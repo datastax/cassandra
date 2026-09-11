@@ -40,6 +40,7 @@ public class LatencyMetrics
     public final LatencyMetricsTimer latency;
     /** Total latency in micro sec */
     public final Counter totalLatency;
+    private final CassandraMetricsRegistry metricsRegistry;
 
     /** parent metrics to replicate any updates to **/
     private List<LatencyMetrics> parents = Lists.newArrayList();
@@ -85,22 +86,28 @@ public class LatencyMetrics
 
     public LatencyMetrics(MetricNameFactory factory, MetricNameFactory aliasFactory, String namePrefix)
     {
+        this(factory,aliasFactory,namePrefix, Metrics);
+    }
+
+    public LatencyMetrics(MetricNameFactory factory, MetricNameFactory aliasFactory, String namePrefix, CassandraMetricsRegistry metricsRegistry)
+    {
         this.factory = factory;
         this.aliasFactory = aliasFactory;
         this.namePrefix = namePrefix;
+        this.metricsRegistry = metricsRegistry;
 
         LatencyMetricsTimer timer = new LatencyMetrics.LatencyMetricsTimer(new DecayingEstimatedHistogramReservoir());
         Counter counter = new LatencyMetricsCounter();
 
         if (aliasFactory == null)
         {
-            latency = Metrics.register(factory.createMetricName(namePrefix + "Latency"), timer);
-            totalLatency = Metrics.register(factory.createMetricName(namePrefix + "TotalLatency"), counter);
+            latency = metricsRegistry.register(factory.createMetricName(namePrefix + "Latency"), timer);
+            totalLatency = metricsRegistry.register(factory.createMetricName(namePrefix + "TotalLatency"), counter);
         }
         else
         {
-            latency = Metrics.register(factory.createMetricName(namePrefix + "Latency"), aliasFactory.createMetricName(namePrefix + "Latency"), timer);
-            totalLatency = Metrics.register(factory.createMetricName(namePrefix + "TotalLatency"), aliasFactory.createMetricName(namePrefix + "TotalLatency"), counter);
+            latency = metricsRegistry.register(factory.createMetricName(namePrefix + "Latency"), aliasFactory.createMetricName(namePrefix + "Latency"), timer);
+            totalLatency = metricsRegistry.register(factory.createMetricName(namePrefix + "TotalLatency"), aliasFactory.createMetricName(namePrefix + "TotalLatency"), counter);
         }
     }
     
@@ -112,9 +119,15 @@ public class LatencyMetrics
      * @param namePrefix Prefix to append to each metric name
      * @param parents any amount of parents to replicate updates to
      */
+
     public LatencyMetrics(MetricNameFactory factory, String namePrefix, LatencyMetrics ... parents)
     {
-        this(factory, null, namePrefix);
+       this(factory,namePrefix, Metrics, parents);
+    }
+
+    public LatencyMetrics(MetricNameFactory factory, String namePrefix, CassandraMetricsRegistry metricsRegistry, LatencyMetrics ... parents)
+    {
+        this(factory, null, namePrefix, metricsRegistry);
         this.parents = Arrays.asList(parents);
         for (LatencyMetrics parent : parents)
         {
@@ -166,13 +179,13 @@ public class LatencyMetrics
         }
         if (aliasFactory == null)
         {
-            Metrics.remove(factory.createMetricName(namePrefix + "Latency"));
-            Metrics.remove(factory.createMetricName(namePrefix + "TotalLatency"));
+            metricsRegistry.remove(factory.createMetricName(namePrefix + "Latency"));
+            metricsRegistry.remove(factory.createMetricName(namePrefix + "TotalLatency"));
         }
         else
         {
-            Metrics.remove(factory.createMetricName(namePrefix + "Latency"), aliasFactory.createMetricName(namePrefix + "Latency"));
-            Metrics.remove(factory.createMetricName(namePrefix + "TotalLatency"), aliasFactory.createMetricName(namePrefix + "TotalLatency"));
+            metricsRegistry.remove(factory.createMetricName(namePrefix + "Latency"), aliasFactory.createMetricName(namePrefix + "Latency"));
+            metricsRegistry.remove(factory.createMetricName(namePrefix + "TotalLatency"), aliasFactory.createMetricName(namePrefix + "TotalLatency"));
         }
     }
 

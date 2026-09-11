@@ -32,6 +32,7 @@ public class MinMaxAvgMetric
     final Gauge<Double> avgGauge;
     final Gauge<Double> stddevGauge;
     final Gauge<Integer> numSamplesGauge;
+    private final CassandraMetricsRegistry metricsRegistry;
 
     private long min;
     private long max;
@@ -39,25 +40,26 @@ public class MinMaxAvgMetric
     private long sumSquares;
     private int numSamples;
 
-    public MinMaxAvgMetric(MetricNameFactory factory, String namePrefix)
+    public MinMaxAvgMetric(MetricNameFactory factory, String namePrefix, CassandraMetricsRegistry metricsRegistry)
     {
         this.factory = factory;
         this.namePrefix = namePrefix;
+        this.metricsRegistry = metricsRegistry;
 
-        minGauge = Metrics.register(factory.createMetricName(namePrefix + " Min"), () -> min);
-        maxGauge = Metrics.register(factory.createMetricName(namePrefix + " Max"), () -> max);
-        avgGauge = Metrics.register(factory.createMetricName(namePrefix + " Avg"), () -> numSamples > 0 ? ((double) sum) / numSamples : 0);
-        stddevGauge = Metrics.register(factory.createMetricName(namePrefix + " StdDev"), () -> stddev());
-        numSamplesGauge = Metrics.register(factory.createMetricName(namePrefix + " NumSamples"), () -> numSamples);
+        minGauge = metricsRegistry.register(factory.createMetricName(namePrefix + " Min"), () -> min);
+        maxGauge = metricsRegistry.register(factory.createMetricName(namePrefix + " Max"), () -> max);
+        avgGauge = metricsRegistry.register(factory.createMetricName(namePrefix + " Avg"), () -> numSamples > 0 ? ((double) sum) / numSamples : 0);
+        stddevGauge = metricsRegistry.register(factory.createMetricName(namePrefix + " StdDev"), () -> stddev());
+        numSamplesGauge = metricsRegistry.register(factory.createMetricName(namePrefix + " NumSamples"), () -> numSamples);
     }
 
     public void release()
     {
-        Metrics.remove(factory.createMetricName(namePrefix + " Min"));
-        Metrics.remove(factory.createMetricName(namePrefix + " Max"));
-        Metrics.remove(factory.createMetricName(namePrefix + " Avg"));
-        Metrics.remove(factory.createMetricName(namePrefix + " StdDev"));
-        Metrics.remove(factory.createMetricName(namePrefix + " NumSamples"));
+        metricsRegistry.remove(factory.createMetricName(namePrefix + " Min"));
+        metricsRegistry.remove(factory.createMetricName(namePrefix + " Max"));
+        metricsRegistry.remove(factory.createMetricName(namePrefix + " Avg"));
+        metricsRegistry.remove(factory.createMetricName(namePrefix + " StdDev"));
+        metricsRegistry.remove(factory.createMetricName(namePrefix + " NumSamples"));
     }
 
     public void reset()

@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Set;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -32,15 +33,20 @@ import com.codahale.metrics.MetricRegistryListener;
 import com.codahale.metrics.Timer;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
+import org.apache.cassandra.metrics.KeyspaceMetrics;
+import org.apache.cassandra.metrics.MetricsFactory;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.checkerframework.checker.nullness.qual.NonNull;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
@@ -63,6 +69,7 @@ public class ColumnFamilyMetricTest
         // disclaimer: this is not a proper way to fix that
         StorageService.instance.forceKeyspaceFlush(SchemaConstants.SYSTEM_KEYSPACE_NAME);
     }
+
 
     @Test
     public void testSizeMetric()
