@@ -21,6 +21,7 @@ import java.util.Set;
 
 import com.google.common.base.CharMatcher;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
@@ -31,6 +32,7 @@ import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 public interface SSTableFormat
 {
     public final static String FORMAT_DEFAULT_PROP = "cassandra.sstable.format.default";
+    boolean SHOULD_STREAM_NEW_CHECKSUMS = CassandraRelevantProperties.SSTABLE_FORMAT_STREAM_NEW_CHECKSUMS.getBoolean();
 
     Type getType();
 

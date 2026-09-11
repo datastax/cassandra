@@ -108,25 +108,20 @@ public class DataIntegrityMetadata
         }
     }
 
-    public static FileDigestValidator fileDigestValidator(Descriptor desc) throws IOException
-    {
-        return new FileDigestValidator(desc);
-    }
-
     public static class FileDigestValidator implements Closeable
     {
+        private final File dataFile;
         private final Checksum checksum;
         private final RandomAccessReader digestReader;
         private final RandomAccessReader dataReader;
-        private final Descriptor descriptor;
         private long storedDigestValue;
 
-        public FileDigestValidator(Descriptor descriptor) throws IOException
+        public FileDigestValidator(File dataFile, File digestFile, ChecksumType checksumType)  throws IOException
         {
-            this.descriptor = descriptor;
-            checksum = ChecksumType.CRC32.newInstance();
-            digestReader = RandomAccessReader.open(descriptor.fileFor(Component.DIGEST));
-            dataReader = RandomAccessReader.open(descriptor.fileFor(Component.DATA));
+            this.dataFile = dataFile;
+            this.checksum = checksumType.newInstance();
+            digestReader = RandomAccessReader.open(digestFile);
+            dataReader = RandomAccessReader.open(dataFile);
             try
             {
                 storedDigestValue = Long.parseLong(digestReader.readLine());
@@ -135,7 +130,7 @@ public class DataIntegrityMetadata
             {
                 close();
                 // Attempting to create a FileDigestValidator without a DIGEST file will fail
-                throw new IOException("Corrupted SSTable : " + descriptor.fileFor(Component.DATA));
+                throw new IOException("Corrupted SSTable : " + dataFile);
             }
         }
 
@@ -149,7 +144,7 @@ public class DataIntegrityMetadata
             long calculatedDigestValue = checkedInputStream.getChecksum().getValue();
             if (storedDigestValue != calculatedDigestValue)
             {
-                throw new IOException("Corrupted SSTable : " + descriptor.fileFor(Component.DATA)
+                throw new IOException("Corrupted SSTable : " + dataFile
                                       + " storedDigestValue=" + storedDigestValue
                                       + " calculatedDigestValue=" + calculatedDigestValue);
             }
