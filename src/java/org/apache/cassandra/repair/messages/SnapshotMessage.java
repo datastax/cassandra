@@ -33,6 +33,12 @@ public class SnapshotMessage extends RepairMessage
     }
 
     @Override
+    public String toString()
+    {
+        return "SnapshotMessage{desc=" + desc + '}';
+    }
+
+    @Override
     public boolean equals(Object o)
     {
         if (!(o instanceof SnapshotMessage))

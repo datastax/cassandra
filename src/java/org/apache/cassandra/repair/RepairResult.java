@@ -32,4 +32,10 @@ public class RepairResult
         this.desc = desc;
         this.stats = stats;
     }
+
+    @Override
+    public String toString()
+    {
+        return "RepairResult{desc=" + desc + ", stats=" + stats + '}';
+    }
 }

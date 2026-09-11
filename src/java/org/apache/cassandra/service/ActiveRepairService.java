@@ -337,12 +337,8 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
     public RepairSession submitRepairSession(UUID parentRepairSession,
                                              CommonRange range,
                                              String keyspace,
-                                             RepairParallelism parallelismDegree,
+                                             RepairOption options,
                                              boolean isIncremental,
-                                             boolean pushRepair,
-                                             boolean pullRepair,
-                                             PreviewKind previewKind,
-                                             boolean optimiseStreams,
                                              ListeningExecutorService executor,
                                              Scheduler validationScheduler,
                                              String... cfnames)
@@ -355,8 +351,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
 
         final RepairSession session = new RepairSession(parentRepairSession, UUIDGen.getTimeUUID(),
                                                         validationScheduler, range, keyspace,
-                                                        parallelismDegree, isIncremental, pushRepair, pullRepair,
-                                                        previewKind, optimiseStreams, cfnames);
+                                                        options, isIncremental, cfnames);
 
         sessions.put(session.getId(), session);
         // register listeners

@@ -58,29 +58,19 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.repair.RepairParallelism;
-import org.apache.cassandra.repair.messages.PrepareMessage;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Refs;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
-import org.mockito.Mockito;
-import org.mockito.invocation.InvocationOnMock;
-import org.mockito.stubbing.Answer;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.repair.messages.RepairOption.DATACENTERS_KEY;
@@ -95,9 +85,6 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 public class ActiveRepairServiceTest
 {
@@ -574,7 +561,8 @@ public class ActiveRepairServiceTest
         endpoints.add(REMOTE);
 
         RepairOption options = new RepairOption(RepairParallelism.PARALLEL, true, true, false, 1, ranges,
-                                                false, false, false, false, PreviewKind.ALL, false, false, false);
+                                                false, false, false, false, PreviewKind.ALL, false, false, false,
+                                                null, null);
         try
         {
             ActiveRepairService.instance.prepareForRepair(parentRepairSession, LOCAL, endpoints, options, isForcedRepair, columnFamilyStores);

@@ -38,6 +38,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -189,6 +190,77 @@ public class RepairOptionTest
         options.put(RepairOption.FORCE_REPAIR_KEY, "false");
         option = RepairOption.parse(options, Murmur3Partitioner.instance);
         Assert.assertFalse(option.isForcedRepair());
+    }
+
+    @Test
+    public void testEntityIdAndRepairTypeParsed()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(RepairOption.ENTITY_ID_KEY, "entity-abc-123");
+        options.put(RepairOption.REPAIR_TYPE_KEY, "continuous");
+
+        RepairOption option = RepairOption.parse(options, Murmur3Partitioner.instance);
+
+        assertEquals("entity-abc-123", option.getEntityId());
+        assertEquals("continuous", option.getRepairType());
+    }
+
+    @Test
+    public void testEntityIdAndRepairTypeAbsentByDefault()
+    {
+        RepairOption option = RepairOption.parse(new HashMap<>(), Murmur3Partitioner.instance);
+
+        assertNull(option.getEntityId());
+        assertNull(option.getRepairType());
+    }
+
+    @Test
+    public void testEntityIdSetRepairTypeAbsent()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(RepairOption.ENTITY_ID_KEY, "entity-abc-123");
+
+        RepairOption option = RepairOption.parse(options, Murmur3Partitioner.instance);
+
+        assertEquals("entity-abc-123", option.getEntityId());
+        assertNull(option.getRepairType());
+    }
+
+    @Test
+    public void testToStringIncludesEntityFieldsWhenSet()
+    {
+        DatabaseDescriptor.daemonInitialization();
+        Map<String, String> options = new HashMap<>();
+        options.put(RepairOption.ENTITY_ID_KEY, "entity-abc-123");
+        options.put(RepairOption.REPAIR_TYPE_KEY, "continuous");
+
+        String result = RepairOption.parse(options, Murmur3Partitioner.instance).toString();
+
+        assertTrue(result.contains("entityId: entity-abc-123"));
+        assertTrue(result.contains("repairType: continuous"));
+    }
+
+    @Test
+    public void testToStringOmitsEntityFieldsWhenAbsent()
+    {
+        DatabaseDescriptor.daemonInitialization();
+        String result = RepairOption.parse(new HashMap<>(), Murmur3Partitioner.instance).toString();
+
+        assertFalse(result.contains("entityId"));
+        assertFalse(result.contains("repairType"));
+    }
+
+    @Test
+    public void testEntityFieldsNotInAsMap()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(RepairOption.ENTITY_ID_KEY, "entity-abc-123");
+        options.put(RepairOption.REPAIR_TYPE_KEY, "continuous");
+
+        Map<String, String> asMap = RepairOption.parse(options, Murmur3Partitioner.instance).asMap();
+
+        assertFalse(asMap.containsKey(RepairOption.ENTITY_ID_KEY));
+        assertFalse(asMap.containsKey(RepairOption.REPAIR_TYPE_KEY));
     }
 
     private void assertParseThrowsIllegalArgumentExceptionWithMessage(Map<String, String> optionsToParse, String expectedErrorMessage)

@@ -34,7 +34,7 @@ import org.apache.cassandra.utils.FBUtilities;
 /**
  * AsymmetricRemoteSyncTask sends {@link SyncRequest} to target node to repair(stream)
  * data with other target replica.
- *
+ * <p>
  * When AsymmetricRemoteSyncTask receives SyncComplete from the target, task completes.
  */
 public class AsymmetricRemoteSyncTask extends SyncTask implements CompletableRemoteSyncTask

@@ -46,4 +46,11 @@ public class SyncStat
     {
         return new SyncStat(nodes, numberOfDifferences, summaries);
     }
+
+    @Override
+    public String toString()
+    {
+        return "SyncStat{" + nodes.coordinator + "<->" + nodes.peer +
+               ", differences=" + numberOfDifferences + '}';
+    }
 }

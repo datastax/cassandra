@@ -66,6 +66,12 @@ public abstract class RepairMessage
         this.desc = desc;
     }
 
+    @Override
+    public String toString()
+    {
+        return getClass().getSimpleName() + (desc != null ? "{desc=" + desc + '}' : "{}");
+    }
+
     public interface RepairFailureCallback
     {
         void onFailure(Exception e);
