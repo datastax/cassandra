@@ -52,7 +52,6 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     public static void setUpClass() throws Exception
     {
         CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
-        CassandraRelevantProperties.COST_CALCULATOR.setString(TestCostCalculator.class.getName());
         CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
 
         // enables constructing Messages with custom parameters
@@ -79,150 +78,6 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     }
 
     @Test
-    public void testAddWriteSensorToInternodeResponse()
-    {
-        testAddSensorsToInternodeResponse(Type.WRITE_BYTES);
-    }
-
-    @Test
-    public void testAddReadSensorToInternodeResponse()
-    {
-        testAddSensorsToInternodeResponse(Type.READ_BYTES);
-    }
-
-    @Test
-    public void testAddReadCostSensorToInternodeResponse()
-    {
-        // READ_COST is now a coordinator-side computation; replicas just propagate READ_BYTES.
-        // Verify that a READ_COST sensor registered and incremented on the coordinator is encoded
-        // correctly in an internode response message (used when the coordinator forwards the
-        // aggregated result to a peer or for testing the internode encoding path).
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
-        UUID tableId = UUID.randomUUID();
-        Context context = new Context("ks1", "t1", tableId.toString());
-
-        sensors.registerSensor(context, Type.READ_BYTES);
-        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
-        sensors.registerSensor(context, Type.READ_COST);
-
-        sensors.incrementSensor(context, Type.READ_BYTES, 500_000.0);
-        sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 100_000_000.0); // 100 ms
-        // With default baseline=-1, READ_COST = read_bytes * COST_SCALE (4000)
-        CostCalculator.computeCost(sensors);
-
-        Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_1, noPayload).withId(1);
-        SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);
-
-        Message<NoPayload> msg = builder.build();
-        assertNotNull(msg.header.customParams());
-
-        Sensor readCostSensor = sensors.getSensor(context, Type.READ_COST).get();
-        String readCostRequestParam = SensorsCustomParams.paramForRequestSensor(readCostSensor).get();
-        assertTrue(msg.header.customParams().containsKey(readCostRequestParam));
-
-        // baseline=-1 → READ_COST = read_bytes * COST_SCALE = 500_000 * 4000 = 2_000_000_000
-        double expectedReadCost = 500_000.0 * 4000.0;
-        assertEquals(expectedReadCost, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(readCostRequestParam)), 0.0);
-    }
-
-    @Test
-    public void testComputeTotalCost_viaCustomParams_readPath()
-    {
-        // Pure read: TOTAL_COST = READ_COST (WRITE_COST absent); baseline=-1 → READ_COST = read_bytes * COST_SCALE
-        String ks = "ks_tmu1";
-        Context context = new Context(ks, "t", UUID.randomUUID().toString());
-
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
-        sensors.registerSensor(context, Type.READ_BYTES);
-        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
-        sensors.registerSensor(context, Type.READ_COST);
-        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
-        sensors.incrementSensor(context, Type.READ_BYTES, 400_000.0);
-        sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, 100_000_000.0); // 100 ms
-
-        CostCalculator.computeCost(sensors);
-
-        double expectedReadCost = 400_000.0 * 4000.0;
-        assertEquals(expectedReadCost, sensors.getSensor(Context.request(), Type.TOTAL_COST).get().getValue(), 0.0);
-    }
-
-    @Test
-    public void testComputeTotalCost_viaCustomParams_writePath()
-    {
-        // Pure write: TOTAL_COST = WRITE_COST (READ_COST absent); baseline=-1 → WRITE_COST = write_bytes * COST_SCALE
-        String ks = "ks_tmu2";
-        Context context = new Context(ks, "t", UUID.randomUUID().toString());
-
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
-        sensors.registerSensor(context, Type.WRITE_BYTES);
-        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
-        sensors.registerSensor(context, Type.WRITE_COST);
-        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
-        sensors.incrementSensor(context, Type.WRITE_BYTES, 250_000.0);
-        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 200_000_000.0); // 200 ms
-
-        CostCalculator.computeCost(sensors);
-
-        double expectedWriteCost = 250_000.0 * 4000.0;
-        assertEquals(expectedWriteCost, sensors.getSensor(Context.request(), Type.TOTAL_COST).get().getValue(), 0.0);
-    }
-
-    @Test
-    public void testComputeTotalCost_viaCustomParams_casPath()
-    {
-        // CAS: TOTAL_COST = WRITE_COST + READ_COST; baseline=-1 → each = bytes * COST_SCALE
-        String ks = "ks_tmu3";
-        Context context = new Context(ks, "t", UUID.randomUUID().toString());
-
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(ks);
-        sensors.registerSensor(context, Type.READ_BYTES);
-        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
-        sensors.registerSensor(context, Type.WRITE_BYTES);
-        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
-        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
-        sensors.registerSensor(context, Type.READ_COST);
-        sensors.registerSensor(context, Type.WRITE_COST);
-        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
-        sensors.incrementSensor(context, Type.READ_BYTES, 300_000.0);
-        sensors.incrementSensor(context, Type.WRITE_BYTES, 150_000.0);
-
-        CostCalculator.computeCost(sensors);
-
-        double expectedTotalCost = (300_000.0 + 150_000.0) * 4000.0;
-        assertEquals(expectedTotalCost, sensors.getSensor(Context.request(), Type.TOTAL_COST).get().getValue(), 0.0);
-    }
-
-    @Test
-    public void testAddWriteCostSensorToInternodeResponse()
-    {
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
-        UUID tableId = UUID.randomUUID();
-        Context context = new Context("ks1", "t1", tableId.toString());
-
-        sensors.registerSensor(context, Type.WRITE_BYTES);
-        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
-        sensors.registerSensor(context, Type.WRITE_COST);
-
-        sensors.incrementSensor(context, Type.WRITE_BYTES, 300_000.0);
-        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, 200_000_000.0); // 200 ms
-        // With default baseline=-1, WRITE_COST = write_bytes * COST_SCALE (4000)
-        CostCalculator.computeCost(sensors);
-
-        Message.Builder<NoPayload> builder = Message.builder(Verb._TEST_2, noPayload).withId(2);
-        SensorsCustomParams.addSensorsToInternodeResponse(sensors, builder);
-
-        Message<NoPayload> msg = builder.build();
-        assertNotNull(msg.header.customParams());
-
-        Sensor writeCostSensor = sensors.getSensor(context, Type.WRITE_COST).get();
-        String writeCostRequestParam = SensorsCustomParams.paramForRequestSensor(writeCostSensor).get();
-        assertTrue(msg.header.customParams().containsKey(writeCostRequestParam));
-
-        double expectedWriteCost = 300_000.0 * 4000.0;
-        assertEquals(expectedWriteCost, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(writeCostRequestParam)), 0.0);
-    }
-
-    @Test
     public void testSensorValueAsByteBuffer()
     {
         double d = Double.MAX_VALUE;
@@ -235,11 +90,15 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     @Test
     public void testAddSensorsToCQLResponse()
     {
-        String table = "t1";
+        for (Type type : Type.values())
+            doTestAddSensorToCQLResponse(type);
+    }
+
+    private void doTestAddSensorToCQLResponse(Type type)
+    {
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
         ResultMessage message = new ResultMessage.Void();
-        Context context = new Context("ks1", table, UUID.randomUUID().toString());
-        Type type = Type.WRITE_BYTES;
+        Context context = new Context("ks1", "t1", UUID.randomUUID().toString());
         double expectedValue = 17.0;
 
         sensors.registerSensor(context, type);
@@ -359,7 +218,14 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         assertNull(message.getCustomPayload());
     }
 
-    private void testAddSensorsToInternodeResponse(Type sensorType)
+    @Test
+    public void testAddSensorToInternodeResponse()
+    {
+        for (Type sensorType : Type.values())
+            doTestAddSensorToInternodeResponse(sensorType);
+    }
+
+    private void doTestAddSensorToInternodeResponse(Type sensorType)
     {
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
         UUID tableId = UUID.randomUUID();
