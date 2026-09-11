@@ -44,7 +44,16 @@ public abstract class AbstractIterator<V> implements Iterator<V>, PeekingIterato
         {
             case MUST_FETCH:
                 state = State.FAILED;
-                next = computeNext();
+                try
+                {
+                    next = computeNext();
+                }
+                catch (Throwable t)
+                {
+                    state = State.FAILED;
+                    close();
+                    throw t;
+                }
 
             default:
                 if (state == State.DONE)
