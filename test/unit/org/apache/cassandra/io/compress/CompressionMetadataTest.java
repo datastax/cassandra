@@ -45,6 +45,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.Memory;
 import org.apache.cassandra.io.util.SafeMemory;
 import org.apache.cassandra.io.util.SliceDescriptor;
+import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.units.SizeUnit;
 
@@ -100,7 +101,7 @@ public class CompressionMetadataTest
 
             metadata.close();
             assertThat(metadata.isCleanedUp()).isTrue();
-            assertThatExceptionOfType(AssertionError.class).isThrownBy(memory.memory::free);
+            assertThatExceptionOfType(doubleFreeException()).isThrownBy(memory.memory::free);
         }
     }
 
@@ -123,8 +124,13 @@ public class CompressionMetadataTest
             copy.close();
             assertThat(metadata.isCleanedUp()).isTrue();
             assertThat(copy.isCleanedUp()).isTrue();
-            assertThatExceptionOfType(AssertionError.class).isThrownBy(memory.memory::free);
+            assertThatExceptionOfType(doubleFreeException()).isThrownBy(memory.memory::free);
         }
+    }
+
+    private static Class<? extends Throwable> doubleFreeException()
+    {
+        return Ref.DEBUG_ENABLED ? IllegalStateException.class : AssertionError.class;
     }
 
     @Test
