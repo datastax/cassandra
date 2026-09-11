@@ -123,8 +123,10 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.CostCalculator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit;
@@ -515,6 +517,9 @@ public class StorageProxy implements StorageProxyMBean
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME); // tracks Prepare + Propose + Commit execution time across all replicas
         // please note no READ_EXECUTION_TIME is recorded: CAS is a write operation and recording two different execution
         // times would be confusing
+        sensors.registerSensor(context, Type.READ_COST);
+        sensors.registerSensor(context, Type.WRITE_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
         try
@@ -565,6 +570,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetricsForLevel(consistencyForPaxos).executionTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyForPaxos).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             Keyspace.openAndGetStore(metadata).metric.coordinatorCasWriteLatency.update(latency, NANOSECONDS);
+            CostCalculator.computeCost(sensors);
         }
     }
 
@@ -1138,6 +1144,8 @@ public class StorageProxy implements StorageProxyMBean
 
         try
         {
+            // TOTAL_COST is request-scoped (one per request, not per table) — register once here.
+            sensors.registerSensor(Context.request(), Type.TOTAL_COST);
             for (IMutation mutation : mutations)
             {
                 // register the sensors for the mutation before the actual write is performed
@@ -1148,6 +1156,7 @@ public class StorageProxy implements StorageProxyMBean
                     sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_EXECUTION_TIME);
                     sensors.registerSensor(Context.from(pu.metadata()), Type.INTERNODE_BYTES);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_COST);
                 }
 
                 if (mutation instanceof CounterMutation)
@@ -1221,6 +1230,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
+            CostCalculator.computeCost(sensors);
         }
     }
 
@@ -1446,6 +1456,8 @@ public class StorageProxy implements StorageProxyMBean
         // Register sensors for each mutation partition before the mutator constructs WriteResponseHandlers.
         // AbstractWriteResponseHandler captures the sensors reference at construction time, so both
         // sensor creation (above) and registration (here) must precede any call to getWriteResponseHandler().
+        // TOTAL_COST is request-scoped (one per request, not per table) — register once here.
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         for (Mutation mutation : mutations)
         {
             for (PartitionUpdate pu : mutation.getPartitionUpdates())
@@ -1455,10 +1467,18 @@ public class StorageProxy implements StorageProxyMBean
                 sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
                 sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_EXECUTION_TIME);
                 sensors.registerSensor(Context.from(pu.metadata()), Type.INTERNODE_BYTES);
+                sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_COST);
             }
         }
 
-        mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, queryStartNanoTime, metrics, clientState);
+        try
+        {
+            mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, queryStartNanoTime, metrics, clientState);
+        }
+        finally
+        {
+            CostCalculator.computeCost(sensors);
+        }
     }
 
     public static void updateCoordinatorWriteLatencyTableMetric(Collection<? extends IMutation> mutations, long latency)
@@ -2111,13 +2131,18 @@ public class StorageProxy implements StorageProxyMBean
         Context context = Context.from(group.metadata());
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.READ_COST);
+        requestSensors.registerSensor(Context.request(), Type.TOTAL_COST);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
-
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
-        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
+        // Partition iteration is lazy: compute cost sensors once the iterator is fully consumed.
+        return PartitionIterators.doOnClose(partitions, () -> {
+            CostCalculator.computeCost(requestSensors);
+            readTracker.onDone();
+        });
     }
 
     /**
@@ -2497,13 +2522,19 @@ public class StorageProxy implements StorageProxyMBean
         Context context = Context.from(command);
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        sensors.registerSensor(context, Type.READ_COST);
+        sensors.registerSensor(Context.request(), Type.TOTAL_COST);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
         PartitionIterator partitions = RangeCommands.partitions(command, consistencyLevel, queryStartNanoTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
-        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
+        // Range reads are lazy: compute cost sensors once the iterator is fully consumed.
+        return PartitionIterators.doOnClose(partitions, () -> {
+            CostCalculator.computeCost(sensors);
+            readTracker.onDone();
+        });
     }
 
     public Map<String, List<String>> getSchemaVersions()

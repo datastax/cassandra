@@ -466,12 +466,15 @@ public class BatchStatement implements CQLStatement
                 SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WRITE_BYTES);
                 SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.INDEX_WRITE_BYTES);
                 SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WRITE_EXECUTION_TIME);
+                SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WRITE_COST);
                 if (hasConditions)
                 {
                     // Conditional batches always perform a Paxos read, so READ_BYTES is always tracked
                     SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.READ_BYTES);
                 }
             }
+            // TOTAL_COST is request-scoped — one entry covering all tables in the batch.
+            SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, Context.request(), org.apache.cassandra.sensors.Type.TOTAL_COST);
         }
         return result;
     }

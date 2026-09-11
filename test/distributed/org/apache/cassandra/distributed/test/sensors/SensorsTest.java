@@ -50,6 +50,7 @@ import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.sensors.ActiveSensorsFactory;
+import org.apache.cassandra.sensors.TestCostCalculator;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.tracing.TraceStateImpl;
@@ -94,6 +95,16 @@ public class SensorsTest extends TestBaseImpl
     private static final String WRITE_COL = "WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_COL;
     private static final String WRITE_EXECUTION_TIME_COL = "WRITE_EXECUTION_TIME_REQUEST." + KEYSPACE + "." + TBL_COL;
     private static final String INDEX_WRITE_COL = "INDEX_WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_COL;
+    private static final String READ_COST_TBL = "READ_COST_REQUEST." + KEYSPACE + "." + TBL;
+    private static final String WRITE_COST_TBL = "WRITE_COST_REQUEST." + KEYSPACE + "." + TBL;
+    private static final String WRITE_COST_COUNTER = "WRITE_COST_REQUEST." + KEYSPACE + "." + TBL_COUNTER;
+    private static final String READ_COST_2I = "READ_COST_REQUEST." + KEYSPACE + "." + TBL_2I;
+    private static final String WRITE_COST_2I = "WRITE_COST_REQUEST." + KEYSPACE + "." + TBL_2I;
+    private static final String READ_COST_SAI = "READ_COST_REQUEST." + KEYSPACE + "." + TBL_SAI;
+    private static final String WRITE_COST_SAI = "WRITE_COST_REQUEST." + KEYSPACE + "." + TBL_SAI;
+    private static final String WRITE_COST_COL = "WRITE_COST_REQUEST." + KEYSPACE + "." + TBL_COL;
+    /** Request-level total cost — no table suffix, keyed on {@link org.apache.cassandra.sensors.Context#request()}. */
+    private static final String TOTAL_COST = "TOTAL_COST_REQUEST";
 
     /**
      * Using a combination of 2 nodes with ALL consistency level to ensure internode communication code paths are exercised in the test
@@ -146,6 +157,7 @@ public class SensorsTest extends TestBaseImpl
     public static void setupCluster() throws IOException
     {
         CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
+        CassandraRelevantProperties.COST_CALCULATOR.setString(TestCostCalculator.class.getName());
 
         cluster = init(Cluster.build(NODES_COUNT).start());
 
@@ -211,16 +223,16 @@ public class SensorsTest extends TestBaseImpl
                                              "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "tbl: insert", noPrep, write, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL }, true });
-        result.add(new Object[]{ "tbl_counter: counter update", noPrep, counter, new String[]{ WRITE_COUNTER, WRITE_EXECUTION_TIME_COUNTER }, true });
-        result.add(new Object[]{ "tbl: point read (paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL }, true });
-        result.add(new Object[]{ "tbl: point read (no paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL }, false });
-        // CAS is a write operation; READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_TBL }, true });
-        result.add(new Object[]{ "tbl: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL }, true });
-        result.add(new Object[]{ "tbl: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL }, true });
-        result.add(new Object[]{ "tbl: range read (paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL }, true });
-        result.add(new Object[]{ "tbl: range read (no paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL }, false });
+        result.add(new Object[]{ "tbl: insert", noPrep, write, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl_counter: counter update", noPrep, counter, new String[]{ WRITE_COUNTER, WRITE_EXECUTION_TIME_COUNTER, WRITE_COST_COUNTER, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: point read (paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: point read (no paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL, TOTAL_COST }, false });
+        // CAS is a write operation; READ_EXECUTION_TIME and READ_COST are not recorded (see StorageProxy.cas()).
+        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_TBL, WRITE_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: range read (paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL, TOTAL_COST }, true });
+        result.add(new Object[]{ "tbl: range read (no paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST_TBL, TOTAL_COST }, false });
         return result;
     }
 
@@ -268,17 +280,17 @@ public class SensorsTest extends TestBaseImpl
                                                        "APPLY BATCH;", KEYSPACE, KEYSPACE, KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "2i: insert (insertRow path)", noPrep, write, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I }, true });
-        // CAS is a write operation; READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i+sai: multi-table logged batch", noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "2i+sai: multi-table unlogged batch", noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
+        result.add(new Object[]{ "2i: insert (insertRow path)", noPrep, write, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        // CAS is a write operation; READ_EXECUTION_TIME and READ_COST are not recorded (see StorageProxy.cas()).
+        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i+sai: multi-table logged batch", noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_2I, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i+sai: multi-table unlogged batch", noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_2I, WRITE_COST_SAI, TOTAL_COST }, true });
         return result;
     }
 
@@ -312,15 +324,15 @@ public class SensorsTest extends TestBaseImpl
                                                    "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "sai: insert (insertRow path)", noPrep, write, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
-        // CAS is a write operation; READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
+        result.add(new Object[]{ "sai: insert (insertRow path)", noPrep, write, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        // CAS is a write operation; READ_EXECUTION_TIME and READ_COST are not recorded (see StorageProxy.cas()).
+        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
         return result;
     }
 
@@ -334,15 +346,15 @@ public class SensorsTest extends TestBaseImpl
         String collectionUpdate = withKeyspace("INSERT INTO %s." + TBL_COL + "(pk, tags) VALUES (1, {'c', 'd'})");
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "sai collection: insert",  new String[0],                   collectionWrite,  new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL }, true  });
-        result.add(new Object[]{ "sai collection: update",  new String[]{ collectionWrite },  collectionUpdate, new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL }, true  });
+        result.add(new Object[]{ "sai collection: insert",  new String[0],                   collectionWrite,  new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST_COL, TOTAL_COST }, true  });
+        result.add(new Object[]{ "sai collection: update",  new String[]{ collectionWrite },  collectionUpdate, new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST_COL, TOTAL_COST }, true  });
         return result;
     }
 
     /**
      * Conditional batch scenarios: BEGIN BATCH statements with IF conditions, routed through
      * {@code BatchStatement.executeWithConditions}. These exercise the {@code ResultMessage.Rows}
-     * return path, which must also carry INDEX_WRITE_BYTES sensors.
+     * return path, which must also carry WRITE_COST sensors.
      *
      * Cassandra requires all statements in a conditional batch to target the same partition key and table.
      * Multi-statement scenarios below use multiple statements on the same partition to exercise the
@@ -385,13 +397,13 @@ public class SensorsTest extends TestBaseImpl
                                                             "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        // Conditional batches route through StorageProxy.cas(); READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i cond batch: IF condition (updateRow)", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai cond batch: IF condition (updateRow)", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
+        // Conditional batches route through StorageProxy.cas(); READ_EXECUTION_TIME and READ_COST are not recorded (see StorageProxy.cas()).
+        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i cond batch: IF condition (updateRow)", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I, WRITE_COST_2I, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai cond batch: IF condition (updateRow)", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
+        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI, WRITE_COST_SAI, TOTAL_COST }, true });
         return result;
     }
 
@@ -487,7 +499,7 @@ public class SensorsTest extends TestBaseImpl
     }
 
     /**
-     * Verifies that enabling tracing on a CQL INSERT does not inflate the user table's {@code WRITE_BYTES_REQUEST}
+     * Verifies that enabling tracing on a CQL INSERT does not inflate the user table's {@code WRITE_COST_REQUEST}
      * sensor in the response custom payload.
      *
      * <p>Trace writes are submitted to {@code Stage.TRACING} with an isolated {@link org.apache.cassandra.sensors.RequestSensors}
@@ -501,9 +513,9 @@ public class SensorsTest extends TestBaseImpl
         cluster.schemaChange(withKeyspace("CREATE TABLE IF NOT EXISTS %s.tbl_trace_isolation (pk int PRIMARY KEY, v1 text)"));
 
         String insert = withKeyspace("INSERT INTO %s.tbl_trace_isolation (pk, v1) VALUES (1, 'hello')");
-        String expectedHeader = "WRITE_BYTES_REQUEST." + KEYSPACE + ".tbl_trace_isolation";
+        String expectedHeader = "WRITE_COST_REQUEST." + KEYSPACE + ".tbl_trace_isolation";
 
-        // Untraced INSERT — baseline WRITE_BYTES for the user table.
+        // Untraced INSERT — baseline WRITE_COST for the user table.
         AtomicReference<Map<String, ByteBuffer>> refNoTrace = new AtomicReference<>();
         cluster.get(1).acceptsOnInstance(
                (IIsolatedExecutor.SerializableConsumer<AtomicReference<Map<String, ByteBuffer>>>)
@@ -517,9 +529,9 @@ public class SensorsTest extends TestBaseImpl
                   .describedAs("Untraced INSERT must carry sensor payload")
                   .isNotNull()
                   .containsKey(expectedHeader);
-        double writeBytesNoTrace = ByteBufferUtil.toDouble(payloadNoTrace.get(expectedHeader));
-        Assertions.assertThat(writeBytesNoTrace)
-                  .describedAs("Untraced INSERT WRITE_BYTES must be > 0")
+        double wmuNoTrace = ByteBufferUtil.toDouble(payloadNoTrace.get(expectedHeader));
+        Assertions.assertThat(wmuNoTrace)
+                  .describedAs("Untraced INSERT WRITE_COST must be > 0")
                   .isGreaterThan(0D);
 
         // Traced INSERT — Tracing.instance.newSession() is called inside the node's classloader so the
@@ -565,7 +577,7 @@ public class SensorsTest extends TestBaseImpl
                   .describedAs("Traced INSERT must carry sensor payload")
                   .isNotNull()
                   .containsKey(expectedHeader);
-        double writeBytesTraced = ByteBufferUtil.toDouble(payloadTraced.get(expectedHeader));
+        double wmuTraced = ByteBufferUtil.toDouble(payloadTraced.get(expectedHeader));
 
         // Verify tracing was genuinely active: system_traces.sessions must contain a row for
         // our session_id, written by TraceStateImpl when the query started.
@@ -584,9 +596,9 @@ public class SensorsTest extends TestBaseImpl
                   .isTrue();
 
         // Trace writes go to system_traces on a separate TRACING thread with an isolated sensor set.
-        // The user table's WRITE_BYTES must be unchanged — not inflated by trace writes.
-        Assertions.assertThat(writeBytesTraced)
-                  .describedAs("Enabling tracing must not inflate WRITE_BYTES for the user table")
-                  .isEqualTo(writeBytesNoTrace);
+        // The user table's WRITE_COST must be unchanged — not inflated by trace writes.
+        Assertions.assertThat(wmuTraced)
+                  .describedAs("Enabling tracing must not inflate WRITE_COST for the user table")
+                  .isEqualTo(wmuNoTrace);
     }
 }

@@ -78,18 +78,6 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     }
 
     @Test
-    public void testAddWriteSensorToInternodeResponse()
-    {
-        testAddSensorsToInternodeResponse(Type.WRITE_BYTES);
-    }
-
-    @Test
-    public void testAddReadSensorToInternodeResponse()
-    {
-        testAddSensorsToInternodeResponse(Type.READ_BYTES);
-    }
-
-    @Test
     public void testSensorValueAsByteBuffer()
     {
         double d = Double.MAX_VALUE;
@@ -102,11 +90,15 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     @Test
     public void testAddSensorsToCQLResponse()
     {
-        String table = "t1";
+        for (Type type : Type.values())
+            doTestAddSensorToCQLResponse(type);
+    }
+
+    private void doTestAddSensorToCQLResponse(Type type)
+    {
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
         ResultMessage message = new ResultMessage.Void();
-        Context context = new Context("ks1", table, UUID.randomUUID().toString());
-        Type type = Type.WRITE_BYTES;
+        Context context = new Context("ks1", "t1", UUID.randomUUID().toString());
         double expectedValue = 17.0;
 
         sensors.registerSensor(context, type);
@@ -226,7 +218,14 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         assertNull(message.getCustomPayload());
     }
 
-    private void testAddSensorsToInternodeResponse(Type sensorType)
+    @Test
+    public void testAddSensorToInternodeResponse()
+    {
+        for (Type sensorType : Type.values())
+            doTestAddSensorToInternodeResponse(sensorType);
+    }
+
+    private void doTestAddSensorToInternodeResponse(Type sensorType)
     {
         RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
         UUID tableId = UUID.randomUUID();
