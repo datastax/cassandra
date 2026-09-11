@@ -44,7 +44,7 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 /// - sparse up to 25 children; last child immediately before
 ///   bb - bytes per pointer - 1
 ///   nnnnn - child count - 2
-///   `[child n-2] ... [child 1] [child 0] [byte n-1] ... [byte 1][byte 0]1nnnnnbb`
+///   `[child n-2] ... [child 1] [child 0] [byte n-1] ... [byte 1][byte 0] 1nnnnnbb`
 /// - bitmap
 ///   `[child n-2] ... [child 1] [child 0] [32-byte bitmap] 11100bbb`
 /// - dense full
@@ -52,7 +52,7 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 /// - relay (epsilon transition)
 ///   `[child] 11111bbb`
 
-public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walker<T, DataOutputPlus>
+public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor.Walker<T, DataOutputPlus>
 {
 
     interface DataSerializer<T>
@@ -74,7 +74,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     Node<T> reusableBoundaryNode = Node.make(0, null, null, null, null);
     NavigableSet<Node<T>> reusableHeadSet = reusableTreeSet.headSet(reusableBoundaryNode, true);
 
-    public FileWriter(DataOutputPlus out, DataSerializer<T> dataSerializer, boolean swapAscentAndDescentSides)
+    public OnDiskTrieWriter(DataOutputPlus out, DataSerializer<T> dataSerializer, boolean swapAscentAndDescentSides)
     {
         this.out = out;
         this.dataSerializer = dataSerializer;
@@ -102,7 +102,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     }
 
     /// Attach a payload to the ascent-side content slot of the node at the current position, whatever path the walk
-    /// is on. [DeletionAwareFileWriter] uses this for the deletion-branch pointer: the slot a range trie fills with
+    /// is on. [OnDiskDeletionAwareTrieWriter] uses this for the deletion-branch pointer: the slot a range trie fills with
     /// return-path content is free in a trie whose content is descent-side only, which is the same reuse
     /// [InMemoryTrie] makes of a prefix node's alternate branch pointer.
     public void ascentContent(T content)
@@ -647,7 +647,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     {
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            FileWriter<T> fw = new FileWriter<>(writer, serializer, isOrdered);
+            OnDiskTrieWriter<T> fw = new OnDiskTrieWriter<>(writer, serializer, isOrdered);
 
             Cursor<T> c = trie.cursor(Direction.REVERSE);
             T content = c.content();   // handle content on the root node

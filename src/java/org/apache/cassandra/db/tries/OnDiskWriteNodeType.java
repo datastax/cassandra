@@ -34,7 +34,7 @@ public enum OnDiskWriteNodeType
     CHAIN(0b01000000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
+        long sizeChildren(int bytesPerPointer, OnDiskTrieWriter.Node<?>[] children)
         {
             assert children.length == 1;
             return (children[0].firstTransition != -1 ? 1 + 1 : 0) +
@@ -42,7 +42,7 @@ public enum OnDiskWriteNodeType
         }
 
         @Override
-        void writeChildren(DataOutputPlus out, FileWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
+        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
         {
             assert children.length == 1;
             maybeWriteRelay(out, children, basePos, 1);
@@ -63,14 +63,14 @@ public enum OnDiskWriteNodeType
     DENSE(0b11101000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
+        long sizeChildren(int bytesPerPointer, OnDiskTrieWriter.Node<?>[] children)
         {
             // last pointer is not implicit here
             return 256 * bytesPerPointer + 1;
         }
 
         @Override
-        void writeChildren(DataOutputPlus out, FileWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
+        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
         {
             int size = children.length;
             // last pointer is not implicit here
@@ -78,9 +78,9 @@ public enum OnDiskWriteNodeType
             for (int i = 0; i <= 255; ++i)
             {
                 if (index >= 0 && i == children[index].firstTransition)
-                    FileWriter.writeReversedSized(out, basePos - children[index--].writtenFilePos, bytesPerPointer);
+                    OnDiskTrieWriter.writeReversedSized(out, basePos - children[index--].writtenFilePos, bytesPerPointer);
                 else
-                    FileWriter.writeReversedSized(out, -1L, bytesPerPointer);
+                    OnDiskTrieWriter.writeReversedSized(out, -1L, bytesPerPointer);
             }
             assert index == -1;
             out.writeByte(bits | (bytesPerPointer - 1));
@@ -90,14 +90,14 @@ public enum OnDiskWriteNodeType
     BITMAP(0b11100000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
+        long sizeChildren(int bytesPerPointer, OnDiskTrieWriter.Node<?>[] children)
         {
             return (children.length - 1) * bytesPerPointer + 32 + 1 +
                    maybeSizeRelay(children, bytesPerPointer);
         }
 
         @Override
-        void writeChildren(DataOutputPlus out, FileWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
+        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
         {
             int size = writePointers(out, children, basePos, bytesPerPointer);
             BitSet bits = new BitSet(256);
@@ -116,14 +116,14 @@ public enum OnDiskWriteNodeType
     SPARSE(0b10000000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
+        long sizeChildren(int bytesPerPointer, OnDiskTrieWriter.Node<?>[] children)
         {
             return (children.length - 1) * bytesPerPointer + children.length + 1 +
                    maybeSizeRelay(children, bytesPerPointer);
         }
 
         @Override
-        void writeChildren(DataOutputPlus out, FileWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
+        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
         {
             int size = writePointers(out, children, basePos, bytesPerPointer);
             for (int i = size - 1; i >= 0; --i)
@@ -152,7 +152,7 @@ public enum OnDiskWriteNodeType
         this.bits = bits;
     }
 
-    static <T> long sizePayload(FileWriter.DataSerializer<T> serializer, T descentData, T ascentData, boolean hasChild)
+    static <T> long sizePayload(OnDiskTrieWriter.DataSerializer<T> serializer, T descentData, T ascentData, boolean hasChild)
     {
         if (descentData == null && ascentData == null)
             return 0;
@@ -181,7 +181,7 @@ public enum OnDiskWriteNodeType
             return descentDataSize + 1; // certainly smaller than a page
     }
 
-    static <T> void writePayload(DataOutputPlus out, FileWriter.DataSerializer<T> serializer, T descentData, T ascentData, boolean hasChild) throws IOException
+    static <T> void writePayload(DataOutputPlus out, OnDiskTrieWriter.DataSerializer<T> serializer, T descentData, T ascentData, boolean hasChild) throws IOException
     {
         if (descentData == null && ascentData == null)
             return;
@@ -193,7 +193,7 @@ public enum OnDiskWriteNodeType
         if (ascentData != null)
         {
             int ascentDataSize = serializer.serialize(out, ascentData);
-            FileWriter.writeReversedVint(out, ascentDataSize);
+            OnDiskTrieWriter.writeReversedVint(out, ascentDataSize);
             code |= PREFIX_HAS_ASCENT_CONTENT;
         }
 
@@ -205,7 +205,7 @@ public enum OnDiskWriteNodeType
         {
             if (descentDataSize >= 0)
             {
-                FileWriter.writeReversedVint(out, descentDataSize);
+                OnDiskTrieWriter.writeReversedVint(out, descentDataSize);
                 code |= PREFIX_HAS_DESCENT_CONTENT;
             }
             if (hasChild)
@@ -229,13 +229,13 @@ public enum OnDiskWriteNodeType
             return DENSE;
     }
 
-    long sizeChildren(int bytesPerPointer, FileWriter.Node<?>[] children)
+    long sizeChildren(int bytesPerPointer, OnDiskTrieWriter.Node<?>[] children)
     {
         // Throw by default, only applies to RELAY, SPARSE, BITMAP and DENSE
         throw new AssertionError();
     }
 
-    void writeChildren(DataOutputPlus out, FileWriter.Node<?> children[], long base, int bytesPerPointer) throws IOException
+    void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> children[], long base, int bytesPerPointer) throws IOException
     {
         // Throw by default, only applies to RELAY, SPARSE, BITMAP and DENSE
         throw new AssertionError();
@@ -270,34 +270,34 @@ public enum OnDiskWriteNodeType
     static long writeRelay(DataOutputPlus out, long filePos, long base) throws IOException
     {
         assert filePos >= 0;
-        int bytesPerPointer = FileWriter.bytesFor(base - filePos);
-        FileWriter.writeReversedSized(out, base - filePos, bytesPerPointer);
+        int bytesPerPointer = OnDiskTrieWriter.bytesFor(base - filePos);
+        OnDiskTrieWriter.writeReversedSized(out, base - filePos, bytesPerPointer);
         out.writeByte(RELAY.bits | (bytesPerPointer - 1));
         return base + bytesPerPointer + 1;
     }
 
 
-    private static boolean implicitFirstChild(FileWriter.Node<?>[] children)
+    private static boolean implicitFirstChild(OnDiskTrieWriter.Node<?>[] children)
     {
         // If the last child is not written yet, it will be written immediately before parent and won't need a relay.
         return children[children.length - 1].writtenFilePos < 0;
     }
 
-    static long maybeSizeRelay(FileWriter.Node<?>[] children, int bytesPerPointer)
+    static long maybeSizeRelay(OnDiskTrieWriter.Node<?>[] children, int bytesPerPointer)
     {
         return implicitFirstChild(children) ? 0 : sizeRelay(bytesPerPointer);
     }
 
-    static int writePointers(DataOutputPlus out, FileWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
+    static int writePointers(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
     {
         int size = children.length;
         basePos = maybeWriteRelay(out, children, basePos, size);
         for (int i = size - 2; i >= 0; --i)
-            FileWriter.writeReversedSized(out, basePos - children[i].writtenFilePos, bytesPerPointer);
+            OnDiskTrieWriter.writeReversedSized(out, basePos - children[i].writtenFilePos, bytesPerPointer);
         return size;
     }
 
-    private static long maybeWriteRelay(DataOutputPlus out, FileWriter.Node<?>[] children, long basePos, int size) throws IOException
+    private static long maybeWriteRelay(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int size) throws IOException
     {
         long firstNodePos = children[size - 1].writtenFilePos;
         if (firstNodePos != basePos)

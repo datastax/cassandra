@@ -164,7 +164,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     final boolean isOrdered; // determines swapContentSides above; needed if tailTrie switches direction
     /// True when a node's ascent-side content slot holds an alternate-branch pointer rather than return-path content,
     /// i.e. when this walks the data trie of a deletion-aware trie. The walk then never stops on that slot; it is read
-    /// on demand by [#alternateBranch]. See [DeletionAwareFileWriter].
+    /// on demand by [#alternateBranch]. See [OnDiskDeletionAwareTrieWriter].
     final boolean alternateInAscentSlot;
 
 

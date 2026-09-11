@@ -902,7 +902,7 @@ public class TrieUtil
         }
     }
 
-    static class IntegerSerDe implements FileWriter.DataSerializer<Integer>, OnDiskCursor.DataDeserializer<Integer>
+    static class IntegerSerDe implements OnDiskTrieWriter.DataSerializer<Integer>, OnDiskCursor.DataDeserializer<Integer>
     {
         @Override
         public int serializedSize(Integer value)
@@ -925,7 +925,7 @@ public class TrieUtil
     }
     public static final IntegerSerDe INTEGER_SERDE = new IntegerSerDe();
 
-    static class StringSerDe implements FileWriter.DataSerializer<String>, OnDiskCursor.DataDeserializer<String>
+    static class StringSerDe implements OnDiskTrieWriter.DataSerializer<String>, OnDiskCursor.DataDeserializer<String>
     {
         @Override
         public int serializedSize(String value)
@@ -951,7 +951,7 @@ public class TrieUtil
     }
     public static final StringSerDe STRING_SERDE = new StringSerDe();
 
-    static class RangeSerDe implements FileWriter.DataSerializer<TestRangeState>, OnDiskCursor.DataDeserializer<TestRangeState>
+    static class RangeSerDe implements OnDiskTrieWriter.DataSerializer<TestRangeState>, OnDiskCursor.DataDeserializer<TestRangeState>
     {
         @Override
         public int serializedSize(TestRangeState value)
@@ -997,11 +997,11 @@ public class TrieUtil
         return onDiskRoundtrip(trie, isOrdered, STRING_SERDE, STRING_SERDE);
     }
 
-    public static <T> OnDiskTrie<T> onDiskRoundtrip(Trie<T> trie, boolean isOrdered, FileWriter.DataSerializer<T> serializer, OnDiskCursor.DataDeserializer<T> deserializer)
+    public static <T> OnDiskTrie<T> onDiskRoundtrip(Trie<T> trie, boolean isOrdered, OnDiskTrieWriter.DataSerializer<T> serializer, OnDiskCursor.DataDeserializer<T> deserializer)
     {
         try
         {
-            File file = FileWriter.write(trie, isOrdered, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
+            File file = OnDiskTrieWriter.write(trie, isOrdered, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
             return OnDiskTrie.open(file, deserializer, VERSION,  isOrdered, -1);
         }
         catch (IOException e)
@@ -1015,11 +1015,11 @@ public class TrieUtil
         return onDiskRoundtrip(trie, RANGE_SERDE, RANGE_SERDE);
     }
 
-    public static <S extends RangeState<S>> OnDiskRangeTrie<S> onDiskRoundtrip(RangeTrie<S> trie, FileWriter.DataSerializer<S> serializer, OnDiskCursor.DataDeserializer<S> deserializer)
+    public static <S extends RangeState<S>> OnDiskRangeTrie<S> onDiskRoundtrip(RangeTrie<S> trie, OnDiskTrieWriter.DataSerializer<S> serializer, OnDiskCursor.DataDeserializer<S> deserializer)
     {
         try
         {
-            File file = FileWriter.write(trie, true, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
+            File file = OnDiskTrieWriter.write(trie, true, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
             return OnDiskRangeTrie.open(file, deserializer, VERSION, -1);
         }
         catch (IOException e)

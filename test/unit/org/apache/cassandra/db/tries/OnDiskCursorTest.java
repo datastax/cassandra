@@ -63,7 +63,7 @@ public class OnDiskCursorTest
             long[] ends = new long[VALUES.length];
             for (int i = 0; i < VALUES.length; ++i)
             {
-                FileWriter.writeReversedVint(out, VALUES[i]);
+                OnDiskTrieWriter.writeReversedVint(out, VALUES[i]);
                 ends[i] = out.position();
             }
 
@@ -87,7 +87,7 @@ public class OnDiskCursorTest
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             out.write(new byte[8]);
-            FileWriter.writeReversedVint(out, 1 << 20);
+            OnDiskTrieWriter.writeReversedVint(out, 1 << 20);
             long pos = out.position();
 
             OnDiskCursor<Void> cursor = cursorOver(out);
