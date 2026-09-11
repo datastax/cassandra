@@ -424,6 +424,11 @@ public class CompactionGraph implements Closeable, Accountable
     }
 
     /**
+     * Workaround for a jvector bug: {@link GraphIndexBuilder#rescore} does not mark copied nodes as complete,
+     * which causes the graph view used by subsequent insertions to hide those nodes entirely.
+     * TODO: remove this method once a future jvector version fixes {@link GraphIndexBuilder#rescore} to call
+     *       {@link OnHeapGraphIndex#markComplete} for each copied node.
+     * <p>
      * {@link GraphIndexBuilder#rescore} copies the nodes and edges of the old graph into a new builder with
      * {@link OnHeapGraphIndex#connectNode(int, int, NodeArray)}, a jvector method that installs a node and its
      * neighbours directly in the graph without marking the node as complete; unlike
