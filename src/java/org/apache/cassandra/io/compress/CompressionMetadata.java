@@ -76,13 +76,6 @@ public class CompressionMetadata extends WrappedSharedCloseable
         {
             super(memory, cnt);
         }
-
-        @Override
-        public void close()
-        {
-            NATIVE_MEMORY_USAGE.addAndGet(-memoryUsed());
-            super.close();
-        }
     }
 
     /**
@@ -127,6 +120,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
 
         public void close()
         {
+            NATIVE_MEMORY_USAGE.addAndGet(-offsets.memoryUsed());
             offsets.close();
         }
     }
@@ -188,6 +182,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
         // We'll create dummy chunk offsets that allow the reader to work with large files
         int maxChunks = 1000; // Support files up to ~4MB
         ChunkOffsetMemory offsets = new ChunkOffsetMemory(maxChunks + 1);
+        NATIVE_MEMORY_USAGE.addAndGet(offsets.memoryUsed());
         
         // Set chunk offsets - each chunk is CHUNK_SIZE + 4 bytes apart
         long offset = 0;
