@@ -204,7 +204,6 @@ public interface CompressionChunkOffsets extends AutoCloseable
         public BlockCache(File file,
                           long offsetsStart,
                           int baseChunkIndex,
-                          int size,
                           int endIndex,
                           int chunkCount,
                           long compressedFileLength,
@@ -212,11 +211,14 @@ public interface CompressionChunkOffsets extends AutoCloseable
                           CompressionChunkOffsetCache cache) throws IOException
         {
             this.file = file;
+            // During writing, early-open readers use the writer's in-memory offsets. BlockCache is created
+            // only once, for the final reader after CompressionInfo is written. Revisit this instance-scoped
+            // id if offsets are spilled to disk before writer completion.
             this.fileId = nextFileId.incrementAndGet();
             this.fileChannel = CompressionChunkOffsets.openChannel(file, readerType);
             this.offsetsStart = offsetsStart;
             this.baseChunkIndex = baseChunkIndex;
-            this.size = size;
+            this.size = endIndex - baseChunkIndex;
             this.chunkCount = chunkCount;
             // We adjust the compressed file length to store the position after the last chunk just to be able to
             // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).

@@ -109,8 +109,8 @@ public interface CompressionChunkOffsetsFactory
                                                         endIndex, chunkCount, compressedFileLength, readerType);
             case BLOCK_CACHE:
                 CompressionChunkOffsetCache cache = CompressionChunkOffsetCache.get();
-                return new CompressionChunkOffsets.BlockCache(indexFilePath, offsetsStart, startIndex, endIndex - startIndex,
-                                                              endIndex, chunkCount, compressedFileLength, readerType, cache);
+                return new CompressionChunkOffsets.BlockCache(indexFilePath, offsetsStart, startIndex, endIndex,
+                                                              chunkCount, compressedFileLength, readerType, cache);
             case IN_MEMORY:
             default:
                 return createInMemoryOffsets(indexFilePath, input, startIndex, endIndex, chunkCount, compressedFileLength);
@@ -170,8 +170,8 @@ public interface CompressionChunkOffsetsFactory
                 CompressionChunkOffsetCache cache = CompressionChunkOffsetCache.get();
                 // Release writer's in-memory offsets since we'll use block-cached implementation.
                 memoryChunkOffsets.close();
-                return new CompressionChunkOffsets.BlockCache(indexFilePath, offsetsStart, startIndex, endIndex - startIndex,
-                                                              endIndex, chunkCount, compressedFileLength, readerType, cache);
+                return new CompressionChunkOffsets.BlockCache(indexFilePath, offsetsStart, startIndex, endIndex,
+                                                              chunkCount, compressedFileLength, readerType, cache);
             case IN_MEMORY:
             default:
                 NATIVE_MEMORY_USAGE.addAndGet(memoryChunkOffsets.memoryUsed());

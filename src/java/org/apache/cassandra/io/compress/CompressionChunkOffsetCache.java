@@ -222,7 +222,7 @@ public class CompressionChunkOffsetCache implements CacheSize
         private final int capacity;
         private final int length;
 
-        public volatile int references;
+        volatile int references;
 
         public OffsetsBlock(ByteBuffer offsetsBuffer)
         {
