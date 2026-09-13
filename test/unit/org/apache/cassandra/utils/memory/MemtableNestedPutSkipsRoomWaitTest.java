@@ -190,7 +190,7 @@ public class MemtableNestedPutSkipsRoomWaitTest
         pool.offHeap.allocated(pool.offHeap.limit);
         try
         {
-            Thread writer = new Thread(() -> { mt.put(update(tm), UpdateTransaction.NO_OP, g); g.close(); }, "gated-writer");
+            Thread writer = new Thread(() -> { mt.checkSpaceAndPut(update(tm), UpdateTransaction.NO_OP, g); g.close(); }, "gated-writer");
             writer.setDaemon(true);
             writer.start();
             writer.join(2_000);

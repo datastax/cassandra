@@ -1749,12 +1749,23 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             Memtable mt = data.getMemtableFor(opGroup, commitLogPosition);
             UpdateTransaction indexer = newUpdateTransaction(update, context, updateIndexes, mt);
-
-            // updateIndexes == false identifies the nested index-table write performed
-            // from within an enclosing mutation (CassandraTableWriteHandler.write via CassandraIndex)
-            long timeDelta = updateIndexes ? mt.put(update, indexer, opGroup)
-                                           : mt.putNested(update, indexer, opGroup);
-
+            long timeDelta;
+            // Nesting is tracked on the context; updateIndexes cannot identify it, as index build and compaction cleanup also pass false. See Memtable#checkSpaceAndPut.
+            if (context.enterMemtableWrite())
+            {
+                try
+                {
+                    timeDelta = mt.checkSpaceAndPut(update, indexer, opGroup);
+                }
+                finally
+                {
+                    context.exitMemtableWrite();
+                }
+            }
+            else
+            {
+                timeDelta = mt.put(update, indexer, opGroup);
+            }
             DecoratedKey key = update.partitionKey();
             invalidateCachedPartition(key);
             metric.topWritePartitionFrequency.addSample(key.getKey(), 1);

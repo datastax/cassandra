@@ -105,7 +105,7 @@ public abstract class AbstractTrieMemtable extends AbstractShardedMemtable
     }
 
     @Override
-    protected long performPut(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
+    public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
     {
         DecoratedKey key = update.partitionKey();
         AbstractMemtableShard<?, ?> shard = getShards()[boundaries.getShardForKey(key)];

@@ -138,6 +138,23 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
         return allocator;
     }
 
+    /**
+     * The memory limit is enforced here, once per PartitionUpdate and before any memtable-internal lock is
+     * taken; the allocations {@link #put} then makes only track usage. A mutation carries one update per table,
+     * so a mutation that writes to several tables is gated once for each of them. A nested write calls
+     * {@link #put} directly and is not gated, see {@link Memtable#checkSpaceAndPut}.
+     * <p>
+     * The wait does not depend on how much the update will allocate, which is not known until it has been
+     * merged into the memtable. An update that adds little or nothing therefore waits as well: a deletion, or
+     * one that loses on timestamp against what the memtable already holds.
+     */
+    @Override
+    public final long checkSpaceAndPut(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
+    {
+        allocator.awaitRoomToStart(opGroup);
+        return put(update, indexer, opGroup);
+    }
+
     @Override
     public long getEstimatedAverageRowSize()
     {
@@ -145,34 +162,6 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
             estimatedAverageRowSize = new MemtableAverageRowSize(this);
         return estimatedAverageRowSize.rowSize;
     }
-    
-    /**
-     * CASSANDRA-21019: the memory limit is enforced once here, before a mutation starts
-     * and before any memtable-internal locks are taken; once started, a mutation runs to
-     * completion and individual allocations only track usage. Implemented here so every
-     * allocator-backed memtable (TrieMemtable, TrieMemtableStage1, SkipListMemtable, and
-     * future implementations) gets the gate; subclasses implement performPut().
-     */
-    @Override
-    public final long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
-    {
-        allocator.awaitRoomToStart(opGroup);
-        return performPut(update, indexer, opGroup);
-    }
-
-    /**
-     * CASSANDRA-21019: nested writes skip the room gate, as the enclosing mutation was
-     * gated when it started. (waiting for room here would run under the base table's
-     * memtable-internal locks where Barrier.markBlocking() cannot release a queued
-     * pre-barrier writer)
-     */
-    @Override
-    public final long putNested(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
-    {
-        return performPut(update, indexer, opGroup);
-    }
-
-    protected abstract long performPut(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup);
 
     @Override
     public boolean shouldSwitch(ColumnFamilyStore.FlushReason reason)

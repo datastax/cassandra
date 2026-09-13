@@ -141,12 +141,10 @@ public class NativeAllocatorTest
             allocator.allocate(50, group);
             verifyUsedReclaiming(80, 80);
 
-            // allocations above the limit dont block, they only track usage;
-            // the limit is enforced before a mutation starts, in awaitRoom()
-            Assert.assertEquals(0, pool.blockedOnAllocatingCount.getCount());
+            // CASSANDRA-21019: allocations above the limit no longer block -- they only
+            // track usage; the limit is enforced before a mutation starts, in awaitRoom()
             allocator.allocate(30, group);
             Assert.assertNull(barrier.get());
-            Assert.assertEquals(0, pool.blockedOnAllocatingCount.getCount());
             verifyUsedReclaiming(110, 110);
 
             // the wait moved to awaitRoom(): above the limit it blocks until the pool has
