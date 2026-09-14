@@ -135,6 +135,22 @@ public class CompressionMetadataTest
     }
 
     @Test
+    public void testInMemoryCloseHandlesZeroLengthOffsets()
+    {
+        Memory.LongArray empty = new Memory.LongArray(0);
+        assertThat(empty.memory).isNull();
+        assertThat(empty.memoryUsed()).isZero();
+
+        long before = CompressionMetadata.nativeMemoryAllocated();
+
+        CompressionChunkOffsets offsets = new CompressionChunkOffsets.InMemory(empty, 0);
+        assertThat(offsets.offHeapMemoryUsed()).isZero();
+        offsets.close();
+
+        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before);
+    }
+
+    @Test
     public void testNativeMemoryIsNotDoubleDecrementedForChunkOffsetMemory() throws IOException
     {
         int chunkCount = 10;
