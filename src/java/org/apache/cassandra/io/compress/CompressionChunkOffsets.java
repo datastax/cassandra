@@ -395,7 +395,6 @@ public interface CompressionChunkOffsets extends AutoCloseable
         private final File file;
         private final int baseChunkIndex;
         private final int size;
-        private final int chunkCount;
         private final long compressedFileLength;
         // Bytes per segment, captured once at construction. A single MappedByteBuffer can map at most
         // Integer.MAX_VALUE bytes, so larger offset sections are split into multiple segments. Rounded down to a whole
@@ -416,7 +415,6 @@ public interface CompressionChunkOffsets extends AutoCloseable
             this.file = file;
             this.baseChunkIndex = baseChunkIndex;
             this.size = size;
-            this.chunkCount = chunkCount;
             int maxSegmentBytes = CassandraRelevantProperties.COMPRESSION_CHUNK_OFFSETS_MMAP_SEGMENT_SIZE.getInt();
             this.segmentBytes = Math.max(Long.BYTES, (maxSegmentBytes / Long.BYTES) * Long.BYTES);
             this.segments = mapOffsets(file, offsetsStart, chunkCount, readerType, segmentBytes);
@@ -469,14 +467,17 @@ public interface CompressionChunkOffsets extends AutoCloseable
         @Override
         public long get(int index)
         {
-            int absoluteIndex = baseChunkIndex + index;
-            if (absoluteIndex < 0 || absoluteIndex >= chunkCount)
+            // Validate against this representation's own range, as InMemory and BlockCache do. Checking the
+            // absolute index against chunkCount instead would accept indices outside a slice: for a slice starting
+            // at baseChunkIndex, get(-1) - which chunkIndex() produces for a position before the slice - still
+            // lands on a mapped chunk and would silently return the offset of the chunk preceding the slice.
+            if (index < 0 || index >= size)
                 throw new CorruptSSTableException(new EOFException(String.format(BlockCache.CHUNK_OUT_OF_BOUNDS_FORMAT,
-                                                                                 absoluteIndex,
-                                                                                 chunkCount)),
+                                                                                 index,
+                                                                                 size)),
                                                   file);
 
-            return getAbsolute(absoluteIndex);
+            return getAbsolute(baseChunkIndex + index);
         }
 
         @Override
