@@ -46,15 +46,14 @@ import static org.junit.Assert.assertTrue;
 
 public class EndpointStateTest
 {
-
     // the following are dse-6.x legacy applicationState ordinals
-    private static final ApplicationState DSE__STATUS = ApplicationState.values()[0];
-    private static final ApplicationState DSE__INTERNAL_IP = ApplicationState.values()[7];
-    private static final ApplicationState DSE__NATIVE_TRANSPORT_PORT = ApplicationState.values()[15];
-    private static final ApplicationState DSE__NATIVE_TRANSPORT_PORT_SSL = ApplicationState.values()[16];
-    private static final ApplicationState DSE__STORAGE_PORT = ApplicationState.values()[17];
-    private static final ApplicationState DSE__SCHEMA_COMPATIBILITY_VERSION = ApplicationState.values()[20];
-    private static final ApplicationState DSE__DISK_USAGE = ApplicationState.values()[21];
+    private final ApplicationState DSE__STATUS = ApplicationState.values()[0];
+    private final ApplicationState DSE__INTERNAL_IP = ApplicationState.values()[7];
+    private final ApplicationState DSE__NATIVE_TRANSPORT_PORT = ApplicationState.values()[15];
+    private final ApplicationState DSE__NATIVE_TRANSPORT_PORT_SSL = ApplicationState.values()[16];
+    private final ApplicationState DSE__STORAGE_PORT = ApplicationState.values()[17];
+    private final ApplicationState DSE__SCHEMA_COMPATIBILITY_VERSION = ApplicationState.values()[20];
+    private final ApplicationState DSE__DISK_USAGE = ApplicationState.values()[21];
 
     public volatile VersionedValue.VersionedValueFactory valueFactory =
         new VersionedValue.VersionedValueFactory(DatabaseDescriptor.getPartitioner());
