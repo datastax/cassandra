@@ -57,9 +57,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code accumulateExecutionTimeSensor}, which fires into the request sensors when the threshold
  * of {@code blockFor()} responses is reached.
  * <p>
- * {@link Type#READ_EXECUTION_TIME} is measured tightly around the actual read work:
- * {@link org.apache.cassandra.service.StorageProxy.LocalReadRunnable} wraps
- * {@code ReadCommand.executeLocally()} and feeds the elapsed time into the handler's accumulator.
+ * {@link Type#READ_EXECUTION_TIME} reflects only replica execution time: it is measured tightly
+ * around {@code ReadCommand.executeLocally()} by {@code LocalReadRunnable} and accumulated via
+ * {@link org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator}.
  * {@link Type#READ_BYTES} is accumulated by
  * {@link org.apache.cassandra.sensors.read.TrackingRowIterator} during row iteration.
  * Each test injects a Byteman sleep inside {@code ReadCommand.executeLocally} to assert
@@ -143,8 +143,8 @@ public class CoordinatorReadSensorsTest
 
     /**
      * Range read, non-paging path: Byteman sleeps 50 ms inside {@code ReadCommand.executeLocally},
-     * which is inside the timing window of {@code LocalReadRunnable.runMayThrow}. The sensor must
-     * gain at least 50 ms.
+     * which is the timing window measured by {@code LocalReadRunnable}. {@link Type#READ_EXECUTION_TIME}
+     * reflects only this replica execution time, so the sensor must gain at least 50 ms.
      */
     @Test
     @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to force read execution time >= 50ms (range, non-paging)",
@@ -186,9 +186,10 @@ public class CoordinatorReadSensorsTest
 
     /**
      * Range read, paging path: Byteman sleeps 50 ms inside {@code ReadCommand.executeLocally},
-     * which is inside the timing window of {@code LocalReadRunnable.runMayThrow}. Supplying
+     * which is the timing window measured by {@code LocalReadRunnable}. Supplying
      * {@code PageSize.inRows(1)} with {@value #NUM_ROWS} rows forces the paging code path through
-     * {@code execute(Pager,...)}. The sensor must gain at least 50 ms.
+     * {@code execute(Pager,...)}. {@link Type#READ_EXECUTION_TIME} reflects only this replica
+     * execution time, so the sensor must gain at least 50 ms.
      */
     @Test
     @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to force read execution time >= 50ms (range, paging)",
@@ -230,8 +231,9 @@ public class CoordinatorReadSensorsTest
 
     /**
      * Single-partition read, non-paging path: Byteman sleeps 50 ms inside
-     * {@code ReadCommand.executeLocally}, which is inside the timing window of
-     * {@code LocalReadRunnable.runMayThrow}. The sensor must gain at least 50 ms.
+     * {@code ReadCommand.executeLocally}, which is the timing window measured by
+     * {@code LocalReadRunnable}. {@link Type#READ_EXECUTION_TIME} reflects only this replica
+     * execution time, so the sensor must gain at least 50 ms.
      */
     @Test
     @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to force read execution time >= 50ms (single-partition, non-paging)",
@@ -273,9 +275,10 @@ public class CoordinatorReadSensorsTest
 
     /**
      * Single-partition read, paging path: Byteman sleeps 50 ms inside
-     * {@code ReadCommand.executeLocally}, which is inside the timing window of
-     * {@code LocalReadRunnable.runMayThrow}. Supplying {@code PageSize.inRows(1)} forces the
-     * {@code execute(Pager,...)} paging path. The sensor must gain at least 50 ms.
+     * {@code ReadCommand.executeLocally}, which is the timing window measured by
+     * {@code LocalReadRunnable}. Supplying {@code PageSize.inRows(1)} forces the
+     * {@code execute(Pager,...)} paging path. {@link Type#READ_EXECUTION_TIME} reflects only
+     * this replica execution time, so the sensor must gain at least 50 ms.
      */
     @Test
     @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to force read execution time >= 50ms (single-partition, paging)",
