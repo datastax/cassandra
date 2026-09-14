@@ -197,7 +197,6 @@ final class HintsDispatcher implements AutoCloseable
                     return Action.ABORT;
 
                 buffersToSend.add(buffer);
-                hintsToSend.add(null);
             }
             else
             {
@@ -209,6 +208,11 @@ final class HintsDispatcher implements AutoCloseable
                 }
                 catch (UnknownTableException e)
                 {
+                    logger.warn("Failed to read a hint for {}: {} - table with id {} is unknown in file {}",
+                                HintsEndpointProvider.instance.endpointForHost(reader.descriptor().hostId),
+                                reader.descriptor().hostId,
+                                e.id,
+                                reader.descriptor().fileName());
                     // Dropped table — skip; no affinity to enforce.
                     continue;
                 }
@@ -220,12 +224,12 @@ final class HintsDispatcher implements AutoCloseable
                 if (!isWritable(hint.mutation().getKeyspaceName()))
                     return Action.ABORT;
 
-                buffersToSend.add(buffer);
                 hintsToSend.add(hint);
             }
         }
 
-        for (int i = 0; i < buffersToSend.size(); i++)
+        int count = sameVersion ? buffersToSend.size() : hintsToSend.size();
+        for (int i = 0; i < count; i++)
         {
             if (abortRequested.getAsBoolean())
             {
