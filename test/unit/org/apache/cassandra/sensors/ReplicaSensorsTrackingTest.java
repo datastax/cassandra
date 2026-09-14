@@ -177,13 +177,20 @@ public class ReplicaSensorsTrackingTest
         ReadCommand command = Util.cmd(cfs, key).build();
         Message<ReadCommand> readRequest = Message.builder(Verb.READ_REQ, command).build();
 
-        // init request sensors, must happen before the callback is created
+        // init request sensors, must happen before the callback is created.
+        // WRITE_EXECUTION_TIME and WRITE_BYTES are registered because StorageProxy.read() registers them
+        // unconditionally (they are non-zero only for SERIAL reads); they must stay zero for a regular read
+        // since ReadCommandVerbHandler only emits READ_BYTES and READ_EXECUTION_TIME.
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(command);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.WRITE_BYTES);
         Sensor actualReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
         Sensor actualExecutionTimeSensor = requestSensors.getSensor(context, Type.READ_EXECUTION_TIME).get();
+        Sensor actualWriteExecutionTimeSensor = requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get();
+        Sensor actualWriteBytesSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -204,6 +211,14 @@ public class ReplicaSensorsTrackingTest
         assertReplicaSensors(readRequest, callback,
                              List.of(Pair.create(actualReadSensor, mockingReadSensor)),
                              List.of(Pair.create(actualExecutionTimeSensor, mockingExecutionTimeSensor)));
+
+        // ReadCommandVerbHandler emits READ_BYTES and READ_EXECUTION_TIME only; write sensors must remain zero.
+        assertThat(actualWriteExecutionTimeSensor.getValue())
+                .as("WRITE_EXECUTION_TIME must remain zero for regular read (verb handler emits READ_EXECUTION_TIME only)")
+                .isZero();
+        assertThat(actualWriteBytesSensor.getValue())
+                .as("WRITE_BYTES must remain zero for regular read (verb handler emits READ_BYTES only)")
+                .isZero();
     }
 
     @Test
@@ -363,14 +378,18 @@ public class ReplicaSensorsTrackingTest
 
         // init request sensors, must happen before the callback is created.
         // INDEX_WRITE_BYTES is intentionally not registered: prepare only writes to system.paxos, which has no indexes.
+        // READ_EXECUTION_TIME is registered because for SERIAL reads the coordinator registers it so that the
+        // data-fetch time flows through; it must remain zero here since PrepareVerbHandler emits WRITE_EXECUTION_TIME only.
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
         Sensor actualReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
-        Sensor actualExecutionTimeSensor = requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get();
+        Sensor actualWriteExecutionTimeSensor = requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get();
+        Sensor actualReadExecutionTimeSensor = requestSensors.getSensor(context, Type.READ_EXECUTION_TIME).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -385,13 +404,18 @@ public class ReplicaSensorsTrackingTest
         mockingPrepareReadSensor.increment(14.0);
         // WRITE_EXECUTION_TIME is accumulated via ExecutionTimeSensorAccumulator: the running max is written
         // once all targets have responded (paxos awaits all replicas before proceeding to the next phase).
-        Sensor mockingPrepareExecutionTimeSensor = new mockingSensor(context, Type.WRITE_EXECUTION_TIME);
-        mockingPrepareExecutionTimeSensor.increment(1_000_000L);
+        Sensor mockingPrepareWriteExecutionTimeSensor = new mockingSensor(context, Type.WRITE_EXECUTION_TIME);
+        mockingPrepareWriteExecutionTimeSensor.increment(1_000_000L);
 
         assertReplicaSensors(prepare, callback,
                              List.of(Pair.create(actualWriteSensor, mockingPrepareWriteSensor),
                                      Pair.create(actualReadSensor, mockingPrepareReadSensor)),
-                             List.of(Pair.create(actualExecutionTimeSensor, mockingPrepareExecutionTimeSensor)));
+                             List.of(Pair.create(actualWriteExecutionTimeSensor, mockingPrepareWriteExecutionTimeSensor)));
+
+        // PrepareVerbHandler emits WRITE_EXECUTION_TIME only; READ_EXECUTION_TIME must remain zero.
+        assertThat(actualReadExecutionTimeSensor.getValue())
+                .as("READ_EXECUTION_TIME must remain zero for Paxos Prepare (verb handler emits WRITE_EXECUTION_TIME only)")
+                .isZero();
     }
 
     @Test
@@ -407,14 +431,18 @@ public class ReplicaSensorsTrackingTest
 
         // init request sensors, must happen before the callback is created.
         // INDEX_WRITE_BYTES is intentionally not registered: propose only writes to system.paxos, which has no indexes.
+        // READ_EXECUTION_TIME is registered because for SERIAL reads the coordinator registers it so that the
+        // data-fetch time flows through; it must remain zero here since ProposeVerbHandler emits WRITE_EXECUTION_TIME only.
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
         Sensor actualReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
-        Sensor actualExecutionTimeSensor = requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get();
+        Sensor actualWriteExecutionTimeSensor = requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get();
+        Sensor actualReadExecutionTimeSensor = requestSensors.getSensor(context, Type.READ_EXECUTION_TIME).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -428,13 +456,18 @@ public class ReplicaSensorsTrackingTest
         mockingProposeReadSensor.increment(16.0);
         // WRITE_EXECUTION_TIME is accumulated via ExecutionTimeSensorAccumulator: the running max is written
         // once all targets have responded (paxos awaits all replicas before proceeding to the next phase).
-        Sensor mockingProposeExecutionTimeSensor = new mockingSensor(context, Type.WRITE_EXECUTION_TIME);
-        mockingProposeExecutionTimeSensor.increment(1_000_000L);
+        Sensor mockingProposeWriteExecutionTimeSensor = new mockingSensor(context, Type.WRITE_EXECUTION_TIME);
+        mockingProposeWriteExecutionTimeSensor.increment(1_000_000L);
 
         assertReplicaSensors(propose, callback,
                              List.of(Pair.create(actualWriteSensor, mockingProposeWriteSensor),
                                      Pair.create(actualReadSensor, mockingProposeReadSensor)),
-                             List.of(Pair.create(actualExecutionTimeSensor, mockingProposeExecutionTimeSensor)));
+                             List.of(Pair.create(actualWriteExecutionTimeSensor, mockingProposeWriteExecutionTimeSensor)));
+
+        // ProposeVerbHandler emits WRITE_EXECUTION_TIME only; READ_EXECUTION_TIME must remain zero.
+        assertThat(actualReadExecutionTimeSensor.getValue())
+                .as("READ_EXECUTION_TIME must remain zero for Paxos Propose (verb handler emits WRITE_EXECUTION_TIME only)")
+                .isZero();
     }
 
     /**
@@ -451,15 +484,20 @@ public class ReplicaSensorsTrackingTest
 
     private void assertSensorsTrackedForWriteRequest(Message writeRequest, boolean allowHints) throws InterruptedException
     {
-        // init request sensors, must happen before the callback is created
+        // init request sensors, must happen before the callback is created.
+        // READ_EXECUTION_TIME is registered because StorageProxy.cas() registers it unconditionally
+        // (non-zero only for the CAS precondition read); it must stay zero for plain writes and Paxos
+        // Commit since MutationVerbHandler and CommitVerbHandler only emit WRITE_EXECUTION_TIME.
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
         Sensor actualIndexWriteSensor = requestSensors.getSensor(context, Type.INDEX_WRITE_BYTES).get();
         Sensor actualExecutionTimeSensor = requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get();
+        Sensor actualReadExecutionTimeSensor = requestSensors.getSensor(context, Type.READ_EXECUTION_TIME).get();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
@@ -479,6 +517,11 @@ public class ReplicaSensorsTrackingTest
         assertReplicaSensors(writeRequest, callback, allowHints,
                              List.of(Pair.create(actualWriteSensor, mockingWriteSensor), Pair.create(actualIndexWriteSensor, mockingIndexWriteSensor)),
                              List.of(Pair.create(actualExecutionTimeSensor, mockingExecutionTimeSensor)));
+
+        // MutationVerbHandler and CommitVerbHandler emit WRITE_EXECUTION_TIME only; READ_EXECUTION_TIME must remain zero.
+        assertThat(actualReadExecutionTimeSensor.getValue())
+                .as("READ_EXECUTION_TIME must remain zero for plain write/Paxos Commit (verb handler emits WRITE_EXECUTION_TIME only)")
+                .isZero();
     }
 
     private void assertReplicaSensors(Message<?> request, RequestCallback<?> callback,
