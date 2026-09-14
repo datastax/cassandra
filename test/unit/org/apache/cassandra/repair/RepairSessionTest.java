@@ -323,8 +323,14 @@ public class RepairSessionTest
                     banner.contains("[entityId:"));
     }
 
+    /**
+     * A do-nothing executor used in tests to exercise job-submission paths without actually
+     * running any tasks or managing any threads.  All lifecycle and scheduling methods are
+     * intentionally inert.
+     */
     private static class NoopExecutorService implements ListeningExecutorService
     {
+        /** No threads to shut down; intentionally empty. */
         @Override public void shutdown() {}
         @Override public List<Runnable> shutdownNow() { return null; }
         @Override public boolean isShutdown() { return false; }
@@ -337,6 +343,7 @@ public class RepairSessionTest
         @Override public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> c, long l, TimeUnit u) { return null; }
         @Override public <T> T invokeAny(Collection<? extends Callable<T>> tasks) { return null; }
         @Override public <T> T invokeAny(Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit) { return null; }
+        /** No thread pool to dispatch to; intentionally empty. */
         @Override public void execute(Runnable command) {}
     }
 }
