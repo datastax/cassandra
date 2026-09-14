@@ -203,6 +203,8 @@ public final class Hint
             offset += modCountSize;
 
             // read the first TableId (16 bytes) using absolute get to leave position untouched
+            if (offset + Long.BYTES * 2 > hintBuffer.limit())
+                return null;
             long msb = hintBuffer.getLong(offset);
             long lsb = hintBuffer.getLong(offset + Long.BYTES);
             TableId tableId = TableId.fromUUID(new UUID(msb, lsb));
