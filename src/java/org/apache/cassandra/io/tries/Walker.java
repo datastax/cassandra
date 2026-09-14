@@ -70,7 +70,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
             bh = source.rebuffer(root);
             buf = bh.buffer();
         }
-        catch (RuntimeException ex)
+        catch (Throwable ex)
         {
             if (bh != null) bh.release();
             source.closeReader();
