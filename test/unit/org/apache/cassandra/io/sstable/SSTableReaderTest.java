@@ -109,6 +109,7 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.BloomCalculations;
 import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.PageAware;
@@ -127,7 +128,9 @@ import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -1719,5 +1722,41 @@ public class SSTableReaderTest
         T ref = refSupplier.get();
         refsToRelease.add(ref.selfRef());
         return ref;
+    }
+
+    @Test
+    public void testGetMinimalKey()
+    {
+        partitioner = DatabaseDescriptor.getPartitioner();
+        DecoratedKey key = k(1);
+        ByteBuffer keyBuffer = key.getKey();
+        assertSame(key, SSTable.getMinimalKey(key));
+        ByteBuffer slab = ByteBuffer.allocate(100);
+        ByteBuffer partial = slab.position(20).limit(20 + key.getKeyLength()).slice();
+        FastByteOperations.copy(keyBuffer, keyBuffer.position(), partial, partial.position(), keyBuffer.remaining());
+        DecoratedKey k2 = new BufferDecoratedKey(key.getToken(), partial);
+        assertEquals(key, k2);
+        checkMinimization(k2);
+
+        partial = slab.position(20).limit(20 + key.getKeyLength());
+        FastByteOperations.copy(keyBuffer, keyBuffer.position(), partial, partial.position(), keyBuffer.remaining());
+        k2 = new BufferDecoratedKey(key.getToken(), partial);
+        assertEquals(key, k2);
+        checkMinimization(k2);
+
+        ByteBuffer direct = ByteBuffer.allocateDirect(key.getKeyLength());
+        FastByteOperations.copy(keyBuffer, keyBuffer.position(), direct, direct.position(), keyBuffer.remaining());
+        DecoratedKey k3 = new BufferDecoratedKey(key.getToken(), direct);
+        assertEquals(key, k3);
+        checkMinimization(k3);
+    }
+
+    private static void checkMinimization(DecoratedKey k2)
+    {
+        DecoratedKey minimal = SSTable.getMinimalKey(k2);
+        assertEquals(k2, minimal);
+        assertNotSame(k2, minimal);
+        assertFalse(ByteBufferUtil.canMinimize(minimal.getKey()));
+        assertSame(minimal, SSTable.getMinimalKey(minimal));
     }
 }
