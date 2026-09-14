@@ -171,7 +171,7 @@ public interface CompressionChunkOffsets extends AutoCloseable
 
         public void close()
         {
-            NATIVE_MEMORY_USAGE.addAndGet(-offsets.memory.size());
+            NATIVE_MEMORY_USAGE.addAndGet(-offsets.memoryUsed());
             offsets.close();
         }
     }
