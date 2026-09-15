@@ -48,8 +48,8 @@ code, and the rest of the node's data precedes it.
 Children are always written before their parents, thus every pointer in the trie is encoded as a delta that is
 subtracted from the position at the start of the current node's data. We use a variable number of bytes per pointer
 (encoded in the node code) to store this delta. The first child of a node is written last, thus it
-<!-- to change for page-packed-->
 immediately precedes the parent's data -- in other words its delta is always 0 and does not need to be stored. 
+<!-- to change for page-packed-->
 
 ### Leaf nodes (code `00nnnnnn`)
 
@@ -103,7 +103,7 @@ B -> 0x184
 C -> 0x102
 ```
 All pointer targets are calculated from the position to the left of the node (`0x20E - 8 = 0x206`). The first child has
-an implicit 0 delta, the second has `0x0082`, and the third -- `0x0104`.
+an implicit 0 delta, the second has the delta `0x0082`, and the third -- `0x0104`.
 
 ### Bitmap nodes (code `11100bbb`)
 
@@ -114,9 +114,9 @@ A bitmap node represents a node with more than 25 children. The child transition
 specifying the distance from the start of this node. As before, the first pointer is an implicit 0.
 
 Example: 
-`... 80 03 01 89 22 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07 FF FF FE 00 00 00 00 00 00 00 00 E2`
+`89 22 00 80 03 01 ... 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07 FF FF FE 00 00 00 00 00 00 00 00 E2`
 encodes a bitmap node that has transitions for the 26 capital letters A-Z (0x41-0x5A). The first child immediately
-precedes this node (1 + 32 + 3x26 bytes before this node's position), the second is `0x002289` bytes further towards
+precedes this node (1 + 32 + 3x25 bytes before this node's position), the second is `0x002289` bytes further towards
 the front of the file, the third -- `0x010380` bytes from the position of the first child. The rest are omitted
 for brevity.
 
@@ -136,7 +136,7 @@ node (1 + 256x4 bytes before this node's position). The other transitions are om
 
 ### Generic content nodes (code `11110dap`)
 
-`<ascent content bytes><varint-encoded length> <descend content bytes><varint-encoded length> 11110dap`
+`<ascent content bytes><varint-encoded length> <descent content bytes><varint-encoded length> 11110dap`
 
 The generic content nodes are used to store content when it is not suitable for a leaf node:
 - when the node has ascent-side content
@@ -144,11 +144,11 @@ The generic content nodes are used to store content when it is not suitable for 
 - when the content cannot fit in 64 bytes
 
 The generic content node has three flags specifying:
-- _d_escent-side content: if the flag is set, the node code is preceded by content which is to be presented on the
+- ***d***escent-side content: if the flag is set, the node code is preceded by content which is to be presented on the
   descent path, with its length encoded as a variable-length unsigned integer.
-- _a_scent-side content: if the flag is set, the descent-side content (or the node code, if this is no present) is
-  preceded by content which is to be presented on the ascent path with length.
-- _p_refix: if the flag is not set, the node has no children. If it is set, the node immediately preceding this node
+- ***a***scent-side content: if the flag is set, the descent-side content (or the node code, if this is not present) is
+  preceded by content which is to be presented on the ascent path, with its length.
+- ***p***refix: if the flag is not set, the node has no children. If it is set, the node immediately preceding this node
   specifies its children.
 
 The exact meaning of descent and ascent path is determined by the specific trie type:
@@ -182,7 +182,7 @@ tr ->
   ie -> 03
 ```
 example from `InMemoryTrie.md` encodes as
-`03 01·65 40·02 01·65 40·01 01·72 6F 74 63 43·07 0B 61 65 69 84·72 74 41`
+`03 01·65 40·02 01·65 40·01 01·72 6F 74 63 43·07 0B 61 65 69 84·72 74 41`.  
 (The middle dots · are placed for clarity at the boundaries between nodes.)
 
 The root of this trie is at position 24 and is a chain node with 2 transitions. It leads to a sparse node at position
@@ -199,7 +199,7 @@ and 2) with their respective payload.
 Using multiple node types is standard in modern trie/radix tree implementations, done to improve the space usage of the
 structure, as well as the lookup performance which is often determined by the space usage because of caching. Our
 choice of types is driven primarily by the size of the resulting entry in the file, but the choice also naturally
-prefers more types that are also time efficient types when the data becomes dense.
+prefers types that are also more time efficient when the data becomes dense.
 
 Generally, unlimited-length sparse nodes are sufficient to implement tries space-efficiently, but on skips (i.e. slices
 / point queries) they require binary search to find the child to descend to. Binary search is known to have poor branch
@@ -264,15 +264,16 @@ The trie is walked depth-first in reverse order, maintaining the path we took, a
 of the information we have collected for nodes on the current path. Once we enter a node, we save its content in 
 this representation. We then walk its deletion branch (if this is a deletion-aware trie and there is one) and its 
 children recursively. This gives us a pointer for each child. If the recursion stops on the ascent path, we store 
-the ascent-side content as well. When we ascend back to a lower depth, the node's information is fully collected.
+the ascent-side content as well. When we ascend back to a smaller depth, the node's information is fully collected.
 
 If the collected node has no children, but has content, we write a leaf or non-prefix generic content node (using the
 configured serializer for the content). Otherwise, we use the number of children, as well as their pointers (for 
-sizing) to decide on the type of child-carrying node to use. We write this to the file, using the current file position
+sizing), to decide on the type of child-carrying node to use. We write this to the file, using the current file position
 as a base for the deltas we construct for the child pointers. If a prefix node is needed to augment this 
 with content, we write one to the file as well. If the ascent that completed the node takes us beyond the immediate 
 parent level, we create a chain node with the remaining transitions taken to reach this node's level from the 
-ascent's.
+closest parent's. If no parent exists, or its depth is smaller than the ascent depth minus one, we create a new parent 
+node.
 
 Because chain and prefix nodes have their child/augmented node immediately before them in the file, the
 writing method above gives us a valid layout. The file position after we have completed this writing is returned 
@@ -291,26 +292,30 @@ For the example above, the construction proceeds like this:
   - The ascent depth is 3, which is lower than the node's. This means that we need to create a chain node with the 
     last one character of the path, resulting in `65 40`.
   - The current file position is 4, which the recursion returns.
-  - There is currently no node at depth 2 (the ascent depth minus one), thus we create one and map the "i" 
-    transition to the pointer 4.
-  - We cut the path array to length 2 and then add "e".
+- There is currently no node at depth 2 (the ascent depth minus one), thus we create one and map the "i" 
+  transition to the pointer 4.
+- We cut the path array to length 2 and then add "e".
 - The cursor descends with one "e" to depth 4.
 - We create a second `Node` to collect the content "02" at depth 4.
 - The cursor tells us to ascend to depth 3 again, with the character "a". Taking the same steps as above, we write 
-  `02 01 65 40` and map the "e" transition to the resuling pointer 8 in the parent `Node`.
+  `02 01 65 40` and return 8.
+- We map the "e" transition to the resuling pointer 8 in the `Node` we already have at depth 2.
+- We cut the path array to length 2 and then add "a".
 - The cursor descends with "ctor" to depth 7.
 - A new node is created to store the content "01".
 - The cursor tells us to ascend to the exhausted state:
   - As this is above depth 7, we follow the steps above to write the leaf `01 01` and four-character chain `72 6F 74 
-  63 43`, and to attach the resulting position 15 for the character "a" in the parent node.
-  - This is above the depth 2 of the parent node, thus we must write it:
+  63 43`, and to return 15.
+  - We find another node below the ascend depth (at depth 2) and attach the resulting position 15 for the character 
+    "a" in this parent node.
+  - The ascent depth marks this node as complete, thus we must write it:
     - We calculate the deltas from the current file position (15) for the three child pointers: 11, 7 and 0.
     - The node has 3 children, and all of the deltas fit in one byte. We select a sparse node with n=1 and b=0.
     - We write the deltas back-to-front, skipping the implied 0: `07 0B`.
     - We write the transition bytes back-to-front: `61 65 69`.
     - We write the node code: `84`.
-    - As the ascent depth (0 for an exhausted cursor) is lower than the node's, thus we write 2 character chain: 
-      `72 74 41` and return the file position 24.
+    - There is no further parent, and the ascent depth (0 for an exhausted cursor) is lower than the node's, thus we 
+      write the two character chain `72 74 41` and return the file position 24.
 - The root of the trie is at the end of the file, at position 24.
 
 ## Consuming

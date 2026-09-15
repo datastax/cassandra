@@ -317,6 +317,17 @@ We currently have two such feature flags: `MAY_HAVE_CONTENT` and `MAY_HAVE_DELET
 two encoded positions, these and any other flags need to be ignored, i.e. encoded positions must be compared using the
 `Cursor.compare` method.
 
+### Closing cursors
+
+As cursors may reference resources (e.g. a file for on-disk tries), they must be closed after use. A closed cursor can
+no longer be advanced, but we allow for one specific use of closed cursors: calling `Cursor.tailCursor` and 
+`RangeCursor.precedingStateCursor` on a closed cursor is supported.
+
+This is done to make it possible to construct tail tries. `Cursor` is `Closeable`, but `Trie` is not, and it must not
+hold resources until a cursor is requested. Because in various places we need to construct tries matching the current
+position in a cursor walk, we support this by wrapping a closed cursor in the resulting `Trie`, and making sure we 
+can take the tail branch from that closed cursor.
+
 ## Merging two tries
 
 Two tries can be merged using `Trie.mergeWith`, which is implemented using the class `MergeCursor`. The implementation
