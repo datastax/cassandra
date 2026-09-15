@@ -33,6 +33,11 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
+
+import org.apache.cassandra.utils.Pair;
+
+import org.apache.cassandra.utils.TimeUUID;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -242,6 +247,42 @@ public class ActiveOperationsTest extends CQLTester
         CompactionManager.instance.submitCacheWrite(writer, mockActiveCompactions).get();
         assertTrue(mockActiveCompactions.finished);
         assertTrue(mockActiveCompactions.operation.getProgress().sstables().isEmpty());
+    }
+
+    @Test
+    public void testRepairFinishedCompactionTaskRemovedFromScheduledOnCleanup() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, a int, b int, PRIMARY KEY (pk, ck))");
+        getCurrentColumnFamilyStore().disableAutoCompaction();
+
+        // Create some SSTables
+        for (int i = 0; i < 3; i++)
+        {
+            execute("INSERT INTO %s (pk, ck, a, b) VALUES (" + i + ", 2, 3, 4)");
+            flush();
+        }
+        Set<SSTableReader> sstables = getCurrentColumnFamilyStore().getLiveSSTables();
+        TimeUUID sessionID = TimeUUID.Generator.nextTimeUUID();
+
+        try (LifecycleTransaction txn = getCurrentColumnFamilyStore().getTracker().tryModify(sstables, OperationType.COMPACTION))
+        {
+            // Create RepairFinishedCompactionTask
+            RepairFinishedCompactionTask task = new RepairFinishedCompactionTask(getCurrentColumnFamilyStore(),
+                                                                                 txn,
+                                                                                 sessionID,
+                                                                                 System.currentTimeMillis(),
+                                                                                 false);
+
+            // Verify task is in scheduledTasks
+            assertEquals(1, CompactionManager.instance.active.getScheduledTasks().size());
+            assertTrue(CompactionManager.instance.active.getScheduledTasks().contains(task));
+
+            CleanupTask cleanupTask = new CleanupTask(getCurrentColumnFamilyStore(), Arrays.asList(Pair.create(sessionID, task)));
+            cleanupTask.cleanup();
+
+            // Verify task was removed from scheduledTasks
+            assertEquals(0, CompactionManager.instance.active.getScheduledTasks().size());
+        }
     }
 
     private static class MockTableOperations implements TableOperationObserver
