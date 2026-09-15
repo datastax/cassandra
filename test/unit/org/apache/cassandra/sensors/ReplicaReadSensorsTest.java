@@ -431,6 +431,7 @@ public class ReplicaReadSensorsTest
         Sensor indexReadSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         double singleRowSearchBytes = indexReadSensor.getValue();
         indexReadSensor.reset();
+        capturedOutboundMessages.clear();
 
         // Scan the whole index
         readCommand = Util.cmd(store)
@@ -519,4 +520,5 @@ public class ReplicaReadSensorsTest
             assertThat(globalValue).isEqualTo(registrySensor.getValue());
         }
     }
+
 }

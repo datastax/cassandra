@@ -47,5 +47,22 @@ public enum Type
      * coordinator: please note execution times are not summed up but rather recorded separately, with the coordinator
      * one recording the whole span of a request.
      */
-    WRITE_EXECUTION_TIME;
+    WRITE_EXECUTION_TIME,
+
+    /**
+     * Cost of a read operation as computed by the coordinator, based on registered sensors on replica and coordinator.
+     */
+    READ_COST,
+
+    /**
+     * Cost of a write operation as computed by the coordinator, based on registered sensors on replica and coordinator.
+     */
+    WRITE_COST,
+
+    /**
+     * Total cost of a request as computed on the coordinator: represents
+     * the combined cost of all read and write operations within a single request (as a request might have multiple
+     * "cost sensors", i.e. a batch across different tables, each with their own "cost sensor").
+     */
+    TOTAL_COST;
 }

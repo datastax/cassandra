@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.BeforeClass;
@@ -78,18 +79,6 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     }
 
     @Test
-    public void testAddWriteSensorToInternodeResponse()
-    {
-        testAddSensorsToInternodeResponse(Type.WRITE_BYTES);
-    }
-
-    @Test
-    public void testAddReadSensorToInternodeResponse()
-    {
-        testAddSensorsToInternodeResponse(Type.READ_BYTES);
-    }
-
-    @Test
     public void testSensorValueAsByteBuffer()
     {
         double d = Double.MAX_VALUE;
@@ -102,11 +91,15 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     @Test
     public void testAddSensorsToCQLResponse()
     {
-        String table = "t1";
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        for (Type type : Type.values())
+            doTestAddSensorToCQLResponse(type);
+    }
+
+    private void doTestAddSensorToCQLResponse(Type type)
+    {
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of("ks1"));
         ResultMessage message = new ResultMessage.Void();
-        Context context = new Context("ks1", table, UUID.randomUUID().toString());
-        Type type = Type.WRITE_BYTES;
+        Context context = new Context("ks1", "t1", UUID.randomUUID().toString());
         double expectedValue = 17.0;
 
         sensors.registerSensor(context, type);
@@ -126,7 +119,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     public void testAddSensorsToCQLResponseWithExistingCustomPayload()
     {
         String table = "t1";
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of("ks1"));
         ResultMessage message = new ResultMessage.Void();
         String existingKey = "existingKey";
         String existingValue = "existingValue";
@@ -157,7 +150,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     @Test
     public void testAddSensorsToCQLResponseSkippedWhenResponseIsNull()
     {
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of("ks1"));
         Context context = new Context("ks1", "t1", UUID.randomUUID().toString());
         Type type = Type.WRITE_BYTES;
         sensors.registerSensor(context, type);
@@ -182,7 +175,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     @Test
     public void testAddSensorsToCQLResponseSkippedWhenProtocolVersionBelowV4()
     {
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of("ks1"));
         ResultMessage message = new ResultMessage.Void();
         Context context = new Context("ks1", "t1", UUID.randomUUID().toString());
         Type type = Type.WRITE_BYTES;
@@ -197,7 +190,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     @Test
     public void testAddSensorsToCQLResponseSkippedWhenDisabledViaProperty()
     {
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of("ks1"));
         ResultMessage message = new ResultMessage.Void();
         Context context = new Context("ks1", "t1", UUID.randomUUID().toString());
         Type type = Type.WRITE_BYTES;
@@ -213,7 +206,7 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
     @Test
     public void testAddSensorsToCQLResponseSkippedWhenZero()
     {
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of("ks1"));
         ResultMessage message = new ResultMessage.Void();
         Context context = new Context("ks1", "t1", UUID.randomUUID().toString());
         Type type = Type.WRITE_BYTES;
@@ -226,9 +219,16 @@ public class SensorsCustomParamsWithActiveSensorsFactoryTest
         assertNull(message.getCustomPayload());
     }
 
-    private void testAddSensorsToInternodeResponse(Type sensorType)
+    @Test
+    public void testAddSensorToInternodeResponse()
     {
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        for (Type sensorType : Type.values())
+            doTestAddSensorToInternodeResponse(sensorType);
+    }
+
+    private void doTestAddSensorToInternodeResponse(Type sensorType)
+    {
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of("ks1"));
         UUID tableId = UUID.randomUUID();
         KeyspaceMetadata ksm = KeyspaceMetadata.create("ks1", null);
         TableMetadata tm = TableMetadata.builder("ks1", "t1", TableId.fromString(tableId.toString()))

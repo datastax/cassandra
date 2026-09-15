@@ -689,24 +689,38 @@ public final class SystemKeyspace
         transferPaxosSensorBytes(commit.update.metadata(), Type.INDEX_WRITE_BYTES);
     }
 
+    /**
+     * Registers a sensor of the given {@code type} on {@link #PaxosContext} in the current request's
+     * {@link RequestSensors}.
+     *
+     * <p>This is the one legitimate downstream registration site in the sensors subsystem.
+     * {@link #PaxosContext} is an internal staging context used exclusively by {@link #trackPaxosBytes}:
+     * bytes written to {@code system.paxos} accumulate there during the Paxos write, and are then
+     * transferred to the user-table context and zeroed out via {@link #transferPaxosSensorBytes}. The
+     * context cannot be pre-registered upstream (in {@link org.apache.cassandra.service.StorageProxy})
+     * because it is private to this class and its lifecycle is tightly coupled to the Paxos write
+     * sequence.
+     */
     private static void registerPaxosSensor(Type type)
     {
         RequestSensors sensors = RequestTracker.instance.get();
         if (sensors != null)
-        {
             sensors.registerSensor(PaxosContext, type);
-        }
     }
 
     /**
-     * Populates sensor values of a given {@link Type} associated with the user commit that initiated Paxos.
+     * Transfers the staged {@link #PaxosContext} bytes of the given {@code type} to the user-table
+     * context, then zeros out the staging sensor so it does not contribute to any request-wide
+     * aggregation (e.g. cost calculation).
      */
     private static void transferPaxosSensorBytes(TableMetadata targetSensorMetadata, Type type)
     {
         RequestSensors sensors = RequestTracker.instance.get();
         if (sensors != null)
             sensors.getSensor(PaxosContext, type).ifPresent(paxosSensor -> {
-                sensors.incrementSensor(Context.from(targetSensorMetadata), type, paxosSensor.getValue());
+                double staged = paxosSensor.getValue();
+                sensors.incrementSensor(Context.from(targetSensorMetadata), type, staged);
+                sensors.incrementSensor(PaxosContext, type, -staged);
                 sensors.syncAllSensors();
             });
     }
