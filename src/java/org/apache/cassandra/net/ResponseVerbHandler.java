@@ -83,9 +83,7 @@ public class ResponseVerbHandler implements IVerbHandler
      *
      * <p><em>Execution-time</em> sensors ({@link Type#READ_EXECUTION_TIME},
      * {@link Type#WRITE_EXECUTION_TIME}) are accumulated by {@code max} because replicas execute
-     * in parallel — only the slowest replica's time is relevant. The coordinator later adds its
-     * own local work on top (result processing for reads, post-mutate work for writes) via a
-     * regular {@code incrementSensor} at the CQL statement layer.</p>
+     * in parallel — only the slowest replica's time is relevant.</p>
      *
      * <p>Please note {@link RequestSensors#syncAllSensors()} is not invoked here, but at the CQL statement layer:
      * this is to reduce number of calls, and because local-only requests would not go through this handler.</p>

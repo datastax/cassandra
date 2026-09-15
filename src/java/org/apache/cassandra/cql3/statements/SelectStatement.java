@@ -112,7 +112,6 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
-import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.serializers.MarshalException;
@@ -490,7 +489,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         ResultMessage.Rows msg;
-        long totalStartNanos = System.nanoTime();
         try (PartitionIterator data = query.execute(options.getConsistency(), queryState, queryStartNanoTime))
         {
             msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset);
@@ -498,17 +496,14 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             if (sensors != null)
             {
                 Context context = Context.from(this.table);
-                // Increment READ_EXECUTION_TIME by the coordinator's own contribution: the total wall-clock span
-                // (replica I/O + result processing + any short-read protection fetches) minus the replica max
-                // already accumulated into the sensor by ResponseVerbHandler. Using max(0, delta) guards against
-                // clock skew or replica over-reporting producing a negative value.
-                double replicaTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
-                double coordinatorTime = Math.max(0, System.nanoTime() - totalStartNanos - replicaTime);
-                sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, coordinatorTime);
                 sensors.syncAllSensors();
 
                 SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
                 SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+                // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
+                // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
             }
         }
         return msg;
@@ -640,7 +635,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         // in memory all the rows that will be discarded by the offset. Key-based paging is also disabled if the offset
         // is explicitly set to zero.
         ResultMessage.Rows msg;
-        long totalStartNanos = System.nanoTime();
         try (PartitionIterator partitions = userOffset == NO_OFFSET
                                           ? pager.fetchPage(pageSize, queryStartNanoTime)
                                           : pager.readAll(pageSize, queryStartNanoTime))
@@ -650,17 +644,14 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             if (sensors != null)
             {
                 Context context = Context.from(this.table);
-                // Increment READ_EXECUTION_TIME by the coordinator's own contribution: the total wall-clock span
-                // (replica I/O + result processing + any short-read protection fetches) minus the replica max
-                // already accumulated into the sensor by ResponseVerbHandler. Using max(0, delta) guards against
-                // clock skew or replica over-reporting producing a negative value.
-                double replicaTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).map(Sensor::getValue).orElse(0.0);
-                double coordinatorTime = Math.max(0, System.nanoTime() - totalStartNanos - replicaTime);
-                sensors.incrementSensor(context, Type.READ_EXECUTION_TIME, coordinatorTime);
                 sensors.syncAllSensors();
 
                 SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
                 SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+                // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
+                // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
+                SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
             }
         }
 
