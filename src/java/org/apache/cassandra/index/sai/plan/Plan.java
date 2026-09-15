@@ -180,7 +180,8 @@ abstract public class Plan
      * If you only want to iterate the subplan nodes, it is recommended to use {@link #forEachSubplan(Function)}
      * or {@link #withUpdatedSubplans(Function)} which offer better performance and less GC pressure.
      */
-    final List<Plan> subplans()
+    @VisibleForTesting
+    public final List<Plan> subplans()
     {
         List<Plan> result = new ArrayList<>();
         forEachSubplan(subplan -> {
@@ -387,6 +388,18 @@ abstract public class Plan
 
         Plan bestPlanSoFar = this;
         List<Leaf> leaves = nodesOfType(Leaf.class);
+
+        // If there is a KeysSort on an index included by the hints, we should do sort-then-filter.
+        // Replace the KeysSort (and its entire filter source) with a bare scored index scan, keeping
+        // all nodes above it (Fetch, Filter, Limit) so the WHERE predicates are still applied as a
+        // post-filter over the results that come back in sorted order.
+        for (KeysSort ks : nodesOfType(KeysSort.class))
+        {
+            if (factory.hints.includes(ks.ordering.getIndexName()))
+            {
+                return bestPlanSoFar.removeRestriction(ks.id);
+            }
+        }
 
         // Remove leaves one by one, starting from the ones with the worst selectivity
         leaves.sort(Comparator.comparingDouble(Plan::selectivity).reversed());
@@ -1041,7 +1054,8 @@ abstract public class Plan
     /**
      * Represents a scan over a numeric storage attached index.
      */
-    static class NumericIndexScan extends IndexScan
+    @VisibleForTesting
+    public static class NumericIndexScan extends IndexScan
     {
         public NumericIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access, Orderer ordering)
         {
@@ -1060,7 +1074,8 @@ abstract public class Plan
     /**
      * Represents a scan over a literal storage attached index
      */
-    static class LiteralIndexScan extends IndexScan
+    @VisibleForTesting
+    public static class LiteralIndexScan extends IndexScan
     {
         public LiteralIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access, Orderer ordering)
         {
@@ -1573,7 +1588,8 @@ abstract public class Plan
      * Returns all keys in ANN order.
      * Contrary to {@link KeysSort}, there is no input node here and the output is generated lazily.
      */
-    final static class AnnIndexScan extends ScoredIndexScan
+    @VisibleForTesting
+    public final static class AnnIndexScan extends ScoredIndexScan
     {
         protected AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
@@ -1617,7 +1633,8 @@ abstract public class Plan
      * Returns all keys in BM25 order.
      * Like AnnIndexScan, this generates results lazily without an input node.
      */
-    final static class Bm25IndexScan extends ScoredIndexScan
+    @VisibleForTesting
+    public final static class Bm25IndexScan extends ScoredIndexScan
     {
         protected Bm25IndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
