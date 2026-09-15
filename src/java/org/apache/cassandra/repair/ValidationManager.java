@@ -143,15 +143,12 @@ public class ValidationManager
             cfs.metric.bytesValidated.update(estimatedTotalBytes);
             cfs.metric.partitionsValidated.update(partitionCount);
         }
-        if (logger.isDebugEnabled())
-        {
-            long duration = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-            logger.debug("Validation of {} partitions (~{}) finished in {} msec, for {}",
-                         partitionCount,
-                         FBUtilities.prettyPrintMemory(estimatedTotalBytes),
-                         duration,
-                         validator.desc);
-        }
+        long duration = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        logger.info("Validation of {} partitions (~{}) finished in {} msec, for {}",
+                    partitionCount,
+                    FBUtilities.prettyPrintMemory(estimatedTotalBytes),
+                    duration,
+                    validator.desc);
     }
 
     /**
