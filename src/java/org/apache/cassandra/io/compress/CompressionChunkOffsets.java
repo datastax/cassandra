@@ -381,8 +381,9 @@ public interface CompressionChunkOffsets extends AutoCloseable
         @Override
         public void close()
         {
-            // Invalidate all blocks from cache because we don't track what blocks are cached
-            int blockCount = (int) Math.ceil(remainingChunkCount * 1.0 / offsetsPerBlock);
+            // Invalidate all blocks from cache because we don't track what blocks are cached.
+            // Only indexes below size are ever looked up via get(), so blocks beyond that were never cached.
+            int blockCount = (size + offsetsPerBlock - 1) / offsetsPerBlock;
             for (int i = 0; i < blockCount; i++)
                 cache.invalidate(new CompressionChunkOffsetCache.BlockKey(fileId, i));
 
