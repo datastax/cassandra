@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
@@ -27,8 +28,6 @@ import java.util.NavigableMap;
 import java.util.Random;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
@@ -39,14 +38,15 @@ import org.junit.runners.Parameterized;
 
 import com.googlecode.concurrenttrees.common.Iterables;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static java.util.Arrays.asList;
+import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.makeInMemoryTrie;
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.apache.cassandra.db.tries.TrieUtil.asString;
 import static org.apache.cassandra.db.tries.TrieUtil.assertMapEquals;
 import static org.apache.cassandra.db.tries.TrieUtil.generateKeys;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.makeInMemoryTrie;
 import static org.apache.cassandra.db.tries.TrieUtil.toBound;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Preencoded;
 import static org.junit.Assert.assertEquals;
@@ -58,6 +58,7 @@ public class IntersectionTrieTest
     public static void enableVerification()
     {
         CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
+        DatabaseDescriptor.toolInitialization();
     }
 
     private static final int COUNT = 15000;
@@ -65,14 +66,17 @@ public class IntersectionTrieTest
     int seed = rand.nextInt();
     final static int bitsNeeded = 4;
 
-    @Parameterized.Parameters(name = "bits per transition {0} dropDanglingZero {1}")
+    @Parameterized.Parameters(name = "bits per transition {0} dropDanglingZero {1} construction {2} direction {3}")
     public static List<Object[]> data()
     {
-        return IntStream.rangeClosed(1, bitsNeeded)
-                        .boxed()
-                        .flatMap(x -> Stream.of(new Object[] { x, false},
-                                                new Object[] {x, true}))
-                        .collect(Collectors.toList());
+        List<Object[]> list = new ArrayList<>();
+        for (int i = 1; i <= bitsNeeded; i++)
+            for (Boolean drop : List.of(Boolean.FALSE, Boolean.TRUE))
+                for (Construction construction : Construction.values())
+                    for (Direction direction : Direction.values())
+                        list.add(new Object[]{ i, drop, construction, direction });
+
+        return list;
     }
 
     @Parameterized.Parameter(0)
@@ -80,6 +84,17 @@ public class IntersectionTrieTest
 
     @Parameterized.Parameter(1)
     public boolean dropDanglingZeros = false;
+
+    enum Construction
+    {
+        TRIES, SETS, RANGE_APPLY_TO, MIXED, IN_MEMORY_DELETE, ON_DISK_ROUNDTRIP;
+    }
+
+    @Parameterized.Parameter(2)
+    public Construction construction = Construction.TRIES;
+
+    @Parameterized.Parameter(3)
+    public Direction direction = Direction.FORWARD;
 
     public static final Trie.CollectionMergeResolver<Integer> RESOLVER = new Trie.CollectionMergeResolver<>()
     {
@@ -462,20 +477,46 @@ public class IntersectionTrieTest
 
     public void testIntersection(String message, List<Integer> expected, Trie<Integer> trie, TrieSet... sets)
     {
-        testIntersectionTries(message, expected, trie, sets);
-        testIntersectionSets(message + " setix", expected, trie, TrieSet.rangeExclusiveEnd(VERSION, null, null), sets);
-        testIntersectionTriesByRangeApplyTo(message + " applyTo", expected, trie, sets);
-        testIntersectionTriesByMixed(message + " applyTo", expected, trie, sets);
-        testIntersectionInMemoryTrieDelete(message + " delete", expected, trie, sets);
+        switch (construction)
+        {
+            case TRIES:
+                testIntersectionTries(message, expected, trie, sets);
+                break;
+            case SETS:
+                testIntersectionSets(message + " setix", expected, trie, TrieSet.rangeExclusiveEnd(VERSION, null, null), sets);
+                break;
+            case RANGE_APPLY_TO:
+                testIntersectionTriesByRangeApplyTo(message + " applyTo", expected, trie, sets);
+                break;
+            case MIXED:
+                testIntersectionTriesByMixed(message + " mixed", expected, trie, sets);
+                break;
+            case IN_MEMORY_DELETE:
+                testIntersectionInMemoryTrieDelete(message + " delete", expected, trie, sets);
+                break;
+            case ON_DISK_ROUNDTRIP:
+                try (OnDiskTrie<Integer> diskTrie = TrieUtil.onDiskRoundtripIntegers(trie, true))
+                {
+                    testIntersectionTries(message, expected, diskTrie, sets);
+                }
+                break;
+        }
     }
 
     public void checkEqual(String message, List<Integer> expected, Trie<Integer> trie)
     {
-        assertEquals(message + " forward", expected, toList(trie, Direction.FORWARD));
-        assertEquals(message + " reverse", expected.stream()
-                                                   .sorted(Comparator.<Integer>naturalOrder().reversed())
-                                                   .collect(Collectors.toList()),
-                     toList(trie, Direction.REVERSE));
+        switch (direction)
+        {
+            case FORWARD:
+                assertEquals(message + " forward", expected, toList(trie, Direction.FORWARD));
+                break;
+            case REVERSE:
+                assertEquals(message + " reverse", expected.stream()
+                                                           .sorted(Comparator.<Integer>naturalOrder().reversed())
+                                                           .collect(Collectors.toList()),
+                             toList(trie, Direction.REVERSE));
+                break;
+        }
     }
 
     public void testIntersectionSets(String message, List<Integer> expected, Trie<Integer> trie, TrieSet intersectedSet, TrieSet[] sets)

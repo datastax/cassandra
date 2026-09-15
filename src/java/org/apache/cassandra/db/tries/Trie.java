@@ -311,10 +311,20 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
     default Trie<T> tailTrie(ByteComparable prefix)
     {
         Cursor<T> c = cursor(Direction.FORWARD);
-        if (c.descendAlong(prefix.asComparableBytes(c.byteComparableVersion())))
-            return c::tailCursor;
-        else
-            return null;
+        try
+        {
+            if (c.descendAlong(prefix.asComparableBytes(c.byteComparableVersion())))
+                return c::tailCursor;
+            else
+                return null;
+        }
+        finally
+        {
+            // The returned trie keeps the cursor as the position to make its cursors from, and has no close of its
+            // own for the caller to reach it with. Release it here; [Cursor#close] leaves `tailCursor` callable
+            // precisely for this.
+            c.close();
+        }
     }
 
     @Override

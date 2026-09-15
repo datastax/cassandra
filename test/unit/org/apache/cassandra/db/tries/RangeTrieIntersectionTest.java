@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -31,6 +32,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static java.util.Arrays.asList;
@@ -45,21 +47,30 @@ public class RangeTrieIntersectionTest
     public static void enableVerification()
     {
         CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
+        DatabaseDescriptor.toolInitialization();
     }
 
     static final int bitsNeeded = 4;
 
 
-    @Parameterized.Parameters(name = "bits per transition {0}")
-    public static List<Object> data()
+    @Parameterized.Parameters(name = "bits per transition {0} on-disk {1}")
+    public static List<Object[]> data()
     {
-        return IntStream.rangeClosed(1, bitsNeeded)
-                        .boxed()
-                        .collect(Collectors.toList());
+        List<Object[]> list = new ArrayList<>();
+        int bound = bitsNeeded;
+        for (int i = 1; i <= bound; i++)
+        {
+            list.add(new Object[]{ i, false });
+            list.add(new Object[]{ i, true });
+        }
+        return list;
     }
 
     @Parameterized.Parameter(0)
     public int bits = bitsNeeded;
+
+    @Parameterized.Parameter(1)
+    public boolean onDisk = false;
 
     /** Creates a {@link ByteComparable} for the provided value by splitting the integer in sequences of "bits" bits. */
     private ByteComparable of(int value)
@@ -101,11 +112,17 @@ public class RangeTrieIntersectionTest
         return TrieSet.ranges(TrieUtil.VERSION, true, true, bounds);
     }
 
+    private RangeTrie<TestRangeState> maybeDiskRoundtrip(RangeTrie<TestRangeState> trie)
+    {
+        return onDisk ? TrieUtil.onDiskRoundtrip(trie) : trie;
+    }
+
     @Test
     public void testSubtrie()
     {
         {
             RangeTrie<TestRangeState> trie = fromList(asList(from(1, 10), to(4, 10), from(6, 11), change(8, 11, 12), to(10, 12)));
+            trie = maybeDiskRoundtrip(trie);
 
             TrieUtil.dumpToOut(trie);
 
@@ -180,6 +197,7 @@ public class RangeTrieIntersectionTest
     {
         {
             RangeTrie<TestRangeState> trie = fromList(asList(from(1, 10), to(4, 10), from(6, 11), change(8, 11, 12), to(10, 12)));
+            trie = maybeDiskRoundtrip(trie);
 
             testIntersection("fully covered ranges",
                              asList(from(1, 10), to(4, 10), from(6, 11), change(8, 11, 12), to(10, 12)),
@@ -220,6 +238,7 @@ public class RangeTrieIntersectionTest
     {
         {
             RangeTrie<TestRangeState> trie = fromList(asList(from(1, 10), to(4, 10), from(6, 11), change(8, 11, 12), to(10, 12), from(13, 13), to(14, 13)));
+            trie = maybeDiskRoundtrip(trie);
 
             // non-overlapping
             testIntersection("", asList(), trie, range(of(0), of(3)), range(of(4), of(7)));
@@ -241,7 +260,7 @@ public class RangeTrieIntersectionTest
     @Test
     public void testRangesOnRanges()
     {
-        testIntersections(fromList(asList(from(1, 10), to(4, 10), from(6, 11), change(8, 11, 12), to(10, 12), from(13, 13), to(14, 13))));
+        testIntersections(maybeDiskRoundtrip(fromList(asList(from(1, 10), to(4, 10), from(6, 11), change(8, 11, 12), to(10, 12), from(13, 13), to(14, 13)))));
     }
 
     private void testIntersections(RangeTrie<TestRangeState> trie)
@@ -362,6 +381,7 @@ public class RangeTrieIntersectionTest
         ByteComparable left = TrieUtil.directComparable("aa");
         ByteComparable right = TrieUtil.directComparable("bb");
         RangeTrie<TestRangeState> trie = RangeTrie.range(left, true, right, true, TrieUtil.VERSION, new TestRangeState(ByteComparable.EMPTY, 1, 1));
+        trie = maybeDiskRoundtrip(trie);
         RangeTrie<TestRangeState> expected = TrieUtil.directRangeTrie("aa", "bb");
         TrieUtil.verifyEqualRangeTries(trie, expected);
     }
@@ -418,6 +438,7 @@ public class RangeTrieIntersectionTest
     private void testDirectIntersectionsRangeSet(String[] ranges1, String[] ranges2, String[] expected2, String[] ranges3, String[] expected3)
     {
         RangeTrie<TestRangeState> set1 = TrieUtil.directRangeTrie(ranges1);
+        set1 = maybeDiskRoundtrip(set1);
         TrieSet set2 = TrieUtil.directRanges(ranges2);
         RangeTrie<TestRangeState> expected = TrieUtil.directRangeTrie(expected2);
         TrieUtil.verifyEqualRangeTries(set1.intersect(set2), expected);
@@ -444,6 +465,7 @@ public class RangeTrieIntersectionTest
     private void testIntersectionSkipToRangeSet(String[] ranges1, String[] ranges2, String[] ixranges, String[] points)
     {
         RangeTrie<TestRangeState> set1 = TrieUtil.directRangeTrie(ranges1);
+        set1 = maybeDiskRoundtrip(set1);
         TrieSet set2 = TrieUtil.directRanges(ranges2);
         RangeTrie<TestRangeState> ix = TrieUtil.directRangeTrie(ixranges);
         TrieUtil.verifyEqualRangeTries(set1.intersect(set2), ix);

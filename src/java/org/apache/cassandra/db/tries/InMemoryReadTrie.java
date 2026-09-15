@@ -824,6 +824,12 @@ public abstract class InMemoryReadTrie<T>
             return new InMemoryCursor<>(trie, dir, currentFullNode, presentContentOnDescentPath);
         }
 
+        @Override
+        public void close()
+        {
+            // nothing to release
+        }
+
         long exhausted()
         {
             currentPosition = Cursor.exhaustedPosition(direction);
@@ -1416,6 +1422,12 @@ public abstract class InMemoryReadTrie<T>
         public DumpCursor<C> tailCursor(Direction direction)
         {
             throw new AssertionError();
+        }
+
+        @Override
+        public void close()
+        {
+            source.close();
         }
 
         @Override

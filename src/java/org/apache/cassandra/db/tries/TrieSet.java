@@ -113,20 +113,22 @@ public interface TrieSet extends CursorWalkable<TrieSetCursor>
     /// branch, PREFIX if it is a prefix of a set boundary, and NOT_CONTAINED if it is not contained in the set at all.
     default ContainsResult contains(ByteComparable key)
     {
-        TrieSetCursor cursor = cursor(Direction.FORWARD);
-        final ByteSource bytes = key.asComparableBytes(cursor.byteComparableVersion());
-        int next = bytes.next();
-        while (next != ByteSource.END_OF_STREAM)
+        try (TrieSetCursor cursor = cursor(Direction.FORWARD))
         {
-            long skipPosition = Cursor.positionForDescentWithByte(cursor.encodedPosition(), next);
-            if (Cursor.compare(cursor.skipTo(skipPosition), skipPosition) != 0)
-                return cursor.nonNullState().precedingIncluded(Direction.FORWARD) ? ContainsResult.CONTAINED
-                                                                                  : ContainsResult.NOT_CONTAINED;
+            final ByteSource bytes = key.asComparableBytes(cursor.byteComparableVersion());
+            int next = bytes.next();
+            while (next != ByteSource.END_OF_STREAM)
+            {
+                long skipPosition = Cursor.positionForDescentWithByte(cursor.encodedPosition(), next);
+                if (Cursor.compare(cursor.skipTo(skipPosition), skipPosition) != 0)
+                    return cursor.nonNullState().precedingIncluded(Direction.FORWARD) ? ContainsResult.CONTAINED
+                                                                                      : ContainsResult.NOT_CONTAINED;
 
-            next = bytes.next();
+                next = bytes.next();
+            }
+            return cursor.nonNullState().succeedingIncluded(Direction.FORWARD) ? ContainsResult.CONTAINED
+                                                                               : ContainsResult.PREFIX;
         }
-        return cursor.nonNullState().succeedingIncluded(Direction.FORWARD) ? ContainsResult.CONTAINED
-                                                                           : ContainsResult.PREFIX;
     }
 
     default TrieSet union(TrieSet other)
@@ -156,7 +158,10 @@ public interface TrieSet extends CursorWalkable<TrieSetCursor>
     /// Constuct a textual representation of the trie.
     default String dump()
     {
-        return cursor(Direction.FORWARD).process(new TrieDumper.Plain<>(Object::toString));
+        try (TrieSetCursor cursor = cursor(Direction.FORWARD))
+        {
+            return cursor.process(new TrieDumper.Plain<>(Object::toString));
+        }
     }
 
     // The methods below form the non-public implementation, whose visibility is restricted to package-level.

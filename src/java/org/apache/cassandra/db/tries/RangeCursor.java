@@ -98,6 +98,10 @@ interface RangeCursor<S extends RangeState<S>> extends Cursor<S>
 
     /// Corresponding method to tailCursor above applicable when this cursor is ahead.
     /// Returns a full-range cursor returning [#precedingState()].
+    ///
+    /// Like [#tailCursor], this remains callable after [Cursor#close] so that the tries built by
+    /// [RangeTrie#tailTrie] over a closed cursor can still be given the covering state. The returned cursor is
+    /// independent of this one and must be closed in its turn.
     default RangeCursor<S> precedingStateCursor(Direction direction)
     {
         S precedingState = precedingState();
@@ -150,6 +154,12 @@ interface RangeCursor<S extends RangeState<S>> extends Cursor<S>
         {
             this.source = source;
             this.marker = marker;
+        }
+
+        @Override
+        public void close()
+        {
+            source.close();
         }
 
         @Override
