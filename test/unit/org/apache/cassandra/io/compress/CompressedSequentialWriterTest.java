@@ -49,6 +49,7 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.io.util.SequentialWriterTest;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ChecksumType;
 
 import static org.apache.cassandra.schema.CompressionParams.DEFAULT_CHUNK_LENGTH;
 import static org.apache.commons.io.FileUtils.readFileToByteArray;
@@ -130,7 +131,7 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
         byte[] dataPre = new byte[bytesToTest];
         byte[] rawPost = new byte[bytesToTest];
         try (CompressedSequentialWriter writer = new CompressedSequentialWriter(f, new File(filename + ".metadata"),
-                null, SequentialWriterOption.DEFAULT,
+                null, ChecksumType.CRC32, SequentialWriterOption.DEFAULT,
                 compressionParameters,
                 sstableMetadataCollector))
         {
@@ -230,7 +231,7 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
                                                       MockCompressor.paramsFor(ratio, extra),
                                                       DEFAULT_CHUNK_LENGTH, ratio);
         try (CompressedSequentialWriter writer = new CompressedSequentialWriter(f, new File(f.path() + ".metadata"),
-                                                                                null, SequentialWriterOption.DEFAULT,
+                                                                                null, ChecksumType.CRC32, SequentialWriterOption.DEFAULT,
                                                                                 compressionParameters,
                                                                                 sstableMetadataCollector))
         {
@@ -290,7 +291,7 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
         final int writeSize = 64;
         byte[] toWrite = new byte[writeSize];
         try (SequentialWriter writer = new CompressedSequentialWriter(tempFile, offsetsFile,
-                                                                      digestFile, SequentialWriterOption.DEFAULT,
+                                                                      digestFile, ChecksumType.CRC32, SequentialWriterOption.DEFAULT,
                                                                       CompressionParams.lz4(bufferSize),
                                                                       new MetadataCollector(new ClusteringComparator(UTF8Type.instance))))
         {
@@ -335,7 +336,7 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
         File tempFile = new File(Files.createTempDir(), "empty.txt");
         File offsetsFile = FileUtils.createDeletableTempFile("compressedsequentialwriter.offset", "test");
         try (SequentialWriter writer = new CompressedSequentialWriter(tempFile, offsetsFile,
-                                                                      null, SequentialWriterOption.DEFAULT,
+                                                                      null, ChecksumType.CRC32, SequentialWriterOption.DEFAULT,
                                                                       CompressionParams.lz4(4096),
                                                                       new MetadataCollector(new ClusteringComparator(UTF8Type.instance))))
         {
@@ -376,7 +377,7 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
         private TestableCSW(File file, File offsetsFile) throws IOException
         {
             this(file, offsetsFile, new CompressedSequentialWriter(file, offsetsFile,
-                                                                   null, SequentialWriterOption.DEFAULT,
+                                                                   null, ChecksumType.CRC32, SequentialWriterOption.DEFAULT,
                                                                    CompressionParams.lz4(DEFAULT_BUFFER_SIZE, MAX_COMPRESSED),
                                                                    new MetadataCollector(new ClusteringComparator(UTF8Type.instance))));
 

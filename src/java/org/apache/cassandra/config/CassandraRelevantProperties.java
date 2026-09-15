@@ -516,6 +516,10 @@ public enum CassandraRelevantProperties
     SYSTEM_DISTRIBUTED_NTS_RF_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_per_dc"),
     SYSTEM_DISTRIBUTED_NTS_DC_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_dc_names"),
 
+    SSTABLE_CHECKSUM_AWS_CRT_DETECTION_ENABLED("cassandra.sstable.checksums.aws_crt_detection_enabled", "true"),
+    SSTABLE_CHECKSUM_TYPE("cassandra.sstable.checksums.type", "CRC32"),
+    SSTABLE_FORMAT_STREAM_NEW_CHECKSUMS("cassandra.sstable.format.stream_new_checksums", "false"),
+
     // in OSS, when UUID based SSTable generation identifiers are enabled, they use TimeUUID
     // though, for CNDB we want to use ULID - this property allows for that
     // valid values for this property are: uuid, ulid

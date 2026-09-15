@@ -756,6 +756,7 @@
 
           <dependency groupId="io.micrometer" artifactId="micrometer-core" version="1.5.5"/>
           <dependency groupId="org.latencyutils" artifactId="LatencyUtils" version="2.0.3"/>
+          <dependency groupId="software.amazon.awssdk.crt" artifactId="aws-crt" version="0.45.4" scope="test"/>
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
         <developer id="alakshman" name="Avinash Lakshman"/>
@@ -840,6 +841,7 @@
         <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common"/>
         <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs"/>
         <dependency groupId="io.github.jbellis" artifactId="jvector"/>
+        <dependency groupId="software.amazon.awssdk.crt" artifactId="aws-crt"/>
       </artifact:pom>
 
       <!-- now the pom's for artifacts being deployed to Maven Central -->
@@ -952,6 +954,7 @@
 
         <dependency groupId="io.micrometer" artifactId="micrometer-core"/>
         <dependency groupId="org.latencyutils" artifactId="LatencyUtils"/>
+        <dependency groupId="software.amazon.awssdk.crt" artifactId="aws-crt" scope="test"/>
       </artifact:pom>
     </target>
 

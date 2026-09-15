@@ -20,6 +20,8 @@ package org.apache.cassandra.io.util;
 import java.nio.ByteBuffer;
 import java.util.Optional;
 
+import org.apache.cassandra.utils.ChecksumType;
+
 public class ChecksummedSequentialWriter extends SequentialWriter
 {
     private static final SequentialWriterOption CRC_WRITER_OPTION = SequentialWriterOption.newBuilder()
@@ -30,13 +32,18 @@ public class ChecksummedSequentialWriter extends SequentialWriter
     private final ChecksumWriter crcMetadata;
     private final Optional<File> digestFile;
 
-    public ChecksummedSequentialWriter(File file, File crcPath, File digestFile, SequentialWriterOption option)
+    public ChecksummedSequentialWriter(File file, File crcPath, File digestFile, ChecksumType checksumType, SequentialWriterOption option)
     {
         super(file, option);
         crcWriter = new SequentialWriter(crcPath, CRC_WRITER_OPTION);
-        crcMetadata = new ChecksumWriter(crcWriter);
+        crcMetadata = new ChecksumWriter(crcWriter, checksumType);
         crcMetadata.writeChunkSize(buffer.capacity());
         this.digestFile = Optional.ofNullable(digestFile);
+    }
+
+    public ChecksummedSequentialWriter(File file, File crcPath, SequentialWriterOption option)
+    {
+        this(file, crcPath, null, ChecksumType.CRC32, option);
     }
 
     @Override
