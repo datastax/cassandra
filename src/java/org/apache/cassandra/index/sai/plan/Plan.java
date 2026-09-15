@@ -180,7 +180,8 @@ abstract public class Plan
      * If you only want to iterate the subplan nodes, it is recommended to use {@link #forEachSubplan(Function)}
      * or {@link #withUpdatedSubplans(Function)} which offer better performance and less GC pressure.
      */
-    final List<Plan> subplans()
+    @VisibleForTesting
+    public final List<Plan> subplans()
     {
         List<Plan> result = new ArrayList<>();
         forEachSubplan(subplan -> {
@@ -1041,7 +1042,8 @@ abstract public class Plan
     /**
      * Represents a scan over a numeric storage attached index.
      */
-    static class NumericIndexScan extends IndexScan
+    @VisibleForTesting
+    public static class NumericIndexScan extends IndexScan
     {
         public NumericIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access, Orderer ordering)
         {
@@ -1617,18 +1619,25 @@ abstract public class Plan
      * Returns all keys in BM25 order.
      * Like AnnIndexScan, this generates results lazily without an input node.
      */
-    final static class Bm25IndexScan extends ScoredIndexScan
+    @VisibleForTesting
+    public final static class Bm25IndexScan extends ScoredIndexScan
     {
         protected Bm25IndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
             super(factory, id, access, ordering);
         }
 
+        @Override
+        protected double estimateSelectivity()
+        {
+            return factory.costEstimator.estimateBM25Selectivity(ordering);
+        }
+
         @Nonnull
         @Override
         protected KeysIterationCost estimateCost()
         {
-            double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows);
+            double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows * selectivity());
             int expectedKeysInt = Math.max(1, (int) Math.ceil(expectedKeys));
 
             int termCount = ordering.getQueryTerms().size();
@@ -2208,6 +2217,16 @@ abstract public class Plan
          * @param candidates number of candidate rows that satisfy the expression predicates
          */
         double estimateAnnSearchCost(Orderer ordering, int limit, long candidates);
+
+        /**
+         * Returns the estimated selectivity of a BM25 ordering clause, i.e. the estimated fraction of rows in the
+         * table that contain all query terms. BM25 uses intersection semantics: only rows containing every query
+         * term are returned. The estimate assumes independence of term occurrences across rows.
+         *
+         * @param ordering the BM25 orderer whose query terms are used for the estimate
+         * @return a value in [0.0, 1.0] representing the estimated fraction of matching rows
+         */
+        double estimateBM25Selectivity(Orderer ordering);
     }
 
     /**
