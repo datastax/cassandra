@@ -57,15 +57,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code accumulateExecutionTimeSensor}, which fires into the request sensors when the threshold
  * of {@code blockFor()} responses is reached.
  * <p>
- * {@link Type#READ_EXECUTION_TIME} is measured tightly around the actual read work:
- * {@link org.apache.cassandra.service.StorageProxy.LocalReadRunnable} wraps
- * {@code ReadCommand.executeLocally()} and feeds the elapsed time into the handler's accumulator.
+ * {@link Type#READ_EXECUTION_TIME} reflects only replica execution time: it is measured tightly
+ * around {@code ReadCommand.executeLocally()} by {@code LocalReadRunnable} and accumulated via
+ * {@link org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator}.
  * {@link Type#READ_BYTES} is accumulated by
  * {@link org.apache.cassandra.sensors.read.TrackingRowIterator} during row iteration.
  * Each test injects a Byteman sleep inside {@code ReadCommand.executeLocally} to assert
  * the execution-time sensor gains at least that much time, and also asserts byte sensors are non-zero.
  * <p>
- * Four paths are covered:
+ * Five paths are covered:
  * <ul>
  *   <li><b>Range read, non-paging</b> — {@code SELECT *} with no page size routes through
  *       {@link org.apache.cassandra.db.PartitionRangeReadCommand} →
@@ -85,6 +85,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       {@code PageSize.inRows(1)} forces the {@code execute(Pager,...)} paging path, routing through
  *       {@code StorageProxy.read} → {@code LocalReadRunnable}.
  *       Verifies {@link Type#READ_EXECUTION_TIME} and {@link Type#READ_BYTES}.</li>
+ *   <li><b>SERIAL read</b> — {@code SELECT * WHERE key = ?} with {@link ConsistencyLevel#SERIAL}
+ *       routes through {@code StorageProxy.readWithPaxos}, which runs Paxos Prepare+Propose rounds
+ *       before the data fetch. The Paxos phases contribute to {@link Type#WRITE_EXECUTION_TIME};
+ *       the data fetch contributes to {@link Type#READ_EXECUTION_TIME}. Both must be non-zero.</li>
  * </ul>
  *
  * @see CoordinatorWriteSensorsTest for the write-side counterpart
@@ -143,8 +147,8 @@ public class CoordinatorReadSensorsTest
 
     /**
      * Range read, non-paging path: Byteman sleeps 50 ms inside {@code ReadCommand.executeLocally},
-     * which is inside the timing window of {@code LocalReadRunnable.runMayThrow}. The sensor must
-     * gain at least 50 ms.
+     * which is the timing window measured by {@code LocalReadRunnable}. {@link Type#READ_EXECUTION_TIME}
+     * reflects only this replica execution time, so the sensor must gain at least 50 ms.
      */
     @Test
     @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to force read execution time >= 50ms (range, non-paging)",
@@ -152,7 +156,7 @@ public class CoordinatorReadSensorsTest
             targetMethod = "executeLocally",
             targetLocation = "AT ENTRY",
             action = "Thread.sleep(50L)")
-    public void testCoordinatorAddsExecutionTimeNonPaging()
+    public void testRangeReadNonPaging()
     {
         QueryProcessor.Prepared prepared = QueryProcessor.prepareInternal(
                 String.format("SELECT * FROM %s.%s", KEYSPACE, TABLE));
@@ -186,9 +190,10 @@ public class CoordinatorReadSensorsTest
 
     /**
      * Range read, paging path: Byteman sleeps 50 ms inside {@code ReadCommand.executeLocally},
-     * which is inside the timing window of {@code LocalReadRunnable.runMayThrow}. Supplying
+     * which is the timing window measured by {@code LocalReadRunnable}. Supplying
      * {@code PageSize.inRows(1)} with {@value #NUM_ROWS} rows forces the paging code path through
-     * {@code execute(Pager,...)}. The sensor must gain at least 50 ms.
+     * {@code execute(Pager,...)}. {@link Type#READ_EXECUTION_TIME} reflects only this replica
+     * execution time, so the sensor must gain at least 50 ms.
      */
     @Test
     @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to force read execution time >= 50ms (range, paging)",
@@ -196,7 +201,7 @@ public class CoordinatorReadSensorsTest
             targetMethod = "executeLocally",
             targetLocation = "AT ENTRY",
             action = "Thread.sleep(50L)")
-    public void testCoordinatorAddsExecutionTimeWithPaging()
+    public void testRangeReadWithPaging()
     {
         QueryProcessor.Prepared prepared = QueryProcessor.prepareInternal(
                 String.format("SELECT * FROM %s.%s", KEYSPACE, TABLE));
@@ -230,8 +235,9 @@ public class CoordinatorReadSensorsTest
 
     /**
      * Single-partition read, non-paging path: Byteman sleeps 50 ms inside
-     * {@code ReadCommand.executeLocally}, which is inside the timing window of
-     * {@code LocalReadRunnable.runMayThrow}. The sensor must gain at least 50 ms.
+     * {@code ReadCommand.executeLocally}, which is the timing window measured by
+     * {@code LocalReadRunnable}. {@link Type#READ_EXECUTION_TIME} reflects only this replica
+     * execution time, so the sensor must gain at least 50 ms.
      */
     @Test
     @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to force read execution time >= 50ms (single-partition, non-paging)",
@@ -239,7 +245,7 @@ public class CoordinatorReadSensorsTest
             targetMethod = "executeLocally",
             targetLocation = "AT ENTRY",
             action = "Thread.sleep(50L)")
-    public void testCoordinatorAddsExecutionTimeSinglePartitionNonPaging()
+    public void testSinglePartitionReadNonPaging()
     {
         QueryProcessor.Prepared prepared = QueryProcessor.prepareInternal(
                 String.format("SELECT * FROM %s.%s WHERE key = ?", KEYSPACE, TABLE));
@@ -273,9 +279,10 @@ public class CoordinatorReadSensorsTest
 
     /**
      * Single-partition read, paging path: Byteman sleeps 50 ms inside
-     * {@code ReadCommand.executeLocally}, which is inside the timing window of
-     * {@code LocalReadRunnable.runMayThrow}. Supplying {@code PageSize.inRows(1)} forces the
-     * {@code execute(Pager,...)} paging path. The sensor must gain at least 50 ms.
+     * {@code ReadCommand.executeLocally}, which is the timing window measured by
+     * {@code LocalReadRunnable}. Supplying {@code PageSize.inRows(1)} forces the
+     * {@code execute(Pager,...)} paging path. {@link Type#READ_EXECUTION_TIME} reflects only
+     * this replica execution time, so the sensor must gain at least 50 ms.
      */
     @Test
     @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to force read execution time >= 50ms (single-partition, paging)",
@@ -283,7 +290,7 @@ public class CoordinatorReadSensorsTest
             targetMethod = "executeLocally",
             targetLocation = "AT ENTRY",
             action = "Thread.sleep(50L)")
-    public void testCoordinatorAddsExecutionTimeSinglePartitionWithPaging()
+    public void testSinglePartitionReadWithPaging()
     {
         QueryProcessor.Prepared prepared = QueryProcessor.prepareInternal(
                 String.format("SELECT * FROM %s.%s WHERE key = ?", KEYSPACE, TABLE));
@@ -309,6 +316,67 @@ public class CoordinatorReadSensorsTest
         Sensor registryReadBytes = SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_BYTES).get();
         assertThat(registryReadBytes.getValue()).as("registry READ_BYTES must equal request sensor")
                                                 .isEqualTo(readBytes);
+    }
+
+    // -------------------------------------------------------------------------
+    // SERIAL read  (readWithPaxos path)
+    // -------------------------------------------------------------------------
+
+    /**
+     * SERIAL read: the Paxos Prepare+Propose rounds execute locally before the data fetch.
+     * Byteman sleeps 50 ms inside {@code ReadCommand.executeLocally} (the data-fetch step) so
+     * {@link Type#READ_EXECUTION_TIME} gains at least 50 ms. {@link Type#WRITE_EXECUTION_TIME}
+     * and {@link Type#WRITE_BYTES} must also be non-zero because the Paxos phases write to
+     * {@code system.paxos} and their times are accumulated into the coordinator's registered sensors.
+     */
+    @Test
+    @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to force read execution time >= 50ms (SERIAL read)",
+            targetClass = "org.apache.cassandra.db.ReadCommand",
+            targetMethod = "executeLocally",
+            targetLocation = "AT ENTRY",
+            action = "Thread.sleep(50L)")
+    public void testSerialRead()
+    {
+        QueryProcessor.Prepared prepared = QueryProcessor.prepareInternal(
+                String.format("SELECT * FROM %s.%s WHERE key = ?", KEYSPACE, TABLE));
+        SelectStatement select = (SelectStatement) prepared.statement;
+
+        QueryOptions options = serialQueryOptionsWithValues("0");
+        select.execute(QueryState.forInternalCalls(), options, System.nanoTime());
+
+        RequestSensors sensors = RequestTracker.instance.get();
+        assertThat(sensors).isNotNull();
+        Context context = Context.from(store.metadata());
+
+        // The data-fetch step (executeLocally) sleeps 50ms, so READ_EXECUTION_TIME >= 50ms.
+        double readExecTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).get().getValue();
+        assertThat(readExecTime).as("READ_EXECUTION_TIME must be >= 50ms for SERIAL read (data-fetch executed locally)")
+                                .isGreaterThanOrEqualTo(50_000_000.0);
+        Sensor registryReadExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_EXECUTION_TIME).get();
+        assertThat(registryReadExecTime.getValue()).as("registry READ_EXECUTION_TIME must equal request sensor")
+                                                   .isEqualTo(readExecTime);
+
+        // Paxos Prepare+Propose phases contribute to WRITE_EXECUTION_TIME.
+        double writeExecTime = sensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get().getValue();
+        assertThat(writeExecTime).as("WRITE_EXECUTION_TIME must be > 0 for SERIAL read (Paxos Prepare+Propose phases)")
+                                 .isGreaterThan(0.0);
+        Sensor registryWriteExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_EXECUTION_TIME).get();
+        assertThat(registryWriteExecTime.getValue()).as("registry WRITE_EXECUTION_TIME must equal request sensor")
+                                                    .isEqualTo(writeExecTime);
+
+        double writeBytes = sensors.getSensor(context, Type.WRITE_BYTES).get().getValue();
+        assertThat(writeBytes).as("WRITE_BYTES must be > 0 for SERIAL read (system.paxos writes during Prepare+Propose)")
+                              .isGreaterThan(0.0);
+        Sensor registryWriteBytes = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_BYTES).get();
+        assertThat(registryWriteBytes.getValue()).as("registry WRITE_BYTES must equal request sensor")
+                                                .isEqualTo(writeBytes);
+
+        double readBytes = sensors.getSensor(context, Type.READ_BYTES).get().getValue();
+        assertThat(readBytes).as("READ_BYTES must be > 0 for SERIAL read (rows were read)")
+                             .isGreaterThan(0.0);
+        Sensor registryReadBytes = SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_BYTES).get();
+        assertThat(registryReadBytes.getValue()).as("registry READ_BYTES must equal request sensor")
+                                               .isEqualTo(readBytes);
     }
 
     // -------------------------------------------------------------------------
@@ -338,6 +406,22 @@ public class CoordinatorReadSensorsTest
                 boundValues,
                 false,
                 pageSize,
+                null,
+                null,
+                ProtocolVersion.CURRENT,
+                KEYSPACE);
+    }
+
+    private static QueryOptions serialQueryOptionsWithValues(String... values)
+    {
+        List<ByteBuffer> boundValues = new ArrayList<>();
+        for (String v : values)
+            boundValues.add(AsciiType.instance.fromString(v));
+        return QueryOptions.create(
+                ConsistencyLevel.SERIAL,
+                boundValues,
+                false,
+                PageSize.NONE,
                 null,
                 null,
                 ProtocolVersion.CURRENT,

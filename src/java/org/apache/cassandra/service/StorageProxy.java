@@ -513,8 +513,7 @@ public class StorageProxy implements StorageProxyMBean
         sensors.registerSensor(context, Type.READ_BYTES);  // tracks user table + system.paxos read bytes (see comment above)
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES); // track secondary index write bytes on commit
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME); // tracks Prepare + Propose + Commit execution time across all replicas
-        // please note no READ_EXECUTION_TIME is recorded: CAS is a write operation and recording two different execution
-        // times would be confusing
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME); // tracks the CAS precondition read (readOne at QUORUM/LOCAL_QUORUM) execution time
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
         try
@@ -2111,6 +2110,8 @@ public class StorageProxy implements StorageProxyMBean
         Context context = Context.from(group.metadata());
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME); // tracks Paxos Prepare + Propose (+ replay Commit) execution time for SERIAL/LOCAL_SERIAL reads
+        requestSensors.registerSensor(context, Type.WRITE_BYTES);          // tracks system.paxos write bytes from Prepare/Propose (+ replay Commit if any) for SERIAL/LOCAL_SERIAL reads
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
