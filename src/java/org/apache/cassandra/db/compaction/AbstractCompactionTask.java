@@ -143,7 +143,7 @@ public abstract class AbstractCompactionTask
         }
     }
 
-    abstract protected void runMayThrow() throws Exception;
+    protected abstract void runMayThrow() throws Exception;
 
     /**
      * Executes the task after setting a new observer, normally the observer is the

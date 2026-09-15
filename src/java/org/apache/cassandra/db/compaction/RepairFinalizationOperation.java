@@ -111,9 +111,4 @@ public class RepairFinalizationOperation
     {
         return sessionID;
     }
-
-    public ILifecycleTransaction getTransaction()
-    {
-        return transaction;
-    }
 }
