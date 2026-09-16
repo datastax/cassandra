@@ -188,11 +188,9 @@ public enum OnDiskReadNodeType
             return (int) implData;
         }
 
-        private long base(long postCodePos, int nodeCode)
+        private long base(long postCodePos, int length, int bytes)
         {
-            int l = length(nodeCode);
-            int b = bytes(nodeCode);
-            return postCodePos - (l + (l - 1) * b);
+            return postCodePos - (length + (length - 1) * bytes);
         }
 
         @Override
@@ -208,7 +206,7 @@ public enum OnDiskReadNodeType
             Direction direction = Cursor.direction(state.currentEncodedPosition);
             int currIndex = index(state.nodeImplData);
             int length = length(state.nodeCode);
-            long nextPosition = encodedPositionForChild(state, currIndex, length);
+            long nextPosition = encodedPositionForChild(state, currIndex);
 
             return descendToChild(state, currIndex, direction, length, nextPosition);
         }
@@ -221,14 +219,14 @@ public enum OnDiskReadNodeType
             if (direction.inLoop(nextIndex, 0, length - 1))
                 state.addBacktrack(postCodePos, nodeCode, nextIndex);
             int bytes = bytes(nodeCode);
-            long base = base(postCodePos, nodeCode);
-            long childDelta = state.readSizedIntImplicit0(base, currIndex, bytes);
+            long childDelta = state.readSizedIntImplicit0(postCodePos - length, currIndex, bytes);
+            long base = base(postCodePos, length, bytes);
             return state.descendInto(nextPosition, base - childDelta);
         }
 
-        private long encodedPositionForChild(OnDiskCursor<?> state, int index, int length)
+        private long encodedPositionForChild(OnDiskCursor<?> state, int index)
         {
-            int nextByte = state.readByteBefore(state.postCodePos - (length - 1 - index));
+            int nextByte = state.readByteBefore(state.postCodePos - index);
             return Cursor.positionForDescentWithByte(state.currentEncodedPosition, nextByte);
         }
 
@@ -238,13 +236,13 @@ public enum OnDiskReadNodeType
             Direction direction = Cursor.direction(state.currentEncodedPosition);
             int currIndex = index(state.nodeImplData);
             int length = length(state.nodeCode);
-            long nextPosition = encodedPositionForChild(state, currIndex, length);
+            long nextPosition = encodedPositionForChild(state, currIndex);
             while (Cursor.compare(nextPosition, encodedSkipPosition) < 0)
             {
                 currIndex += direction.increase;
                 if (!direction.inLoop(currIndex, 0, length - 1))
                     return state.exhausted;
-                nextPosition = encodedPositionForChild(state, currIndex, length);
+                nextPosition = encodedPositionForChild(state, currIndex);
             }
 
             return descendToChild(state, currIndex, direction, length, nextPosition);
@@ -253,21 +251,25 @@ public enum OnDiskReadNodeType
         @Override
         public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
         {
-            int index = direction.select(0, length(nodeCode) - 1);
-            long base = base(postCodePos, nodeCode);
-            return base - state.readSizedIntImplicit0(base, index, bytes(nodeCode));
+            int length = length(nodeCode);
+            int bytes = bytes(nodeCode);
+            int index = direction.select(0, length - 1);
+            long base = base(postCodePos, length, bytes);
+            return base - state.readSizedIntImplicit0(postCodePos - length, index, bytes);
         }
 
         @Override
         public String dump(OnDiskCursor<?> state)
         {
-            int length = length(state.nodeCode);
-            long base = base(state.postCodePos, state.nodeCode);
-            int bytes = bytes(state.nodeCode);
+            long postCodePos = state.postCodePos;
+            int nodeCode = state.nodeCode;
+            int length = length(nodeCode);
+            int bytes = bytes(nodeCode);
+            long base = base(postCodePos, length, bytes);
             String s = String.format("Sparse%d", bytes);
             for (int i = 0; i < length; ++i)
-                s += String.format("\n%02x --> %d", state.readByteBefore(state.postCodePos - length + i),
-                                   base - state.readSizedIntImplicit0(base, i, bytes));
+                s += String.format("\n%02x --> %d", state.readByteBefore(postCodePos - i),
+                                   base - state.readSizedIntImplicit0(postCodePos - length, i, bytes));
             return s;
         }
     },
@@ -303,13 +305,15 @@ public enum OnDiskReadNodeType
 
         private long descendToChild(OnDiskCursor<?> state, Direction direction, int transition)
         {
-            int next = findNext(state, direction, state.nodeCode, state.postCodePos, transition + direction.increase);
+            long postCodePos = state.postCodePos;
+            int nodeCode = state.nodeCode;
+            int next = findNext(state, direction, nodeCode, postCodePos, transition + direction.increase);
             if (direction.inLoop(next, 0, 255))
-                state.addBacktrack(state.postCodePos, state.nodeCode, next);
+                state.addBacktrack(postCodePos, nodeCode, next);
             long nextPosition = Cursor.positionForDescentWithByte(state.currentEncodedPosition, transition);
-            int bytes = bytes(state.nodeCode);
-            long base = state.postCodePos - 256 * bytes;
-            long childDelta = state.readSizedInt(base, transition, bytes);
+            int bytes = bytes(nodeCode);
+            long base = postCodePos - 256 * bytes;
+            long childDelta = state.readSizedInt(postCodePos - transition * bytes, bytes);
             return state.descendInto(nextPosition, base - childDelta);
         }
 
@@ -338,7 +342,7 @@ public enum OnDiskReadNodeType
             long notPresent = notPresent(bytes);
             while (direction.inLoop(index, 0, 255))
             {
-                long child = state.readSizedInt(base, index, bytes);
+                long child = state.readSizedInt(postCodePos - index * bytes, bytes);
                 if (child != notPresent)
                     break;
 
@@ -354,7 +358,7 @@ public enum OnDiskReadNodeType
             int index = findNext(state, direction, nodeCode, postCodePos, direction.select(0, 255));
             int bytes = bytes(nodeCode);
             long base = postCodePos - 256 * bytes;
-            return base - state.readSizedInt(base, index, bytes);
+            return base - state.readSizedInt(postCodePos - index * bytes, bytes);
         }
 
         @Override
@@ -366,7 +370,7 @@ public enum OnDiskReadNodeType
             StringBuilder s = new StringBuilder(String.format("Dense%d", bytes));
             for (int i = 0; i < 256; ++i)
             {
-                long child = state.readSizedInt(base, i, bytes);
+                long child = state.readSizedInt(state.postCodePos - i * bytes, bytes);
                 if (child != notPresent)
                     s.append(String.format("\n%02x --> %d", i, base - child));
             }
@@ -444,7 +448,7 @@ public enum OnDiskReadNodeType
                 state.addBacktrack(postCodePos, state.nodeCode, encode(nextTransition, currIndex + direction.increase, length));
             int bytes = bytes(state.nodeCode);
             long base = base(postCodePos, length, bytes);
-            long childDelta = state.readSizedIntImplicit0(base, currIndex, bytes);
+            long childDelta = state.readSizedIntImplicit0(postCodePos - 32, currIndex, bytes);
             return state.descendInto(Cursor.positionForDescentWithByte(state.currentEncodedPosition, currTransition), base - childDelta);
         }
 
@@ -555,7 +559,7 @@ public enum OnDiskReadNodeType
             int index = direction.isForward() ? 0 : length - 1;
             int bytes = bytes(nodeCode);
             long base = base(postCodePos, length, bytes);
-            return base - state.readSizedIntImplicit0(base, index, bytes);
+            return base - state.readSizedIntImplicit0(postCodePos - 32, index, bytes);
         }
 
         private long base(long postCodePos, int length, int bytes)
@@ -583,7 +587,7 @@ public enum OnDiskReadNodeType
                     if ((bitmapByte & (1 << bitIdx)) != 0)
                     {
                         int transition = byteIdx * 8 + bitIdx;
-                        long childDelta = state.readSizedIntImplicit0(base, childIndex, bytes);
+                        long childDelta = state.readSizedIntImplicit0(postCodePos - 32, childIndex, bytes);
                         s.append(String.format("\n%02x --> %d", transition, base - childDelta));
                         childIndex++;
                     }

@@ -47,7 +47,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-/// Round-trips deletion-aware tries through [DeletionAwareFileWriter] and
+/// Round-trips deletion-aware tries through [OnDiskDeletionAwareTrieWriter] and
 /// [OnDiskDeletionAwareTrie], which is the only real check that the deletion-branch pointer
 /// written into a node's ascent-side slot is recovered and that the branch bytes land where the
 /// pointer says.
@@ -62,7 +62,7 @@ public class OnDiskDeletionAwareTrieTest
 
     /// [LivePoint] and [DeletionMarker] both carry their own position, so the key bytes have to be
     /// serialized alongside the values for the round trip to compare equal.
-    static class LiveSerDe implements FileWriter.DataSerializer<LivePoint>, OnDiskCursor.DataDeserializer<LivePoint>
+    static class LiveSerDe implements OnDiskTrieWriter.DataSerializer<LivePoint>, OnDiskCursor.DataDeserializer<LivePoint>
     {
         @Override
         public int serializedSize(LivePoint value)
@@ -90,7 +90,7 @@ public class OnDiskDeletionAwareTrieTest
         }
     }
 
-    static class MarkerSerDe implements FileWriter.DataSerializer<DeletionMarker>, OnDiskCursor.DataDeserializer<DeletionMarker>
+    static class MarkerSerDe implements OnDiskTrieWriter.DataSerializer<DeletionMarker>, OnDiskCursor.DataDeserializer<DeletionMarker>
     {
         @Override
         public int serializedSize(DeletionMarker value)
@@ -135,7 +135,7 @@ public class OnDiskDeletionAwareTrieTest
         File file = new File(java.io.File.createTempFile("deletionaware", ".trie"));
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            DeletionAwareFileWriter.write(source, LIVE, MARKER, writer);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer);
             writer.finish();
         }
 
@@ -154,7 +154,7 @@ public class OnDiskDeletionAwareTrieTest
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            DeletionAwareFileWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
             ByteBuffer buffer = out.asNewBuffer();
 
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
@@ -203,7 +203,7 @@ public class OnDiskDeletionAwareTrieTest
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points, false, true);
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            DeletionAwareFileWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             assertTriesEqual(source, read);
@@ -217,7 +217,7 @@ public class OnDiskDeletionAwareTrieTest
     /// branch when only a prefix of the branch's data is matched by the set: the walk descends into the branch,
     /// which the set covers at that point, and then finds no marker below.
     ///
-    /// [DeletionAwareFileWriter#exitDeletionsBranch] must report no root for it. The position it would otherwise
+    /// [OnDiskDeletionAwareTrieWriter#exitDeletionsBranch] must report no root for it. The position it would otherwise
     /// hand back is that of whatever node was written last -- here the live point's, written before the walk
     /// reaches the branch -- and the reader has no way to tell that apart from a real root: it sets
     /// [Cursor#MAY_HAVE_DELETION_BRANCH_BIT] and decodes the byte there as a node code.
@@ -245,7 +245,7 @@ public class OnDiskDeletionAwareTrieTest
 
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            DeletionAwareFileWriter.write(intersected, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(intersected, LIVE, MARKER, out);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             assertNoDeletionBranchRecorded(read);
@@ -348,12 +348,12 @@ public class OnDiskDeletionAwareTrieTest
         File deletionAwareFile = new File(java.io.File.createTempFile("deletionawarelive", ".trie"));
         try (SequentialWriter writer = new SequentialWriter(deletionAwareFile))
         {
-            DeletionAwareFileWriter.write(DataPoint.fromList(points), LIVE, MARKER, writer);
+            OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(points), LIVE, MARKER, writer);
             writer.finish();
         }
 
         File plainFile = new File(java.io.File.createTempFile("plainlive", ".trie"));
-        FileWriter.write(plain, false, LIVE, plainFile);
+        OnDiskTrieWriter.write(plain, false, LIVE, plainFile);
 
         assertArrayEquals("Live-only data must serialize identically with and without deletion awareness",
                           Files.readAllBytes(plainFile.toPath()),
@@ -443,7 +443,7 @@ public class OnDiskDeletionAwareTrieTest
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            DeletionAwareFileWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             for (int transition = 0; transition <= 0xFF; ++transition)
@@ -466,7 +466,7 @@ public class OnDiskDeletionAwareTrieTest
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            DeletionAwareFileWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             for (Direction direction : Direction.values())
@@ -488,7 +488,7 @@ public class OnDiskDeletionAwareTrieTest
         File file = new File(java.io.File.createTempFile("deletionawarelarge", ".trie"));
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            DeletionAwareFileWriter.write(source, LIVE, MARKER, writer);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer);
             writer.finish();
         }
         assertTrue("The trie must not fit in one buffer, was " + file.length() + " bytes",
@@ -520,7 +520,7 @@ public class OnDiskDeletionAwareTrieTest
         File file = new File(java.io.File.createTempFile("deletionawaretails", ".trie"));
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            DeletionAwareFileWriter.write(source, LIVE, MARKER, writer);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer);
             writer.finish();
         }
 

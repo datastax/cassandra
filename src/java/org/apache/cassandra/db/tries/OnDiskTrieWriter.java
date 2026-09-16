@@ -29,30 +29,12 @@ import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
-/// Written bottom-to-top, i.e. children first, with negative deltas for every pointer. Everything except value is
-/// written reversed
-/// Types:
-/// - leaf up to 63 bytes
-///   `[data bytes] 00nnnnnn`
-/// - generic content; child immediately before
-///   p - has child
-///   d - has descent content
-///   a - has ascent content
-///   `[ascent data bytes] [varint-encoded ascent data length] [descent data bytes] [varint-encoded descent data length] 11110dap`
-/// - chain up to 64 bytes; child immediately before
-///   `[byte n-1] ... [byte 1] [byte 0] 01nnnnnn`
-/// - sparse up to 25 children; last child immediately before
-///   bb - bytes per pointer - 1
-///   nnnnn - child count - 2
-///   `[child n-2] ... [child 1] [child 0] [byte n-1] ... [byte 1][byte 0]1nnnnnbb`
-/// - bitmap
-///   `[child n-2] ... [child 1] [child 0] [32-byte bitmap] 11100bbb`
-/// - dense full
-///   `[child 255] ... [child 1] [child 0] 11101bbb`
-/// - relay (epsilon transition)
-///   `[child] 11111bbb`
+/// Written bottom-to-top, i.e. children first, with negative deltas for every pointer. It also walks the trie in
+/// reverse order to write the first child closest to the parent.
+///
+/// Everything except value is written reversed. See [OnDiskTrie.md](./OnDiskTrie.md) for details.
 
-public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walker<T, DataOutputPlus>
+public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor.Walker<T, DataOutputPlus>
 {
 
     interface DataSerializer<T>
@@ -74,7 +56,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     Node<T> reusableBoundaryNode = Node.make(0, null, null, null, null);
     NavigableSet<Node<T>> reusableHeadSet = reusableTreeSet.headSet(reusableBoundaryNode, true);
 
-    public FileWriter(DataOutputPlus out, DataSerializer<T> dataSerializer, boolean swapAscentAndDescentSides)
+    public OnDiskTrieWriter(DataOutputPlus out, DataSerializer<T> dataSerializer, boolean swapAscentAndDescentSides)
     {
         this.out = out;
         this.dataSerializer = dataSerializer;
@@ -102,7 +84,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     }
 
     /// Attach a payload to the ascent-side content slot of the node at the current position, whatever path the walk
-    /// is on. [DeletionAwareFileWriter] uses this for the deletion-branch pointer: the slot a range trie fills with
+    /// is on. [OnDiskDeletionAwareTrieWriter] uses this for the deletion-branch pointer: the slot a range trie fills with
     /// return-path content is free in a trie whose content is descent-side only, which is the same reuse
     /// [InMemoryTrie] makes of a prefix node's alternate branch pointer.
     public void ascentContent(T content)
@@ -647,7 +629,7 @@ public class FileWriter<T> extends TriePathReconstructor implements Cursor.Walke
     {
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            FileWriter<T> fw = new FileWriter<>(writer, serializer, isOrdered);
+            OnDiskTrieWriter<T> fw = new OnDiskTrieWriter<>(writer, serializer, isOrdered);
 
             Cursor<T> c = trie.cursor(Direction.REVERSE);
             T content = c.content();   // handle content on the root node
