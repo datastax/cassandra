@@ -27,14 +27,14 @@ import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-/// Reads a [DeletionAwareTrie] written by [DeletionAwareFileWriter].
+/// Reads a [DeletionAwareTrie] written by [OnDiskDeletionAwareTrieWriter].
 ///
 /// The data trie is read as an ordinary on-disk trie of the caller's content, walked with
 /// [OnDiskCursor#alternateInAscentSlot] set so that the ascent-side content slot is understood as the
 /// position of the node's deletion branch. A deletion branch is itself a complete range trie in the same
 /// stream, so [Cursor#deletionBranchCursor] is just an [OnDiskCursor.Range] opened at that position.
 ///
-/// See [DeletionAwareFileWriter] for why the branch position lives in that slot rather than in the node
+/// See [OnDiskDeletionAwareTrieWriter] for why the branch position lives in that slot rather than in the node
 /// encoding.
 public class OnDiskDeletionAwareTrie<T, D extends RangeState<D>>
 implements DeletionAwareTrie<T, D>, Closeable

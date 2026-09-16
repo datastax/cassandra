@@ -22,7 +22,7 @@ import java.io.IOException;
 
 import org.apache.cassandra.io.util.DataOutputPlus;
 
-/// Serializes a [DeletionAwareTrie] using the [FileWriter] on-disk trie format.
+/// Serializes a [DeletionAwareTrie] using the [OnDiskTrieWriter] on-disk trie format.
 ///
 /// ## Where the deletion branch pointer lives
 ///
@@ -47,7 +47,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 ///
 /// ## Ordering
 ///
-/// [FileWriter] writes nodes bottom-up as the walk ascends, so every pointer it emits
+/// [OnDiskTrieWriter] writes nodes bottom-up as the walk ascends, so every pointer it emits
 /// points backwards. [DeletionAwareCursor#process] visits a node's content, then its
 /// deletion branch, then descends into its children, and the node itself is written
 /// after its children. Serializing the deletion branch when the walk leaves it therefore
@@ -57,10 +57,10 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// A branch trie is complete in itself, so its root is the position reached once it has
 /// been fully written — the same convention [OnDiskTrie#open] uses when it takes the
 /// file length as the root.
-/// Note this *holds* a [FileWriter] rather than extending it: the underlying writer is a
+/// Note this *holds* a [OnDiskTrieWriter] rather than extending it: the underlying writer is a
 /// `Walker<Slot<T>>` while this is a `Walker<T>`, and Java does not permit inheriting the
 /// same interface with two different type arguments.
-public class DeletionAwareFileWriter<T, D extends RangeState<D>>
+public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>>
 implements Cursor.Walker<T, DataOutputPlus>
 {
     /// The contents of one of a node's two payload slots: live content on the descent side, or the
@@ -89,11 +89,11 @@ implements Cursor.Walker<T, DataOutputPlus>
 
     /// Writes whichever of the two kinds of slot it is handed: the caller's content, or the branch pointer as a
     /// minimal-width reversed integer, whose length the node's own length prefix records.
-    private static class SlotSerializer<T> implements FileWriter.DataSerializer<Slot<T>>
+    private static class SlotSerializer<T> implements OnDiskTrieWriter.DataSerializer<Slot<T>>
     {
-        final FileWriter.DataSerializer<T> contentSerializer;
+        final OnDiskTrieWriter.DataSerializer<T> contentSerializer;
 
-        SlotSerializer(FileWriter.DataSerializer<T> contentSerializer)
+        SlotSerializer(OnDiskTrieWriter.DataSerializer<T> contentSerializer)
         {
             this.contentSerializer = contentSerializer;
         }
@@ -102,7 +102,7 @@ implements Cursor.Walker<T, DataOutputPlus>
         public int serializedSize(Slot<T> value)
         {
             return value.content != null ? contentSerializer.serializedSize(value.content)
-                                         : FileWriter.bytesFor(value.deletionBranchRoot);
+                                         : OnDiskTrieWriter.bytesFor(value.deletionBranchRoot);
         }
 
         @Override
@@ -111,20 +111,20 @@ implements Cursor.Walker<T, DataOutputPlus>
             if (value.content != null)
                 return contentSerializer.serialize(out, value.content);
 
-            int bytes = FileWriter.bytesFor(value.deletionBranchRoot);
-            FileWriter.writeReversedSized(out, value.deletionBranchRoot, bytes);
+            int bytes = OnDiskTrieWriter.bytesFor(value.deletionBranchRoot);
+            OnDiskTrieWriter.writeReversedSized(out, value.deletionBranchRoot, bytes);
             return bytes;
         }
     }
 
     final DataOutputPlus out;
-    final FileWriter.DataSerializer<D> deletionSerializer;
+    final OnDiskTrieWriter.DataSerializer<D> deletionSerializer;
 
     /// The writer for the data trie itself.
-    final FileWriter<Slot<T>> inner;
+    final OnDiskTrieWriter<Slot<T>> inner;
 
     /// Non-null only while the walk is inside a deletion branch.
-    private FileWriter<D> branchWriter;
+    private OnDiskTrieWriter<D> branchWriter;
     /// Depth of the node the current deletion branch hangs from, to rebase the nested walk.
     private int branchDepthAdjustment;
     /// Stream position when the current deletion branch was entered, to tell a branch that wrote
@@ -132,20 +132,20 @@ implements Cursor.Walker<T, DataOutputPlus>
     private long branchStartPosition;
 
 
-    public DeletionAwareFileWriter(DataOutputPlus out,
-                                   FileWriter.DataSerializer<T> contentSerializer,
-                                   FileWriter.DataSerializer<D> deletionSerializer)
+    public OnDiskDeletionAwareTrieWriter(DataOutputPlus out,
+                                         OnDiskTrieWriter.DataSerializer<T> contentSerializer,
+                                         OnDiskTrieWriter.DataSerializer<D> deletionSerializer)
     {
         this.out = out;
         this.deletionSerializer = deletionSerializer;
         // Never ordered: OnDiskDeletionAwareTrie always reads the data trie with isOrdered = false, and an ordered
         // write would swap the two content slots in FileWriter.InProgressNode.complete, putting the branch pointer
         // where the reader expects the live content.
-        this.inner = new FileWriter<>(out, new SlotSerializer<>(contentSerializer), false);
+        this.inner = new OnDiskTrieWriter<>(out, new SlotSerializer<>(contentSerializer), false);
     }
 
     /// Write out every node the walk has finished with. Called by the driving loop on ascent,
-    /// mirroring [FileWriter#ascendTo].
+    /// mirroring [OnDiskTrieWriter#ascendTo].
     public void ascendTo(long newEncodedPosition) throws IOException
     {
         inner.ascendTo(newEncodedPosition);
@@ -160,7 +160,7 @@ implements Cursor.Walker<T, DataOutputPlus>
     }
 
     /// Not [DeletionAwareCursor.DeletionAwareWalker]: that contract reports a branch's markers but
-    /// never its ascents, and [FileWriter] only emits nodes on ascent. The driver below walks both
+    /// never its ascents, and [OnDiskTrieWriter] only emits nodes on ascent. The driver below walks both
     /// levels explicitly instead, so these are plain methods rather than interface overrides.
     public boolean enterDeletionsBranch()
     {
@@ -171,7 +171,7 @@ implements Cursor.Walker<T, DataOutputPlus>
         // trie, it is read back through OnDiskCursor.Range, and that always reads with
         // isOrdered = true. Writing it unordered loses the ascent-path stops and the read-back
         // positions disagree on ON_RETURN_PATH_BIT.
-        branchWriter = new FileWriter<>(out, deletionSerializer, true);
+        branchWriter = new OnDiskTrieWriter<>(out, deletionSerializer, true);
         branchStartPosition = out.position();
         branchDepthAdjustment = inner.keyPos;
         return true;
@@ -249,19 +249,19 @@ implements Cursor.Walker<T, DataOutputPlus>
 
     /// Serialize a deletion-aware trie.
     ///
-    /// [DeletionAwareCursor#process] cannot drive this: it never calls `ascendTo`, and [FileWriter]
-    /// only emits nodes on ascent — which is why [FileWriter#write] has its own loop. The same
+    /// [DeletionAwareCursor#process] cannot drive this: it never calls `ascendTo`, and [OnDiskTrieWriter]
+    /// only emits nodes on ascent — which is why [OnDiskTrieWriter#write] has its own loop. The same
     /// applies to a deletion branch, so both levels are walked explicitly here.
     ///
-    /// Writes in [Direction#REVERSE] like [FileWriter#write], so the root ends up last and the trie
+    /// Writes in [Direction#REVERSE] like [OnDiskTrieWriter#write], so the root ends up last and the trie
     /// is read from the end of the stream.
     public static <T, D extends RangeState<D>> void write(DeletionAwareTrie<T, D> trie,
-                                                          FileWriter.DataSerializer<T> contentSerializer,
-                                                          FileWriter.DataSerializer<D> deletionSerializer,
+                                                          OnDiskTrieWriter.DataSerializer<T> contentSerializer,
+                                                          OnDiskTrieWriter.DataSerializer<D> deletionSerializer,
                                                           DataOutputPlus out) throws IOException
     {
-        DeletionAwareFileWriter<T, D> fw =
-            new DeletionAwareFileWriter<>(out, contentSerializer, deletionSerializer);
+        OnDiskDeletionAwareTrieWriter<T, D> fw =
+            new OnDiskDeletionAwareTrieWriter<>(out, contentSerializer, deletionSerializer);
         DeletionAwareCursor<T, D> c = trie.cursor(Direction.REVERSE);
 
         emitAt(fw, c);
@@ -295,7 +295,7 @@ implements Cursor.Walker<T, DataOutputPlus>
     }
 
     /// Report the content and, if present, the whole deletion branch at the cursor's position.
-    private static <T, D extends RangeState<D>> void emitAt(DeletionAwareFileWriter<T, D> fw,
+    private static <T, D extends RangeState<D>> void emitAt(OnDiskDeletionAwareTrieWriter<T, D> fw,
                                                             DeletionAwareCursor<T, D> c) throws IOException
     {
         long position = c.encodedPosition();
@@ -326,7 +326,7 @@ implements Cursor.Walker<T, DataOutputPlus>
     }
 
     /// The same ascent-driven loop as above, over one deletion branch, feeding the nested writer.
-    private static <D extends RangeState<D>> void writeBranch(FileWriter<D> bw, RangeCursor<D> c) throws IOException
+    private static <D extends RangeState<D>> void writeBranch(OnDiskTrieWriter<D> bw, RangeCursor<D> c) throws IOException
     {
         D content = c.content();
         if (content != null)

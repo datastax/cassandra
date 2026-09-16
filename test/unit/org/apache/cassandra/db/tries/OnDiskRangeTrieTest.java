@@ -108,7 +108,7 @@ public class OnDiskRangeTrieTest
     private void testWideNode(int prefixLength, int[] transitions, int suffixLength) throws IOException
     {
         InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(prefixLength, transitions, suffixLength));
-        File file = FileWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")));
+        File file = OnDiskTrieWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")));
 
         try (OnDiskRangeTrie<TestRangeState> actual = OnDiskRangeTrie.open(file, RANGE_SERDE, VERSION, -1))
         {
@@ -212,7 +212,7 @@ public class OnDiskRangeTrieTest
         final int prefixLength = 2;
         final int suffixLength = 4;
         InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(prefixLength, BITMAP_TRANSITIONS, suffixLength));
-        File file = FileWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")));
+        File file = OnDiskTrieWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")));
 
         TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(new ChannelProxy(file)));
         try (OnDiskRangeTrie<TestRangeState> actual = new OnDiskRangeTrie.WithOwnChannel<>(factory, RANGE_SERDE, VERSION, factory.fileLength()))
