@@ -431,19 +431,12 @@ public class OnDiskCursor<T> implements Cursor<T>
         return new UncheckedIOException(new IOException("Corrupt serialized trie: " + message));
     }
 
-    /// Reads a long int from an int array with the given number of bytes per item.
-    /// Unlike other read methods, this accepts the position _before_ the array in `base`.
-    long readSizedInt(long base, int index, int bytes)
-    {
-        return readSizedInt(base + (index + 1) * bytes, bytes);
-    }
-
     /// Reads a long int from an int array with the given number of bytes per item, where the first element of the
     /// array is an implicit 0.
-    /// Unlike other read methods, this accepts the position _before_ the array in `base`.
-    long readSizedIntImplicit0(long base, int index, int bytes)
+    /// The parameter `pos` must point to the end of the array, where the int with index 1 ends.
+    long readSizedIntImplicit0(long pos, int index, int bytes)
     {
-        return index > 0 ? readSizedInt(base + index * bytes, bytes) : 0;
+        return index > 0 ? readSizedInt(pos - (index - 1) * bytes, bytes) : 0;
     }
 
     /// Read `bytes` many bytes preceding position `pos` in the file into a long unsigned integer.

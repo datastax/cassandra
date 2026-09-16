@@ -84,7 +84,7 @@ If this example is placed on bytes 11-14 of a file, the pointer 15 points to the
 
 ### Sparse nodes (code `1nnnnnbb`)
 
-`<pointer 1><pointer 2>...<pointer n+1> <transition 0><transition 1>...<transition n+1> 1nnnnnbb`
+`<pointer n+1><pointer n>...<pointer 1> <transition n+1><transition n>...<transition 0> 1nnnnnbb`
 
 A sparse node represents a node that between 2 and 25 children inclusive (encoded as `n = childCount - 2` for `n < 24`).
 The transition characters are explicitly listed, as well as the pointers to the children, except the first child which
@@ -95,7 +95,7 @@ Note that not all codes starting with 1 encode sparse nodes; values of `n` betwe
 If a child of a sparse node is more than `0xFFFFFFFF` bytes away (i.e. where the delta cannot fit in 4 bytes), a sparse
 node cannot be used (a bitmap node will be used instead).
 
-Example: `82 00 04 01 31 32 33 85` encodes a sparse node with 3 children (10000101 has n=1 and b=1). If it resides
+Example: `04 01 82 00 33 32 31 85` encodes a sparse node with 3 children (10000101 has n=1 and b=1). If it resides
 (i.e. ends) on position `0x20E`, then the node specifies:
 ```
 A -> 0x206
@@ -107,14 +107,15 @@ an implicit 0 delta, the second has the delta `0x0082`, and the third -- `0x0104
 
 ### Bitmap nodes (code `11100bbb`)
 
-`<pointer 1><pointer 2>...<pointer n-1> <256-bit bitmap> 11100bbb`
+`<pointer n-1><pointer n-2>...<pointer 1> <256-bit bitmap> 11100bbb`
 
 A bitmap node represents a node with more than 25 children. The child transitions are stored as bits in the bitmap
 (the respective bit is set for every child transition present in the node). Each pointer is encoded using `b+1` bytes
 specifying the distance from the start of this node. As before, the first pointer is an implicit 0.
 
 Example: 
-`89 22 00 80 03 01 ... 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07 FF FF FE 00 00 00 00 00 00 00 00 E2`
+`... 01 03 80 00 22 89 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07 FF FF FE 00 00 00 00 00 00 00 
+00 E2`
 encodes a bitmap node that has transitions for the 26 capital letters A-Z (0x41-0x5A). The first child immediately
 precedes this node (1 + 32 + 3x25 bytes before this node's position), the second is `0x002289` bytes further towards
 the front of the file, the third -- `0x010380` bytes from the position of the first child. The rest are omitted
@@ -122,7 +123,7 @@ for brevity.
 
 ### Dense nodes (code `11101bbb`)
 
-`<pointer 0><pointer 1>...<pointer 255> 11101bbb`
+`<pointer 255><pointer 254>...<pointer 1><pointer 0> 11101bbb`
 
 A dense node is a node where all 256 pointers are explicitly specified. If there is no child for a specific transition
 value, we use a pointer with all bits set to 1, otherwise we store it reversed with `b+1` bytes as before.
@@ -130,7 +131,7 @@ value, we use a pointer with all bits set to 1, otherwise we store it reversed w
 Unlike the other node types, dense nodes do not have a child with an implicit 0 pointer, because the first child in
 this definition always corresponds to the 00 transition, and a dense node may be missing a child for it.
 
-Example: `FF FF FF FF 00 00 00 00 ... EB`
+Example: `... 00 00 00 00 FF FF FF FF EB`
 encodes a dense node that has 4 bytes per pointer, that has no child for 00 and whose 01 child immediately precedes the
 node (1 + 256x4 bytes before this node's position). The other transitions are omitted from the example.
 
@@ -182,7 +183,7 @@ tr ->
   ie -> 03
 ```
 example from `InMemoryTrie.md` encodes as
-`03 01·65 40·02 01·65 40·01 01·72 6F 74 63 43·07 0B 61 65 69 84·72 74 41`.  
+`03 01·65 40·02 01·65 40·01 01·72 6F 74 63 43·0B 07 69 65 61 84·72 74 41`.  
 (The middle dots · are placed for clarity at the boundaries between nodes.)
 
 The root of this trie is at position 24 and is a chain node with 2 transitions. It leads to a sparse node at position

@@ -73,6 +73,12 @@ public class OnDiskTrieTest
     }
 
     @Test
+    public void testSimpleA() throws TrieSpaceExhaustedException
+    {
+        testEntries("tractor", "tree", "trie");
+    }
+
+    @Test
     public void testEmpty() throws TrieSpaceExhaustedException
     {
         testEntries();
@@ -200,16 +206,16 @@ public class OnDiskTrieTest
     {
         testEntriesHex(
             // chain parent ending in 00
-//            "aaaaaa00", "aaaaaa0000", "aaaaaa00ab",
+            "aaaaaa00", "aaaaaa0000", "aaaaaa00ab",
             // chain parent ending in FF
-            "bbbbbbff", "bbbbbbffff", "bbbbbbffab"//,
+            "bbbbbbff", "bbbbbbffff", "bbbbbbffab",
             // sparse parent
-//            "cc00", "cc80", "ccff", "cc00ab", "cc80ab", "ccffab",
-//            // split parent
-//            "dd00", "dd80", "ddf0", "dd00ab", "dd80ab", "ddf0ab",
-//            "dd04", "dd84", "ddf4", "dd04ab", "dd84ab", "ddf4ab",
-//            "dd08", "dd88", "ddf8", "dd08ab", "dd88ab", "ddf8ab",
-//            "dd0f", "dd8f", "ddff", "dd0fab", "dd8fab", "ddffab"
+            "cc00", "cc80", "ccff", "cc00ab", "cc80ab", "ccffab",
+            // split parent
+            "dd00", "dd80", "ddf0", "dd00ab", "dd80ab", "ddf0ab",
+            "dd04", "dd84", "ddf4", "dd04ab", "dd84ab", "ddf4ab",
+            "dd08", "dd88", "ddf8", "dd08ab", "dd88ab", "ddf8ab",
+            "dd0f", "dd8f", "ddff", "dd0fab", "dd8fab", "ddffab"
         );
     }
 

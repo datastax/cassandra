@@ -65,7 +65,7 @@ public enum OnDiskWriteNodeType
         @Override
         long sizeChildren(int bytesPerPointer, OnDiskTrieWriter.Node<?>[] children)
         {
-            // last pointer is not implicit here
+            // first pointer is not implicit here
             return 256 * bytesPerPointer + 1;
         }
 
@@ -73,16 +73,16 @@ public enum OnDiskWriteNodeType
         void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
         {
             int size = children.length;
-            // last pointer is not implicit here
-            int index = size - 1;
-            for (int i = 0; i <= 255; ++i)
+            // first pointer is not implicit here
+            int index = 0;
+            for (int i = 255; i >= 0; --i)
             {
-                if (index >= 0 && i == children[index].firstTransition)
-                    OnDiskTrieWriter.writeReversedSized(out, basePos - children[index--].writtenFilePos, bytesPerPointer);
+                if (index < size && i == children[index].firstTransition)
+                    OnDiskTrieWriter.writeReversedSized(out, basePos - children[index++].writtenFilePos, bytesPerPointer);
                 else
                     OnDiskTrieWriter.writeReversedSized(out, -1L, bytesPerPointer);
             }
-            assert index == -1;
+            assert index == size;
             out.writeByte(bits | (bytesPerPointer - 1));
         }
     },
@@ -126,7 +126,7 @@ public enum OnDiskWriteNodeType
         void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
         {
             int size = writePointers(out, children, basePos, bytesPerPointer);
-            for (int i = size - 1; i >= 0; --i)
+            for (int i = 0; i < size; ++i)
                 out.writeByte(children[i].firstTransition);
             out.writeByte(bits | ((size - 2) << SHIFT_SPARSE_LENGTH) | (bytesPerPointer - 1));
         }
@@ -292,7 +292,7 @@ public enum OnDiskWriteNodeType
     {
         int size = children.length;
         basePos = maybeWriteRelay(out, children, basePos, size);
-        for (int i = size - 2; i >= 0; --i)
+        for (int i = 0; i < size - 1; ++i)
             OnDiskTrieWriter.writeReversedSized(out, basePos - children[i].writtenFilePos, bytesPerPointer);
         return size;
     }
