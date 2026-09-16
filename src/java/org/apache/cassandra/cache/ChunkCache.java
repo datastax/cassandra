@@ -169,7 +169,15 @@ public class ChunkCache
         if (chunkSize == PageAware.PAGE_SIZE)
             return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
         if (chunkSize < PageAware.PAGE_SIZE)
-            return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP).limit(chunkSize).slice());
+        {
+            // Always reserve a full page from the pool, but only expose a narrower view (a slice of a
+            // *duplicate*) for reads. The original, full-capacity buffer is kept untouched and is what gets
+            // returned to the pool on release, so BufferPool sees the same size it handed out -- slicing a
+            // buffer down before releasing it confuses BufferPool's slot/size accounting (see Chunk.free()).
+            ByteBuffer allocated = bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
+            ByteBuffer sliced = allocated.duplicate().limit(chunkSize).slice();
+            return new SingleRegionChunk(position, sliced, allocated);
+        }
 
         ByteBuffer[] buffers = bufferPool.getMultiple(chunkSize, PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
         if (buffers.length > 1)
@@ -539,11 +547,24 @@ public class ChunkCache
     class SingleRegionChunk extends Chunk implements Rebufferer.BufferHolder
     {
         private final ByteBuffer buffer;
+        /**
+         * The buffer to actually return to {@link #bufferPool} on release. This is normally the same object as
+         * {@link #buffer}, except when {@link #buffer} is a narrowed view (e.g. for chunk sizes smaller than
+         * {@link PageAware#PAGE_SIZE}), in which case this holds the original, full-capacity buffer obtained
+         * from the pool -- releasing anything else would confuse the pool's size accounting.
+         */
+        private final ByteBuffer releaseBuffer;
 
         public SingleRegionChunk(long offset, ByteBuffer buffer)
         {
+            this(offset, buffer, buffer);
+        }
+
+        public SingleRegionChunk(long offset, ByteBuffer buffer, ByteBuffer releaseBuffer)
+        {
             super(offset);
             this.buffer = buffer;
+            this.releaseBuffer = releaseBuffer;
             buffer.order(ByteOrder.BIG_ENDIAN);
         }
 
@@ -560,7 +581,7 @@ public class ChunkCache
 
         void releaseBuffers()
         {
-            bufferPool.put(buffer);
+            bufferPool.put(releaseBuffer);
         }
 
         void read(ChunkReader file)
@@ -578,7 +599,7 @@ public class ChunkCache
 
         int capacity()
         {
-            return buffer.capacity();
+            return releaseBuffer.capacity();
         }
     }
 
