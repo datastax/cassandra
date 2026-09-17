@@ -107,6 +107,8 @@ public class RepairFinalizationOperation
 
             if (completed)
             {
+                logger.info("RepairFinishedCompactionTask for session {} on {}.{} complete ({} sstable(s), obsolete={})",
+                            sessionID, realm.metadata().keyspace, realm.metadata().name, sstableCount, obsoleteSSTables);
                 realm.repairSessionCompleted(sessionID);
             }
         }
