@@ -174,7 +174,7 @@ public class ChunkCache
             // view from that limit; releasing a slice/duplicate confuses slot/size accounting and can
             // leak direct memory on the overflow path (see Chunk.free()).
             ByteBuffer allocated = bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
-            // position must remain 0: buffer() uses duplicate().slice(), which bases capacity on remaining.
+            // position must remain 0: buffer() uses slice(), which bases capacity on remaining.
             assert allocated.position() == 0 : "pool buffer position must be 0";
             allocated.limit(chunkSize);
             return new SingleRegionChunk(position, allocated);
@@ -548,8 +548,8 @@ public class ChunkCache
      * Only one {@link ByteBuffer} is owned: the object returned by the buffer pool (typically a full page).
      * Logical chunk size is encoded in {@code buffer.limit()} (with {@code position == 0}); capacity stays at the
      * allocated size so the pool sees what it handed out on release. {@link #buffer()} builds a transient
-     * {@code duplicate().slice()} view whose capacity equals that logical size so {@code readChunk}'s
-     * {@code clear()} semantics stay correct — the slice is never returned to the pool.
+     * {@code slice()} view whose capacity equals that logical size so {@code readChunk}'s {@code clear()}
+     * semantics stay correct — the slice is never returned to the pool.
      */
     class SingleRegionChunk extends Chunk implements Rebufferer.BufferHolder
     {
@@ -573,10 +573,10 @@ public class ChunkCache
         public ByteBuffer buffer()
         {
             assert isReferenced() : "Already unreferenced";
-            // Narrow capacity to the logical chunk size (owned limit) for readers / readChunk: limit alone on a
-            // duplicate is not enough because clear() resets limit to capacity. Slice is transient and never
-            // returned to the pool — only #buffer is.
-            ByteBuffer view = buffer.duplicate().slice();
+            // Narrow capacity to the logical chunk size (owned limit) for readers / readChunk: limit alone is
+            // not enough because clear() resets limit to capacity. slice() is already an independent view
+            // (does not mutate #buffer); transient and never returned to the pool — only #buffer is.
+            ByteBuffer view = buffer.slice();
             if (bytesRead > 0)
                 view.limit(bytesRead);
             return view;

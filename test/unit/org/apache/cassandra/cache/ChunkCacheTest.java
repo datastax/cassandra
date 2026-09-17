@@ -587,7 +587,7 @@ public class ChunkCacheTest
     /**
      * For chunks smaller than {@link PageAware#PAGE_SIZE}, {@link ChunkCache#newChunk} still reserves a whole
      * page from the pool, encodes the logical size in the owned buffer's limit, and exposes a
-     * {@code duplicate().slice()} view for reads (see {@code SingleRegionChunk}). This test verifies that:
+     * {@code slice()} view for reads (see {@code SingleRegionChunk}). This test verifies that:
      * <ul>
      *   <li>the pool sees reservation/release of the *full* page (not the narrowed chunk size),</li>
      *   <li>the read view has {@code capacity == chunkSize},</li>
