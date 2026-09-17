@@ -21,25 +21,26 @@ package org.apache.cassandra.db.compaction;
 import java.util.UUID;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.service.ActiveRepairService;
 
 /**
- * promotes/demotes sstables involved in a consistent repair that has been finalized, or failed
+ * Repair finishing task supporting background execution and cancellation.
+ *
+ * This class wraps {@link RepairFinalizationOperation} to provide full compaction task
+ * lifecycle management (CREATED → STARTED → ACTIVE → COMPLETE states) with proper
+ * scheduledTasks tracking and removal.
+ *
+ * For normal repair completion, use {@link RepairFinalizationOperation} directly to
+ * avoid unnecessary compaction task overhead.
  */
 public class RepairFinishedCompactionTask extends AbstractCompactionTask
 {
     private static final Logger logger = LoggerFactory.getLogger(RepairFinishedCompactionTask.class);
 
-    private final UUID sessionID;
-    private final long repairedAt;
-    private final boolean isTransient;
+    private final RepairFinalizationOperation operation;
 
     public RepairFinishedCompactionTask(CompactionRealm realm,
                                         ILifecycleTransaction transaction,
@@ -48,69 +49,25 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
                                         boolean isTransient)
     {
         super(realm, transaction);
-        this.sessionID = sessionID;
-        this.repairedAt = repairedAt;
-        this.isTransient = isTransient;
+        this.operation = new RepairFinalizationOperation(realm, transaction, sessionID, repairedAt, isTransient);
     }
 
     @VisibleForTesting
     UUID getSessionID()
     {
-        return sessionID;
+        return operation.getSessionID();
     }
 
+    @Override
     protected void runMayThrow() throws Exception
     {
-        boolean completed = false;
-        boolean obsoleteSSTables = isTransient && repairedAt > 0;
-        int sstableCount = transaction.originals().size();
-        try
-        {
-            if (obsoleteSSTables)
-            {
-                logger.info("Obsoleting {} transient repaired sstable(s) for session {} on {}.{}",
-                            sstableCount, sessionID,
-                            realm.metadata().keyspace, realm.metadata().name);
-                Preconditions.checkState(Iterables.all(transaction.originals(), SSTableReader::isTransient));
-                transaction.obsoleteOriginals();
-            }
-            else
-            {
-                logger.info("Moving {} sstable(s) from pending to repaired (repairedAt={}, session={}) on {}.{}",
-                            sstableCount, repairedAt, sessionID,
-                            realm.metadata().keyspace, realm.metadata().name);
-                realm.mutateRepairedWithLock(transaction.originals(),
-                                             repairedAt,
-                                             ActiveRepairService.NO_PENDING_REPAIR,
-                                             false);
-                realm.repairSessionCompleted(sessionID);
-            }
-            completed = true;
-        }
-        finally
-        {
-            if (obsoleteSSTables)
-            {
-                transaction.prepareToCommit();
-                transaction.commit();
-            }
-            else
-            {
-                // we abort here because mutating metadata isn't guarded by LifecycleTransaction, so this won't roll
-                // anything back. Also, we don't want to obsolete the originals. We're only using it to prevent other
-                // compactions from marking these sstables compacting, and unmarking them when we're done
-                transaction.abort();
-            }
-            if (completed)
-            {
-                realm.repairSessionCompleted(sessionID);
-            }
-        }
+        // Delegate to the lightweight operation
+        operation.execute();
     }
 
     @Override
     public long getSpaceOverhead()
     {
-        return 0;   // This is just metadata modification, no overhead.
+        return 0;  // This is just metadata modification, no overhead.
     }
 }
