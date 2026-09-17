@@ -111,6 +111,10 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
     @Nullable
     public final String entityId;
 
+    /** Repair type supplied by CNDB (e.g. "continuous", "on_demand"), null when not set */
+    @Nullable
+    public final String repairType;
+
     private final AtomicBoolean isFailed = new AtomicBoolean(false);
 
     // Each validation task waits response from replica in validating ConcurrentMap (keyed by CF name and endpoint address)
@@ -159,6 +163,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         this.pullRepair = options.isPullRepair();
         this.optimiseStreams = options.optimiseStreams();
         this.entityId = options.getEntityId();
+        this.repairType = options.getRepairType();
         this.taskExecutor = MoreExecutors.listeningDecorator(createExecutor());
     }
 
@@ -256,10 +261,13 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         return sb.toString();
     }
 
-    /** Returns " [entityId: <id>]" when entityId is set, empty string otherwise. */
+    /**
+     * Returns " [entityId: <id>, repairType: <type>]" (with a leading space for inline log message formatting)
+     * when entityId is set, or an empty string otherwise.
+     */
     private String entityTag()
     {
-        return entityId != null ? " [entityId: " + entityId + ']' : "";
+        return entityId != null ? " [entityId: " + entityId + ", repairType: " + repairType + ']' : "";
     }
 
     /**

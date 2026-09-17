@@ -46,6 +46,9 @@ import static org.junit.matchers.JUnitMatchers.containsString;
 
 public class RepairOptionTest
 {
+    private static final String TEST_ENTITY_ID = "entity-abc-123";
+    private static final String TEST_REPAIR_TYPE = "continuous";
+
     @Test
     public void testParseOptions()
     {
@@ -196,13 +199,13 @@ public class RepairOptionTest
     public void testEntityIdAndRepairTypeParsed()
     {
         Map<String, String> options = new HashMap<>();
-        options.put(RepairOption.ENTITY_ID_KEY, "entity-abc-123");
-        options.put(RepairOption.REPAIR_TYPE_KEY, "continuous");
+        options.put(RepairOption.ENTITY_ID_KEY, TEST_ENTITY_ID);
+        options.put(RepairOption.REPAIR_TYPE_KEY, TEST_REPAIR_TYPE);
 
         RepairOption option = RepairOption.parse(options, Murmur3Partitioner.instance);
 
-        assertEquals("entity-abc-123", option.getEntityId());
-        assertEquals("continuous", option.getRepairType());
+        assertEquals(TEST_ENTITY_ID, option.getEntityId());
+        assertEquals(TEST_REPAIR_TYPE, option.getRepairType());
     }
 
     @Test
@@ -218,11 +221,11 @@ public class RepairOptionTest
     public void testEntityIdSetRepairTypeAbsent()
     {
         Map<String, String> options = new HashMap<>();
-        options.put(RepairOption.ENTITY_ID_KEY, "entity-abc-123");
+        options.put(RepairOption.ENTITY_ID_KEY, TEST_ENTITY_ID);
 
         RepairOption option = RepairOption.parse(options, Murmur3Partitioner.instance);
 
-        assertEquals("entity-abc-123", option.getEntityId());
+        assertEquals(TEST_ENTITY_ID, option.getEntityId());
         assertNull(option.getRepairType());
     }
 
@@ -231,13 +234,13 @@ public class RepairOptionTest
     {
         DatabaseDescriptor.daemonInitialization();
         Map<String, String> options = new HashMap<>();
-        options.put(RepairOption.ENTITY_ID_KEY, "entity-abc-123");
-        options.put(RepairOption.REPAIR_TYPE_KEY, "continuous");
+        options.put(RepairOption.ENTITY_ID_KEY, TEST_ENTITY_ID);
+        options.put(RepairOption.REPAIR_TYPE_KEY, TEST_REPAIR_TYPE);
 
         String result = RepairOption.parse(options, Murmur3Partitioner.instance).toString();
 
-        assertTrue(result.contains("entityId: entity-abc-123"));
-        assertTrue(result.contains("repairType: continuous"));
+        assertTrue(result.contains("entityId: " + TEST_ENTITY_ID));
+        assertTrue(result.contains("repairType: " + TEST_REPAIR_TYPE));
     }
 
     @Test
@@ -254,8 +257,8 @@ public class RepairOptionTest
     public void testEntityFieldsNotInAsMap()
     {
         Map<String, String> options = new HashMap<>();
-        options.put(RepairOption.ENTITY_ID_KEY, "entity-abc-123");
-        options.put(RepairOption.REPAIR_TYPE_KEY, "continuous");
+        options.put(RepairOption.ENTITY_ID_KEY, TEST_ENTITY_ID);
+        options.put(RepairOption.REPAIR_TYPE_KEY, TEST_REPAIR_TYPE);
 
         Map<String, String> asMap = RepairOption.parse(options, Murmur3Partitioner.instance).asMap();
 

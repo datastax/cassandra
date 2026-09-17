@@ -69,7 +69,8 @@ public class RepairSessionTest
 {
     private static final String KEYSPACE   = "Keyspace1";
     private static final String CF         = "Standard1";
-    private static final String ENTITY_ID  = "entity-xyz-999";
+    private static final String ENTITY_ID   = "entity-xyz-999";
+    private static final String REPAIR_TYPE = "continuous";
 
     @BeforeClass
     public static void initDD()
@@ -102,7 +103,7 @@ public class RepairSessionTest
     {
         Map<String, String> opts = new HashMap<>();
         opts.put(RepairOption.ENTITY_ID_KEY, entityId);
-        opts.put(RepairOption.REPAIR_TYPE_KEY, "continuous");
+        opts.put(RepairOption.REPAIR_TYPE_KEY, REPAIR_TYPE);
         return RepairOption.parse(opts, Murmur3Partitioner.instance);
     }
 
@@ -291,8 +292,8 @@ public class RepairSessionTest
         String banner = infos.get(0);
         assertTrue("Banner must contain parentSessionId=" + parentSessionId,
                    banner.contains(parentSessionId.toString()));
-        assertTrue("Banner must contain [entityId: " + ENTITY_ID + "]",
-                   banner.contains("[entityId: " + ENTITY_ID + "]"));
+        assertTrue("Banner must contain [entityId: " + ENTITY_ID + ", repairType: " + REPAIR_TYPE + "]",
+                   banner.contains("[entityId: " + ENTITY_ID + ", repairType: " + REPAIR_TYPE + "]"));
     }
 
     /**

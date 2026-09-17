@@ -116,12 +116,7 @@ public class RepairJobTest
         {
             super(parentRepairSession, id, Scheduler.build(0), commonRange, keyspace,
                   RepairOption.parse(
-                      new HashMap<String, String>() {{
-                          put(RepairOption.PARALLELISM_KEY, parallelismDegree.getName());
-                          put(RepairOption.INCREMENTAL_KEY, Boolean.toString(isIncremental));
-                          put(RepairOption.PULL_REPAIR_KEY, Boolean.toString(pullRepair));
-                          put(RepairOption.OPTIMISE_STREAMS_KEY, Boolean.toString(optimiseStreams));
-                      }},
+                      buildOptions(parallelismDegree, isIncremental, pullRepair, optimiseStreams),
                       org.apache.cassandra.dht.Murmur3Partitioner.instance),
                   isIncremental, cfnames);
         }
@@ -153,6 +148,17 @@ public class RepairJobTest
         public void registerSyncCompleteCallback(Callable<?> callback)
         {
             syncCompleteCallbacks.add(callback);
+        }
+
+        private static Map<String, String> buildOptions(RepairParallelism parallelismDegree, boolean isIncremental,
+                                                        boolean pullRepair, boolean optimiseStreams)
+        {
+            Map<String, String> options = new HashMap<>();
+            options.put(RepairOption.PARALLELISM_KEY, parallelismDegree.getName());
+            options.put(RepairOption.INCREMENTAL_KEY, Boolean.toString(isIncremental));
+            options.put(RepairOption.PULL_REPAIR_KEY, Boolean.toString(pullRepair));
+            options.put(RepairOption.OPTIMISE_STREAMS_KEY, Boolean.toString(optimiseStreams));
+            return options;
         }
     }
 
