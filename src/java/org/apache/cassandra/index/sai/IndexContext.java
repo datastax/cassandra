@@ -884,6 +884,8 @@ public class IndexContext
                     if (version().onOrAfter(Version.BM25_EARLIEST))
                         return;
                     throw new InvalidRequestException(String.format(INDEX_VERSION_DOES_NOT_SUPPORT_BM25, getIndexName()));
+                default:
+                    return;
             }
         }
     }

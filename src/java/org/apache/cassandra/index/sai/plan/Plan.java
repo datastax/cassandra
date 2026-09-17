@@ -1590,9 +1590,9 @@ abstract public class Plan
      * Contrary to {@link KeysSort}, there is no input node here and the output is generated lazily.
      */
     @VisibleForTesting
-    public final static class AnnIndexScan extends ScoredIndexScan
+    public static final class AnnIndexScan extends ScoredIndexScan
     {
-        protected AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
+        private AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
             super(factory, id, access, ordering);
         }
@@ -1635,9 +1635,9 @@ abstract public class Plan
      * Like AnnIndexScan, this generates results lazily without an input node.
      */
     @VisibleForTesting
-    public final static class Bm25IndexScan extends ScoredIndexScan
+    public static final class Bm25IndexScan extends ScoredIndexScan
     {
-        protected Bm25IndexScan(Factory factory, int id, Access access, Orderer ordering)
+        private Bm25IndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
             super(factory, id, access, ordering);
         }
