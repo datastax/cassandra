@@ -20,8 +20,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-import javax.annotation.Nullable;
-
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -42,9 +40,8 @@ public class BM25MixedVersionTest extends SAITester
     @Parameterized.Parameter
     public Version oldVersion;
 
-    /** The version of a second sstable, or null if the second set of rows is not flushed. */
+    /** The version of a second sstable. */
     @Parameterized.Parameter(1)
-    @Nullable
     public Version newVersion;
 
     @Parameterized.Parameters(name = "old={0} new={1}")
@@ -63,14 +60,12 @@ public class BM25MixedVersionTest extends SAITester
 
                 params.add(new Object[]{ oldVersion, newVersion });
             }
-
-            params.add(new Object[]{ oldVersion, null });
         }
         return params;
     }
 
     @Test
-    public void testBM25WithMixedVersions()
+    public void testBM25WithMixedVersions() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY(k, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer': 'english'}");
@@ -81,17 +76,16 @@ public class BM25MixedVersionTest extends SAITester
         execute("INSERT INTO %s(k, c, v) VALUES (0, 3, 'bananas ORANGE ORANGE ORANGE')");
         flush();
 
-        if (newVersion != null)
-            SAIUtil.setCurrentVersion(newVersion);
+        SAIUtil.setCurrentVersion(newVersion);
         execute("INSERT INTO %s(k, c, v) VALUES (0, 4, 'bananas ORANGE ORANGE ORANGE')");
         execute("INSERT INTO %s(k, c, v) VALUES (0, 5, 'bananas bananas ORANGE ORANGE')");
         execute("INSERT INTO %s(k, c, v) VALUES (0, 6, 'bananas bananas bananas ORANGE')");
-        if (newVersion != null)
-            flush();
 
-        assertRows(execute("SELECT c FROM %s ORDER BY v BM25 OF 'banana' LIMIT 10"),
-                   row(1), row(6), row(2), row(5), row(3), row(4));
-        assertRows(execute("SELECT c FROM %s ORDER BY v BM25 OF 'orange' LIMIT 10"),
-                   row(3), row(4), row(2), row(5), row(1), row(6));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT c FROM %s ORDER BY v BM25 OF 'banana' LIMIT 10"),
+                       row(1), row(6), row(2), row(5), row(3), row(4));
+            assertRows(execute("SELECT c FROM %s ORDER BY v BM25 OF 'orange' LIMIT 10"),
+                       row(3), row(4), row(2), row(5), row(1), row(6));
+        });
     }
 }

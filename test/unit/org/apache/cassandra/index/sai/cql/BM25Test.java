@@ -854,6 +854,10 @@ public class BM25Test extends SAITester
     // ID 17: total words = 14, climate occurrences = 1
     private static final List<Integer> CLIMATE_QUERY_RESULTS = Arrays.asList(10, 18, 0, 15, 5, 11, 17);
     private static final List<Integer> CLIMATE_QUERY_SCORE_5_RESULTS = Arrays.asList(10, 18, 0);
+    // When the corpus is split across sources that each compute a local avgDocLength (EC with mixed-version
+    // sources), ids 5 and 15 swap because they have the same term frequency but their relative length
+    // normalization changes depending on which half of the dataset each source sees.
+    private static final List<Integer> CLIMATE_QUERY_RESULTS_EC = Arrays.asList(10, 18, 0, 5, 15, 11, 17);
 
     @Test
     public void testCollections() throws Throwable
@@ -924,19 +928,20 @@ public class BM25Test extends SAITester
         flush();
         insertPrimitiveData(10, 20);
 
-        // The same result as in testCollections above
+        // The same result as in testCollections above, except for EC which uses per-source local
+        // avgDocLength when sources span different index versions, slightly reordering docs with the
+        // same term frequency (ids 5 and 15 both have 2 climate occurrences but different lengths).
         executeQuery(CLIMATE_QUERY_RESULTS,
-                     Arrays.asList(0, 10, 5, 18, 15, 11, 17),
+                     CLIMATE_QUERY_RESULTS_EC,
                      "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                      "climate");
         executeQuery(CLIMATE_QUERY_SCORE_5_RESULTS,
-                     Arrays.asList(0, 10, 18),
                      "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                      "climate");
 
         flush();
         executeQuery(CLIMATE_QUERY_RESULTS,
-                     Arrays.asList(10, 18, 0, 5, 15, 11, 17),
+                     CLIMATE_QUERY_RESULTS_EC,
                      "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                      "climate");
         executeQuery(CLIMATE_QUERY_SCORE_5_RESULTS, "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
