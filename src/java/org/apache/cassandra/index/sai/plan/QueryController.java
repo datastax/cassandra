@@ -1048,7 +1048,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // BM25 returns documents that contain ALL query terms (intersection semantics).
         // Assuming term occurrences are independent across rows,
         // the selectivity is the product of the per-term selectivities,
-        // same as we do for filter interscetions.
+        // same as we do for filter intersections.
+        // Note that CQL
         double selectivity = 1.0;
         for (ByteBuffer term : orderer.getQueryTerms())
         {

@@ -1128,6 +1128,24 @@ public class BM25Test extends SAITester
                              "CREATE CUSTOM INDEX ON %s(FULL(m)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
     }
 
+    @Test
+    public void testEmptyQueryTerms()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, s text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'english' }");
+        execute("INSERT INTO %s (k, s) VALUES (0, 'apple')");
+
+        Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY s BM25 OF '' LIMIT 5"))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining("BM25 query must contain at least one term");
+
+        Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY s BM25 OF 'the' LIMIT 5"))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining("BM25 query must contain at least one term");
+
+        assertRows(execute("SELECT k FROM %s ORDER BY s BM25 OF 'apple' LIMIT 5"), row(0));
+    }
+
     /**
      * Verify that the selectivity of the filtering effects of BM25 ordering is considered at query planning,
      * so BM25's index scan can be preferred to other filters depending on that selectivity.

@@ -1199,7 +1199,7 @@ public class SAITester extends CQLTester
 
     private static boolean containsPlan(Plan plan, Class<? extends Plan> planClass)
     {
-        return plan.getClass().isAssignableFrom(planClass) ||
+        return plan.getClass().equals(planClass) ||
                plan.subplans().stream().anyMatch(subplan -> containsPlan(subplan, planClass));
     }
 
