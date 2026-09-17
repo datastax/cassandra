@@ -524,7 +524,13 @@ public class V2VectorIndexSearcher extends IndexSearcher
      */
     private SegmentRowIdOrdinalPairs flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange) throws IOException
     {
-        var segmentOrdinalPairs = new SegmentRowIdOrdinalPairs(keysInRange.size());
+        // When input keys include static-row keys (from a static-column predicate), each key may expand to
+        // multiple regular rows. Use the segment's row count as the upper-bound capacity.
+        boolean hasStaticKeys = keysInRange.stream().anyMatch(k -> k.isStaticRow() || !k.hasClustering());
+        int capacity = hasStaticKeys
+                       ? (int) (metadata.maxSSTableRowId - metadata.minSSTableRowId + 1)
+                       : keysInRange.size();
+        var segmentOrdinalPairs = new SegmentRowIdOrdinalPairs(capacity);
         int lastSegmentRowId = -1;
         try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var ordinalsView = graph.getOrdinalsView())
@@ -537,7 +543,38 @@ public class V2VectorIndexSearcher extends IndexSearcher
             for (int i = 0; i < keysInRange.size();)
             {
                 // turn the pk back into a row id, with a fast path for the case where the pk is from this sstable
-                PrimaryKey primaryKey = keysInRange.get(i);
+                var primaryKey = keysInRange.get(i);
+
+                // A static-column predicate produces PrimaryKeys with STATIC_CLUSTERING. The vector index stores
+                // regular-row keys, so we must expand the static key to all regular rows in the same partition.
+                if (primaryKey.isStaticRow() || !primaryKey.hasClustering())
+                {
+                    i++;
+                    // Use ceiling to find the first regular-row ID in this partition.
+                    // Static rows sort before all regular rows in the same partition, so ceiling
+                    // on a static key gives us the first regular row in the partition.
+                    long firstRowId = primaryKeyMap.ceiling(primaryKey);
+                    if (firstRowId < 0 || firstRowId > metadata.maxSSTableRowId)
+                        continue;
+                    // Walk forward adding rows until we leave the partition.
+                    for (long rowId = firstRowId; rowId <= metadata.maxSSTableRowId; rowId++)
+                    {
+                        var rowKey = primaryKeyMap.primaryKeyFromRowId(rowId);
+                        if (!rowKey.partitionKey().equals(primaryKey.partitionKey()))
+                            break;
+                        if (rowId < metadata.minSSTableRowId)
+                            continue;
+                        int segmentRowId = metadata.toSegmentRowId(rowId);
+                        // Do not enforce monotonicity here: static keys from different partitions may
+                        // yield segment row IDs in non-ascending order relative to each other.
+                        int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+                        if (ordinal >= 0)
+                            segmentOrdinalPairs.add(segmentRowId, ordinal);
+                    }
+                    continue;
+                }
+
+
                 long sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
 
                 if (sstableRowId < 0)

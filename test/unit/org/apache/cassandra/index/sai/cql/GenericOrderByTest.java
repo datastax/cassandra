@@ -386,4 +386,71 @@ public class GenericOrderByTest extends SAITester
         assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 's'),
                              "SELECT c FROM %s WHERE n = 1 ORDER BY s DESC LIMIT 5 WITH excluded_indexes = {" + numericIndex + ',' + literalIndex + '}');
     }
+
+    /**
+     * Regression test for CNDB-19058 / CNDB-15622.
+     *
+     * A search-then-sort generic ORDER BY hybrid query whose WHERE predicate is on a static column and whose ORDER BY
+     * is on a regular column must return the correct rows after flush.  Before the fix, {@code Slice.make(clustering)}
+     * was called with {@code STATIC_CLUSTERING} or {@code EMPTY}, which is invalid for regular column fetches, causing
+     * an NPE, AssertionError, or 0 results after flush.
+     */
+    @Test
+    public void testHybridQueryWithStaticPredicateAndGenericOrder()
+    {
+        // Disable query optimiser to ensure the search-then-sort execution path is exercised
+        QueryController.QUERY_OPT_LEVEL = 0;
+
+        createTable("CREATE TABLE %s (k int, c int, s text static, r int, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (k, c, s, r) VALUES (1, 1, 'target', 1)");
+        execute("INSERT INTO %s (k, c, s, r) VALUES (2, 1, 'target', 2) USING TIMESTAMP 1");
+        // Enough non-matching partitions to trigger search-then-sort
+        for (int i = 3; i < 100; i++)
+            execute("INSERT INTO %s (k, c, s, r) VALUES (?, 1, 'other', ?)", i, i);
+
+        String select = "SELECT k, c FROM %s WHERE s = ? ORDER BY r LIMIT 2";
+
+        // Must work in memtable state
+        assertRows(execute(select, "target"), row(1, 1), row(2, 1));
+
+        // Must still work after flush – this is the case that broke before the fix
+        flush();
+        assertRows(execute(select, "target"), row(1, 1), row(2, 1));
+
+        // And after compaction
+        compact();
+        assertRows(execute(select, "target"), row(1, 1), row(2, 1));
+    }
+
+    /**
+     * Regression test for CNDB-15622: static column predicate with generic ORDER BY on a wide partition with
+     * multiple clustering rows.  The query must not produce 0 results / crash after flush.
+     * At least one clustering row from the matching partition must be returned.
+     */
+    @Test
+    public void testHybridQueryWithStaticPredicateMultipleClusteringsAndGenericOrder()
+    {
+        QueryController.QUERY_OPT_LEVEL = 0;
+
+        createTable("CREATE TABLE %s (k int, c int, s text static, r int, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
+
+        // One matching partition with two clustering rows
+        execute("INSERT INTO %s (k, c, s, r) VALUES (1, 1, 'target', 10)");
+        execute("INSERT INTO %s (k, c, s, r) VALUES (1, 2, 'target', 5)");
+        // Non-matching partitions to trigger search-then-sort
+        for (int i = 2; i < 100; i++)
+            execute("INSERT INTO %s (k, c, s, r) VALUES (?, 1, 'other', ?)", i, i * 100);
+
+        // At least one row from k=1 must be returned before and after flush
+        String select = "SELECT k FROM %s WHERE s = ? ORDER BY r LIMIT 5";
+        assertRowCount(execute(select, "target"), 1);
+
+        flush();
+        assertRowCount(execute(select, "target"), 1);
+    }
 }

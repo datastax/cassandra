@@ -41,6 +41,8 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -459,11 +461,46 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                                        orderer.bm25stats.hasOldFormatIndex());
     }
 
-
+    /**
+     * Retrieve the cell for the indexed column from the memtable for the given primary key.
+     *
+     * When the ordering column is static we read it directly from the partition's static row.
+     * When the key is a static row or partition-only key (no regular clustering) but the ordering
+     * column is regular, we must iterate the regular rows in the partition rather than calling
+     * {@code getRow(STATIC_CLUSTERING)}, which would only return the static row.
+     */
     @Nullable
     private org.apache.cassandra.db.rows.Cell<?> getCellForKey(PrimaryKey key)
     {
-        return memtable.getCellForKey(key.partitionKey(), key.clustering(), indexContext.getDefinition());
+        Partition partition = memtable.getPartition(key.partitionKey());
+        if (partition == null)
+            return null;
+
+        if (indexContext.getDefinition().isStatic())
+        {
+            Row staticRow = partition.staticRow();
+            return staticRow != null ? staticRow.getCell(indexContext.getDefinition()) : null;
+        }
+
+        if (key.isStaticRow() || !key.hasClustering())
+        {
+            // The key came from a static-column index; iterate regular rows to find the sort-key cell.
+            Iterator<Row> rowIter = partition.rowIterator();
+            while (rowIter.hasNext())
+            {
+                Row row = rowIter.next();
+                var cell = row.getCell(indexContext.getDefinition());
+                if (cell != null)
+                    return cell;
+            }
+            return null;
+        }
+
+        Row row = partition.getRow(key.clustering());
+        if (row == null)
+            return null;
+        return row.getCell(indexContext.getDefinition());
+
     }
 
     private ByteComparable encode(ByteBuffer input)
