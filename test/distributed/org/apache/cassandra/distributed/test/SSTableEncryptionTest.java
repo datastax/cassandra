@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.crypto.NoSuchPaddingException;
 
@@ -185,13 +186,23 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertThat(Bytes.indexOf(encryptedTable.sstableBytes, sensitiveBytes)).isEqualTo(-1);
             // sensitive key should not be present in encrypted partition index
             assertThat(Bytes.indexOf(encryptedTable.partitionIndexBytes, sensitiveBytes)).isEqualTo(-1);
-            // BTI does not list full keys so we usually won't find sensitive key without encryption either
-            // assertThat(Bytes.indexOf(nonEncryptedTable.partitionIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
+            // BTI does not list full keys, but it does include the first and last key in its metadata
+            assertThat(Bytes.indexOf(nonEncryptedTable.partitionIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
             // sensitive key should not be present in encrypted row index
             assertThat(Bytes.indexOf(encryptedTable.rowIndexBytes, sensitiveBytes)).isEqualTo(-1);
-            // BTI does not list full keys so we usually won't find sensitive key without encryption either
-            // assertThat(Bytes.indexOf(nonEncryptedTable.rowIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
+            // The row index includes full partition keys, thus we will find the key in the index
+            assertThat(Bytes.indexOf(nonEncryptedTable.rowIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
 
+            String btiEncodedKeyPattern = "";
+            for (int i = SENSITIVE_KEY.length() - 1; i >= 0; --i)
+                btiEncodedKeyPattern += "." + SENSITIVE_KEY.charAt(i);
+            Pattern btiEncodedKey = Pattern.compile(btiEncodedKeyPattern);
+
+            checkPresence(encryptedTable.rowIndexBytes, btiEncodedKey, false);
+            checkPresence(nonEncryptedTable.rowIndexBytes, btiEncodedKey, true);
+            checkPresence(encryptedTable.partitionIndexBytes, btiEncodedKey, false);
+            // Keys in the partition index differ in the token, the BTI encoding of the key won't be found in the non-
+            // encrypted table.
 
             // indexes with encryption should pass the checksum check
             assertThat(checkEncryptionCrc(encryptedTable.partitionIndexBytes)).isTrue();
@@ -201,6 +212,12 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertThat(checkEncryptionCrc(nonEncryptedTable.partitionIndexBytes)).isFalse();
             assertThat(checkEncryptionCrc(nonEncryptedTable.rowIndexBytes)).isFalse();
         }
+    }
+
+    private static void checkPresence(byte[] nonEncryptedTable, Pattern btiEncodedKey, boolean expected)
+    {
+        String partitionIndexString = new String(nonEncryptedTable, StandardCharsets.US_ASCII);
+        assertThat(btiEncodedKey.matcher(partitionIndexString).find()).isEqualTo(expected);
     }
 
     private boolean checkEncryptionCrc(byte[] bytes)
@@ -354,7 +371,13 @@ public class SSTableEncryptionTest extends TestBaseImpl
         {
             for (int j = 0; j < ROWS_COUNT; j++)
             {
-                cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')", keyspace, tableName, i, j, k), ALL);
+                cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')",
+                                                             keyspace,
+                                                             tableName,
+                                                             SENSITIVE_KEY + '_' + i,
+                                                             SENSITIVE_KEY + '_' + j,
+                                                             SENSITIVE_KEY + '_' + k),
+                                               ALL);
                 k++;
             }
         }
