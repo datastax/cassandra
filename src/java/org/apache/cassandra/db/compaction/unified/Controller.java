@@ -267,7 +267,11 @@ public abstract class Controller
      * When set to false, persistence is disabled.
      */
     public static final String SCALING_PARAMETER_PERSISTENCE_PROPERTY = UCS_SCALING_PARAMETER_PERSISTENCE.getKey();
-    public static final boolean SCALING_PARAMETER_PERSISTENCE = UCS_SCALING_PARAMETER_PERSISTENCE.getBooleanWithLegacyFallback();
+
+    public static boolean isScalingParameterPersistenceEnabled()
+    {
+        return UCS_SCALING_PARAMETER_PERSISTENCE.getBooleanWithLegacyFallback();
+    }
 
     /**
      * This property allows seperate defaults for vector and non-vector tables.  If this property is set to true
@@ -451,7 +455,7 @@ public abstract class Controller
 
     public static void storeOptions(TableMetadata metadata, int[] scalingParameters, long flushSizeBytes)
     {
-        if (!SCALING_PARAMETER_PERSISTENCE)
+        if (!isScalingParameterPersistenceEnabled())
         {
             logger.debug("Scaling parameter persistence is disabled via {}. Skipping write to disk.", SCALING_PARAMETER_PERSISTENCE_PROPERTY);
             return;
