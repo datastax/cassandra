@@ -312,21 +312,34 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
 
         keysInRange.forEach(k ->
         {
-            // if the indexed column is static, we need to get the static row associated with the non-static row that
-            // might be referenced by the key
             if (isStatic)
+            {
+                // The vector column is static: the graph is keyed by static-row PrimaryKeys (one per partition).
+                // Input keys may be regular-row keys, so convert to the static key before the graph lookup.
                 k = k.forStaticRow();
-
-            var v = graph.vectorForKey(k);
-            if (v == null)
-                return;
-            var i = graph.getOrdinal(v);
-            if (i < 0)
-                // might happen if the vector and/or its postings have been removed in the meantime between getting the
-                // vector and getting the ordinal (graph#vectorForKey and graph#getOrdinal are not synchronized)
-                return;
-            keysInGraph.add(k);
-            relevantOrdinals.add(i);
+                addKeyToGraph(k, keysInGraph, relevantOrdinals);
+            }
+            else if (k.isStaticRow() || !k.hasClustering())
+            {
+                // The predicate column is static, but the vector column is regular.
+                // The graph stores one entry per regular row (with its actual clustering).
+                // Expand this static/partition-only key to all regular-row keys that are
+                // in this partition and present in the graph's primaryKeys set.
+                // `primaryKeys` only contains rows that were actually indexed (non-null vector),
+                // so this scan is O(vector-indexed rows in the partition), not O(all rows).
+                var dk = k.partitionKey();
+                var partitionMin = indexContext.keyFactory().createPartitionKeyOnly(dk);
+                for (PrimaryKey regularKey : primaryKeys.tailSet(partitionMin))
+                {
+                    if (!regularKey.partitionKey().equals(dk))
+                        break;
+                    addKeyToGraph(regularKey, keysInGraph, relevantOrdinals);
+                }
+            }
+            else
+            {
+                addKeyToGraph(k, keysInGraph, relevantOrdinals);
+            }
         });
 
         int rerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
@@ -346,6 +359,20 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
         // indexed path
         var nodeScoreIterator = graph.search(context, qv, limit, rerankK, 0, orderer.usePruning(), relevantOrdinals::contains);
         return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
+    }
+
+    private void addKeyToGraph(PrimaryKey k, HashSet<PrimaryKey> keysInGraph, IntHashSet relevantOrdinals)
+    {
+        var v = graph.vectorForKey(k);
+        if (v == null)
+            return;
+        var i = graph.getOrdinal(v);
+        if (i < 0)
+            // might happen if the vector and/or its postings have been removed in the meantime between getting the
+            // vector and getting the ordinal (graph#vectorForKey and graph#getOrdinal are not synchronized)
+            return;
+        keysInGraph.add(k);
+        relevantOrdinals.add(i);
     }
 
     /**

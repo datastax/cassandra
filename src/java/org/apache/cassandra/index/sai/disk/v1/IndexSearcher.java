@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 
@@ -29,7 +30,9 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -126,20 +129,35 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
             keys,
             key ->
             {
-                var slices = Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
+                var slices = (key.isStaticRow() || !key.hasClustering())
+                             ? Slices.ALL
+                             : Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
                 // TODO if we end up needing to read the row still, is it better to store offset and use reader.unfilteredAt?
                 try (var iter = reader.iterator(key.partitionKey(), slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
                 {
-                    if (iter.hasNext())
+                    if (indexContext.getDefinition().isStatic())
                     {
-                        var row = (Row) iter.next();
-                        assert !iter.hasNext();
-                        var cell = row.getCell(indexContext.getDefinition());
+                        Row staticRow = iter.staticRow();
+                        Cell<?> cell = staticRow != null ? staticRow.getCell(indexContext.getDefinition()) : null;
                         if (cell == null)
                             return null;
-                        // We encode the bytes to make sure they compare correctly.
                         var byteComparable = encode(cell.buffer());
                         return new PrimaryKeyWithByteComparable(indexContext, reader.descriptor.id, key, byteComparable);
+                    }
+
+                    while (iter.hasNext())
+                    {
+                        var unfiltered = iter.next();
+                        if (unfiltered.isRow())
+                        {
+                            Row row = (Row) unfiltered;
+                            var cell = row.getCell(indexContext.getDefinition());
+                            if (cell == null)
+                                continue;
+                            // We encode the bytes to make sure they compare correctly.
+                            var byteComparable = encode(cell.buffer());
+                            return new PrimaryKeyWithByteComparable(indexContext, reader.descriptor.id, key, byteComparable);
+                        }
                     }
                 }
                 return null;
