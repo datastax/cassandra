@@ -1049,7 +1049,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // Assuming term occurrences are independent across rows,
         // the selectivity is the product of the per-term selectivities,
         // same as we do for filter intersections.
-        // Note that CQL
+        // Note that CQL will reject queries without any query terms.
         double selectivity = 1.0;
         for (ByteBuffer term : orderer.getQueryTerms())
         {
