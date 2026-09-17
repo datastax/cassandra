@@ -29,7 +29,8 @@ import java.util.Set;
  *     <ul>
  *       <li><b>Table-context sensors</b> — {@code <TYPE>_REQUEST.<keyspace>.<table>} for request sensors
  *           and {@code <TYPE>_GLOBAL.<keyspace>.<table>} for global sensors.</li>
- *       <li><b>Request-context sensors</b> (i.e. {@link Type#TOTAL_COST} keyed on {@link Context#request()}) —
+ *       <li><b>Request-context sensors</b> (i.e. {@link Type#TOTAL_COST} keyed on a {@link Context} created via
+ *           {@link Context#from(RequestSensors)}) —
  *           {@code <TYPE>_REQUEST} and {@code <TYPE>_GLOBAL}, with no keyspace or table suffix, because
  *           the sensor aggregates cost across the whole request rather than a single table.</li>
  *     </ul>
@@ -46,7 +47,10 @@ public class ActiveSensorsFactory implements SensorsFactory
             Context ctx = sensor.getContext();
             if (ctx.isRequestContext())
                 return Optional.of(sensor.getType() + "_REQUEST");
-            return Optional.of(sensor.getType() + "_REQUEST." + ctx.getKeyspace().get() + '.' + ctx.getTable().get());
+            return Optional.of(sensor.getType() + "_REQUEST."
+                               + ctx.getKeyspace().orElseThrow(() -> new IllegalStateException("Table context missing keyspace: " + ctx))
+                               + '.'
+                               + ctx.getTable().orElseThrow(() -> new IllegalStateException("Table context missing table: " + ctx)));
         }
 
         @Override
@@ -55,7 +59,10 @@ public class ActiveSensorsFactory implements SensorsFactory
             Context ctx = sensor.getContext();
             if (ctx.isRequestContext())
                 return Optional.of(sensor.getType() + "_GLOBAL");
-            return Optional.of(sensor.getType() + "_GLOBAL." + ctx.getKeyspace().get() + '.' + ctx.getTable().get());
+            return Optional.of(sensor.getType() + "_GLOBAL."
+                               + ctx.getKeyspace().orElseThrow(() -> new IllegalStateException("Table context missing keyspace: " + ctx))
+                               + '.'
+                               + ctx.getTable().orElseThrow(() -> new IllegalStateException("Table context missing table: " + ctx)));
         }
     };
 

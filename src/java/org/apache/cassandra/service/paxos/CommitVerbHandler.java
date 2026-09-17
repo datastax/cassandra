@@ -59,8 +59,6 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         PaxosState.commit(message.payload, p -> MutatorProvider.getCustomOrDefault().onAppliedProposal(p));
         sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, System.nanoTime() - commitStartNanos);
 
-        sensors.syncAllSensors();
-
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();
 

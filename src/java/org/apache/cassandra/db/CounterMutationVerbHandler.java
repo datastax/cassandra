@@ -63,12 +63,13 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toSet());
         for (TableMetadata tm : tables)
         {
-            requestSensors.registerSensor(Context.from(tm), Type.INTERNODE_BYTES);
+            Context context = Context.from(tm);
+            requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
             if (!tm.isIndex())
             {
-                requestSensors.registerSensor(Context.from(tm), Type.WRITE_BYTES);
-                requestSensors.registerSensor(Context.from(tm), Type.INDEX_WRITE_BYTES);
-                requestSensors.registerSensor(Context.from(tm), Type.WRITE_EXECUTION_TIME);
+                requestSensors.registerSensor(context, Type.WRITE_BYTES);
+                requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+                requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
             }
         }
 

@@ -703,7 +703,7 @@ public enum CassandraRelevantProperties
 
     /**
      * Whether to enable SAI per-query metrics for different kinds of query, such as filter-only queries, top-k-only
-     * queries, hybrid queries, single-partition queries, and multipartition queries. Tihese metrics are histograms and
+     * queries, hybrid queries, single-partition queries, and multipartition queries. These metrics are histograms and
      * timers.
      */
     SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_query.enabled", "false"),

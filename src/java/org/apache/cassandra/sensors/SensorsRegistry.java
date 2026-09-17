@@ -104,15 +104,19 @@ public class SensorsRegistry implements SchemaChangeListener
 
     private SensorsRegistry()
     {
-        Schema.instance.registerListener(this);
         // Backfill keyspaces and tableIds from schema already loaded at construction time.
         // Without this, any keyspace/table that existed before SensorsRegistry was class-loaded
         // would silently fail the gate in getOrCreateSensorFast() and produce no sensors.
+        // Backfill must happen before registerListener so that any concurrent onDrop* event fired
+        // after registration operates on a fully-populated set and correctly removes the entry.
         Schema.instance.distributedKeyspaces().forEach(ksm -> {
             keyspaces.add(ksm.name);
             ksm.tables.forEach(t -> tableIds.add(t.id.toString()));
             ksm.views.forEach(v -> tableIds.add(v.metadata.id.toString()));
         });
+        logger.debug("SensorsRegistry backfilled {} keyspace(s) and {} table/view id(s) from existing schema",
+                     keyspaces.size(), tableIds.size());
+        Schema.instance.registerListener(this);
     }
 
     public void registerListener(SensorsRegistryListener listener)
@@ -204,6 +208,16 @@ public class SensorsRegistry implements SchemaChangeListener
         }
     }
 
+    /**
+     * Removes all sensors associated with the given {@code requestOwner} from the registry.
+     * <p>
+     * Request-context sensors are never removed automatically (they have no schema anchor),
+     * so callers that create sensors via {@link Context#from(RequestSensors)} with a non-null
+     * owner <em>must</em> call this method once the request is complete to prevent unbounded
+     * accumulation of stale request-level sensors in the registry.
+     *
+     * @param requestOwner the owner identifier returned by {@link RequestSensors#getRequestOwner()}
+     */
     public void removeSensorsByRequestOwner(String requestOwner)
     {
         stripedUpdateLock.getAt(getLockStripe(requestOwner.hashCode())).writeLock().lock();
@@ -357,14 +371,12 @@ public class SensorsRegistry implements SchemaChangeListener
             });
             sensor = typeSensors[type.ordinal()];
 
-            String ks = sensor.getContext().getKeyspace().get();
-            Set<Sensor> keyspaceSet = byKeyspace.get(ks);
-            keyspaceSet = keyspaceSet != null ? keyspaceSet : byKeyspace.computeIfAbsent(ks, (ignored) -> Sets.newConcurrentHashSet());
+            Set<Sensor> keyspaceSet = byKeyspace.get(keyspace);
+            keyspaceSet = keyspaceSet != null ? keyspaceSet : byKeyspace.computeIfAbsent(keyspace, (ignored) -> Sets.newConcurrentHashSet());
             keyspaceSet.add(sensor);
 
-            String tid = sensor.getContext().getTableId().get();
-            Set<Sensor> tableSet = byTableId.get(tid);
-            tableSet = tableSet != null ? tableSet : byTableId.computeIfAbsent(tid, (ignored) -> Sets.newConcurrentHashSet());
+            Set<Sensor> tableSet = byTableId.get(tableId);
+            tableSet = tableSet != null ? tableSet : byTableId.computeIfAbsent(tableId, (ignored) -> Sets.newConcurrentHashSet());
             tableSet.add(sensor);
 
             Set<Sensor> opSet = byType.get(sensor.getType().name());
@@ -383,25 +395,33 @@ public class SensorsRegistry implements SchemaChangeListener
      * Creates (or returns existing) sensor for a {@link Context#request()} context.
      * Stored in {@link #identity} and {@link #byType} only — never in byKeyspace or byTableId.
      */
-    @Nullable
     private Sensor getOrCreateRequestSensor(Context context, Type type)
     {
-        Sensor[] typeSensors = identity.compute(context, (key, types) -> {
-            Sensor[] computed = types != null ? types : new Sensor[Type.values().length];
-            if (computed[type.ordinal()] == null)
-            {
-                computed[type.ordinal()] = new Sensor(context, type);
-                notifyOnSensorCreated(computed[type.ordinal()]);
-            }
-            return computed;
-        });
-        Sensor sensor = typeSensors[type.ordinal()];
+        String requestOwner = context.getRequestOwner().get();
+        stripedUpdateLock.getAt(getLockStripe(requestOwner.hashCode())).readLock().lock();
+        try
+        {
+            Sensor[] typeSensors = identity.compute(context, (key, types) -> {
+                Sensor[] computed = types != null ? types : new Sensor[Type.values().length];
+                if (computed[type.ordinal()] == null)
+                {
+                    computed[type.ordinal()] = new Sensor(context, type);
+                    notifyOnSensorCreated(computed[type.ordinal()]);
+                }
+                return computed;
+            });
+            Sensor sensor = typeSensors[type.ordinal()];
 
-        Set<Sensor> opSet = byType.get(sensor.getType().name());
-        opSet = opSet != null ? opSet : byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
-        opSet.add(sensor);
+            Set<Sensor> opSet = byType.get(sensor.getType().name());
+            opSet = opSet != null ? opSet : byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
+            opSet.add(sensor);
 
-        return sensor;
+            return sensor;
+        }
+        finally
+        {
+            stripedUpdateLock.getAt(getLockStripe(requestOwner.hashCode())).readLock().unlock();
+        }
     }
 
     /**

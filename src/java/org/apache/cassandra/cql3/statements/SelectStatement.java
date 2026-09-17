@@ -504,8 +504,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             Context context = Context.from(this.table);
             SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
             SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
-            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, Context.from(sensors), Type.READ_COST);
-            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, Context.from(sensors), Type.TOTAL_COST);
+            Context requestContext = Context.from(sensors);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, requestContext, Type.READ_COST);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, requestContext, Type.TOTAL_COST);
             // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
             // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
             SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
@@ -641,8 +642,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         // is explicitly set to zero.
         ResultMessage.Rows msg;
         try (PartitionIterator partitions = userOffset == NO_OFFSET
-                                            ? pager.fetchPage(pageSize, queryStartNanoTime)
-                                            : pager.readAll(pageSize, queryStartNanoTime))
+                                          ? pager.fetchPage(pageSize, queryStartNanoTime)
+                                          : pager.readAll(pageSize, queryStartNanoTime))
         {
             msg = processResults(partitions, options, selectors, nowInSec, userLimit, userOffset);
         }
@@ -656,8 +657,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             Context context = Context.from(this.table);
             SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
             SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
-            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, Context.from(sensors), Type.READ_COST);
-            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, Context.from(sensors), Type.TOTAL_COST);
+            Context requestContext = Context.from(sensors);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, requestContext, Type.READ_COST);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, requestContext, Type.TOTAL_COST);
             // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
             // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
             SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);

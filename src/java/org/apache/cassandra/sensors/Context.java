@@ -39,6 +39,8 @@ import org.apache.cassandra.schema.TableMetadata;
  *       sensor that aggregates cost across all tables touched by one coordinator request.
  *       Two request contexts with the same owner are considered equal.</li>
  * </ul>
+ * <p>For table contexts, {@link #getKeyspace()}, {@link #getTable()}, and {@link #getTableId()} always
+ * return a non-empty {@link Optional}. For request contexts they always return {@link Optional#empty()}.
  */
 public class Context
 {
@@ -51,6 +53,9 @@ public class Context
 
     public Context(String keyspace, String table, String tableId)
     {
+        Objects.requireNonNull(keyspace, "keyspace must not be null");
+        Objects.requireNonNull(table, "table must not be null");
+        Objects.requireNonNull(tableId, "tableId must not be null");
         this.keyspace = keyspace;
         this.table = table;
         this.tableId = tableId;

@@ -64,7 +64,7 @@ import org.apache.cassandra.utils.NoSpamLogger;
  * regardless of the user keyspace, are never accidentally suppressed.
  * <p>
  * Instances of this class should be created via the configured {@link SensorsFactory}.
- * The no-arg and {@code Supplier}-only constructors are visible for testing only.
+ * The no-arg, {@code Supplier}-only, and {@code (Set<String>, Supplier<SensorsRegistry>)} constructors are visible for testing only.
  */
 public class ActiveRequestSensors implements RequestSensors
 {
@@ -113,10 +113,9 @@ public class ActiveRequestSensors implements RequestSensors
     {
         if (!isAllowed(context))
         {
-            NoSpamLogger
-            .getLogger(logger, 1, TimeUnit.MINUTES)
-            .warn("Ignoring sensor registration for context {} and type {}: keyspace '{}' is not in the allowed keyspaces {}",
-                  context, type, context.getKeyspace().orElse(null), allowedKeyspaces);
+            NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES)
+                        .warn("Ignoring sensor registration for context {} and type {}: keyspace '{}' is not in the allowed keyspaces {}",
+                              context, type, context.getKeyspace().orElse(null), allowedKeyspaces);
 
             return;
         }
