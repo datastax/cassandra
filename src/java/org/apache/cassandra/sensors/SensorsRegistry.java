@@ -114,8 +114,7 @@ public class SensorsRegistry implements SchemaChangeListener
             ksm.tables.forEach(t -> tableIds.add(t.id.toString()));
             ksm.views.forEach(v -> tableIds.add(v.metadata.id.toString()));
         });
-        logger.debug("SensorsRegistry backfilled {} keyspace(s) and {} table/view id(s) from existing schema",
-                     keyspaces.size(), tableIds.size());
+
         Schema.instance.registerListener(this);
     }
 
