@@ -586,8 +586,8 @@ public class ChunkCacheTest
 
     /**
      * For chunks smaller than {@link PageAware#PAGE_SIZE}, {@link ChunkCache#newChunk} still reserves a whole
-     * page from the pool but exposes a narrowed view for reads (see {@code SingleRegionChunk}). This test
-     * verifies that:
+     * page from the pool, encodes the logical size in the owned buffer's limit, and exposes a
+     * {@code duplicate().slice()} view for reads (see {@code SingleRegionChunk}). This test verifies that:
      * <ul>
      *   <li>the pool sees reservation/release of the *full* page (not the narrowed chunk size),</li>
      *   <li>the read view has {@code capacity == chunkSize},</li>
@@ -738,8 +738,8 @@ public class ChunkCacheTest
     /**
      * End-to-end: small-chunk readers go through the cache, Caffeine weighs entries by full-page
      * {@link ChunkCache.Chunk#capacity()}, and eviction/invalidation returns every reserved page to the
-     * pool. Without the releaseBuffer/capacity fix the cache under-weighed small chunks and returning a
-     * slice leaked both weight-accounting and pool memory.
+     * pool. Without weighing by the allocated page (and putting that page back), small chunks under-weigh
+     * the cache and releasing a narrowed view leaks pool/overflow memory.
      */
     @Test
     public void testSmallChunkCacheEvictionReleasesFullPage() throws IOException
@@ -779,7 +779,7 @@ public class ChunkCacheTest
             assertEquals(overflowBefore, pool.overflowMemoryInBytes());
         }
 
-        // Drop every entry for this reader id; onRemoval must put the full-page releaseBuffer back.
+        // Drop every entry for this reader id; onRemoval must put the full-page pool buffer back.
         chunkCache.invalidateFileNow(file);
         Awaitility.await().untilAsserted(() -> assertEquals(0, chunkCache.sizeOfFile(file)));
 
