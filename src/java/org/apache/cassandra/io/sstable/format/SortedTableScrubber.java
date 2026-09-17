@@ -188,7 +188,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     {
         List<SSTableReader> finished = new ArrayList<>();
         outputHandler.output("Scrubbing %s (%s)", sstable, FBUtilities.prettyPrintMemory(dataFile.length()));
-        // Do not use early opening with scrub as it is unsafe (scrub may move rows to a different table that is not
+        // Do not use early opening with scrub as it is unsafe (scrub may move rows to a different sstable that is not
         // written until the whole operation completes).
         try (SSTableRewriter writer = SSTableRewriter.constructWithoutEarlyOpening(transaction, false, sstable.maxDataAge);
              Refs<SSTableReader> refs = Refs.ref(Collections.singleton(sstable)))
