@@ -685,17 +685,18 @@ public class Scrubber implements Closeable
         }
     }
 
-    private static class NoTTLTransformer extends Transformation<UnfilteredRowIterator>
+    @VisibleForTesting
+    public static class NoTTLTransformer extends Transformation<UnfilteredRowIterator>
     {
         private final TableMetadata metadata;
         private final OutputHandler outputHandler;
-        private final OverwrittenTTLInfoMetrics overwritenTTLInfoMetrics;
+        private final OverwrittenTTLInfoMetrics overwrittenTTLInfoMetrics;
 
         public NoTTLTransformer(OutputHandler outputHandler, TableMetadata metadata, OverwrittenTTLInfoMetrics overwritenTTLInfoMetrics)
         {
             this.metadata = metadata;
             this.outputHandler = outputHandler;
-            this.overwritenTTLInfoMetrics = overwritenTTLInfoMetrics;
+            this.overwrittenTTLInfoMetrics = overwritenTTLInfoMetrics;
         }
 
         @Override
@@ -745,7 +746,7 @@ public class Scrubber implements Closeable
             if (ttlWasOverwritten)
             {
                 outputHandler.debug(String.format("Found row with TTL to remove: %s", row.toString(metadata, false)));
-                overwritenTTLInfoMetrics.incrementNoTTLOverwrittenRows();
+                overwrittenTTLInfoMetrics.incrementNoTTLOverwrittenRows();
             }
 
             return builder.build();
@@ -774,7 +775,8 @@ public class Scrubber implements Closeable
         }
 
         //Checks if the row has any ttl columns
-        private boolean hasAnyTTL(Row row)
+        @VisibleForTesting
+        public static boolean hasAnyTTL(Row row)
         {
             if (row.primaryKeyLivenessInfo().isExpiring()) return true;
             for (ColumnData cd : row)
