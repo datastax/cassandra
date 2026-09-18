@@ -539,7 +539,9 @@ public class LocalSessions
                 int now = FBUtilities.nowInSeconds();
                 if (shouldFail(session, now))
                 {
-                    logger.warn("Auto failing timed out repair session {}", session);
+                    int ageSeconds = now - session.getLastUpdate();
+                    logger.warn("Auto failing timed out repair session {} (last activity {}s ago, AUTO_FAIL_TIMEOUT={}s)",
+                                session.sessionID, ageSeconds, AUTO_FAIL_TIMEOUT);
                     failSession(session.sessionID, false);
                 }
                 else if (shouldDelete(session, now))
@@ -831,7 +833,7 @@ public class LocalSessions
                 }
                 else if (session.getState() != FAILED)
                 {
-                    logger.info("Failing local repair session {}", session.sessionID);
+                    logger.info("Failing local repair session {} (coordinator={})", session.sessionID, session.coordinator);
                     setStateAndSave(session, FAILED);
                 }
             }
@@ -914,7 +916,8 @@ public class LocalSessions
 
         LocalSession session = createSessionUnsafe(sessionID, parentSession, peers);
         putSessionUnsafe(session);
-        logger.info("Beginning local incremental repair session {}", session);
+        logger.info("Beginning local incremental repair session {} (coordinator={}, tables={}, ranges={})",
+                    sessionID, coordinator, parentSession.getTableIds(), parentSession.getRanges());
 
         ExecutorService executor = Executors.newFixedThreadPool(parentSession.getColumnFamilyStores().size());
 

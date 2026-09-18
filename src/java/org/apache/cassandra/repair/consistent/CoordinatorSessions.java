@@ -25,6 +25,9 @@ import java.util.UUID;
 
 import com.google.common.base.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.messages.FailSession;
 import org.apache.cassandra.repair.messages.FinalizePromise;
@@ -36,6 +39,8 @@ import org.apache.cassandra.service.ActiveRepairService;
  */
 public class CoordinatorSessions
 {
+    private static final Logger logger = LoggerFactory.getLogger(CoordinatorSessions.class);
+
     private final Map<UUID, CoordinatorSession> sessions = new HashMap<>();
 
     protected CoordinatorSession buildSession(CoordinatorSession.Builder builder)
@@ -63,6 +68,8 @@ public class CoordinatorSessions
         builder.withParticipants(participants);
         CoordinatorSession session = buildSession(builder);
         sessions.put(session.sessionID, session);
+        logger.info("Registered coordinator session {} with {} participant(s): {} for tables {}",
+                    sessionId, participants.size(), participants, prs.getTableIds());
         return session;
     }
 

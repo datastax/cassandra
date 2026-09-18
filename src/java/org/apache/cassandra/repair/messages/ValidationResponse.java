@@ -75,6 +75,12 @@ public class ValidationResponse extends RepairMessage
     }
 
     @Override
+    public String toString()
+    {
+        return "ValidationResponse{desc=" + desc + ", success=" + success() + '}';
+    }
+
+    @Override
     public int hashCode()
     {
         return Objects.hash(desc);

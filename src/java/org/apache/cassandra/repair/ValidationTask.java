@@ -19,6 +19,9 @@ package org.apache.cassandra.repair;
 
 import com.google.common.util.concurrent.AbstractFuture;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.exceptions.RepairException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.messages.RepairMessage;
@@ -34,6 +37,8 @@ import static org.apache.cassandra.net.Verb.VALIDATION_REQ;
  */
 public class ValidationTask extends AbstractFuture<TreeResponse> implements Runnable
 {
+    private static final Logger logger = LoggerFactory.getLogger(ValidationTask.class);
+
     private final RepairJobDesc desc;
     private final InetAddressAndPort endpoint;
     private final int nowInSec;
@@ -52,6 +57,8 @@ public class ValidationTask extends AbstractFuture<TreeResponse> implements Runn
      */
     public void run()
     {
+        logger.info("{} parentSession={} Sending validation request to {}",
+                    previewKind.logPrefix(desc.sessionId), desc.parentSessionId, endpoint);
         RepairMessage.sendMessageWithFailureCB(new ValidationRequest(desc, nowInSec),
                                                VALIDATION_REQ,
                                                endpoint,
@@ -67,6 +74,7 @@ public class ValidationTask extends AbstractFuture<TreeResponse> implements Runn
     {
         if (trees == null)
         {
+            logger.warn("{} parentSession={} Validation failed on {}", previewKind.logPrefix(desc.sessionId), desc.parentSessionId, endpoint);
             setException(new RepairException(desc, previewKind, "Validation failed in " + endpoint));
         }
         else
