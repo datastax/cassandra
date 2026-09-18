@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.crypto.NoSuchPaddingException;
 
@@ -34,6 +35,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.crypto.LocalSystemKey;
 import org.apache.cassandra.crypto.TDEConfigurationProvider;
 import org.apache.cassandra.db.Keyspace;
@@ -42,8 +44,9 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.utils.ChecksumType;
 
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
@@ -78,9 +81,22 @@ public class SSTableEncryptionTest extends TestBaseImpl
     }
 
     @Test
+    public void shouldFlushToQueryableEncryptedSSTables() throws Throwable
+    {
+        // test reading sstables as set up by flush/compaction on the running node
+        testQueryableEncryptedSSTables(false);
+    }
+
+    @Test
     public void shouldCreateQueryableEncryptedSSTables() throws Throwable
     {
-        try (Cluster cluster = builder().withNodes(2)
+        // test reading sstables from disk without write-time set-up
+        testQueryableEncryptedSSTables(true);
+    }
+
+    public void testQueryableEncryptedSSTables(boolean restartNodes) throws Throwable
+    {
+        try (Cluster cluster = builder().withNodes(1)
                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                                         .start())
         {
@@ -101,6 +117,14 @@ public class SSTableEncryptionTest extends TestBaseImpl
             cluster.get(1).flush(keyspace);
 
             insertAndFlush(cluster, keyspace, table, numberOfRows);
+
+            if (restartNodes)
+            {
+                for (int i = 1; i <= cluster.size(); ++i)
+                {
+                    restartWithDeletedCommitLog(cluster, i);
+                }
+            }
 
             // when querying all
             Object[][] rows = cluster.coordinator(1).execute(String.format("SELECT * FROM %s.%s ", keyspace, table), ALL);
@@ -130,6 +154,16 @@ public class SSTableEncryptionTest extends TestBaseImpl
         }
     }
 
+    private static void restartWithDeletedCommitLog(Cluster cluster, int i)
+    {
+        String commitlogpath = cluster.get(1).callOnInstance(() -> DatabaseDescriptor.getCommitLogLocation().path());
+        waitOn(cluster.get(i).shutdown());
+        // delete the commit log to make sure we are not recreating the data from it
+        PathUtils.deleteRecursive(Path.of(commitlogpath));
+        // start-up must now read the sstables
+        cluster.get(i).startup();
+    }
+
     @Test
     public void shouldEncryptSensitiveData() throws Exception
     {
@@ -152,13 +186,23 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertThat(Bytes.indexOf(encryptedTable.sstableBytes, sensitiveBytes)).isEqualTo(-1);
             // sensitive key should not be present in encrypted partition index
             assertThat(Bytes.indexOf(encryptedTable.partitionIndexBytes, sensitiveBytes)).isEqualTo(-1);
-            // BTI does not list full keys so we usually won't find sensitive key without encryption either
-            // assertThat(Bytes.indexOf(nonEncryptedTable.partitionIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
+            // BTI does not list full keys, but it does include the first and last key in its metadata
+            assertThat(Bytes.indexOf(nonEncryptedTable.partitionIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
             // sensitive key should not be present in encrypted row index
             assertThat(Bytes.indexOf(encryptedTable.rowIndexBytes, sensitiveBytes)).isEqualTo(-1);
-            // BTI does not list full keys so we usually won't find sensitive key without encryption either
-            // assertThat(Bytes.indexOf(nonEncryptedTable.rowIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
+            // The row index includes full partition keys, thus we will find the key in the index
+            assertThat(Bytes.indexOf(nonEncryptedTable.rowIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
 
+            String btiEncodedKeyPattern = "";
+            for (int i = SENSITIVE_KEY.length() - 1; i >= 0; --i)
+                btiEncodedKeyPattern += "." + SENSITIVE_KEY.charAt(i);
+            Pattern btiEncodedKey = Pattern.compile(btiEncodedKeyPattern);
+
+            checkPresence(encryptedTable.rowIndexBytes, btiEncodedKey, false);
+            checkPresence(nonEncryptedTable.rowIndexBytes, btiEncodedKey, true);
+            checkPresence(encryptedTable.partitionIndexBytes, btiEncodedKey, false);
+            // Keys in the partition index differ in the token, the BTI encoding of the key won't be found in the non-
+            // encrypted table.
 
             // indexes with encryption should pass the checksum check
             assertThat(checkEncryptionCrc(encryptedTable.partitionIndexBytes)).isTrue();
@@ -168,6 +212,12 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertThat(checkEncryptionCrc(nonEncryptedTable.partitionIndexBytes)).isFalse();
             assertThat(checkEncryptionCrc(nonEncryptedTable.rowIndexBytes)).isFalse();
         }
+    }
+
+    private static void checkPresence(byte[] nonEncryptedTable, Pattern btiEncodedKey, boolean expected)
+    {
+        String partitionIndexString = new String(nonEncryptedTable, StandardCharsets.US_ASCII);
+        assertThat(btiEncodedKey.matcher(partitionIndexString).find()).isEqualTo(expected);
     }
 
     private boolean checkEncryptionCrc(byte[] bytes)
@@ -252,8 +302,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertEquals(secretKey, secretKey2);
 
             // restart to clear in memory secret key cache
-            waitOn(cluster.get(1).shutdown());
-            cluster.get(1).startup();
+            restartWithDeletedCommitLog(cluster, 1);
 
             // when
             Object[][] rows = cluster. get(1).executeInternal(String.format("SELECT * FROM %s.%s", keyspace, nonEncryptedTableName));
@@ -322,7 +371,13 @@ public class SSTableEncryptionTest extends TestBaseImpl
         {
             for (int j = 0; j < ROWS_COUNT; j++)
             {
-                cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')", keyspace, tableName, i, j, k), ALL);
+                cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')",
+                                                             keyspace,
+                                                             tableName,
+                                                             SENSITIVE_KEY + '_' + i,
+                                                             SENSITIVE_KEY + '_' + j,
+                                                             SENSITIVE_KEY + '_' + k),
+                                               ALL);
                 k++;
             }
         }

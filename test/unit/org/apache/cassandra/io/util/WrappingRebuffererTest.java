@@ -143,6 +143,11 @@ public class WrappingRebuffererTest
             return position;
         }
 
+        public long positionForSkip(long currentPosition, int bytesToSkip)
+        {
+            return currentPosition + bytesToSkip;
+        }
+
         public void close()
         {
             // nothing
