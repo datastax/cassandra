@@ -1182,6 +1182,27 @@ public class SAITester extends CQLTester
         }
     }
 
+    protected void assertQueryHasSubplan(String select, Class<? extends Plan> planClass, Object[]... rows)
+    {
+        assertRows(execute(select), rows);
+
+        ReadCommand command = parseReadCommand(select);
+
+        StorageAttachedIndexQueryPlan indexPlan = (StorageAttachedIndexQueryPlan) command.indexQueryPlan();
+        Assertions.assertThat(indexPlan).isNotNull();
+
+        StorageAttachedIndexSearcher searcher = indexPlan.searcherFor(command);
+        Plan.RowsIteration saiPlan = searcher.buildPlan();
+
+        Assertions.assertThat(containsPlan(saiPlan, planClass)).isTrue();
+    }
+
+    private static boolean containsPlan(Plan plan, Class<? extends Plan> planClass)
+    {
+        return plan.getClass().isAssignableFrom(planClass) ||
+               plan.subplans().stream().anyMatch(subplan -> containsPlan(subplan, planClass));
+    }
+
     protected static class PlanSelectionAssertion
     {
         private final double expectedRows;
