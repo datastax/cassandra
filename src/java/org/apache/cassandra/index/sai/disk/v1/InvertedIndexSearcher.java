@@ -251,7 +251,7 @@ public class InvertedIndexSearcher extends IndexSearcher
                                        orderer.bm25stats,
                                        indexContext,
                                        sstable.descriptor.id,
-                                       metadata.totalTermCount == INVALID_TOTAL_TERM_COUNT);
+                                       metadata.totalTermCount == INVALID_TOTAL_TERM_COUNT || orderer.bm25stats.hasOldFormatIndex());
     }
 
     @Override
@@ -277,7 +277,7 @@ public class InvertedIndexSearcher extends IndexSearcher
                                        orderer.bm25stats,
                                        indexContext,
                                        sstable.descriptor.id,
-                                       metadata.totalTermCount == INVALID_TOTAL_TERM_COUNT);
+                                       metadata.totalTermCount == INVALID_TOTAL_TERM_COUNT || orderer.bm25stats.hasOldFormatIndex());
     }
 
     @Override
