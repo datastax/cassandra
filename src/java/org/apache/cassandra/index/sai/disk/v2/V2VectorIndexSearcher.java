@@ -50,6 +50,7 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.ReorderingPostingList;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
@@ -524,7 +525,13 @@ public class V2VectorIndexSearcher extends IndexSearcher
      */
     private SegmentRowIdOrdinalPairs flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange) throws IOException
     {
-        var segmentOrdinalPairs = new SegmentRowIdOrdinalPairs(keysInRange.size());
+        // When input keys include static-row keys (from a static-column predicate), each key may expand to
+        // multiple regular rows. Use the segment's row count as the upper-bound capacity.
+        boolean hasStaticKeys = keysInRange.stream().anyMatch(k -> k.isStaticRow() || !k.hasClustering());
+        int capacity = hasStaticKeys
+                       ? (int) (metadata.maxSSTableRowId - metadata.minSSTableRowId + 1)
+                       : keysInRange.size();
+        var segmentOrdinalPairs = new SegmentRowIdOrdinalPairs(capacity);
         int lastSegmentRowId = -1;
         try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var ordinalsView = graph.getOrdinalsView())
@@ -533,11 +540,21 @@ public class V2VectorIndexSearcher extends IndexSearcher
             // (if most of the keys belong to this sstable, bsearch will actually be slower)
             var comparisonsSavedByBsearch = new QuickSlidingWindowReservoir(10);
             boolean preferSeqScanToBsearch = false;
+            int i = 0;
 
-            for (int i = 0; i < keysInRange.size();)
+            while (i < keysInRange.size())
             {
-                // turn the pk back into a row id, with a fast path for the case where the pk is from this sstable
                 var primaryKey = keysInRange.get(i);
+
+                // A static-column predicate produces PrimaryKeys with STATIC_CLUSTERING. The vector index stores
+                // regular-row keys, so we must expand the static key to all regular rows in the same partition.
+                if (primaryKey.isStaticRow() || !primaryKey.hasClustering())
+                {
+                    expandStaticKeyToRows(primaryKey, primaryKeyMap, ordinalsView, segmentOrdinalPairs);
+                    i++;
+                    continue;
+                }
+
                 long sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
 
                 if (sstableRowId < 0)
@@ -546,52 +563,20 @@ public class V2VectorIndexSearcher extends IndexSearcher
                     // of the next-highest row ID.  Invert it back to get the ceiling row ID.
                     long ceilingRowId = ~sstableRowId;
                     if (ceilingRowId > metadata.maxSSTableRowId)
-                    {
-                        // The next greatest primary key is greater than all the primary keys in this segment
-                        break;
-                    }
-                    var ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
+                        break; // The next greatest primary key is greater than all the primary keys in this segment
 
-                    boolean ceilingPrimaryKeyMatchesKeyInRange = false;
+                    var ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
                     // adaptively choose either seq scan or bsearch to skip ahead in keysInRange until
                     // we find one at least as large as the ceiling key
-                    if (preferSeqScanToBsearch)
-                    {
-                        int keysToSkip = 1; // We already know that the PK at index i is not equal to the ceiling PK.
-                        int cmp = 1; // Need to initialize. The value is irrelevant.
-                        for ( ; i + keysToSkip < keysInRange.size(); keysToSkip++)
-                        {
-                            var nextPrimaryKey = keysInRange.get(i + keysToSkip);
-                            cmp = nextPrimaryKey.compareTo(ceilingPrimaryKey);
-                            if (cmp >= 0)
-                                break;
-                        }
-                        comparisonsSavedByBsearch.update(keysToSkip - (int) ceil(logBase2(keysInRange.size() - i)));
-                        i += keysToSkip;
-                        ceilingPrimaryKeyMatchesKeyInRange = cmp == 0;
-                    }
-                    else
-                    {
-                        // Use a sublist to only search the remaining primary keys in range.
-                        var keysRemaining = keysInRange.subList(i, keysInRange.size());
-                        int nextIndexForCeiling = Collections.binarySearch(keysRemaining, ceilingPrimaryKey);
-                        if (nextIndexForCeiling < 0)
-                            // We got the inversion of the insertion point. Invert it to get the insertion point.
-                            nextIndexForCeiling = ~nextIndexForCeiling;
-                        else
-                            ceilingPrimaryKeyMatchesKeyInRange = true;
-
-                        comparisonsSavedByBsearch.update(nextIndexForCeiling - (int) ceil(logBase2(keysRemaining.size())));
-                        i += nextIndexForCeiling;
-                    }
-
-                    // update our estimate
-                    preferSeqScanToBsearch = comparisonsSavedByBsearch.size() >= 10
-                                             && comparisonsSavedByBsearch.getMean() < 0;
-                    if (ceilingPrimaryKeyMatchesKeyInRange)
+                    int[] result = skipToOrFindCeiling(keysInRange, i, ceilingPrimaryKey, preferSeqScanToBsearch,
+                                                       comparisonsSavedByBsearch);
+                    i = result[0];
+                    preferSeqScanToBsearch = result[1] != 0;
+                    boolean matched = result[2] != 0;
+                    if (matched)
                         sstableRowId = ceilingRowId;
                     else
-                        continue; // without incrementing i further. ceilingPrimaryKey is less than the PK at index i.
+                        continue; // ceilingPrimaryKey is less than the PK at index i; do not increment i
                 }
                 // Increment here to simplify the sstableRowId < 0 logic.
                 i++;
@@ -617,6 +602,81 @@ public class V2VectorIndexSearcher extends IndexSearcher
             }
         }
         return segmentOrdinalPairs;
+    }
+
+    /**
+     * Expands a static/partition-only primary key to all regular rows in the same partition within this segment,
+     * adding each matching row's segment-row-id and ordinal to {@code segmentOrdinalPairs}.
+     */
+    private void expandStaticKeyToRows(PrimaryKey staticKey,
+                                       PrimaryKeyMap primaryKeyMap,
+                                       OrdinalsView ordinalsView,
+                                       SegmentRowIdOrdinalPairs segmentOrdinalPairs) throws IOException
+    {
+        // Static rows sort before all regular rows in the same partition, so ceiling on a static key
+        // gives us the first regular row in the partition.
+        long firstRowId = primaryKeyMap.ceiling(staticKey);
+        if (firstRowId < 0 || firstRowId > metadata.maxSSTableRowId)
+            return;
+        // Walk forward adding rows until we leave the partition.
+        long rowId = firstRowId;
+        while (rowId <= metadata.maxSSTableRowId)
+        {
+            var rowKey = primaryKeyMap.primaryKeyFromRowId(rowId);
+            if (!rowKey.partitionKey().equals(staticKey.partitionKey()))
+                break;
+            if (rowId >= metadata.minSSTableRowId)
+            {
+                int segmentRowId = metadata.toSegmentRowId(rowId);
+                // Do not enforce monotonicity here: static keys from different partitions may
+                // yield segment row IDs in non-ascending order relative to each other.
+                int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+                if (ordinal >= 0)
+                    segmentOrdinalPairs.add(segmentRowId, ordinal);
+            }
+            rowId++;
+        }
+    }
+
+    /**
+     * Advances index {@code i} in {@code keysInRange} until it reaches a key &gt;= {@code ceilingPrimaryKey},
+     * using either sequential scan or binary search depending on {@code preferSeqScan}.
+     *
+     * @return a 3-element int array: [new i, preferSeqScanToBsearch (0/1), ceilingMatched (0/1)]
+     */
+    private int[] skipToOrFindCeiling(List<PrimaryKey> keysInRange, int i, PrimaryKey ceilingPrimaryKey,
+                                      boolean preferSeqScan, QuickSlidingWindowReservoir comparisonsSaved)
+    {
+        boolean matched = false;
+        if (preferSeqScan)
+        {
+            int keysToSkip = 1; // We already know that the PK at index i is not equal to the ceiling PK.
+            int cmp = 1;        // Need to initialize. The value is irrelevant.
+            while (i + keysToSkip < keysInRange.size())
+            {
+                cmp = keysInRange.get(i + keysToSkip).compareTo(ceilingPrimaryKey);
+                if (cmp >= 0)
+                    break;
+                keysToSkip++;
+            }
+            comparisonsSaved.update(keysToSkip - (int) ceil(logBase2(keysInRange.size() - i)));
+            i += keysToSkip;
+            matched = cmp == 0;
+        }
+        else
+        {
+            // Use a sublist to only search the remaining primary keys in range.
+            var keysRemaining = keysInRange.subList(i, keysInRange.size());
+            int nextIndexForCeiling = Collections.binarySearch(keysRemaining, ceilingPrimaryKey);
+            if (nextIndexForCeiling < 0)
+                nextIndexForCeiling = ~nextIndexForCeiling; // invert insertion point
+            else
+                matched = true;
+            comparisonsSaved.update(nextIndexForCeiling - (int) ceil(logBase2(keysRemaining.size())));
+            i += nextIndexForCeiling;
+        }
+        boolean newPreferSeqScan = comparisonsSaved.size() >= 10 && comparisonsSaved.getMean() < 0;
+        return new int[]{ i, newPreferSeqScan ? 1 : 0, matched ? 1 : 0 };
     }
 
     public static double logBase2(double number) {

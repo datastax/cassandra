@@ -200,6 +200,69 @@ public class BM25Test extends SAITester
         assertRows(execute(select, "target", "apple"), row(1, 1), row(2, 1));
     }
 
+    /**
+     * Regression test for CNDB-19058 / CNDB-15622.
+     *
+     * A search-then-sort BM25 hybrid query whose WHERE predicate is on a static column and whose ORDER BY is on
+     * a regular column must return the correct rows after flush.  Before the fix, the SSTable reader was sliced
+     * with {@code Slice.make(STATIC_CLUSTERING)}, which is invalid for regular column lookups, causing the rows to
+     * disappear entirely (0 results) after flush.
+     */
+    @Test
+    public void testHybridQueryWithStaticPredicateAndBM25Order()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text static, r text, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        createAnalyzedIndex("r");
+
+        execute("INSERT INTO %s (k, c, s, r) VALUES (1, 1, 'target', 'apple')");
+        execute("INSERT INTO %s (k, c, s, r) VALUES (2, 1, 'target', 'apple juice') USING TIMESTAMP 1");
+        // Insert many unrelated partitions so the planner chooses search-then-sort
+        for (int i = 3; i < 100; i++)
+            execute("INSERT INTO %s (k, c, s, r) VALUES (?, 1, 'other', 'apple juice')", i);
+
+        String select = "SELECT k, c FROM %s WHERE s = ? ORDER BY r BM25 OF ? LIMIT 3";
+
+        // Must work in memtable state
+        assertRows(execute(select, "target", "apple"), row(1, 1), row(2, 1));
+
+        // Must still work after flush – this is the case that broke before the fix
+        flush();
+        assertRows(execute(select, "target", "apple"), row(1, 1), row(2, 1));
+
+        // And after compaction
+        compact();
+        assertRows(execute(select, "target", "apple"), row(1, 1), row(2, 1));
+    }
+
+    /**
+     * Regression test for CNDB-19058 / CNDB-15622: static column predicate on a wide partition with multiple
+     * clustering rows.  The BM25 ORDER BY must not return 0 results (NPE / invalid slice) after flush.
+     * The query must return at least one clustering row from the matching partition.
+     */
+    @Test
+    public void testHybridQueryWithStaticPredicateMultipleClusteringsAndBM25Order()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text static, r text, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        createAnalyzedIndex("r");
+
+        // One partition matching the static predicate, with two clustering rows
+        execute("INSERT INTO %s (k, c, s, r) VALUES (1, 1, 'target', 'apple pie')");
+        execute("INSERT INTO %s (k, c, s, r) VALUES (1, 2, 'target', 'apple')");
+        // Enough non-matching partitions to trigger search-then-sort
+        for (int i = 2; i < 100; i++)
+            execute("INSERT INTO %s (k, c, s, r) VALUES (?, 1, 'other', 'apple')", i);
+
+        String select = "SELECT k FROM %s WHERE s = ? ORDER BY r BM25 OF ? LIMIT 5";
+
+        // At least one row from partition k=1 must be returned both before and after flush
+        assertRowCount(execute(select, "target", "apple"), 1);
+
+        flush();
+        assertRowCount(execute(select, "target", "apple"), 1);
+    }
+
     @Test
     public void testSearchThenSortWithRowReinsertedWithoutOrderedColumn() throws Throwable
     {

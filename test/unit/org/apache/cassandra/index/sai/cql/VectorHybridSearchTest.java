@@ -251,4 +251,108 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
         result = execute("SELECT pk FROM %s WHERE val < ? ORDER BY vec ANN OF ? LIMIT 10 with ann_options = { 'rerank_k': -1 }", MIN_PQ_ROWS / 5, randomVectorBoxed(128));
         assertRowCount(result, 10);
     }
+
+    /**
+     * Regression test for CNDB-19058 / CNDB-15622.
+     *
+     * A search-then-sort ANN hybrid query whose WHERE predicate is on a static column and whose ORDER BY is ANN must
+     * return the correct rows both in-memtable and after flush.  Before the fix, the static PrimaryKey from the
+     * predicate index was not found in the vector graph (which stores regular-row keys), yielding 0 results.
+     */
+    @Test
+    public void testHybridANNQueryWithStaticPredicate() throws Throwable
+    {
+        // Use exact (brute-force) scoring so results are deterministic regardless of graph structure.
+        // This exercises the static-key to regular-row expansion path in the SSTable vector searcher;
+        // the brute-force vs graph scoring choice is orthogonal to that correctness.
+        setMaxBruteForceRows(Integer.MAX_VALUE);
+
+        createTable("CREATE TABLE %s (k int, c int, s text static, r vector<float, 2>, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (k, c, s, r) VALUES (1, 1, 'target', [1, 1])");
+        execute("INSERT INTO %s (k, c, s, r) VALUES (2, 1, 'target', [2, 2])");
+        // Enough non-matching partitions to trigger search-then-sort
+        for (int i = 3; i < 100; i++)
+            execute("INSERT INTO %s (k, c, s, r) VALUES (?, 1, 'other', ?)", i, vector(i, i));
+
+        String select = "SELECT k, c FROM %s WHERE s = ? ORDER BY r ANN OF [1, 1] LIMIT 2";
+
+        // Must work in memtable state
+        assertRows(execute(select, "target"), row(1, 1), row(2, 1));
+
+        // Must still work after flush
+        flush();
+        assertRows(execute(select, "target"), row(1, 1), row(2, 1));
+
+        // And after compaction
+        compact();
+        assertRows(execute(select, "target"), row(1, 1), row(2, 1));
+    }
+
+    /**
+     * Regression test for CNDB-19058 / CNDB-15622: ANN hybrid query with a static column predicate where the
+     * matching partition has multiple clustering rows.  All regular rows must be resolved for re-ranking, both
+     * in-memtable and after flush.
+     */
+    @Test
+    public void testHybridANNQueryWithStaticPredicateMultipleClusterings() throws Throwable
+    {
+        // Use exact (brute-force) scoring so results are deterministic regardless of graph structure.
+        setMaxBruteForceRows(Integer.MAX_VALUE);
+
+        createTable("CREATE TABLE %s (k int, c int, s text static, r vector<float, 2>, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
+
+        // One partition matching the predicate with two clustering rows
+        execute("INSERT INTO %s (k, c, s, r) VALUES (1, 1, 'target', [1, 3])");
+        execute("INSERT INTO %s (k, c, s, r) VALUES (1, 2, 'target', [1, 1])");
+        // Non-matching partitions to trigger search-then-sort
+        for (int i = 2; i < 100; i++)
+            execute("INSERT INTO %s (k, c, s, r) VALUES (?, 1, 'other', ?)", i, vector(i, i));
+
+        // c=2 ([1,1]) is the nearest neighbour to [1,1]
+        String select = "SELECT k, c FROM %s WHERE s = ? ORDER BY r ANN OF [1, 1] LIMIT 1";
+
+        assertRows(execute(select, "target"), row(1, 2));
+
+        flush();
+        assertRows(execute(select, "target"), row(1, 2));
+
+        compact();
+        assertRows(execute(select, "target"), row(1, 2));
+    }
+
+    /**
+     * Covers the null-vector early-return path in VectorMemtableIndex.addKeyToGraph.
+     * When some rows have a null vector value they must be silently skipped rather than
+     * causing a NullPointerException or incorrect results.
+     */
+    @Test
+    public void testANNWithNullVectorRows()
+    {
+        setMaxBruteForceRows(Integer.MAX_VALUE);
+
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, s int, r vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
+
+        // k=1 has a vector; k=2 has s=1 but NO vector (null) — addKeyToGraph must return early for k=2
+        execute("INSERT INTO %s (k, s, r) VALUES (1, 1, [1, 1])");
+        execute("INSERT INTO %s (k, s) VALUES (2, 1)");
+        // Fill enough non-matching rows to trigger search-then-sort
+        for (int i = 3; i < 100; i++)
+            execute("INSERT INTO %s (k, s, r) VALUES (?, 99, ?)", i, vector(i, i));
+
+        String select = "SELECT k FROM %s WHERE s = 1 ORDER BY r ANN OF [1, 1] LIMIT 5";
+
+        // Only k=1 has a vector; k=2 (null vector) must be skipped; result must not crash
+        assertRows(execute(select), row(1));
+
+        // Flush exercises the SSTable path; null-vector rows are simply absent from the index
+        flush();
+        assertRows(execute(select), row(1));
+    }
 }
