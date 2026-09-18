@@ -385,6 +385,8 @@ public class GenericOrderByTest extends SAITester
                              "SELECT c FROM %s WHERE n = 1 ORDER BY s DESC LIMIT 5 WITH excluded_indexes = {" + literalIndex + '}');
         assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 's'),
                              "SELECT c FROM %s WHERE n = 1 ORDER BY s DESC LIMIT 5 WITH excluded_indexes = {" + numericIndex + ',' + literalIndex + '}');
+    }
+
     /**
      * Regression test for CNDB-19058 / CNDB-15622.
      *
@@ -450,5 +452,33 @@ public class GenericOrderByTest extends SAITester
 
         flush();
         assertRowCount(execute(select, "target"), 1);
+    }
+
+    /**
+     * Covers the path in IndexSearcher where a row exists in the partition but has no cell value
+     * for the ORDER BY column (cell == null).  That row must be skipped gracefully, not crash.
+     */
+    @Test
+    public void testOrderByColumnWithNullCellSkipped()
+    {
+        QueryController.QUERY_OPT_LEVEL = 0;
+
+        createTable("CREATE TABLE %s (k int, c int, s text static, r int, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
+
+        // k=1 has a matching static value; c=1 has r set, c=2 does not (r is null → cell absent)
+        execute("INSERT INTO %s (k, c, s, r) VALUES (1, 1, 'target', 10)");
+        execute("INSERT INTO %s (k, c, s) VALUES (1, 2, 'target')");  // no r value
+        for (int i = 2; i < 100; i++)
+            execute("INSERT INTO %s (k, c, s, r) VALUES (?, 1, 'other', ?)", i, i);
+
+        String select = "SELECT k, c FROM %s WHERE s = ? ORDER BY r LIMIT 2";
+
+        // The row with null r must be skipped; only (1,1) should come back
+        assertRows(execute(select, "target"), row(1, 1));
+
+        flush();
+        assertRows(execute(select, "target"), row(1, 1));
     }
 }

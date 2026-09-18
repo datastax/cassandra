@@ -263,8 +263,8 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     public void testHybridANNQueryWithStaticPredicate() throws Throwable
     {
         // Use exact (brute-force) scoring so results are deterministic regardless of graph structure.
-        // The test validates static-key → regular-row expansion in flatmapPrimaryKeysToBitsAndRows;
-        // the scoring path (brute-force vs graph) is orthogonal to that correctness.
+        // This exercises the static-key to regular-row expansion path in the SSTable vector searcher;
+        // the brute-force vs graph scoring choice is orthogonal to that correctness.
         setMaxBruteForceRows(Integer.MAX_VALUE);
 
         createTable("CREATE TABLE %s (k int, c int, s text static, r vector<float, 2>, PRIMARY KEY (k, c))");
@@ -323,5 +323,36 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
 
         compact();
         assertRows(execute(select, "target"), row(1, 2));
+    }
+
+    /**
+     * Covers the null-vector early-return path in VectorMemtableIndex.addKeyToGraph.
+     * When some rows have a null vector value they must be silently skipped rather than
+     * causing a NullPointerException or incorrect results.
+     */
+    @Test
+    public void testANNWithNullVectorRows()
+    {
+        setMaxBruteForceRows(Integer.MAX_VALUE);
+
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, s int, r vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
+
+        // k=1 has a vector; k=2 has s=1 but NO vector (null) — addKeyToGraph must return early for k=2
+        execute("INSERT INTO %s (k, s, r) VALUES (1, 1, [1, 1])");
+        execute("INSERT INTO %s (k, s) VALUES (2, 1)");
+        // Fill enough non-matching rows to trigger search-then-sort
+        for (int i = 3; i < 100; i++)
+            execute("INSERT INTO %s (k, s, r) VALUES (?, 99, ?)", i, vector(i, i));
+
+        String select = "SELECT k FROM %s WHERE s = 1 ORDER BY r ANN OF [1, 1] LIMIT 5";
+
+        // Only k=1 has a vector; k=2 (null vector) must be skipped; result must not crash
+        assertRows(execute(select), row(1));
+
+        // Flush exercises the SSTable path; null-vector rows are simply absent from the index
+        flush();
+        assertRows(execute(select), row(1));
     }
 }
