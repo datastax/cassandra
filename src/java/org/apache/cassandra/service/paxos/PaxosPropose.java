@@ -21,6 +21,7 @@ package org.apache.cassandra.service.paxos;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -421,7 +422,7 @@ public class PaxosPropose<OnDone extends Consumer<? super PaxosPropose.Status>> 
         public void doVerb(Message<Request> message)
         {
             // Initialize the sensor and set ExecutorLocals
-            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.proposal.update.metadata().keyspace);
+            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.proposal.update.metadata().keyspace));
             Context context = Context.from(message.payload.proposal.update.metadata());
 
             // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor

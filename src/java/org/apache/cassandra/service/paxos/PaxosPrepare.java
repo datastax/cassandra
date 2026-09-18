@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.Set;
 import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -1033,7 +1034,7 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
         public void doVerb(Message<Request> message)
         {
             // Initialize the sensor and set ExecutorLocals
-            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.table.keyspace);
+            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.table.keyspace));
             Context context = Context.from(message.payload.table);
 
             // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor

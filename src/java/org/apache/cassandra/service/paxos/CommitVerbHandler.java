@@ -20,6 +20,8 @@
  */
 package org.apache.cassandra.service.paxos;
 
+import java.util.Set;
+
 import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
@@ -41,7 +43,7 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
     public void doVerb(Message<Commit> message)
     {
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.update.metadata().keyspace));
         RequestTracker.instance.set(sensors);
         Context context = Context.from(message.payload.update.metadata());
 
@@ -57,7 +59,7 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();
 
-        // No need to calculate outbound internode bytes for NoPayload response
+        // no need to calculate outbound internode bytes because the response is NoPayload
         sensors.syncAllSensors();
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());

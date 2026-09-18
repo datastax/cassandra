@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -101,7 +102,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         MessageParams.reset();
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(Set.of(command.metadata().keyspace));
         Context context = Context.from(command);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         RequestTracker.instance.set(requestSensors);

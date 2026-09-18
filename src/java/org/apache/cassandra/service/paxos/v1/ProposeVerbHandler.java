@@ -15,8 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.service.paxos.v1;
+
+import java.util.Set;
+
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -42,7 +44,7 @@ public class ProposeVerbHandler extends AbstractPaxosVerbHandler implements IVer
     void processMessage(Message<Commit> message)
     {
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.update.metadata().keyspace));
         RequestTracker.instance.set(sensors);
 
         Context context = Context.from(message.payload.update.metadata());
