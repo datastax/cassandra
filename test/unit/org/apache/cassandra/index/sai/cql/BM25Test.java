@@ -1128,13 +1128,31 @@ public class BM25Test extends SAITester
                              "CREATE CUSTOM INDEX ON %s(FULL(m)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
     }
 
+    @Test
+    public void testEmptyQueryTerms()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, s text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'english' }");
+        execute("INSERT INTO %s (k, s) VALUES (0, 'apple')");
+
+        Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY s BM25 OF '' LIMIT 5"))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining("BM25 query must contain at least one term");
+
+        Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY s BM25 OF 'the' LIMIT 5"))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining("BM25 query must contain at least one term");
+
+        assertRows(execute("SELECT k FROM %s ORDER BY s BM25 OF 'apple' LIMIT 5"), row(0));
+    }
+
     /**
      * Verify that the selectivity of the filtering effects of BM25 ordering is considered at query planning,
      * so BM25's index scan can be preferred to other filters depending on that selectivity.
      * Also verify that index hints are considered when selecting between filter-then-sort and sort-then-filter.
      */
     @Test
-    public void testPlaningOnHybridQueries()
+    public void testPlanningOnHybridQueries()
     {
         createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
         String literalIndex = createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
@@ -1176,20 +1194,20 @@ public class BM25Test extends SAITester
         // Verify hybrid queries
 
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5",
-                              Plan.NumericIndexScan.class, // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+                              Plan.Bm25IndexScan.class,
                               row(0), row(1), row(2));
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'orange' LIMIT 5",
-                              Plan.NumericIndexScan.class, // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+                              Plan.Bm25IndexScan.class,
                               row(3), row(4), row(5), row(6), row(7));
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'banana' LIMIT 5",
-                              Plan.NumericIndexScan.class); // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+                              Plan.Bm25IndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'apple' LIMIT 5",
                               Plan.NumericIndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5",
                               Plan.NumericIndexScan.class,
                               row(8), row(9));
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'banana' LIMIT 5",
-                              Plan.NumericIndexScan.class); // TODO: should be Bm25IndexScanto be fixed by CNDB-19255
+                              Plan.Bm25IndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'apple' LIMIT 5",
                               Plan.NumericIndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'orange' LIMIT 5",
