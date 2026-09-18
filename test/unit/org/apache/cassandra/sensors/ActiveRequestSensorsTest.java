@@ -20,11 +20,13 @@ package org.apache.cassandra.sensors;
 
 import java.util.Collection;
 import java.util.Optional;
+import java.util.Set;
 
 import org.junit.Before;
 import org.junit.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.apache.cassandra.schema.SchemaConstants.SYSTEM_KEYSPACE_NAME;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -225,6 +227,81 @@ public class ActiveRequestSensorsTest
         assertThat(allSensors).hasSize(4);
         assertThat(allSensors).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context1, type2).get(),
                                                          sensors.getSensor(context2, type1).get(), sensors.getSensor(context2, type2).get());
+    }
+
+    @Test
+    public void testAllowedKeyspacePermitsRegistration()
+    {
+        RequestSensors restricted = new ActiveRequestSensors(Set.of("ks1"), () -> sensorsRegistry);
+        restricted.registerSensor(context1, type1); // context1 is "ks1"
+        assertThat(restricted.getSensor(context1, type1)).isPresent();
+    }
+
+    @Test
+    public void testDisallowedKeyspaceDropsSensor()
+    {
+        RequestSensors restricted = new ActiveRequestSensors(Set.of("ks1"), () -> sensorsRegistry);
+        restricted.registerSensor(context2, type2); // context2 is "ks2", not allowed
+        assertThat(restricted.getSensor(context2, type2)).isEmpty();
+    }
+
+    @Test
+    public void testRequestContextAlwaysAllowed()
+    {
+        RequestSensors restricted = new ActiveRequestSensors(Set.of("ks1"), () -> sensorsRegistry);
+        Context requestCtx = Context.from(restricted);
+        restricted.registerSensor(requestCtx, type1);
+        assertThat(restricted.getSensor(requestCtx, type1)).isPresent();
+    }
+
+    @Test
+    public void testSystemKeyspaceAlwaysAllowed()
+    {
+        RequestSensors restricted = new ActiveRequestSensors(Set.of("ks1"), () -> sensorsRegistry);
+        Context systemCtx = new Context(SYSTEM_KEYSPACE_NAME, "paxos", "id-system");
+        restricted.registerSensor(systemCtx, type1);
+        assertThat(restricted.getSensor(systemCtx, type1)).isPresent();
+    }
+
+    @Test
+    public void testNullAllowedKeyspacesPermitsAll()
+    {
+        RequestSensors unrestricted = new ActiveRequestSensors(null, () -> sensorsRegistry);
+        unrestricted.registerSensor(context1, type1);
+        unrestricted.registerSensor(context2, type2);
+        assertThat(unrestricted.getSensor(context1, type1)).isPresent();
+        assertThat(unrestricted.getSensor(context2, type2)).isPresent();
+    }
+
+    @Test
+    public void testDisallowedKeyspaceSensorNotSyncedToRegistry()
+    {
+        RequestSensors restricted = new ActiveRequestSensors(Set.of("ks1"), () -> sensorsRegistry);
+        restricted.registerSensor(context2, type2); // dropped
+        restricted.incrementSensor(context2, type2, 5.0);
+        restricted.syncAllSensors();
+        verify(sensorsRegistry, times(0)).incrementSensor(eq(context2), eq(type2), eq(5.0));
+    }
+
+    @Test
+    public void testGetKeyspacesReturnsAllowedSet()
+    {
+        RequestSensors restricted = new ActiveRequestSensors(Set.of("ks1", "ks2"), () -> sensorsRegistry);
+        assertThat(restricted.getKeyspaces()).containsExactlyInAnyOrder("ks1", "ks2");
+    }
+
+    @Test
+    public void testGetKeyspacesIsUnmodifiable()
+    {
+        RequestSensors restricted = new ActiveRequestSensors(Set.of("ks1"), () -> sensorsRegistry);
+        assertThat(restricted.getKeyspaces()).isUnmodifiable();
+    }
+
+    @Test
+    public void testGetKeyspacesReturnsEmptySetWhenUnrestricted()
+    {
+        RequestSensors unrestricted = new ActiveRequestSensors(null, () -> sensorsRegistry);
+        assertThat(unrestricted.getKeyspaces()).isEmpty();
     }
 
 }

@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Set;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,7 +58,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         validateTransientStatus(message);
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(Set.of(command.metadata().keyspace));
         Context context = Context.from(command);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);

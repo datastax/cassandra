@@ -34,7 +34,7 @@ import static org.junit.Assert.*;
 public class SSTableContextManagerTest extends SAITester
 {
     @Test
-    public void shouldRefreshDescriptorWhenRequestDifferentIndexes()
+    public void shouldRefreshDescriptorWhenFromDifferentIndexes()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, v1 int, v2 int)");
 
