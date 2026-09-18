@@ -33,6 +33,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -127,43 +128,38 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
         return SortingIterator.createCloseable(
             orderer.getComparator(),
             keys,
-            key ->
-            {
-                var slices = (key.isStaticRow() || !key.hasClustering())
-                             ? Slices.ALL
-                             : Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
-                // TODO if we end up needing to read the row still, is it better to store offset and use reader.unfilteredAt?
-                try (var iter = reader.iterator(key.partitionKey(), slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
-                {
-                    if (indexContext.getDefinition().isStatic())
-                    {
-                        Row staticRow = iter.staticRow();
-                        Cell<?> cell = staticRow != null ? staticRow.getCell(indexContext.getDefinition()) : null;
-                        if (cell == null)
-                            return null;
-                        var byteComparable = encode(cell.buffer());
-                        return new PrimaryKeyWithByteComparable(indexContext, reader.descriptor.id, key, byteComparable);
-                    }
-
-                    while (iter.hasNext())
-                    {
-                        var unfiltered = iter.next();
-                        if (unfiltered.isRow())
-                        {
-                            Row row = (Row) unfiltered;
-                            var cell = row.getCell(indexContext.getDefinition());
-                            if (cell == null)
-                                continue;
-                            // We encode the bytes to make sure they compare correctly.
-                            var byteComparable = encode(cell.buffer());
-                            return new PrimaryKeyWithByteComparable(indexContext, reader.descriptor.id, key, byteComparable);
-                        }
-                    }
-                }
-                return null;
-            },
+            key -> readSortKey(reader, key),
             Runnables.doNothing()
         );
+    }
+
+    private PrimaryKeyWithSortKey readSortKey(SSTableReader reader, PrimaryKey key)
+    {
+        var slices = (key.isStaticRow() || !key.hasClustering())
+                     ? Slices.ALL
+                     : Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
+        assert !indexContext.getDefinition().isStatic()
+            : "Generic ORDER BY on static column " + indexContext.getDefinition().name + " is not supported; " +
+              "IndexContext.supports() should have rejected ORDER_BY_ASC/DESC for static columns";
+        try (var iter = reader.iterator(key.partitionKey(), slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
+        {
+            return readRegularSortKey(reader, key, iter);
+        }
+    }
+
+    private PrimaryKeyWithSortKey readRegularSortKey(SSTableReader reader, PrimaryKey key, UnfilteredRowIterator iter)
+    {
+        while (iter.hasNext())
+        {
+            var unfiltered = iter.next();
+            if (!unfiltered.isRow())
+                continue; // NOSONAR: S135 — the second continue below is in a different loop path; each branch exits
+            Row row = (Row) unfiltered;
+            var cell = row.getCell(indexContext.getDefinition());
+            if (cell != null)
+                return new PrimaryKeyWithByteComparable(indexContext, reader.descriptor.id, key, encode(cell.buffer()));
+        }
+        return null;
     }
 
     private ByteComparable encode(ByteBuffer input)

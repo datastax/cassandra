@@ -50,6 +50,7 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.ReorderingPostingList;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
@@ -531,128 +532,206 @@ public class V2VectorIndexSearcher extends IndexSearcher
                        ? (int) (metadata.maxSSTableRowId - metadata.minSSTableRowId + 1)
                        : keysInRange.size();
         var segmentOrdinalPairs = new SegmentRowIdOrdinalPairs(capacity);
-        int lastSegmentRowId = -1;
         try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var ordinalsView = graph.getOrdinalsView())
         {
             // track whether we are saving comparisons by using binary search to skip ahead
             // (if most of the keys belong to this sstable, bsearch will actually be slower)
             var comparisonsSavedByBsearch = new QuickSlidingWindowReservoir(10);
-            boolean preferSeqScanToBsearch = false;
-
-            for (int i = 0; i < keysInRange.size();)
+            var state = new KeyIterationState();
+            for (int i = 0; i < keysInRange.size(); i = state.nextI)
             {
-                // turn the pk back into a row id, with a fast path for the case where the pk is from this sstable
+                state.nextI = i + 1;
                 var primaryKey = keysInRange.get(i);
 
                 // A static-column predicate produces PrimaryKeys with STATIC_CLUSTERING. The vector index stores
                 // regular-row keys, so we must expand the static key to all regular rows in the same partition.
                 if (primaryKey.isStaticRow() || !primaryKey.hasClustering())
                 {
-                    i++;
-                    // Use ceiling to find the first regular-row ID in this partition.
-                    // Static rows sort before all regular rows in the same partition, so ceiling
-                    // on a static key gives us the first regular row in the partition.
-                    long firstRowId = primaryKeyMap.ceiling(primaryKey);
-                    if (firstRowId < 0 || firstRowId > metadata.maxSSTableRowId)
-                        continue;
-                    // Walk forward adding rows until we leave the partition.
-                    for (long rowId = firstRowId; rowId <= metadata.maxSSTableRowId; rowId++)
-                    {
-                        var rowKey = primaryKeyMap.primaryKeyFromRowId(rowId);
-                        if (!rowKey.partitionKey().equals(primaryKey.partitionKey()))
-                            break;
-                        if (rowId < metadata.minSSTableRowId)
-                            continue;
-                        int segmentRowId = metadata.toSegmentRowId(rowId);
-                        // Do not enforce monotonicity here: static keys from different partitions may
-                        // yield segment row IDs in non-ascending order relative to each other.
-                        int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                        if (ordinal >= 0)
-                            segmentOrdinalPairs.add(segmentRowId, ordinal);
-                    }
-                    continue;
+                    expandStaticKeyToRows(primaryKey, primaryKeyMap, ordinalsView, segmentOrdinalPairs);
                 }
-
-                long sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
-
-                if (sstableRowId < 0)
+                else
                 {
-                    // The given PK doesn't exist in this sstable, so sstableRowId is the inversion
-                    // of the next-highest row ID.  Invert it back to get the ceiling row ID.
-                    long ceilingRowId = ~sstableRowId;
-                    if (ceilingRowId > metadata.maxSSTableRowId)
-                    {
-                        // The next greatest primary key is greater than all the primary keys in this segment
+                    boolean done = processRegularKey(keysInRange, i, primaryKey, primaryKeyMap, ordinalsView,
+                                                     segmentOrdinalPairs, comparisonsSavedByBsearch, state);
+                    if (done)
                         break;
-                    }
-                    var ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
-
-                    boolean ceilingPrimaryKeyMatchesKeyInRange = false;
-                    // adaptively choose either seq scan or bsearch to skip ahead in keysInRange until
-                    // we find one at least as large as the ceiling key
-                    if (preferSeqScanToBsearch)
-                    {
-                        int keysToSkip = 1; // We already know that the PK at index i is not equal to the ceiling PK.
-                        int cmp = 1; // Need to initialize. The value is irrelevant.
-                        for ( ; i + keysToSkip < keysInRange.size(); keysToSkip++)
-                        {
-                            var nextPrimaryKey = keysInRange.get(i + keysToSkip);
-                            cmp = nextPrimaryKey.compareTo(ceilingPrimaryKey);
-                            if (cmp >= 0)
-                                break;
-                        }
-                        comparisonsSavedByBsearch.update(keysToSkip - (int) ceil(logBase2(keysInRange.size() - i)));
-                        i += keysToSkip;
-                        ceilingPrimaryKeyMatchesKeyInRange = cmp == 0;
-                    }
-                    else
-                    {
-                        // Use a sublist to only search the remaining primary keys in range.
-                        var keysRemaining = keysInRange.subList(i, keysInRange.size());
-                        int nextIndexForCeiling = Collections.binarySearch(keysRemaining, ceilingPrimaryKey);
-                        if (nextIndexForCeiling < 0)
-                            // We got the inversion of the insertion point. Invert it to get the insertion point.
-                            nextIndexForCeiling = ~nextIndexForCeiling;
-                        else
-                            ceilingPrimaryKeyMatchesKeyInRange = true;
-
-                        comparisonsSavedByBsearch.update(nextIndexForCeiling - (int) ceil(logBase2(keysRemaining.size())));
-                        i += nextIndexForCeiling;
-                    }
-
-                    // update our estimate
-                    preferSeqScanToBsearch = comparisonsSavedByBsearch.size() >= 10
-                                             && comparisonsSavedByBsearch.getMean() < 0;
-                    if (ceilingPrimaryKeyMatchesKeyInRange)
-                        sstableRowId = ceilingRowId;
-                    else
-                        continue; // without incrementing i further. ceilingPrimaryKey is less than the PK at index i.
                 }
-                // Increment here to simplify the sstableRowId < 0 logic.
-                i++;
+            }
+        }
+        return segmentOrdinalPairs;
+    }
 
-                // During compaction, the SegmentMetadata is written based on the rows with vector values. Therefore,
-                // we can find a row that has a row id but is outside the min/max range of the segment. We can ignore
-                // these rows here and skip the row id to ordinal conversion that would result in a -1 ordinal.
-                if (sstableRowId < metadata.minSSTableRowId || sstableRowId > metadata.maxSSTableRowId)
-                    continue;
+    /**
+     * Mutable iteration state threaded through {@link #flatmapPrimaryKeysToBitsAndRows} to avoid
+     * primitive-array ref passing for values that change across loop iterations.
+     */
+    private static final class KeyIterationState
+    {
+        int nextI = 0;
+        int lastSegmentRowId = -1;
+        boolean preferSeqScan = false;
+    }
 
-                // convert the global row id to segment row id and from segment row id to graph ordinal
-                int segmentRowId = metadata.toSegmentRowId(sstableRowId);
-                // This requirement is required by the ordinals view. There are cases where we have broken this
-                // requirement, and in order to make future debugging easier, we check here and throw an exception
-                // with additional detail.
-                if (segmentRowId <= lastSegmentRowId)
-                    throw new IllegalStateException("Row ids must ascend monotonically. Got " + segmentRowId + " after " + lastSegmentRowId
-                                                    + " for " + primaryKey + " on sstable " + primaryKeyMap.getSSTableId());
-                lastSegmentRowId = segmentRowId;
+    // Sentinel values returned by resolveCeilingRowId to signal control flow to the caller.
+    private static final long DONE_SENTINEL = Long.MIN_VALUE;     // caller should break
+    private static final long SKIP_SENTINEL = Long.MIN_VALUE + 1; // caller should continue (no i increment)
+
+    /**
+     * Handles the case where {@code exactRowIdOrInvertedCeiling} returned a negative (inverted) row id,
+     * meaning the primary key does not exist in this SSTable.  Resolves the ceiling row id, updates
+     * {@code state.nextI} and {@code state.preferSeqScan}, and returns the resolved row id.
+     *
+     * @return the resolved sstable row id, {@link #DONE_SENTINEL} if the caller should break, or
+     *         {@link #SKIP_SENTINEL} if the caller should advance to {@code state.nextI} without
+     *         recording a pair.
+     */
+    private long resolveCeilingRowId(List<PrimaryKey> keysInRange, int i, long invertedRowId,
+                                     KeyIterationState state, QuickSlidingWindowReservoir comparisonsSaved,
+                                     PrimaryKeyMap primaryKeyMap) throws IOException
+    {
+        long ceilingRowId = ~invertedRowId;
+        if (ceilingRowId > metadata.maxSSTableRowId)
+            return DONE_SENTINEL;
+
+        var ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
+        // adaptively choose either seq scan or bsearch to skip ahead in keysInRange until
+        // we find one at least as large as the ceiling key
+        int[] result = skipToOrFindCeiling(keysInRange, i, ceilingPrimaryKey, state.preferSeqScan, comparisonsSaved);
+        state.nextI = result[0] + (result[2] != 0 ? 1 : 0); // advance past matched key
+        state.preferSeqScan = result[1] != 0;
+        boolean matched = result[2] != 0;
+        return matched ? ceilingRowId : SKIP_SENTINEL;
+    }
+
+    /**
+     * Converts {@code sstableRowId} to a segment row id and ordinal, adds the pair to
+     * {@code segmentOrdinalPairs}, and updates {@code state.lastSegmentRowId}.
+     */
+    private void addSegmentPair(PrimaryKey primaryKey, PrimaryKeyMap primaryKeyMap,
+                                OrdinalsView ordinalsView, SegmentRowIdOrdinalPairs segmentOrdinalPairs,
+                                long sstableRowId, KeyIterationState state) throws IOException
+    {
+        int segmentRowId = metadata.toSegmentRowId(sstableRowId);
+        // This requirement is required by the ordinals view. There are cases where we have broken this
+        // requirement, and in order to make future debugging easier, we check here and throw an exception
+        // with additional detail.
+        if (segmentRowId <= state.lastSegmentRowId)
+            throw new IllegalStateException("Row ids must ascend monotonically. Got " + segmentRowId + " after "
+                                            + state.lastSegmentRowId + " for " + primaryKey
+                                            + " on sstable " + primaryKeyMap.getSSTableId());
+        state.lastSegmentRowId = segmentRowId;
+        int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+        if (ordinal >= 0)
+            segmentOrdinalPairs.add(segmentRowId, ordinal);
+    }
+
+    /**
+     * Processes a single regular (non-static) primary key: looks up its sstable row id, handles the
+     * missing-key (inverted ceiling) case via {@link #resolveCeilingRowId}, checks the segment range,
+     * and adds the pair if in range.  Updates {@code state} as a side-effect.
+     *
+     * @return {@code true} if the outer loop should stop (all remaining keys are beyond this segment).
+     */
+    private boolean processRegularKey(List<PrimaryKey> keysInRange, int i, PrimaryKey primaryKey,
+                                      PrimaryKeyMap primaryKeyMap, OrdinalsView ordinalsView,
+                                      SegmentRowIdOrdinalPairs segmentOrdinalPairs,
+                                      QuickSlidingWindowReservoir comparisonsSaved,
+                                      KeyIterationState state) throws IOException
+    {
+        long sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
+
+        if (sstableRowId < 0)
+        {
+            // The given PK doesn't exist in this sstable; resolve ceiling and advance i.
+            sstableRowId = resolveCeilingRowId(keysInRange, i, sstableRowId, state, comparisonsSaved, primaryKeyMap);
+            if (sstableRowId == DONE_SENTINEL)
+                return true;
+            if (sstableRowId == SKIP_SENTINEL)
+                return false;
+        }
+
+        // During compaction, the SegmentMetadata is written based on the rows with vector values. Therefore,
+        // we can find a row that has a row id but is outside the min/max range of the segment. We can ignore
+        // these rows here and skip the row id to ordinal conversion that would result in a -1 ordinal.
+        if (sstableRowId >= metadata.minSSTableRowId && sstableRowId <= metadata.maxSSTableRowId)
+            addSegmentPair(primaryKey, primaryKeyMap, ordinalsView, segmentOrdinalPairs, sstableRowId, state);
+        return false;
+    }
+
+    /**
+     * Expands a static/partition-only primary key to all regular rows in the same partition within this segment,
+     * adding each matching row's segment-row-id and ordinal to {@code segmentOrdinalPairs}.
+     */
+    private void expandStaticKeyToRows(PrimaryKey staticKey,
+                                       PrimaryKeyMap primaryKeyMap,
+                                       OrdinalsView ordinalsView,
+                                       SegmentRowIdOrdinalPairs segmentOrdinalPairs) throws IOException
+    {
+        // Static rows sort before all regular rows in the same partition, so ceiling on a static key
+        // gives us the first regular row in the partition.
+        long firstRowId = primaryKeyMap.ceiling(staticKey);
+        if (firstRowId < 0 || firstRowId > metadata.maxSSTableRowId)
+            return;
+        // Walk forward adding rows until we leave the partition.
+        long rowId = firstRowId;
+        while (rowId <= metadata.maxSSTableRowId)
+        {
+            var rowKey = primaryKeyMap.primaryKeyFromRowId(rowId);
+            if (!rowKey.partitionKey().equals(staticKey.partitionKey()))
+                break;
+            if (rowId >= metadata.minSSTableRowId)
+            {
+                int segmentRowId = metadata.toSegmentRowId(rowId);
+                // Do not enforce monotonicity here: static keys from different partitions may
+                // yield segment row IDs in non-ascending order relative to each other.
                 int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
                 if (ordinal >= 0)
                     segmentOrdinalPairs.add(segmentRowId, ordinal);
             }
+            rowId++;
         }
-        return segmentOrdinalPairs;
+    }
+
+    /**
+     * Advances index {@code i} in {@code keysInRange} until it reaches a key &gt;= {@code ceilingPrimaryKey},
+     * using either sequential scan or binary search depending on {@code preferSeqScan}.
+     *
+     * @return a 3-element int array: [new i, preferSeqScanToBsearch (0/1), ceilingMatched (0/1)]
+     */
+    private int[] skipToOrFindCeiling(List<PrimaryKey> keysInRange, int i, PrimaryKey ceilingPrimaryKey,
+                                      boolean preferSeqScan, QuickSlidingWindowReservoir comparisonsSaved)
+    {
+        boolean matched = false;
+        if (preferSeqScan)
+        {
+            int keysToSkip = 1; // We already know that the PK at index i is not equal to the ceiling PK.
+            int cmp = 1;        // Need to initialize. The value is irrelevant.
+            while (i + keysToSkip < keysInRange.size())
+            {
+                cmp = keysInRange.get(i + keysToSkip).compareTo(ceilingPrimaryKey);
+                if (cmp >= 0)
+                    break;
+                keysToSkip++;
+            }
+            comparisonsSaved.update(keysToSkip - (long) ceil(logBase2(keysInRange.size() - i)));
+            i += keysToSkip;
+            matched = cmp == 0;
+        }
+        else
+        {
+            // Use a sublist to only search the remaining primary keys in range.
+            var keysRemaining = keysInRange.subList(i, keysInRange.size());
+            int nextIndexForCeiling = Collections.binarySearch(keysRemaining, ceilingPrimaryKey);
+            if (nextIndexForCeiling < 0)
+                nextIndexForCeiling = ~nextIndexForCeiling; // invert insertion point
+            else
+                matched = true;
+            comparisonsSaved.update(nextIndexForCeiling - (long) ceil(logBase2(keysRemaining.size())));
+            i += nextIndexForCeiling;
+        }
+        boolean newPreferSeqScan = comparisonsSaved.size() >= 10 && comparisonsSaved.getMean() < 0;
+        return new int[]{ i, newPreferSeqScan ? 1 : 0, matched ? 1 : 0 };
     }
 
     public static double logBase2(double number) {
