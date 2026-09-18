@@ -209,7 +209,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
 
         rowIndexFileBuilder.withChunkCache(chunkCache);
         rowIndexFileBuilder.mmapped(ioOptions.indexDiskAccessMode);
-        if (compressionMetadata != null && compressionMetadata.parameters.getSstableCompressor().encryptionOnly() != null)
+        if (compressionMetadata != null && descriptor.version.indicesAreEncrypted() && compressionMetadata.parameters.getSstableCompressor().encryptionOnly() != null)
             rowIndexFileBuilder.withCompressionMetadata(compressionMetadata).encryptionOnly();
 
         return rowIndexFileBuilder;
@@ -224,7 +224,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
 
         partitionIndexFileBuilder.withChunkCache(chunkCache);
         partitionIndexFileBuilder.mmapped(ioOptions.indexDiskAccessMode);
-        if (compressionMetadata != null && compressionMetadata.parameters.getSstableCompressor().encryptionOnly() != null)
+        if (compressionMetadata != null && descriptor.version.indicesAreEncrypted() && compressionMetadata.parameters.getSstableCompressor().encryptionOnly() != null)
             partitionIndexFileBuilder.withCompressionMetadata(compressionMetadata).encryptionOnly();
 
         return partitionIndexFileBuilder;

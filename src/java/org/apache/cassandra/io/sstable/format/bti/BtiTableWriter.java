@@ -218,8 +218,8 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             boolean compression = b.getComponents().contains(SSTableFormat.Components.COMPRESSION_INFO);
             TableMetadata metadata = b.getTableMetadataRef().getLocal();
             CompressionParams params = metadata.params.compression;
-            ICompressor encryptor = compression ? params.getSstableCompressor().encryptionOnly() : null;
-
+            ICompressor encryptor = compression && b.descriptor.version.indicesAreEncrypted() ? params.getSstableCompressor().encryptionOnly()
+                                                                                              : null;
             // Build into locals so that a failure partway through construction can release whatever was
             // already created: SortedTableWriter's constructor only sees a null indexWriter in that case
             // and cannot close any of it (including the bloom filter created by the super constructor).
@@ -370,7 +370,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             {
                 partitionIndex.complete();
                 partitionIndexCompleted = true;
-                
+
                 // Update FileHandle builders for encrypted writers
                 rowIndexWriter.updateFileHandle(rowIndexFHBuilder);
                 partitionIndexWriter.updateFileHandle(partitionIndexFHBuilder);
