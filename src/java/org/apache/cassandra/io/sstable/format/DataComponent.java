@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.io.sstable.format;
 
-import java.util.Optional;
-
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config.FlushCompression;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -108,40 +106,20 @@ public class DataComponent
         CompressionParams compressionParams = metadata.params.compression;
         final ICompressor compressor = compressionParams.getSstableCompressor();
 
-        if (null != compressor && operationType == OperationType.FLUSH)
+        if (compressionParams.getSstableCompressor() != null)
         {
-            // When we are flushing out of the memtable throughput of the compressor is critical as flushes,
-            // especially of large tables, can queue up and potentially block writes.
-            // This optimization allows us to fall back to a faster compressor if a particular
-            // compression algorithm indicates we should. See CASSANDRA-15379 for more details.
-            switch (flushCompression)
+            if (operationType == OperationType.FLUSH)
             {
-                // It is relatively easier to insert a Noop compressor than to disable compressed writing
-                // entirely as the "compression" member field is provided outside the scope of this class.
-                // It may make sense in the future to refactor the ownership of the compression flag so that
-                // We can bypass the CompressedSequentialWriter in this case entirely.
-                case none:
-                    compressionParams = CompressionParams.NOOP;
-                    break;
-                case fast:
-                    if (!compressor.recommendedUses().contains(ICompressor.Uses.FAST_COMPRESSION))
-                    {
-                        compressionParams = CompressionParams.FAST;
-                        break;
-                    }
-                    // else fall through
-                case adaptive:
-                    if (!compressor.recommendedUses().contains(ICompressor.Uses.FAST_COMPRESSION))
-                    {
-                        compressionParams = CompressionParams.FAST_ADAPTIVE;
-                        break;
-                    }
-                    // else fall through
-                case table:
-                default:
-                    compressionParams = Optional.ofNullable(compressionParams.forUse(ICompressor.Uses.FAST_COMPRESSION))
-                                                .orElse(compressionParams);
-                    break;
+                // When we are flushing out of the memtable throughput of the compressor is critical as flushes,
+                // especially of large tables, can queue up and potentially block writes.
+                // This optimization allows us to fall back to a faster compressor if a particular
+                // compression algorithm indicates we should. See CASSANDRA-15379 for more details.
+                compressionParams = compressionParams.forFlush(metadata.keyspace);
+            }
+            else
+            {
+                // Allows to plugin custom per-keyspace resolution of compressionParams
+                compressionParams = compressionParams.forCompaction(metadata.keyspace);
             }
         }
         return compressionParams;
