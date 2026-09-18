@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Collections;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -59,5 +60,11 @@ public class NoOpRequestSensors implements RequestSensors
     public void syncAllSensors()
     {
 
+    }
+
+    @Override
+    public Set<String> getKeyspaces()
+    {
+        return Collections.emptySet();
     }
 }

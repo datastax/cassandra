@@ -474,6 +474,11 @@ public class BatchStatement implements CQLStatement
                     SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.READ_EXECUTION_TIME);
                 }
             }
+            // READ_COST, WRITE_COST and TOTAL_COST are request-scoped — one entry covering all tables in the batch.
+            Context requestContext = Context.from(sensors);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, requestContext, org.apache.cassandra.sensors.Type.READ_COST);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, requestContext, org.apache.cassandra.sensors.Type.WRITE_COST);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, requestContext, org.apache.cassandra.sensors.Type.TOTAL_COST);
         }
         return result;
     }

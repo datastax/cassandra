@@ -146,12 +146,16 @@ public class UpdateStatement extends ModificationStatement
         {
             sensors.syncAllSensors();
 
+            Context requestContext = Context.from(sensors);
             SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
             SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.INDEX_WRITE_BYTES);
             SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, requestContext, Type.WRITE_COST);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, requestContext, Type.TOTAL_COST);
             // CAS updates incorporate read sensors (Paxos read phase bytes + precondition read execution time)
             SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
             SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, requestContext, Type.READ_COST);
         }
 
         return result;
