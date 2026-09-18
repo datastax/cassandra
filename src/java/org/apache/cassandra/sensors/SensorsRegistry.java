@@ -31,6 +31,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
@@ -337,7 +338,7 @@ public class SensorsRegistry implements SchemaChangeListener
     /**
      * To get best performance we are not returning Optional here.
      *
-     * <p>For a {@link Context#request()} context the sensor is stored only in {@link #identity}
+     * <p>For a {@link Context#from(RequestSensors)} context the sensor is stored only in {@link #identity}
      * and {@link #byType} — it is not indexed by keyspace or table-id, and does not require the
      * keyspace/table to be known to the schema.
      */
@@ -359,16 +360,19 @@ public class SensorsRegistry implements SchemaChangeListener
             if (!keyspaces.contains(keyspace) || !tableIds.contains(tableId))
                 return null;
 
+            AtomicBoolean created = new AtomicBoolean(false);
             Sensor[] typeSensors = identity.compute(context, (key, types) -> {
                 Sensor[] computed = types != null ? types : new Sensor[Type.values().length];
                 if (computed[type.ordinal()] == null)
                 {
                     computed[type.ordinal()] = new Sensor(context, type);
-                    notifyOnSensorCreated(computed[type.ordinal()]);
+                    created.set(true);
                 }
                 return computed;
             });
             sensor = typeSensors[type.ordinal()];
+            if (created.get())
+                notifyOnSensorCreated(sensor);
 
             Set<Sensor> keyspaceSet = byKeyspace.get(keyspace);
             keyspaceSet = keyspaceSet != null ? keyspaceSet : byKeyspace.computeIfAbsent(keyspace, (ignored) -> Sets.newConcurrentHashSet());
@@ -391,7 +395,7 @@ public class SensorsRegistry implements SchemaChangeListener
     }
 
     /**
-     * Creates (or returns existing) sensor for a {@link Context#request()} context.
+     * Creates (or returns existing) sensor for a {@link Context#from(RequestSensors)} context.
      * Stored in {@link #identity} and {@link #byType} only — never in byKeyspace or byTableId.
      */
     private Sensor getOrCreateRequestSensor(Context context, Type type)
@@ -400,16 +404,19 @@ public class SensorsRegistry implements SchemaChangeListener
         stripedUpdateLock.getAt(getLockStripe(requestOwner.hashCode())).readLock().lock();
         try
         {
+            AtomicBoolean created = new AtomicBoolean(false);
             Sensor[] typeSensors = identity.compute(context, (key, types) -> {
                 Sensor[] computed = types != null ? types : new Sensor[Type.values().length];
                 if (computed[type.ordinal()] == null)
                 {
                     computed[type.ordinal()] = new Sensor(context, type);
-                    notifyOnSensorCreated(computed[type.ordinal()]);
+                    created.set(true);
                 }
                 return computed;
             });
             Sensor sensor = typeSensors[type.ordinal()];
+            if (created.get())
+                notifyOnSensorCreated(sensor);
 
             Set<Sensor> opSet = byType.get(sensor.getType().name());
             opSet = opSet != null ? opSet : byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
