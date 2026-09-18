@@ -697,6 +697,12 @@ public class ChunkCache
         }
 
         @Override
+        public long positionForSkip(long currentPosition, int bytesToSkip)
+        {
+            return source.positionForSkip(currentPosition, bytesToSkip);
+        }
+
+        @Override
         public void close()
         {
             source.close();
