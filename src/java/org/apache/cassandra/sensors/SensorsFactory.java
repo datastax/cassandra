@@ -19,6 +19,7 @@
 package org.apache.cassandra.sensors;
 
 import java.util.Optional;
+import java.util.Set;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.FBUtilities;
@@ -26,12 +27,16 @@ import org.apache.cassandra.utils.FBUtilities;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SENSORS_FACTORY;
 
 /**
- * Provides a factory to customize the behaviour of sensors tracking in CNDB by providing two factory methods:
+ * Provides a factory to customize the behaviour of sensors tracking by providing factory methods:
  * <ul>
- *   <li>{@link SensorsFactory#createRequestSensors} provides a {@link RequestSensors} implementation to track sensors per keyspace.</li>
- *   <li>{@link SensorsFactory#createSensorEncoder} provides a {@link SensorEncoder} implementation to control how sensors are encoded as string on the wire.</li>
+ *   <li>{@link #createRequestSensors} — creates a {@link RequestSensors} instance scoped to a set of keyspaces,
+ *       used by coordinators and replicas to track per-request sensor values.</li>
+ *   <li>{@link #createSensorEncoder} — creates a {@link SensorEncoder} that controls how sensor names are
+ *       encoded on the wire.</li>
  * </ul>
- * The concrete implementation of this factory is configured by the {@link CassandraRelevantProperties#SENSORS_FACTORY} system property.
+ * The concrete implementation is selected at startup via the
+ * {@link CassandraRelevantProperties#SENSORS_FACTORY} system property; when unset the default no-op
+ * implementation is used, which disables all sensor tracking.
  */
 public interface SensorsFactory
 {
@@ -59,10 +64,10 @@ public interface SensorsFactory
      * handling requests at various stages/thread pools (e.g. when processing CQL queries or when applying verbs).
      * Consequently, implementations should be very efficient.
      *
-     * @param keyspaces the keyspaces associated with the request.
+     * @param keyspaces the keyspaces associated with the request, or an empty set to allow all keyspaces.
      * @return a {@link RequestSensors} instance. The default implementation returns a singleton no-op instance.
      */
-    default RequestSensors createRequestSensors(String... keyspaces)
+    default RequestSensors createRequestSensors(Set<String> keyspaces)
     {
         return NoOpRequestSensors.instance;
     }
@@ -74,4 +79,5 @@ public interface SensorsFactory
     {
         return NOOP_SENSOR_ENCODER;
     }
+
 }

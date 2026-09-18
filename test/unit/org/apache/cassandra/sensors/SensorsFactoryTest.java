@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Set;
+
 import org.junit.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,10 +30,10 @@ public class SensorsFactoryTest
     public void testDefaultRequestSensors()
     {
         SensorsFactory factory = SensorsFactory.instance;
-        RequestSensors sensors = factory.createRequestSensors("ks1", "ks2");
+        RequestSensors sensors = factory.createRequestSensors(Set.of("ks1", "ks2"));
 
         assertThat(sensors).isInstanceOf(NoOpRequestSensors.class);
-        assertThat(factory.createRequestSensors("ks1", "ks2")).isSameAs(sensors);
+        assertThat(factory.createRequestSensors(Set.of("ks1", "ks2"))).isSameAs(sensors);
     }
 
     @Test

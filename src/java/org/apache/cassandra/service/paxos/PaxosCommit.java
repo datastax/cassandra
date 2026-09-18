@@ -19,6 +19,7 @@
 package org.apache.cassandra.service.paxos;
 
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import org.slf4j.Logger;
@@ -318,7 +319,7 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
         public void doVerb(Message<Agreed> message)
         {
             // Initialize the sensor and set ExecutorLocals
-            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
+            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.update.metadata().keyspace));
             Context context = Context.from(message.payload.update.metadata());
 
             // Commit phase writes the proposal to the table, so a read sensor is registered in addition to the write sensor

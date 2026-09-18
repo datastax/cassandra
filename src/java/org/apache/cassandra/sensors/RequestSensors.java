@@ -20,6 +20,7 @@ package org.apache.cassandra.sensors;
 
 import java.util.Collection;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Predicate;
 
 /**
@@ -28,6 +29,32 @@ import java.util.function.Predicate;
  */
 public interface RequestSensors
 {
+    /**
+     * The default request owner used by implementations that do not assign a unique per-request identity.
+     * All instances that return this value share a single request-level {@link Context} in the
+     * {@link SensorsRegistry}.
+     */
+    String DEFAULT_REQUEST_OWNER = "DEFAULT_REQUEST_OWNER";
+
+    /**
+     * Returns the owner identifier for this request, used to construct the request-level {@link Context}
+     * via {@link Context#from(RequestSensors)}.
+     *
+     * <p>Mirrors the role that keyspace/table/tableId play for table contexts: two request contexts with
+     * the same owner are considered equal and map to the same sensor in the {@link SensorsRegistry}.
+     * Implementations that assign a unique owner per request will therefore produce distinct registry entries,
+     * enabling per-request identification.
+     *
+     * <p>The default implementation returns {@link #DEFAULT_REQUEST_OWNER}, so all requests share one
+     * request-level context and registry entry by default.
+     *
+     * @return the request owner; never {@code null}
+     */
+    default String getRequestOwner()
+    {
+        return DEFAULT_REQUEST_OWNER;
+    }
+
     /**
      * Register a new sensor associated to the given context and type. It is up to the implementation to decide the
      * idempotency of this operation.
@@ -68,4 +95,12 @@ public interface RequestSensors
      * will be called at least once per request/response so it is recommended to make the implementation idempotent.
      */
     void syncAllSensors();
+
+    /**
+     * Returns the set of keyspaces this instance is restricted to, or an empty set if there is no restriction
+     * (i.e. all keyspaces are tracked). System keyspaces are always implicitly allowed regardless of this set.
+     *
+     * @return an unmodifiable set of allowed keyspace names, or an empty set for unrestricted instances
+     */
+    Set<String> getKeyspaces();
 }
