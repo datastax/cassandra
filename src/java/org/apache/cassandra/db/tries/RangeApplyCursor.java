@@ -34,6 +34,19 @@ class RangeApplyCursor<T, S extends RangeState<S>> implements Cursor<T>
     final RangeCursor<S> range;
     final Cursor<T> data;
 
+    @Override
+    public void close()
+    {
+        try
+        {
+            range.close();
+        }
+        finally
+        {
+            data.close();
+        }
+    }
+
     boolean atRange;
 
     RangeApplyCursor(BiFunction<S, T, T> resolver, RangeCursor<S> range, Cursor<T> data)

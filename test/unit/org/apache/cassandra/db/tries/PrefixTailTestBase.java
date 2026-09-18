@@ -50,7 +50,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
-public abstract class PrefixTailTestBase<T extends InMemoryBaseTrie<Object>, Q extends BaseTrie<Object, ?, Q>>
+public abstract class PrefixTailTestBase<T extends InMemoryBaseTrie<Object, ?, ?>, Q extends BaseTrie<Object, ?, Q>>
 {
     @BeforeClass
     public static void enableVerification()
