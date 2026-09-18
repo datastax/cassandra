@@ -33,6 +33,7 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -100,7 +101,7 @@ public class ActiveRequestSensors implements RequestSensors
     @VisibleForTesting
     public ActiveRequestSensors(Set<String> allowedKeyspaces, Supplier<SensorsRegistry> sensorsRegistry)
     {
-        this.allowedKeyspaces = allowedKeyspaces;
+        this.allowedKeyspaces = allowedKeyspaces == null ? null : ImmutableSet.copyOf(allowedKeyspaces);
         this.sensorsRegistry = sensorsRegistry;
     }
 
@@ -177,7 +178,7 @@ public class ActiveRequestSensors implements RequestSensors
      * <p>
      * Registration is always allowed when:
      * <ul>
-     *   <li>no keyspace restriction was set ({@code allowedKeyspaces == null}), or</li>
+     *   <li>no keyspace restriction was set ({@code allowedKeyspaces} null or empty)</li>
      *   <li>the context is a request context (no keyspace identity), or</li>
      *   <li>the context keyspace is a system keyspace (e.g. {@code system}, {@code system_schema},
      *       {@code system_auth}, …), or</li>
@@ -186,7 +187,7 @@ public class ActiveRequestSensors implements RequestSensors
      */
     private boolean isAllowed(Context context)
     {
-        if (allowedKeyspaces == null || context.isRequestContext())
+        if (allowedKeyspaces == null || allowedKeyspaces.isEmpty() || context.isRequestContext())
             return true;
         String keyspace = context.getKeyspace().orElse(null);
         return keyspace != null && (allowedKeyspaces.contains(keyspace) || SchemaConstants.isSystemKeyspace(keyspace));

@@ -27,7 +27,7 @@ import org.apache.cassandra.utils.FBUtilities;
  * Abstraction for computing a coordinator-level cost for read and write operations using {@link Sensor}s.
  *
  * <p>All three cost sensors — {@link Type#READ_COST}, {@link Type#WRITE_COST}, and
- * {@link Type#TOTAL_COST} — are request-scoped and keyed on {@link Context#request()}, so there is
+ * {@link Type#TOTAL_COST} — are request-scoped and keyed on {@link Context#from(RequestSensors)}, so there is
  * exactly one of each per request regardless of how many tables were touched.
  *
  * <p>The default implementation is {@link NoOpCostCalculator}, which always returns {@code 0}.
@@ -68,11 +68,11 @@ public interface CostCalculator
     /**
      * Populates all cost sensors that are registered in {@code sensors}, in the given order:
      * <ol>
-     *   <li>If a {@link Type#READ_COST} sensor is registered on {@link Context#request()}, invokes
+     *   <li>If a {@link Type#READ_COST} sensor is registered on {@link Context#from(RequestSensors)}, invokes
      *       {@link #computeReadCost(RequestSensors)} once and stores the result.</li>
-     *   <li>If a {@link Type#WRITE_COST} sensor is registered on {@link Context#request()}, invokes
+     *   <li>If a {@link Type#WRITE_COST} sensor is registered on {@link Context#from(RequestSensors)}, invokes
      *       {@link #computeWriteCost(RequestSensors)} once and stores the result.</li>
-     *   <li>If a {@link Type#TOTAL_COST} sensor is registered on {@link Context#request()}, invokes
+     *   <li>If a {@link Type#TOTAL_COST} sensor is registered on {@link Context#from(RequestSensors)}, invokes
      *       {@link #computeTotalCost(RequestSensors)} once and stores the result.</li>
      * </ol>
      * Sensors for cost types not registered in {@code sensors} are silently skipped.
