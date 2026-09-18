@@ -131,12 +131,10 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     private static class RandomAccessCompressedReader implements CompressedReader
     {
         private final ChannelProxy channel;
-        private final ThreadLocalByteBufferHolder bufferHolder;
 
         private RandomAccessCompressedReader(ChannelProxy channel, CompressionMetadata metadata)
         {
             this.channel = channel;
-            this.bufferHolder = new ThreadLocalByteBufferHolder(metadata.compressor().preferredBufferType());
         }
 
         @Override
@@ -165,13 +163,11 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     private static class ScanCompressedReader implements CompressedReader
     {
         private final ChannelProxy channel;
-        private final ThreadLocalByteBufferHolder bufferHolder;
         private final ThreadLocalReadAheadBuffer readAheadBuffer;
 
         private ScanCompressedReader(ChannelProxy channel, CompressionMetadata metadata, int readAheadBufferSize)
         {
             this.channel = channel;
-            this.bufferHolder = new ThreadLocalByteBufferHolder(metadata.compressor().preferredBufferType());
             this.readAheadBuffer = new ThreadLocalReadAheadBuffer(channel, readAheadBufferSize, metadata.compressor().preferredBufferType());
         }
 
