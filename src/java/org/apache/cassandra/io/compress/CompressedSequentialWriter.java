@@ -29,6 +29,7 @@ import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
 import java.util.zip.Checksum;
 
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -116,6 +117,13 @@ public class CompressedSequentialWriter extends SequentialWriter
         compressed = compressor.preferredBufferType().allocate(compressor.initialCompressedBufferLength(buffer.capacity()));
 
         maxCompressedLength = parameters.maxCompressedLength();
+        if (this.compressor.encryptionOnly() != null)
+        {
+            // This should have already been verified by CompressionParams. Make sure the invalid setting didn't somehow get through.
+            Preconditions.checkState(parameters.maxCompressedLength() == Integer.MAX_VALUE,
+                                     CompressionParams.MIN_COMPRESS_RATIO + " cannot be used in combination with encryption.\n" +
+                                     "Compression parameters: %s", parameters.asMap());
+        }
 
         /* Index File (-CompressionInfo.db component) and it's header */
         metadataWriter = CompressionMetadata.Writer.open(parameters, offsetsFile);
