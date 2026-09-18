@@ -424,22 +424,11 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
     {
         int dataBufferSize = ioOptions.diskOptimizationStrategy.bufferSize(statsMetadata.estimatedPartitionSize.percentile(ioOptions.diskOptimizationEstimatePercentile));
 
-
         FileHandle dataFile;
         CompressionMetadata compressionMetadata = null;
         if (compression)
-        {
-            if (dataWriter instanceof CompressedSequentialWriter)
-            {
-                compressionMetadata = ((CompressedSequentialWriter) dataWriter).open(lengthOverride);
-            }
-            else if (dataWriter instanceof EncryptedSequentialWriter)
-            {
-                // For encrypted writers, we need to create encryption-specific compression metadata
-                compressionMetadata = CompressionMetadata.encryptedOnly(metadata.getLocal().params.compression);
-            }
-        }
-        
+            compressionMetadata = ((CompressedSequentialWriter) dataWriter).open(lengthOverride);
+
         try
         {
             FileHandle.Builder builder = dataFileBuilder.mmapped(ioOptions.defaultDiskAccessMode)
@@ -449,19 +438,9 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
                                                         .withCrcCheckChance(crcCheckChanceSupplier);
             
             if (compressionMetadata != null)
-            {
                 builder.withCompressionMetadata(compressionMetadata);
-            }
-            
-            if (dataWriter instanceof EncryptedSequentialWriter)
-            {
-                ((EncryptedSequentialWriter) dataWriter).updateFileHandle(builder, lengthOverride);
-            }
-            else
-            {
-                builder.withLengthOverride(lengthOverride);
-            }
-            
+
+            builder.withLengthOverride(lengthOverride);
             dataFile = builder.complete();
         }
         finally
