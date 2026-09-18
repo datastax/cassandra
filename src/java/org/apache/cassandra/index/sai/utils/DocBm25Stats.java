@@ -38,6 +38,7 @@ public class DocBm25Stats
     private long docCount;
     private long totalTermCount;
     private double avgDocLength;
+    private boolean hasOldFormatIndex;
 
     public long getDocCount()
     {
@@ -47,6 +48,22 @@ public class DocBm25Stats
     public double getAvgDocLength()
     {
         return avgDocLength;
+    }
+
+    /**
+     * @return  {@link true} if any on-disk index in the query view was written before version ED,
+     * meaning it lacks a serialized {@code totalTermCount} and cannot contribute to a reliable global
+     * {@code avgDocLength}. When this is true, each segment must compute its own local average from
+     * the {@code DOC_LENGTHS} data rather than using the global value.
+     */
+    public boolean hasOldFormatIndex()
+    {
+        return hasOldFormatIndex;
+    }
+
+    public void setHasOldFormatIndex()
+    {
+        this.hasOldFormatIndex = true;
     }
 
     public void add(long docCount, long totalTermCount, List<Pair<ByteBuffer, Expression>> termAndExpressions, DocumentFrequencyEstimator estimator)

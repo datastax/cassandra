@@ -462,7 +462,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                                        orderer.bm25stats,
                                        indexContext,
                                        memtable,
-                                       false);
+                                       orderer.bm25stats.hasOldFormatIndex());
     }
 
     @Nullable

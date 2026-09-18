@@ -709,6 +709,18 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     termAndExpressions.add(Pair.create(term, termExpression));
                 }
 
+                // If any sstable index was written before Version.ED it lacks a serialized totalTermCount,
+                // so the global avgDocLength cannot be computed reliably. Flag this so that every segment
+                // falls back to computing its own local average from the DOC_LENGTHS data.
+                for (SSTableIndex index : view.sstableIndexes)
+                {
+                    if (!index.getVersion().onOrAfter(Version.ED))
+                    {
+                        orderer.bm25stats.setHasOldFormatIndex();
+                        break;
+                    }
+                }
+
                 for (MemtableIndex index : view.memtableIndexes)
                     orderer.bm25stats.add(index.getRowCount(),
                                           index.getApproximateTermCount(),
