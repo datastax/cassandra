@@ -1084,9 +1084,30 @@ public class RowFilter
             Index.Analyzer analyzer = analyzer();
 
             // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
-            return analyzer == null
-                   ? operator.isSatisfiedBy(type, foundValue, value)
-                   : operator.isSatisfiedByAnalyzed(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
+            if (analyzer == null)
+                return operator.isSatisfiedBy(type, foundValue, value);
+
+            // LIKE operators are only supported by indexes with non-tokenizing analyzers (e.g. case or accent
+            // normalization), and their semantics apply to the normalized terms: each analyzed queried token
+            // must be satisfied by one of the analyzed value tokens. Operator#isSatisfiedByAnalyzed doesn't
+            // implement them, so they are handled here.
+            if (operator.isLike())
+            {
+                List<ByteBuffer> indexedTokens = analyzer.indexedTokens(foundValue);
+                for (ByteBuffer queriedToken : analyzer.queriedTokens())
+                {
+                    // plain indexed loop: this runs per candidate row (including replica filtering
+                    // protection), where a Stream + spliterator + capturing lambda per token is pure garbage
+                    boolean satisfied = false;
+                    for (int i = 0; i < indexedTokens.size() && !satisfied; i++)
+                        satisfied = operator.isSatisfiedBy(type, indexedTokens.get(i), queriedToken);
+                    if (!satisfied)
+                        return false;
+                }
+                return true;
+            }
+
+            return operator.isSatisfiedByAnalyzed(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
         }
 
         @Nullable

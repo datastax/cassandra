@@ -68,8 +68,24 @@ using the provided 'sstableupgrade' tool.
 5.0.7
 ======
 
+New features
+------------
+    - Storage-attached indexes (SAI) on non-tokenized string columns now serve every CQL LIKE variant:
+      LIKE '<prefix>%' as a bounded scan of the sorted terms dictionary, and LIKE '%<term>', LIKE '%<term>%'
+      and generic LIKE '<a>%<b>' patterns by intersecting a compiled pattern automaton with the terms
+      dictionaries. No index rebuild or on-disk format change is required. The total number of indexed terms
+      a single query's pattern matching may visit is capped by the cassandra.sai.max_automaton_expansions
+      system property (default 8192); queries exceeding the cap fail with a message suggesting a more
+      selective pattern.
+
 Upgrading
 ---------
+    - Filtering (including replica filtering protection) now evaluates the LIKE '<a>%<b>' operator with
+      proper pattern semantics: every '%' in the pattern is an any-string wildcard. It previously performed
+      a plain 'contains' comparison that treated '%' as a literal character, so such patterns could never
+      match during post-filtering. The negated form of the operator (not reachable from CQL) flips
+      accordingly. Custom (non-SAI) index implementations whose results are post-filtered with this operator
+      will see the corrected semantics as well.
     - This release addresses a security vulnerability in the LZ4 dependency, documented in CASSANDRA-21052. For users
       who did not use LZ4 native libraries, this will now fallback to a safer but less performant pure Java
       implementation. During startup, a warning will be logged if the LZ4 native library is not available.
