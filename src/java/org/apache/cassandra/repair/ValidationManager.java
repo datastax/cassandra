@@ -154,15 +154,12 @@ public class ValidationManager implements IValidationManager
             if (topPartitionCollector != null)
                 cfs.topPartitions.merge(topPartitionCollector);
         }
-        if (logger.isDebugEnabled())
-        {
-            long duration = TimeUnit.NANOSECONDS.toMillis(clock.nanoTime() - start);
-            logger.debug("Validation of {} partitions (~{}) finished in {} msec, for {}",
-                         state.partitionsProcessed,
-                         FBUtilities.prettyPrintMemory(state.estimatedTotalBytes),
-                         duration,
-                         validator.desc);
-        }
+        long duration = TimeUnit.NANOSECONDS.toMillis(clock.nanoTime() - start);
+        logger.info("Validation of {} partitions (~{}) finished in {} msec, for {}",
+                    state.partitionsProcessed,
+                    FBUtilities.prettyPrintMemory(state.estimatedTotalBytes),
+                    duration,
+                    validator.desc);
     }
 
     private static boolean isTopPartitionSupported(Validator validator)

@@ -132,5 +132,8 @@ public class StreamingRepairTask implements StreamEventHandler
     {
         this.state.phase.fail(t);
         RepairMessage.sendMessageWithRetries(ctx, new SyncResponse(desc, src, dst, false, Collections.emptyList()), SYNC_RSP, initiator);
+        logger.error("[streaming task #{}] parentSession={} stream {} -> {} failed: {}",
+                     desc.sessionId, desc.parentSessionId, src, dst, t.getMessage(), t);
+        MessagingService.instance().send(Message.out(SYNC_RSP, new SyncResponse(desc, src, dst, false, Collections.emptyList())), initiator);
     }
 }

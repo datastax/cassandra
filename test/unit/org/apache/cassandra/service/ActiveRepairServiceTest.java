@@ -71,6 +71,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 import static org.apache.cassandra.repair.messages.RepairOption.DATACENTERS_KEY;
 import static org.apache.cassandra.repair.messages.RepairOption.FORCE_REPAIR_KEY;
@@ -613,7 +614,8 @@ public class ActiveRepairServiceTest
         RepairOption options = new RepairOption(RepairParallelism.PARALLEL, true, true,
                                                 false, 1, ranges, false, false,
                                                 false, false, PreviewKind.ALL, false,
-                                                false, false, false, false);
+                                                false, false, false, false,
+                                                null, null);
         try
         {
             ActiveRepairService.instance().prepareForRepair(parentRepairSession, LOCAL, endpoints, options, isForcedRepair, columnFamilyStores);

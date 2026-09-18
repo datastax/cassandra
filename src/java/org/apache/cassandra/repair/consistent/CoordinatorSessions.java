@@ -29,6 +29,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.repair.SharedContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.messages.FailSession;
 import org.apache.cassandra.repair.messages.FinalizePromise;
@@ -47,7 +50,7 @@ public class CoordinatorSessions
 {
     private static final Logger logger = LoggerFactory.getLogger(CoordinatorSessions.class);
     private final SharedContext ctx;
-    
+
     private final Map<TimeUUID, CoordinatorSession> sessions = new HashMap<>();
 
     public CoordinatorSessions(SharedContext ctx)
@@ -82,6 +85,8 @@ public class CoordinatorSessions
         builder.withContext(ctx);
         CoordinatorSession session = buildSession(builder);
         sessions.put(session.sessionID, session);
+        logger.info("Registered coordinator session {} with {} participant(s): {} for tables {}",
+                    sessionId, participants.size(), participants, prs.getTableIds());
         return session;
     }
 

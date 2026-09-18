@@ -176,7 +176,8 @@ public class CoordinatorSession extends ConsistentSession
     {
         Preconditions.checkArgument(allStates(State.PREPARING));
 
-        logger.info("Beginning prepare phase of incremental repair session {}", sessionID);
+        logger.info("Beginning prepare phase of incremental repair session {} coordinated by {} with {} participant(s): {}",
+                    sessionID, coordinator, participants.size(), participants);
 
         PrepareConsistentRequest request = new PrepareConsistentRequest(sessionID, coordinator, participants);
         for (final InetAddressAndPort participant : participants)
@@ -205,7 +206,8 @@ public class CoordinatorSession extends ConsistentSession
             return;
         if (!success)
         {
-            logger.warn("{} failed the prepare phase for incremental repair session {}", participant, sessionID);
+            logger.warn("{} failed the prepare phase for incremental repair session {} (current state: {})",
+                        participant, sessionID, getParticipantState(participant));
             sendFailureMessageToParticipants();
             setParticipantState(participant, State.FAILED);
         }
@@ -265,7 +267,8 @@ public class CoordinatorSession extends ConsistentSession
         }
         else if (!success)
         {
-            logger.warn("Finalization proposal of session {} rejected by {}. Aborting session", sessionID, participant);
+            logger.warn("Finalization proposal of session {} rejected by {} (participant state: {}). Aborting session",
+                        sessionID, participant, getParticipantState(participant));
             fail();
         }
         else
@@ -316,7 +319,8 @@ public class CoordinatorSession extends ConsistentSession
             logger.error("Can't transition endpoints {} to FAILED", cantFail, new RuntimeException());
             return;
         }
-        logger.info("Incremental repair session {} failed", sessionID);
+        logger.warn("Incremental repair session {} failed with {} participant(s): {}",
+                    sessionID, participantStates.size(), participantStates.keySet());
         sendFailureMessageToParticipants();
         setAll(State.FAILED);
 
@@ -340,7 +344,8 @@ public class CoordinatorSession extends ConsistentSession
      */
     public Future<CoordinatedRepairResult> execute(Supplier<Future<CoordinatedRepairResult>> sessionSubmitter)
     {
-        logger.info("Beginning coordination of incremental repair session {}", sessionID);
+        logger.info("Beginning coordination of incremental repair session {} with {} participant(s): {}",
+                    sessionID, participants.size(), participants);
 
         sessionStart = ctx.clock().currentTimeMillis();
         Future<Void> prepareResult = prepare();

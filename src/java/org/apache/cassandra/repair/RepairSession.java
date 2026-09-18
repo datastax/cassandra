@@ -57,6 +57,7 @@ import org.apache.cassandra.repair.consistent.LocalSessions;
 import org.apache.cassandra.repair.messages.SyncResponse;
 import org.apache.cassandra.repair.messages.ValidationResponse;
 import org.apache.cassandra.repair.state.SessionState;
+import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.tracing.Tracing;
@@ -122,6 +123,14 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
     public final boolean repairPaxos;
     public final boolean paxosOnly;
 
+    /** Entity identifier supplied by CNDB, null when not set */
+    @Nullable
+    public final String entityId;
+
+    /** Repair type supplied by CNDB (e.g. "continuous", "on_demand"), null when not set */
+    @Nullable
+    public final String repairType;
+
     private final AtomicBoolean isFailed = new AtomicBoolean(false);
 
     // Each validation task waits response from replica in validating ConcurrentMap (keyed by CF name and endpoint address)
@@ -148,6 +157,8 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
      * @param pullRepair true if the repair should be one way (from remote host to this host and only applicable between two hosts--see RepairOption)
      * @param repairPaxos true if incomplete paxos operations should be completed as part of repair
      * @param paxosOnly true if we should only complete paxos operations, not run a normal repair
+     * @param options repair options, used to extract parallelism, push/pull repair, preview kind,
+     *                optimise streams, and entity context for logging
      * @param cfnames names of columnfamilies
      */
     public RepairSession(SharedContext ctx,
@@ -155,6 +166,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
                          TimeUUID parentRepairSession,
                          CommonRange commonRange,
                          String keyspace,
+                         RepairOption options,
                          RepairParallelism parallelismDegree,
                          boolean isIncremental,
                          boolean pushRepair,
@@ -174,9 +186,11 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
         this.parallelismDegree = parallelismDegree;
         this.pushRepair = pushRepair;
         this.isIncremental = isIncremental;
-        this.previewKind = previewKind;
-        this.pullRepair = pullRepair;
-        this.optimiseStreams = optimiseStreams;
+        this.previewKind = options.getPreviewKind();
+        this.pullRepair = options.isPullRepair();
+        this.optimiseStreams = options.optimiseStreams();
+        this.entityId = options.getEntityId();
+        this.repairType = options.getRepairType();
         this.taskExecutor = new SafeExecutor(createExecutor(ctx));
     }
 
@@ -242,8 +256,11 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
         }
 
         String msg = String.format("Received merkle tree for %s from %s", desc.columnFamily, endpoint);
-        logger.info("{} {}", previewKind.logPrefix(getId()), msg);
+        logger.info("{} parentSession={} {}", previewKind.logPrefix(getId()), parentRepairSession, message);
         Tracing.traceRepair(msg);
+        String message = String.format("Received merkle tree for %s from %s", desc.columnFamily, endpoint);
+        logger.info("{} parentSession={} {}", previewKind.logPrefix(getId()), parentRepairSession, message);
+        Tracing.traceRepair(message);
         task.treesReceived(trees);
     }
 
@@ -262,8 +279,14 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
         if (task == null)
             return;
 
-        if (logger.isDebugEnabled())
-            logger.debug("{} Repair completed between {} and {} on {}", previewKind.logPrefix(getId()), nodes.coordinator, nodes.peer, desc.columnFamily);
+        if (!success)
+            logger.info("{} parentSession={} sync FAILED between {} and {} on {}",
+                        previewKind.logPrefix(getId()), parentRepairSession,
+                        nodes.coordinator, nodes.peer, desc.columnFamily);
+        else if (logger.isDebugEnabled())
+            logger.debug("{} parentSession={} sync completed between {} and {} on {}",
+                         previewKind.logPrefix(getId()), parentRepairSession,
+                         nodes.coordinator, nodes.peer, desc.columnFamily);
         task.syncComplete(message.payload.success, message.payload.summaries);
     }
 
@@ -283,6 +306,15 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
     }
 
     /**
+     * Returns " [entityId: <id>, repairType: <type>]" (with a leading space for inline log message formatting)
+     * when entityId is set, or an empty string otherwise.
+     */
+    private String entityTag()
+    {
+        return entityId != null ? " [entityId: " + entityId + ", repairType: " + repairType + ']' : "";
+    }
+
+    /**
      * Start RepairJob on given ColumnFamilies.
      *
      * This first validates if all replica are available, and if they are,
@@ -297,8 +329,8 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
         if (terminated)
             return;
 
-        logger.info("{} parentSessionId = {}: new session: will sync {} on range {} for {}.{}",
-                    previewKind.logPrefix(getId()), state.parentRepairSession, repairedNodes(), state.commonRange, state.keyspace, Arrays.toString(state.cfnames));
+        logger.info("{} parentSession={}: new session: will sync {} on range {} for {}.{}{}",
+                    previewKind.logPrefix(getId()), state.parentRepairSession, repairedNodes(), state.commonRange, state.keyspace, Arrays.toString(state.cfnames), entityTag());
         Tracing.traceRepair("Syncing range {}", state.commonRange);
         if (!previewKind.isPreview() && !paxosOnly)
         {
@@ -355,7 +387,8 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
             {
                 state.phase.success();
                 // this repair session is completed
-                logger.info("{} {}", previewKind.logPrefix(getId()), "Session completed successfully");
+                logger.info("{} parentSession={} session completed successfully on range {} for {}.{}{}",
+                            previewKind.logPrefix(getId()), parentRepairSession, commonRange, keyspace, Arrays.toString(cfnames), entityTag());
                 Tracing.traceRepair("Completed sync of range {}", state.commonRange);
                 trySuccess(new RepairSessionResult(state.id, state.keyspace, state.commonRange.ranges, results, state.commonRange.hasSkippedReplicas));
 
@@ -372,6 +405,8 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
                     logger.warn(msg+ ": {}", previewKind.logPrefix(getId()), t.getMessage());
                 else
                     logger.error(msg, previewKind.logPrefix(getId()), t);
+                logger.error("{} parentSession={} session failed on range {} for {}.{}{}",
+                             previewKind.logPrefix(getId()), parentRepairSession, commonRange, keyspace, Arrays.toString(cfnames), entityTag(), t);
                 Tracing.traceRepair("Session completed with the following error: {}", t);
                 forceShutdown(t);
             }

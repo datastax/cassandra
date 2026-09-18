@@ -81,6 +81,15 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
     final List<SyncTask> syncTasks = new CopyOnWriteArrayList<>();
 
     /**
+     * Returns " [entityId: <id>, repairType: <type>]" (with a leading space for inline log message formatting)
+     * when entityId is set on the session, or an empty string otherwise.
+     */
+    private String entityTag()
+    {
+        return session.entityId != null ? " [entityId: " + session.entityId + ", repairType: " + session.repairType + ']' : "";
+    }
+
+    /**
      * Create repair job to run on specific columnfamily
      *  @param session RepairSession that this RepairJob belongs
      * @param columnFamily name of the ColumnFamily to repair
@@ -205,7 +214,9 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                 state.phase.success();
                 if (!session.previewKind.isPreview())
                 {
-                    logger.info("{} {}.{} is fully synced", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+                    logger.info("{} parentSession={} {}.{} is fully synced with endpoints {} {}",
+                                session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                                desc.keyspace, desc.columnFamily, session.commonRange.endpoints, entityTag());
                     RepairProgressReporter.instance.onRepairSucceeded(session.getId(), desc.keyspace, desc.columnFamily);
                 }
                 cfs.metric.repairsCompleted.inc();
@@ -223,7 +234,9 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
 
                 if (!session.previewKind.isPreview())
                 {
-                    logger.warn("{} {}.{} sync failed", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+                    logger.warn("{} parentSession={} {}.{} sync failed with endpoints {} {}: {}",
+                                session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                                desc.keyspace, desc.columnFamily, session.commonRange.endpoints, entityTag(), t.getMessage());
                     RepairProgressReporter.instance.onRepairFailed(session.getId(), desc.keyspace, desc.columnFamily, t);
                 }
                 cfs.metric.repairsCompleted.inc();

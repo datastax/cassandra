@@ -441,7 +441,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
     public RepairSession submitRepairSession(TimeUUID parentRepairSession,
                                              CommonRange range,
                                              String keyspace,
-                                             RepairParallelism parallelismDegree,
+                                             RepairOption options,
                                              boolean isIncremental,
                                              boolean pushRepair,
                                              boolean pullRepair,
@@ -463,6 +463,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             return null;
 
         final RepairSession session = new RepairSession(ctx, validationScheduler, parentRepairSession, range, keyspace,
+                                                        options,
                                                         parallelismDegree, isIncremental, pushRepair, pullRepair,
                                                         previewKind, optimiseStreams, repairPaxos, paxosOnly, cfnames);
         repairs.getIfPresent(parentRepairSession).register(session.state);

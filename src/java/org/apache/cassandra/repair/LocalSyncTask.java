@@ -178,6 +178,9 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
     {
         if (active.compareAndSet(true, false))
         {
+            logger.error("{} parentSession={} sync {} <-> {} failed: {}",
+                         previewKind.logPrefix(desc.sessionId), desc.parentSessionId,
+                         nodePair.coordinator, nodePair.peer, t.getMessage(), t);
             tryFailure(t);
             finished();
         }
