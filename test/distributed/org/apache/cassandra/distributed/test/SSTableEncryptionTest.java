@@ -167,6 +167,23 @@ public class SSTableEncryptionTest extends TestBaseImpl
     @Test
     public void shouldEncryptSensitiveData() throws Exception
     {
+        shouldEncryptSensitiveData(null);
+    }
+
+    @Test
+    public void shouldEncryptSensitiveDataMinCompressRatio0() throws Exception
+    {
+        shouldEncryptSensitiveData(0.0);
+    }
+
+    @Test
+    public void shouldEncryptSensitiveDataMinCompressRatio11() throws Exception
+    {
+        shouldEncryptSensitiveData(1.1);
+    }
+
+    public void shouldEncryptSensitiveData(Double minCompressRatio) throws Exception
+    {
         try (Cluster cluster = builder().withNodes(1)
                                         .withDataDirCount(1)
                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK)
@@ -177,7 +194,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
             String keyspace = createKeyspace(cluster);
             TestTable nonEncryptedTable = createTableWithSampleData(cluster, keyspace, "");
             Path secretKey = createLocalSecretKey(cluster);
-            TestTable encryptedTable = createTableWithSampleData(cluster, keyspace, localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString()));
+            TestTable encryptedTable = createTableWithSampleData(cluster, keyspace, localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString(), minCompressRatio));
 
             // then
             // sensitive key should not be present in encrypted data
@@ -500,10 +517,11 @@ public class SSTableEncryptionTest extends TestBaseImpl
          cluster.get(1).flush(keyspace);
     }
 
-    private String localSystemKeyEncryptionCompressionSuffix(String className, String secretKeyPath)
+    private String localSystemKeyEncryptionCompressionSuffix(String className, String secretKeyPath, Double minCompressRatio)
     {
         return String.format(" WITH compression = " +
                              "{'class' : '%s', " +
+                             (minCompressRatio != null ? "'min_compress_ratio': '" + minCompressRatio + "', " : "") +
                              "'cipher_algorithm' : 'AES/ECB/PKCS5Padding', " +
                              "'secret_key_strength' : 128, " +
                              "'key_provider' : 'LocalFileSystemKeyProviderFactory', " +
