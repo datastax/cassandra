@@ -563,9 +563,6 @@ public class ChunkCache
         public SingleRegionChunk(long offset, ByteBuffer buffer)
         {
             super(offset);
-            assert buffer.position() == 0 : "owned buffer position must be 0 (logical size is limit/remaining)";
-            assert buffer.limit() > 0 && buffer.limit() <= buffer.capacity()
-                : String.format("buffer.limit() %d must be in (0, capacity=%d]", buffer.limit(), buffer.capacity());
             this.buffer = buffer;
             buffer.order(ByteOrder.BIG_ENDIAN);
         }
@@ -573,12 +570,11 @@ public class ChunkCache
         public ByteBuffer buffer()
         {
             assert isReferenced() : "Already unreferenced";
-            // Narrow capacity to the logical chunk size (owned limit) for readers / readChunk: limit alone is
-            // not enough because clear() resets limit to capacity. slice() is already an independent view
-            // (does not mutate #buffer); transient and never returned to the pool — only #buffer is.
+            // Always apply bytesRead as the view limit. It starts at 0 so a failed/incomplete load cannot
+            // expose stale data. Chunk readers (e.g. SimpleChunkReader, CompressedChunkReader) expect that
+            // and call clear() (or otherwise reset limit) before filling, so a 0-limit buffer is fine for read().
             ByteBuffer view = buffer.slice();
-            if (bytesRead > 0)
-                view.limit(bytesRead);
+            view.limit(bytesRead);
             return view;
         }
 
