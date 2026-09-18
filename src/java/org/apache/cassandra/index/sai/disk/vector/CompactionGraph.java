@@ -521,7 +521,8 @@ public class CompactionGraph implements Closeable, Accountable
                                                                       builder.getGraph().size(),
                                                                       lastRowId,
                                                                       maxOrdinal,
-                                                                      postingsMap);
+                                                                      postingsMap,
+                                                                      perIndexComponents.version());
                 ordinalMapper.set(rp.ordinalMapper);
                 try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
                 {
