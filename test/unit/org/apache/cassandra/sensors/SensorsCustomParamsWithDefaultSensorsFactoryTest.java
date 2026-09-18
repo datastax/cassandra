@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.BeforeClass;
@@ -54,7 +55,7 @@ public class SensorsCustomParamsWithDefaultSensorsFactoryTest
     @Test
     public void testAddSensorsToInternodeResponse()
     {
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of("ks1"));
         UUID tableId = UUID.randomUUID();
         KeyspaceMetadata ksm = KeyspaceMetadata.create("ks1", null);
         TableMetadata tm = TableMetadata.builder("ks1", "t1", TableId.fromString(tableId.toString()))
@@ -82,7 +83,7 @@ public class SensorsCustomParamsWithDefaultSensorsFactoryTest
     public void testAddSensorToCQLResponse()
     {
         String table = "t1";
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors("ks1");
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of("ks1"));
         ResultMessage message = new ResultMessage.Void();
         Context context = new Context("ks1", table, UUID.randomUUID().toString());
         Type type = Type.READ_BYTES;

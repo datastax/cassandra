@@ -84,8 +84,8 @@ public class RequestSensorBench
         for (int i = 0; i < NUM_SENSORS; i++)
         {
             Context context = new Context("keyspace" + i, "table" + i, UUID.randomUUID().toString());
-            SensorsRegistry.instance.onCreateKeyspace(KeyspaceMetadata.create(context.getKeyspace(), null));
-            SensorsRegistry.instance.onCreateTable(TableMetadata.builder(context.getKeyspace(), context.getTable()).id(TableId.fromString(context.getTableId())).build());
+            SensorsRegistry.instance.onCreateKeyspace(KeyspaceMetadata.create(context.getKeyspace().get(), null));
+            SensorsRegistry.instance.onCreateTable(TableMetadata.builder(context.getKeyspace().get(), context.getTable().get()).id(TableId.fromString(context.getTableId().get())).build());
             contextFixtures.put(i, Pair.create(context, Type.values()[randomGen.nextInt(Type.values().length)]));
         }
 

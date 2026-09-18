@@ -33,6 +33,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.DefaultCompressionSelector;
+import org.apache.cassandra.sensors.NoOpCostCalculator;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.FileSystemOwnershipCheck;
 import org.apache.cassandra.service.context.OperationContext;
@@ -315,6 +316,13 @@ public enum CassandraRelevantProperties
     CONSISTENT_DIRECTORY_LISTINGS("cassandra.consistent_directory_listings"),
     CONSISTENT_RANGE_MOVEMENT("cassandra.consistent.rangemovement", "true"),
     CONSISTENT_SIMULTANEOUS_MOVES_ALLOW("cassandra.consistent.simultaneousmoves.allow"),
+    /**
+     * Allows plugging a custom {@link org.apache.cassandra.sensors.CostCalculator} implementation
+     * without having to subclass {@link SensorsFactory}.
+     * When set, the named class is instantiated directly via {@link org.apache.cassandra.utils.FBUtilities#construct}.
+     * When absent, {@link NoOpCostCalculator} is used.
+     */
+    COST_CALCULATOR("cassandra.cost_calculator_class"),
     COUNTER_LOCK_FAIR_LOCK("cassandra.counter_lock.fair_lock", "false"),
     COUNTER_LOCK_NUM_STRIPES_PER_THREAD("cassandra.counter_lock.num_stripes_per_thread", "1024"),
     CRYPTO_PROVIDER_CLASS_NAME("cassandra.crypto_provider_class_name"),

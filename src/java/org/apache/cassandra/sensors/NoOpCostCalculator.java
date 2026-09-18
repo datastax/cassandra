@@ -18,22 +18,33 @@
 
 package org.apache.cassandra.sensors;
 
-import java.util.Set;
-
-import org.junit.Test;
-
-import static org.assertj.core.api.Assertions.assertThat;
-
-
-public class RequestSensorsFactoryTest
+/**
+ * No-op implementation of {@link CostCalculator} that always returns {@code 0}.
+ * Used as the default when no concrete cost calculation is configured.
+ */
+public class NoOpCostCalculator implements CostCalculator
 {
-    @Test
-    public void testCreateUsesNoOpByDefault()
+    public static final NoOpCostCalculator instance = new NoOpCostCalculator();
+
+    private NoOpCostCalculator()
     {
-        SensorsFactory factory = SensorsFactory.instance;
-        RequestSensors sensors = factory.createRequestSensors(Set.of("ks1"));
-        assertThat(sensors).isInstanceOf(NoOpRequestSensors.class);
-        RequestSensors anotherSensors = factory.createRequestSensors(Set.of("ks2"));
-        assertThat(anotherSensors).isSameAs(sensors);
+    }
+
+    @Override
+    public double computeReadCost(RequestSensors sensors)
+    {
+        return 0;
+    }
+
+    @Override
+    public double computeWriteCost(RequestSensors sensors)
+    {
+        return 0;
+    }
+
+    @Override
+    public double computeTotalCost(RequestSensors sensors)
+    {
+        return 0;
     }
 }
