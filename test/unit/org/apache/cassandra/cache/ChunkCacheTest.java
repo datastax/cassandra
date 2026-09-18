@@ -49,12 +49,12 @@ import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SliceDescriptor;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
-import org.apache.cassandra.utils.PageAware;
+import org.apache.cassandra.io.util.PageAware;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.awaitility.Awaitility;
 import org.mockito.ArgumentCaptor;
 
-import static org.apache.cassandra.utils.PageAware.PAGE_SIZE;
+import static org.apache.cassandra.io.util.PageAware.PAGE_SIZE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -757,11 +757,11 @@ public class ChunkCacheTest
         file.deleteOnExit();
         writeBytes(file, new byte[fileSize]);
 
-        try (FileHandle.Builder builder = new FileHandle.Builder(file)
-                                                        .withChunkCache(chunkCache)
-                                                        .bufferSize(SMALL_CHUNK_SIZE)
-                                                        .slice(new SliceDescriptor(0, fileSize, SMALL_CHUNK_SIZE));
-             FileHandle handle = builder.complete();
+        FileHandle.Builder builder = new FileHandle.Builder(file)
+                                                .withChunkCache(chunkCache)
+                                                .bufferSize(SMALL_CHUNK_SIZE)
+                                                .slice(new SliceDescriptor(0, fileSize, SMALL_CHUNK_SIZE));
+        try (FileHandle handle = builder.complete();
              RandomAccessReader reader = handle.createReader())
         {
             for (int pos = 0; pos < fileSize; pos += SMALL_CHUNK_SIZE)
