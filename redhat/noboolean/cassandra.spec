@@ -28,9 +28,12 @@
 
 %global username cassandra
 
+# Extract project name from build.xml
+%define project_name %(sed -n 's/.*<project[^>]*name="\\([^"]*\\)".*/\\1/p' build.xml | head -1)
+
 # input of ~alphaN, ~betaN, ~rcN package versions need to retain upstream '-alphaN, etc' version for sources
 %define upstream_version %(echo %{version} | sed -r 's/~/-/g')
-%define relname apache-cassandra-%{upstream_version}
+%define relname %{project_name}-%{upstream_version}
 
 # default DIST_DIR to build
 %global _get_dist_dir %(echo "${DIST_DIR:-build}")
@@ -130,7 +133,7 @@ cp -p bin/* %{buildroot}/usr/bin/
 cp -p tools/bin/* %{buildroot}/usr/bin/
 
 # copy cassandra jar
-cp %{_get_dist_dir}/apache-cassandra-%{upstream_version}.jar %{buildroot}/usr/share/%{username}/
+cp %{_get_dist_dir}/%{project_name}-%{upstream_version}.jar %{buildroot}/usr/share/%{username}/
 
 %clean
 %{__rm} -rf %{buildroot}
@@ -193,6 +196,7 @@ Cassandra is a distributed (peer-to-peer) system for the management and storage 
 This package contains extra tools for working with Cassandra clusters.
 
 %files tools
+%attr(755,root,root) %{_bindir}/analyzecompactionlog
 %attr(755,root,root) %{_bindir}/sstablepartitions
 %attr(755,root,root) %{_bindir}/sstabledump
 %attr(755,root,root) %{_bindir}/compaction-stress
