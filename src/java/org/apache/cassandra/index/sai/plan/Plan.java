@@ -336,7 +336,7 @@ abstract public class Plan
 
     /**
      * Returns additional information specific to the node displayed in the first line.
-     * The information is included in the output of {@link #toString()} and {@link #toRedactedStringRecursive()}.
+     * The information is included in the output of {@link #toString()} and {@link #toString(Redaction)}.
      * It is up to subclasses to implement it.
      */
     protected String title(Redaction redaction)
@@ -346,7 +346,7 @@ abstract public class Plan
 
     /**
      * Returns additional information specific to the node, displayed below the title.
-     * The information is included in the output of {@link #toString()} and {@link #toRedactedStringRecursive()}.
+     * The information is included in the output of {@link #toString()} and {@link #toString(Redaction)}.
      * It is up to subclasses to implement it.
      */
     protected String description(Redaction redaction)
@@ -1642,11 +1642,17 @@ abstract public class Plan
             super(factory, id, access, ordering);
         }
 
+        @Override
+        protected double estimateSelectivity()
+        {
+            return factory.costEstimator.estimateBM25Selectivity(ordering);
+        }
+
         @Nonnull
         @Override
         protected KeysIterationCost estimateCost()
         {
-            double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows);
+            double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows * selectivity());
             int expectedKeysInt = Math.max(1, (int) Math.ceil(expectedKeys));
 
             int termCount = ordering.getQueryTerms().size();
@@ -2226,6 +2232,16 @@ abstract public class Plan
          * @param candidates number of candidate rows that satisfy the expression predicates
          */
         double estimateAnnSearchCost(Orderer ordering, int limit, long candidates);
+
+        /**
+         * Returns the estimated selectivity of a BM25 ordering clause, i.e. the estimated fraction of rows in the
+         * table that contain all query terms. BM25 uses intersection semantics: only rows containing every query
+         * term are returned. The estimate assumes independence of term occurrences across rows.
+         *
+         * @param ordering the BM25 orderer whose query terms are used for the estimate
+         * @return a value in [0.0, 1.0] representing the estimated fraction of matching rows
+         */
+        double estimateBM25Selectivity(Orderer ordering);
     }
 
     /**
