@@ -173,7 +173,7 @@ public class ChunkCache
         if (chunkSize == PageAware.PAGE_SIZE)
             return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
         if (chunkSize < PageAware.PAGE_SIZE)
-            return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP).limit(chunkSize).slice());
+            return new SingleRegionSubChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP), chunkSize);
 
         ByteBuffer[] buffers = bufferPool.getMultiple(chunkSize, PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
         if (buffers.length > 1)
@@ -349,16 +349,12 @@ public class ChunkCache
         /** The offset in the file where the chunk is read */
         final long offset;
 
-        /** The number of bytes read from disk, this could be less than the memory space allocated */
-        int bytesRead;
-
         private volatile int references;
         private static final AtomicIntegerFieldUpdater<Chunk> referencesUpdater = AtomicIntegerFieldUpdater.newUpdater(Chunk.class, "references");
 
         Chunk(long offset)
         {
             this.offset = offset;
-            this.bytesRead = 0; // To be filled by the read method
             this.references = 1; // Start referenced
         }
 
@@ -446,6 +442,8 @@ public class ChunkCache
         {
             super(offset);
             this.buffers = buffers;
+            for (ByteBuffer buf : buffers)
+                buf.order(ByteOrder.BIG_ENDIAN);
         }
 
         void releaseBuffers()
@@ -471,8 +469,12 @@ public class ChunkCache
                     FastByteOperations.copy(scratchBuffer, pageStart, buffers[idx++], 0, PageAware.PAGE_SIZE);
 
                 if (pageStart < limit)   // if the limit is not a multiple of the page size
-                    FastByteOperations.copy(scratchBuffer, pageStart, buffers[idx++], 0, limit - pageStart);
-                bytesRead = limit;
+                {
+                    int length = limit - pageStart;
+                    ByteBuffer buf = buffers[idx++];
+                    FastByteOperations.copy(scratchBuffer, pageStart, buf, 0, length);
+                    buf.limit(length);
+                }
             }
             finally
             {
@@ -506,19 +508,13 @@ public class ChunkCache
             {
                 this.buffer = buffer;
                 this.offset = offset;
-                buffer.order(ByteOrder.BIG_ENDIAN);
             }
 
             @Override
             public ByteBuffer buffer()
             {
                 assert isReferenced() : "Already unreferenced";
-                // Calculate the appropriate limit for this specific buffer based on its position
-                int bufferIndex = (int) ((offset - MultiRegionChunk.this.offset) / PageAware.PAGE_SIZE);
-                int startOfBuffer = bufferIndex * PageAware.PAGE_SIZE;
-                int endOfBuffer = Math.min(startOfBuffer + PageAware.PAGE_SIZE, bytesRead);
-                int bufferLimit = Math.max(0, endOfBuffer - startOfBuffer);
-                return buffer.duplicate().limit(bufferLimit);
+                return buffer.duplicate();
             }
 
             @Override
@@ -544,9 +540,9 @@ public class ChunkCache
      * This class is a chunk but also behaves as a {@link Rebufferer.BufferHolder} to save an allocation when
      * {@link this#getBuffer(long)} is invoked.
      */
-    class SingleRegionChunk extends Chunk implements Rebufferer.BufferHolder
+    private class SingleRegionChunk extends Chunk implements Rebufferer.BufferHolder
     {
-        private final ByteBuffer buffer;
+        final ByteBuffer buffer;
 
         public SingleRegionChunk(long offset, ByteBuffer buffer)
         {
@@ -573,9 +569,7 @@ public class ChunkCache
 
         void read(ChunkReader file)
         {
-            ByteBuffer buffer = buffer();
-            file.readChunk(offset, buffer);
-            bytesRead = buffer.limit();
+            file.readChunk(offset, buffer); // also sets the buffer's limit
         }
 
         @Nullable
@@ -587,6 +581,27 @@ public class ChunkCache
         int capacity()
         {
             return buffer.capacity();
+        }
+    }
+
+    private class SingleRegionSubChunk extends SingleRegionChunk
+    {
+        public SingleRegionSubChunk(long offset, ByteBuffer buffer, int capacity)
+        {
+            super(offset, buffer.limit(capacity));
+        }
+
+        public ByteBuffer buffer()
+        {
+            assert isReferenced() : "Already unreferenced";
+            return buffer.slice();
+        }
+
+        void read(ChunkReader file)
+        {
+            ByteBuffer slicedBuf = buffer.slice(); // We were given a limit when the buffer was passed. Make sure we don't read more.
+            file.readChunk(offset, slicedBuf);
+            buffer.limit(slicedBuf.limit());
         }
     }
 
