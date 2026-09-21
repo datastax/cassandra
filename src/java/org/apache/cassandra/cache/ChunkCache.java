@@ -562,7 +562,7 @@ public class ChunkCache
     class SingleRegionChunk extends Chunk implements Rebufferer.BufferHolder
     {
         /**
-         * Pool-owned buffer; always what is returned from {@link BufferPool#put} on release.
+         * Pool-owned buffer; always what is returned from {@link BufferPool} on release.
          * {@code limit} holds the logical chunk size for reads (may be smaller than {@link #capacity()});
          * {@code position} must stay 0 for the lifetime of the chunk.
          */
