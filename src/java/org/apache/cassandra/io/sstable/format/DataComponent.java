@@ -19,7 +19,6 @@
 package org.apache.cassandra.io.sstable.format;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.Config.FlushCompression;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
@@ -60,12 +59,11 @@ public class DataComponent
                                                TableMetadata metadata,
                                                SequentialWriterOption options,
                                                MetadataCollector metadataCollector,
-                                               OperationType operationType,
-                                               FlushCompression flushCompression)
+                                               OperationType operationType)
     {
         if (metadata.params.compression.isEnabled())
         {
-            final CompressionParams compressionParams = buildCompressionParams(metadata, operationType, flushCompression);
+            final CompressionParams compressionParams = buildCompressionParams(metadata, operationType);
             final ICompressor compressor = compressionParams.getSstableCompressor();
 
             // Check if this is encryption-only (no actual compression)
@@ -101,10 +99,9 @@ public class DataComponent
      *
      * @return {@link CompressionParams}
      */
-    private static CompressionParams buildCompressionParams(TableMetadata metadata, OperationType operationType, FlushCompression flushCompression)
+    private static CompressionParams buildCompressionParams(TableMetadata metadata, OperationType operationType)
     {
         CompressionParams compressionParams = metadata.params.compression;
-        final ICompressor compressor = compressionParams.getSstableCompressor();
 
         if (compressionParams.getSstableCompressor() != null)
         {
