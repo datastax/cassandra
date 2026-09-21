@@ -28,7 +28,6 @@ import java.util.function.UnaryOperator;
 import java.util.zip.CRC32;
 
 import com.google.common.base.Throwables;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,7 +35,6 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.CompressionMetadataReaderType;
 import org.apache.cassandra.io.compress.ICompressor;
-import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
@@ -47,8 +45,8 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
+import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
@@ -362,14 +360,6 @@ public class MetadataSerializer implements IMetadataSerializer
             ICompressor compressor = params.getSstableCompressor();
             if (compressor != null)
                 return compressor.encryptionOnly();
-            return null;
-        }
-        catch (Throwable t)
-        {
-            // If we can't read the compression metadata, assume no encryption.
-            // During flush, the compression file may not be accessible yet in some implementations
-            // causing FSReadError. Catch Throwable to handle both Exception and Error.
-            logger.debug("Could not read compression metadata for {}: {}", desc, t.getMessage(), t);
             return null;
         }
     }

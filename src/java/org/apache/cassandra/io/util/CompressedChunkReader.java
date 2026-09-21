@@ -231,6 +231,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         return ReaderType.COMPRESSED;
     }
 
+    void adjustIfBeyondFileEnd(long bufferStart, ByteBuffer uncompressed)
+    {
+        if (bufferStart + uncompressed.limit() > fileLength)
+            uncompressed.limit((int) (fileLength - bufferStart));
+    }
+
     public static class Standard extends CompressedChunkReader
     {
 
@@ -299,7 +305,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                             if (shouldDecompress)
                                 metadata.compressor().uncompress(compressed, uncompressed);
                             else
+                            {
                                 uncompressed.put(compressed);
+                                // Because we may pad the last uncompressed chunk, it may happen that the resulting
+                                // buffer extends past the end of the file. If that's the case, adjust the limit.
+                                adjustIfBeyondFileEnd(position, uncompressed);
+                            }
                         }
                         catch (IOException e)
                         {
@@ -394,7 +405,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                     if (chunk.length < maxCompressedLength)
                         metadata.compressor().uncompress(compressedChunk, uncompressed);
                     else
+                    {
                         uncompressed.put(compressedChunk);
+                        // Because we may pad the last uncompressed chunk, it may happen that the resulting
+                        // buffer extends past the end of the file. If that's the case, adjust the limit.
+                        adjustIfBeyondFileEnd(position, uncompressed);
+                    }
                 }
                 catch (IOException e)
                 {

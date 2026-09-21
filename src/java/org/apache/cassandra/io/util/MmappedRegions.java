@@ -384,18 +384,7 @@ public class MmappedRegions extends SharedCloseableImpl
          */
         private void add(long pos, long size)
         {
-            // For encrypted files, ensure we don't try to map beyond the actual file size
-            long mappingOffset = pos - onDiskSliceOffset;
-            long channelSize = channel.size();
-            if (mappingOffset + size > channelSize) {
-                // Adjust size to not exceed channel size
-                size = Math.max(0, channelSize - mappingOffset);
-                if (size == 0) {
-                    return; // Nothing to map
-                }
-            }
-            
-            var buffer = channel.map(FileChannel.MapMode.READ_ONLY, mappingOffset, size);
+            var buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos - onDiskSliceOffset, size);
             if (adviseRandom)
                 INativeLibrary.instance.adviseRandom(buffer, size, channel.filePath());
 
