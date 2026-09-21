@@ -232,10 +232,6 @@ public class MetadataSerializerTest
             File statsFile = descriptor.fileFor(Components.STATS);
             statsFile.parent().createDirectoriesIfNotExists();
             
-            File compressionInfoFile = descriptor.fileFor(Components.COMPRESSION_INFO);
-            compressionInfoFile.parent().createDirectoriesIfNotExists();
-            compressionInfoFile.createFileIfNotExists();
-            
             try (DataOutputStreamPlus out = new FileOutputStreamPlus(statsFile))
             {
                 serializer.serialize(metadata, out, descriptor);
