@@ -35,7 +35,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
-import com.google.common.util.concurrent.*;
+import com.google.common.util.concurrent.FutureCallback;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -149,16 +149,13 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
 
     /**
      * Create new repair session.
+     * @param ctx shared context
+     * @param validationScheduler scheduler for validation tasks
      * @param parentRepairSession the parent sessions id
      * @param commonRange ranges to repair
      * @param keyspace name of keyspace
-     * @param parallelismDegree specifies the degree of parallelism when calculating the merkle trees
-     * @param pushRepair true if the repair should be one way pushing differences to remote host
-     * @param pullRepair true if the repair should be one way (from remote host to this host and only applicable between two hosts--see RepairOption)
-     * @param repairPaxos true if incomplete paxos operations should be completed as part of repair
-     * @param paxosOnly true if we should only complete paxos operations, not run a normal repair
-     * @param options repair options, used to extract parallelism, push/pull repair, preview kind,
-     *                optimise streams, and entity context for logging
+     * @param options repair options — all session flags (parallelism, incremental, push/pull,
+     *                preview kind, optimise streams, paxos, entity context, etc.) are read from here
      * @param cfnames names of columnfamilies
      */
     public RepairSession(SharedContext ctx,
@@ -167,25 +164,17 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
                          CommonRange commonRange,
                          String keyspace,
                          RepairOption options,
-                         RepairParallelism parallelismDegree,
-                         boolean isIncremental,
-                         boolean pushRepair,
-                         boolean pullRepair,
-                         PreviewKind previewKind,
-                         boolean optimiseStreams,
-                         boolean repairPaxos,
-                         boolean paxosOnly,
                          String... cfnames)
     {
         this.ctx = ctx;
         this.validationScheduler = validationScheduler;
-        this.repairPaxos = repairPaxos;
-        this.paxosOnly = paxosOnly;
+        this.repairPaxos = options.repairPaxos();
+        this.paxosOnly = options.paxosOnly();
         assert cfnames.length > 0 : "Repairing no column families seems pointless, doesn't it";
         this.state = new SessionState(ctx.clock(), parentRepairSession, keyspace, cfnames, commonRange);
-        this.parallelismDegree = parallelismDegree;
-        this.pushRepair = pushRepair;
-        this.isIncremental = isIncremental;
+        this.parallelismDegree = options.getParallelism();
+        this.pushRepair = options.isPushRepair();
+        this.isIncremental = options.isIncremental();
         this.previewKind = options.getPreviewKind();
         this.pullRepair = options.isPullRepair();
         this.optimiseStreams = options.optimiseStreams();
@@ -256,11 +245,8 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
         }
 
         String msg = String.format("Received merkle tree for %s from %s", desc.columnFamily, endpoint);
-        logger.info("{} parentSession={} {}", previewKind.logPrefix(getId()), parentRepairSession, message);
+        logger.info("{} parentSession={} {}{}", previewKind.logPrefix(getId()), state.parentRepairSession, msg, entityTag());
         Tracing.traceRepair(msg);
-        String message = String.format("Received merkle tree for %s from %s", desc.columnFamily, endpoint);
-        logger.info("{} parentSession={} {}", previewKind.logPrefix(getId()), parentRepairSession, message);
-        Tracing.traceRepair(message);
         task.treesReceived(trees);
     }
 
@@ -279,14 +265,14 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
         if (task == null)
             return;
 
-        if (!success)
-            logger.info("{} parentSession={} sync FAILED between {} and {} on {}",
-                        previewKind.logPrefix(getId()), parentRepairSession,
-                        nodes.coordinator, nodes.peer, desc.columnFamily);
+        if (!message.payload.success)
+            logger.info("{} parentSession={} sync FAILED between {} and {} on {}{}",
+                        previewKind.logPrefix(getId()), state.parentRepairSession,
+                        nodes.coordinator, nodes.peer, desc.columnFamily, entityTag());
         else if (logger.isDebugEnabled())
-            logger.debug("{} parentSession={} sync completed between {} and {} on {}",
-                         previewKind.logPrefix(getId()), parentRepairSession,
-                         nodes.coordinator, nodes.peer, desc.columnFamily);
+            logger.debug("{} parentSession={} sync completed between {} and {} on {}{}",
+                         previewKind.logPrefix(getId()), state.parentRepairSession,
+                         nodes.coordinator, nodes.peer, desc.columnFamily, entityTag());
         task.syncComplete(message.payload.success, message.payload.summaries);
     }
 
@@ -388,7 +374,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
                 state.phase.success();
                 // this repair session is completed
                 logger.info("{} parentSession={} session completed successfully on range {} for {}.{}{}",
-                            previewKind.logPrefix(getId()), parentRepairSession, commonRange, keyspace, Arrays.toString(cfnames), entityTag());
+                            previewKind.logPrefix(getId()), state.parentRepairSession, state.commonRange, state.keyspace, Arrays.toString(state.cfnames), entityTag());
                 Tracing.traceRepair("Completed sync of range {}", state.commonRange);
                 trySuccess(new RepairSessionResult(state.id, state.keyspace, state.commonRange.ranges, results, state.commonRange.hasSkippedReplicas));
 
@@ -402,11 +388,11 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
                 state.phase.fail(t);
                 String msg = "{} Session completed with the following error";
                 if (Throwables.anyCauseMatches(t, RepairException::shouldWarn))
-                    logger.warn(msg+ ": {}", previewKind.logPrefix(getId()), t.getMessage());
+                    logger.warn(msg + ": {}", previewKind.logPrefix(getId()), t.getMessage());
                 else
                     logger.error(msg, previewKind.logPrefix(getId()), t);
                 logger.error("{} parentSession={} session failed on range {} for {}.{}{}",
-                             previewKind.logPrefix(getId()), parentRepairSession, commonRange, keyspace, Arrays.toString(cfnames), entityTag(), t);
+                             previewKind.logPrefix(getId()), state.parentRepairSession, state.commonRange, state.keyspace, Arrays.toString(state.cfnames), entityTag(), t);
                 Tracing.traceRepair("Session completed with the following error: {}", t);
                 forceShutdown(t);
             }

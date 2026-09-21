@@ -135,13 +135,17 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
         Future<Void> paxosRepair;
         if (paxosRepairEnabled() && ((useV2() && session.repairPaxos) || session.paxosOnly))
         {
-            logger.info("{} {}.{} starting paxos repair", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+            logger.info("{} parentSession={} {}.{} starting paxos repair{}",
+                        session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                        desc.keyspace, desc.columnFamily, entityTag());
             TableMetadata metadata = Schema.instance.getTableMetadata(desc.keyspace, desc.columnFamily);
             paxosRepair = PaxosCleanup.cleanup(ctx, allEndpoints, metadata, desc.ranges, session.state.commonRange.hasSkippedReplicas, taskExecutor);
         }
         else
         {
-            logger.info("{} {}.{} not running paxos repair", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+            logger.info("{} parentSession={} {}.{} not running paxos repair{}",
+                        session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                        desc.keyspace, desc.columnFamily, entityTag());
             paxosRepair = ImmediateFuture.success(null);
         }
 
@@ -151,7 +155,9 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
             {
                 public void onSuccess(Void v)
                 {
-                    logger.info("{} {}.{} paxos repair completed", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+                    logger.info("{} parentSession={} {}.{} paxos repair completed{}",
+                                session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                                desc.keyspace, desc.columnFamily, entityTag());
                     trySuccess(new RepairResult(desc, Collections.emptyList()));
                 }
 
@@ -160,7 +166,9 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                  */
                 public void onFailure(Throwable t)
                 {
-                    logger.warn("{} {}.{} paxos repair failed", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+                    logger.warn("{} parentSession={} {}.{} paxos repair failed{}",
+                                session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                                desc.keyspace, desc.columnFamily, entityTag());
                     tryFailure(t);
                 }
             }, taskExecutor);
@@ -216,7 +224,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                 {
                     logger.info("{} parentSession={} {}.{} is fully synced with endpoints {} {}",
                                 session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
-                                desc.keyspace, desc.columnFamily, session.commonRange.endpoints, entityTag());
+                                desc.keyspace, desc.columnFamily, session.state.commonRange.endpoints, entityTag());
                     RepairProgressReporter.instance.onRepairSucceeded(session.getId(), desc.keyspace, desc.columnFamily);
                 }
                 cfs.metric.repairsCompleted.inc();
@@ -236,7 +244,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                 {
                     logger.warn("{} parentSession={} {}.{} sync failed with endpoints {} {}: {}",
                                 session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
-                                desc.keyspace, desc.columnFamily, session.commonRange.endpoints, entityTag(), t.getMessage());
+                                desc.keyspace, desc.columnFamily, session.state.commonRange.endpoints, entityTag(), t.getMessage());
                     RepairProgressReporter.instance.onRepairFailed(session.getId(), desc.keyspace, desc.columnFamily, t);
                 }
                 cfs.metric.repairsCompleted.inc();
@@ -512,7 +520,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
     {
         state.phase.validationSubmitted();
         String message = String.format("Requesting merkle trees for %s (to %s)", desc.columnFamily, endpoints);
-        logger.info("{} {}", session.previewKind.logPrefix(desc.sessionId), message);
+        logger.info("{} parentSession={} {}{}", session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
         Tracing.traceRepair(message);
         long nowInSec = getNowInSeconds();
         List<ValidationTask> tasks = new ArrayList<>(endpoints.size());
@@ -533,7 +541,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
     {
         state.phase.validationSubmitted();
         String message = String.format("Requesting merkle trees for %s (to %s)", desc.columnFamily, endpoints);
-        logger.info("{} {}", session.previewKind.logPrefix(desc.sessionId), message);
+        logger.info("{} parentSession={} {}{}", session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
         Tracing.traceRepair(message);
         long nowInSec = getNowInSeconds();
         List<Future<TreeResponse>> tasks = new ArrayList<>(endpoints.size());
@@ -576,7 +584,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
     {
         state.phase.validationSubmitted();
         String message = String.format("Requesting merkle trees for %s (to %s)", desc.columnFamily, endpoints);
-        logger.info("{} {}", session.previewKind.logPrefix(desc.sessionId), message);
+        logger.info("{} parentSession={} {}{}", session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
         Tracing.traceRepair(message);
         long nowInSec = getNowInSeconds();
         List<Future<TreeResponse>> tasks = new ArrayList<>(endpoints.size());

@@ -580,7 +580,7 @@ public class LocalSessions
                 long now = ctx.clock().nowInSeconds();
                 if (shouldFail(session, now))
                 {
-                    int ageSeconds = now - session.getLastUpdate();
+                    long ageSeconds = now - session.getLastUpdate();
                     logger.warn("Auto failing timed out repair session {} (last activity {}s ago, AUTO_FAIL_TIMEOUT={}s)",
                                 session.sessionID, ageSeconds, AUTO_FAIL_TIMEOUT);
                     failSession(session.sessionID, false);
@@ -886,7 +886,7 @@ public class LocalSessions
                 }
                 else if (session.getState() != FAILED)
                 {
-                    logger.debug("Failing local repair session {} (coordinator={})", session.sessionID, session.coordinator);
+                    logger.info("Failing local repair session {} (coordinator={})", session.sessionID, session.coordinator);
                     setStateAndSave(session, FAILED);
                 }
             }
@@ -974,7 +974,7 @@ public class LocalSessions
         sendAck(ctx, message);
         if (!putSessionUnsafe(session))
             return;
-        logger.debug("Beginning local incremental repair session {} (coordinator={}, tables={}, ranges={})",
+        logger.info("Beginning local incremental repair session {} (coordinator={}, tables={}, ranges={})",
                     sessionID, coordinator, parentSession.getTableIds(), parentSession.getRanges());
 
         ExecutorService executor = ctx.executorFactory().pooled("Repair-" + sessionID, parentSession.getColumnFamilyStores().size());

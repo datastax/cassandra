@@ -20,6 +20,7 @@ package org.apache.cassandra.repair;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -28,12 +29,13 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
 import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.utils.WithResources;
-import org.apache.cassandra.utils.concurrent.Future;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -51,6 +53,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.messages.RepairOption;
+import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.TimeUUID;
 import org.slf4j.LoggerFactory;
@@ -113,18 +116,23 @@ public class RepairSessionTest
         return RepairOption.parse(Collections.emptyMap(), Murmur3Partitioner.instance);
     }
 
-    private static RepairSession buildSession(UUID parentSessionId,
-                                              UUID sessionId,
+    /**
+     * Build a RepairSession for tests. All session flags come from {@code options}.
+     */
+    private static RepairSession buildSession(TimeUUID parentSessionId,
                                               Set<InetAddressAndPort> endpoints,
                                               RepairOption options)
     {
         IPartitioner p = Murmur3Partitioner.instance;
         Range<Token> range = new Range<>(p.getToken(ByteBufferUtil.bytes(0)),
                                          p.getToken(ByteBufferUtil.bytes(100)));
-        return new RepairSession(parentSessionId, sessionId, Scheduler.build(0),
-                                 new CommonRange(endpoints, Collections.emptySet(),
-                                                 Arrays.asList(range)),
-                                 KEYSPACE, options, false, CF);
+        return new RepairSession(SharedContext.Global.instance,
+                                 Scheduler.build(0),
+                                 parentSessionId,
+                                 new CommonRange(endpoints, Collections.emptySet(), Arrays.asList(range)),
+                                 KEYSPACE,
+                                 options,
+                                 CF);
     }
 
     private List<String> capturedInfoMessages()
@@ -162,159 +170,12 @@ public class RepairSessionTest
         InetAddressAndPort remote = InetAddressAndPort.getByName("127.0.0.2");
         Gossiper.instance.initializeNodeUnsafe(remote, UUID.randomUUID(), 1);
 
-        // Set up RepairSession
         TimeUUID parentSessionId = nextTimeUUID();
-        IPartitioner p = Murmur3Partitioner.instance;
-        Range<Token> repairRange = new Range<>(p.getToken(ByteBufferUtil.bytes(0)), p.getToken(ByteBufferUtil.bytes(100)));
         Set<InetAddressAndPort> endpoints = Sets.newHashSet(remote);
-        RepairSession session = new RepairSession(SharedContext.Global.instance, new Scheduler.NoopScheduler(), parentSessionId,
-                                                  new CommonRange(endpoints, Collections.emptySet(), Arrays.asList(repairRange)),
-                                                  "Keyspace1", RepairParallelism.SEQUENTIAL,
-                                                  false, false, false,
-                                                  PreviewKind.NONE, false, false, false, "Standard1");
-
-        RepairSession session = buildSession(parentSessionId, sessionId, endpoints,
-                                             optionsWithoutTenant());
+        RepairSession session = buildSession(parentSessionId, endpoints, optionsWithoutTenant());
         session.convict(remote, Double.MAX_VALUE);
 
         assertSessionFails(session);
-    }
-
-    private void assertSessionFails(RepairSession session) throws InterruptedException
-    {
-        try
-        {
-            session.get();
-            fail();
-        }
-        catch (ExecutionException ex)
-        {
-            assertEquals(IOException.class, ex.getCause().getClass());
-        }
-    }
-
-    private static class NoopExecutorService implements ExecutorPlus
-    {
-        @Override
-        public void shutdown()
-        {
-        }
-
-        @Override
-        public List<Runnable> shutdownNow()
-        {
-            return null;
-        }
-
-        @Override
-        public boolean isShutdown()
-        {
-            return false;
-        }
-
-        @Override
-        public boolean isTerminated()
-        {
-            return false;
-        }
-
-        @Override
-        public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public <T> Future<T> submit(Callable<T> task)
-        {
-            return null;
-        }
-
-        @Override
-        public <T> Future<T> submit(Runnable task, T result)
-        {
-            return null;
-        }
-
-        @Override
-        public Future<?> submit(Runnable task)
-        {
-            return null;
-        }
-
-        @Override
-        public void execute(WithResources withResources, Runnable task)
-        {
-        }
-
-        @Override
-        public <T> Future<T> submit(WithResources withResources, Callable<T> task)
-        {
-            return null;
-        }
-
-        @Override
-        public Future<?> submit(WithResources withResources, Runnable task)
-        {
-            return null;
-        }
-
-        @Override
-        public <T> Future<T> submit(WithResources withResources, Runnable task, T result)
-        {
-            return null;
-        }
-
-        @Override
-        public boolean inExecutor()
-        {
-            return false;
-        }
-
-        @Override
-        public void execute(Runnable command)
-        {
-        }
-
-        @Override
-        public int getCorePoolSize()
-        {
-            return 0;
-        }
-
-        @Override
-        public void setCorePoolSize(int newCorePoolSize)
-        {
-        }
-
-        @Override
-        public int getMaximumPoolSize()
-        {
-            return 0;
-        }
-
-        @Override
-        public void setMaximumPoolSize(int newMaximumPoolSize)
-        {
-        }
-
-        @Override
-        public int getActiveTaskCount()
-        {
-            return 0;
-        }
-
-        @Override
-        public long getCompletedTaskCount()
-        {
-            return 0;
-        }
-
-        @Override
-        public int getPendingTaskCount()
-        {
-            return 0;
-        }
     }
 
     @Test
@@ -324,23 +185,9 @@ public class RepairSessionTest
         Gossiper.instance.initializeNodeUnsafe(remote, UUID.randomUUID(), 1);
         Gossiper.instance.convict(remote, Double.MAX_VALUE);
 
-        UUID parentSessionId = UUIDGen.getTimeUUID();
-        UUID sessionId = UUID.randomUUID();
-        // Set up RepairSession
-        TimeUUID parentSessionId = TimeUUID.Generator.nextTimeUUID();
-        IPartitioner p = Murmur3Partitioner.instance;
-        Range<Token> repairRange = new Range<>(p.getToken(ByteBufferUtil.bytes(0)), p.getToken(ByteBufferUtil.bytes(100)));
+        TimeUUID parentSessionId = nextTimeUUID();
         Set<InetAddressAndPort> endpoints = Sets.newHashSet(remote);
-        SharedContext.Global ctx = SharedContext.Global.instance;
-        RepairSession session = new RepairSession(ctx, new Scheduler.NoopScheduler(), parentSessionId,
-                                                  new CommonRange(endpoints, Collections.emptySet(), Arrays.asList(repairRange)),
-                                                  "Keyspace1", RepairParallelism.SEQUENTIAL,
-                                                  false, false, false,
-                                                  PreviewKind.NONE, false,
-                                                  false, false, "Standard1");
-
-        RepairSession session = buildSession(parentSessionId, sessionId, endpoints,
-                                             optionsWithoutTenant());
+        RepairSession session = buildSession(parentSessionId, endpoints, optionsWithoutTenant());
         session.start(new NoopExecutorService());
 
         assertSessionFails(session);
@@ -350,13 +197,11 @@ public class RepairSessionTest
     @Test
     public void testEntityIdIsWiredFromOptions() throws Exception
     {
-        UUID parentSessionId = UUIDGen.getTimeUUID();
-        UUID sessionId = UUID.randomUUID();
+        TimeUUID parentSessionId = nextTimeUUID();
         Set<InetAddressAndPort> endpoints = Sets.newHashSet(
                 InetAddressAndPort.getByName("10.0.0.2"));
 
-        RepairSession session = buildSession(parentSessionId, sessionId, endpoints,
-                                             optionsWithTenant(ENTITY_ID));
+        RepairSession session = buildSession(parentSessionId, endpoints, optionsWithTenant(ENTITY_ID));
 
         assertEquals("entityId must equal the value set in RepairOption",
                      ENTITY_ID, session.entityId);
@@ -366,13 +211,11 @@ public class RepairSessionTest
     @Test
     public void testEntityIdIsNullWhenAbsent() throws Exception
     {
-        UUID parentSessionId = UUIDGen.getTimeUUID();
-        UUID sessionId = UUID.randomUUID();
+        TimeUUID parentSessionId = nextTimeUUID();
         Set<InetAddressAndPort> endpoints = Sets.newHashSet(
                 InetAddressAndPort.getByName("10.0.0.3"));
 
-        RepairSession session = buildSession(parentSessionId, sessionId, endpoints,
-                                             optionsWithoutTenant());
+        RepairSession session = buildSession(parentSessionId, endpoints, optionsWithoutTenant());
 
         assertNull("entityId must be null when not set in RepairOption", session.entityId);
     }
@@ -381,16 +224,14 @@ public class RepairSessionTest
     @Test
     public void testParentRepairSessionIsStored() throws Exception
     {
-        UUID parentSessionId = UUIDGen.getTimeUUID();
-        UUID sessionId = UUID.randomUUID();
+        TimeUUID parentSessionId = nextTimeUUID();
         Set<InetAddressAndPort> endpoints = Sets.newHashSet(
                 InetAddressAndPort.getByName("10.0.0.4"));
 
-        RepairSession session = buildSession(parentSessionId, sessionId, endpoints,
-                                             optionsWithoutTenant());
+        RepairSession session = buildSession(parentSessionId, endpoints, optionsWithoutTenant());
 
         assertEquals("parentRepairSession must match the UUID passed to the constructor",
-                     parentSessionId, session.parentRepairSession);
+                     parentSessionId, session.state.parentRepairSession);
         assertNotNull("session id must not be null", session.getId());
     }
 
@@ -405,12 +246,10 @@ public class RepairSessionTest
         Gossiper.instance.initializeNodeUnsafe(remote, UUID.randomUUID(), 1);
         Gossiper.instance.convict(remote, Double.MAX_VALUE);
 
-        UUID parentSessionId = UUIDGen.getTimeUUID();
-        UUID sessionId = UUID.randomUUID();
+        TimeUUID parentSessionId = nextTimeUUID();
         Set<InetAddressAndPort> endpoints = Sets.newHashSet(remote);
 
-        RepairSession session = buildSession(parentSessionId, sessionId, endpoints,
-                                             optionsWithoutTenant());
+        RepairSession session = buildSession(parentSessionId, endpoints, optionsWithoutTenant());
         session.start(new NoopExecutorService());
 
         // The dead-node error path in start() logs at ERROR level
@@ -431,12 +270,10 @@ public class RepairSessionTest
         InetAddressAndPort remote = InetAddressAndPort.getByName("127.0.0.4");
         Gossiper.instance.initializeNodeUnsafe(remote, UUID.randomUUID(), 1);
 
-        UUID parentSessionId = UUIDGen.getTimeUUID();
-        UUID sessionId = UUID.randomUUID();
+        TimeUUID parentSessionId = nextTimeUUID();
         Set<InetAddressAndPort> endpoints = Sets.newHashSet(remote);
 
-        RepairSession session = buildSession(parentSessionId, sessionId, endpoints,
-                                             optionsWithTenant(ENTITY_ID));
+        RepairSession session = buildSession(parentSessionId, endpoints, optionsWithTenant(ENTITY_ID));
         // start() with a live-node endpoint logs the banner then proceeds to
         // the job-submission path (NoopExecutorService means no jobs actually run)
         session.start(new NoopExecutorService());
@@ -461,12 +298,10 @@ public class RepairSessionTest
         InetAddressAndPort remote = InetAddressAndPort.getByName("127.0.0.5");
         Gossiper.instance.initializeNodeUnsafe(remote, UUID.randomUUID(), 1);
 
-        UUID parentSessionId = UUIDGen.getTimeUUID();
-        UUID sessionId = UUID.randomUUID();
+        TimeUUID parentSessionId = nextTimeUUID();
         Set<InetAddressAndPort> endpoints = Sets.newHashSet(remote);
 
-        RepairSession session = buildSession(parentSessionId, sessionId, endpoints,
-                                             optionsWithoutTenant());
+        RepairSession session = buildSession(parentSessionId, endpoints, optionsWithoutTenant());
         session.start(new NoopExecutorService());
 
         List<String> infos = capturedInfoMessages();
@@ -485,29 +320,44 @@ public class RepairSessionTest
      * running any tasks or managing any threads.  All lifecycle and scheduling methods are
      * intentionally inert.
      */
-    private static class NoopExecutorService implements ListeningExecutorService
+    private static class NoopExecutorService implements ExecutorPlus
     {
-        @Override public void shutdown()
-        {
-            // No threads to shut down; this executor has no thread pool.
-        }
+        @Override public void shutdown() {}
         @Override public List<Runnable> shutdownNow() { return null; }
         @Override public boolean isShutdown() { return false; }
         @Override public boolean isTerminated() { return false; }
         @Override public boolean awaitTermination(long timeout, TimeUnit unit) { return false; }
-        @Override public <T> ListenableFuture<T> submit(Callable<T> callable) { return null; }
-        @Override public ListenableFuture<?> submit(Runnable runnable) { return null; }
-        @Override public <T> ListenableFuture<T> submit(Runnable runnable, T t) { return null; }
-        @Override public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> c) { return null; }
-        @Override public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> c, long l, TimeUnit u) { return null; }
-        @Override public <T> T invokeAny(Collection<? extends Callable<T>> tasks) { return null; }
-        @Override public <T> T invokeAny(Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit) { return null; }
-
-        @Override public void execute(Runnable command)
-        {
+        @Override public <T> org.apache.cassandra.utils.concurrent.Future<T> submit(Callable<T> task) { return null; }
+        @Override public <T> org.apache.cassandra.utils.concurrent.Future<T> submit(Runnable task, T result) { return null; }
+        @Override public org.apache.cassandra.utils.concurrent.Future<?> submit(Runnable task) { return null; }
+        @Override public void execute(WithResources withResources, Runnable task){
             // Intentionally does not run the command. Tests using this executor only exercise
             // log lines emitted before job submission in RepairSession.start(); submitted jobs
             // are never expected to complete.
         }
+        @Override public <T> org.apache.cassandra.utils.concurrent.Future<T> submit(WithResources withResources, Callable<T> task) { return null; }
+        @Override public org.apache.cassandra.utils.concurrent.Future<?> submit(WithResources withResources, Runnable task) { return null; }
+        @Override public <T> org.apache.cassandra.utils.concurrent.Future<T> submit(WithResources withResources, Runnable task, T result) { return null; }
+        @Override public boolean inExecutor() { return false; }
+        @Override public void execute(Runnable command) {
+            // Intentionally does not run the command. Tests using this executor only exercise
+            // log lines emitted before job submission in RepairSession.start(); submitted jobs
+            // are never expected to complete.
+        }
+        @Override public int getCorePoolSize() { return 0; }
+        @Override public void setCorePoolSize(int newCorePoolSize) {
+            // Intentionally does not run the command. Tests using this executor only exercise
+            // log lines emitted before job submission in RepairSession.start(); submitted jobs
+            // are never expected to complete.
+        }
+        @Override public int getMaximumPoolSize() { return 0; }
+        @Override public void setMaximumPoolSize(int newMaximumPoolSize) {
+            // Intentionally does not run the command. Tests using this executor only exercise
+            // log lines emitted before job submission in RepairSession.start(); submitted jobs
+            // are never expected to complete.
+        }
+        @Override public int getActiveTaskCount() { return 0; }
+        @Override public long getCompletedTaskCount() { return 0; }
+        @Override public int getPendingTaskCount() { return 0; }
     }
 }

@@ -133,11 +133,11 @@ public class RepairJobTest
                                         String... cfnames)
         {
             super(SharedContext.Global.instance, new Scheduler.NoopScheduler(),
-                  parentRepairSession, commonRange, keyspace, RepairOption.parse(
-                      buildOptions(parallelismDegree, isIncremental,  pullRepair,
-                   optimiseStreams),
-                      org.apache.cassandra.dht.Murmur3Partitioner.instance),
-                  isIncremental, repairPaxos, paxosOnly, cfnames);
+                  parentRepairSession, commonRange, keyspace,
+                  RepairOption.parse(buildOptions(parallelismDegree, isIncremental, pullRepair, optimiseStreams,
+                                                  repairPaxos, paxosOnly, previewKind),
+                                     org.apache.cassandra.dht.Murmur3Partitioner.instance),
+                  cfnames);
         }
 
         @Override
@@ -173,13 +173,18 @@ public class RepairJobTest
         }
 
         private static Map<String, String> buildOptions(RepairParallelism parallelismDegree, boolean isIncremental,
-                                                        boolean pullRepair, boolean optimiseStreams)
+                                                        boolean pullRepair, boolean optimiseStreams,
+                                                        boolean repairPaxos, boolean paxosOnly,
+                                                        PreviewKind previewKind)
         {
             Map<String, String> options = new HashMap<>();
             options.put(RepairOption.PARALLELISM_KEY, parallelismDegree.getName());
             options.put(RepairOption.INCREMENTAL_KEY, Boolean.toString(isIncremental));
             options.put(RepairOption.PULL_REPAIR_KEY, Boolean.toString(pullRepair));
             options.put(RepairOption.OPTIMISE_STREAMS_KEY, Boolean.toString(optimiseStreams));
+            options.put(RepairOption.REPAIR_PAXOS_KEY, Boolean.toString(repairPaxos));
+            options.put(RepairOption.PAXOS_ONLY_KEY, Boolean.toString(paxosOnly));
+            options.put(RepairOption.PREVIEW, previewKind.toString());
             return options;
         }
     }

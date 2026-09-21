@@ -54,6 +54,6 @@ public class SyncStat
     public String toString()
     {
         return "SyncStat{" + nodes.coordinator + "<->" + nodes.peer +
-               ", differences=" + numberOfDifferences + '}';
+               ", differences=" + (differences == null ? 0 : differences.size()) + '}';
     }
 }
