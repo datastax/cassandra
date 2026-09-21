@@ -326,9 +326,6 @@ public class MetadataSerializer implements IMetadataSerializer
         rewriteSSTableMetadata(descriptor, currentComponents);
     }
 
-    // Package-private for testing
-    static CompressionParams testCompressionParams = null;
-
     /**
      * Read the compression info file pointed by the given descriptor and create the corresponding encryptor.
      *
@@ -339,15 +336,6 @@ public class MetadataSerializer implements IMetadataSerializer
     {
         if (!desc.version.metadataIsEncrypted())
             return null;
-        
-        // For testing, use the provided compression params
-        if (testCompressionParams != null)
-        {
-            ICompressor compressor = testCompressionParams.getSstableCompressor();
-            if (compressor != null)
-                return compressor.encryptionOnly();
-            return null;
-        }
         
         File compressionFile = desc.fileFor(Components.COMPRESSION_INFO);
         if (!compressionFile.exists())

@@ -31,6 +31,7 @@ import java.util.Map;
 import com.google.common.primitives.Bytes;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,6 +46,7 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.io.compress.Encryptor;
 import org.apache.cassandra.io.compress.EncryptorTest;
+import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
@@ -58,6 +60,9 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Throwables;
+import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMUnitConfig;
+import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.apache.cassandra.io.compress.EncryptionConfig.CIPHER_ALGORITHM;
 import static org.apache.cassandra.io.compress.EncryptionConfig.KEY_PROVIDER;
@@ -67,6 +72,14 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(BMUnitRunner.class)
+@BMUnitConfig(debug = true, verbose = true)
+@BMRule(name = "Return specified encryptor",
+        targetClass = "MetadataSerializer",
+        targetMethod = "getEncryptor",
+        condition = "org.apache.cassandra.io.sstable.metadata.MetadataSerializerTest.testCompressor != null",
+        targetLocation = "AT ENTRY",
+        action = "return org.apache.cassandra.io.sstable.metadata.MetadataSerializerTest.testCompressor")
 public class MetadataSerializerTest
 {
     private final static Logger logger = LoggerFactory.getLogger(MetadataSerializerTest.class);
@@ -75,6 +88,8 @@ public class MetadataSerializerTest
     private static CompressionParams compressionParams;
     
     final static String sensitiveKey = "Key with sensitive information";
+
+    static ICompressor testCompressor = null;
 
     @BeforeClass
     public static void initDD()
@@ -211,7 +226,7 @@ public class MetadataSerializerTest
     public File serializeWithEncryption(Map<MetadataType, MetadataComponent> metadata, MetadataSerializer serializer, Descriptor descriptor)
     throws IOException
     {
-        MetadataSerializer.testCompressionParams = compressionParams;
+        testCompressor = compressionParams.getSstableCompressor();
         try
         {
             File statsFile = descriptor.fileFor(Components.STATS);
@@ -229,20 +244,20 @@ public class MetadataSerializerTest
         }
         finally
         {
-            MetadataSerializer.testCompressionParams = null;
+            testCompressor = null;
         }
     }
 
     private Map<MetadataType, MetadataComponent> deserializeWithEncryption(MetadataSerializer serializer, Descriptor desc, FileInputStreamPlus in) throws IOException
     {
-        MetadataSerializer.testCompressionParams = compressionParams;
+        testCompressor = compressionParams.getSstableCompressor();
         try
         {
             return serializer.deserialize(desc, in, EnumSet.allOf(MetadataType.class));
         }
         finally
         {
-            MetadataSerializer.testCompressionParams = null;
+            testCompressor = null;
         }
     }
 
