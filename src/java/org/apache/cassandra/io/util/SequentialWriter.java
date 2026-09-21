@@ -317,13 +317,8 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
 
     public void updateFileHandle(FileHandle.Builder fhBuilder)
     {
-        updateFileHandle(fhBuilder, -1);
-    }
-
-    public void updateFileHandle(FileHandle.Builder fhBuilder, long dataLength)
-    {
         // Set actual length to avoid having to read it off the file system.
-        fhBuilder.withLengthOverride(dataLength > 0 ? dataLength : lastFlushOffset);
+        fhBuilder.withLengthOverride(lastFlushOffset);
     }
 
     /**
