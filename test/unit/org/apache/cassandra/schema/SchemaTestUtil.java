@@ -97,7 +97,7 @@ public class SchemaTestUtil
         Schema.instance.transform(schema -> schema.withAddedOrUpdated(ksm.withSwapped(ksm.tables.withSwapped(updated))));
     }
 
-    static void announceKeyspaceDrop(String ksName)
+    public static void announceKeyspaceDrop(String ksName)
     {
         KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksName);
         if (oldKsm == null)
