@@ -32,6 +32,7 @@ import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.openhft.chronicle.values.NotNull;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
@@ -450,6 +451,11 @@ public class Message<T>
         public UUID traceSession()
         {
             return (UUID) params.get(ParamType.TRACE_SESSION);
+        }
+
+        public boolean tracedProbabilistically()
+        {
+            return (Boolean)params.getOrDefault(ParamType.TRACED_PROBABILISTICALLY, false);
         }
 
         @Nullable
