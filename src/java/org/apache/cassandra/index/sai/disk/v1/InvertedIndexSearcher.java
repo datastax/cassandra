@@ -166,18 +166,15 @@ public class InvertedIndexSearcher extends IndexSearcher
 
     private Cell<?> readColumn(SSTableReader sstable, PrimaryKey primaryKey)
     {
+        assert !indexContext.getDefinition().isStatic()
+            : "BM25 on static column " + indexContext.getDefinition().name + " is not supported; "
+              + "StatementRestrictions should have rejected this";
         var dk = primaryKey.partitionKey();
         var slices = (primaryKey.isStaticRow() || !primaryKey.hasClustering())
                      ? Slices.ALL
                      : Slices.with(indexContext.comparator(), Slice.make(primaryKey.clustering()));
         try (var rowIterator = sstable.rowIterator(dk, slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
         {
-            if (indexContext.getDefinition().isStatic())
-            {
-                Row staticRow = rowIterator.staticRow();
-                return staticRow != null ? staticRow.getCell(indexContext.getDefinition()) : null;
-            }
-
             while (rowIterator.hasNext())
             {
                 Unfiltered unfiltered = rowIterator.next();

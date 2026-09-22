@@ -262,9 +262,8 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     @Test
     public void testHybridANNQueryWithStaticPredicate() throws Throwable
     {
-        // Use exact (brute-force) scoring so results are deterministic regardless of graph structure.
-        // The test validates static-key → regular-row expansion in flatmapPrimaryKeysToBitsAndRows;
-        // the scoring path (brute-force vs graph) is orthogonal to that correctness.
+        // Force brute-force scoring for determinism: the test is about static-key to regular-row
+        // expansion correctness, which is independent of whether the graph or brute-force path is used.
         setMaxBruteForceRows(Integer.MAX_VALUE);
 
         createTable("CREATE TABLE %s (k int, c int, s text static, r vector<float, 2>, PRIMARY KEY (k, c))");
