@@ -63,8 +63,8 @@ public class PartialMaskingFunctionTest extends MaskingFunctionTester
                        row(masker.mask(stringValue, 1, 2, '#')));
 
             // ... with manually specified UTF-8 padding
-//            assertRows(execute(format("SELECT %s((text) %s, 1, 2, 'é') FROM %%s", functionName, name)),
-//                       row(masker.mask(stringValue, 1, 2, 'é')));
+            assertRows(execute(format("SELECT %s((text) %s, 1, 2, 'é') FROM %%s", functionName, name)),
+                       row(masker.mask(stringValue, 1, 2, 'é')));
 
             // ... with not single-character padding
             assertInvalidThrowMessage("should be single-character",
