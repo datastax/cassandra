@@ -64,13 +64,21 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         this.rowIndexFile = rowIndexFile;
         this.dataFile = dataFile;
 
-        readNext();
-        // first value can be off
-        if (nextKey != null && !(nextKey.compareTo(left) > inclusiveLeft))
+        try
         {
             readNext();
+            // first value can be off
+            if (nextKey != null && !(nextKey.compareTo(left) > inclusiveLeft))
+            {
+                readNext();
+            }
+            advance();
         }
-        advance();
+        catch (Throwable t)
+        {
+            super.close();
+            throw t;
+        }
     }
 
     /**
