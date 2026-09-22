@@ -19,6 +19,7 @@ package org.apache.cassandra.repair;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -38,6 +39,8 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.state.SyncState;
 import org.apache.cassandra.streaming.PreviewKind;
+import org.apache.cassandra.streaming.StreamOperation;
+import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTrees;
@@ -163,6 +166,51 @@ public class RepairObservabilityLoggingTest extends AbstractRepairTest
                    messagesAt(streamingAppender, Level.ERROR).isEmpty());
     }
 
+    /**
+     * execute() must log at INFO before initiating the stream, including parentSessionId and dst endpoint.
+     * The stream executor will fail without a running cluster, but the log fires before the send.
+     */
+    @Test
+    public void streamingRepairTask_execute_logsInfoWithParentSession()
+    {
+        RepairJobDesc desc = makeDesc();
+        SyncState syncState = new SyncState(Clock.Global.clock(), desc, PARTICIPANT1, PARTICIPANT2, PARTICIPANT3);
+        StreamingRepairTask task = new StreamingRepairTask(SharedContext.Global.instance, syncState, desc,
+                                                          PARTICIPANT1, PARTICIPANT2, PARTICIPANT3,
+                                                          Collections.emptyList(), null,
+                                                          PreviewKind.NONE, false);
+
+        try { task.execute(); } catch (Exception ignored) { /* stream executor may throw */ }
+
+        List<String> infos = messagesAt(streamingAppender, Level.INFO);
+        assertFalse("execute() must produce at least one INFO log", infos.isEmpty());
+        String first = infos.get(0);
+        assertTrue("log must contain sessionId",       first.contains(desc.sessionId.toString()));
+        assertTrue("log must contain parentSessionId", first.contains(desc.parentSessionId.toString()));
+    }
+
+    /**
+     * onSuccess() must log at INFO including parentSessionId and the initiator endpoint.
+     */
+    @Test
+    public void streamingRepairTask_onSuccess_logsInfoWithParentSession()
+    {
+        RepairJobDesc desc = makeDesc();
+        SyncState syncState = new SyncState(Clock.Global.clock(), desc, PARTICIPANT1, PARTICIPANT2, PARTICIPANT3);
+        StreamingRepairTask task = new StreamingRepairTask(SharedContext.Global.instance, syncState, desc,
+                                                          PARTICIPANT1, PARTICIPANT2, PARTICIPANT3,
+                                                          Collections.emptyList(), null,
+                                                          PreviewKind.NONE, false);
+        StreamState streamState = new StreamState(nextTimeUUID(), StreamOperation.REPAIR, new HashSet<>());
+
+        try { task.onSuccess(streamState); } catch (Exception ignored) { /* send may throw */ }
+
+        List<String> infos = messagesAt(streamingAppender, Level.INFO);
+        assertFalse("onSuccess() must produce at least one INFO log", infos.isEmpty());
+        String msg = String.join(" ", infos);
+        assertTrue("log must contain parentSessionId", msg.contains(desc.parentSessionId.toString()));
+    }
+
     // LocalSyncTask.checkArgument requires local == FBUtilities.getBroadcastAddressAndPort()
     private LocalSyncTask makeLocalSyncTask(RepairJobDesc desc, InetAddressAndPort remote)
     {
@@ -210,6 +258,44 @@ public class RepairObservabilityLoggingTest extends AbstractRepairTest
         List<String> errors = messagesAt(localSyncAppender, Level.ERROR);
         assertTrue("only the first onFailure call must produce a log (AtomicBoolean guards re-entry)",
                    errors.size() == 1);
+    }
+
+    /**
+     * startSync() must log at INFO including parentSessionId and the remote endpoint.
+     */
+    @Test
+    public void localSyncTask_startSync_logsInfoWithParentSession()
+    {
+        RepairJobDesc desc = makeDesc();
+        LocalSyncTask task = makeLocalSyncTask(desc, PARTICIPANT2);
+
+        // startSync is package-private via run() when rangesToSync is non-empty; invoke via run()
+        // createStreamPlan() will throw UnknownKeyspaceException in unit tests but the log fires before it
+        try { task.run(); } catch (Exception ignored) { /* keyspace 'ks1' not available in unit tests */ }
+
+        List<String> infos = messagesAt(localSyncAppender, Level.INFO);
+        assertFalse("startSync() must produce at least one INFO log", infos.isEmpty());
+        String msg = infos.get(0);
+        assertTrue("log must contain parentSessionId", msg.contains(desc.parentSessionId.toString()));
+        assertTrue("log must contain remote endpoint",  msg.contains(PARTICIPANT2.toString()));
+    }
+
+    /**
+     * onSuccess() must log at INFO including parentSessionId on the non-aborted path.
+     */
+    @Test
+    public void localSyncTask_onSuccess_logsInfoWithParentSession()
+    {
+        RepairJobDesc desc = makeDesc();
+        LocalSyncTask task = makeLocalSyncTask(desc, PARTICIPANT2);
+        StreamState streamState = new StreamState(nextTimeUUID(), StreamOperation.REPAIR, new HashSet<>());
+
+        task.onSuccess(streamState);
+
+        List<String> infos = messagesAt(localSyncAppender, Level.INFO);
+        assertFalse("onSuccess() must produce at least one INFO log", infos.isEmpty());
+        String msg = String.join(" ", infos);
+        assertTrue("log must contain parentSessionId", msg.contains(desc.parentSessionId.toString()));
     }
 
     /**

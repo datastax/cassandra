@@ -33,9 +33,11 @@ import ch.qos.logback.core.read.ListAppender;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.AbstractRepairTest;
+import org.apache.cassandra.repair.CoordinatedRepairResult;
 import org.apache.cassandra.repair.SharedContext;
 import org.apache.cassandra.repair.messages.FinalizePromise;
 import org.apache.cassandra.repair.messages.PrepareConsistentResponse;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import org.slf4j.LoggerFactory;
 
@@ -216,5 +218,82 @@ public class CoordinatorSessionLoggingTest extends AbstractRepairTest
         boolean hasInfoFailed = infoMessages().stream()
                                               .anyMatch(m -> m.contains("failed") && m.contains(session.sessionID.toString()));
         assertFalse("fail() must not produce an INFO 'failed' log (promoted to WARN)", hasInfoFailed);
+    }
+
+    // -------------------------------------------------------------------------
+    // prepare() — INFO banner
+    // -------------------------------------------------------------------------
+
+    /**
+     * prepare() must log INFO "Beginning prepare phase of incremental repair session …" including
+     * the sessionID, coordinator address, participant count, and participant addresses.
+     */
+    @Test
+    public void prepare_logsInfoBannerWithSessionAndParticipants()
+    {
+        InstrumentedCoordinatorSession session = createSession();
+
+        session.prepare();
+
+        String msg = infoMessages().stream()
+                                   .filter(m -> m.contains("Beginning prepare phase"))
+                                   .findFirst()
+                                   .orElse("");
+
+        assertFalse("prepare() must emit 'Beginning prepare phase' INFO", msg.isEmpty());
+        assertTrue("log must contain session ID",           msg.contains(session.sessionID.toString()));
+        assertTrue("log must contain coordinator address",  msg.contains(COORDINATOR.toString()));
+        assertTrue("log must contain participant count",    msg.contains(String.valueOf(PARTICIPANTS.size())));
+        assertTrue("log must contain a participant address", msg.contains(PARTICIPANT1.toString()));
+    }
+
+    /**
+     * prepare() INFO banner must not fire at WARN — it is purely informational.
+     */
+    @Test
+    public void prepare_bannerNotAtWarn()
+    {
+        InstrumentedCoordinatorSession session = createSession();
+
+        session.prepare();
+
+        assertTrue("prepare() banner must not produce a WARN",
+                   warnMessages().stream().noneMatch(m -> m.contains("Beginning prepare phase")));
+    }
+
+    // -------------------------------------------------------------------------
+    // execute() — INFO coordination banner
+    // -------------------------------------------------------------------------
+
+    /**
+     * execute() must log INFO "Beginning coordination of incremental repair session …" including
+     * the sessionID, participant count, and participant addresses before kicking off prepare().
+     *
+     * We supply a session submitter that immediately fails so the method returns quickly;
+     * we only care about the log line that fires synchronously at entry.
+     */
+    @Test
+    public void execute_logsCoordinationBannerWithSessionAndParticipants()
+    {
+        InstrumentedCoordinatorSession session = createSession();
+
+        // Supply a submitter that instantly fails — we only need to trigger the entry log.
+        ImmediateFuture<CoordinatedRepairResult> failedFuture =
+                ImmediateFuture.failure(new RuntimeException("test"));
+        try
+        {
+            session.execute(() -> failedFuture);
+        }
+        catch (Exception ignored) { /* expected — we only test the log */ }
+
+        String msg = infoMessages().stream()
+                                   .filter(m -> m.contains("Beginning coordination"))
+                                   .findFirst()
+                                   .orElse("");
+
+        assertFalse("execute() must emit 'Beginning coordination' INFO", msg.isEmpty());
+        assertTrue("log must contain session ID",            msg.contains(session.sessionID.toString()));
+        assertTrue("log must contain participant count",     msg.contains(String.valueOf(PARTICIPANTS.size())));
+        assertTrue("log must contain a participant address", msg.contains(PARTICIPANT1.toString()));
     }
 }

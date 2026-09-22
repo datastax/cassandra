@@ -137,6 +137,7 @@ public class RepairJobTest
                   RepairOption.parse(buildOptions(parallelismDegree, isIncremental, pullRepair, optimiseStreams,
                                                   repairPaxos, paxosOnly, previewKind),
                                      org.apache.cassandra.dht.Murmur3Partitioner.instance),
+                  isIncremental,
                   cfnames);
         }
 

@@ -441,6 +441,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                                              CommonRange range,
                                              String keyspace,
                                              RepairOption options,
+                                             boolean isIncremental,
                                              ExecutorPlus executor,
                                              Scheduler validationScheduler,
                                              String... cfnames)
@@ -455,7 +456,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             return null;
 
         final RepairSession session = new RepairSession(ctx, validationScheduler, parentRepairSession, range, keyspace,
-                                                        options, cfnames);
+                                                        options, isIncremental, cfnames);
         repairs.getIfPresent(parentRepairSession).register(session.state);
 
         sessions.put(session.getId(), session);

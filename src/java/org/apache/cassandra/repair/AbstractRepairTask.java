@@ -70,6 +70,7 @@ public abstract class AbstractRepairTask implements RepairTask
                                                                                  commonRange,
                                                                                  keyspace,
                                                                                  options,
+                                                                                 isIncremental,
                                                                                  executor,
                                                                                  validationScheduler,
                                                                                  cfnames);

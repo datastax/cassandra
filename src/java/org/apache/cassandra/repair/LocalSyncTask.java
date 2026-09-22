@@ -115,11 +115,11 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
             InetAddressAndPort remote = nodePair.peer;
 
             String message = String.format("Performing streaming repair of %d ranges with %s", rangesToSync.size(), remote);
-            logger.info("{} {}", previewKind.logPrefix(desc.sessionId), message);
+            logger.info("{} parentSession={} {}", previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message);
             Tracing.traceRepair(message);
 
             StreamPlan plan = createStreamPlan();
-            logger.info("{} {} {}", previewKind.logPrefix(desc.sessionId), "Starting streaming plan with id", plan.getPlanId());
+            logger.info("{} parentSession={} Starting streaming plan with id {}", previewKind.logPrefix(desc.sessionId), desc.parentSessionId, plan.getPlanId());
             ctx.streamExecutor().execute(plan);
             planPromise.setSuccess(plan);
         }
@@ -166,7 +166,7 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
             String status = result.hasAbortedSession() ? "aborted" : "complete";
             String message = String.format("Sync %s using session %s between %s and %s on %s",
                                            status, desc.sessionId, nodePair.coordinator, nodePair.peer, desc.columnFamily);
-            logger.info("{} {}", previewKind.logPrefix(desc.sessionId), message);
+            logger.info("{} parentSession={} {}", previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message);
             Tracing.traceRepair(message);
             trySuccess(result.hasAbortedSession() ? stat : stat.withSummaries(result.createSummaries()));
             finished();

@@ -154,8 +154,11 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
      * @param parentRepairSession the parent sessions id
      * @param commonRange ranges to repair
      * @param keyspace name of keyspace
-     * @param options repair options — all session flags (parallelism, incremental, push/pull,
-     *                preview kind, optimise streams, paxos, entity context, etc.) are read from here
+     * @param options repair options — parallelism, push/pull, preview kind, optimise streams,
+     *                paxos, entity context, etc. are read from here
+     * @param isIncremental true only for genuine incremental (consistent) repair sessions, which
+     *                      manage their own snapshotting via CoordinatorSession and must not send
+     *                      SNAPSHOT_MSG. Pass false for full and preview repairs.
      * @param cfnames names of columnfamilies
      */
     public RepairSession(SharedContext ctx,
@@ -164,6 +167,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
                          CommonRange commonRange,
                          String keyspace,
                          RepairOption options,
+                         boolean isIncremental,
                          String... cfnames)
     {
         this.ctx = ctx;
@@ -174,7 +178,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
         this.state = new SessionState(ctx.clock(), parentRepairSession, keyspace, cfnames, commonRange);
         this.parallelismDegree = options.getParallelism();
         this.pushRepair = options.isPushRepair();
-        this.isIncremental = options.isIncremental();
+        this.isIncremental = isIncremental;
         this.previewKind = options.getPreviewKind();
         this.pullRepair = options.isPullRepair();
         this.optimiseStreams = options.optimiseStreams();
@@ -359,7 +363,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
         List<RepairJob> jobs = new ArrayList<>(state.cfnames.length);
         for (String cfname : state.cfnames)
         {
-            RepairJob job = new RepairJob(this, cfname);
+            RepairJob job = createJob(cfname);
             state.register(job.state);
             executor.execute(job);
             jobs.add(job);
@@ -386,17 +390,22 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
             public void onFailure(Throwable t)
             {
                 state.phase.fail(t);
-                String msg = "{} Session completed with the following error";
                 if (Throwables.anyCauseMatches(t, RepairException::shouldWarn))
-                    logger.warn(msg + ": {}", previewKind.logPrefix(getId()), t.getMessage());
+                    logger.warn("{} parentSession={} session failed on range {} for {}.{}{}: {}",
+                                previewKind.logPrefix(getId()), state.parentRepairSession, state.commonRange, state.keyspace, Arrays.toString(state.cfnames), entityTag(), t.getMessage());
                 else
-                    logger.error(msg, previewKind.logPrefix(getId()), t);
-                logger.error("{} parentSession={} session failed on range {} for {}.{}{}",
-                             previewKind.logPrefix(getId()), state.parentRepairSession, state.commonRange, state.keyspace, Arrays.toString(state.cfnames), entityTag(), t);
+                    logger.error("{} parentSession={} session failed on range {} for {}.{}{}",
+                                 previewKind.logPrefix(getId()), state.parentRepairSession, state.commonRange, state.keyspace, Arrays.toString(state.cfnames), entityTag(), t);
                 Tracing.traceRepair("Session completed with the following error: {}", t);
                 forceShutdown(t);
             }
         }, taskExecutor);
+    }
+
+    @VisibleForTesting
+    protected RepairJob createJob(String columnFamily)
+    {
+        return new RepairJob(this, columnFamily);
     }
 
     public synchronized void terminate(@Nullable Throwable reason)
