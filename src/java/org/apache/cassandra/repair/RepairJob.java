@@ -81,7 +81,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
     final List<SyncTask> syncTasks = new CopyOnWriteArrayList<>();
 
     /**
-     * Returns " [entityId: <id>, repairType: <type>]" (with a leading space for inline log message formatting)
+     * Returns " [entityId: &lt;id&gt;, repairType: &lt;type&gt;]" (with a leading space for inline log message formatting)
      * when entityId is set on the session, or an empty string otherwise.
      */
     private String entityTag()
