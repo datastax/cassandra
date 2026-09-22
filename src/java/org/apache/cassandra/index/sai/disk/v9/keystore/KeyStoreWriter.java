@@ -24,7 +24,6 @@ import java.io.IOException;
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 
-import io.micrometer.core.lang.NonNull;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
@@ -86,9 +85,9 @@ public class KeyStoreWriter implements Closeable
      * @param blockShift        the block shift that is used to determine the block size
      * @param clustering        determines whether the keys will be written as ordered partitions
      */
-    public KeyStoreWriter(@NonNull IndexComponent.ForWrite keysDataComponent,
-                          @NonNull MetadataWriter metadataWriter,
-                          @NonNull NumericValuesWriter keysBlockOffsets,
+    public KeyStoreWriter(@Nonnull IndexComponent.ForWrite keysDataComponent,
+                          @Nonnull MetadataWriter metadataWriter,
+                          @Nonnull NumericValuesWriter keysBlockOffsets,
                           int blockShift,
                           boolean clustering) throws IOException
     {
