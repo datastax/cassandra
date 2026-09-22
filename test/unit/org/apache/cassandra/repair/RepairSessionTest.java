@@ -20,7 +20,6 @@ package org.apache.cassandra.repair;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -29,7 +28,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -53,7 +51,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.messages.RepairOption;
-import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.TimeUUID;
 import org.slf4j.LoggerFactory;
@@ -262,7 +259,7 @@ public class RepairSessionTest
 
     /**
      * start() INFO banner must contain both the parent session UUID and
-     * the entity tag "[entityId: <value>]" when entityId is set.
+     * the entity tag "[entityId: &lt;value&gt;]" when entityId is set.
      */
     @Test
     public void testStartInfoBannerIncludesEntityAndParentSession() throws Exception
