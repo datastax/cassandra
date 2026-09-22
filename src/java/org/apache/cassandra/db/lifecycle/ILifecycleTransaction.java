@@ -31,6 +31,7 @@ import org.apache.cassandra.utils.concurrent.Transactional;
 public interface ILifecycleTransaction extends Transactional, LifecycleNewTracker
 {
     void checkpoint();
+    Throwable abortCheckpoint(Throwable accumulate);
     void update(SSTableReader reader, boolean original);
     void update(Collection<SSTableReader> readers, boolean original);
     SSTableReader current(SSTableReader reader);

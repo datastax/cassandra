@@ -37,6 +37,15 @@ public interface ReaderFileProxy extends AutoCloseable
     long adjustPosition(long position);
 
     /**
+     * Called to provide the position to be seeked to after skipping the given number of bytes.
+     * Overridden by EncryptedChunkReader to properly account for holes.
+     */
+    default long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        return currentPosition + bytesToSkip;
+    }
+
+    /**
      * Needed for tests. Returns the table's CRC check chance, which is only set for compressed tables.
      */
     double getCrcCheckChance();
