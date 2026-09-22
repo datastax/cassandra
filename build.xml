@@ -151,7 +151,7 @@
     </condition>
 
     <!-- https://www.eclemma.org/jacoco/ -->
-    <property name="jacoco.version" value="0.8.12"/>
+    <property name="jacoco.version" value="0.8.15"/>
     <property name="jacoco.export.dir" value="${build.dir}/jacoco/" />
     <property name="jacoco.partials.dir" value="${jacoco.export.dir}/partials" />
     <property name="jacoco.partialexecfile" value="${jacoco.partials.dir}/partial.exec" />
@@ -1364,7 +1364,7 @@
           <isset property="repetition"/>
       </condition>
       <condition property="additionalagent"
-                 value="-javaagent:${build.dir.lib}/jars/jacocoagent.jar=destfile=${jacoco.partialexecfile}"
+                 value="-javaagent:${build.dir.lib}/jars/jacocoagent.jar=destfile=${jacoco.partials.dir}/partial-${tag}-${test.name}.exec"
                  else="">
         <istrue value="${usejacoco}"/>
       </condition>
@@ -1675,6 +1675,7 @@
     <antcall target="${runtask}">
       <param name="usejacoco" value="yes"/>
     </antcall>
+    <antcall target="jacoco-merge-partials"/>
   </target>
 
   <!-- Use this with an FQDN for test class, and an optional csv list of methods like this:
@@ -1927,9 +1928,37 @@
   <!-- Use JaCoCo ant extension without needing externally saved lib -->
   <target name="jacoco-init" depends="resolver-init">
     <typedef uri="antlib:org.jacoco.ant" classpathref="jacocoant.classpath"/>
+    <mkdir dir="${test.classes}"/>
+    <javac includes="**/ValidateJacocoExecTask.java" srcdir="${build.helpers.dir}/anttasks" destdir="${test.classes}" includeantruntime="true" source="${java.default}" target="${java.default}">
+      <compilerarg value="-Xlint:-options"/>
+      <classpath refid="jacocoant.classpath"/>
+    </javac>
+    <taskdef name="jacoco-validate" classname="org.apache.cassandra.anttasks.ValidateJacocoExecTask">
+      <classpath>
+        <path refid="jacocoant.classpath"/>
+        <pathelement path="${test.classes}"/>
+      </classpath>
+    </taskdef>
   </target>
 
-  <target name="jacoco-merge" depends="jacoco-init">
+  <target name="jacoco-validate" depends="jacoco-init">
+    <exec executable="sync" osfamily="unix" failonerror="false"/>
+    <jacoco-validate dir="${jacoco.export.dir}"/>
+  </target>
+
+  <target name="jacoco-merge-partials" depends="jacoco-init">
+    <exec executable="sync" osfamily="unix" failonerror="false"/>
+    <jacoco-validate dir="${jacoco.partials.dir}"/>
+    <jacoco:merge destfile="${jacoco.partialexecfile}" xmlns:jacoco="antlib:org.jacoco.ant">
+        <fileset dir="${jacoco.partials.dir}" includes="*.exec,**/*.exec" excludes="partial.exec"/>
+    </jacoco:merge>
+    <delete>
+        <fileset dir="${jacoco.partials.dir}" includes="*.exec,**/*.exec" excludes="partial.exec"/>
+    </delete>
+    <exec executable="sync" osfamily="unix" failonerror="false"/>
+  </target>
+
+  <target name="jacoco-merge" depends="jacoco-init,jacoco-validate">
     <jacoco:merge destfile="${jacoco.finalexecfile}" xmlns:jacoco="antlib:org.jacoco.ant">
         <fileset dir="${jacoco.export.dir}" includes="*.exec,**/*.exec"/>
     </jacoco:merge>
