@@ -1138,7 +1138,7 @@ public class SecondaryIndexTest extends CQLTester
         indexName = createIndexAsync("CREATE CUSTOM INDEX ON %s (value) USING '" + ReadOnlyOnFailureIndex.class.getName() + "'");
         index = (ReadOnlyOnFailureIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(indexName);
         waitForIndexBuilds(indexName);
-        assertInvalidThrow(IndexNotAvailableException.class, "SELECT value FROM %s WHERE value = 1");
+        assertInvalidThrow(IndexBuildInProgressException.class, "SELECT value FROM %s WHERE value = 1");
         execute("INSERT INTO %s (pk, ck, value) VALUES (?, ?, ?)", 1, 1, 1);
         assertEquals(0, index.rowsInserted.size());
 
@@ -1178,7 +1178,7 @@ public class SecondaryIndexTest extends CQLTester
         waitForIndexBuilds(indexName);
         execute("INSERT INTO %s (pk, ck, value) VALUES (?, ?, ?)", 1, 1, 1);
         assertEquals(1, index.rowsInserted.size());
-        assertInvalidThrow(IndexNotAvailableException.class, "SELECT value FROM %s WHERE value = 1");
+        assertInvalidThrow(IndexBuildInProgressException.class, "SELECT value FROM %s WHERE value = 1");
 
         // Upon recovery, we can query data again
         index.reset();
