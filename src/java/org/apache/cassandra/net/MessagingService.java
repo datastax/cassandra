@@ -232,7 +232,6 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
         VERSION_DSE_68(MessagingService.VERSION_DSE_68, false), // DSE 6.8
         ;
 
-        //public static final Version CURRENT = VERSION_DS_20; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
         public static final Version CURRENT = VERSION_DS_21; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
 
         public final int value;
