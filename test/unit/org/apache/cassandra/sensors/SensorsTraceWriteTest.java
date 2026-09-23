@@ -34,7 +34,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaTransformations;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.TraceKeyspace;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.TimeUUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -82,8 +82,8 @@ public class SensorsTraceWriteTest
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(SchemaConstants.TRACE_KEYSPACE_NAME).getMetadata());
         SensorsRegistry.instance.onCreateTable(events);
 
-        Mutation mutation = new RowUpdateBuilder(events, 0, UUIDGen.getTimeUUID())
-                            .clustering(UUIDGen.getTimeUUID())
+        Mutation mutation = new RowUpdateBuilder(events, 0, TimeUUID.Generator.nextTimeUUID().asUUID())
+                            .clustering(TimeUUID.Generator.nextTimeUUID())
                             .add("activity", "test trace event")
                             .build();
 
