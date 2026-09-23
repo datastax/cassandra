@@ -24,6 +24,7 @@ import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -68,16 +69,18 @@ public class PartitionUpdateTest extends CQLTester
         builder.newRow().add("s", 1);
         builder.newRow(1).add("a", 2);
         PartitionUpdate update1 = builder.build();
-        PartitionUpdate trieUpdate1 = TriePartitionUpdate.asTrieUpdate(update1);
 
         int size1 = update1.dataSize();
-        int rowSum = update1.staticRow().dataSize();
-        for (Row row : update1.rows())
-            rowSum += row.dataSize();
+        Assert.assertEquals(rowDataSizeSum(update1), size1);
+        // The table's memtable factory builds trie updates, and trie-backed rows do not count the clustering,
+        // liveness and deletion sizes (see TrieBackedRow.dataSize).
+        Assert.assertEquals(64, size1);
 
-        Assert.assertEquals(rowSum, size1);
-        Assert.assertEquals(94, size1);
-        Assert.assertEquals(size1, trieUpdate1.dataSize());
+        // BTree rows count the key, liveness and deletion too.
+        PartitionUpdate btreeUpdate1 = BTreePartitionUpdate.asBTreeUpdate(update1);
+        Assert.assertEquals(rowDataSizeSum(btreeUpdate1), btreeUpdate1.dataSize());
+        Assert.assertEquals(94, btreeUpdate1.dataSize());
+        Assert.assertEquals(btreeUpdate1.dataSize(), TriePartitionUpdate.asTrieUpdate(btreeUpdate1).dataSize());
 
         builder = UpdateBuilder.create(cfm, "key0");
         builder.newRow(1).add("a", 2);
@@ -87,6 +90,14 @@ public class PartitionUpdateTest extends CQLTester
         builder = UpdateBuilder.create(cfm, "key0");
         int size3 = builder.build().dataSize();
         Assert.assertTrue(size2 != size3);
+    }
+
+    private static int rowDataSizeSum(PartitionUpdate update)
+    {
+        int sum = update.staticRow().dataSize();
+        for (Row row : update.rows())
+            sum += row.dataSize();
+        return sum;
     }
 
     @Test
