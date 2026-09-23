@@ -66,6 +66,7 @@ import static org.apache.cassandra.service.paxos.Paxos.useV2;
 public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
 {
     private static final Logger logger = LoggerFactory.getLogger(RepairJob.class);
+    private static final String LOG_FMT_VALIDATION = "{} parentSession={} {}{}";
 
     private final SharedContext ctx;
     public final JobState state;
@@ -520,7 +521,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
     {
         state.phase.validationSubmitted();
         String message = String.format("Requesting merkle trees for %s (to %s)", desc.columnFamily, endpoints);
-        logger.info("{} parentSession={} {}{}", session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
+        logger.info(LOG_FMT_VALIDATION, session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
         Tracing.traceRepair(message);
         long nowInSec = getNowInSeconds();
         List<ValidationTask> tasks = new ArrayList<>(endpoints.size());
@@ -541,7 +542,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
     {
         state.phase.validationSubmitted();
         String message = String.format("Requesting merkle trees for %s (to %s)", desc.columnFamily, endpoints);
-        logger.info("{} parentSession={} {}{}", session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
+        logger.info(LOG_FMT_VALIDATION, session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
         Tracing.traceRepair(message);
         long nowInSec = getNowInSeconds();
         List<Future<TreeResponse>> tasks = new ArrayList<>(endpoints.size());
@@ -584,7 +585,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
     {
         state.phase.validationSubmitted();
         String message = String.format("Requesting merkle trees for %s (to %s)", desc.columnFamily, endpoints);
-        logger.info("{} parentSession={} {}{}", session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
+        logger.info(LOG_FMT_VALIDATION, session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
         Tracing.traceRepair(message);
         long nowInSec = getNowInSeconds();
         List<Future<TreeResponse>> tasks = new ArrayList<>(endpoints.size());
