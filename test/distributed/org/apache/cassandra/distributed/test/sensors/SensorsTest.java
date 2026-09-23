@@ -57,7 +57,7 @@ import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.tracing.TraceStateImpl;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.TimeUUID;
 import org.assertj.core.api.Assertions;
 
 /**
@@ -525,8 +525,8 @@ public class SensorsTest extends TestBaseImpl
                    // system_traces.sessions is durable before we query it after the call.
                    int prevTimeout = TraceStateImpl.WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS;
                    TraceStateImpl.WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS = 60;
-                   UUID sessionId = UUIDGen.getTimeUUID();
-                   result[1] = sessionId;
+                   TimeUUID sessionId = TimeUUID.Generator.nextTimeUUID();
+                   result[1] = sessionId.asUUID();
                    Tracing.instance.newSession(ClientState.forInternalCalls(), sessionId, Collections.emptyMap());
                    // begin() writes the system_traces.sessions row — mirrors what QueryMessage does
                    // before executing the CQL statement in the native protocol handler.
