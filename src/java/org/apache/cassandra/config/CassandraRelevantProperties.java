@@ -239,6 +239,37 @@ public enum CassandraRelevantProperties
     COMPACTION_VALIDATION_MODE("cassandra.compaction_validation_mode", "NONE"),
 
     /**
+     * Cache size for compression chunk offsets if BLOCK_CACHE is configured. By default, it uses 15% of max direct
+     * memory.
+     *
+     * Alternatively, an absolute cache size can be configured, e.g. "10GiB".
+     */
+    COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE("cassandra.compression_chunk_offsets_block_cache_size",
+                                               "auto@0.15"),
+    /**
+     * Number of bytes per compression chunk offsets cache block. The value divided by {@link Long#BYTES} determines
+     * how many chunk offsets are loaded from the compression info file on each cache miss. Values that are not
+     * divisible by {@link Long#BYTES} are rounded down to a whole offset and floored at one offset.
+     */
+    COMPRESSION_CHUNK_OFFSETS_CACHE_BLOCK_SIZE("cassandra.compression_chunk_offsets_cache_block_size_bytes", "65536"),
+    /**
+     * Factory for initializing {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} instances.
+     */
+    COMPRESSION_CHUNK_OFFSETS_FACTORY("cassandra.compression_chunk_offsets_factory"),
+    /**
+     * Maximum size in bytes of a single memory-mapped segment used by the {@code mmap}
+     * {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} implementation. A {@code MappedByteBuffer} can
+     * map at most {@link Integer#MAX_VALUE} bytes, so larger offset sections are split into multiple segments. The
+     * effective value is rounded down to a whole number of 8-byte offsets.
+     */
+    COMPRESSION_CHUNK_OFFSETS_MMAP_SEGMENT_SIZE("cassandra.compression_chunk_offsets.mmapped_max_segment_size", String.valueOf(Integer.MAX_VALUE)),
+    /**
+     * Selects the {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} implementation. One of
+     * {@code in_memory}, {@code mmap}, or {@code block_cache}.
+     */
+    COMPRESSION_CHUNK_OFFSETS_TYPE("cassandra.compression_chunk_offsets_type", "in_memory"),
+
+    /**
      * This property indicates the location for the access file. If com.sun.management.jmxremote.authenticate is false,
      * then this property and the password and access files, are ignored. Otherwise, the access file must exist and
      * be in the valid format. If the access file is empty or nonexistent, then no access is allowed.
