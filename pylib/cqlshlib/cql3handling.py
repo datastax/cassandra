@@ -750,13 +750,15 @@ syntax_rules += r'''
                   ;
 <groupByClause> ::= [groupcol]=<cident>
                   ;
-<identifiers> ::= "{" <identifier> ( "," <identifier> )* "}" 
+<identifiers> ::= "{" <identifier> ( "," <identifier> )* "}"
+                  ;
+<identifiersOrStars> ::= "{" ( <identifier> | <star> ) ( "," ( <identifier> | <star> ) )* "}"
                   ;
 <options> ::= <option> ( "AND" <option> )*
                   ;
-<option> ::= "ann_options" "=" <mapLiteral> 
-           | "included_indexes" "=" <identifiers> 
-           | "excluded_indexes" "=" <identifiers> 
+<option> ::= "ann_options" "=" <mapLiteral>
+           | "included_indexes" "=" <identifiers>
+           | "excluded_indexes" "=" <identifiersOrStars>
            ;
 '''
 

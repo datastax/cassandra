@@ -119,6 +119,8 @@ public class StreamingRepairTask implements StreamEventHandler
      */
     public void onFailure(Throwable t)
     {
+        logger.error("[streaming task #{}] parentSession={} stream {} -> {} failed: {}",
+                     desc.sessionId, desc.parentSessionId, src, dst, t.getMessage(), t);
         MessagingService.instance().send(Message.out(SYNC_RSP, new SyncResponse(desc, src, dst, false, Collections.emptyList())), initiator);
     }
 }

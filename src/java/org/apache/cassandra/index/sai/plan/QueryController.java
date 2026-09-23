@@ -709,6 +709,18 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     termAndExpressions.add(Pair.create(term, termExpression));
                 }
 
+                // If any sstable index was written before Version.ED it lacks a serialized totalTermCount,
+                // so the global avgDocLength cannot be computed reliably. Flag this so that every segment
+                // falls back to computing its own local average from the DOC_LENGTHS data.
+                for (SSTableIndex index : view.sstableIndexes)
+                {
+                    if (!index.getVersion().onOrAfter(Version.ED))
+                    {
+                        orderer.bm25stats.setHasOldFormatIndex();
+                        break;
+                    }
+                }
+
                 for (MemtableIndex index : view.memtableIndexes)
                     orderer.bm25stats.add(index.getRowCount(),
                                           index.getApproximateTermCount(),
@@ -1036,6 +1048,28 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             }
         }
         return cost;
+    }
+
+    @Override
+    public double estimateBM25Selectivity(Orderer orderer)
+    {
+        long totalRows = planFactory.tableMetrics.rows;
+        if (totalRows == 0)
+            return 0.0;
+
+        // BM25 returns documents that contain ALL query terms (intersection semantics).
+        // Assuming term occurrences are independent across rows,
+        // the selectivity is the product of the per-term selectivities,
+        // same as we do for filter intersections.
+        // Note that CQL will reject queries without any query terms.
+        double selectivity = 1.0;
+        for (ByteBuffer term : orderer.getQueryTerms())
+        {
+            Expression termExpression = new Expression(orderer.context).add(Operator.ANALYZER_MATCHES, term);
+            long termMatchingRows = estimateMatchingRowCount(termExpression);
+            selectivity *= (double) termMatchingRows / totalRows;
+        }
+        return Math.min(1.0, selectivity);
     }
 
     @FunctionalInterface

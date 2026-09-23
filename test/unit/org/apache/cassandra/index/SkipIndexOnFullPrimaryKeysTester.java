@@ -30,7 +30,6 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.net.MessagingService;
 import org.assertj.core.api.Assertions;
 
 /**
@@ -61,8 +60,6 @@ public abstract class SkipIndexOnFullPrimaryKeysTester extends SAITester
     @BeforeClass
     public static void setUpClass()
     {
-        // Set the messaging version that adds support for the new index hints before starting the server
-        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
         CQLTester.setUpClass();
         CQLTester.enableCoordinatorExecution();
     }

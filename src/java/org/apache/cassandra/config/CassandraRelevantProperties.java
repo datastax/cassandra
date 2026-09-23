@@ -26,6 +26,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.DefaultCompressionSelector;
+import org.apache.cassandra.sensors.NoOpCostCalculator;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.context.OperationContext;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
@@ -516,6 +517,10 @@ public enum CassandraRelevantProperties
     SYSTEM_DISTRIBUTED_NTS_RF_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_per_dc"),
     SYSTEM_DISTRIBUTED_NTS_DC_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_dc_names"),
 
+    SSTABLE_CHECKSUM_AWS_CRT_DETECTION_ENABLED("cassandra.sstable.checksums.aws_crt_detection_enabled", "true"),
+    SSTABLE_CHECKSUM_TYPE("cassandra.sstable.checksums.type", "CRC32"),
+    SSTABLE_FORMAT_STREAM_NEW_CHECKSUMS("cassandra.sstable.format.stream_new_checksums", "false"),
+
     // in OSS, when UUID based SSTable generation identifiers are enabled, they use TimeUUID
     // though, for CNDB we want to use ULID - this property allows for that
     // valid values for this property are: uuid, ulid
@@ -674,6 +679,14 @@ public enum CassandraRelevantProperties
     SENSORS_FACTORY("cassandra.sensors_factory_class"),
 
     /**
+     * Allows plugging a custom {@link org.apache.cassandra.sensors.CostCalculator} implementation
+     * without having to subclass {@link SensorsFactory}.
+     * When set, the named class is instantiated directly via {@link org.apache.cassandra.utils.FBUtilities#construct}.
+     * When absent, {@link NoOpCostCalculator} is used.
+     */
+    COST_CALCULATOR("cassandra.cost_calculator_class"),
+
+    /**
      * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
      * CompletableFuture fetched from the cache to complete. This is part of a migitation for DBPE-13261.
      */
@@ -780,7 +793,7 @@ public enum CassandraRelevantProperties
      * or to force the node to use a specific version for testing purposes.
      */
     @Deprecated // remove when cndb no longer supports bdp/6.8-cndb
-    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_11)),
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_12)),
 
     /**
      * Fully-qualified class name of a {@link org.apache.cassandra.schema.CompressionParams.Selector} implementation
@@ -842,7 +855,45 @@ public enum CassandraRelevantProperties
      */
     SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf"),
 
-    TEST_INTERVAL_TREE_EXPENSIVE_CHECKS("cassandra.test.interval_tree_expensive_checks");
+    TEST_INTERVAL_TREE_EXPENSIVE_CHECKS("cassandra.test.interval_tree_expensive_checks"),
+    /**
+     * Cache size for compression chunk offsets if BLOCK_CACHE is configured. By default, it uses 15% of max direct
+     * memory.
+     *
+     * Alternatively, an absolute cache size can be configured, e.g. "10GiB".
+     */
+    COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE("cassandra.compression_chunk_offsets_block_cache_size",
+                                               "auto@0.15"),
+    /**
+     * Number of bytes per compression chunk offsets cache block. The value divided by {@link Long#BYTES} determines
+     * how many chunk offsets are loaded from the compression info file on each cache miss. Values that are not
+     * divisible by {@link Long#BYTES} are rounded down to a whole offset and floored at one offset.
+     */
+    COMPRESSION_CHUNK_OFFSETS_CACHE_BLOCK_SIZE("cassandra.compression_chunk_offsets_cache_block_size_bytes", "65536"),
+    /**
+     * Selects the {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} implementation. One of:
+     * <ul>
+     *     <li>{@code in_memory} (default): load all offsets into off-heap memory.</li>
+     *     <li>{@code mmap}: memory-map the offsets section of the compression info file. Gives close to in-memory
+     *     performance while leaving page management to the OS, so memory is reclaimed under pressure. Only suitable
+     *     when the compression info file is fully available on local disk.</li>
+     *     <li>{@code block_cache}: use the block cache sized by {@link #COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE}
+     *     and fail configuration validation if that size resolves to zero or less.</li>
+     * </ul>
+     */
+    COMPRESSION_CHUNK_OFFSETS_TYPE("cassandra.compression_chunk_offsets_type", "in_memory"),
+    /**
+     * Maximum size in bytes of a single memory-mapped segment used by the {@code mmap}
+     * {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} implementation. A {@code MappedByteBuffer} can
+     * map at most {@link Integer#MAX_VALUE} bytes, so larger offset sections are split into multiple segments. The
+     * effective value is rounded down to a whole number of 8-byte offsets. Primarily useful for tests that need to
+     * exercise the multi-segment path without creating a multi-TB file.
+     */
+    COMPRESSION_CHUNK_OFFSETS_MMAP_SEGMENT_SIZE("cassandra.compression_chunk_offsets.mmapped_max_segment_size", String.valueOf(Integer.MAX_VALUE)),
+    /**
+     * Factory for initializing {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} instances
+     */
+    COMPRESSION_CHUNK_OFFSETS_FACTORY("cassandra.compression_chunk_offsets_factory");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

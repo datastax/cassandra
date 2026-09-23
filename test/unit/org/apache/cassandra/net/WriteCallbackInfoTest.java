@@ -72,13 +72,18 @@ public class WriteCallbackInfoTest
     private void testShouldHint(Verb verb, ConsistencyLevel cl, boolean allowHints, boolean expectHint) throws Exception
     {
         TableMetadata metadata = MockSchema.newTableMetadata("", "");
-        Object payload = verb == Verb.PAXOS_COMMIT_REQ
-                         ? new Commit(UUID.randomUUID(), PartitionUpdate.builder(metadata, ByteBufferUtil.EMPTY_BYTE_BUFFER, RegularAndStaticColumns.NONE, 1).build())
-                         : new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
+        Mutation mutation = new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
+        Object payload;
+        if (verb == Verb.PAXOS_COMMIT_REQ)
+            payload = new Commit(UUID.randomUUID(), PartitionUpdate.builder(metadata, ByteBufferUtil.EMPTY_BYTE_BUFFER, RegularAndStaticColumns.NONE, 1).build());
+        else if (verb == Verb.COUNTER_MUTATION_REQ)
+            payload = new CounterMutation(mutation, cl);
+        else
+            payload = mutation;
 
         RequestCallbacks.WriteCallbackInfo wcbi = new RequestCallbacks.WriteCallbackInfo(Message.out(verb, payload), full(InetAddressAndPort.getByName("192.168.1.1")), null, cl, allowHints);
         Assert.assertEquals(expectHint, wcbi.shouldHint());
-        Assert.assertNotNull(wcbi.mutation());
+        Assert.assertNotNull(wcbi.iMutation());
     }
 
     private void testIMutation(Verb verb, boolean allowHints) throws Exception

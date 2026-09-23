@@ -18,7 +18,17 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.NavigableSet;
+import java.util.Set;
+import java.util.SortedSet;
 import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
@@ -27,9 +37,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.math.IntMath;
-
-import org.apache.cassandra.cql3.Ordering;
-import org.apache.cassandra.cql3.restrictions.*;
+import org.apache.commons.lang3.builder.ToStringBuilder;
+import org.apache.commons.lang3.builder.ToStringStyle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +46,19 @@ import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.Ordering;
+import org.apache.cassandra.cql3.PageSize;
+import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.ResultSet;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.VariableSpecifications;
+import org.apache.cassandra.cql3.WhereClause;
+import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
@@ -48,17 +70,35 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.ResultSetBuilder;
 import org.apache.cassandra.cql3.selection.Selectable;
 import org.apache.cassandra.cql3.selection.Selection;
 import org.apache.cassandra.cql3.selection.Selection.Selectors;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringBound;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DataRange;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.PartitionRangeReadQuery;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.ReadQuery;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.SinglePartitionReadQuery;
+import org.apache.cassandra.db.Slice;
+import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.aggregation.GroupMaker;
-import org.apache.cassandra.db.filter.*;
+import org.apache.cassandra.db.filter.ClusteringIndexFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -66,7 +106,10 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
@@ -82,11 +125,8 @@ import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.FBUtilities;
-
-import org.apache.commons.lang3.builder.ToStringBuilder;
-import org.apache.commons.lang3.builder.ToStringStyle;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
@@ -449,10 +489,30 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        int userOffset,
                                        long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
+        ResultMessage.Rows msg;
         try (PartitionIterator data = query.execute(options.getConsistency(), queryState, queryStartNanoTime))
         {
-            return processResults(data, options, selectors, nowInSec, userLimit, userOffset);
+            msg = processResults(data, options, selectors, nowInSec, userLimit, userOffset);
         }
+        // The iterator is now closed: any doOnClose callbacks (e.g. StorageProxy.getRangeSlice's populateCostSensors)
+        // have fired and sensor values are fully populated before we read them below.
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+        {
+            sensors.syncAllSensors();
+
+            Context context = Context.from(this.table);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+            Context requestContext = Context.from(sensors);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, requestContext, Type.READ_COST);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, requestContext, Type.TOTAL_COST);
+            // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
+            // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
+        }
+        return msg;
     }
 
     @Override
@@ -587,11 +647,24 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         {
             msg = processResults(partitions, options, selectors, nowInSec, userLimit, userOffset);
         }
-
+        // The iterator is now closed: any doOnClose callbacks (e.g. StorageProxy.getRangeSlice's populateCostSensors)
+        // have fired and sensor values are fully populated before we read them below.
         RequestSensors sensors = RequestTracker.instance.get();
-        Context context = Context.from(this.table);
-        Type sensorType = Type.READ_BYTES;
-        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, sensorType);
+        if (sensors != null)
+        {
+            sensors.syncAllSensors();
+
+            Context context = Context.from(this.table);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.READ_EXECUTION_TIME);
+            Context requestContext = Context.from(sensors);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, requestContext, Type.READ_COST);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, requestContext, Type.TOTAL_COST);
+            // Non-zero only for SERIAL/LOCAL_SERIAL reads (Paxos Prepare+Propose+optional replay Commit); zero
+            // for regular reads and silently skipped by addSensorToCQLResponse's zero-value guard in that case.
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_EXECUTION_TIME);
+            SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
+        }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
@@ -634,6 +707,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         Selectors selectors = selection.newSelectors(options);
         ReadQuery query = getQuery(state, options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, userOffset);
 
+        // Sensors are not tracked for internal execution: RequestSensors is only initialised by StorageProxy and the
+        // verb handlers (for internode messages), so RequestTracker.instance.get() always returns null here. This path
+        // is reached via executeLocally(), which is only invoked for NODE_LOCAL consistency — a debug-only mode that
+        // deliberately bypasses the coordinator stack entirely.
         try (ReadExecutionController executionController = query.executionController())
         {
             if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize, query.isTopK()))

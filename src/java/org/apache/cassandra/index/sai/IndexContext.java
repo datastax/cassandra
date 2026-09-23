@@ -114,6 +114,9 @@ public class IndexContext
     private static final String ANALYZED_TERM_OVERSIZE_ERROR_MESSAGE =
     "Term's analyzed size for column %s exceeds the cumulative limit for index. Max allowed size %s.";
 
+    public static final String MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE =
+    "Index hints including a SAI index used for ORDER BY cannot include any other index";
+
     private static final Set<AbstractType<?>> EQ_ONLY_TYPES =
             ImmutableSet.of(UTF8Type.instance, AsciiType.instance, BooleanType.instance, UUIDType.instance);
 
@@ -860,7 +863,18 @@ public class IndexContext
             if (!expression.column().equals(column))
                 continue;
 
-            switch (expression.operator())
+            Operator operator = expression.operator();
+
+            // We cannot use indexes for both filtering and sorting, it's either sort-then-filter or filter-then-sort.
+            // We should reject index hints asking to include indexes for both sorting and filtering.
+            if (operator.isOrderBy()
+                && rowFilter.indexHints.includes(config.name)
+                && rowFilter.indexHints.included.size() > 1)
+            {
+                throw new InvalidRequestException(MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE);
+            }
+
+            switch (operator)
             {
                 case ANN:
                     float[] value = TypeUtil.decomposeVector(getValidator(), expression.getIndexValue());
@@ -870,6 +884,8 @@ public class IndexContext
                     if (version().onOrAfter(Version.BM25_EARLIEST))
                         return;
                     throw new InvalidRequestException(String.format(INDEX_VERSION_DOES_NOT_SUPPORT_BM25, getIndexName()));
+                default:
+                    return;
             }
         }
     }

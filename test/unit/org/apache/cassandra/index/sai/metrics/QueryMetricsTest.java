@@ -644,6 +644,28 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 0);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 2);
 
+        // Verify counters for total cells fetched.
+        // The table schema has 2 non-PK columns (n, v), so each live row contributes 2 cells.
+        // Tombstone rows (partition/range tombstones) contribute 0 cells.
+        name = "TotalCellsFetched";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 2 * (numRowsPerPartition + numRows + numRowsPerPartition + numRows + numRowsPerPartition + numRows));
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), 2 * numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), 2 * numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), 2 * numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), 2 * numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 2 * numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 2 * numRows);
+
+        // Verify counters for total cells returned.
+        name = "TotalCellsReturned";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 2 * (numRowsPerPartition + numRows + numRowsPerPartition + numRows + numRowsPerPartition + numRows));
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), 2 * numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), 2 * numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), 2 * numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), 2 * numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 2 * numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 2 * numRows);
+
         // Verify counters for timeouts.
         name = "TotalQueryTimeouts";
         waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 0);

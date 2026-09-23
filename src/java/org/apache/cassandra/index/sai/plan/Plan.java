@@ -180,7 +180,8 @@ abstract public class Plan
      * If you only want to iterate the subplan nodes, it is recommended to use {@link #forEachSubplan(Function)}
      * or {@link #withUpdatedSubplans(Function)} which offer better performance and less GC pressure.
      */
-    final List<Plan> subplans()
+    @VisibleForTesting
+    public final List<Plan> subplans()
     {
         List<Plan> result = new ArrayList<>();
         forEachSubplan(subplan -> {
@@ -335,7 +336,7 @@ abstract public class Plan
 
     /**
      * Returns additional information specific to the node displayed in the first line.
-     * The information is included in the output of {@link #toString()} and {@link #toRedactedStringRecursive()}.
+     * The information is included in the output of {@link #toString()} and {@link #toString(Redaction)}.
      * It is up to subclasses to implement it.
      */
     protected String title(Redaction redaction)
@@ -345,7 +346,7 @@ abstract public class Plan
 
     /**
      * Returns additional information specific to the node, displayed below the title.
-     * The information is included in the output of {@link #toString()} and {@link #toRedactedStringRecursive()}.
+     * The information is included in the output of {@link #toString()} and {@link #toString(Redaction)}.
      * It is up to subclasses to implement it.
      */
     protected String description(Redaction redaction)
@@ -387,6 +388,19 @@ abstract public class Plan
 
         Plan bestPlanSoFar = this;
         List<Leaf> leaves = nodesOfType(Leaf.class);
+
+        // If there is a KeysSort on an index included by the hints, we should do sort-then-filter.
+        // Replace the KeysSort (and its entire filter source) with a bare scored index scan, keeping
+        // all nodes above it (Fetch, Filter, Limit) so the WHERE predicates are still applied as a
+        // post-filter over the results that come back in sorted order.
+        // Note that KeysSort represents a CQL ORDER BY clause, so there can only be one per query plan.
+        for (KeysSort ks : nodesOfType(KeysSort.class))
+        {
+            if (factory.hints.includes(ks.ordering.getIndexName()))
+            {
+                return bestPlanSoFar.removeRestriction(ks.id);
+            }
+        }
 
         // Remove leaves one by one, starting from the ones with the worst selectivity
         leaves.sort(Comparator.comparingDouble(Plan::selectivity).reversed());
@@ -1041,7 +1055,8 @@ abstract public class Plan
     /**
      * Represents a scan over a numeric storage attached index.
      */
-    static class NumericIndexScan extends IndexScan
+    @VisibleForTesting
+    public static class NumericIndexScan extends IndexScan
     {
         public NumericIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access, Orderer ordering)
         {
@@ -1060,7 +1075,8 @@ abstract public class Plan
     /**
      * Represents a scan over a literal storage attached index
      */
-    static class LiteralIndexScan extends IndexScan
+    @VisibleForTesting
+    public static class LiteralIndexScan extends IndexScan
     {
         public LiteralIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access, Orderer ordering)
         {
@@ -1573,9 +1589,10 @@ abstract public class Plan
      * Returns all keys in ANN order.
      * Contrary to {@link KeysSort}, there is no input node here and the output is generated lazily.
      */
-    final static class AnnIndexScan extends ScoredIndexScan
+    @VisibleForTesting
+    public static final class AnnIndexScan extends ScoredIndexScan
     {
-        protected AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
+        private AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
             super(factory, id, access, ordering);
         }
@@ -1617,18 +1634,25 @@ abstract public class Plan
      * Returns all keys in BM25 order.
      * Like AnnIndexScan, this generates results lazily without an input node.
      */
-    final static class Bm25IndexScan extends ScoredIndexScan
+    @VisibleForTesting
+    public static final class Bm25IndexScan extends ScoredIndexScan
     {
-        protected Bm25IndexScan(Factory factory, int id, Access access, Orderer ordering)
+        private Bm25IndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
             super(factory, id, access, ordering);
+        }
+
+        @Override
+        protected double estimateSelectivity()
+        {
+            return factory.costEstimator.estimateBM25Selectivity(ordering);
         }
 
         @Nonnull
         @Override
         protected KeysIterationCost estimateCost()
         {
-            double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows);
+            double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows * selectivity());
             int expectedKeysInt = Math.max(1, (int) Math.ceil(expectedKeys));
 
             int termCount = ordering.getQueryTerms().size();
@@ -2208,6 +2232,16 @@ abstract public class Plan
          * @param candidates number of candidate rows that satisfy the expression predicates
          */
         double estimateAnnSearchCost(Orderer ordering, int limit, long candidates);
+
+        /**
+         * Returns the estimated selectivity of a BM25 ordering clause, i.e. the estimated fraction of rows in the
+         * table that contain all query terms. BM25 uses intersection semantics: only rows containing every query
+         * term are returned. The estimate assumes independence of term occurrences across rows.
+         *
+         * @param ordering the BM25 orderer whose query terms are used for the estimate
+         * @return a value in [0.0, 1.0] representing the estimated fraction of matching rows
+         */
+        double estimateBM25Selectivity(Orderer ordering);
     }
 
     /**

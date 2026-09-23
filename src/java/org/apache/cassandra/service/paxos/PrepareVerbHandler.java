@@ -19,6 +19,8 @@ package org.apache.cassandra.service.paxos;
  * under the License.
  * 
  */
+import java.util.Set;
+
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
@@ -41,24 +43,32 @@ public class PrepareVerbHandler implements IVerbHandler<Commit>
     public void doVerb(Message<Commit> message)
     {
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
-        Context context = Context.from(message.payload.update.metadata());
-
-        // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor
-        sensors.registerSensor(context, Type.READ_BYTES);
-        sensors.registerSensor(context, Type.WRITE_BYTES);
-        sensors.registerSensor(context, Type.INTERNODE_BYTES);
-        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.update.metadata().keyspace));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
-        Message.Builder<PrepareResponse> reply = message.responseWithBuilder(doPrepare(message.payload));
+        Context context = Context.from(message.payload.update.metadata());
 
-        // calculate outbound internode bytes before adding the sensor to the response
+        // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor.
+        // INDEX_WRITE_BYTES is not registered here because prepare only writes to system.paxos, which has no indexes.
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        sensors.registerSensor(context, Type.INTERNODE_BYTES);
+
+        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+
+        long prepareStartNanos = System.nanoTime();
+        Message.Builder<PrepareResponse> reply = message.responseWithBuilder(doPrepare(message.payload));
+        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, System.nanoTime() - prepareStartNanos);
+
         int size = reply.currentPayloadSize(MessagingService.current_version);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+
         sensors.syncAllSensors();
+
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
+
         MessagingService.instance().send(reply.build(), message.from());
     }
 }

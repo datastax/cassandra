@@ -172,7 +172,7 @@
     <property name="chronicle-threads.version" value="2.24ea14" />
     <property name="chronicle-map.version" value="3.24ea4" />
 
-    <property name="netty.version" value="4.1.136.Final" />
+    <property name="netty.version" value="4.1.138.Final" />
 
     <condition property="maven-ant-tasks.jar.exists">
       <available file="${build.dir}/maven-ant-tasks-${maven-ant-tasks.version}.jar" />
@@ -568,7 +568,7 @@
         <scm connection="${scm.connection}" developerConnection="${scm.developerConnection}" url="${scm.url}"/>
         <dependencyManagement>
           <dependency groupId="org.xerial.snappy" artifactId="snappy-java" version="1.1.10.7"/>
-          <dependency groupId="at.yawk.lz4" artifactId="lz4-java" version="1.10.2"/>
+          <dependency groupId="at.yawk.lz4" artifactId="lz4-java" version="1.11.2"/>
           <dependency groupId="com.ning" artifactId="compress-lzf" version="0.8.4" scope="provided"/>
           <dependency groupId="com.github.luben" artifactId="zstd-jni" version="1.5.5-1"/>
           <dependency groupId="com.google.guava" artifactId="guava" version="33.4.0-jre">
@@ -756,6 +756,7 @@
 
           <dependency groupId="io.micrometer" artifactId="micrometer-core" version="1.5.5"/>
           <dependency groupId="org.latencyutils" artifactId="LatencyUtils" version="2.0.3"/>
+          <dependency groupId="software.amazon.awssdk.crt" artifactId="aws-crt" version="0.45.4" scope="test"/>
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
         <developer id="alakshman" name="Avinash Lakshman"/>
@@ -840,6 +841,7 @@
         <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common"/>
         <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs"/>
         <dependency groupId="io.github.jbellis" artifactId="jvector"/>
+        <dependency groupId="software.amazon.awssdk.crt" artifactId="aws-crt"/>
       </artifact:pom>
 
       <!-- now the pom's for artifacts being deployed to Maven Central -->
@@ -952,6 +954,7 @@
 
         <dependency groupId="io.micrometer" artifactId="micrometer-core"/>
         <dependency groupId="org.latencyutils" artifactId="LatencyUtils"/>
+        <dependency groupId="software.amazon.awssdk.crt" artifactId="aws-crt" scope="test"/>
       </artifact:pom>
     </target>
 

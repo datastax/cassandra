@@ -18,6 +18,8 @@ package org.apache.cassandra.db.compaction.unified;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
@@ -454,6 +456,17 @@ public class AdaptiveController extends Controller
     public int getMaxRecentAdaptiveCompactions()
     {
         return maxAdaptiveCompactions;
+    }
+
+    /**
+     * The adaptive controller does not support time-driven levels. Time-driven levels require stable,
+     * per-bucket scaling parameters which are incompatible with the dynamic parameter optimization
+     * performed by this controller. Returns an empty list.
+     */
+    @Override
+    public List<TimeBucket> getTimeBuckets()
+    {
+        return Collections.emptyList();
     }
 
     /** Protected by the synchronized block in UnifiedCompactionStrategy#getNextBackgroundTasks */

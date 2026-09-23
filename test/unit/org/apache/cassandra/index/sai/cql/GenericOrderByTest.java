@@ -23,9 +23,12 @@ import java.util.TreeMap;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -287,5 +290,100 @@ public class GenericOrderByTest extends SAITester
             assertRows(execute(query, 1, 2), row(1), row(2));
             assertRows(execute(query, 1, 1), row(1));
         });
+    }
+
+    @Test
+    public void testPlaningOnHybridQueries()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
+        String literalIndex = createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        String numericIndex = createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 0, 'a', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 1, 'b', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 2, 'c', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 3, 'd', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 4, 'e', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 5, 'f', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 6, 'g', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 7, 'h', 1)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 8, 'i', 0)");
+        execute("INSERT INTO %s (k, c, s, n) VALUES (0, 9, 'j', 0)");
+
+        // hybrid query that prefers the filtering index due to selectivity, ascending order
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s ASC LIMIT 5",
+                              Plan.NumericIndexScan.class,
+                              row(8), row(9));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s ASC LIMIT 5 WITH included_indexes = {" + numericIndex + '}',
+                              Plan.NumericIndexScan.class,
+                              row(8), row(9));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s ASC LIMIT 5 WITH included_indexes = {" + literalIndex + '}',
+                              Plan.LiteralIndexScan.class,
+                              row(8), row(9));
+        assertInvalidMessage(IndexContext.MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s ASC LIMIT 5 WITH included_indexes = {" + numericIndex + ',' + literalIndex + '}');
+        assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s ASC LIMIT 5 WITH excluded_indexes = {" + numericIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s ASC LIMIT 5 WITH excluded_indexes = {" + literalIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s ASC LIMIT 5 WITH excluded_indexes = {" + numericIndex + ',' + literalIndex + '}');
+
+        // hybrid query that prefers the ordering index due to selectivity, ascending order
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s ASC LIMIT 5",
+                              Plan.LiteralIndexScan.class,
+                              row(0), row(1), row(2), row(3), row(4));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s ASC LIMIT 5 WITH included_indexes = {" + numericIndex + '}',
+                              Plan.NumericIndexScan.class,
+                              row(0), row(1), row(2), row(3), row(4));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s ASC LIMIT 5 WITH included_indexes = {" + literalIndex + '}',
+                              Plan.LiteralIndexScan.class,
+                              row(0), row(1), row(2), row(3), row(4));
+        assertInvalidMessage(IndexContext.MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s ASC LIMIT 5 WITH included_indexes = {" + numericIndex + ',' + literalIndex + '}');
+        assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s ASC LIMIT 5 WITH excluded_indexes = {" + numericIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s ASC LIMIT 5 WITH excluded_indexes = {" + literalIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s ASC LIMIT 5 WITH excluded_indexes = {" + numericIndex + ',' + literalIndex + '}');
+
+        // hybrid query that prefers the filtering index due to selectivity, descending order
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s DESC LIMIT 5",
+                              Plan.NumericIndexScan.class,
+                              row(9), row(8));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s DESC LIMIT 5 WITH included_indexes = {" + numericIndex + '}',
+                              Plan.NumericIndexScan.class,
+                              row(9), row(8));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s DESC LIMIT 5 WITH included_indexes = {" + literalIndex + '}',
+                              Plan.LiteralIndexScan.class,
+                              row(9), row(8));
+        assertInvalidMessage(IndexContext.MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s DESC LIMIT 5 WITH included_indexes = {" + numericIndex + ',' + literalIndex + '}');
+        assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s DESC LIMIT 5 WITH excluded_indexes = {" + numericIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s DESC LIMIT 5 WITH excluded_indexes = {" + literalIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 0 ORDER BY s DESC LIMIT 5 WITH excluded_indexes = {" + numericIndex + ',' + literalIndex + '}');
+
+        // hybrid query that prefers the ordering index due to selectivity, descending order
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s DESC LIMIT 5",
+                              Plan.LiteralIndexScan.class,
+                              row(7), row(6), row(5), row(4), row(3));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s DESC LIMIT 5 WITH included_indexes = {" + numericIndex + '}',
+                              Plan.NumericIndexScan.class,
+                              row(7), row(6), row(5), row(4), row(3));
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s DESC LIMIT 5 WITH included_indexes = {" + literalIndex + '}',
+                              Plan.LiteralIndexScan.class,
+                              row(7), row(6), row(5), row(4), row(3));
+        assertInvalidMessage(IndexContext.MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s DESC LIMIT 5 WITH included_indexes = {" + numericIndex + ',' + literalIndex + '}');
+        assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s DESC LIMIT 5 WITH excluded_indexes = {" + numericIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s DESC LIMIT 5 WITH excluded_indexes = {" + literalIndex + '}');
+        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 's'),
+                             "SELECT c FROM %s WHERE n = 1 ORDER BY s DESC LIMIT 5 WITH excluded_indexes = {" + numericIndex + ',' + literalIndex + '}');
     }
 }

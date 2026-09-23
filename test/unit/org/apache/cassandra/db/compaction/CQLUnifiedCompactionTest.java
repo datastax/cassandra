@@ -19,6 +19,7 @@ package org.apache.cassandra.db.compaction;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.junit.After;
@@ -365,5 +366,179 @@ public class CQLUnifiedCompactionTest extends CQLTester
         return cfs.getCompactionStrategyContainer()
                   .getStrategies()
                   .get(0);
+    }
+
+    @Test
+    public void testTimeDrivenLevels() throws Throwable
+    {
+        createTable("create table %s (id int primary key, val text) with compaction = " +
+                    "{'class':'UnifiedCompactionStrategy', 'adaptive' : 'false', 'num_shards': '1', 'min_sstable_size': '0B', " +
+                    "'scaling_parameters': 'T2 until 10m; T100'}");
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.disableAutoCompaction();
+
+        // 1. Insert 4 old SSTables (20 minutes ago)
+        long nowUs = System.currentTimeMillis() * 1000L;
+        long oldTimestampUs = nowUs - TimeUnit.MINUTES.toMicros(20);
+
+        for (int i = 0; i < 4; i++)
+        {
+            execute("INSERT INTO %s (id, val) VALUES (?, ?) USING TIMESTAMP ?", 0, "old_" + i, oldTimestampUs);
+            flush();
+        }
+
+        assertEquals(4, cfs.getLiveSSTables().size());
+
+        // Enable auto-compaction and wait briefly to ensure no compaction is triggered on the old SSTables
+        cfs.enableAutoCompaction(true);
+        FBUtilities.sleepQuietly(500);
+        assertEquals(4, cfs.getLiveSSTables().size());
+
+        // 2. Insert 4 fresh SSTables (current time)
+        cfs.disableAutoCompaction();
+        long newTimestampUs = System.currentTimeMillis() * 1000L;
+        for (int i = 4; i < 8; i++)
+        {
+            execute("INSERT INTO %s (id, val) VALUES (?, ?) USING TIMESTAMP ?", 4, "new_" + i, newTimestampUs);
+            flush();
+        }
+
+        assertEquals(8, cfs.getLiveSSTables().size());
+
+        // Enable auto-compaction: the 4 fresh SSTables fall into the 'until_10m' arena using T2 (threshold=2),
+        // so they must trigger compaction, while the 4 old SSTables in T100 arena should not compact.
+        cfs.enableAutoCompaction(true);
+
+        int numChecks = 0;
+        while (cfs.getLiveSSTables().size() > 5 && numChecks < 200) // up to 2 seconds
+        {
+            FBUtilities.sleepQuietly(10);
+            numChecks++;
+        }
+
+        // Final state: 4 old SSTables + 1 compacted fresh SSTable = 5 SSTables
+        assertEquals(5, cfs.getLiveSSTables().size());
+    }
+
+    /**
+     * Tests that compaction is triggered after a scheduled time has elapsed.
+     * <p>
+     * Configures a table with {@code T100 until 3s; T2}.
+     * Initially inserts 4 fresh SSTables. Since they are fresh (< 3-second age),
+     * they match {@code T100} and do not trigger compaction.
+     * After sleeping for 4 seconds, the SSTables age past the 3-second threshold,
+     * matching {@code T2}, and triggering compaction.
+     * </p>
+     *
+     * @throws Throwable if execution fails
+     */
+    @Test
+    public void testScheduledTimeCompaction() throws Throwable
+    {
+        createTable("create table %s (id int primary key, val text) with compaction = " +
+                    "{'class':'UnifiedCompactionStrategy', 'adaptive' : 'false', 'num_shards': '1', 'min_sstable_size': '0B', " +
+                    "'scaling_parameters': 'T100 until 3s; T2'}");
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.disableAutoCompaction();
+
+        // 1. Insert 4 fresh SSTables
+        long newTimestampUs = System.currentTimeMillis() * 1000L;
+        for (int i = 0; i < 4; i++)
+        {
+            execute("INSERT INTO %s (id, val) VALUES (?, ?) USING TIMESTAMP ?", 0, "val_" + i, newTimestampUs);
+            flush();
+        }
+
+        assertEquals(4, cfs.getLiveSSTables().size());
+
+        // Enable auto-compaction and wait briefly to ensure no compaction is triggered on the fresh SSTables
+        cfs.enableAutoCompaction(true);
+        FBUtilities.sleepQuietly(500);
+        assertEquals(4, cfs.getLiveSSTables().size());
+
+        // Disable auto-compaction to control the timing
+        cfs.disableAutoCompaction();
+
+        // 2. Sleep for 4 seconds to let the SSTables age past 3 seconds
+        FBUtilities.sleepQuietly(4000);
+
+        // Enable auto-compaction again: the 4 SSTables should now fall into the T2 arena and trigger compaction
+        cfs.enableAutoCompaction(true);
+
+        int numChecks = 0;
+        while (cfs.getLiveSSTables().size() > 1 && numChecks < 200) // up to 2 seconds
+        {
+            FBUtilities.sleepQuietly(10);
+            numChecks++;
+        }
+
+        // Final state: 1 compacted SSTable
+        assertEquals(1, cfs.getLiveSSTables().size());
+    }
+
+    @Test
+    public void testHolidayCaseDynamicBaseSizeAdjustment() throws Throwable
+    {
+        createTable("create table %s (id int primary key, val blob) with compression = { 'enabled' : false } AND " +
+                    "compaction = {'class':'UnifiedCompactionStrategy', 'adaptive' : 'false', " +
+                    "'target_sstable_size': '1MiB', 'flush_size_override': '1MiB', 'scaling_parameters': 'T2 until 2s; T2'}");
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.disableAutoCompaction();
+
+        int key = 0;
+        byte[] bytes = new byte[2048];
+        new Random(87652).nextBytes(bytes);
+        ByteBuffer val = ByteBuffer.wrap(bytes);
+
+        // First SSTable: ~2.5MiB (1300 rows).
+        long oldTimestampUs = (System.currentTimeMillis() * 1000L) - TimeUnit.MINUTES.toMicros(20);
+        for (int i = 0; i < 1300; i++)
+            execute("INSERT INTO %s (id, val) VALUES (?, ?) USING TIMESTAMP ?", key++, val, oldTimestampUs);
+        flush();
+
+        // Second SSTable: ~400KiB (200 rows).
+        for (int i = 0; i < 200; i++)
+            execute("INSERT INTO %s (id, val) VALUES (?, ?) USING TIMESTAMP ?", key++, val, oldTimestampUs);
+        flush();
+
+        assertEquals(2, cfs.getLiveSSTables().size());
+
+        // Enable auto-compaction temporarily to verify that they do NOT compact yet,
+        // since the 2.5MiB SSTable is on Level 1 (range 2MiB-4MiB) and the 400KiB SSTable is on Level 0 of the base arena.
+        cfs.enableAutoCompaction(true);
+        FBUtilities.sleepQuietly(500);
+        assertEquals(2, cfs.getLiveSSTables().size());
+
+        // Disable auto-compaction to write the fresh younger SSTable.
+        cfs.disableAutoCompaction();
+
+        // 2. Create a fresh younger SSTable that is large: ~5.1MiB (2600 rows).
+        // Since it has the current timestamp, it falls into the younger 'until 2s' bucket.
+        long newTimestampUs = System.currentTimeMillis() * 1000L;
+        for (int i = 0; i < 2600; i++)
+            execute("INSERT INTO %s (id, val) VALUES (?, ?) USING TIMESTAMP ?", key++, val, newTimestampUs);
+        flush();
+
+        assertEquals(3, cfs.getLiveSSTables().size());
+
+        //  The fresh 400KiB SSTable is in the younger bucket, making youngerMaxDensity = 400KiB.
+        //  The base sstable size of the older bucket is adjusted to 400KiB.
+        //  This shifts the 150KiB SSTable from Level 1 to Level 0.
+        //  Now Level 0 of the older bucket contains 2 SSTables (150KiB and 40KiB).
+        //  Since 2 >= threshold (2), they will be compacted together!
+        cfs.enableAutoCompaction(true);
+
+        int numChecks = 0;
+        while (cfs.getLiveSSTables().size() > 2 && numChecks < 200) // up to 2 seconds
+        {
+            FBUtilities.sleepQuietly(10);
+            numChecks++;
+        }
+
+        // Final state: 1 compacted older SSTable + 1 fresh younger SSTable = 2 SSTables
+        assertEquals(2, cfs.getLiveSSTables().size());
     }
 }

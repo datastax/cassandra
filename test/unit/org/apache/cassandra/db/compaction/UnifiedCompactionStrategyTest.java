@@ -119,10 +119,20 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         super.setUp();
     }
 
+    private Controller mockController()
+    {
+        Controller controller = Mockito.mock(Controller.class);
+        when(controller.getScalingParameter(anyInt(), any())).thenCallRealMethod();
+        when(controller.getFanout(anyInt(), any())).thenCallRealMethod();
+        when(controller.getThreshold(anyInt(), any())).thenCallRealMethod();
+        when(controller.getMaxLevelDensity(anyInt(), anyDouble(), any())).thenCallRealMethod();
+        return controller;
+    }
+
     @Test
     public void testNoSSTables()
     {
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         long minimalSizeBytes = 2 << 20;
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getScalingParameter(anyInt())).thenReturn(4);
@@ -205,7 +215,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     {
         long minimalSizeBytes = m << 20;
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         ShardManager shardManager = Mockito.mock(ShardManager.class);
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getNumShards(anyDouble())).thenReturn(1);
@@ -324,7 +334,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     {
         long minimalSizeBytes = m << 20;
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         ShardManager shardManager = Mockito.mock(ShardManager.class);
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getNumShards(anyDouble())).thenReturn(16);
@@ -423,7 +433,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         final int m = 2; // minimal sorted run size in MB m
         long minimalSizeBytes = m << 20;
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getNumShards(anyDouble())).thenReturn(1);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
@@ -641,7 +651,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         final int numShards = 1;
         final int levels = (int) Math.floor(Math.log(numSSTables) / Math.log(F)) + 1;
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getMinSstableSizeBytes()).thenReturn(minSstableSizeBytes);
         when(controller.getScalingParameter(anyInt())).thenReturn(W);
         when(controller.getFanout(anyInt())).thenCallRealMethod();
@@ -802,7 +812,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         final long minSstableSizeBytes = 2L << 20; // 2 MB
         final int numShards = 5;
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getMinSstableSizeBytes()).thenReturn(minSstableSizeBytes);
         when(controller.getScalingParameter(anyInt())).thenReturn(W);
         when(controller.getFanout(anyInt())).thenCallRealMethod();
@@ -1174,7 +1184,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     {
         long minimalSizeBytes = m << 20;
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getScalingParameter(anyInt())).thenReturn(W);
         when(controller.getFanout(anyInt())).thenCallRealMethod();
@@ -1228,7 +1238,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
     private void assertCompactionTask(final int numShards, final int expectedNumOfTasks, boolean parallelizeOutputShards, Class expectedClass)
     {
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         long minimalSizeBytes = 2 << 20;
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getScalingParameter(anyInt())).thenReturn(0);
@@ -1268,7 +1278,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     @Test
     public void testGetNextCompactionAggregates()
     {
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         long minimalSizeBytes = 2 << 20;
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getScalingParameter(anyInt())).thenReturn(0);
@@ -1398,7 +1408,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
     private void testDropExpiredFromBucket(int numShards, boolean parallelizeOutputShards) throws Exception
     {
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         long minimalSizeBytes = 2 << 20;
         when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
@@ -1462,7 +1472,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
     private void testDropExpiredAndCompactNonExpired(boolean parallelizeOutputShards)
     {
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         long minimalSizeBytes = 2 << 20;
         when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
@@ -1556,7 +1566,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             when(sstable.onDiskLength()).thenReturn(onDiskLength);
         }
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         long minimalSizeBytes = 2 << 20;
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getScalingParameter(anyInt())).thenReturn(0);
@@ -1622,7 +1632,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     @Test
     public void testPending()
     {
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getScalingParameter(anyInt())).thenReturn(-8); // F=10, T=2
         when(controller.getFanout(anyInt())).thenCallRealMethod();
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
@@ -1747,7 +1757,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         }
         dataTracker.addInitialSSTables(allSSTables);
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getNumShards(anyDouble())).thenReturn(numShards);
         when(controller.parallelizeOutputShards()).thenReturn(true);
         when(controller.getOverheadSizeInBytes(any(), anyLong())).thenAnswer(inv -> (long) (inv.getArgument(1)) * 4 / 3);
@@ -1811,7 +1821,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         allSSTables.addAll(mockNonOverlappingSSTables(15, 1, 200 << 20));
         allSSTables.addAll(mockNonOverlappingSSTables(25, 2, 400 << 20));
         dataTracker.addInitialSSTables(allSSTables);
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getNumShards(anyDouble())).thenReturn(numShards);
         when(controller.parallelizeOutputShards()).thenReturn(false);
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
@@ -1848,7 +1858,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         allSSTables.addAll(mockNonOverlappingSSTables(15, 1, 200 << 20));
         allSSTables.addAll(mockNonOverlappingSSTables(25, 2, 400 << 20));
         dataTracker.addInitialSSTables(allSSTables);
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getNumShards(anyDouble())).thenReturn(numShards);
         when(controller.parallelizeOutputShards()).thenReturn(true);
 
@@ -1945,7 +1955,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         allSSTables.addAll(mockNonOverlappingSSTables(30, 2, 400 << 20));
         dataTracker.addInitialSSTables(allSSTables);
 
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getNumShards(anyDouble())).thenReturn(numShards);
         when(controller.parallelizeOutputShards()).thenReturn(parallelize);
         when(controller.maxConcurrentCompactions()).thenReturn(1000);
@@ -2132,7 +2142,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             }
             allSSTables.addAll(list);
         }
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         when(controller.getScalingParameter(anyInt())).thenReturn(fanout - 2); // F=T=fanout
         when(controller.getFanout(anyInt())).thenCallRealMethod();
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
@@ -2205,7 +2215,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     @Test
     public void testGetLevel()
     {
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
         UnifiedCompactionStrategy.Level level = strategy.getLevel(1, 0.25d, 0.5d);
@@ -2218,7 +2228,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     public void testGetLevelForTransaction()
     {
         // Test that getLevel returns -1 for unknown transactions
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         BackgroundCompactions backgroundCompactions = new BackgroundCompactions(realm);
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, backgroundCompactions, controller);
 
@@ -2274,7 +2284,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     {
         // For UCS, sstable.getSSTableLevel() is always 0 (misleading), 
         // while strategy.getLevel(txn) provides the correct context.
-        Controller controller = Mockito.mock(Controller.class);
+        Controller controller = mockController();
         BackgroundCompactions backgroundCompactions = new BackgroundCompactions(realm);
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, backgroundCompactions, controller);
 

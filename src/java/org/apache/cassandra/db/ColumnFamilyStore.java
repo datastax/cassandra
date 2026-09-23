@@ -1666,11 +1666,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             {
                 RequestSensors sensors = requestTracker.get();
                 if (sensors != null)
-                {
-                    Context puContext = Context.from(this.metadata.get());
-                    sensors.registerSensor(puContext, Type.WRITE_BYTES);
-                    sensors.incrementSensor(puContext, Type.WRITE_BYTES, dataSize);
-                }
+                    sensors.incrementSensor(Context.from(this.metadata.get()), Type.WRITE_BYTES, dataSize);
             }
         }
         catch (RuntimeException e)

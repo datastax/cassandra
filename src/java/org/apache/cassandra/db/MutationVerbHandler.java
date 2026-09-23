@@ -18,6 +18,8 @@
 package org.apache.cassandra.db;
 
 import java.util.Collection;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
@@ -30,10 +32,10 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParamType;
-import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
@@ -86,20 +88,36 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         try
         {
             // Initialize the sensor and set ExecutorLocals
-            RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(message.payload.getKeyspaceName());
+            RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.getKeyspaceName()));
             ExecutorLocals locals = ExecutorLocals.create(requestSensors);
             ExecutorLocals.set(locals);
 
-            // Initialize internode bytes with the inbound message size:
             Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toList());
+            Set<Context> writeContexts = ConcurrentHashMap.newKeySet();
             for (TableMetadata tm : tables)
             {
                 Context context = Context.from(tm);
+                if (!tm.isIndex())
+                {
+                    writeContexts.add(context);
+                    requestSensors.registerSensor(context, Type.WRITE_BYTES);
+                    requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+                    requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+                }
                 requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-                requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
+                requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, (double) message.payloadSize(MessagingService.current_version) / tables.size());
             }
 
-            message.payload.applyFuture(WriteOptions.DEFAULT).thenAccept(o -> respond(requestSensors, message, respondToAddress)).exceptionally(wto -> {
+            long writeStartNanos = System.nanoTime();
+            message.payload.applyFuture(WriteOptions.DEFAULT).thenAccept(o -> {
+                long writeElapsedNanos = System.nanoTime() - writeStartNanos;
+                for (Context writeContext : writeContexts)
+                {
+                    requestSensors.incrementSensor(writeContext, Type.WRITE_EXECUTION_TIME, (double) writeElapsedNanos / writeContexts.size());
+                }
+                requestSensors.syncAllSensors();
+                respond(requestSensors, message, respondToAddress);
+            }).exceptionally(wto -> {
                 failed();
                 return null;
             });

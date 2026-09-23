@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.junit.Before;
@@ -72,9 +73,15 @@ abstract public class VectorCompactionTest extends VectorTester
     @Parameterized.Parameters(name = "version={0} enableNVQ={1}")
     public static Collection<Object[]> data()
     {
+        return data(v -> true);
+    }
+
+    protected static Collection<Object[]> data(Predicate<Version> versionFilter)
+    {
         // See Version file for explanation of changes associated with each version
         return Version.ALL.stream()
                           .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .filter(versionFilter)
                           .flatMap(vd -> {
                               // NVQ is only relevant some of the time
                               Boolean[] enableNVQ = JVectorVersionUtil.versionSupportsNVQ(vd)

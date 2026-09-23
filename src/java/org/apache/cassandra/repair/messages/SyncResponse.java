@@ -78,6 +78,14 @@ public class SyncResponse extends RepairMessage
         return Objects.hash(desc, success, nodes, summaries);
     }
 
+    @Override
+    public String toString()
+    {
+        return "SyncResponse{desc=" + desc +
+               ", nodes=" + nodes.coordinator + "<->" + nodes.peer +
+               ", success=" + success + '}';
+    }
+
     public static final IVersionedSerializer<SyncResponse> serializer = new IVersionedSerializer<SyncResponse>()
     {
         public void serialize(SyncResponse message, DataOutputPlus out, int version) throws IOException

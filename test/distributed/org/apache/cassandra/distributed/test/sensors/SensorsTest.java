@@ -18,13 +18,20 @@
 
 package org.apache.cassandra.distributed.test.sensors;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -35,14 +42,24 @@ import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.sensors.ActiveSensorsFactory;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.TestCostCalculator;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.tracing.TraceKeyspace;
+import org.apache.cassandra.tracing.TraceStateImpl;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.UUIDGen;
 import org.assertj.core.api.Assertions;
 
 /**
@@ -52,8 +69,38 @@ import org.assertj.core.api.Assertions;
 @RunWith(Parameterized.class)
 public class SensorsTest extends TestBaseImpl
 {
-    private static final String EXPECTED_WRITE_BYTES_HEADER = "WRITE_BYTES_REQUEST." + KEYSPACE + ".tbl";
-    private static final String EXPECTED_READ_BYTES_HEADER = "READ_BYTES_REQUEST." + KEYSPACE + ".tbl";
+    // Table names — shared by setupCluster(), truncateTables(), and data()
+    private static final String TBL = "tbl";
+    private static final String TBL_COUNTER = "tbl_counter";
+    private static final String TBL_2I = "tbl_2i";
+    private static final String TBL_SAI = "tbl_sai_idx";
+    private static final String TBL_COL = "tbl_col";
+
+    // Sensor header constants per table
+    private static final String WRITE_TBL = "WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL;
+    private static final String WRITE_EXECUTION_TIME_TBL = "WRITE_EXECUTION_TIME_REQUEST." + KEYSPACE + "." + TBL;
+    private static final String READ_TBL = "READ_BYTES_REQUEST." + KEYSPACE + "." + TBL;
+    private static final String READ_EXECUTION_TIME_TBL = "READ_EXECUTION_TIME_REQUEST." + KEYSPACE + "." + TBL;
+    private static final String WRITE_COUNTER = "WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_COUNTER;
+    private static final String WRITE_EXECUTION_TIME_COUNTER = "WRITE_EXECUTION_TIME_REQUEST." + KEYSPACE + "." + TBL_COUNTER;
+    private static final String WRITE_2I = "WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_2I;
+    private static final String WRITE_EXECUTION_TIME_2I = "WRITE_EXECUTION_TIME_REQUEST." + KEYSPACE + "." + TBL_2I;
+    private static final String READ_2I = "READ_BYTES_REQUEST." + KEYSPACE + "." + TBL_2I;
+    private static final String READ_EXECUTION_TIME_2I = "READ_EXECUTION_TIME_REQUEST." + KEYSPACE + "." + TBL_2I;
+    private static final String INDEX_WRITE_2I = "INDEX_WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_2I;
+    private static final String WRITE_SAI = "WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_SAI;
+    private static final String WRITE_EXECUTION_TIME_SAI = "WRITE_EXECUTION_TIME_REQUEST." + KEYSPACE + "." + TBL_SAI;
+    private static final String READ_SAI = "READ_BYTES_REQUEST." + KEYSPACE + "." + TBL_SAI;
+    private static final String READ_EXECUTION_TIME_SAI = "READ_EXECUTION_TIME_REQUEST." + KEYSPACE + "." + TBL_SAI;
+    private static final String INDEX_WRITE_SAI = "INDEX_WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_SAI;
+    private static final String WRITE_COL = "WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_COL;
+    private static final String WRITE_EXECUTION_TIME_COL = "WRITE_EXECUTION_TIME_REQUEST." + KEYSPACE + "." + TBL_COL;
+    private static final String INDEX_WRITE_COL = "INDEX_WRITE_BYTES_REQUEST." + KEYSPACE + "." + TBL_COL;
+    /** Request-level cost sensors — no table suffix, keyed on {@link org.apache.cassandra.sensors.Context#from(RequestSensors)}. */
+    private static final String READ_COST  = "READ_COST_REQUEST";
+    private static final String WRITE_COST = "WRITE_COST_REQUEST";
+    private static final String TOTAL_COST = "TOTAL_COST_REQUEST";
+
     /**
      * Using a combination of 2 nodes with ALL consistency level to ensure internode communication code paths are exercised in the test
      */
@@ -61,65 +108,302 @@ public class SensorsTest extends TestBaseImpl
     private static final ConsistencyLevel CONSISTENCY_LEVEL = ConsistencyLevel.ALL;
 
     /**
-     * Schema to be used for the test
+     * Single shared cluster for all parameterized scenarios — avoids the metaspace exhaustion that results from
+     * spinning up a new in-process dtest cluster (with its own isolated classloader) for every scenario.
+     * All tables are created once in {@link #setupCluster()}; each scenario truncates them in {@link #truncateTables()}.
+     */
+    private static Cluster cluster;
+
+    /**
+     * Human-readable scenario name used as the JUnit test display name.
      */
     @Parameterized.Parameter(0)
-    public String schema;
+    public String scenarioName;
+
     /**
      * Queries to be executed to prepare the table, for example insert some data before read to populate read sensors.
-     * Will be run before the {@link #testQuery}
+     * Will be run before the {@link #testQuery}.
      */
     @Parameterized.Parameter(1)
     public String[] prepQueries;
 
     /**
-     * Query to be executed to test the sensors, will be run after the {@link #prepQueries}
+     * Query to be executed to test the sensors, will be run after the {@link #prepQueries}.
      */
     @Parameterized.Parameter(2)
     public String testQuery;
 
     /**
-     * Expected headers in the custom payload for the test queries
+     * Expected headers in the custom payload for the test queries.
      */
     @Parameterized.Parameter(3)
     public String[] expectedHeaders;
 
+    /**
+     * When {@code true}, the query is executed with a page size, which always takes the paging
+     * path ({@code execute(Pager,...)}). When {@code false}, no page size is supplied
+     * ({@link PageSize#NONE}), causing {@code canSkipPaging} to return {@code true} and routing
+     * execution through the distributed non-paging path ({@code execute(ReadQuery,...)}).
+     */
+    @Parameterized.Parameter(4)
+    public boolean paging;
+
+    /**
+     * When {@code true}, the query is executed with {@link org.apache.cassandra.db.ConsistencyLevel#SERIAL}
+     * rather than {@link #CONSISTENCY_LEVEL}, routing through {@code StorageProxy.readWithPaxos}.
+     */
+    @Parameterized.Parameter(5)
+    public boolean serialConsistency;
+
     @BeforeClass
-    public static void setup()
+    public static void setupCluster() throws IOException
     {
         CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
+        CassandraRelevantProperties.COST_CALCULATOR.setString(TestCostCalculator.class.getName());
+
+        cluster = init(Cluster.build(NODES_COUNT).start());
+
+        // Create all table variants upfront so the cluster is reused across every parameterized scenario.
+        // Each scenario truncates the relevant tables in @Before rather than recreating the cluster.
+        cluster.schemaChange(withKeyspace("CREATE TABLE %s." + TBL + " (pk int PRIMARY KEY, v1 text)"));
+        cluster.schemaChange(withKeyspace("CREATE TABLE %s." + TBL_COUNTER + " (pk int PRIMARY KEY, total counter)"));
+        cluster.schemaChange(withKeyspace("CREATE TABLE %s." + TBL_2I + " (pk int PRIMARY KEY, v1 text)"));
+        cluster.schemaChange(withKeyspace("CREATE INDEX ON %s." + TBL_2I + " (v1)"));
+        cluster.schemaChange(withKeyspace("CREATE TABLE %s." + TBL_SAI + " (pk int PRIMARY KEY, v1 text)"));
+        cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s." + TBL_SAI + " (v1) USING '" + StorageAttachedIndex.class.getName() + "'"));
+        cluster.schemaChange(withKeyspace("CREATE TABLE %s." + TBL_COL + " (pk int PRIMARY KEY, tags set<text>)"));
+        cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s." + TBL_COL + " (tags) USING '" + StorageAttachedIndex.class.getName() + "'"));
     }
 
-    @Parameterized.Parameters(name = "schema={0}, prepQueries={1}, testQuery={2}, expectedHeaders={3}")
+    @AfterClass
+    public static void teardownCluster()
+    {
+        if (cluster != null)
+            cluster.close();
+    }
+
+    @Before
+    public void truncateTables()
+    {
+        cluster.coordinator(1).execute(withKeyspace("TRUNCATE %s." + TBL), ConsistencyLevel.ALL);
+        cluster.coordinator(1).execute(withKeyspace("TRUNCATE %s." + TBL_COUNTER), ConsistencyLevel.ALL);
+        cluster.coordinator(1).execute(withKeyspace("TRUNCATE %s." + TBL_2I), ConsistencyLevel.ALL);
+        cluster.coordinator(1).execute(withKeyspace("TRUNCATE %s." + TBL_SAI), ConsistencyLevel.ALL);
+        cluster.coordinator(1).execute(withKeyspace("TRUNCATE %s." + TBL_COL), ConsistencyLevel.ALL);
+    }
+
+    @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data()
     {
-        String tableSchema = withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v1 text)");
-        String counterTableSchema = withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, total counter)");
+        List<Object[]> result = new ArrayList<>();
+        result.addAll(baselineScenarios());
+        result.addAll(secondaryIndexScenarios());
+        result.addAll(saiScalarScenarios());
+        result.addAll(saiCollectionScenarios());
+        result.addAll(conditionalBatchScenarios());
+        return result;
+    }
 
-        String write = withKeyspace("INSERT INTO %s.tbl(pk, v1) VALUES (1, 'read me')");
-        String counter = withKeyspace("UPDATE %s.tbl SET total = total + 1 WHERE pk = 1");
-        String read = withKeyspace("SELECT * FROM %s.tbl WHERE pk=1");
-        String cas = withKeyspace("UPDATE %s.tbl SET v1 = 'cas update' WHERE pk = 1 IF v1 = 'read me'");
+    /**
+     * Baseline scenarios: non-indexed writes, reads and CAS on {@value TBL} and {@value TBL_COUNTER}.
+     */
+    private static List<Object[]> baselineScenarios()
+    {
+        String[] noPrep = new String[0];
+        String write = withKeyspace("INSERT INTO %s." + TBL + "(pk, v1) VALUES (1, 'read me')");
+        String counter = withKeyspace("UPDATE %s." + TBL_COUNTER + " SET total = total + 1 WHERE pk = 1");
+        String read = withKeyspace("SELECT * FROM %s." + TBL + " WHERE pk=1");
+        String range = withKeyspace("SELECT * FROM %s." + TBL);
+        String cas = withKeyspace("UPDATE %s." + TBL + " SET v1 = 'cas update' WHERE pk = 1 IF v1 = 'read me'");
         String loggedBatch = String.format("BEGIN BATCH\n" +
-                                           "INSERT INTO %s.tbl(pk, v1) VALUES (2, 'read me 2');\n" +
-                                           "INSERT INTO %s.tbl(pk, v1) VALUES (3, 'read me 3');\n" +
+                                           "INSERT INTO %s." + TBL + "(pk, v1) VALUES (2, 'read me 2');\n" +
+                                           "INSERT INTO %s." + TBL + "(pk, v1) VALUES (3, 'read me 3');\n" +
                                            "APPLY BATCH;", KEYSPACE, KEYSPACE);
         String unloggedBatch = String.format("BEGIN UNLOGGED BATCH\n" +
-                                             "INSERT INTO %s.tbl(pk, v1) VALUES (4, 'read me 2');\n" +
-                                             "INSERT INTO %s.tbl(pk, v1) VALUES (4, 'read me 3');\n" +
+                                             "INSERT INTO %s." + TBL + "(pk, v1) VALUES (4, 'read me 2');\n" +
+                                             "INSERT INTO %s." + TBL + "(pk, v1) VALUES (4, 'read me 3');\n" +
                                              "APPLY BATCH;", KEYSPACE, KEYSPACE);
-        String range = withKeyspace("SELECT * FROM %s.tbl");
 
         List<Object[]> result = new ArrayList<>();
+        result.add(new Object[]{ "tbl: insert", noPrep, write, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "tbl_counter: counter update", noPrep, counter, new String[]{ WRITE_COUNTER, WRITE_EXECUTION_TIME_COUNTER, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "tbl: point read (paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "tbl: point read (no paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, false, false });
+        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "tbl: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "tbl: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "tbl: range read (paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "tbl: range read (no paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, false, false });
+        result.add(new Object[]{ "tbl: SERIAL read", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, false, true });
+        return result;
+    }
+
+    /**
+     * Secondary index (2i) scenarios on {@value TBL_2I}: inserts (insertRow path), updates (updateRow path),
+     * CAS (insert via IF NOT EXISTS / update via IF condition), and multi-table batches mixing
+     * {@value TBL_2I} and {@value TBL_SAI} (exercises the per-table sensor loop for two distinct tables).
+     */
+    private static List<Object[]> secondaryIndexScenarios()
+    {
         String[] noPrep = new String[0];
-        result.add(new Object[]{ tableSchema, noPrep, write, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
-        result.add(new Object[]{ counterTableSchema, noPrep, counter, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
-        result.add(new Object[]{ tableSchema, new String[]{ write }, read, new String[]{ EXPECTED_READ_BYTES_HEADER } });
-        // CAS requests incorporate read (and write) bytes from the paxos (and user) tables
-        result.add(new Object[]{ tableSchema, noPrep, cas, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER } });
-        result.add(new Object[]{ tableSchema, noPrep, loggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
-        result.add(new Object[]{ tableSchema, noPrep, unloggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
-        result.add(new Object[]{ tableSchema, new String[]{ write }, range, new String[]{ EXPECTED_READ_BYTES_HEADER } });
+        String write = withKeyspace("INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (1, '2i read me')");
+        String writeUpdate = withKeyspace("INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (1, '2i updated')");
+        String cas = withKeyspace("UPDATE %s." + TBL_2I + " SET v1 = '2i cas update' WHERE pk = 1 IF v1 = '2i read me'");
+        String casInsert = withKeyspace("INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (5, '2i cas insert') IF NOT EXISTS");
+        // single-table batches (same table, multiple rows)
+        String loggedBatch = String.format("BEGIN BATCH\n" +
+                                           "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (2, '2i read me 2');\n" +
+                                           "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (3, '2i read me 3');\n" +
+                                           "APPLY BATCH;", KEYSPACE, KEYSPACE);
+        String unloggedBatch = String.format("BEGIN UNLOGGED BATCH\n" +
+                                             "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (4, '2i read me 2');\n" +
+                                             "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (4, '2i read me 3');\n" +
+                                             "APPLY BATCH;", KEYSPACE, KEYSPACE);
+        String loggedBatchUpdate = String.format("BEGIN BATCH\n" +
+                                                 "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (2, '2i updated 2');\n" +
+                                                 "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (3, '2i updated 3');\n" +
+                                                 "APPLY BATCH;", KEYSPACE, KEYSPACE);
+        String unloggedBatchUpdate = String.format("BEGIN UNLOGGED BATCH\n" +
+                                                   "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (4, '2i updated 2');\n" +
+                                                   "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (4, '2i updated 3');\n" +
+                                                   "APPLY BATCH;", KEYSPACE, KEYSPACE);
+        // multi-table batches: tbl_2i + tbl_sai in the same batch — sensors must appear for both tables
+        String multiTableLoggedBatch = String.format("BEGIN BATCH\n" +
+                                                     "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (20, 'mt 2i a');\n" +
+                                                     "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (21, 'mt 2i b');\n" +
+                                                     "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (20, 'mt sai a');\n" +
+                                                     "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (21, 'mt sai b');\n" +
+                                                     "APPLY BATCH;", KEYSPACE, KEYSPACE, KEYSPACE, KEYSPACE);
+        String multiTableUnloggedBatch = String.format("BEGIN UNLOGGED BATCH\n" +
+                                                       "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (22, 'mt 2i a');\n" +
+                                                       "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (23, 'mt 2i b');\n" +
+                                                       "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (22, 'mt sai a');\n" +
+                                                       "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (23, 'mt sai b');\n" +
+                                                       "APPLY BATCH;", KEYSPACE, KEYSPACE, KEYSPACE, KEYSPACE);
+
+        List<Object[]> result = new ArrayList<>();
+        result.add(new Object[]{ "2i: insert (insertRow path)", noPrep, write, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i+sai: multi-table logged batch", noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i+sai: multi-table unlogged batch", noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
+        return result;
+    }
+
+    /**
+     * SAI scenarios on a scalar column ({@value TBL_SAI}): inserts (insertRow path), updates (updateRow path),
+     * and CAS (insert via IF NOT EXISTS / update via IF condition).
+     * The update path exercises {@code TrieMemtableIndex.update(ByteBuffer, ByteBuffer)}.
+     */
+    private static List<Object[]> saiScalarScenarios()
+    {
+        String[] noPrep = new String[0];
+        String write = withKeyspace("INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (1, 'sai read me')");
+        String writeUpdate = withKeyspace("INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (1, 'sai updated')");
+        String cas = withKeyspace("UPDATE %s." + TBL_SAI + " SET v1 = 'sai cas update' WHERE pk = 1 IF v1 = 'sai read me'");
+        String casInsert = withKeyspace("INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (5, 'sai cas insert') IF NOT EXISTS");
+        String loggedBatch = String.format("BEGIN BATCH\n" +
+                                           "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (2, 'sai read me 2');\n" +
+                                           "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (3, 'sai read me 3');\n" +
+                                           "APPLY BATCH;", KEYSPACE, KEYSPACE);
+        String unloggedBatch = String.format("BEGIN UNLOGGED BATCH\n" +
+                                             "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (4, 'sai read me 2');\n" +
+                                             "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (4, 'sai read me 3');\n" +
+                                             "APPLY BATCH;", KEYSPACE, KEYSPACE);
+        String loggedBatchUpdate = String.format("BEGIN BATCH\n" +
+                                                 "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (2, 'sai updated 2');\n" +
+                                                 "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (3, 'sai updated 3');\n" +
+                                                 "APPLY BATCH;", KEYSPACE, KEYSPACE);
+        String unloggedBatchUpdate = String.format("BEGIN UNLOGGED BATCH\n" +
+                                                   "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (4, 'sai updated 2');\n" +
+                                                   "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (4, 'sai updated 3');\n" +
+                                                   "APPLY BATCH;", KEYSPACE, KEYSPACE);
+
+        List<Object[]> result = new ArrayList<>();
+        result.add(new Object[]{ "sai: insert (insertRow path)", noPrep, write, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
+        return result;
+    }
+
+    /**
+     * SAI scenarios on a non-frozen collection column ({@value TBL_COL}): inserts and updates.
+     * The update path exercises {@code TrieMemtableIndex.update(Iterator, Iterator)}.
+     */
+    private static List<Object[]> saiCollectionScenarios()
+    {
+        String collectionWrite = withKeyspace("INSERT INTO %s." + TBL_COL + "(pk, tags) VALUES (1, {'a', 'b'})");
+        String collectionUpdate = withKeyspace("INSERT INTO %s." + TBL_COL + "(pk, tags) VALUES (1, {'c', 'd'})");
+
+        List<Object[]> result = new ArrayList<>();
+        result.add(new Object[]{ "sai collection: insert", new String[0], collectionWrite, new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai collection: update", new String[]{ collectionWrite }, collectionUpdate, new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST, TOTAL_COST }, true, false });
+        return result;
+    }
+
+    /**
+     * Conditional batch scenarios: BEGIN BATCH statements with IF conditions, routed through
+     * {@code BatchStatement.executeWithConditions}. These exercise the {@code ResultMessage.Rows}
+     * return path, which must also carry WRITE_COST sensors.
+     * <p>
+     * Cassandra requires all statements in a conditional batch to target the same partition key and table.
+     * Multi-statement scenarios below use multiple statements on the same partition to exercise the
+     * repeated-same-TableMetadata path through {@code .distinct()} in the sensor loop.
+     */
+    private static List<Object[]> conditionalBatchScenarios()
+    {
+        String[] noPrep = new String[0];
+
+        // 2i: single conditional statement — IF NOT EXISTS (insert path)
+        String prep2i = withKeyspace("INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (1, '2i read me')");
+        String conditionalBatch2iInsert = String.format("BEGIN BATCH\n" +
+                                                        "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (10, '2i cond batch insert') IF NOT EXISTS;\n" +
+                                                        "APPLY BATCH;", KEYSPACE);
+        // 2i: single conditional statement — IF condition (update path)
+        String conditionalBatch2iUpdate = String.format("BEGIN BATCH\n" +
+                                                        "UPDATE %s." + TBL_2I + " SET v1 = '2i cond batch update' WHERE pk = 1 IF v1 = '2i read me';\n" +
+                                                        "APPLY BATCH;", KEYSPACE);
+        // 2i: multiple statements on the same partition — conditional insert + unconditional insert on pk=10,
+        // exercises the duplicate-TableMetadata path (same metadata object appears twice in statements list)
+        String conditionalBatch2iMultiStmt = String.format("BEGIN BATCH\n" +
+                                                           "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (10, '2i multi a') IF NOT EXISTS;\n" +
+                                                           "INSERT INTO %s." + TBL_2I + "(pk, v1) VALUES (10, '2i multi b');\n" +
+                                                           "APPLY BATCH;", KEYSPACE, KEYSPACE);
+
+        // SAI: single conditional statement — IF NOT EXISTS (insert path)
+        String prepSai = withKeyspace("INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (1, 'sai read me')");
+        String conditionalBatchSaiInsert = String.format("BEGIN BATCH\n" +
+                                                         "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (10, 'sai cond batch insert') IF NOT EXISTS;\n" +
+                                                         "APPLY BATCH;", KEYSPACE);
+        // SAI: single conditional statement — IF condition (update path)
+        String conditionalBatchSaiUpdate = String.format("BEGIN BATCH\n" +
+                                                         "UPDATE %s." + TBL_SAI + " SET v1 = 'sai cond batch update' WHERE pk = 1 IF v1 = 'sai read me';\n" +
+                                                         "APPLY BATCH;", KEYSPACE);
+        // SAI: multiple statements on the same partition — conditional insert + unconditional insert on pk=10,
+        // exercises the duplicate-TableMetadata path (same metadata object appears twice in statements list)
+        String conditionalBatchSaiMultiStmt = String.format("BEGIN BATCH\n" +
+                                                            "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (10, 'sai multi a') IF NOT EXISTS;\n" +
+                                                            "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (10, 'sai multi b');\n" +
+                                                            "APPLY BATCH;", KEYSPACE, KEYSPACE);
+
+        List<Object[]> result = new ArrayList<>();
+        // Conditional batches route through StorageProxy.cas(); CAS records both WRITE_EXECUTION_TIME and READ_EXECUTION_TIME, plus READ_COST and WRITE_COST.
+        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i cond batch: IF condition (updateRow)", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai cond batch: IF condition (updateRow)", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
         return result;
     }
 
@@ -132,6 +416,14 @@ public class SensorsTest extends TestBaseImpl
             double requestBytes = getBytesForHeader(customPayload, header);
             Assertions.assertThat(requestBytes).isGreaterThan(0D);
         }
+
+        // The CQL custom payload contains only _REQUEST keys (addSensorToCQLResponse writes no
+        // _GLOBAL counterpart). Assert the key set is exactly expectedHeaders — no more, no less.
+        Assertions.assertThat(customPayload.keySet())
+                  .describedAs("Custom payload must contain exactly the expected sensor headers — " +
+                               "unexpected headers indicate a production code path emits a sensor " +
+                               "not covered by expectedHeaders")
+                  .containsExactlyInAnyOrderElementsOf(Arrays.asList(expectedHeaders));
     }
 
     @Test
@@ -149,32 +441,38 @@ public class SensorsTest extends TestBaseImpl
     }
 
     /**
-     * Execute the test with the given {@code propagateViaNativeProtocol} flag and return the custom payload
+     * Execute the test with the given {@code propagateViaNativeProtocol} flag and return the custom payload.
+     * Routes through {@link #executeWithResultNoPaging} when {@link #paging} is {@code false},
+     * otherwise through {@link #executeWithResult}.
      */
     private Map<String, ByteBuffer> executeTest(boolean propagateViaNativeProtocol) throws Throwable
     {
-        CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(propagateViaNativeProtocol);
         AtomicReference<Map<String, ByteBuffer>> customPayload = new AtomicReference<>();
-        try (Cluster cluster = init(Cluster.build(NODES_COUNT).start()))
-        {
-            cluster.schemaChange(schema);
-            for (String prepQuery : this.prepQueries)
-                cluster.coordinator(1).execute(prepQuery, ConsistencyLevel.ALL);
-            // work around serializability of @Parameterized.Parameter by providing a locally scoped variable
-            String query = this.testQuery;
-            // Any methods used inside the runOnInstance() block should be static, otherwise java.io.NotSerializableException will be thrown
-            cluster.get(1).acceptsOnInstance(
-                   (IIsolatedExecutor.SerializableConsumer<AtomicReference<Map<String, ByteBuffer>>>)
-                   (reference) -> reference.set(executeWithResult(query).getCustomPayload()))
-                   .accept(customPayload);
-        }
-
+        for (String prepQuery : this.prepQueries)
+            cluster.coordinator(1).execute(prepQuery, ConsistencyLevel.ALL);
+        // work around serializability of @Parameterized.Parameter by providing a locally scoped variable
+        String query = this.testQuery;
+        boolean paging = this.paging;
+        // The cluster is shared across scenarios, so SENSORS_VIA_NATIVE_PROTOCOL must be set inside the node's
+        // classloader via runOnInstance rather than on the outer test JVM — the node won't see outer JVM property changes.
+        // Any methods used inside the runOnInstance() block should be static, otherwise java.io.NotSerializableException will be thrown
+        boolean serial = this.serialConsistency;
+        cluster.get(1).acceptsOnInstance(
+               (IIsolatedExecutor.SerializableConsumer<AtomicReference<Map<String, ByteBuffer>>>)
+               (reference) -> {
+                   CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(propagateViaNativeProtocol);
+                   ResultMessage<?> result = serial ? executeWithResultSerial(query)
+                                                    : paging ? executeWithResult(query)
+                                                             : executeWithResultNoPaging(query);
+                   reference.set(result.getCustomPayload());
+               })
+               .accept(customPayload);
         return customPayload.get();
     }
 
     private double getBytesForHeader(Map<String, ByteBuffer> customPayload, String expectedHeader)
     {
-        Assertions.assertThat(customPayload).containsKey(expectedHeader);
+        Assertions.assertThat(customPayload).describedAs("Expected header %s not found in custom payload", expectedHeader).containsKey(expectedHeader);
         return ByteBufferUtil.toDouble(customPayload.get(expectedHeader));
     }
 
@@ -183,18 +481,144 @@ public class SensorsTest extends TestBaseImpl
      */
     private static ResultMessage<?> executeWithResult(String query)
     {
+        return executeWithResult(query, PageSize.inRows(512));
+    }
+
+    /**
+     * Like {@link #executeWithResult(String)} but passes {@link PageSize#NONE} so that
+     * {@code canSkipPaging} returns {@code true} and the distributed non-paging path
+     * ({@code execute(ReadQuery,...)}) is taken instead of the paging path.
+     */
+    private static ResultMessage<?> executeWithResultNoPaging(String query)
+    {
+        return executeWithResult(query, PageSize.NONE);
+    }
+
+    private static ResultMessage<?> executeWithResult(String query, PageSize pageSize)
+    {
         long nanoTime = System.nanoTime();
         QueryHandler.Prepared prepared = QueryProcessor.prepareInternal(query);
-        ConsistencyLevel consistencyLevel = ConsistencyLevel.valueOf(CONSISTENCY_LEVEL.name());
-        org.apache.cassandra.db.ConsistencyLevel cl = org.apache.cassandra.db.ConsistencyLevel.fromCode(consistencyLevel.ordinal());
-        QueryOptions initialOptions = QueryOptions.create(cl,
-                                                          null,
-                                                          false,
-                                                          PageSize.inRows(512),
-                                                          null,
-                                                          null,
-                                                          ProtocolVersion.CURRENT,
-                                                          prepared.keyspace);
-        return prepared.statement.execute(QueryProcessor.internalQueryState(), initialOptions, nanoTime);
+        org.apache.cassandra.db.ConsistencyLevel cl = org.apache.cassandra.db.ConsistencyLevel.fromCode(ConsistencyLevel.valueOf(CONSISTENCY_LEVEL.name()).ordinal());
+        QueryOptions options = QueryOptions.create(cl, null, false, pageSize, null, null, ProtocolVersion.CURRENT, prepared.keyspace);
+        return prepared.statement.execute(QueryProcessor.internalQueryState(), options, nanoTime);
+    }
+
+    /**
+     * Executes a query with {@link org.apache.cassandra.db.ConsistencyLevel#SERIAL}, routing through
+     * {@code StorageProxy.readWithPaxos}. Always uses {@link PageSize#NONE} since SERIAL reads are
+     * single-partition and the non-paging path is sufficient.
+     */
+    private static ResultMessage<?> executeWithResultSerial(String query)
+    {
+        long nanoTime = System.nanoTime();
+        QueryHandler.Prepared prepared = QueryProcessor.prepareInternal(query);
+        QueryOptions options = QueryOptions.create(org.apache.cassandra.db.ConsistencyLevel.SERIAL,
+                                                   null, false, PageSize.NONE, null, null,
+                                                   ProtocolVersion.CURRENT, prepared.keyspace);
+        return prepared.statement.execute(QueryProcessor.internalQueryState(), options, nanoTime);
+    }
+
+    /**
+     * Verifies that enabling tracing on a CQL INSERT does not inflate the user table's {@code WRITE_COST_REQUEST}
+     * sensor in the response custom payload.
+     *
+     * <p>Trace writes are submitted to {@code Stage.TRACING} with an isolated {@link org.apache.cassandra.sensors.RequestSensors}
+     * instance. The {@code StorageProxy.mutate()} call on that thread creates its own {@code system_traces} sensor set
+     * and never touches the user table's sensor set on the coordinator thread. Therefore the sensor payload for a traced
+     * INSERT must be byte-for-byte identical to that of an untraced INSERT against the same table.
+     */
+    @Test
+    public void testTraceWriteDoesNotInflateSensors() throws Throwable
+    {
+        cluster.schemaChange(withKeyspace("CREATE TABLE IF NOT EXISTS %s.tbl_trace_isolation (pk int PRIMARY KEY, v1 text)"));
+
+        String insert = withKeyspace("INSERT INTO %s.tbl_trace_isolation (pk, v1) VALUES (1, 'hello')");
+        String expectedHeader = "WRITE_COST_REQUEST";
+
+        // Untraced INSERT — baseline WRITE_COST for the user table.
+        AtomicReference<Map<String, ByteBuffer>> refNoTrace = new AtomicReference<>();
+        cluster.get(1).acceptsOnInstance(
+               (IIsolatedExecutor.SerializableConsumer<AtomicReference<Map<String, ByteBuffer>>>)
+               (reference) -> {
+                   CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
+                   reference.set(executeWithResult(insert).getCustomPayload());
+               })
+               .accept(refNoTrace);
+        Map<String, ByteBuffer> payloadNoTrace = refNoTrace.get();
+        Assertions.assertThat(payloadNoTrace)
+                  .describedAs("Untraced INSERT must carry sensor payload")
+                  .isNotNull()
+                  .containsKey(expectedHeader);
+        double wmuNoTrace = ByteBufferUtil.toDouble(payloadNoTrace.get(expectedHeader));
+        Assertions.assertThat(wmuNoTrace)
+                  .describedAs("Untraced INSERT WRITE_COST must be > 0")
+                  .isGreaterThan(0D);
+
+        // Traced INSERT — Tracing.instance.newSession() is called inside the node's classloader so the
+        // TRACING thread-local is set correctly on the node side. The trace writes to system_traces must
+        // not appear in the user table's sensor payload.
+        // Use Object[] to carry both the custom payload map and the session UUID out of the node's
+        // isolated classloader in a single acceptsOnInstance call. Two-element array: [0] = payload
+        // map, [1] = session UUID. AtomicReference set inside the lambda only updates the node-side
+        // copy, so we use the consumer argument itself to ferry data back to the outer JVM.
+        Object[] tracedResult = new Object[2];
+        cluster.get(1).acceptsOnInstance(
+               (IIsolatedExecutor.SerializableConsumer<Object[]>)
+               (result) -> {
+                   CassandraRelevantProperties.SENSORS_VIA_NATIVE_PROTOCOL.setBoolean(true);
+                   // Ensure stopSession() waits for all Stage.TRACING futures so that
+                   // system_traces.sessions is durable before we query it after the call.
+                   int prevTimeout = TraceStateImpl.WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS;
+                   TraceStateImpl.WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS = 60;
+                   UUID sessionId = UUIDGen.getTimeUUID();
+                   result[1] = sessionId;
+                   Tracing.instance.newSession(ClientState.forInternalCalls(), sessionId, Collections.emptyMap());
+                   // begin() writes the system_traces.sessions row — mirrors what QueryMessage does
+                   // before executing the CQL statement in the native protocol handler.
+                   Tracing.instance.begin("Execute CQL3 query", null, Collections.emptyMap());
+                   try
+                   {
+                       result[0] = executeWithResult(insert).getCustomPayload();
+                   }
+                   finally
+                   {
+                       // stopSession() calls waitForPendingEvents(), which (with the timeout set above)
+                       // blocks until all Stage.TRACING futures complete — guaranteeing the sessions
+                       // row is written before we query system_traces below.
+                       Tracing.instance.stopSession();
+                       TraceStateImpl.WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS = prevTimeout;
+                   }
+               })
+               .accept(tracedResult);
+        @SuppressWarnings("unchecked")
+        Map<String, ByteBuffer> payloadTraced = (Map<String, ByteBuffer>) tracedResult[0];
+        UUID sessionId = (UUID) tracedResult[1];
+        Assertions.assertThat(payloadTraced)
+                  .describedAs("Traced INSERT must carry sensor payload")
+                  .isNotNull()
+                  .containsKey(expectedHeader);
+        double wmuTraced = ByteBufferUtil.toDouble(payloadTraced.get(expectedHeader));
+
+        // Verify tracing was genuinely active: system_traces.sessions must contain a row for
+        // our session_id, written by TraceStateImpl when the query started.
+        AtomicBoolean traceSessionExists = new AtomicBoolean(false);
+        cluster.get(1).acceptsOnInstance(
+               (IIsolatedExecutor.SerializableConsumer<AtomicBoolean>)
+               (flag) -> {
+                   UntypedResultSet rows = QueryProcessor.executeInternal(
+                   "SELECT session_id FROM " + SchemaConstants.TRACE_KEYSPACE_NAME + '.' + TraceKeyspace.SESSIONS + " WHERE session_id = ?",
+                   sessionId);
+                   flag.set(rows != null && !rows.isEmpty());
+               })
+               .accept(traceSessionExists);
+        Assertions.assertThat(traceSessionExists.get())
+                  .describedAs("system_traces.sessions must contain a row for session %s — confirms tracing was active", sessionId)
+                  .isTrue();
+
+        // Trace writes go to system_traces on a separate TRACING thread with an isolated sensor set.
+        // The user table's WRITE_COST must be unchanged — not inflated by trace writes.
+        Assertions.assertThat(wmuTraced)
+                  .describedAs("Enabling tracing must not inflate WRITE_COST for the user table")
+                  .isEqualTo(wmuNoTrace);
     }
 }

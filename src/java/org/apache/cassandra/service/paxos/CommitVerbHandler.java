@@ -20,6 +20,8 @@
  */
 package org.apache.cassandra.service.paxos;
 
+import java.util.Set;
+
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
@@ -40,20 +42,28 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
     public void doVerb(Message<Commit> message)
     {
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
-        Context context = Context.from(message.payload.update.metadata());
-        sensors.registerSensor(context, Type.WRITE_BYTES);
-        sensors.registerSensor(context, Type.INTERNODE_BYTES);
-        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.update.metadata().keyspace));
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
+        Context context = Context.from(message.payload.update.metadata());
+
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        sensors.registerSensor(context, Type.INTERNODE_BYTES);
+
+        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+
+        long commitStartNanos = System.nanoTime();
         PaxosState.commit(message.payload, p -> MutatorProvider.getCustomOrDefault().onAppliedProposal(p));
+        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, System.nanoTime() - commitStartNanos);
 
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();
 
         // no need to calculate outbound internode bytes because the response is NoPayload
+        sensors.syncAllSensors();
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());
     }

@@ -39,7 +39,7 @@ public final class ComponentManifest implements Iterable<Component>
 {
     private static final List<Component> STREAM_COMPONENTS = ImmutableList.of(Component.DATA, Component.PRIMARY_INDEX, Component.PARTITION_INDEX, Component.ROW_INDEX,
                                                                               Component.STATS, Component.COMPRESSION_INFO, Component.FILTER, Component.SUMMARY,
-                                                                              Component.DIGEST, Component.CRC);
+                                                                              Component.DIGEST, Component.DIGEST_CRC32C, Component.DIGEST_CRC64NVME, Component.CRC);
 
     private final LinkedHashMap<Component, Long> components;
 
@@ -51,11 +51,11 @@ public final class ComponentManifest implements Iterable<Component>
     @VisibleForTesting
     public static ComponentManifest create(Descriptor descriptor)
     {
-        LinkedHashMap<Component, Long> components = new LinkedHashMap<>(descriptor.getFormat().supportedComponents().size());
+        LinkedHashMap<Component, Long> components = new LinkedHashMap<>(descriptor.getFormat().streamingComponents().size());
 
         for (Component component : STREAM_COMPONENTS)
         {
-            if (descriptor.getFormat().supportedComponents().contains(component))
+            if (descriptor.getFormat().streamingComponents().contains(component))
             {
                 File file = descriptor.fileFor(component);
                 if (!file.exists())

@@ -36,6 +36,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.repair.messages.RepairOption;
+
 import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.ListenableFuture;
 import org.junit.After;
@@ -112,8 +114,11 @@ public class RepairJobTest
                                         RepairParallelism parallelismDegree, boolean isIncremental, boolean pullRepair,
                                         PreviewKind previewKind, boolean optimiseStreams, String... cfnames)
         {
-            super(parentRepairSession, id, Scheduler.build(0), commonRange, keyspace, parallelismDegree, isIncremental,
-                  false, pullRepair, previewKind, optimiseStreams, cfnames);
+            super(parentRepairSession, id, Scheduler.build(0), commonRange, keyspace,
+                  RepairOption.parse(
+                      buildOptions(parallelismDegree, isIncremental, pullRepair, optimiseStreams),
+                      org.apache.cassandra.dht.Murmur3Partitioner.instance),
+                  isIncremental, cfnames);
         }
 
         protected DebuggableThreadPoolExecutor createExecutor()
@@ -143,6 +148,17 @@ public class RepairJobTest
         public void registerSyncCompleteCallback(Callable<?> callback)
         {
             syncCompleteCallbacks.add(callback);
+        }
+
+        private static Map<String, String> buildOptions(RepairParallelism parallelismDegree, boolean isIncremental,
+                                                        boolean pullRepair, boolean optimiseStreams)
+        {
+            Map<String, String> options = new HashMap<>();
+            options.put(RepairOption.PARALLELISM_KEY, parallelismDegree.getName());
+            options.put(RepairOption.INCREMENTAL_KEY, Boolean.toString(isIncremental));
+            options.put(RepairOption.PULL_REPAIR_KEY, Boolean.toString(pullRepair));
+            options.put(RepairOption.OPTIMISE_STREAMS_KEY, Boolean.toString(optimiseStreams));
+            return options;
         }
     }
 
@@ -174,6 +190,7 @@ public class RepairJobTest
                                                     new CommonRange(neighbors, Collections.emptySet(), FULL_RANGE),
                                                     KEYSPACE, RepairParallelism.SEQUENTIAL, false, false,
                                                     PreviewKind.NONE, false, CF);
+        // note: MeasureableRepairSession translates the above args into RepairOption internally
 
         this.job = new RepairJob(session, CF);
         this.sessionJobDesc = new RepairJobDesc(session.parentRepairSession, session.getId(),

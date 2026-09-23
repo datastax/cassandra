@@ -1103,6 +1103,34 @@ public class FBUtilities
     }
 
     /**
+     * Parses a human-readable size configuration string.
+     * <p>
+     * Supports plain byte sizes (e.g. {@code 1024B}, {@code 256MiB}, {@code 1GiB}) and relative size via {@code auto}:
+     * {@code auto} or {@code auto@<ratio>} where {@code <ratio>} is a decimal multiplier applied
+     * to {@code maxSizeInBytes}. For example, {@code auto@0.1} returns 10% of {@code maxSizeInBytes}.
+     *
+     * @param maxSizeInBytes base size used when {@code auto} is specified
+     * @param configString user-provided configuration string
+     * @return size in bytes
+     */
+    public static long parseHumanReadableConfig(long maxSizeInBytes, String configString)
+    {
+        long sizeInBytes;
+        Matcher autoPatternMatcher = Pattern.compile("auto(@(\\d+(\\.\\d*)?))?").matcher(configString.toLowerCase());
+        if (autoPatternMatcher.matches())
+        {
+            sizeInBytes = maxSizeInBytes;
+            final String ratioString = autoPatternMatcher.group(2);
+            if (ratioString != null)
+                sizeInBytes = (long) (sizeInBytes * Double.parseDouble(ratioString));
+        }
+        else
+            sizeInBytes = FBUtilities.parseHumanReadableBytes(configString);
+
+        return sizeInBytes;
+    }
+
+    /**
      * Parse an integer value, allowing the string "max" to mean Integer.MAX_VALUE.
      */
     public static int parseIntAllowingMax(String value)

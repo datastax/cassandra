@@ -36,6 +36,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -151,10 +152,6 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     @SuppressWarnings("resource")
     private SegmentMetadata(IndexInput input, IndexContext context, Version version, SSTableContext sstableContext, boolean loadFullResolutionBounds) throws IOException
     {
-        if (!loadFullResolutionBounds)
-            logger.warn("Loading segment metadata without full primary key boundary resolution. Some ORDER BY queries" +
-                        " may not work correctly.");
-
         AbstractType<?> termsType = context.getValidator();
 
         this.version = version;
@@ -188,7 +185,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         else
         {
             assert sstableContext == null;
-            // Only valid in some very specific tests.
+            // Only valid when the caller does not use the boundaries for query processing.
             PrimaryKey.Factory primaryKeyFactory = context.keyFactory();
             this.minKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
             this.maxKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
@@ -223,19 +220,52 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     }
 
     /**
-     * This is only visible for testing because the SegmentFlushTest creates fake boundary scenarios that break
-     * normal assumptions about the min/max row ids mapping to specific positions in the per-sstable index components.
-     * Only set loadFullResolutionBounds to false in tests when you are sure that is the only possible solution.
+     * Loads segment metadata without fully resolving its primary key boundaries. This avoids opening the primary key
+     * map and is intended for callers that only need metadata unrelated to those boundaries, such as compactors.
+     * The returned primary key boundaries must not be used for query processing.
      */
-    @VisibleForTesting
     @SuppressWarnings("resource")
-    public static List<SegmentMetadata> loadForTesting(MetadataSource source, IndexContext context) throws IOException
+    public static List<SegmentMetadata> loadWithoutFullResolutionBounds(MetadataSource source,
+                                                                         IndexContext context) throws IOException
     {
         return load(source, context, null, false);
     }
 
     /**
-     * Only set loadFullResolutionBounds to false in tests when you are sure that is exactly what you want.
+     * Test-only variant that warns about unresolved primary key boundaries. SegmentFlushTest uses this because it
+     * creates fake boundary scenarios that break normal assumptions about the min/max row ids mapping to specific
+     * positions in the per-sstable index components.
+     */
+    @VisibleForTesting
+    @SuppressWarnings("resource")
+    public static List<SegmentMetadata> loadForTesting(MetadataSource source, IndexContext context) throws IOException
+    {
+        logger.warn("Loading segment metadata without full primary key boundary resolution. Some ORDER BY queries" +
+                    " may not work correctly.");
+        return loadWithoutFullResolutionBounds(source, context);
+    }
+
+    /**
+     * Returns the number of rows the index of the provided components has indexed in its sstable, that is the sum of
+     * the rows of all its segments.
+     * <p>
+     * Only the (small) metadata component is read: no searcher, primary key map or graph is opened, so this can be
+     * used where the index is not, or cannot be, loaded for reads &mdash; on compactors, which do not open SAI
+     * searchers, or before the sstable index has made it into the index view. For the same reason the primary key
+     * boundaries of the returned segments are not fully resolved, which is why they are not exposed here.
+     */
+    public static long totalRowCount(IndexComponents.ForRead perIndexComponents, IndexContext context) throws IOException
+    {
+        long rows = 0;
+        MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
+        for (SegmentMetadata metadata : loadWithoutFullResolutionBounds(source, context))
+            rows += metadata.numRows;
+        return rows;
+    }
+
+    /**
+     * Internal implementation for the public loading modes above. Callers should select the overload that matches
+     * whether fully resolved primary key boundaries are required.
      */
     private static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableContext sstableContext, boolean loadFullResolutionBounds) throws IOException
     {

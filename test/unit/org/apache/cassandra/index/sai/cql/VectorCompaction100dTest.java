@@ -16,8 +16,24 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Collection;
+
+import org.junit.runners.Parameterized;
+
+import org.apache.cassandra.index.sai.disk.format.Version;
+
 public class VectorCompaction100dTest extends VectorCompactionTest
 {
+    // The full version matrix takes longer than the test fork timeout on slow CI hosts, so the
+    // 100d suite is sharded by version: this class covers FB and later, older versions are covered
+    // by VectorCompaction100dEdFaTest, VectorCompaction100dEbEcTest and
+    // VectorCompaction100dLegacyTest.
+    @Parameterized.Parameters(name = "version={0} enableNVQ={1}")
+    public static Collection<Object[]> data()
+    {
+        return data(v -> v.onOrAfter(Version.FB));
+    }
+
     @Override
     public int dimension()
     {

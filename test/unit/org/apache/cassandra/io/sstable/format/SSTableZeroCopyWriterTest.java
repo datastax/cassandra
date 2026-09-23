@@ -166,7 +166,7 @@ public class SSTableZeroCopyWriterTest
             if (desc.fileFor(component).exists())
             {
                 Pair<DataInputPlus, Long> pair = getSSTableComponentData(sstable, component, bufferMapper);
-                btzcw.writeComponent(component.type, pair.left, pair.right);
+                btzcw.writeComponent(component, pair.left, pair.right);
             }
         }
 

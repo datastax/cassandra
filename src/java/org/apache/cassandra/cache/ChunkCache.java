@@ -166,10 +166,19 @@ public class ChunkCache
 
     Chunk newChunk(int chunkSize, long position)
     {
-        if (chunkSize == PageAware.PAGE_SIZE)
-            return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
-        if (chunkSize < PageAware.PAGE_SIZE)
-            return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP).limit(chunkSize).slice());
+        if (chunkSize <= PageAware.PAGE_SIZE)
+        {
+            // Always reserve a full page from the pool, even when the reader requests a smaller chunk.
+            // Encode the logical chunk size in the owned buffer's limit (capacity stays PAGE_SIZE so
+            // BufferPool.put sees the size it handed out). buffer() builds a transient capacity-narrowed
+            // view from that limit; releasing a slice/duplicate confuses slot/size accounting and can
+            // leak direct memory on the overflow path (see Chunk.free()).
+            ByteBuffer allocated = bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
+            // position must remain 0: buffer() uses slice(), which bases capacity on remaining.
+            assert allocated.position() == 0 : "pool buffer position must be 0";
+            allocated.limit(chunkSize);
+            return new SingleRegionChunk(position, allocated);
+        }
 
         ByteBuffer[] buffers = bufferPool.getMultiple(chunkSize, PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
         if (buffers.length > 1)
@@ -535,9 +544,20 @@ public class ChunkCache
      * <p/>
      * This class is a chunk but also behaves as a {@link Rebufferer.BufferHolder} to save an allocation when
      * {@link this#getBuffer(long)} is invoked.
+     * <p/>
+     * Only one {@link ByteBuffer} is owned: the object returned by the buffer pool (typically a full page).
+     * Logical chunk size is encoded in {@code buffer.limit()} (with {@code position == 0}); capacity stays at the
+     * allocated size so the pool sees what it handed out on release. {@link #buffer()} builds a transient
+     * {@code slice()} view whose capacity equals that logical size so {@code readChunk}'s {@code clear()}
+     * semantics stay correct — the slice is never returned to the pool.
      */
     class SingleRegionChunk extends Chunk implements Rebufferer.BufferHolder
     {
+        /**
+         * Pool-owned buffer; always what is returned from {@link #bufferPool#put} on release.
+         * {@code limit} holds the logical chunk size for reads (may be smaller than {@link #capacity()});
+         * {@code position} must stay 0 for the lifetime of the chunk.
+         */
         private final ByteBuffer buffer;
 
         public SingleRegionChunk(long offset, ByteBuffer buffer)
@@ -550,7 +570,12 @@ public class ChunkCache
         public ByteBuffer buffer()
         {
             assert isReferenced() : "Already unreferenced";
-            return buffer.duplicate().limit(bytesRead);
+            // Always apply bytesRead as the view limit. It starts at 0 so a failed/incomplete load cannot
+            // expose stale data. Chunk readers (e.g. SimpleChunkReader, CompressedChunkReader) expect that
+            // and call clear() (or otherwise reset limit) before filling, so a 0-limit buffer is fine for read().
+            ByteBuffer view = buffer.slice();
+            view.limit(bytesRead);
+            return view;
         }
 
         public long offset()
@@ -578,6 +603,7 @@ public class ChunkCache
 
         int capacity()
         {
+            // Weight / pool accounting use allocated size, not the logical read size in buffer.limit().
             return buffer.capacity();
         }
     }

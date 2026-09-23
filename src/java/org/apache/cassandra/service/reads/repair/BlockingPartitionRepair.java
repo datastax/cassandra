@@ -38,21 +38,20 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.EndpointsForToken;
+import org.apache.cassandra.locator.InOurDcTester;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.Replicas;
-import org.apache.cassandra.locator.InOurDcTester;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
-import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.tracing.Tracing;
 
-import static org.apache.cassandra.net.Verb.*;
+import static org.apache.cassandra.net.Verb.READ_REPAIR_REQ;
 
 public class BlockingPartitionRepair
         extends AbstractFuture<Object> implements RequestCallback<Object>
@@ -96,7 +95,7 @@ public class BlockingPartitionRepair
         latch = new CountDownLatch(Math.max(blockFor, 0));
     }
 
-    int blockFor()
+    public int blockFor()
     {
         return writePlan.blockFor();
     }

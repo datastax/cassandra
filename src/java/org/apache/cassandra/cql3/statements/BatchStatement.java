@@ -179,13 +179,13 @@ public class BatchStatement implements CQLStatement
     public short[] getPartitionKeyBindVariableIndexes()
     {
         boolean affectsMultipleTables =
-            !statements.isEmpty() && !statements.stream().map(s -> s.metadata().id).allMatch(isEqual(statements.get(0).metadata().id));
+        !statements.isEmpty() && !statements.stream().map(s -> s.metadata().id).allMatch(isEqual(statements.get(0).metadata().id));
 
         // Use the TableMetadata of the first statement for partition key bind indexes.  If the statements affect
         // multiple tables, we won't send partition key bind indexes.
         return (affectsMultipleTables || statements.isEmpty())
-             ? null
-             : bindVariables.getPartitionKeyBindVariableIndexes(statements.get(0).metadata());
+               ? null
+               : bindVariables.getPartitionKeyBindVariableIndexes(statements.get(0).metadata());
     }
 
     @Override
@@ -354,7 +354,7 @@ public class BatchStatement implements CQLStatement
             String suffix = tablesWithZeroGcGs.size() == 1 ? "" : "s";
             NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES, LOGGED_BATCH_LOW_GCGS_WARNING,
                              suffix, tablesWithZeroGcGs);
-            ClientWarn.instance.warn(MessageFormatter.arrayFormat(LOGGED_BATCH_LOW_GCGS_WARNING, new Object[] { suffix, tablesWithZeroGcGs })
+            ClientWarn.instance.warn(MessageFormatter.arrayFormat(LOGGED_BATCH_LOW_GCGS_WARNING, new Object[]{ suffix, tablesWithZeroGcGs })
                                                      .getMessage());
         }
         return collector.toMutations();
@@ -427,7 +427,7 @@ public class BatchStatement implements CQLStatement
         if (cl == null)
             throw new InvalidRequestException("Invalid empty consistency level");
 
-        for (int i = 0; i < statements.size(); i++ )
+        for (int i = 0; i < statements.size(); i++)
         {
             ModificationStatement statement = statements.get(i);
             statement.validateConsistency(cl, queryState);
@@ -437,26 +437,49 @@ public class BatchStatement implements CQLStatement
         if (options.getSerialConsistency(queryState) == null)
             throw new InvalidRequestException("Invalid empty serial consistency level");
 
+        ResultMessage<?> result;
         if (hasConditions)
-            return executeWithConditions(options, queryState, queryStartNanoTime);
-
-        if (updatesVirtualTables)
-            executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
+        {
+            result = executeWithConditions(options, queryState, queryStartNanoTime);
+        }
         else
-            executeWithoutConditions(getMutations(queryState, options, false, timestamp, nowInSeconds, queryStartNanoTime),
-                                     queryState, cl, queryStartNanoTime);
+        {
+            if (updatesVirtualTables)
+                executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
+            else
+                executeWithoutConditions(getMutations(queryState, options, false, timestamp, nowInSeconds, queryStartNanoTime),
+                                         queryState, cl, queryStartNanoTime);
+            result = new ResultMessage.Void();
+        }
 
-        ResultMessage<ResultMessage.Void> result = new ResultMessage.Void();
-        RequestSensors sensors = RequestTracker.instance.get();
         Map<TableId, TableMetadata> tableMetadataById = statements.stream()
                                                                   .map(ModificationStatement::metadata)
                                                                   .collect(Collectors.toMap(metadata -> metadata.id, Function.identity(), (existing, replacement) -> existing));
-        for (TableMetadata metadata : tableMetadataById.values())
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null && !tableMetadataById.isEmpty())
         {
-            Context context = Context.from(metadata);
-            SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WRITE_BYTES);
-        }
+            sensors.syncAllSensors();
 
+            for (TableMetadata metadata : tableMetadataById.values())
+            {
+                Context context = Context.from(metadata);
+                SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WRITE_BYTES);
+                SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.INDEX_WRITE_BYTES);
+                SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WRITE_EXECUTION_TIME);
+                if (hasConditions)
+                {
+                    // Conditional batches route through StorageProxy.cas(), which records both
+                    // READ_BYTES (Paxos read phase) and READ_EXECUTION_TIME (precondition read)
+                    SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.READ_BYTES);
+                    SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.READ_EXECUTION_TIME);
+                }
+            }
+            // READ_COST, WRITE_COST and TOTAL_COST are request-scoped — one entry covering all tables in the batch.
+            Context requestContext = Context.from(sensors);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, requestContext, org.apache.cassandra.sensors.Type.READ_COST);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, requestContext, org.apache.cassandra.sensors.Type.WRITE_COST);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, requestContext, org.apache.cassandra.sensors.Type.TOTAL_COST);
+        }
         return result;
     }
 
@@ -521,7 +544,7 @@ public class BatchStatement implements CQLStatement
         }
     }
 
-    private Pair<CQL3CasRequest,Set<ColumnMetadata>> makeCasRequest(BatchQueryOptions options, QueryState state)
+    private Pair<CQL3CasRequest, Set<ColumnMetadata>> makeCasRequest(BatchQueryOptions options, QueryState state)
     {
         long batchTimestamp = options.getTimestamp(state);
         int nowInSeconds = options.getNowInSeconds(state);
@@ -549,7 +572,7 @@ public class BatchStatement implements CQLStatement
 
             checkFalse(statement.getRestrictions().clusteringKeyRestrictionsHasIN(),
                        "IN on the clustering key columns is not supported with conditional %s",
-                       statement.type.isUpdate()? "updates" : "deletions");
+                       statement.type.isUpdate() ? "updates" : "deletions");
 
             if (statement.hasSlices())
             {
@@ -565,7 +588,6 @@ public class BatchStatement implements CQLStatement
                 {
                     casRequest.addRangeDeletion(slice, statement, statementOptions, timestamp, nowInSeconds);
                 }
-
             }
             else
             {
@@ -627,13 +649,13 @@ public class BatchStatement implements CQLStatement
         try (RowIterator result = ModificationStatement.casInternal(request, timestamp, nowInSeconds, state))
         {
             ResultSet resultSet =
-                ModificationStatement.buildCasResultSet(ksName,
-                                                        tableName,
-                                                        result,
-                                                        columnsWithConditions,
-                                                        true,
-                                                        state,
-                                                        options.forStatement(0));
+            ModificationStatement.buildCasResultSet(ksName,
+                                                    tableName,
+                                                    result,
+                                                    columnsWithConditions,
+                                                    true,
+                                                    state,
+                                                    options.forStatement(0));
             return new ResultMessage.Rows(resultSet);
         }
     }
