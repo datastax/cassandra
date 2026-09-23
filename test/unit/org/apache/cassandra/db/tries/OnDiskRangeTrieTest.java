@@ -42,9 +42,10 @@ import static org.junit.Assert.assertEquals;
 /// The round-trip comparisons in the other on-disk tests only walk both directions, which never asks
 /// for the active range state. That state is computed by descending to the nearest content with
 /// [OnDiskReadNodeType#getFirstChild], reached only when [RangeCursor#state] is asked for after a
-/// skip, which is what [RangeTrie#applicableRange] does. Getting to the bitmap, dense and relay
+/// skip, which is what [RangeTrie#applicableRange] does. Getting to the bitmap and dense
 /// implementations of it needs a wider alphabet than the other tests use, transitions at or above
-/// 0xE0 to tell a full bitmap cardinality from a truncated one, and a trie spanning several pages.
+/// 0xE0 to tell a full bitmap cardinality from a truncated one, and keys long enough that the child
+/// pointers take more than one byte.
 public class OnDiskRangeTrieTest
 {
     @BeforeClass
@@ -95,9 +96,9 @@ public class OnDiskRangeTrieTest
         testWideNode(2, denseTransitions(), 1);
     }
 
-    /// Long keys make the trie span several pages, which is what makes the writer lay out relay nodes.
+    /// Long keys push the children far enough apart that their pointers need more than one byte.
     @Test
-    public void testWideNodesOverSeveralPages() throws IOException
+    public void testWideNodesWithMultiBytePointers() throws IOException
     {
         testWideNode(2, BITMAP_TRANSITIONS, 128);
     }

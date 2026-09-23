@@ -103,8 +103,6 @@ public class OnDiskTrieTest
         testEntries("", "abc", "abd");
     }
 
-    // TODO: Test unproductive path (via custom cursor)
-
     @Test
     public void testChains() throws TrieSpaceExhaustedException
     {
