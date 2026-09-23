@@ -114,6 +114,14 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         class FilterNotIndexed extends Transformation
         {
             @Override
+            protected RegularAndStaticColumns applyToPartitionColumns(RegularAndStaticColumns columns)
+            {
+                // See ClusteringIndexSliceFilter#filterNotIndexed: the rows are filtered with the column filter, so
+                // the resulting iterator must advertise the fetched columns rather than the ones of the source.
+                return columnFilter.fetchedColumns();
+            }
+
+            @Override
             public Row applyToStatic(Row row)
             {
                 return columnFilter.fetchedColumns().statics.isEmpty() ? null : row.filter(columnFilter, iterator.metadata());
