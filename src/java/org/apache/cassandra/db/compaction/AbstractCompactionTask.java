@@ -343,6 +343,6 @@ public abstract class AbstractCompactionTask
 
     public String toString()
     {
-        return "CompactionTask(" + transaction + ")";
+        return getClass().getSimpleName() + "(" + transaction + ")";
     }
 }
