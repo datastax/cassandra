@@ -413,6 +413,19 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         return accumulate;
     }
 
+    /**
+     * Rolls back a prepared checkpoint by clearing the staged state.
+     */
+    public Throwable abortCheckpoint(Throwable accumulate)
+    {
+        // Release the references of newly-prepared SSTableReaders that will not be used.
+        accumulate = release(selfRefs(staged.update), accumulate);
+
+        staged.clear();
+        // We may have added some sstable states in the identities list, which we aren't removing. This is fine, the
+        // next time we try to checkpoint we will use different readers.
+        return accumulate;
+    }
 
     /**
      * update a reader: if !original, this is a reader that is being introduced by this transaction;

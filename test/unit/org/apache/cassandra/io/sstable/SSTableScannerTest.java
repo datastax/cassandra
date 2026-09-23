@@ -22,17 +22,21 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -50,10 +54,13 @@ import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.io.sstable.format.bti.BtiTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.hamcrest.Matchers;
+import org.mockito.Mockito;
 
 import static org.apache.cassandra.dht.AbstractBounds.isEmpty;
 import static org.junit.Assert.assertEquals;
@@ -186,11 +193,12 @@ public class SSTableScannerTest
 
     private static void assertScanMatches(SSTableReader sstable, int scanStart, int scanEnd, int ... boundaries)
     {
-        assertScanMatchesUsingScanner(sstable, scanStart, scanEnd, boundaries);
+        assertScanFromDataRangeMatches(sstable, scanStart, scanEnd, boundaries);
+        assertScanFromIteratorMatches(sstable, scanStart, scanEnd, boundaries);
         assertScanMatchesUsingSimple(sstable, scanStart, scanEnd, boundaries);
     }
 
-    private static void assertScanMatchesUsingScanner(SSTableReader sstable, int scanStart, int scanEnd, int ... boundaries)
+    private static void assertScanFromDataRangeMatches(SSTableReader sstable, int scanStart, int scanEnd, int ... boundaries)
     {
         assert boundaries.length % 2 == 0;
         for (DataRange range : dataRanges(sstable.metadata(), scanStart, scanEnd))
@@ -208,6 +216,33 @@ public class SSTableScannerTest
             {
                 throw new RuntimeException(e);
             }
+        }
+    }
+
+    private static void assertScanFromIteratorMatches(SSTableReader sstable, int scanStart, int scanEnd, int ... boundaries)
+    {
+        assert boundaries.length % 2 == 0;
+        Range<Token> range = rangeFor(scanStart, scanEnd);
+        List<Range<Token>> ranges = scanStart <= scanEnd ? List.of(range) : range.unwrap();
+        List<AbstractBounds<PartitionPosition>> pps =
+            ranges.stream()
+                  .sorted(Comparator.comparing(b -> b.left))
+                  .map(r -> new Range<PartitionPosition>(r.left.minKeyBound(), r.right.maxKeyBound()))
+                  .collect(Collectors.<AbstractBounds<PartitionPosition>>toList());
+
+        try(ISSTableScanner scanner = sstable.getScanner(pps.iterator()))
+        {
+            for (int b = 0; b < boundaries.length; b += 2)
+                for (int i = boundaries[b]; i <= boundaries[b + 1]; i++)
+                    assertEquals(toKey(i), new String(scanner.next().partitionKey().getKey().array()));
+            boolean hadNext = scanner.hasNext();
+            while (scanner.hasNext())
+                System.out.println("Got extra " + new String(scanner.next().partitionKey().getKey().array()));
+            assertFalse(hadNext);
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
         }
     }
 
@@ -241,6 +276,32 @@ public class SSTableScannerTest
     @Test
     public void testSingleDataRange() throws IOException
     {
+        testSingleDataRange(false, false);
+    }
+
+    @Test
+    public void testSingleDataRangeWithChangedStart() throws IOException
+    {
+        testSingleDataRange(true, false);
+    }
+
+    @Test
+    public void testSingleDataRangeWithChangedEnd() throws IOException
+    {
+
+        Assume.assumeTrue(DatabaseDescriptor.getSelectedSSTableFormat() == BtiFormat.getInstance());
+        testSingleDataRange(false, true);
+    }
+
+    @Test
+    public void testSingleDataRangeWithChangedBothEnds() throws IOException
+    {
+        Assume.assumeTrue(DatabaseDescriptor.getSelectedSSTableFormat() == BtiFormat.getInstance());
+        testSingleDataRange(true, true);
+    }
+
+    private void testSingleDataRange(boolean filterFirst, boolean filterLast)
+    {
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(TABLE);
         store.clearUnsafe();
@@ -248,13 +309,35 @@ public class SSTableScannerTest
         // disable compaction while flushing
         store.disableAutoCompaction();
 
-        for (int i = 2; i < 10; i++)
+        for (int i = filterFirst ? 0 : 2; i <= (filterLast ? 12 : 9); i++)
             insertRowWithKey(store.metadata(), i);
-        Util.flush(store);
+        store.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         assertEquals(1, store.getLiveSSTables().size());
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
+        if (filterFirst)
+            sstable = sstable.cloneWithNewStart(dk(2));
+        if (filterLast)
+            sstable = cloneWithNewEndBound(sstable, dk(9));
+        testSingleDataRange(sstable);
+    }
 
+    private SSTableReader cloneWithNewEndBound(SSTableReader sstable, DecoratedKey last)
+    {
+        long fileEnd = sstable.getPosition(last, SSTableReader.Operator.GT);
+        // Change the end bound and make sure it is applied.
+        sstable = ((BtiTableReader) sstable).unbuildTo(new BtiTableReader.Builder(sstable.descriptor), true)
+                                            .setLast(last)
+                                            .build(sstable.owner().orElse(null), true, true);
+        BtiTableReader spied = Mockito.spy((BtiTableReader) sstable);
+        Mockito.when(spied.filterLast()).thenReturn(true);
+        // When it's given a position beyond the last key, the sstable will use uncompressedLength(). Mock that too.
+        Mockito.when(spied.uncompressedLength()).thenReturn(fileEnd);
+        return spied;
+    }
+
+    private void testSingleDataRange(SSTableReader sstable)
+    {
         // full range scan
         ISSTableScanner scanner = sstable.getScanner();
         for (int i = 2; i < 10; i++)
@@ -360,7 +443,7 @@ public class SSTableScannerTest
         // start of range edge conditions
         assertScanMatches(sstable, 3, 9, 4, 9);
         assertScanMatches(sstable, 4, 9, 4, 9);
-        assertScanMatches(sstable, 5, 9, 4, 9);
+        assertScanMatches(sstable, 5, 9, 5, 9);
 
         // end of range edge conditions
         assertScanMatches(sstable, 1, 8, 4, 8);

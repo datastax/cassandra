@@ -64,4 +64,10 @@ public abstract class AbstractReaderFileProxy implements ReaderFileProxy
     {
         return position;
     }
+
+    @Override
+    public long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        return currentPosition + bytesToSkip;
+    }
 }

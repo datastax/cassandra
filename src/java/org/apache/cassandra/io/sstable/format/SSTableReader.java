@@ -978,34 +978,25 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         }
         else
         {
-            CompressionMetadata compressionMetadata = dfile.compressionMetadata().orElse(null);
-            if (compressionMetadata != null)
+            final CompressionMetadata compressionMetadata = getCompressionMetadata();
+            long lastEnd = 0;
+            for (PartitionPositionBounds position : positionBounds)
             {
-                long lastEnd = 0;
-                for (PartitionPositionBounds position : positionBounds)
+                assert position.lowerPosition >= 0 : "the partition lower cannot be negative";
+                if (position.upperPosition == position.lowerPosition)
                 {
-                    assert position.lowerPosition >= 0 : "the partition lower cannot be negative";
-                    if (position.upperPosition == position.lowerPosition)
-                    {
-                        continue;
-                    }
-                    assert position.upperPosition >= position.lowerPosition : "the partition upper position cannot be lower than lower position";
-
-                    // The end of the chunk that contains the last required byte from the range.
-                    long upperChunkEnd = compressionMetadata.chunkFor(position.upperPosition - 1).chunkEnd();
-                    // The start of the chunk that contains the first required byte from the range.
-                    long lowerChunkStart = compressionMetadata.chunkFor(position.lowerPosition).offset;
-                    if (lowerChunkStart < lastEnd)  // if regions include the same chunk, count it only once
-                        lowerChunkStart = lastEnd;
-                    total += upperChunkEnd - lowerChunkStart;
-                    lastEnd = upperChunkEnd;
+                    continue;
                 }
-            }
-            else
-            {
-                // For encrypted files without compression metadata, just sum the ranges
-                for (PartitionPositionBounds position : positionBounds)
-                    total += position.upperPosition - position.lowerPosition;
+                assert position.upperPosition >= position.lowerPosition : "the partition upper position cannot be lower than lower position";
+
+                // The end of the chunk that contains the last required byte from the range.
+                long upperChunkEnd = compressionMetadata.chunkFor(position.upperPosition - 1).chunkEnd();
+                // The start of the chunk that contains the first required byte from the range.
+                long lowerChunkStart = compressionMetadata.chunkFor(position.lowerPosition).offset;
+                if (lowerChunkStart < lastEnd)  // if regions include the same chunk, count it only once
+                    lowerChunkStart = lastEnd;
+                total += upperChunkEnd - lowerChunkStart;
+                lastEnd = upperChunkEnd;
             }
         }
         return total;
@@ -2205,24 +2196,9 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         for (Component component : components())
         {
             // Only the data file is compressable.
-            if (logical && component == Components.DATA && compression)
-            {
-                // For encrypted files or shallow readers, dfile may be null
-                if (dfile != null)
-                {
-                    CompressionMetadata metadata = dfile.compressionMetadata().orElse(null);
-                    bytes += metadata != null ? metadata.dataLength : dfile.dataLength();
-                }
-                else
-                {
-                    // For shallow readers without dfile, use file length from descriptor
-                    bytes += descriptor.fileFor(component).length();
-                }
-            }
-            else
-            {
-                bytes += descriptor.fileFor(component).length();
-            }
+            bytes += logical && component == Components.DATA && compression
+                     ? getCompressionMetadata().dataLength
+                     : descriptor.fileFor(component).length();
         }
         return bytes;
     }
@@ -2320,8 +2296,9 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
         public B setCompactionMetadata(Optional<CompactionMetadata> compactionMetadata)
         {
-//            Preconditions.checkNotNull(compactionMetadata);
-            this.compactionMetadata = compactionMetadata != null ? compactionMetadata : Optional.empty();
+            // We can be given null, if a source SSTableReader has not yet read it; in this case we should leave
+            // this builder in the same state.
+            this.compactionMetadata = compactionMetadata;
             return (B) this;
         }
 

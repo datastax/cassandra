@@ -58,6 +58,10 @@ import static java.lang.Math.min;
 
 /**
  * SSTable metadata that always stay on heap.
+ *
+ * Note that some of the metadata of this class include user data (for instance {@link #coveredClustering} or
+ * {@link #zeroCopyMetadata}) and this component must thus be encrypted
+ * when encryption is enabled. This is done by {@link MetadataSerializer}.
  */
 public class StatsMetadata extends MetadataComponent
 {
