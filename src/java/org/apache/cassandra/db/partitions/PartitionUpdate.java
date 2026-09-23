@@ -518,7 +518,8 @@ public interface PartitionUpdate extends Partition
         public PartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
         {
             TableMetadata metadata = tableMetadataResolver.apply(TableId.deserialize(in));
-            if (version >= MessagingService.VERSION_DS_21)
+            // VERSION_DSE_68 is numerically above the DS versions but has no format byte.
+            if (version >= MessagingService.VERSION_DS_21 && version != MessagingService.VERSION_DSE_68)
             {
                 int format = in.readByte();
                 if (format == 1)
@@ -564,7 +565,8 @@ public interface PartitionUpdate extends Partition
         {
             long size = update.metadata().id.serializedSize();
 
-            if (version >= MessagingService.VERSION_DS_21)
+            // VERSION_DSE_68 is numerically above the DS versions but has no format byte.
+            if (version >= MessagingService.VERSION_DS_21 && version != MessagingService.VERSION_DSE_68)
             {
                 if (update instanceof TriePartitionUpdate)
                     return size + 1L + TriePartitionUpdateSerializer.serializedSize(update, version);

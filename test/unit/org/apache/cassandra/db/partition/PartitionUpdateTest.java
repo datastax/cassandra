@@ -23,10 +23,13 @@ import org.junit.Test;
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.RowUpdateBuilder;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIteratorSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
@@ -133,6 +136,35 @@ public class PartitionUpdateTest extends CQLTester
             // VERSION_DS_20 as much as here. What a round trip owes the caller is the content, so assert that.
             Assert.assertEquals(TriePartitionUpdate.asTrieUpdate(update), TriePartitionUpdate.asTrieUpdate(deserializedUpdate));
             Assert.assertEquals(update.operationCount(), deserializedUpdate.operationCount());
+        }
+    }
+
+    /**
+     * VERSION_DSE_68 is numerically above VERSION_DS_21, but its partition updates carry no format byte, whichever
+     * class the update is.
+     */
+    @Test
+    public void testSerializedSizeAtDse68HasNoFormatByte()
+    {
+        createTable("CREATE TABLE %s (key text, clustering int, a int, s int static, PRIMARY KEY(key, clustering))");
+        TableMetadata cfm = currentTableMetadata();
+
+        UpdateBuilder builder = UpdateBuilder.create(cfm, "key0");
+        builder.newRow().add("s", 1);
+        builder.newRow(1).add("a", 2);
+        PartitionUpdate originalUpdate = builder.build();
+
+        int version = MessagingService.VERSION_DSE_68;
+        for (PartitionUpdate update : new PartitionUpdate[]{ originalUpdate, TriePartitionUpdate.asTrieUpdate(originalUpdate) })
+        {
+            long expected;
+            try (UnfilteredRowIterator iter = update.unfilteredIterator())
+            {
+                expected = cfm.id.serializedSize()
+                           + TypeSizes.LONG_SIZE
+                           + UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, version, update.rowCount());
+            }
+            Assert.assertEquals(update.getClass().getSimpleName(), expected, PartitionUpdate.serializer.serializedSize(update, version));
         }
     }
 
