@@ -27,9 +27,10 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// ## Where the deletion branch pointer lives
 ///
 /// [OnDiskWriteNodeType] has no room for a deletion branch: the node code is
-/// `nodeCode >> 3`, all 32 type codes are assigned (LEAF 0-7, CHAIN 8-15, SPARSE 16-27,
-/// BITMAP 28, DENSE 29, PREFIX 30, RELAY 31), and PREFIX's three flag bits are all in
-/// use (`HAS_CHILD`, `HAS_ASCENT_CONTENT`, `HAS_DESCENT_CONTENT`).
+/// `nodeCode >> 3`, every type code but the reserved `11111xxx` is assigned (LEAF 0-7,
+/// CHAIN 8-15, SPARSE 16-27, BITMAP 28, DENSE 29, PREFIX 30), the reserved code is kept free
+/// for format evolution rather than spent on a deletion branch, and PREFIX's three flag bits
+/// are all in use (`HAS_CHILD`, `HAS_ASCENT_CONTENT`, `HAS_DESCENT_CONTENT`).
 ///
 /// A node does, however, have a spare payload slot. A generic-content node carries content on both the
 /// descent and the ascent (return) path, and the data trie of a deletion-aware trie only ever presents
@@ -99,13 +100,6 @@ implements Cursor.Walker<T, DataOutputPlus>
         }
 
         @Override
-        public int serializedSize(Slot<T> value)
-        {
-            return value.content != null ? contentSerializer.serializedSize(value.content)
-                                         : OnDiskTrieWriter.bytesFor(value.deletionBranchRoot);
-        }
-
-        @Override
         public int serialize(DataOutputPlus out, Slot<T> value) throws IOException
         {
             if (value.content != null)
@@ -139,7 +133,7 @@ implements Cursor.Walker<T, DataOutputPlus>
         this.out = out;
         this.deletionSerializer = deletionSerializer;
         // Never ordered: OnDiskDeletionAwareTrie always reads the data trie with isOrdered = false, and an ordered
-        // write would swap the two content slots in FileWriter.InProgressNode.complete, putting the branch pointer
+        // write would swap the two content slots in OnDiskTrieWriter.writeAndRecycleNode, putting the branch pointer
         // where the reader expects the live content.
         this.inner = new OnDiskTrieWriter<>(out, new SlotSerializer<>(contentSerializer), false);
     }
@@ -191,7 +185,7 @@ implements Cursor.Walker<T, DataOutputPlus>
         // of the branch's data, so the walk descends into the branch and then finds no marker below (see
         // OnDiskDeletionAwareTrieTest.testDeletionBranchEmptiedByIntersection).
         //
-        // A trie with no content leaves the stream untouched (see FileWriter.ascendTo), so the
+        // A trie with no content leaves the stream untouched (see OnDiskTrieWriter.ascendTo), so the
         // position is that of whatever node was written last, or 0 if nothing has been written
         // yet. Report "no branch" rather than a root that is not a node: a recorded root makes
         // the reader set MAY_HAVE_DELETION_BRANCH_BIT and decode that byte as a node code.

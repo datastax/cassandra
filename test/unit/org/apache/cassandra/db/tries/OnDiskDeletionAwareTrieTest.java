@@ -65,19 +65,13 @@ public class OnDiskDeletionAwareTrieTest
     static class LiveSerDe implements OnDiskTrieWriter.DataSerializer<LivePoint>, OnDiskCursor.DataDeserializer<LivePoint>
     {
         @Override
-        public int serializedSize(LivePoint value)
-        {
-            return 4 + 4 + positionBytes(value.position).length;
-        }
-
-        @Override
         public int serialize(DataOutputPlus out, LivePoint value) throws IOException
         {
             byte[] pos = positionBytes(value.position);
             out.writeInt(value.timestamp);
             out.writeInt(pos.length);
             out.write(pos);
-            return serializedSize(value);
+            return 4 + 4 + pos.length;
         }
 
         @Override
@@ -93,12 +87,6 @@ public class OnDiskDeletionAwareTrieTest
     static class MarkerSerDe implements OnDiskTrieWriter.DataSerializer<DeletionMarker>, OnDiskCursor.DataDeserializer<DeletionMarker>
     {
         @Override
-        public int serializedSize(DeletionMarker value)
-        {
-            return 4 + 4 + 4 + positionBytes(value.position).length;
-        }
-
-        @Override
         public int serialize(DataOutputPlus out, DeletionMarker value) throws IOException
         {
             byte[] pos = positionBytes(value.position);
@@ -106,7 +94,7 @@ public class OnDiskDeletionAwareTrieTest
             out.writeInt(value.rightSide);
             out.writeInt(pos.length);
             out.write(pos);
-            return serializedSize(value);
+            return 4 + 4 + 4 + pos.length;
         }
 
         @Override

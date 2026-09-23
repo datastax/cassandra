@@ -623,7 +623,7 @@ public enum OnDiskReadNodeType
                 if (hasDescent)
                     currentPos = state.getContentAtPos(currentPos);
                 if (hasChild)
-                    state.descendPostPrefixOrRelay(maybeSkipOverContent(state, currentPos, hasAscent));
+                    state.descendPostPrefix(maybeSkipOverContent(state, currentPos, hasAscent));
                 else
                     state.descendPostPrefixToEmpty();
                 return;
@@ -665,7 +665,7 @@ public enum OnDiskReadNodeType
             }
 
             if (hasChild)
-                state.descendPostPrefixOrRelay(currentPos);
+                state.descendPostPrefix(currentPos);
             else
                 state.descendPostPrefixToEmpty(); // no children
         }
@@ -803,51 +803,6 @@ public enum OnDiskReadNodeType
             String children = hasChild ? " --> " + pos : "";
             return "Prefix: " + descentContent + ascentContent + children;
         }
-    },
-
-    RELAY
-    {
-        private int bytes(int nodeCode)
-        {
-            return (nodeCode & 0b111) + 1;
-        }
-
-        @Override
-        public void load(OnDiskCursor<?> state)
-        {
-            int bytes = bytes(state.nodeCode);
-            long base = state.postCodePos - bytes;
-            state.descendPostPrefixOrRelay(base - state.readSizedInt(state.postCodePos, bytes));
-        }
-
-        @Override
-        public long advance(OnDiskCursor<?> state)
-        {
-            state.getContentAtPos(state.postCodePos);
-            state.currentImpl = LEAF; // no further children
-            return state.currentEncodedPosition = state.nodeImplData;
-        }
-
-        @Override
-        public long skipTo(OnDiskCursor<?> state, long encodedSkipPosition)
-        {
-            assert Cursor.compare(encodedSkipPosition, state.nodeImplData) <= 0;
-            return advance(state);
-        }
-
-        @Override
-        public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
-        {
-            int bytes = bytes(nodeCode);
-            long base = postCodePos - bytes;
-            return base - state.readSizedInt(postCodePos, bytes);
-        }
-
-        @Override
-        public String dump(OnDiskCursor<?> state)
-        {
-            return "Relay --> " + state.readSizedInt(state.postCodePos, bytes(state.nodeCode));
-        }
     };
 
     // prefix with no content and no child is used for backtrack entry to return ascent-side content
@@ -893,14 +848,15 @@ public enum OnDiskReadNodeType
         LEAF, LEAF, LEAF, LEAF, LEAF, LEAF, LEAF, LEAF,
         CHAIN, CHAIN, CHAIN, CHAIN, CHAIN, CHAIN, CHAIN, CHAIN,
         SPARSE, SPARSE, SPARSE, SPARSE, SPARSE, SPARSE, SPARSE, SPARSE,
-        SPARSE, SPARSE, SPARSE, SPARSE, BITMAP, DENSE, PREFIX, RELAY
+        SPARSE, SPARSE, SPARSE, SPARSE, BITMAP, DENSE, PREFIX, null // code 31 (11111xxx) is reserved
     };
 
-    /**
-     * Selects the appropriate OnDiskReadNodeType based on the node code.
-     */
+    /// Selects the appropriate OnDiskReadNodeType based on the node code. Code `11111xxx` is reserved.
     static OnDiskReadNodeType selectNodeImpl(int nodeCode)
     {
-        return IMPLEMENTATIONS[nodeCode >> 3];
+        OnDiskReadNodeType impl = IMPLEMENTATIONS[nodeCode >> 3];
+        if (impl == null)
+            throw OnDiskCursor.corrupt("reserved node code " + nodeCode);
+        return impl;
     }
 }
