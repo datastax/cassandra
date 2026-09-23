@@ -312,7 +312,9 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         byte[] bytes = assertSizeMatchesBytesWritten(shape, update);
         try (DataInputBuffer in = new DataInputBuffer(bytes))
         {
-            assertEquals(shape, update, PartitionUpdate.serializer.deserialize(in, VERSION, DeserializationHelper.Flag.LOCAL));
+            // A shape written in the BTree encoding reads back through the table's own partition update factory, so
+            // it can come back as a different class; what a round trip owes the caller is the content.
+            assertEquals(shape, update, TriePartitionUpdate.asTrieUpdate(PartitionUpdate.serializer.deserialize(in, VERSION, DeserializationHelper.Flag.LOCAL)));
         }
     }
 
