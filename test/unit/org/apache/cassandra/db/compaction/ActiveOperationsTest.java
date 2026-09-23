@@ -263,8 +263,7 @@ public class ActiveOperationsTest extends CQLTester
             assertEquals(1, CompactionManager.instance.active.getScheduledTasks().size());
             assertTrue(CompactionManager.instance.active.getScheduledTasks().contains(task));
 
-            CleanupTask cleanupTask = new CleanupTask(getCurrentColumnFamilyStore(), Arrays.asList(Pair.create(sessionID, task)));
-            cleanupTask.cleanup();
+            task.execute();
 
             // Verify task was removed from scheduledTasks
             assertEquals(0, CompactionManager.instance.active.getScheduledTasks().size());

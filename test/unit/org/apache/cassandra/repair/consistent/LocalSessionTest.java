@@ -161,6 +161,7 @@ public class LocalSessionTest extends AbstractRepairTest
         }
 
         boolean failSessionCalled = false;
+
         public void failSession(UUID sessionID, boolean sendMessage)
         {
             failSessionCalled = true;
@@ -202,6 +203,7 @@ public class LocalSessionTest extends AbstractRepairTest
         }
 
         boolean sessionHasData = false;
+
         protected boolean sessionHasData(LocalSession session)
         {
             return sessionHasData;
@@ -327,7 +329,6 @@ public class LocalSessionTest extends AbstractRepairTest
 
         // ...and we should have sent a success message back to the coordinator
         assertMessagesSent(sessions, COORDINATOR, new PrepareConsistentResponse(sessionID, PARTICIPANT1, false));
-
     }
 
     /**
@@ -355,7 +356,8 @@ public class LocalSessionTest extends AbstractRepairTest
         AtomicReference<BooleanSupplier> isCancelledRef = new AtomicReference<>();
         SettableFuture future = SettableFuture.create();
 
-        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions() {
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions()
+        {
             ListenableFuture prepareSession(KeyspaceRepairManager repairManager, UUID sessionID, Collection<ColumnFamilyStore> tables, RangesAtEndpoint ranges, ExecutorService executor, BooleanSupplier isCancelled)
             {
                 isCancelledRef.set(isCancelled);
@@ -857,7 +859,6 @@ public class LocalSessionTest extends AbstractRepairTest
 
         Assert.assertEquals(session2, session2next);
         Assert.assertEquals(session3, session3next);
-
     }
 
     /**
@@ -916,7 +917,7 @@ public class LocalSessionTest extends AbstractRepairTest
      * If LocalSessions.start is called more than
      * once, an exception should be thrown
      */
-    @Test (expected = IllegalArgumentException.class)
+    @Test(expected = IllegalArgumentException.class)
     public void multipleStartupFailure() throws Exception
     {
         InstrumentedLocalSessions initialSessions = new InstrumentedLocalSessions();
@@ -1084,7 +1085,8 @@ public class LocalSessionTest extends AbstractRepairTest
     public void cleanupStatusRequest() throws Exception
     {
         AtomicReference<LocalSession> checkedSession = new AtomicReference<>();
-        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions() {
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions()
+        {
             public void sendStatusRequest(LocalSession session)
             {
                 Assert.assertTrue(checkedSession.compareAndSet(null, session));
@@ -1103,5 +1105,232 @@ public class LocalSessionTest extends AbstractRepairTest
 
         Assert.assertEquals(session, checkedSession.get());
     }
-}
 
+    /**
+     * Cleanup should not process sessions if the node is not initialized
+     */
+    @Test
+    public void cleanupNodeNotInitialized() throws Exception
+    {
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions()
+        {
+            @Override
+            protected boolean isNodeInitialized()
+            {
+                return false;
+            }
+        };
+        sessions.start();
+
+        int time = FBUtilities.nowInSeconds() - LocalSessions.AUTO_FAIL_TIMEOUT - 1;
+        LocalSession session = sessionWithTime(time - 1, time);
+        session.setState(REPAIRING);
+
+        sessions.putSessionUnsafe(session);
+        Assert.assertNotNull(sessions.getSession(session.sessionID));
+        Assert.assertEquals(REPAIRING, session.getState());
+
+        // cleanup should not fail the session since node is not initialized
+        sessions.cleanup();
+
+        Assert.assertNotNull(sessions.getSession(session.sessionID));
+        Assert.assertEquals(REPAIRING, session.getState());
+        Assert.assertEquals(session, sessions.loadUnsafe(session.sessionID));
+    }
+
+    /**
+     * Test cleanup with successful session cleanup
+     */
+    @Test
+    public void cleanupSuccessfulRelease() throws Exception
+    {
+        UUID sessionID = registerSession();
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        LocalSession session = sessions.prepareForTest(sessionID);
+        sessions.maybeSetRepairing(sessionID);
+        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID));
+        sessions.handleFinalizeCommitMessage(PARTICIPANT1, new FinalizeCommit(sessionID));
+
+        Assert.assertEquals(FINALIZED, session.getState());
+
+        // Simulate that the session has sstables to clean up
+        sessions.sessionHasData = true;
+
+        // Call cleanup - should succeed since session is finalized and not in progress
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session.ranges, false);
+
+        // Verify the session was processed
+        Assert.assertNotNull(summary);
+        Assert.assertEquals(cfm.keyspace, summary.keyspace);
+        Assert.assertEquals(cfm.name, summary.table);
+        // Note: actual success/failure depends on whether sstables exist and can be modified
+        // In this test environment, we can't easily verify the exact contents without mocking
+    }
+
+    /**
+     * Test cleanup with session that has no sstables (unsuccessful)
+     */
+    @Test
+    public void cleanupNoSSTables() throws Exception
+    {
+        UUID sessionID = registerSession();
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        LocalSession session = sessions.prepareForTest(sessionID);
+        sessions.maybeSetRepairing(sessionID);
+        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID));
+        sessions.handleFinalizeCommitMessage(PARTICIPANT1, new FinalizeCommit(sessionID));
+
+        Assert.assertEquals(FINALIZED, session.getState());
+
+        // Session has no sstables (sessionHasData = false by default)
+        sessions.sessionHasData = false;
+
+        // Call cleanup - should return unsuccessful since no sstables
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session.ranges, false);
+
+        Assert.assertNotNull(summary);
+        Assert.assertEquals(cfm.keyspace, summary.keyspace);
+        Assert.assertEquals(cfm.name, summary.table);
+        // When there are no sstables, getRepairFinalizationOperation returns null, 
+        // so the session should be in the unsuccessful set
+        Assert.assertTrue(summary.unsuccessful.contains(sessionID));
+        Assert.assertFalse(summary.successful.contains(sessionID));
+    }
+
+    /**
+     * Test cleanup skips sessions that are in progress
+     */
+    @Test
+    public void cleanupSessionInProgress() throws Exception
+    {
+        UUID sessionID = registerSession();
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        LocalSession session = sessions.prepareForTest(sessionID);
+        sessions.maybeSetRepairing(sessionID);
+
+        // Session is in REPAIRING state, not completed
+        Assert.assertEquals(REPAIRING, session.getState());
+        Assert.assertTrue(sessions.isSessionInProgress(sessionID));
+
+        // Call cleanup - should skip this session since it's in progress
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session.ranges, false);
+
+        Assert.assertNotNull(summary);
+        // Session should still be in REPAIRING state
+        Assert.assertEquals(REPAIRING, session.getState());
+        // In-progress sessions are not processed, so both lists should be empty
+        Assert.assertTrue(summary.successful.isEmpty());
+        Assert.assertTrue(summary.unsuccessful.isEmpty());
+    }
+
+    /**
+     * Test cleanup with failed session
+     */
+    @Test
+    public void cleanupFailedSession() throws Exception
+    {
+        UUID sessionID = registerSession();
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        LocalSession session = sessions.prepareForTest(sessionID);
+        sessions.failSession(sessionID, false);
+
+        Assert.assertEquals(FAILED, session.getState());
+        Assert.assertFalse(sessions.isSessionInProgress(sessionID));
+
+        // Call cleanup on failed session
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session.ranges, false);
+
+        Assert.assertNotNull(summary);
+        Assert.assertEquals(cfm.keyspace, summary.keyspace);
+        Assert.assertEquals(cfm.name, summary.table);
+        // Failed session with no sstables should be in unsuccessful set
+        Assert.assertTrue(summary.unsuccessful.contains(sessionID));
+        Assert.assertFalse(summary.successful.contains(sessionID));
+    }
+
+    /**
+     * Test cleanup with multiple sessions having mixed states
+     */
+    @Test
+    public void cleanupMixedSessions() throws Exception
+    {
+        UUID sessionID1 = registerSession();
+        UUID sessionID2 = registerSession();
+        UUID sessionID3 = registerSession();
+
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        // Session 1: Finalized (should be cleaned up)
+        LocalSession session1 = sessions.prepareForTest(sessionID1);
+        sessions.maybeSetRepairing(sessionID1);
+        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID1));
+        sessions.handleFinalizeCommitMessage(PARTICIPANT1, new FinalizeCommit(sessionID1));
+        Assert.assertEquals(FINALIZED, session1.getState());
+
+        // Session 2: Failed (should be cleaned up)
+        LocalSession session2 = sessions.prepareForTest(sessionID2);
+        sessions.failSession(sessionID2, false);
+        Assert.assertEquals(FAILED, session2.getState());
+
+        // Session 3: In progress (should be skipped)
+        LocalSession session3 = sessions.prepareForTest(sessionID3);
+        sessions.maybeSetRepairing(sessionID3);
+        Assert.assertEquals(REPAIRING, session3.getState());
+
+        // Call cleanup on all sessions
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session1.ranges, false);
+
+        Assert.assertNotNull(summary);
+        Assert.assertEquals(cfm.keyspace, summary.keyspace);
+        Assert.assertEquals(cfm.name, summary.table);
+        
+        // Session 3 should still be in REPAIRING state (not cleaned up)
+        Assert.assertEquals(REPAIRING, session3.getState());
+        
+        // Session 1 and 2 should be processed (in unsuccessful since no sstables)
+        // Session 3 should not be in either list (in progress)
+        Assert.assertFalse(summary.successful.contains(sessionID3));
+        Assert.assertFalse(summary.unsuccessful.contains(sessionID3));
+    }
+
+    /**
+     * Test cleanup with force flag
+     */
+    @Test
+    public void cleanupWithForce() throws Exception
+    {
+        UUID sessionID = registerSession();
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        LocalSession session = sessions.prepareForTest(sessionID);
+        sessions.maybeSetRepairing(sessionID);
+        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID));
+        sessions.handleFinalizeCommitMessage(PARTICIPANT1, new FinalizeCommit(sessionID));
+
+        Assert.assertEquals(FINALIZED, session.getState());
+
+        // Call cleanup with force=true
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session.ranges, true);
+
+        Assert.assertNotNull(summary);
+        Assert.assertEquals(cfm.keyspace, summary.keyspace);
+        Assert.assertEquals(cfm.name, summary.table);
+        // Force cleanup should process the session
+    }
+}
