@@ -73,8 +73,7 @@ import com.google.common.collect.Iterables;
 
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import org.apache.cassandra.io.compress.AdaptiveCompressor;
-import org.apache.cassandra.io.compress.LZ4Compressor;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -3643,11 +3642,9 @@ public abstract class CQLTester
         }
     }
 
-    public static String defaultCompressor()
+    public static String defaultCompressorClassName()
     {
-        return DatabaseDescriptor.shouldUseAdaptiveCompressionByDefault()
-               ? AdaptiveCompressor.class.getName()
-               : LZ4Compressor.class.getName();
+        return CompressionParams.forNewTables(KEYSPACE).getSstableCompressor().getClass().getName();
     }
 
     @FunctionalInterface
