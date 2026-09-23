@@ -80,10 +80,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.SkipListMemtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
-import org.apache.cassandra.db.partitions.TriePartitionUpdateSerializer;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.rows.UnfilteredRowIteratorSerializer;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSWriteError;
@@ -883,7 +880,7 @@ public abstract class CommitLogTest
     }
 
     /// A trie-backed update takes a different path into the log than a BTree one: from messaging
-    /// version VERSION_DS_21 on it can be written by TriePartitionUpdateSerializer in the on-disk trie
+    /// version VERSION_DS_21 on it is written by TriePartitionUpdateSerializer in the on-disk trie
     /// format, and replay has to hand back what was written.
     @Test
     public void replayTriePartitionUpdate() throws IOException
@@ -893,10 +890,8 @@ public abstract class CommitLogTest
         PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(cfs.metadata(), "trieKey");
         builder.timestamp(1000).nowInSec(1500).delete();     // older than the rows, so it shadows nothing
         builder.timestamp(2000).nowInSec(1500);
-        // The clusterings share a long prefix, which is what makes the trie the smaller of the two encodings and
-        // so the one the update is written in; see the assertion below.
-        for (int i = 0; i < 10; ++i)
-            builder.row("a-clustering-prefix-shared-by-every-row-" + i).add("val", bytes("value" + i));
+        builder.row("aaa").add("val", bytes("first"));
+        builder.row("ccc").add("val", bytes("second"));
         builder.addRangeTombstone().start("fff").end("mmm").inclStart().exclEnd();
         TriePartitionUpdate expected = TriePartitionUpdate.asTrieUpdate(builder.build());
 
@@ -918,27 +913,9 @@ public abstract class CommitLogTest
         // the trie representation of whatever came back, and assert the format separately.
         int storageVersion = StorageCompatibilityMode.current().storageMessagingVersion();
         assertEquals(expected, TriePartitionUpdate.asTrieUpdate(replayed));
-
-        // From VERSION_DS_21 on the writer emits whichever of the two encodings is smaller, and STANDARD1 asks for a
-        // skiplist memtable, so a replayed update is trie-backed exactly when the trie encoding was the smaller one.
-        // The fixture is built to be such a shape; if it stopped being one this would stop covering the trie path.
-        if (storageVersion >= MessagingService.VERSION_DS_21)
-            assertTrue("The trie encoding must be the smaller one for this fixture",
-                       trieEncodingIsSmaller(expected, storageVersion));
-
         assertEquals("Format the update was replayed in, at messaging version " + storageVersion,
                      storageVersion >= MessagingService.VERSION_DS_21,
                      replayed instanceof TriePartitionUpdate);
-    }
-
-    /// Which of the two encodings PartitionUpdate.PartitionUpdateSerializer writes the update in: the smaller one.
-    private static boolean trieEncodingIsSmaller(TriePartitionUpdate update, int version)
-    {
-        long trieSize = TriePartitionUpdateSerializer.serializedSize(update, version);
-        try (UnfilteredRowIterator iter = update.unfilteredIterator())
-        {
-            return trieSize <= UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, version, update.rowCount());
-        }
     }
 
     @Test

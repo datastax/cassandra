@@ -149,14 +149,6 @@ public class TriePartitionUpdateSerializer
         return laidOut.bytes;
     }
 
-    /// Drop the layout [#serializedSize] retained for this version, for a caller that has decided the write it was
-    /// kept for is not going to happen. Version-checked like [#takeRetainedTrie], so that a layout made for some
-    /// other version is not thrown away with it.
-    static void discardRetainedTrie(TriePartitionUpdate trieUpdate, int version)
-    {
-        takeRetainedTrie(trieUpdate, version);
-    }
-
     /// Keep the laid-out trie on the update for the write that follows, unless it is large enough that holding it
     /// is the problem [org.apache.cassandra.config.CassandraRelevantProperties#CACHEABLE_MUTATION_SIZE_LIMIT]
     /// exists to avoid. Above that limit the mutation does not keep its own serialized bytes either, and the two

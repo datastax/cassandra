@@ -39,7 +39,6 @@ public class PartitionUpdateSizeCache
             TriePartitionUpdate trieUpdate = (TriePartitionUpdate) update;
             trieUpdate.serializedSizeDS21 = -1;
             trieUpdate.serializedSizeDS20 = -1;
-            trieUpdate.btreeSerializedSizeDS21 = -1;
             trieUpdate.serializedTrie = null;
         }
     }
