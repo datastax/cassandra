@@ -68,7 +68,6 @@ import org.apache.cassandra.utils.concurrent.SharedCloseable;
  * The indexes are created by {@link PartitionIndexBuilder}. To read the index one must obtain a thread-unsafe
  * {@link Reader} or {@link IndexPosIterator}.
  */
-@VisibleForTesting
 public class PartitionIndex implements SharedCloseable
 {
     private static final Logger logger = LoggerFactory.getLogger(PartitionIndex.class);
@@ -89,12 +88,13 @@ public class PartitionIndex implements SharedCloseable
     public static final int FOOTER_LENGTH = 3 * 8;
     private static final int FLAG_HAS_HASH_BYTE = 8;
 
+    @VisibleForTesting
     public PartitionIndex(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last, ByteComparable.Version version)
     {
         this(fh, trieRoot, keyCount, first, last, null, null, version);
     }
 
-    public PartitionIndex(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last, DecoratedKey filterFirst, DecoratedKey filterLast, ByteComparable.Version version)
+    PartitionIndex(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last, DecoratedKey filterFirst, DecoratedKey filterLast, ByteComparable.Version version)
     {
         this.keyCount = keyCount;
         this.fh = fh.sharedCopy();
