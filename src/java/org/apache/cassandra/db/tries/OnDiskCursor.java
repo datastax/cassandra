@@ -187,8 +187,8 @@ public class OnDiskCursor<T> implements Cursor<T>
     /// The node the cursor is positioned on, as the pair that identifies it: the position just after its code byte,
     /// and that code. A chain node steps through its bytes without moving to a new node in the file, so the position
     /// alone does not identify where a tail taken here must start -- the code carries how much of the chain is left.
-    /// Both are left alone by [#descendPostPrefixOrRelay], which moves the implementation on to the node a prefix or
-    /// relay points to while the cursor stays on the prefix.
+    /// Both are left alone by [#descendPostPrefix], which moves the implementation on to the node a prefix points to
+    /// while the cursor stays on the prefix.
     long currentFullNodePostCodePos;   // for tails
     int currentFullNodeCode;
 
@@ -212,7 +212,7 @@ public class OnDiskCursor<T> implements Cursor<T>
         return currentEncodedPosition;
     }
 
-    void descendPostPrefixOrRelay(long nodePos)
+    void descendPostPrefix(long nodePos)
     {
         // leave content and encodedPosition unchanged
         this.postCodePos = nodePos - 1;

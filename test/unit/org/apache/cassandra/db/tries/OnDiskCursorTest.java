@@ -145,6 +145,26 @@ public class OnDiskCursorTest
         }
     }
 
+    /// Code `11111xxx` is reserved. A reader that meets it must fail as on corruption, not dereference nothing.
+    @Test
+    public void testReservedNodeCodeIsRejected() throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            out.write(new byte[8]);
+            out.writeByte(0b11111000);
+            ByteBuffer buffer = out.asNewBuffer();
+            assertThrows(UncheckedIOException.class,
+                         () -> new OnDiskCursor<Void>((rdr, length) -> null,
+                                                      new ByteBufferRebufferer(buffer),
+                                                      VERSION,
+                                                      Direction.FORWARD,
+                                                      true,
+                                                      false,
+                                                      buffer.limit()));
+        }
+    }
+
     /// A cursor over the given bytes. A leaf node with no content is appended as the root so that the
     /// cursor can be constructed; the tests read positions within the bytes before it directly.
     private static OnDiskCursor<Void> cursorOver(DataOutputBuffer out) throws IOException

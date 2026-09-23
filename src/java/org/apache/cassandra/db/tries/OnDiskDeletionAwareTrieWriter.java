@@ -27,9 +27,10 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// ## Where the deletion branch pointer lives
 ///
 /// [OnDiskWriteNodeType] has no room for a deletion branch: the node code is
-/// `nodeCode >> 3`, all 32 type codes are assigned (LEAF 0-7, CHAIN 8-15, SPARSE 16-27,
-/// BITMAP 28, DENSE 29, PREFIX 30, RELAY 31), and PREFIX's three flag bits are all in
-/// use (`HAS_CHILD`, `HAS_ASCENT_CONTENT`, `HAS_DESCENT_CONTENT`).
+/// `nodeCode >> 3`, every type code but the reserved `11111xxx` is assigned (LEAF 0-7,
+/// CHAIN 8-15, SPARSE 16-27, BITMAP 28, DENSE 29, PREFIX 30), the reserved code is kept free
+/// for format evolution rather than spent on a deletion branch, and PREFIX's three flag bits
+/// are all in use (`HAS_CHILD`, `HAS_ASCENT_CONTENT`, `HAS_DESCENT_CONTENT`).
 ///
 /// A node does, however, have a spare payload slot. A generic-content node carries content on both the
 /// descent and the ascent (return) path, and the data trie of a deletion-aware trie only ever presents
