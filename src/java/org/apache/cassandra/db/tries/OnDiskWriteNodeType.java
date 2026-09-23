@@ -23,7 +23,6 @@ import java.util.Arrays;
 import java.util.BitSet;
 
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.utils.vint.VIntCoding;
 
 public enum OnDiskWriteNodeType
 {
@@ -34,51 +33,28 @@ public enum OnDiskWriteNodeType
     CHAIN(0b01000000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, OnDiskTrieWriter.Node<?>[] children)
+        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
         {
-            assert children.length == 1;
-            return (children[0].firstTransition != -1 ? 1 + 1 : 0) +
-                   maybeSizeRelay(children, bytesPerPointer);
-        }
-
-        @Override
-        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
-        {
-            assert children.length == 1;
-            maybeWriteRelay(out, children, basePos, 1);
-            // Node may have moved its transition into the leading chain of its child. If so, there's no node to write
-            // here.
-            if (children[0].firstTransition != -1)
-            {
-                out.writeByte(children[0].firstTransition);
-                out.writeByte(bits);    // length 1
-            }
+            assert node.childCount() == 1;
+            out.writeByte(node.childTransition(0));
+            out.writeByte(bits);    // length 1
         }
     },
 
     PREFIX(0b11110000),
 
-    RELAY(0b11111000),
-
     DENSE(0b11101000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, OnDiskTrieWriter.Node<?>[] children)
+        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
         {
-            // first pointer is not implicit here
-            return 256 * bytesPerPointer + 1;
-        }
-
-        @Override
-        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
-        {
-            int size = children.length;
+            int size = node.childCount();
             // first pointer is not implicit here
             int index = 0;
             for (int i = 255; i >= 0; --i)
             {
-                if (index < size && i == children[index].firstTransition)
-                    OnDiskTrieWriter.writeReversedSized(out, basePos - children[index++].writtenFilePos, bytesPerPointer);
+                if (index < size && i == node.childTransition(index))
+                    OnDiskTrieWriter.writeReversedSized(out, basePos - node.child(index++), bytesPerPointer);
                 else
                     OnDiskTrieWriter.writeReversedSized(out, -1L, bytesPerPointer);
             }
@@ -90,22 +66,14 @@ public enum OnDiskWriteNodeType
     BITMAP(0b11100000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, OnDiskTrieWriter.Node<?>[] children)
+        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
         {
-            return (children.length - 1) * bytesPerPointer + 32 + 1 +
-                   maybeSizeRelay(children, bytesPerPointer);
-        }
-
-        @Override
-        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
-        {
-            int size = writePointers(out, children, basePos, bytesPerPointer);
+            int size = writePointers(out, node, basePos, bytesPerPointer);
             BitSet bits = new BitSet(256);
             for (int i = 0; i < size; ++i)
-                bits.set(children[i].firstTransition);
+                bits.set(node.childTransition(i));
             // toLongArray() trims to the highest set bit, so a node whose transitions all fall in the
-            // low half returns fewer than 4 longs. The format always reserves 32 bytes here (see
-            // sizeChildren), so pad back out to 4.
+            // low half returns fewer than 4 longs. The format always reserves 32 bytes here, so pad back out to 4.
             long[] bitsAsLong = Arrays.copyOf(bits.toLongArray(), 4);
             for (int i = 3; i >= 0; --i)
                 out.writeLong(bitsAsLong[i]);   // lowest-order bytes ends up last
@@ -116,18 +84,11 @@ public enum OnDiskWriteNodeType
     SPARSE(0b10000000)
     {
         @Override
-        long sizeChildren(int bytesPerPointer, OnDiskTrieWriter.Node<?>[] children)
+        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
         {
-            return (children.length - 1) * bytesPerPointer + children.length + 1 +
-                   maybeSizeRelay(children, bytesPerPointer);
-        }
-
-        @Override
-        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
-        {
-            int size = writePointers(out, children, basePos, bytesPerPointer);
+            int size = writePointers(out, node, basePos, bytesPerPointer);
             for (int i = 0; i < size; ++i)
-                out.writeByte(children[i].firstTransition);
+                out.writeByte(node.childTransition(i));
             out.writeByte(bits | ((size - 2) << SHIFT_SPARSE_LENGTH) | (bytesPerPointer - 1));
         }
     };
@@ -135,9 +96,7 @@ public enum OnDiskWriteNodeType
     final int bits;
 
     static final int MAX_LEAF_LENGTH_INCLUSIVE = 63;
-
     static final int MAX_CHAIN_LENGTH_INCLUSIVE = 64;
-
     // sparse: 0x80 - 0xE0 (96 positions) 1lllllbb, lllll is count - 2 and must be < 24, bb is bytes per pointer
     static final int MAX_SPARSE_LENGTH_INCLUSIVE = 25;
     static final int MAX_SPARSE_BYTES = 4;
@@ -152,35 +111,6 @@ public enum OnDiskWriteNodeType
         this.bits = bits;
     }
 
-    static <T> long sizePayload(OnDiskTrieWriter.DataSerializer<T> serializer, T descentData, T ascentData, boolean hasChild)
-    {
-        if (descentData == null && ascentData == null)
-            return 0;
-
-        int descentDataSize = -1;
-        if (descentData != null)
-            descentDataSize = serializer.serializedSize(descentData);
-
-        if (hasChild || ascentData != null || descentDataSize > MAX_LEAF_LENGTH_INCLUSIVE)
-        {
-            long size = 1;
-            if (descentDataSize >= 0)
-            {
-                size += descentDataSize + VIntCoding.computeUnsignedVIntSize(descentDataSize);
-            }
-
-            if (ascentData != null)
-            {
-                int ascentDataSize = serializer.serializedSize(ascentData);
-                size += ascentDataSize + VIntCoding.computeUnsignedVIntSize(ascentDataSize);
-            }
-
-            return size;
-        }
-        else
-            return descentDataSize + 1; // certainly smaller than a page
-    }
-
     static <T> void writePayload(DataOutputPlus out, OnDiskTrieWriter.DataSerializer<T> serializer, T descentData, T ascentData, boolean hasChild) throws IOException
     {
         if (descentData == null && ascentData == null)
@@ -188,18 +118,26 @@ public enum OnDiskWriteNodeType
 
         // A node is read backwards from its code byte, and the reader takes the content block
         // adjacent to the code as the descent side (see OnDiskReadNodeType.PREFIX and the layout in
-        // FileWriter's class comment), so the ascent block has to be emitted first.
+        // OnDiskTrie.md), so the ascent block has to be emitted first.
         int code = PREFIX.bits;
         if (ascentData != null)
         {
+            long ascentStart = out.position();
             int ascentDataSize = serializer.serialize(out, ascentData);
+            assert ascentDataSize == out.position() - ascentStart
+                : "Serializer reported " + ascentDataSize + " bytes but wrote " + (out.position() - ascentStart);
             OnDiskTrieWriter.writeReversedVint(out, ascentDataSize);
             code |= PREFIX_HAS_ASCENT_CONTENT;
         }
 
         int descentDataSize = -1;
         if (descentData != null)
+        {
+            long descentStart = out.position();
             descentDataSize = serializer.serialize(out, descentData);
+            assert descentDataSize == out.position() - descentStart
+                : "Serializer reported " + descentDataSize + " bytes but wrote " + (out.position() - descentStart);
+        }
 
         if (hasChild || ascentData != null || descentDataSize > MAX_LEAF_LENGTH_INCLUSIVE)
         {
@@ -229,79 +167,19 @@ public enum OnDiskWriteNodeType
             return DENSE;
     }
 
-    long sizeChildren(int bytesPerPointer, OnDiskTrieWriter.Node<?>[] children)
+    void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
     {
-        // Throw by default, only applies to RELAY, SPARSE, BITMAP and DENSE
+        // Throw by default, only applies to CHAIN, SPARSE, BITMAP and DENSE
         throw new AssertionError();
     }
 
-    void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> children[], long base, int bytesPerPointer) throws IOException
+    /// Write the explicit pointers of a sparse or bitmap node: every child but the last written, whose delta is 0 and
+    /// is left implicit.
+    static int writePointers(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
     {
-        // Throw by default, only applies to RELAY, SPARSE, BITMAP and DENSE
-        throw new AssertionError();
-    }
-
-    static long sizeChain(byte[] bytes)
-    {
-        int length = bytes.length;
-        return length + (length + MAX_CHAIN_LENGTH_INCLUSIVE - 1) / MAX_CHAIN_LENGTH_INCLUSIVE;
-    }
-
-    static void writeChain(DataOutputPlus out, byte[] bytes) throws IOException
-    {
-        int remaining = bytes.length;
-        int current = remaining - 1;
-        while (remaining > 0)
-        {
-            int len = Math.min(remaining, MAX_CHAIN_LENGTH_INCLUSIVE);
-            int stop = remaining - len;
-            while (current >= stop)
-                out.writeByte(bytes[current--]);
-            out.writeByte(CHAIN.bits | (len - 1));
-            remaining -= len;
-        }
-    }
-
-    static long sizeRelay(int bytesPerPointer)
-    {
-        return bytesPerPointer + 1;
-    }
-
-    static long writeRelay(DataOutputPlus out, long filePos, long base) throws IOException
-    {
-        assert filePos >= 0;
-        int bytesPerPointer = OnDiskTrieWriter.bytesFor(base - filePos);
-        OnDiskTrieWriter.writeReversedSized(out, base - filePos, bytesPerPointer);
-        out.writeByte(RELAY.bits | (bytesPerPointer - 1));
-        return base + bytesPerPointer + 1;
-    }
-
-
-    private static boolean implicitFirstChild(OnDiskTrieWriter.Node<?>[] children)
-    {
-        // If the last child is not written yet, it will be written immediately before parent and won't need a relay.
-        return children[children.length - 1].writtenFilePos < 0;
-    }
-
-    static long maybeSizeRelay(OnDiskTrieWriter.Node<?>[] children, int bytesPerPointer)
-    {
-        return implicitFirstChild(children) ? 0 : sizeRelay(bytesPerPointer);
-    }
-
-    static int writePointers(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int bytesPerPointer) throws IOException
-    {
-        int size = children.length;
-        basePos = maybeWriteRelay(out, children, basePos, size);
+        int size = node.childCount();
         for (int i = 0; i < size - 1; ++i)
-            OnDiskTrieWriter.writeReversedSized(out, basePos - children[i].writtenFilePos, bytesPerPointer);
+            OnDiskTrieWriter.writeReversedSized(out, basePos - node.child(i), bytesPerPointer);
         return size;
-    }
-
-    private static long maybeWriteRelay(DataOutputPlus out, OnDiskTrieWriter.Node<?>[] children, long basePos, int size) throws IOException
-    {
-        long firstNodePos = children[size - 1].writtenFilePos;
-        if (firstNodePos != basePos)
-            basePos = writeRelay(out, firstNodePos, basePos);
-        return basePos;
     }
 }

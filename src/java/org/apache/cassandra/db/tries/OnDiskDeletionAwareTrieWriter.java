@@ -99,13 +99,6 @@ implements Cursor.Walker<T, DataOutputPlus>
         }
 
         @Override
-        public int serializedSize(Slot<T> value)
-        {
-            return value.content != null ? contentSerializer.serializedSize(value.content)
-                                         : OnDiskTrieWriter.bytesFor(value.deletionBranchRoot);
-        }
-
-        @Override
         public int serialize(DataOutputPlus out, Slot<T> value) throws IOException
         {
             if (value.content != null)
@@ -139,7 +132,7 @@ implements Cursor.Walker<T, DataOutputPlus>
         this.out = out;
         this.deletionSerializer = deletionSerializer;
         // Never ordered: OnDiskDeletionAwareTrie always reads the data trie with isOrdered = false, and an ordered
-        // write would swap the two content slots in FileWriter.InProgressNode.complete, putting the branch pointer
+        // write would swap the two content slots in OnDiskTrieWriter.writeAndRecycleNode, putting the branch pointer
         // where the reader expects the live content.
         this.inner = new OnDiskTrieWriter<>(out, new SlotSerializer<>(contentSerializer), false);
     }
@@ -191,7 +184,7 @@ implements Cursor.Walker<T, DataOutputPlus>
         // of the branch's data, so the walk descends into the branch and then finds no marker below (see
         // OnDiskDeletionAwareTrieTest.testDeletionBranchEmptiedByIntersection).
         //
-        // A trie with no content leaves the stream untouched (see FileWriter.ascendTo), so the
+        // A trie with no content leaves the stream untouched (see OnDiskTrieWriter.ascendTo), so the
         // position is that of whatever node was written last, or 0 if nothing has been written
         // yet. Report "no branch" rather than a root that is not a node: a recorded root makes
         // the reader set MAY_HAVE_DELETION_BRANCH_BIT and decode that byte as a node code.

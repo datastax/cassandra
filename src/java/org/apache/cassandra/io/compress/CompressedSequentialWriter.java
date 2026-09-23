@@ -387,19 +387,18 @@ public class CompressedSequentialWriter extends SequentialWriter
     }
 
     @Override
-    public long padToPageBoundary()
+    public void padToPageBoundary()
     {
         if (buffer.position() == 0)
-            return bufferOffset;
+            return;
 
         int padLength = bytesLeftInPage();
 
         // Flush as much as we have
         doFlush(0);
         // But pretend we had a whole chunk
-        lastFlushOffset += padLength;
         bufferOffset += padLength;
-        return bufferOffset;
+        lastFlushOffset += padLength;
     }
 
     @Override

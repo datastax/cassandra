@@ -905,12 +905,6 @@ public class TrieUtil
     static class IntegerSerDe implements OnDiskTrieWriter.DataSerializer<Integer>, OnDiskCursor.DataDeserializer<Integer>
     {
         @Override
-        public int serializedSize(Integer value)
-        {
-            return 4;
-        }
-
-        @Override
         public int serialize(DataOutputPlus out, Integer value) throws IOException
         {
             out.writeInt(value);
@@ -927,12 +921,6 @@ public class TrieUtil
 
     static class StringSerDe implements OnDiskTrieWriter.DataSerializer<String>, OnDiskCursor.DataDeserializer<String>
     {
-        @Override
-        public int serializedSize(String value)
-        {
-            return value.getBytes(StandardCharsets.UTF_8).length;
-        }
-
         @Override
         public int serialize(DataOutputPlus out, String value) throws IOException
         {
@@ -953,12 +941,6 @@ public class TrieUtil
 
     static class RangeSerDe implements OnDiskTrieWriter.DataSerializer<TestRangeState>, OnDiskCursor.DataDeserializer<TestRangeState>
     {
-        @Override
-        public int serializedSize(TestRangeState value)
-        {
-            return VIntCoding.computeVIntSize(value.leftSide) + VIntCoding.computeVIntSize(value.rightSide) + 1 + ByteComparable.length(value.position, VERSION);
-        }
-
         @Override
         public int serialize(DataOutputPlus out, TestRangeState value) throws IOException
         {

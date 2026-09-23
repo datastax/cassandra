@@ -298,9 +298,9 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     }
 
     @Override
-    public long padToPageBoundary() throws IOException
+    public void padToPageBoundary() throws IOException
     {
-        return PageAware.pad(this);
+        PageAware.pad(this);
     }
 
     @Override
