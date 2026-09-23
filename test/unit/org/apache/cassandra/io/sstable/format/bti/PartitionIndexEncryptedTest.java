@@ -215,12 +215,6 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
             return PartitionIndex.load(fhBuilder, partitioner, false, ZeroCopyMetadata.EMPTY, version);
     }
 
-    @Override
-    public void testDumpTrieToFile()
-    {
-        //FIXME: the tested trie dump method seems to be used only in tests, it should be revisited and fixed evnetually
-    }
-
     /**
      * Verifies that seeking, reading and skipping over encryption-only files result in the same positions and read the
      * same data. See DSP-25176.

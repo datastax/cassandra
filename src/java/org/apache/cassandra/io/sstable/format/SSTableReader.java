@@ -2296,8 +2296,9 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
         public B setCompactionMetadata(Optional<CompactionMetadata> compactionMetadata)
         {
-            Preconditions.checkNotNull(compactionMetadata);
-            this.compactionMetadata = compactionMetadata != null ? compactionMetadata : Optional.empty();
+            // We can be given null, if a source SSTableReader has not yet read it; in this case we should leave
+            // this builder in the same state.
+            this.compactionMetadata = compactionMetadata;
             return (B) this;
         }
 

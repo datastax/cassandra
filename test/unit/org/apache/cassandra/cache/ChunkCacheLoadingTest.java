@@ -107,7 +107,7 @@ public class ChunkCacheLoadingTest
                                                   .addPartitionKeyColumn("key", Int32Type.instance)
                                                   .addRegularColumn("c", CounterColumnType.instance)
                                                   .compression(CompressionParams.fromMap(ImmutableMap.of(CompressionParams.CLASS,
-                                                                                                         ReadingNopCompressor.class.getName())))
+                                                                                                         ReadingNopCompressor.class.getTypeName())))
                                                   .build();
         // A regular table, used for setting up chunk cache collisions with different chunks.
         TableMetadata normalTable = TableMetadata.builder(KEYSPACE, NORMAL)
@@ -135,10 +135,9 @@ public class ChunkCacheLoadingTest
             targetClass = "org.apache.cassandra.cache.ChunkCache$Key",
             targetMethod = "hashCode()",
             // This is needed in order to ensure that loads of different chunks will result in colliding loads in the
-            // underlying Caffeine cache. We want to ensure that because in 6.0 and above (unlike in 5.1) doing a nested read
+            // underlying Caffeine cache. We want to ensure that because in DSE 6 and above (unlike in 5.1) doing a nested read
             // of the same chunk is much harder to handle without resulting in a stall, mostly because of the changes related
             // to the chunk cache now storing chunk futures instead of the chunks themselves.
-            condition = "$0.internedPath.contains(\"db3050\") && $0.internedPath.contains(\"Data.db\")",
             action = "return 1")
     @Test(timeout=5000)
     public void testUncompressionReadCollision() throws Exception

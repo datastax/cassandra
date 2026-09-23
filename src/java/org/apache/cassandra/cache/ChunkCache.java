@@ -475,6 +475,8 @@ public class ChunkCache
                     FastByteOperations.copy(scratchBuffer, pageStart, buf, 0, length);
                     buf.limit(length);
                 }
+                while (idx < buffers.length)
+                    buffers[idx++].limit(0);
             }
             finally
             {
@@ -591,12 +593,14 @@ public class ChunkCache
             super(offset, buffer.limit(capacity));
         }
 
+        @Override
         public ByteBuffer buffer()
         {
             assert isReferenced() : "Already unreferenced";
             return buffer.slice();
         }
 
+        @Override
         void read(ChunkReader file)
         {
             ByteBuffer slicedBuf = buffer.slice(); // We were given a limit when the buffer was passed. Make sure we don't read more.

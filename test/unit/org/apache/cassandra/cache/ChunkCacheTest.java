@@ -45,6 +45,7 @@ import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.PageAware;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -55,7 +56,6 @@ import org.awaitility.Awaitility;
 import org.mockito.ArgumentCaptor;
 
 import static org.apache.cassandra.distributed.shared.AssertUtils.assertNotNull;
-import static org.apache.cassandra.io.util.PageAware.PAGE_SIZE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -81,6 +81,7 @@ public class ChunkCacheTest
         DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.enableChunkCache(512);
         CassandraRelevantProperties.BUFFERPOOL_DISABLE_COMBINED_ALLOCATION.setBoolean(true);
+        CassandraRelevantProperties.CHUNKCACHE_ASYNC_CLEANUP.setBoolean(false); // ensure synchronous cleanup so the cache sizes stay fixed after ops
     }
 
     @Test
@@ -615,12 +616,12 @@ public class ChunkCacheTest
         assertEquals(0, overflowBefore);
 
         ChunkCache.Chunk chunk = chunkCache.newChunk(SMALL_CHUNK_SIZE, 0);
-        assertEquals(PAGE_SIZE, chunk.capacity());
+        assertEquals(PageAware.PAGE_SIZE, chunk.capacity());
         // Read view must stay narrowed to the requested chunk size (alignment / readChunk capacity asserts).
         assertEquals(SMALL_CHUNK_SIZE, ((Rebufferer.BufferHolder) chunk).buffer().capacity());
 
         // A full page must have been reserved from the pool, not just chunkSize.
-        assertEquals(usedBefore + PAGE_SIZE, pool.usedSizeInBytes());
+        assertEquals(usedBefore + PageAware.PAGE_SIZE, pool.usedSizeInBytes());
         assertEquals(overflowBefore, pool.overflowMemoryInBytes());
 
         chunk.release();
@@ -628,7 +629,7 @@ public class ChunkCacheTest
         // The buffer handed back to the pool must be the full page-sized buffer, not a narrowed slice.
         // Capacity is snapshotted at call time because the pool zeroes the buffer object on recycle.
         verify(pool).put(any(ByteBuffer.class));
-        assertEquals(PAGE_SIZE, capturedCapacity[0]);
+        assertEquals(PageAware.PAGE_SIZE, capturedCapacity[0]);
 
         // The pool must be back to its exact pre-allocation state.
         assertEquals(usedBefore, pool.usedSizeInBytes());
@@ -640,7 +641,7 @@ public class ChunkCacheTest
         for (int i = 0; i < cycles; i++)
         {
             ChunkCache.Chunk c = chunkCache.newChunk(SMALL_CHUNK_SIZE, i * (long) SMALL_CHUNK_SIZE);
-            assertEquals(PAGE_SIZE, c.capacity());
+            assertEquals(PageAware.PAGE_SIZE, c.capacity());
             c.release();
         }
         assertEquals("used memory must not drift after repeated small-chunk cycles",
@@ -677,12 +678,12 @@ public class ChunkCacheTest
         assertEquals(0, overflowBefore);
 
         ChunkCache.Chunk chunk = chunkCache.newChunk(SMALL_CHUNK_SIZE, 0);
-        assertEquals(PAGE_SIZE, chunk.capacity());
+        assertEquals(PageAware.PAGE_SIZE, chunk.capacity());
         assertEquals(SMALL_CHUNK_SIZE, ((Rebufferer.BufferHolder) chunk).buffer().capacity());
 
         // Confirm the overflow path was really taken, and that the full page was tracked as overflow usage.
-        assertEquals(overflowBefore + PAGE_SIZE, overflowPool.overflowMemoryInBytes());
-        assertEquals(usedBefore + PAGE_SIZE, overflowPool.usedSizeInBytes());
+        assertEquals(overflowBefore + PageAware.PAGE_SIZE, overflowPool.overflowMemoryInBytes());
+        assertEquals(usedBefore + PageAware.PAGE_SIZE, overflowPool.usedSizeInBytes());
 
         chunk.release();
 
@@ -692,7 +693,7 @@ public class ChunkCacheTest
 
         // The released buffer must be the original, full-page buffer, which owns a real Cleaner -- unlike a
         // narrowed slice of it, which would silently fail to free the underlying native memory.
-        assertEquals(PAGE_SIZE, releasedBuffer.capacity());
+        assertEquals(PageAware.PAGE_SIZE, releasedBuffer.capacity());
         assertNotNull("The released overflow buffer should own a real Cleaner so put() can actually free it",
                       cleanerMethod.invoke(releasedBuffer));
 
@@ -722,9 +723,9 @@ public class ChunkCacheTest
         for (int i = 0; i < cycles; i++)
         {
             ChunkCache.Chunk chunk = chunkCache.newChunk(SMALL_CHUNK_SIZE, i * (long) SMALL_CHUNK_SIZE);
-            assertEquals(PAGE_SIZE, chunk.capacity());
+            assertEquals(PageAware.PAGE_SIZE, chunk.capacity());
             // Peak usage during the cycle must be a full page on the overflow path.
-            assertEquals(PAGE_SIZE, overflowPool.overflowMemoryInBytes());
+            assertEquals(PageAware.PAGE_SIZE, overflowPool.overflowMemoryInBytes());
             chunk.release();
             assertEquals("overflow must return to baseline after every release",
                          overflowBefore, overflowPool.overflowMemoryInBytes());
@@ -774,8 +775,8 @@ public class ChunkCacheTest
 
             assertTrue("expected multiple cached small chunks", chunkCache.sizeOfFile(file) > 1);
             // Weighted size must count full pages (capacity), not the narrowed read view.
-            assertEquals((long) chunkCache.sizeOfFile(file) * PAGE_SIZE, chunkCache.weightedSize());
-            assertEquals(usedBefore + (long) chunkCache.sizeOfFile(file) * PAGE_SIZE, pool.usedSizeInBytes());
+            assertEquals((long) chunkCache.sizeOfFile(file) * PageAware.PAGE_SIZE, chunkCache.weightedSize());
+            assertEquals(usedBefore + (long) chunkCache.sizeOfFile(file) * PageAware.PAGE_SIZE, pool.usedSizeInBytes());
             assertEquals(overflowBefore, pool.overflowMemoryInBytes());
         }
 
@@ -791,7 +792,7 @@ public class ChunkCacheTest
     @Test
     public void testLastChunkLimitSinglePage() throws IOException
     {
-        testLastChunkLimit(PAGE_SIZE);
+        testLastChunkLimit(PageAware.PAGE_SIZE);
     }
 
     @Test
@@ -803,7 +804,7 @@ public class ChunkCacheTest
     @Test
     public void testLastChunkLimitMultiplePages() throws IOException
     {
-        testLastChunkLimit(PAGE_SIZE * 16);
+        testLastChunkLimit(PageAware.PAGE_SIZE * 16);
     }
 
     public void testLastChunkLimit(int chunkSize) throws IOException
@@ -824,7 +825,7 @@ public class ChunkCacheTest
         FileHandle.Builder builder = new FileHandle.Builder(file)
                                      .withChunkCache(chunkCache)
                                      .bufferSize(chunkSize);
-        if (chunkSize < PAGE_SIZE)
+        if (chunkSize < PageAware.PAGE_SIZE)
             builder.slice(new SliceDescriptor(0, fileSize, chunkSize)); // enforce the chunk size
         try (FileHandle handle = builder.complete();
              RandomAccessReader reader = handle.createReader())
@@ -841,9 +842,9 @@ public class ChunkCacheTest
 
             assertTrue("expected multiple cached chunks", chunkCache.sizeOfFile(file) > 1);
 
-            assertEquals((long) chunkCache.sizeOfFile(file) * Math.max(chunkSize, PAGE_SIZE),
+            assertEquals((long) chunkCache.sizeOfFile(file) * Math.max(chunkSize, PageAware.PAGE_SIZE),
                          chunkCache.weightedSize());
-            assertEquals(usedBefore + (long) chunkCache.sizeOfFile(file) * Math.max(chunkSize, PAGE_SIZE),
+            assertEquals(usedBefore + (long) chunkCache.sizeOfFile(file) * Math.max(chunkSize, PageAware.PAGE_SIZE),
                          pool.usedSizeInBytes());
             assertEquals(overflowBefore, pool.overflowMemoryInBytes());
 

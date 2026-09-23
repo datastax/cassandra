@@ -358,7 +358,7 @@ public final class CompressionParams
 
     public static String prepareCompressorName(Class<?> clazz)
     {
-        String compressorName = clazz.getName();
+        String compressorName = clazz.getTypeName();
         String simpleName = clazz.getSimpleName();
 
         if (expandCompressorName(simpleName).equals(compressorName))
@@ -536,7 +536,7 @@ public final class CompressionParams
         Map<String, String> options = new HashMap<>(otherOptions);
         // Store the full name here. We could also use prepareCompressorName, but that would change the names users
         // see and may cause something to break unnecessarily.
-        options.put(CLASS, sstableCompressor.getClass().getName());
+        options.put(CLASS, sstableCompressor.getClass().getTypeName());
         options.put(CHUNK_LENGTH_IN_KB, chunkLengthInKB());
         if (minCompressRatio != DEFAULT_MIN_COMPRESS_RATIO)
             options.put(MIN_COMPRESS_RATIO, String.valueOf(minCompressRatio));
