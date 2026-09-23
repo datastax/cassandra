@@ -46,6 +46,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
@@ -339,28 +340,25 @@ public class MetadataSerializer implements IMetadataSerializer
         if (!compressionFile.exists())
             return null;
 
-        try
-        {
-            // During flush the compression info file may not have been uploaded to remote storage yet, so it has to
-            // be read through the write-time channel.
-            CompressionMetadataReaderType readerType = writeTime ? CompressionMetadataReaderType.WRITE_TIME
-                                                                 : CompressionMetadataReaderType.READ_TIME;
+        // During flush the compression info file may not have been uploaded to remote storage yet, so it has to
+        // be read through the write-time channel.
+        CompressionMetadataReaderType readerType = writeTime ? CompressionMetadataReaderType.WRITE_TIME
+                                                             : CompressionMetadataReaderType.READ_TIME;
 
-            // We only need the compression parameters, not the chunk offsets, so read just the header. This allocates
-            // no off-heap memory and creates no ref-counted resource to release.
-            // hasMaxCompressedSize must match how the file was written - the version flag - otherwise everything the
-            // header stores after the parameters is read at the wrong offset.
-            CompressionParams params = CompressionMetadata.readCompressionParams(compressionFile,
-                                                                                 desc.version.hasMaxCompressedLength(),
-                                                                                 readerType);
+        // We only need the compression parameters, not the chunk offsets, so read just the header. This allocates
+        // no off-heap memory and creates no ref-counted resource to release.
+        // hasMaxCompressedSize must match how the file was written - the version flag - otherwise everything the
+        // header stores after the parameters is read at the wrong offset.
+        CompressionParams params = CompressionMetadata.readCompressionParams(compressionFile,
+                                                                             desc.version.hasMaxCompressedLength(),
+                                                                             readerType);
 
-            // Note: we use only the encryption component, without any compression. The reason for doing this is to
-            // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
-            // serialization on reads.
-            ICompressor compressor = params.getSstableCompressor();
-            if (compressor != null)
-                return compressor.encryptionOnly();
-            return null;
-        }
+        // Note: we use only the encryption component, without any compression. The reason for doing this is to
+        // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
+        // serialization on reads.
+        ICompressor compressor = params.getSstableCompressor();
+        if (compressor != null)
+            return compressor.encryptionOnly();
+        return null;
     }
 }
