@@ -28,9 +28,9 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.memory.BufferPools;
 
 import static org.apache.cassandra.db.tries.InMemoryReadTrie.CELL_SIZE;
 import static org.apache.cassandra.db.tries.InMemoryReadTrie.getBufferIdx;
@@ -185,7 +185,7 @@ public class BufferManagerMultibuf implements BufferManager
 
     /**
      * Deserializes a {@link BufferManagerMultibuf} from the input stream.
-     * Allocates backing buffers from {@link BufferPools#forChunkCache} for off-heap buffers or JVM heap memory,
+     * Allocates backing buffers of the given type (off-heap or JVM heap memory),
      * populates raw byte content, and guarantees clean {@link #discardBuffers} cleanup if an I/O error occurs.
      */
     public static BufferManagerMultibuf deserialize(DataInputPlus in, BufferType bufferType, InMemoryBaseTrie.ExpectedLifetime lifetime, OpOrder opOrder) throws IOException
@@ -204,9 +204,7 @@ public class BufferManagerMultibuf implements BufferManager
             while (remaining > 0)
             {
                 int bufferSize = (int) size;
-                ByteBuffer newBuffer = (bufferType == BufferType.OFF_HEAP)
-                    ? BufferPools.forChunkCache().get(bufferSize, bufferType)
-                    : bufferType.allocate(bufferSize);
+                ByteBuffer newBuffer = bufferType.allocate(bufferSize);
                 bm.buffers[bufIdx] = new UnsafeBuffer(newBuffer);
                 int toRead = (int) Math.min(remaining, (long) bufferSize);
                 if (newBuffer.hasArray())
@@ -270,9 +268,7 @@ public class BufferManagerMultibuf implements BufferManager
             if (leadBit + BUF_START_SHIFT == 31)
                 throw new TrieSpaceExhaustedException();
 
-            ByteBuffer newBuffer = (bufferType == BufferType.OFF_HEAP)
-                ? BufferPools.forChunkCache().get(BUF_START_SIZE << leadBit, bufferType)
-                : bufferType.allocate(BUF_START_SIZE << leadBit);
+            ByteBuffer newBuffer = bufferType.allocate(BUF_START_SIZE << leadBit);
             buffers[leadBit] = new UnsafeBuffer(newBuffer);
             // Note: Since we are not moving existing data to a new buffer, we are okay with no happens-before enforcing
             // writes. Any reader that sees a pointer in the new buffer may only do so after reading the volatile write
@@ -393,11 +389,11 @@ public class BufferManagerMultibuf implements BufferManager
     }
 
     /**
-     * Discards and releases all off-heap buffers owned by this manager back to the chunk cache pool.
+     * Discards and releases all off-heap buffers owned by this manager.
      * <p>
      * NOTE: This method MUST only be invoked when the trie is no longer accessible by any readers or writers
      * (e.g. after a memtable discard or on deserialization failure). Because reads on the trie are lock-free,
-     * returning buffers to the pool while concurrent reads are active would result in use-after-free memory corruption.
+     * releasing buffers while concurrent reads are active would result in use-after-free memory corruption.
      */
     @Override
     public void discardBuffers()
@@ -411,8 +407,7 @@ public class BufferManagerMultibuf implements BufferManager
             if (b != null)
             {
                 buffers[i] = null;
-                if (b.byteBuffer() != null)
-                    BufferPools.forChunkCache().put(b.byteBuffer());
+                FileUtils.clean(b.byteBuffer());
             }
         }
     }
