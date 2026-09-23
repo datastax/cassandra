@@ -37,8 +37,8 @@ public class RepairFinalizationOperation
 {
     private static final Logger logger = LoggerFactory.getLogger(RepairFinalizationOperation.class);
 
-    private final CompactionRealm realm;
-    private final ILifecycleTransaction transaction;
+    public final CompactionRealm realm;
+    public final ILifecycleTransaction transaction;
     private final UUID sessionID;
     private final long repairedAt;
     private final boolean isTransient;
@@ -105,6 +105,11 @@ public class RepairFinalizationOperation
                 realm.repairSessionCompleted(sessionID);
             }
         }
+    }
+
+    public Throwable abort(Throwable accumulate)
+    {
+        return transaction.abort(accumulate);
     }
 
     public UUID getSessionID()
