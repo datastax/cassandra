@@ -49,6 +49,9 @@ public enum OnDiskWriteNodeType
         void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
         {
             int size = node.childCount();
+            // An absent child is written as all-ones, so the furthest real delta must stay below that: size the
+            // pointers for one more than the furthest delta (see OnDiskReadNodeType.DENSE.notPresent).
+            bytesPerPointer = OnDiskTrieWriter.bytesFor(basePos - node.child(0) + 1);
             // first pointer is not implicit here
             int index = 0;
             for (int i = 255; i >= 0; --i)

@@ -26,13 +26,16 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 /// Pins the bytes [OnDiskTrieWriter] produces against the worked examples in `OnDiskTrie.md`. The round-trip suites
 /// only check that the reader agrees with the writer; this is what catches a change to the layout itself.
@@ -131,6 +134,59 @@ public class OnDiskTrieWriterTest
     {
         Trie<Integer> withBranch = trie(false, "abcdef", 1, "abca", 2).mapValues(v -> v == 2 ? null : v);
         assertBytes("01 01  66 65 41  64 40  63 62 61 42", write(withBranch, false));
+    }
+
+    /// Raw bytes as content, to control node sizes exactly.
+    static class BytesSerDe implements OnDiskTrieWriter.DataSerializer<byte[]>, OnDiskCursor.DataDeserializer<byte[]>
+    {
+        @Override
+        public int serialize(DataOutputPlus out, byte[] value) throws IOException
+        {
+            out.write(value);
+            return value.length;
+        }
+
+        @Override
+        public byte[] deserialize(DataInputPlus rdr, int length) throws IOException
+        {
+            byte[] bytes = new byte[length];
+            rdr.readFully(bytes);
+            return bytes;
+        }
+    }
+
+    static final BytesSerDe BYTES_SERDE = new BytesSerDe();
+
+    /// A dense node marks an absent child with all-ones of its pointer width, so the furthest child's delta must
+    /// never be exactly that. 240 single-byte keys select a dense node with two-byte pointers; their sizes are chosen
+    /// so that the delta to the first-written child (key 0xff) is exactly 0xffff, which forces three-byte pointers.
+    @Test
+    public void testDenseFurthestDeltaAtPointerLimit() throws Exception
+    {
+        // A value longer than 63 bytes is written as a prefix node: value, two-byte vint length, code = length + 3.
+        // The 239 children written after key 0xff are 238 * 273 + 561 = 65535 bytes; key 0x10 is written last.
+        InMemoryTrie<byte[]> trie = InMemoryTrie.shortLived(VERSION);
+        for (int b = 0x10; b <= 0xff; ++b)
+            trie.putRecursive(ByteComparable.preencoded(VERSION, new byte[]{ (byte) b }),
+                              new byte[b == 0x10 ? 558 : 270], false, (x, y) -> y);
+
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskTrieWriter.write(trie, false, BYTES_SERDE, out);
+            // 240 children (239 * 273 + 561) + dense node with three-byte pointers (256 * 3 + 1)
+            assertEquals(65808 + 769, out.getLength());
+        }
+
+        try (OnDiskTrie<byte[]> read = TrieUtil.onDiskRoundtrip(trie, false, BYTES_SERDE, BYTES_SERDE))
+        {
+            assertNotNull("child 0xff must not read as absent", read.get(ByteComparable.preencoded(VERSION, new byte[]{ (byte) 0xff })));
+            // Values are byte[], which assertTriesEqual would compare by identity.
+            for (int b = 0x10; b <= 0xff; ++b)
+            {
+                ByteComparable.Preencoded key = ByteComparable.preencoded(VERSION, new byte[]{ (byte) b });
+                assertArrayEquals("key " + b, trie.get(key), read.get(key));
+            }
+        }
     }
 
     /// Writing into a stream that already holds data: an empty trie writes nothing, so there is no root to report, and

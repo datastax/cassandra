@@ -127,6 +127,7 @@ for brevity.
 
 A dense node is a node where all 256 pointers are explicitly specified. If there is no child for a specific transition
 value, we use a pointer with all bits set to 1, otherwise we store it reversed with `b+1` bytes as before.
+The number of bytes per pointer is chosen so that the furthest child's delta is strictly less than the all-ones value.
 
 Unlike the other node types, dense nodes do not have a child with an implicit 0 pointer, because the first child in
 this definition always corresponds to the 00 transition, and a dense node may be missing a child for it.
