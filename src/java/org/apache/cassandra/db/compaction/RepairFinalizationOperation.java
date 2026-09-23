@@ -36,8 +36,8 @@ public class RepairFinalizationOperation
 {
     private static final Logger logger = LoggerFactory.getLogger(RepairFinalizationOperation.class);
 
-    private final CompactionRealm realm;
-    private final ILifecycleTransaction transaction;
+    public final CompactionRealm realm;
+    public final ILifecycleTransaction transaction;
     private final TimeUUID sessionID;
     private final long repairedAt;
     private final boolean isTransient;
@@ -68,9 +68,11 @@ public class RepairFinalizationOperation
 
         try
         {
-            if (obsoleteSSTables)
+            try
             {
-                logger.info("Obsoleting transient repaired sstables for {}", sessionID);
+                if (obsoleteSSTables)
+                {
+                    logger.info("Obsoleting transient repaired sstables for {}", sessionID);
                 Preconditions.checkState(Iterables.all(transaction.originals(), SSTableReader::isTransient));
                 transaction.obsoleteOriginals();
             }
@@ -99,10 +101,14 @@ public class RepairFinalizationOperation
                 transaction.abort();
             }
 
-            if (completed)
-            {
-                realm.repairSessionCompleted(sessionID);
+                if (completed)
+                {
+                    realm.repairSessionCompleted(sessionID);}
             }
+        }
+        finally
+        {
+            transaction.close();
         }
     }
 

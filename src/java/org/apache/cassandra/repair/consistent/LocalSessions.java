@@ -42,7 +42,6 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
-import com.google.common.base.Predicates;
 import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -51,13 +50,12 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.FutureCallback;
-
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;
-import org.apache.cassandra.db.compaction.CleanupTask;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.RepairFinalizationOperation;
 import org.apache.cassandra.db.compaction.RepairFinishedCompactionTask;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -108,7 +106,6 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.REPAIR_CLEANUP_INTERVAL_SECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.REPAIR_DELETE_TIMEOUT_SECONDS;
@@ -389,33 +386,51 @@ public class LocalSessions
 
     private CleanupSummary doReleaseRepairData(ColumnFamilyStore cfs, Collection<TimeUUID> sessions)
     {
-        List<Pair<TimeUUID, RepairFinishedCompactionTask>> tasks = new ArrayList<>(sessions.size());
+        Set<TimeUUID> successful = new HashSet<>();
+        Set<TimeUUID> unsuccessful = new HashSet<>();
         for (TimeUUID session : sessions)
         {
             if (canCleanup(session))
-                tasks.add(Pair.create(session, getRepairFinishedCompactionTask(cfs, session)));
+            {
+                try
+                {
+                    RepairFinalizationOperation op = getRepairFinalizationOperation(cfs, session);
+                    if (op != null)
+                    {
+                        op.execute();
+                        successful.add(session);
+                    }
+                    else
+                        unsuccessful.add(session);
+                }
+                catch (Throwable t)
+                {
+                    logger.error("Failed cleaning up " + session, t);
+                    unsuccessful.add(session);
+                }
+            }
         }
 
-        return new CleanupTask(cfs, tasks).cleanup();
+        return new CleanupSummary(cfs, successful, unsuccessful);
     }
 
-    private RepairFinishedCompactionTask getRepairFinishedCompactionTask(ColumnFamilyStore cfs, TimeUUID session)
+    private RepairFinalizationOperation getRepairFinalizationOperation(ColumnFamilyStore cfs, TimeUUID session)
     {
         Set<SSTableReader> sstables = cfs.getPendingRepairSSTables(session);
         if (sstables.isEmpty())
             return null;
 
-        return getRepairFinishedCompactionTask(cfs, session, sstables);
+        return getRepairFinalizationOperation(cfs, session, sstables);
     }
 
-    private RepairFinishedCompactionTask getRepairFinishedCompactionTask(CompactionRealm realm,
-                                                                         TimeUUID session,
-                                                                         Collection<? extends CompactionSSTable> sstables)
+    private RepairFinalizationOperation getRepairFinalizationOperation(CompactionRealm realm,
+                                                                       TimeUUID session,
+                                                                       Collection<? extends CompactionSSTable> sstables)
     {
         long repairedAt = getFinalSessionRepairedAt(session);
         boolean isTransient = sstables.iterator().next().isTransient();
         LifecycleTransaction txn = realm.tryModify(sstables, OperationType.COMPACTION);
-        return txn == null ? null : new RepairFinishedCompactionTask(realm, txn, session, repairedAt, isTransient);
+        return txn == null ? null : new RepairFinalizationOperation(realm, txn, session, repairedAt, isTransient);
     }
 
     /**
@@ -434,11 +449,23 @@ public class LocalSessions
             }
         }
 
-        return finalizations.entrySet()
-                            .stream()
-                            .map(entry -> getRepairFinishedCompactionTask(realm, entry.getKey(), entry.getValue()))
-                            .filter(Predicates.notNull())
-                            .collect(Collectors.toList());
+        List<AbstractCompactionTask> list = new ArrayList<>();
+        try
+        {
+            for (Map.Entry<TimeUUID, Collection<CompactionSSTable>> entry : finalizations.entrySet())
+            {
+                RepairFinalizationOperation repairFinalizationOperation = getRepairFinalizationOperation(realm, entry.getKey(), entry.getValue());
+                if (repairFinalizationOperation != null)
+                    list.add(new RepairFinishedCompactionTask(repairFinalizationOperation));
+            }
+        }
+        catch (Throwable t)
+        {
+            for (AbstractCompactionTask task : list)
+                t = task.rejected(t);
+            throw Throwables.unchecked(t);
+        }
+        return list;
     }
 
     public boolean canCleanup(TimeUUID sessionID)

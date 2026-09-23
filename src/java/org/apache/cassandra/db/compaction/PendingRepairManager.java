@@ -272,19 +272,6 @@ class PendingRepairManager
         return txn == null ? null : new RepairFinishedCompactionTask(realm, txn, sessionID, repairedAt, isTransient);
     }
 
-    public CleanupTask releaseSessionData(Collection<TimeUUID> sessionIDs)
-    {
-        List<Pair<TimeUUID, RepairFinishedCompactionTask>> tasks = new ArrayList<>(sessionIDs.size());
-        for (TimeUUID session : sessionIDs)
-        {
-            if (hasDataForSession(session))
-            {
-                tasks.add(Pair.create(session, getRepairFinishedCompactionTask(session)));
-            }
-        }
-        return new CleanupTask(realm, tasks);
-    }
-
     synchronized int getNumPendingRepairFinishedTasks()
     {
         int count = 0;
