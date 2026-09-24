@@ -183,7 +183,7 @@ public class VectorTester extends SAITester
      */
     @Ignore
     @RunWith(Parameterized.class)
-    abstract static class Versioned extends VectorTester
+    public abstract static class Versioned extends VectorTester
     {
         @Parameterized.Parameter
         public Version version;

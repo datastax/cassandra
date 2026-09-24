@@ -487,19 +487,7 @@ public class CompactionGraph implements Closeable, Accountable
             SAICodecUtils.writeHeader(postingsOutput);
             SAICodecUtils.writeHeader(pqOutput);
 
-            // write PQ (time to do this is negligible, don't bother doing it async)
-            long pqOffset = pqOutput.getFilePointer();
             Version version = context.version();
-            boolean writeFusedPQ = JVectorVersionUtil.shouldWriteFused(version);
-            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION, version);
-            if (writeFusedPQ)
-                // With FusedPQ the per-vector codes are embedded in TERMS_DATA; only the codebook
-                // (compressor metadata) is needed in the PQ file so that the query vector can be
-                // encoded at search time. Writing full PQVectors here would duplicate the codes on disk.
-                compressor.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
-            else
-                compressedVectors.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
-            long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write postings asynchronously while we run cleanup()
             var ordinalMapper = new AtomicReference<OrdinalMapper>();
@@ -522,11 +510,13 @@ public class CompactionGraph implements Closeable, Accountable
                                                                       builder.getGraph().size(),
                                                                       lastRowId,
                                                                       maxOrdinal,
-                                                                      postingsMap);
+                                                                      postingsMap,
+                                                                      perIndexComponents.version());
                 ordinalMapper.set(rp.ordinalMapper);
                 try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
                 {
-                    return writePostings(version, rp, postingsOutput, vectorValues);
+                    writePostings(version, rp, postingsOutput, vectorValues);
+                    return rp;
                 }
             });
 
@@ -534,9 +524,25 @@ public class CompactionGraph implements Closeable, Accountable
             builder.cleanup();
 
             // wait for postings to finish writing and clean up related resources
-            long postingsEnd = postingsFuture.get();
-            long postingsLength = postingsEnd - postingsOffset;
+            V5VectorPostingsWriter.RemappedPostings rp = postingsFuture.get();
+            long postingsLength = postingsOutput.getFilePointer() - postingsOffset;
             es.shutdown();
+
+            // PQ must be written after postings (non-fused path) so we have the ordinal mapping needed to densify the codes.
+            long pqOffset = pqOutput.getFilePointer();
+            boolean writeFusedPQ = JVectorVersionUtil.shouldWriteFused(version);
+            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION, version);
+            if (writeFusedPQ)
+                // With FusedPQ the per-vector codes are embedded in TERMS_DATA; only the codebook
+                // (compressor metadata) is needed in the PQ file so that the query vector can be
+                // encoded at search time. Writing full PQVectors here would duplicate the codes on disk.
+                compressor.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
+            else
+            {
+                MutableCompressedVectors<?> remappedPQCodes = maybeRemapPQCodes(rp);
+                remappedPQCodes.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
+            }
+            long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write the graph edge lists and optionally fused adc features
             var start = nanoTime();
@@ -623,6 +629,33 @@ public class CompactionGraph implements Closeable, Accountable
             return new V2VectorPostingsWriter<Integer>(postingsStructure == Structure.ONE_TO_ONE, builder.getGraph().size(), rp.ordinalMapper::newToOld)
                    .writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap, Set.of());
         }
+    }
+
+    /**
+     * Returns the PQ codes to write, remapped to dense ordinals if needed.
+     * <p>
+     * For {@link Structure#ZERO_OR_ONE_TO_MANY}, the codes in {@link #compressedVectors} are indexed by
+     * old (sparse) ordinals with holes left by deleted vectors. This method returns a compact instance
+     * containing only the live codes renumbered to match the postings ordinals in {@code rp}.
+     * For other structures the numbering is already dense, so {@link #compressedVectors} is returned as-is.
+     */
+    private MutableCompressedVectors<?> maybeRemapPQCodes(V5VectorPostingsWriter.RemappedPostings rp)
+    {
+        // No renumbering needed for ONE_TO_ONE and ONE_TO_MANY, because the numbering is already dense
+        if (rp.structure != Structure.ZERO_OR_ONE_TO_MANY)
+            return compressedVectors;
+
+        assert compressedVectors instanceof MutablePQVectors;
+        MutablePQVectors sourceCodes = (MutablePQVectors) compressedVectors;
+        MutablePQVectors remappedCV = new MutablePQVectors((ProductQuantization) compressor);
+        int subspaceCount = sourceCodes.getCompressedSize();
+        for (int newOrdinal = 0; newOrdinal <= rp.maxNewOrdinal; newOrdinal++)
+        {
+            int oldOrdinal = rp.ordinalMapper.newToOld(newOrdinal);
+            remappedCV.setZero(newOrdinal);  // allocates the slot
+            remappedCV.get(newOrdinal).copyFrom(sourceCodes.get(oldOrdinal), 0, 0, subspaceCount);
+        }
+        return remappedCV;
     }
 
     public long ramBytesUsed()

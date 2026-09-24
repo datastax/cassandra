@@ -46,7 +46,6 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
