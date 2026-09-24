@@ -54,6 +54,7 @@ import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
+import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.MutableCompressedVectors;
 import io.github.jbellis.jvector.quantization.MutablePQVectors;
 import io.github.jbellis.jvector.quantization.NVQuantization;
@@ -485,22 +486,11 @@ public class CompactionGraph implements Closeable, Accountable
             SAICodecUtils.writeHeader(postingsOutput);
             SAICodecUtils.writeHeader(pqOutput);
 
-            // write PQ (time to do this is negligible, don't bother doing it async)
-            long pqOffset = pqOutput.getFilePointer();
             Version version = context.version();
-            boolean writeFusedPQ = JVectorVersionUtil.shouldWriteFused(version);
-            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION, version);
-            if (writeFusedPQ)
-                // With FusedPQ the per-vector codes are embedded in TERMS_DATA; only the codebook
-                // (compressor metadata) is needed in the PQ file so that the query vector can be
-                // encoded at search time. Writing full PQVectors here would duplicate the codes on disk.
-                compressor.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
-            else
-                compressedVectors.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
-            long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write postings asynchronously while we run cleanup()
             var ordinalMapper = new AtomicReference<OrdinalMapper>();
+            var remappedPostings = new AtomicReference<V5VectorPostingsWriter.RemappedPostings>();
             long postingsOffset = postingsOutput.getFilePointer();
             var es = Executors.newSingleThreadExecutor(new NamedThreadFactory("CompactionGraphPostingsWriter"));
 
@@ -521,8 +511,10 @@ public class CompactionGraph implements Closeable, Accountable
                                                                       builder.getGraph().size(),
                                                                       lastRowId,
                                                                       maxOrdinal,
-                                                                      postingsMap);
+                                                                      postingsMap,
+                                                                      perIndexComponents.version());
                 ordinalMapper.set(rp.ordinalMapper);
+                remappedPostings.set(rp);
                 try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
                 {
                     return writePostings(version, rp, postingsOutput, vectorValues);
@@ -536,6 +528,28 @@ public class CompactionGraph implements Closeable, Accountable
             long postingsEnd = postingsFuture.get();
             long postingsLength = postingsEnd - postingsOffset;
             es.shutdown();
+
+            // write PQ
+            long pqOffset = pqOutput.getFilePointer();
+            boolean writeFusedPQ = JVectorVersionUtil.shouldWriteFused(version);
+            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION, version);
+            if (writeFusedPQ)
+            {
+                // With FusedPQ the per-vector codes are embedded in TERMS_DATA; only the codebook
+                // (compressor metadata) is needed in the PQ file so that the query vector can be
+                // encoded at search time. Writing full PQVectors here would duplicate the codes on disk.
+                compressor.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
+            }
+            else
+            {
+                V5VectorPostingsWriter.RemappedPostings rp = remappedPostings.get();
+                try (OnDiskVectorValues vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
+                {
+                    CompressedVectors cv = compressor.encodeAll(new RemappedVectorValues(rp, rp.maxNewOrdinal, vectorValues));
+                    cv.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
+                }
+            }
+            long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             var start = System.nanoTime();
 
