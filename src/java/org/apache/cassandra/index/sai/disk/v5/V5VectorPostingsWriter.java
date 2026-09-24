@@ -110,11 +110,17 @@ public class V5VectorPostingsWriter<T>
 
     /**
      * This method describes the mapping done during construction of the graph so that we can easily create
-     * an appropriate V5VectorPostingsWriter.  No ordinal remapping is performed because (V5) compaction writes
-     * vectors to disk as they are added to the graph, so there is no opportunity to reorder the way there is
-     * in a Memtable index.
+     * an appropriate V5VectorPostingsWriter.
+     * <p>
+     * For ONE_TO_ONE and ONE_TO_MANY structures, no ordinal remapping is performed: compaction writes vectors to
+     * disk as they are added to the graph, so there is no opportunity to reorder the way there is in a Memtable
+     * index.
+     * <p>
+     * For ZERO_OR_ONE_TO_MANY, dense ordinal remapping is performed (via {@link #remapForMemtable}) for V5+
+     * index formats so that holes left by deleted vectors are eliminated.  Legacy formats use an identity mapping
+     * via {@link #createGenericIdentityMapping(ChronicleMap, int, int)} because they do not support V5 postings.
      */
-    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, int maxRowId, int maxOrdinal, ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap)
+    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, int maxRowId, int maxOrdinal, ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap, Version version)
     {
         assert !postingsMap.isEmpty(); // flush+compact should skip writing an index component in this case
 
@@ -131,12 +137,12 @@ public class V5VectorPostingsWriter<T>
         if (structure == Structure.ONE_TO_MANY)
         {
             // compute extraOrdinals from the postingsMap
-            var extraOrdinals = new Int2IntHashMap(Integer.MIN_VALUE);
+            Int2IntHashMap extraOrdinals = new Int2IntHashMap(Integer.MIN_VALUE);
             postingsMap.forEachEntry(entry -> {
                 VectorPostings.CompactionVectorPostings.Marshaller.recordExtraOrdinals(entry, extraOrdinals);
             });
 
-            var skippedOrdinals = extraOrdinals.keySet();
+            Set<Integer> skippedOrdinals = extraOrdinals.keySet();
             return new RemappedPostings(Structure.ONE_TO_MANY,
                                         maxOrdinal,
                                         maxRowId,
@@ -146,7 +152,9 @@ public class V5VectorPostingsWriter<T>
         }
 
         assert structure == Structure.ZERO_OR_ONE_TO_MANY : structure;
-        return createGenericIdentityMapping(postingsMap, maxRowId, maxOrdinal);
+        return (V5OnDiskFormat.writeV5VectorPostings(version))
+               ? remapForMemtable(postingsMap, version)
+               : createGenericIdentityMapping(postingsMap, maxRowId, maxOrdinal);
     }
 
     public long writePostings(SequentialWriter writer,
