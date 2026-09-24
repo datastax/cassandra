@@ -46,6 +46,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
@@ -433,7 +434,9 @@ abstract public class VectorCompactionTest extends VectorTester
                 {
                     var struct = hasUniqueVectors
                                  ? V5VectorPostingsWriter.Structure.ONE_TO_ONE
-                                 : V5VectorPostingsWriter.tooManyOrdinalMappingHoles(searcher.graph.size(), numRows)
+                                 // V2 has no concept of ONE_TO_MANY optimization;
+                                 // it actually writes ZERO_OR_ONE_TO_MANY when ONE_TO_MANY was requested
+                                 : !V5OnDiskFormat.writeV5VectorPostings(version) || V5VectorPostingsWriter.tooManyOrdinalMappingHoles(searcher.graph.size(), numRows)
                                    ? V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY
                                    : V5VectorPostingsWriter.Structure.ONE_TO_MANY;
                     assertEquals(struct, searcher.getPostingsStructure());
