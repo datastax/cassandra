@@ -41,6 +41,8 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -429,7 +431,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                 keys,
                 key ->
                 {
-                    var cell = getCellForKey(key);
+                    var cell = getOrderingCellForKey(key);
                     if (cell == null)
                         return null;
 
@@ -448,7 +450,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         List<ByteBuffer> queryTerms = orderer.getQueryTerms();
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
         Iterator<BM25Utils.DocTF> it = stream
-                                       .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
+                                       .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getOrderingCellForKey(pk), analyzer, queryTerms))
                                        .filter(Objects::nonNull)
                                        .iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),
@@ -459,11 +461,47 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                                        orderer.bm25stats.hasOldFormatIndex());
     }
 
-
+    /**
+     * Retrieve the indexed column's cell from the memtable for the given primary key, for use
+     * <em>only</em> in the ORDER BY / BM25 ordering path ({@link #orderResultsBy} and
+     * {@link #orderByBM25}).  Do <strong>not</strong> call this from the search / WHERE-predicate
+     * path — static-column indexes are valid search predicates but ORDER BY / BM25 on a static
+     * column is unsupported, and the assert below will fire if this method is ever reached with a
+     * static ordering column.
+     *
+     * <p>When the key is a static row or partition-only key (no regular clustering) but the
+     * ordering column is regular, we iterate the regular rows in the partition rather than calling
+     * {@code getRow(STATIC_CLUSTERING)}, which would only return the static row.
+     */
     @Nullable
-    private org.apache.cassandra.db.rows.Cell<?> getCellForKey(PrimaryKey key)
+    private org.apache.cassandra.db.rows.Cell<?> getOrderingCellForKey(PrimaryKey key)
     {
-        return memtable.getCellForKey(key.partitionKey(), key.clustering(), indexContext.getDefinition());
+        assert !indexContext.getDefinition().isStatic()
+            : "BM25/ORDER BY on static column " + indexContext.getDefinition().name + " is not supported; "
+              + "IndexContext.supports() and StatementRestrictions should have rejected this";
+        Partition partition = memtable.getPartition(key.partitionKey());
+        if (partition == null)
+            return null;
+
+        if (key.isStaticRow() || !key.hasClustering())
+        {
+            // The key came from a static-column index; iterate regular rows to find the sort-key cell.
+            Iterator<Row> rowIter = partition.rowIterator();
+            while (rowIter.hasNext())
+            {
+                Row row = rowIter.next();
+                var cell = row.getCell(indexContext.getDefinition());
+                if (cell != null)
+                    return cell;
+            }
+            return null;
+        }
+
+        Row row = partition.getRow(key.clustering());
+        if (row == null)
+            return null;
+        return row.getCell(indexContext.getDefinition());
+
     }
 
     private ByteComparable encode(ByteBuffer input)

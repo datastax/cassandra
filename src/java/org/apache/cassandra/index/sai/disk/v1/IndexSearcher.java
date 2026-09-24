@@ -22,6 +22,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import javax.annotation.Nullable;
+
 import com.google.common.util.concurrent.Runnables;
 
 import org.apache.cassandra.db.PartitionPosition;
@@ -30,6 +32,7 @@ import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -124,28 +127,49 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
         return SortingIterator.createCloseable(
             orderer.getComparator(),
             keys,
-            key ->
-            {
-                var slices = Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
-                // TODO if we end up needing to read the row still, is it better to store offset and use reader.unfilteredAt?
-                try (var iter = reader.rowIterator(key.partitionKey(), slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
-                {
-                    if (iter.hasNext())
-                    {
-                        var row = (Row) iter.next();
-                        assert !iter.hasNext();
-                        var cell = row.getCell(indexContext.getDefinition());
-                        if (cell == null)
-                            return null;
-                        // We encode the bytes to make sure they compare correctly.
-                        var byteComparable = encode(cell.buffer());
-                        return new PrimaryKeyWithByteComparable(indexContext, reader.descriptor.id, key, byteComparable);
-                    }
-                }
-                return null;
-            },
+            key -> readSortKey(reader, key),
             Runnables.doNothing()
         );
+    }
+
+    /**
+     * Read the sort key cell for the given primary key from the SSTable.
+     * <p>
+     * ORDER BY on static columns is rejected by {@code IndexContext.supports()}, so the ordering column
+     * is always regular; the assert below will fire if that invariant is ever violated.
+     */
+    @Nullable
+    private PrimaryKeyWithByteComparable readSortKey(SSTableReader reader, PrimaryKey key)
+    {
+        assert !indexContext.getDefinition().isStatic()
+            : "ORDER BY on static column " + indexContext.getDefinition().name + " is not supported; "
+              + "IndexContext.supports() should have rejected this";
+        var slices = (key.isStaticRow() || !key.hasClustering())
+                     ? Slices.ALL
+                     : Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
+        try (var iter = reader.rowIterator(key.partitionKey(), slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
+        {
+            return readRegularSortKey(reader, key, iter);
+        }
+    }
+
+    @Nullable
+    private PrimaryKeyWithByteComparable readRegularSortKey(SSTableReader reader, PrimaryKey key,
+                                                            UnfilteredRowIterator iter)
+    {
+        while (iter.hasNext())
+        {
+            var unfiltered = iter.next();
+            if (!unfiltered.isRow())
+                continue;
+            Row row = (Row) unfiltered;
+            var cell = row.getCell(indexContext.getDefinition());
+            if (cell == null)
+                return null;
+            var byteComparable = encode(cell.buffer());
+            return new PrimaryKeyWithByteComparable(indexContext, reader.descriptor.id, key, byteComparable);
+        }
+        return null;
     }
 
     private ByteComparable encode(ByteBuffer input)
