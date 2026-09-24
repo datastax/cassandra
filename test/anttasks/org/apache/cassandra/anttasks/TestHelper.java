@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.anttasks;
 
+import java.io.File;
+
 import org.apache.tools.ant.Project;
 import org.apache.tools.ant.Task;
 import org.apache.tools.ant.taskdefs.MacroInstance;
@@ -45,8 +47,15 @@ public class TestHelper extends Task
             if (allTestClasses[i] == null)
                 continue;
 
+            String classFile = allTestClasses[i].trim();
+            if (classFile.isEmpty())
+                continue;
+
+            String simpleName = new File(classFile).getName().replace(".java", "");
+
             MacroInstance task = (MacroInstance) project.createTask(property);
             task.setDynamicAttribute("test.file.list", ' ' + allTestClasses[i]);
+            task.setDynamicAttribute("test.name", simpleName);
             seqTask.addTask(task);
         }
 
