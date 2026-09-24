@@ -79,7 +79,7 @@ public class ValidateJacocoExecTask extends Task
                 log("Removing corrupted JaCoCo exec file: " + f.getPath() + " (" + f.length() + " bytes) - " + e.getClass().getSimpleName() + ": " + e.getMessage(), Project.MSG_ERR);
                 if (!f.delete())
                 {
-                    log("Failed to delete corrupted JaCoCo exec file: " + f.getPath(), Project.MSG_ERR);
+                    throw new BuildException("Failed to delete corrupted JaCoCo exec file: " + f.getPath());
                 }
             }
         }

@@ -1262,6 +1262,7 @@
      <!-- needed to compile org.apache.cassandra.utils.memory.BufferPoolTest -->
      <compilerarg line="${jdk11plus-javac-exports}"/>
      <src path="${test.anttasks.src}"/>
+     <exclude name="**/ValidateJacocoExecTask.java"/>
      <src path="${test.unit.src}"/>
      <src path="${test.long.src}"/>
      <src path="${test.burn.src}"/>
@@ -1353,6 +1354,7 @@
     <attribute name="exclude" default="" />
     <attribute name="filelist" default="" />
     <attribute name="testtag" default=""/>
+    <attribute name="testname" default="${test.name}"/>
     <attribute name="usejacoco" default="no"/>
     <attribute name="showoutput" default="false"/>
 
@@ -1364,7 +1366,7 @@
           <isset property="repetition"/>
       </condition>
       <condition property="additionalagent"
-                 value="-javaagent:${build.dir.lib}/jars/jacocoagent.jar=destfile=${jacoco.partials.dir}/partial-${tag}-${test.name}.exec"
+                 value="-javaagent:${build.dir.lib}/jars/jacocoagent.jar=destfile=${jacoco.partials.dir}/partial-${tag}-@{testname}.exec"
                  else="">
         <istrue value="${usejacoco}"/>
       </condition>
@@ -1478,11 +1480,12 @@
   <!-- Will not generate a junit report or fail on error  -->
   <macrodef name="testlist">
     <attribute name="test.file.list"/>
+    <attribute name="test.name" default="${test.name}"/>
     <sequential>
       <condition property="maxMemory" value="8G" else="4G">
           <equals arg1="${test.classlistprefix}" arg2="distributed"/>
       </condition>
-      <testmacrohelper inputdir="${test.dir}/${test.classlistprefix}" filelist="@{test.file.list}" exclude="**/*.java" timeout="${test.timeout}">
+      <testmacrohelper inputdir="${test.dir}/${test.classlistprefix}" filelist="@{test.file.list}" testname="@{test.name}" exclude="**/*.java" timeout="${test.timeout}">
         <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
         <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
         <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
@@ -1499,13 +1502,14 @@
   <!-- Will not generate a junit report  -->
   <macrodef name="testlist-compression">
     <attribute name="test.file.list" />
+    <attribute name="test.name" default="${test.name}"/>
     <sequential>
       <property name="compressed_yaml" value="${build.test.dir}/cassandra.compressed.yaml"/>
       <concat destfile="${compressed_yaml}">
           <fileset file="${test.conf}/cassandra.yaml"/>
           <fileset file="${test.conf}/commitlog_compression_${test.compression.algo}.yaml"/>
       </concat>
-      <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}"
+      <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}" testname="@{test.name}"
                        exclude="**/*.java" timeout="${test.timeout}" testtag="compression">
         <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
         <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
@@ -1523,13 +1527,14 @@
 
   <macrodef name="testlist-cdc">
     <attribute name="test.file.list" />
+    <attribute name="test.name" default="${test.name}"/>
     <sequential>
       <property name="cdc_yaml" value="${build.test.dir}/cassandra.cdc.yaml"/>
       <concat destfile="${cdc_yaml}">
         <fileset file="${test.conf}/cassandra.yaml"/>
         <fileset file="${test.conf}/cdc.yaml"/>
       </concat>
-      <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}"
+      <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}" testname="@{test.name}"
                        exclude="**/*.java" timeout="${test.timeout}" testtag="cdc">
         <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
         <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
@@ -1545,6 +1550,7 @@
 
     <macrodef name="testlist-latest">
         <attribute name="test.file.list" />
+        <attribute name="test.name" default="${test.name}"/>
         <sequential>
             <property name="latest_yaml" value="${build.test.dir}/cassandra.latest.yaml"/>
             <concat destfile="${latest_yaml}">
@@ -1552,7 +1558,7 @@
                 <fileset file="${test.conf}/latest_diff.yaml"/>
                 <fileset file="${test.conf}/storage_compatibility_mode_none.yaml"/>
             </concat>
-            <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}"
+            <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}" testname="@{test.name}"
                              exclude="**/*.java" timeout="${test.timeout}" testtag="latest">
                 <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
                 <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
@@ -1568,13 +1574,14 @@
 
     <macrodef name="testlist-oa">
     <attribute name="test.file.list"/>
+    <attribute name="test.name" default="${test.name}"/>
     <sequential>
       <property name="scm_none_yaml" value="${build.test.dir}/cassandra.scm_none.yaml"/>
         <concat destfile="${scm_none_yaml}">
           <fileset file="${test.conf}/cassandra.yaml"/>
           <fileset file="${test.conf}/storage_compatibility_mode_none.yaml"/>
         </concat>
-      <testmacrohelper inputdir="${test.dir}/${test.classlistprefix}" filelist="@{test.file.list}"
+      <testmacrohelper inputdir="${test.dir}/${test.classlistprefix}" filelist="@{test.file.list}" testname="@{test.name}"
                        exclude="**/*.java" timeout="${test.timeout}" testtag="oa">
         <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
         <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
@@ -1592,8 +1599,9 @@
     <macrodef name="testlist-nocursor">
         <attribute name="test.file.list"/>
         <attribute name="testlist.offset"/>
+        <attribute name="test.name" default="${test.name}"/>
         <sequential>
-            <testmacrohelper inputdir="${test.dir}/${test.classlistprefix}" filelist="@{test.file.list}" poffset="@{testlist.offset}"
+            <testmacrohelper inputdir="${test.dir}/${test.classlistprefix}" filelist="@{test.file.list}" poffset="@{testlist.offset}" testname="@{test.name}"
                              exclude="**/*.java" timeout="${test.timeout}" testtag="nocursor">
                 <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
                 <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
@@ -1611,13 +1619,14 @@
 
     <macrodef name="testlist-system-keyspace-directory">
     <attribute name="test.file.list" />
+    <attribute name="test.name" default="${test.name}"/>
     <sequential>
       <property name="system_keyspaces_directory_yaml" value="${build.test.dir}/cassandra.system.yaml"/>
       <concat destfile="${system_keyspaces_directory_yaml}">
         <fileset file="${test.conf}/cassandra.yaml"/>
         <fileset file="${test.conf}/system_keyspaces_directory.yaml"/>
       </concat>
-      <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}"
+      <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}" testname="@{test.name}"
                        exclude="**/*.java" timeout="${test.timeout}" testtag="system_keyspace_directory">
         <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
         <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
@@ -1633,8 +1642,9 @@
 
   <macrodef name="testlist-sai-legacy">
     <attribute name="test.file.list" />
+    <attribute name="test.name" default="${test.name}"/>
     <sequential>
-        <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}"
+        <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}" testname="@{test.name}"
                          exclude="**/*.java" timeout="${test.timeout}" >
             <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
             <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
@@ -1651,16 +1661,17 @@
 
   <macrodef name="testlist-sai">
       <attribute name="test.file.list" />
+      <attribute name="test.name" default="${test.name}"/>
       <sequential>
-          <testmacrohelper inputdir="\${test.unit.src}" filelist="@{test.file.list}"
-                           exclude="**/*.java" timeout="\${test.timeout}" testtag="sai-legacy">
-              <jvmarg value="-Dlegacy-sstable-root=\${test.data}/legacy-sstables"/>
-              <jvmarg value="-Dinvalid-legacy-sstable-root=\${test.data}/invalid-legacy-sstables"/>
+          <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}" testname="@{test.name}"
+                           exclude="**/*.java" timeout="${test.timeout}" testtag="sai-legacy">
+              <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
+              <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
               <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
               <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
               <jvmarg value="-Dcassandra.skip_sync=true" />
 
-              <jvmarg value="-Dlogback.configurationFile=file://\${test.logback.configurationFile}"/>
+              <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
           </testmacrohelper>
       </sequential>
   </macrodef>
@@ -1929,7 +1940,7 @@
   <target name="jacoco-init" depends="resolver-init">
     <typedef uri="antlib:org.jacoco.ant" classpathref="jacocoant.classpath"/>
     <mkdir dir="${test.classes}"/>
-    <javac includes="**/ValidateJacocoExecTask.java" srcdir="${build.helpers.dir}/anttasks" destdir="${test.classes}" includeantruntime="true" source="${java.default}" target="${java.default}">
+    <javac includes="**/ValidateJacocoExecTask.java" srcdir="${test.anttasks.src}" destdir="${test.classes}" includeantruntime="true" source="${java.default}" target="${java.default}">
       <compilerarg value="-Xlint:-options"/>
       <classpath refid="jacocoant.classpath"/>
     </javac>
@@ -1946,22 +1957,42 @@
     <jacoco-validate dir="${jacoco.export.dir}"/>
   </target>
 
-  <target name="jacoco-merge-partials" depends="jacoco-init">
-    <exec executable="sync" osfamily="unix" failonerror="false"/>
-    <jacoco-validate dir="${jacoco.partials.dir}"/>
+  <target name="_jacoco-do-merge-partials" if="has.jacoco.partials">
     <jacoco:merge destfile="${jacoco.partialexecfile}" xmlns:jacoco="antlib:org.jacoco.ant">
         <fileset dir="${jacoco.partials.dir}" includes="*.exec,**/*.exec" excludes="partial.exec"/>
     </jacoco:merge>
+  </target>
+
+  <target name="jacoco-merge-partials" depends="jacoco-init">
+    <exec executable="sync" osfamily="unix" failonerror="false"/>
+    <jacoco-validate dir="${jacoco.partials.dir}"/>
+    <path id="jacoco.partials.files">
+        <fileset dir="${jacoco.partials.dir}" includes="*.exec,**/*.exec" excludes="partial.exec"/>
+    </path>
+    <condition property="has.jacoco.partials">
+        <resourcecount refid="jacoco.partials.files" when="greater" count="0"/>
+    </condition>
+    <antcall target="_jacoco-do-merge-partials"/>
     <delete>
         <fileset dir="${jacoco.partials.dir}" includes="*.exec,**/*.exec" excludes="partial.exec"/>
     </delete>
     <exec executable="sync" osfamily="unix" failonerror="false"/>
   </target>
 
-  <target name="jacoco-merge" depends="jacoco-init,jacoco-validate">
+  <target name="_jacoco-do-merge" if="has.jacoco.exports">
     <jacoco:merge destfile="${jacoco.finalexecfile}" xmlns:jacoco="antlib:org.jacoco.ant">
         <fileset dir="${jacoco.export.dir}" includes="*.exec,**/*.exec"/>
     </jacoco:merge>
+  </target>
+
+  <target name="jacoco-merge" depends="jacoco-init,jacoco-validate">
+    <path id="jacoco.export.files">
+        <fileset dir="${jacoco.export.dir}" includes="*.exec,**/*.exec"/>
+    </path>
+    <condition property="has.jacoco.exports">
+        <resourcecount refid="jacoco.export.files" when="greater" count="0"/>
+    </condition>
+    <antcall target="_jacoco-do-merge"/>
   </target>
 
   <target name="jacoco-report" depends="jacoco-merge">
@@ -2015,12 +2046,13 @@
     <attribute name="exclude" default="" />
     <attribute name="filelist" default="" />
     <attribute name="testtag" default=""/>
+    <attribute name="testname" default="${test.name}"/>
 
     <sequential>
       <testmacrohelper inputdir="@{inputdir}" timeout="@{timeout}"
                        forkmode="@{forkmode}" filter="@{filter}"
                        exclude="@{exclude}" filelist="@{filelist}"
-                       testtag="@{testtag}" showoutput="false" >
+                       testtag="@{testtag}" testname="@{testname}" showoutput="false" >
           <optjvmargs/>
       </testmacrohelper>
       <fail message="Some test(s) failed.">
