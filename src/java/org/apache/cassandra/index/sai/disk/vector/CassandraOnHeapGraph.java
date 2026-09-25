@@ -44,7 +44,6 @@ import org.slf4j.LoggerFactory;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.ImmutableGraphIndex;
-import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
@@ -739,51 +738,4 @@ public class CassandraOnHeapGraph<T> implements Accountable
         builder.cleanup();
     }
 
-    /**
-     * A simple wrapper that remaps the ordinals in the vector values to the new ordinals
-     */
-    private static class RemappedVectorValues implements RandomAccessVectorValues
-    {
-        final V5VectorPostingsWriter.RemappedPostings remapped;
-        final int maxNewOrdinal;
-        final RandomAccessVectorValues vectorValues;
-
-        RemappedVectorValues(V5VectorPostingsWriter.RemappedPostings remapped, int maxNewOrdinal, RandomAccessVectorValues vectorValues)
-        {
-            this.remapped = remapped;
-            this.maxNewOrdinal = maxNewOrdinal;
-            this.vectorValues = vectorValues;
-        }
-
-        @Override
-        public int size()
-        {
-            return maxNewOrdinal + 1;
-        }
-
-        @Override
-        public int dimension()
-        {
-            return vectorValues.dimension();
-        }
-
-        @Override
-        public VectorFloat<?> getVector(int i)
-        {
-            var oldOrdinal = remapped.ordinalMapper.newToOld(i);
-            return oldOrdinal == OrdinalMapper.OMITTED ? null : vectorValues.getVector(oldOrdinal);
-        }
-
-        @Override
-        public boolean isValueShared()
-        {
-            return vectorValues.isValueShared();
-        }
-
-        @Override
-        public RandomAccessVectorValues copy()
-        {
-            return new RemappedVectorValues(remapped, maxNewOrdinal, vectorValues.copy());
-        }
-    }
 }
