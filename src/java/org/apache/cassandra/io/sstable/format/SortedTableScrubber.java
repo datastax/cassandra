@@ -228,6 +228,9 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             outputHandler.output("Scrub of %s complete: %d partitions in new sstable and %d empty (tombstoned) partitions dropped", sstable, goodPartitions, emptyPartitions);
             if (negativeLocalDeletionInfoMetrics.fixedRows > 0)
                 outputHandler.output("Fixed %d rows with overflowed local deletion time.", negativeLocalDeletionInfoMetrics.fixedRows);
+            if (negativeLocalDeletionInfoMetrics.fixedStaticRows > 0)
+                outputHandler.output("Fixed static columns with overflowed local deletion time in " + negativeLocalDeletionInfoMetrics.fixedStaticRows + " partitions.");
+            
             if (badPartitions > 0)
                 outputHandler.warn("Unable to recover %d partitions that were skipped.  You can attempt manual recovery from the pre-scrub snapshot.  You can also run nodetool repair to transfer the data from a healthy replica, if any", badPartitions);
         }
@@ -622,6 +625,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 
         private final OutputHandler outputHandler;
         private final NegativeLocalDeletionInfoMetrics negativeLocalExpirationTimeMetrics;
+        private Row fixedStaticRow;
 
         public FixNegativeLocalDeletionTimeIterator(UnfilteredRowIterator iterator, OutputHandler outputHandler,
                                                     NegativeLocalDeletionInfoMetrics negativeLocalDeletionInfoMetrics)
@@ -629,6 +633,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             this.iterator = iterator;
             this.outputHandler = outputHandler;
             this.negativeLocalExpirationTimeMetrics = negativeLocalDeletionInfoMetrics;
+            this.fixedStaticRow = null;
         }
 
         private static <C extends CellData<?, C>> C fixCellExpirationTime(C cell)
@@ -649,6 +654,27 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         public UnfilteredRowIterator wrapped()
         {
             return iterator;
+        }
+
+        @Override 
+        public Row staticRow()
+        {
+            if (fixedStaticRow != null)
+                return fixedStaticRow;
+
+            Row staticRow = iterator.staticRow();
+            if (hasNegativeLocalExpirationTime(staticRow))
+            {
+                outputHandler.debug("Found static row with negative local expiration time: %s", staticRow.toString(metadata(), false));
+                negativeLocalExpirationTimeMetrics.fixedStaticRows++;
+                fixedStaticRow = (Row) fixNegativeLocalExpirationTime(staticRow);
+            }
+            else 
+            {
+                fixedStaticRow = staticRow;
+            }
+
+            return fixedStaticRow;
         }
 
         @Override
@@ -712,5 +738,6 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     private static class NegativeLocalDeletionInfoMetrics
     {
         public volatile int fixedRows = 0;
+        public volatile int fixedStaticRows = 0;
     }
 }
