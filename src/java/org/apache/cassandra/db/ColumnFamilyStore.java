@@ -25,6 +25,7 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -60,6 +61,7 @@ import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListenableFutureTask;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -174,6 +176,7 @@ import org.json.simple.JSONObject;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_RECLAIM_THREADS;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
 import static org.apache.cassandra.utils.Throwables.perform;
@@ -208,12 +211,25 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                                                                                  new NamedThreadFactory("MemtablePostFlush"),
                                                                                                  "internal");
 
-    private static final ThreadPoolExecutor reclaimExecutor = new JMXEnabledThreadPoolExecutor(1,
-                                                                                               Stage.KEEP_ALIVE_SECONDS,
-                                                                                               TimeUnit.SECONDS,
-                                                                                               new LinkedBlockingQueue<>(),
-                                                                                               new NamedThreadFactory("MemtableReclaimMemory"),
-                                                                                               "internal");
+    // we use multiple reclaim executors to permit reclaim when a CFS's read order gets blocked
+    private static final ThreadPoolExecutor[] reclaimExecutors;
+
+    static
+    {
+        int count = MEMTABLE_RECLAIM_THREADS.getInt();
+        if (count <= 0)
+            throw new ConfigurationException(MEMTABLE_RECLAIM_THREADS.name() + " must be 1 or greater, was " + count);
+        reclaimExecutors = new ThreadPoolExecutor[count];
+        for (int i = 0; i < count; ++i)
+        {
+            reclaimExecutors[i] = new JMXEnabledThreadPoolExecutor(1,
+                                                                   Stage.KEEP_ALIVE_SECONDS,
+                                                                   TimeUnit.SECONDS,
+                                                                   new LinkedBlockingQueue<>(),
+                                                                   new NamedThreadFactory("MemtableReclaimMemory" + (i > 0 ? Integer.toString(i) : "")),
+                                                                   "internal");
+        }
+    }
 
     /**
      * Reason for initiating a memtable flush.
@@ -382,8 +398,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public static void shutdownExecutorsAndWait(long timeout, TimeUnit unit) throws InterruptedException, TimeoutException
     {
-        List<ExecutorService> executors = new ArrayList<>();
-        Collections.addAll(executors, reclaimExecutor, postFlushExecutor, flushExecutor);
+        List<Executor> executors = new ArrayList<>();
+        Collections.addAll(executors, postFlushExecutor, flushExecutor);
+        Collections.addAll(executors, reclaimExecutors);
         perDiskflushExecutors.appendAllExecutors(executors);
         ExecutorUtils.shutdownAndWait(timeout, unit, executors);
     }
@@ -1499,8 +1516,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                     readBarrier.await();
                     memtable.discard();
                 }
-            }, reclaimExecutor);
+            }, reclaimExecutor());
         }
+    }
+
+    /**
+     * Choose a reclaim executor, based on the table id's hash code. Each CFS is served by an assigned thread (i.e.
+     * its individual reclamations are still performed in order) as flushes on the same CFS wait on the same read order
+     * and would block multiple threads if spread among the executors.
+     */
+    public ExecutorService reclaimExecutor()
+    {
+        return reclaimExecutors[Math.floorMod(metadata.id.hashCode(), reclaimExecutors.length)];
     }
 
     public Memtable createMemtable(AtomicReference<CommitLogPosition> commitLogUpperBound)
@@ -3598,7 +3625,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
          *
          * @param collection the collection to append to.
          */
-        public void appendAllExecutors(Collection<ExecutorService> collection)
+        public void appendAllExecutors(Collection<? super ExecutorService> collection)
         {
             Collections.addAll(collection, nonLocalSystemflushExecutors);
             if (useSpecificExecutorForSystemKeyspaces)
