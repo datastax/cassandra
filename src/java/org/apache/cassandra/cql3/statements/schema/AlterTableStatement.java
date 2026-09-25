@@ -560,12 +560,12 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
 
             Guardrails.tableProperties.guard(attrs.updatedProperties(), attrs::removeProperty, state);
 
-            validateDefaultTimeToLive(attrs.asNewTableParams());
+            validateDefaultTimeToLive(attrs.asNewTableParams(keyspaceName));
         }
 
         public KeyspaceMetadata apply(KeyspaceMetadata keyspace, TableMetadata table)
         {
-            attrs.validate();
+            attrs.validate(keyspaceName);
 
             TableParams params = attrs.asAlteredTableParams(table.params);
 
