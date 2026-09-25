@@ -230,7 +230,7 @@ public abstract class AbstractCompactionTask
     /**
      * Reject/cancel the task if it affects any sstable that satisfies the given predicate.
      */
-    public boolean cancelIfAffects(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate)
+    public boolean cancelIfAffects(CompactionRealm realm, Predicate<SSTableReader> sstablePredicate, TableOperation.StopTrigger trigger)
     {
         if (realm != this.realm)
             return false;
@@ -239,7 +239,10 @@ public abstract class AbstractCompactionTask
         {
             if (sstablePredicate.test(r))
             {
-                Throwables.maybeFail(rejected(null));
+                // Reject with an exception to notify observers task wasn't successful.
+                Throwable err = rejected(new CompactionInterruptedException(null, trigger));
+                if (err != null && !(err instanceof CompactionInterruptedException))
+                    logger.warn("Failed to reject task with id={}", getTransaction().opId(), err);
                 return true;
             }
         }
@@ -321,6 +324,6 @@ public abstract class AbstractCompactionTask
 
     public String toString()
     {
-        return "CompactionTask(" + transaction + ")";
+        return getClass().getSimpleName() + "(" + transaction + ")";
     }
 }

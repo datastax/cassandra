@@ -25,6 +25,7 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -60,6 +61,7 @@ import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListenableFutureTask;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -174,6 +176,7 @@ import org.json.simple.JSONObject;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_RECLAIM_THREADS;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
 import static org.apache.cassandra.utils.Throwables.perform;
@@ -208,12 +211,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                                                                                  new NamedThreadFactory("MemtablePostFlush"),
                                                                                                  "internal");
 
-    private static final ThreadPoolExecutor reclaimExecutor = new JMXEnabledThreadPoolExecutor(1,
-                                                                                               Stage.KEEP_ALIVE_SECONDS,
-                                                                                               TimeUnit.SECONDS,
-                                                                                               new LinkedBlockingQueue<>(),
-                                                                                               new NamedThreadFactory("MemtableReclaimMemory"),
-                                                                                               "internal");
+    private static final Executor reclaimExecutor = MEMTABLE_RECLAIM_THREADS.getInt() == 0
+                                                    ? MoreExecutors.directExecutor()
+                                                    : new JMXEnabledThreadPoolExecutor(MEMTABLE_RECLAIM_THREADS.getInt(),
+                                                                                       MEMTABLE_RECLAIM_THREADS.getInt(),
+                                                                                       Stage.KEEP_ALIVE_SECONDS,
+                                                                                       TimeUnit.SECONDS,
+                                                                                       new LinkedBlockingQueue<>(),
+                                                                                       new NamedThreadFactory("MemtableReclaimMemory"),
+                                                                                       "internal");
 
     /**
      * Reason for initiating a memtable flush.
@@ -382,7 +388,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public static void shutdownExecutorsAndWait(long timeout, TimeUnit unit) throws InterruptedException, TimeoutException
     {
-        List<ExecutorService> executors = new ArrayList<>();
+        List<Executor> executors = new ArrayList<>();
         Collections.addAll(executors, reclaimExecutor, postFlushExecutor, flushExecutor);
         perDiskflushExecutors.appendAllExecutors(executors);
         ExecutorUtils.shutdownAndWait(timeout, unit, executors);
@@ -2727,8 +2733,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 ActiveRepairService.instance.abort((prs) -> prs.getTableIds().contains(metadata.id),
                                                    "Stopping parent sessions {} due to truncation of tableId="+metadata.id);
                 data.notifyTruncated(replayAfter, truncatedAt);
-                
-                if (!noSnapshot && DatabaseDescriptor.isAutoSnapshot()) 
+
+                if (!noSnapshot && DatabaseDescriptor.isAutoSnapshot())
                     snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(name, SNAPSHOT_TRUNCATE_PREFIX));
 
                 discardSSTables(truncatedAt);
@@ -2818,7 +2824,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             {
                 // Cancel scheduled compactions matching predicate. This must be done first because tasks progress from
                 // scheduled to active.
-                CompactionManager.instance.active.cancelScheduledTasksAffecting(toInterruptFor, sstablesPredicate);
+                CompactionManager.instance.active.cancelScheduledTasksAffecting(toInterruptFor, sstablesPredicate, trigger);
                 // interrupt in-progress compactions
                 CompactionManager.instance.interruptCompactionForCFs(toInterruptFor, sstablesPredicate, interruptValidation, trigger);
 
@@ -3598,7 +3604,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
          *
          * @param collection the collection to append to.
          */
-        public void appendAllExecutors(Collection<ExecutorService> collection)
+        public void appendAllExecutors(Collection<? super ExecutorService> collection)
         {
             Collections.addAll(collection, nonLocalSystemflushExecutors);
             if (useSpecificExecutorForSystemKeyspaces)
