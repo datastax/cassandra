@@ -630,6 +630,12 @@ public enum CassandraRelevantProperties
     MBEAN_REGISTRATION_CLASS("org.apache.cassandra.mbean_registration_class"),
     MEMTABLE_OVERHEAD_COMPUTE_STEPS("cassandra.memtable_row_overhead_computation_step", "100000"),
     MEMTABLE_OVERHEAD_SIZE("cassandra.memtable.row_overhead_size", "-1"),
+    /**
+     * Number of memtable reclaim threads to use. To be able to make progress when one ColumnFamilyStore's read order
+     * is blocked, each CFS is served by an assigned thread, chosen pseudo randomly (based on
+     * the table id's hash code).
+     */
+    MEMTABLE_RECLAIM_THREADS("cassandra.memtable_reclaim_threads", "1"),
     MEMTABLE_SHARD_COUNT("cassandra.memtable.shard.count"),
     MEMTABLE_TRIE_SIZE_LIMIT("cassandra.trie_size_limit_mb"),
     MIGRATION_DELAY("cassandra.migration_delay_ms", "60000"),
