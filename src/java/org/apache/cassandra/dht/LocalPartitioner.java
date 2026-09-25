@@ -19,6 +19,7 @@ package org.apache.cassandra.dht;
 
 import java.nio.ByteBuffer;
 import java.util.Collections;
+import java.util.concurrent.ConcurrentMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -32,10 +33,31 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.memory.HeapCloner;
+import com.google.common.collect.MapMaker;
+
 
 public class LocalPartitioner implements IPartitioner
 {
     private static final long EMPTY_SIZE = ObjectSizes.measure(new LocalPartitioner(null).new LocalToken());
+
+    /**
+     * Intern cache: one canonical LocalPartitioner per AbstractType comparator.
+     * Weak values allow entries to be collected when no live reference remains, preventing leaks
+     * for transient index types without sacrificing instance-identity guarantees.
+     */
+    private static final ConcurrentMap<AbstractType<?>, LocalPartitioner> instances =
+            new MapMaker().weakValues().makeMap();
+
+    /**
+     * Returns the canonical LocalPartitioner for the given comparator, creating
+     * it on first use. Callers that obtain their partitioner through this factory will
+     * receive the same instance for equal comparators, which makes {@code ==} identity checks
+     * in {@link LocalToken#compareTo} and {@link TableMetadata#equals} reliable.
+     */
+    public static LocalPartitioner of(AbstractType<?> comparator)
+    {
+        return instances.computeIfAbsent(comparator, LocalPartitioner::new);
+    }
 
     final AbstractType<?> comparator;   // package-private to avoid access workarounds in embedded LocalToken.
 
@@ -161,8 +183,7 @@ public class LocalPartitioner implements IPartitioner
         @Override
         public int compareTo(Token o)
         {
-            assert o.getPartitioner().getClass().equals(getPartitioner().getClass()) :
-                String.format("partitioners do not match; %s != %s", getPartitioner(), o.getPartitioner());
+            assert getPartitioner() == o.getPartitioner() : String.format("partitioners do not match; %s != %s", getPartitioner(), o.getPartitioner());
             return comparator.compare(token, ((LocalToken) o).token);
         }
 

@@ -45,7 +45,6 @@ import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.UserFunction;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.index.Index;
 import org.apache.cassandra.db.KeyspaceNotDefinedException;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -196,38 +195,7 @@ public class Schema implements SchemaProvider
 
         this.tableMetadataRefCache = tableMetadataRefCache.withUpdatedRefs(previous, updated);
 
-        indexesDiff.entriesDiffering().values().forEach(diff -> updateIndexMetadataRef(updated.name, diff.rightValue()));
-
         SchemaDiagnostics.metadataReloaded(this, previous, updated, tablesDiff, viewsDiff, indexesDiff);
-    }
-
-    /**
-     * Ensures that live query-handling components, such as the index's backing
-     * {@link ColumnFamilyStore}, hold the revised {@link TableMetadata} pointer rather than
-     * a stale snapshot from index-creation time. Without this update, subsequent SSTable re-writes
-     * for that index would use outdated {@link TableParams}, ignoring the new changes.
-     *
-     * @param keyspaceName the name of the keyspace containing the index
-     * @param indexTable   the updated index-table metadata produced by the schema diff
-     */
-    private void updateIndexMetadataRef(String keyspaceName, TableMetadata indexTable)
-    {
-        Keyspace ks = getKeyspaceInstance(keyspaceName);
-
-        // The keyspace may not be live yet (e.g. during initial load) or may already have been removed.
-        if (ks == null || !ks.hasColumnFamilyStore(indexTable.id))
-            return;
-
-        ColumnFamilyStore baseCfs = ks.getColumnFamilyStore(indexTable.id);
-
-        // The index may not have been initialized yet or may already have been removed
-        // (e.g. during DROP TABLE / DROP INDEX).
-        Index idx = baseCfs.indexManager.getIndexByName(indexTable.indexName().get());
-        if (idx == null)
-            return;
-
-        // Update the live index CFS metadata.
-        idx.getBackingTable().ifPresent(indexCfs -> indexCfs.metadata.set(indexTable));
     }
 
     public void registerListener(SchemaChangeListener listener)
