@@ -39,6 +39,7 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -77,6 +78,7 @@ import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListenableFutureTask;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -228,12 +230,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                                                                                  new NamedThreadFactory("MemtablePostFlush"),
                                                                                                  "internal");
 
-    private static final ThreadPoolExecutor reclaimExecutor = new JMXEnabledThreadPoolExecutor(1,
-                                                                                               Stage.KEEP_ALIVE_SECONDS,
-                                                                                               TimeUnit.SECONDS,
-                                                                                               new LinkedBlockingQueue<>(),
-                                                                                               new NamedThreadFactory("MemtableReclaimMemory"),
-                                                                                               "internal");
+    private static final Executor reclaimExecutor = CassandraRelevantProperties.MEMTABLE_RECLAIM_THREADS.getInt() == 0
+                                                    ? MoreExecutors.directExecutor()
+                                                    : new JMXEnabledThreadPoolExecutor(CassandraRelevantProperties.MEMTABLE_RECLAIM_THREADS.getInt(),
+                                                                                       CassandraRelevantProperties.MEMTABLE_RECLAIM_THREADS.getInt(),
+                                                                                       Stage.KEEP_ALIVE_SECONDS,
+                                                                                       TimeUnit.SECONDS,
+                                                                                       new LinkedBlockingQueue<>(),
+                                                                                       new NamedThreadFactory("MemtableReclaimMemory"),
+                                                                                       "internal");
 
     /**
      * Reason for initiating a memtable flush.
@@ -407,7 +412,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public static void shutdownExecutorsAndWait(long timeout, TimeUnit unit) throws InterruptedException, TimeoutException
     {
-        List<ExecutorService> executors = new ArrayList<>();
+        List<Executor> executors = new ArrayList<>();
         Collections.addAll(executors, reclaimExecutor, postFlushExecutor, flushExecutor);
         perDiskflushExecutors.appendAllExecutors(executors);
         ExecutorUtils.shutdownAndWait(timeout, unit, executors);
@@ -3710,7 +3715,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
          *
          * @param collection the collection to append to.
          */
-        public void appendAllExecutors(Collection<ExecutorService> collection)
+        public void appendAllExecutors(Collection<? super ExecutorService> collection)
         {
             Collections.addAll(collection, nonLocalSystemflushExecutors);
             if (useSpecificExecutorForSystemKeyspaces)

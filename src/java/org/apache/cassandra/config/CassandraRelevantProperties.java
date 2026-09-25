@@ -893,7 +893,10 @@ public enum CassandraRelevantProperties
     /**
      * Factory for initializing {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} instances
      */
-    COMPRESSION_CHUNK_OFFSETS_FACTORY("cassandra.compression_chunk_offsets_factory");
+    COMPRESSION_CHUNK_OFFSETS_FACTORY("cassandra.compression_chunk_offsets_factory"),
+
+    /** Number of memtable reclaim threads to use. If set to 0, reclaim will be performed on the post-flush thread. */
+    MEMTABLE_RECLAIM_THREADS("cassandra.memtable_reclaim_threads", "1");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
