@@ -111,7 +111,7 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
     final Scheduler validationScheduler;
 
     /**
-     * Appends " [entityId: <id>, repairType: <type>]" to the given message when entityId is set in options,
+     * Appends " [entityId: &lt;id&gt;, repairType: &lt;type&gt;]" to the given message when entityId is set in options,
      * or returns the message unchanged otherwise.
      */
     private String withEntityContext(String message)
