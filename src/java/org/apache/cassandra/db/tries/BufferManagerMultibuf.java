@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -25,6 +26,8 @@ import com.google.common.annotations.VisibleForTesting;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -112,7 +115,129 @@ public class BufferManagerMultibuf implements BufferManager
             default:
                 throw new AssertionError();
         }
+    }
 
+    /**
+     * Computes the serialized wire size (4-byte allocated position length + raw buffer bytes).
+     */
+    public long serializedSize()
+    {
+        return 4L + allocatedPos;
+    }
+
+    /**
+     * Serializes all allocated backing buffers into the destination stream.
+     * Writes the total allocated bytes followed by chunked buffer writes using direct array access
+     * or thread-local 8KB intermediate byte arrays for non-array direct byte buffers.
+     */
+    public void serialize(DataOutputPlus out) throws IOException
+    {
+        int pos = allocatedPos;
+        out.writeInt(pos);
+        long remaining = pos;
+        int bufIdx = 0;
+        long size = BUF_START_SIZE;
+        byte[] temp = null;
+        while (remaining > 0)
+        {
+            int toWrite = (int) Math.min(remaining, size);
+            UnsafeBuffer buf = buffers[bufIdx];
+            if (buf != null)
+            {
+                ByteBuffer bb = buf.byteBuffer();
+                if (bb != null && bb.hasArray())
+                {
+                    out.write(bb.array(), bb.arrayOffset(), toWrite);
+                }
+                else if (bb != null)
+                {
+                    ByteBuffer dup = bb.duplicate();
+                    dup.position(0);
+                    dup.limit(toWrite);
+                    out.write(dup);
+                }
+                else
+                {
+                    if (temp == null)
+                        temp = TEMP_BUFFER.get();
+                    int bytesLeft = toWrite;
+                    int offset = 0;
+                    while (bytesLeft > 0)
+                    {
+                        int chunk = Math.min(bytesLeft, temp.length);
+                        buf.getBytes(offset, temp, 0, chunk);
+                        out.write(temp, 0, chunk);
+                        offset += chunk;
+                        bytesLeft -= chunk;
+                    }
+                }
+            }
+            remaining -= toWrite;
+            bufIdx++;
+            size <<= 1;
+        }
+    }
+
+    /**
+     * Thread-local intermediate buffer used for chunked I/O stream transfers of off-heap buffers.
+     */
+    private static final ThreadLocal<byte[]> TEMP_BUFFER = ThreadLocal.withInitial(() -> new byte[8192]);
+
+    /**
+     * Deserializes a {@link BufferManagerMultibuf} from the input stream.
+     * Allocates backing buffers of the given type (off-heap or JVM heap memory),
+     * populates raw byte content, and guarantees clean {@link #discardBuffers} cleanup if an I/O error occurs.
+     */
+    public static BufferManagerMultibuf deserialize(DataInputPlus in, BufferType bufferType, InMemoryBaseTrie.ExpectedLifetime lifetime, OpOrder opOrder) throws IOException
+    {
+        BufferManagerMultibuf bm = new BufferManagerMultibuf(bufferType, lifetime, opOrder);
+        try
+        {
+            int pos = in.readInt();
+            if (pos < 0 || pos > 100_000_000)
+                throw new IOException("Corrupt BufferManagerMultibuf allocatedPos: " + pos);
+            bm.allocatedPos = pos;
+            long remaining = bm.allocatedPos;
+            int bufIdx = 0;
+            long size = BUF_START_SIZE;
+            byte[] temp = null;
+            while (remaining > 0)
+            {
+                int bufferSize = (int) size;
+                ByteBuffer newBuffer = bufferType.allocate(bufferSize);
+                bm.buffers[bufIdx] = new UnsafeBuffer(newBuffer);
+                int toRead = (int) Math.min(remaining, (long) bufferSize);
+                if (newBuffer.hasArray())
+                {
+                    // For on-heap buffers, read directly into the backing array
+                    in.readFully(newBuffer.array(), newBuffer.arrayOffset(), toRead);
+                }
+                else
+                {
+                    if (temp == null)
+                        temp = TEMP_BUFFER.get();
+                    int bytesLeft = toRead;
+                    int offset = 0;
+                    while (bytesLeft > 0)
+                    {
+                        int chunk = Math.min(bytesLeft, temp.length);
+                        in.readFully(temp, 0, chunk);
+                        bm.buffers[bufIdx].putBytes(offset, temp, 0, chunk);
+                        offset += chunk;
+                        bytesLeft -= chunk;
+                    }
+                }
+                remaining -= toRead;
+                bufIdx++;
+                size <<= 1;
+            }
+            return bm;
+        }
+        catch (Throwable t)
+        {
+            bm.discardBuffers();
+            throw t;
+        }
     }
 
     @Override
@@ -263,16 +388,27 @@ public class BufferManagerMultibuf implements BufferManager
         return bufferOverhead;
     }
 
+    /**
+     * Discards and releases all off-heap buffers owned by this manager.
+     * <p>
+     * NOTE: This method MUST only be invoked when the trie is no longer accessible by any readers or writers
+     * (e.g. after a memtable discard or on deserialization failure). Because reads on the trie are lock-free,
+     * releasing buffers while concurrent reads are active would result in use-after-free memory corruption.
+     */
     @Override
     public void discardBuffers()
     {
         if (bufferType == BufferType.ON_HEAP)
             return; // no cleaning needed
 
-        for (UnsafeBuffer b : buffers)
+        for (int i = 0; i < buffers.length; i++)
         {
+            UnsafeBuffer b = buffers[i];
             if (b != null)
+            {
+                buffers[i] = null;
                 FileUtils.clean(b.byteBuffer());
+            }
         }
     }
 
