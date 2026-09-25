@@ -893,7 +893,15 @@ public enum CassandraRelevantProperties
     /**
      * Factory for initializing {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} instances
      */
-    COMPRESSION_CHUNK_OFFSETS_FACTORY("cassandra.compression_chunk_offsets_factory");
+    COMPRESSION_CHUNK_OFFSETS_FACTORY("cassandra.compression_chunk_offsets_factory"),
+
+    /**
+     * Number of memtable reclaim threads to use. To be able to make progress when one ColumnFamilyStore's read order
+     * is blocked, each CFS is served by an assigned thread, chosen pseudo randomly (based on
+     * the table id's hash code).
+     */
+    MEMTABLE_RECLAIM_THREADS("cassandra.memtable_reclaim_threads", "1");
+
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
