@@ -292,7 +292,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         // result iterator. Therefore, the first shard search is special - we run the search eagerly,
         // but the rest of the iterators are create lazily in the loop below.
         assert rangeIndexes[startShard] != null;
-        KeyRangeIterator firstIterator = rangeIndexes[startShard].search(expression, keyRange);
+        KeyRangeIterator firstIterator = rangeIndexes[startShard].search(queryContext, expression, keyRange);
         // Assume all shards are the same size, but we must not pass 0 because of some checks in KeyRangeIterator
         // that assume 0 means empty iterator and could fail.
         var keyCount = Math.max(1, firstIterator.getMaxKeys());
@@ -307,13 +307,13 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             var shardRange = boundaries.getBounds(shard);
             var minKey = index.indexContext.keyFactory().createTokenOnly(shardRange.left.getToken());
             var maxKey = index.indexContext.keyFactory().createTokenOnly(shardRange.right.getToken());
-            builder.add(new KeyRangeLazyIterator(() -> index.search(expression, keyRange), minKey, maxKey, keyCount));
+            builder.add(new KeyRangeLazyIterator(() -> index.search(queryContext, expression, keyRange), minKey, maxKey, keyCount));
         }
 
         return builder.build();
     }
 
-    public KeyRangeIterator eagerSearch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public KeyRangeIterator eagerSearch(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = getEndShardForBounds(keyRange);
@@ -322,7 +322,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         for (int shard = startShard; shard <= endShard; ++shard)
         {
             assert rangeIndexes[shard] != null;
-            builder.add(rangeIndexes[shard].search(expression, keyRange));
+            builder.add(rangeIndexes[shard].search(queryContext, expression, keyRange));
         }
         return builder.build();
     }
@@ -345,7 +345,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             for (ByteBuffer term : queryTerms)
             {
                 Expression expr = new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term);
-                KeyRangeIterator iterator = eagerSearch(expr, keyRange);
+                KeyRangeIterator iterator = eagerSearch(queryContext, expr, keyRange);
                 termIterators.add(iterator);
             }
             KeyRangeIterator intersectedIterator = KeyRangeIntersectionIterator.builder(termIterators).build();

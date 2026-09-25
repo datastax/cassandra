@@ -44,10 +44,12 @@ import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 /**
  * Multiple {@link SegmentMetadata} are stored in {@link IndexComponentType#META} file, each corresponds to an on-disk
@@ -355,6 +357,39 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                 boolean lowerInclusive = predicate.lower != null && predicate.lower.inclusive;
                 boolean upperInclusive = predicate.upper != null && predicate.upper.inclusive;
                 return termsDistribution.estimateNumRowsInRange(lower, lowerInclusive, upper, upperInclusive);
+            }
+            case PREFIX:
+            {
+                // Conservative estimate: interpolate over the term range [enc(prefix), nextOf(enc(prefix)))
+                // covered by the prefix.
+                var lower = asByteComparable(predicate.lower.value.encoded, predicate.validator);
+                var upper = predicate.getPrefixUpperBoundByteComparable(version);
+                return termsDistribution.estimateNumRowsInRange(lower, true, upper, false);
+            }
+            case AUTOMATON:
+            {
+                // Conservative estimate for automaton pattern expressions: all terms accepted by the automaton
+                // share its common byte prefix, so when one exists interpolate over [prefix, nextOf(prefix))
+                // exactly like a PREFIX expression; without a common prefix the pattern may match anywhere in
+                // the dictionary, so return the segment size as the upper bound.
+                CompiledAutomaton automaton = predicate.getAutomaton();
+                // An empty-language automaton matches nothing and the search path short-circuits to an empty
+                // iterator; without this check it would fall through to the no-common-prefix maximum below.
+                if (automaton.type == CompiledAutomaton.AUTOMATON_TYPE.NONE)
+                    return 0;
+                // A single-term automaton matches exactly one term, like the search path's exact lookup.
+                if (automaton.type == CompiledAutomaton.AUTOMATON_TYPE.SINGLE)
+                {
+                    ByteBuffer term = ByteBuffer.wrap(automaton.term.bytes, automaton.term.offset, automaton.term.length);
+                    return termsDistribution.estimateNumRowsMatchingExact(asByteComparable(term, predicate.validator));
+                }
+                byte[] commonPrefix = AutomatonQueries.commonPrefixBytes(automaton);
+                if (commonPrefix.length == 0)
+                    return numRows;
+                byte[] upperBytes = AutomatonQueries.prefixUpperBound(commonPrefix);
+                var lower = asByteComparable(ByteBuffer.wrap(commonPrefix), predicate.validator);
+                var upper = upperBytes == null ? null : asByteComparable(ByteBuffer.wrap(upperBytes), predicate.validator);
+                return termsDistribution.estimateNumRowsInRange(lower, true, upper, false);
             }
             default:
                 throw new IllegalArgumentException("Unsupported expression: " + predicate);
