@@ -67,6 +67,7 @@ import com.codahale.metrics.Timer;
  * to be met that we no longer need.
  * <p>5. This scheme is not fair</p>
  * <p>6. Only the thread that calls register() may call await()</p>
+ * <p>7. A signal can be cancelled while it is within await() if the invoking thread is interrupted</p>
  */
 public final class WaitQueue
 {
@@ -240,7 +241,7 @@ public final class WaitQueue
         public abstract void cancel();
 
         /**
-         * Wait, without throwing InterruptedException, until signalled. On exit isSignalled() must be true.
+         * Wait, without throwing InterruptedException, until signalled. On exit isSet() must be true.
          * If the thread is interrupted in the meantime, the interrupted flag will be set.
          */
         public void awaitUninterruptibly();
@@ -249,6 +250,7 @@ public final class WaitQueue
          * Wait until signalled, or throw an InterruptedException if interrupted before this happens.
          * On normal exit isSignalled() must be true; however if InterruptedException is thrown isCancelled()
          * will be true.
+         * Important: the signal can be cancelled if the thread executing await() is interrupted
          * @throws InterruptedException
          */
         public void await() throws InterruptedException;
@@ -258,6 +260,7 @@ public final class WaitQueue
          * isSignalled() will be true on exit, and the method will return true; if timedout, the method will return
          * false and isCancelled() will be true; if interrupted an InterruptedException will be thrown and isCancelled()
          * will be true.
+         * Important: the signal can be cancelled if the thread executing await() is interrupted
          * @param nanos System.nanoTime() to wait until
          * @return true if signalled, false if timed out
          * @throws InterruptedException
@@ -282,7 +285,7 @@ public final class WaitQueue
         public void awaitUninterruptibly()
         {
             boolean interrupted = false;
-            while (!isSignalled())
+            while (!isSet())
             {
                 if (Thread.interrupted())
                     interrupted = true;
@@ -295,7 +298,7 @@ public final class WaitQueue
 
         public void await() throws InterruptedException
         {
-            while (!isSignalled())
+            while (!isSet())
             {
                 checkInterrupted();
                 LockSupport.park();
@@ -306,7 +309,7 @@ public final class WaitQueue
         public boolean awaitUntil(long until) throws InterruptedException
         {
             long now;
-            while (until > (now = System.nanoTime()) && !isSignalled())
+            while (until > (now = System.nanoTime()) && !isSet())
             {
                 checkInterrupted();
                 long delta = until - now;
@@ -318,7 +321,7 @@ public final class WaitQueue
         public boolean awaitUntilUninterruptibly(long until)
         {
             long now;
-            while (until > (now = System.nanoTime()) && !isSignalled())
+            while (until > (now = System.nanoTime()) && !isSet())
             {
                 long delta = until - now;
                 LockSupport.parkNanos(delta);
