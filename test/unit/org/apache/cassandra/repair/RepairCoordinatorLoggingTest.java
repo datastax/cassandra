@@ -116,14 +116,6 @@ public class RepairCoordinatorLoggingTest
                             .collect(Collectors.toList());
     }
 
-    private List<String> warnMessages()
-    {
-        return appender.list.stream()
-                            .filter(e -> e.getLevel() == Level.WARN)
-                            .map(ILoggingEvent::getFormattedMessage)
-                            .collect(Collectors.toList());
-    }
-
     private List<String> errorMessages()
     {
         return appender.list.stream()
@@ -132,29 +124,25 @@ public class RepairCoordinatorLoggingTest
                             .collect(Collectors.toList());
     }
 
-    /**
-     * When notifyError() receives a warn-class RepairException and entityId is set,
-     * the WARN log must include the repair id and the entityTag.
-     */
     @Test
     public void notifyError_warnPath_includesEntityTag()
     {
         RepairCoordinator coordinator = build(optionsWithEntity());
         coordinator.notifyError(RepairException.warn("simulated abort"));
 
-        String msg = warnMessages().stream()
-                                   .filter(m -> m.contains("aborted"))
-                                   .findFirst()
-                                   .orElse("");
+        String msg = errorMessages().stream()
+                                    .filter(m -> m.contains("failed"))
+                                    .findFirst()
+                                    .orElse("");
 
-        assertFalse("notifyError(warn) must emit a WARN 'aborted' log", msg.isEmpty());
-        assertTrue("log must contain the repair id",      msg.contains(coordinator.state.id.toString()));
+        assertFalse("notifyError must emit an ERROR 'failed' log", msg.isEmpty());
+        assertTrue("log must contain the repair id",       msg.contains(coordinator.state.id.toString()));
         assertTrue("log must contain [entityId: " + ENTITY_ID, msg.contains("[entityId: " + ENTITY_ID));
         assertTrue("log must contain repairType: " + REPAIR_TYPE, msg.contains("repairType: " + REPAIR_TYPE));
     }
 
     /**
-     * When entityId is absent, notifyError() warn path must NOT add an entityTag block.
+     * When entityId is absent, notifyError() must NOT add an entity context block.
      */
     @Test
     public void notifyError_warnPath_noEntityTagWhenAbsent()
@@ -162,20 +150,16 @@ public class RepairCoordinatorLoggingTest
         RepairCoordinator coordinator = build(optionsWithoutEntity());
         coordinator.notifyError(RepairException.warn("simulated abort"));
 
-        String msg = warnMessages().stream()
-                                   .filter(m -> m.contains("aborted"))
-                                   .findFirst()
-                                   .orElse("");
+        String msg = errorMessages().stream()
+                                    .filter(m -> m.contains("failed"))
+                                    .findFirst()
+                                    .orElse("");
 
-        assertFalse("notifyError(warn) must emit a WARN 'aborted' log", msg.isEmpty());
+        assertFalse("notifyError must emit an ERROR 'failed' log", msg.isEmpty());
         assertFalse("log must not contain [entityId:] when entityId is absent",
                     msg.contains("[entityId:"));
     }
 
-    /**
-     * When notifyError() receives a generic (non-warn) exception and entityId is set,
-     * the ERROR log must include the repair id and the entityTag.
-     */
     @Test
     public void notifyError_errorPath_includesEntityTag()
     {

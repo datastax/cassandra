@@ -65,7 +65,8 @@ public abstract class AbstractRepairTask implements RepairTask
 
         for (CommonRange commonRange : commonRanges)
         {
-            logger.info("Starting RepairSession for {}", commonRange);
+            logger.info("Starting RepairSession for parentSession={} range={} endpoints={}",
+                        parentSession, commonRange, commonRange.endpoints);
             RepairSession session = coordinator.ctx.repair().submitRepairSession(parentSession,
                                                                                  commonRange,
                                                                                  keyspace,
