@@ -110,6 +110,17 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
     final SharedContext ctx;
     final Scheduler validationScheduler;
 
+    /**
+     * Appends " [entityId: &lt;id&gt;, repairType: &lt;type&gt;]" to the given message when entityId is set in options,
+     * or returns the message unchanged otherwise.
+     */
+    private String withEntityContext(String message)
+    {
+        if (state.options.getEntityId() == null)
+            return message;
+        return message + " [entityId: " + state.options.getEntityId() + ", repairType: " + state.options.getRepairType() + "]";
+    }
+
     private TraceState traceState;
 
     public RepairCoordinator(StorageService storageService, int cmd, RepairOption options, String keyspace)
@@ -169,16 +180,7 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
         if (error instanceof SomeRepairFailedException)
             return;
 
-        if (Throwables.anyCauseMatches(error, RepairException::shouldWarn))
-        {
-            logger.warn("Repair {} aborted: {}", state.id, error.getMessage());
-            if (logger.isDebugEnabled())
-                logger.debug("Repair {} aborted: ", state.id, error);
-        }
-        else
-        {
-            logger.error("Repair {} failed:", state.id, error);
-        }
+        logger.error(withEntityContext("Repair {} failed:"), state.id, error);
 
         StorageMetrics.repairExceptions.inc();
         String errorMessage = String.format("Repair command #%d failed with error %s", state.cmd, error.getMessage());
@@ -255,7 +257,7 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
         }
 
         fireProgressEvent(jmxEvent(ProgressEventType.COMPLETE, msg));
-        logger.info(state.options.getPreviewKind().logPrefix(state.id) + msg);
+        logger.info("{}, {}", state.options.getPreviewKind().logPrefix(state.id), withEntityContext(msg));
 
         ctx.repair().removeParentRepairSession(state.id);
         TraceState localState = traceState;
@@ -374,8 +376,8 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
 
     private void notifyStarting()
     {
-        String message = String.format("Starting repair command #%d (%s), repairing keyspace %s with %s", state.cmd, state.id, state.keyspace,
-                                       state.options);
+        String message = withEntityContext(String.format("Starting repair command #%d (%s), repairing keyspace %s with %s",
+                                                         state.cmd, state.id, state.keyspace, state.options));
         logger.info(message);
         Tracing.traceRepair(message);
         fireProgressEvent(jmxEvent(ProgressEventType.START, message));
@@ -404,7 +406,8 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
             {
                 if (state.options.ignoreUnreplicatedKeyspaces())
                 {
-                    logger.info("{} Found no neighbors for range {} for {} - ignoring since repairing with --ignore-unreplicated-keyspaces", state.id, range, state.keyspace);
+                    logger.info(withEntityContext("{} Found no neighbors for range {} for {} - ignoring since repairing with --ignore-unreplicated-keyspaces"),
+                                state.id, range, state.keyspace);
                     continue;
                 }
                 else

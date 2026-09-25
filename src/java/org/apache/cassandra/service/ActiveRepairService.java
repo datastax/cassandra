@@ -88,7 +88,6 @@ import org.apache.cassandra.service.paxos.PaxosRepair;
 import org.apache.cassandra.service.paxos.cleanup.PaxosCleanup;
 import org.apache.cassandra.repair.ParentRepairSessionListener;
 import org.apache.cassandra.repair.RepairJobDesc;
-import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.RepairSession;
 import org.apache.cassandra.repair.consistent.CoordinatorSessions;
 import org.apache.cassandra.repair.consistent.LocalSessions;
@@ -441,19 +440,13 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
     public RepairSession submitRepairSession(TimeUUID parentRepairSession,
                                              CommonRange range,
                                              String keyspace,
-                                             RepairParallelism parallelismDegree,
+                                             RepairOption options,
                                              boolean isIncremental,
-                                             boolean pushRepair,
-                                             boolean pullRepair,
-                                             PreviewKind previewKind,
-                                             boolean optimiseStreams,
-                                             boolean repairPaxos,
-                                             boolean paxosOnly,
                                              ExecutorPlus executor,
                                              Scheduler validationScheduler,
                                              String... cfnames)
     {
-        if (repairPaxos && previewKind != PreviewKind.NONE)
+        if (options.repairPaxos() && options.getPreviewKind() != PreviewKind.NONE)
             throw new IllegalArgumentException("cannot repair paxos in a preview repair");
 
         if (range.endpoints.isEmpty())
@@ -463,8 +456,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             return null;
 
         final RepairSession session = new RepairSession(ctx, validationScheduler, parentRepairSession, range, keyspace,
-                                                        parallelismDegree, isIncremental, pushRepair, pullRepair,
-                                                        previewKind, optimiseStreams, repairPaxos, paxosOnly, cfnames);
+                                                        options, isIncremental, cfnames);
         repairs.getIfPresent(parentRepairSession).register(session.state);
 
         sessions.put(session.getId(), session);

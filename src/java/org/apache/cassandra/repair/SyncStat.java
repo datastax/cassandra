@@ -49,4 +49,11 @@ public class SyncStat
     {
         return new SyncStat(nodes, differences, summaries);
     }
+
+    @Override
+    public String toString()
+    {
+        return "SyncStat{" + nodes.coordinator + "<->" + nodes.peer +
+               ", differences=" + (differences == null ? 0 : differences.size()) + '}';
+    }
 }

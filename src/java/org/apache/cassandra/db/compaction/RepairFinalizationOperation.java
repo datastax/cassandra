@@ -65,18 +65,23 @@ public class RepairFinalizationOperation
     {
         boolean completed = false;
         boolean obsoleteSSTables = isTransient && repairedAt > 0;
+        int sstableCount = transaction.originals().size();
 
         try
         {
             if (obsoleteSSTables)
             {
-                logger.info("Obsoleting transient repaired sstables for {}", sessionID);
+                logger.info("Obsoleting {} transient repaired sstable(s) for session {} on {}.{}",
+                            sstableCount, sessionID,
+                            realm.metadata().keyspace, realm.metadata().name);
                 Preconditions.checkState(Iterables.all(transaction.originals(), SSTableReader::isTransient));
                 transaction.obsoleteOriginals();
             }
             else
             {
-                logger.info("Moving {} from pending to repaired with repaired at = {} for session id = {}", transaction.originals(), repairedAt, sessionID);
+                logger.info("Moving {} sstable(s) from pending to repaired (repairedAt={}, session={}) on {}.{}",
+                            sstableCount, repairedAt, sessionID,
+                            realm.metadata().keyspace, realm.metadata().name);
                 realm.mutateRepairedWithLock(transaction.originals(),
                         repairedAt,
                         ActiveRepairService.NO_PENDING_REPAIR,
@@ -101,6 +106,8 @@ public class RepairFinalizationOperation
 
             if (completed)
             {
+                logger.info("RepairFinishedCompactionTask for session {} on {}.{} complete ({} sstable(s), obsolete={})",
+                            sessionID, realm.metadata().keyspace, realm.metadata().name, sstableCount, obsoleteSSTables);
                 realm.repairSessionCompleted(sessionID);
             }
         }
