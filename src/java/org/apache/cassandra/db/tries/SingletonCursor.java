@@ -164,6 +164,12 @@ class SingletonCursor<T> implements Cursor<T>
                                      value);
     }
 
+    @Override
+    public void close()
+    {
+        // nothing to release
+    }
+
     ByteSource.Duplicatable duplicateSource()
     {
         if (!(src instanceof ByteSource.Duplicatable))

@@ -50,6 +50,11 @@ public class ReturnPathSeekTest
 {
     static final String[] tests = new String[] {"", "testing", "test", "tests", "tested", "tesa", "tesz"};
 
+    /// Keys forming a branch whose content is presented after it, with an immediately adjacent sibling branch:
+    /// walked in reverse, "ab" is reported on the return path and the next node at the same depth is "aa", one
+    /// byte away.
+    static final String[] adjacentBranchTests = new String[] {"aa", "aad", "ab", "abc"};
+
     @Parameterized.Parameter(0)
     public boolean inMemorySingleton = true;
     @Parameterized.Parameter(1)
@@ -129,8 +134,13 @@ public class ReturnPathSeekTest
 
     private InMemoryTrie<String> buildInMemoryTrie() throws TrieSpaceExhaustedException
     {
+        return buildInMemoryTrie(tests);
+    }
+
+    private InMemoryTrie<String> buildInMemoryTrie(String[] keys) throws TrieSpaceExhaustedException
+    {
         InMemoryTrie<String> trie = InMemoryTrie.shortLivedOrdered(VERSION);
-        for (String test : tests)
+        for (String test : keys)
         {
             ByteComparable.Preencoded e = TrieUtil.directComparable(test);
             System.out.println("Adding " + asString(e) + ": " + test);
@@ -144,8 +154,13 @@ public class ReturnPathSeekTest
 
     private Trie<String> buildMergeTrie() throws TrieSpaceExhaustedException
     {
+        return buildMergeTrie(tests);
+    }
+
+    private Trie<String> buildMergeTrie(String[] keys) throws TrieSpaceExhaustedException
+    {
         List<Trie<String>> tries = new ArrayList<>();
-        for (String test : tests)
+        for (String test : keys)
         {
             ByteComparable.Preencoded e = TrieUtil.directComparable(test);
             System.out.println("Adding " + asString(e) + ": " + test);
@@ -203,6 +218,40 @@ public class ReturnPathSeekTest
     {
         Cursor<String> c = trie.cursor(Direction.FORWARD);
         assertFalse(descendAlongToReturnPath(c, e.getPreencodedBytes()));
+    }
+
+    /// A branch skip issued from a position on the return path must land on the next sibling's descent position.
+    /// Asking for the sibling's return path position instead would step over the sibling's whole branch, dropping
+    /// "aad" from the walk.
+    @Test
+    public void testSkipBranchFromReturnPath() throws TrieSpaceExhaustedException
+    {
+        Trie<String> trie = useUnion ? buildMergeTrie(adjacentBranchTests) : buildInMemoryTrie(adjacentBranchTests);
+        if (intersectTrie)
+            trie = trie.slice(TrieUtil.directComparable("aa"), true, TrieUtil.directComparable("ac"), true);
+
+        Cursor<String> cursor = trie.cursor(Direction.REVERSE);
+        // In an ordered trie content is placed after the branch, thus in reverse it is presented on the return path.
+        assertTrue(descendAlongToReturnPath(cursor, TrieUtil.directComparable("ab").getPreencodedBytes()));
+        assertEquals("ab", cursor.content());
+
+        long skipped = cursor.skipTo(Cursor.positionForSkippingBranch(cursor.encodedPosition()));
+        assertEquals("Skipping the \"ab\" branch must descend into \"aa\"",
+                     0,
+                     Cursor.compare(Cursor.encode(2, 'a', Direction.REVERSE), skipped));
+        assertFalse("Skipping a branch must not land on the sibling's return path, its branch was not walked yet",
+                    Cursor.isOnReturnPath(skipped));
+
+        List<String> remaining = new ArrayList<>();
+        String value = Cursor.content(cursor, skipped);
+        if (value == null)
+            value = cursor.advanceToContent(null);
+        while (value != null)
+        {
+            remaining.add(value);
+            value = cursor.advanceToContent(null);
+        }
+        assertEquals(Arrays.asList("aad", "aa"), remaining);
     }
 
     @Test

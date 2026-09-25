@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.compress.BufferType;
 
-class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
+public class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
 {
     private final int bufferSize;
     private final BufferType bufferType;
     private final long startOffset;
 
-    SimpleChunkReader(ChannelProxy channel, long fileLength, BufferType bufferType, int bufferSize)
+    public SimpleChunkReader(ChannelProxy channel, long fileLength, BufferType bufferType, int bufferSize)
     {
         this(channel, fileLength, bufferType, bufferSize, 0);
     }
