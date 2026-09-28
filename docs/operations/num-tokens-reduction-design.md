@@ -85,7 +85,11 @@ we revisit the decision to allow new tokens before starting Phase 2.
     moving or shrinking node (the check done before bootstrap in `prepareForBootstrap`:
     "Other bootstrapping/leaving/moving nodes detected"; `move` itself does not check this).
     This only reflects the local gossip view, so two operators starting on two nodes at the
-    same time are not detected: the Phase 3 script serialises the steps;
+    same time are not detected: the Phase 3 script serialises the steps. Before bootstrap the
+    check runs only with `useStrictConsistency`; the shrink always runs it;
+  * no endpoint is in HIBERNATE or BOOT_REPLACE state. A replacement at the same address gossips
+    HIBERNATE, gets no bootstrap tokens and is skipped by the version gate (§4.2), yet it may run
+    older code or turn NORMAL while X is SHRINKING and then ignore the status;
   * every node in the cluster runs a version that understands the new gossip state
     (§4.2);
   * the node has no pending ranges;
@@ -109,8 +113,9 @@ we revisit the decision to allow new tokens before starting Phase 2.
   gated on a minimum release version (decision 2026-09-28): the first release that contains
   this code. `Gossiper.getMinVersion()` is not used as is. It is cached for 60 s, it returns
   `NULL_VERSION` while gossip stabilises, and it skips endpoints in LEFT, REMOVED or HIBERNATE
-  state. The gate reads `RELEASE_VERSION` of every endpoint in gossip that isn't in a dead
-  state (live or down), and refuses if any version is missing, unparsable or older.
+  state. The gate reads `RELEASE_VERSION` of every endpoint in gossip except those in LEFT or
+  REMOVED state (live or down, HIBERNATE included, which §4.1 refuses anyway), and refuses if
+  any version is missing, unparsable or older.
 * On completion the node publishes `TOKENS` = kept set and `NORMAL`, exactly like `move`. Peers
   already handle a `NORMAL` endpoint whose token set shrank: `TokenMetadata.updateNormalTokens`
   replaces the endpoint's tokens.
@@ -179,8 +184,18 @@ writes the new token count to `system.local` (a new nullable column, e.g.
 `token_count_override`, in the same mutation as the tokens). At startup `joinTokenRing`
 accepts saved tokens whose count differs from `num_tokens` only if it equals the recorded
 count, and logs a warning to update `num_tokens` in `cassandra.yaml`. When the yaml matches
-again, the override is cleared. Adding a column to `system.local` has to be checked
-against the fork's system-table upgrade rules during Phase 2.
+again, the override is cleared.
+
+In this fork `system.local` is written through `Nodes`/`LocalInfo`, one INSERT per save
+(`NodesPersistence.saveLocal`, `INSERT_LOCAL_STMT`). "Same mutation" therefore means: a new
+`LocalInfo` field, the column in `INSERT_LOCAL_STMT` and in the `SystemKeyspace` table
+definition, and handling in `CC4UpgradeNodesPersistence` / `CC4NodesFileReader`. Downgrade
+risk: an older binary reading `system.local` sstables that contain the unknown column. The
+Phase 2 PR must test the downgrade, or document that downgrading requires the override to be
+cleared first.
+
+The Phase 0 restart message ("the number of tokens of a node is fixed when it joins the
+ring") becomes inaccurate once this ships; the Phase 2 PR updates it.
 
 ### 4.6 Tests
 
