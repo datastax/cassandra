@@ -1,4 +1,5 @@
 tools/bin/generatetokens usr/bin
+tools/bin/tokenreductionplanner usr/bin
 tools/bin/sstabledump usr/bin
 tools/bin/sstableexpiredblockers usr/bin
 tools/bin/sstablelevelreset usr/bin

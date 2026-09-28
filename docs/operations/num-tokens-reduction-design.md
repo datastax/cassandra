@@ -1,6 +1,6 @@
 # Design: in-place reduction of `num_tokens`
 
-Status: agreed design (decisions in §7). Phase 0 is implemented; Phases 1–3 are to be implemented in this order,
+Status: agreed design (decisions in §7). Phases 0 and 1 are implemented; Phases 2–3 are to be implemented in this order,
 one pull request each, against `main-5.0` of the eolivelli fork.
 
 Companion documents: `reduce-num-tokens-runbook.md` (today's procedure, via a new datacenter)
@@ -72,6 +72,41 @@ New tool `tools/bin/tokenreductionplanner` (next to `generatetokens`, reusing
 
 This phase also answers whether subset-only selection balances well enough. If it doesn't,
 we revisit the decision to allow new tokens before starting Phase 2.
+
+### 3.1 Implementation and results (Phase 1 done)
+
+* `DatacenterRing` (`org.apache.cassandra.dht.tokenallocator`): the tokens of one datacenter with
+  the NetworkTopologyStrategy replica walk, supporting incremental removal and "what if removed"
+  evaluation. Each token records the ranges whose walk accepted its node at it, so a removal only
+  recomputes those ranges and the merged range. `TokenReductionPlannerTest` checks it against
+  the real `NetworkTopologyStrategy` + `TokenMetadata` on 60 random clusters (1–2 DCs, 1–4 racks,
+  RF 1–5, heterogeneous token counts), before and after every removal.
+* `TokenReductionPlanner`: per round, drops tokens round-robin (the node furthest above its
+  target first), each time the token that most reduces the sum of squared deviations from the
+  target ownership. It then replays the steps in execution order (most loaded node first) to
+  report ownership after every step, the peak, and the data streamed.
+* `tools/bin/tokenreductionplanner` (`TokenReductionPlannerTool`): reads `nodetool ring` output
+  (with loads, which size the report in bytes) or CSV `endpoint,datacenter,rack,token`. It writes
+  `plan.txt` and `round-<n>-<tokens>/<step>-<endpoint>.tokens`, the kept tokens for Phase 2's
+  `--keep-file`.
+
+Measured on random 256-token rings, RF 3, 256 → 16 by halving. Ownership is relative to the fair
+share. "Streamed" counts copies of the datacenter data set; a new datacenter copies 1.00.
+
+| Nodes | Racks | Initial max | Final max / min | Peak during rounds | Streamed |
+|---|---|---|---|---|---|
+| 6 | 1 | 1.052 | 1.027 / 0.981 | 1.40 | 1.37 |
+| 12 | 1 | 1.062 | 1.028 / 0.967 | 1.61 | 1.83 |
+| 12 | 3 | 1.067 | 1.018 / 0.983 | 1.47 | 1.28 |
+| 24 | 3 | 1.091 | 1.032 / 0.972 | 1.52 | 1.46 |
+| 48 | 1 | 1.098 | 1.039 / 0.970 | 1.68 | 2.12 |
+| 100 | 3 | 1.188 | 1.052 / 0.948 | 1.54 | 1.57 |
+
+Keeping a subset balances the final ring better than the initial random ring, and close to a
+fresh allocation (a new datacenter allocated with 16 tokens reaches max ~1.02 with one rack). The
+price is 1.3–2.1× the streaming of the new-datacenter procedure and a 1.4–1.7× peak on one node
+per round, without extra hardware. Planning 100 nodes takes about 5 seconds. Conclusion:
+subset-only is good enough, and Phase 2 proceeds as designed.
 
 ## 4. Phase 2 — core: shrink a node's token set online
 
