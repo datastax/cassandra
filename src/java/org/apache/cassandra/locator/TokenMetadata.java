@@ -1271,34 +1271,32 @@ public class TokenMetadata
             allLeftMetadata.removeEndpoint(endpoint);
         }
 
-        // Finally the shrinking nodes. A node that keeps a subset of its tokens only leaves some replica sets and the
-        // nodes that replace it there get pending ranges, like for a leave (with SimpleStrategy and
-        // NetworkTopologyStrategy the shrinking node never gains a range, and never loses one of the ranges of
-        // another node). Shrinks are applied one after the other to allLeftMetadata, like moves.
-        for (Map.Entry<InetAddressAndPort, Set<Token>> shrinking : shrinkingEndpoints.entrySet())
+        // Finally the shrinking nodes. A node that keeps a subset of its tokens only merges ranges, and only leaves
+        // replica sets: the nodes that replace it there get pending ranges (with SimpleStrategy and
+        // NetworkTopologyStrategy the shrinking node never gains a range and no other node loses one). The pending
+        // ranges are computed range by range at the granularity of the current ring, comparing the replicas with
+        // those of the ring where every shrink is done: this is linear in the ring size, and gives disjoint ranges
+        // per endpoint even with several shrinking nodes.
+        if (!shrinkingEndpoints.isEmpty())
         {
-            InetAddressAndPort endpoint = shrinking.getKey();
-            if (!allLeftMetadata.isMember(endpoint))
-                continue; // it is also leaving
-            TokenMetadata before = allLeftMetadata.cloneOnlyTokenMap();
-            Set<Replica> shrinkAffectedReplicas = new HashSet<>();
-            for (Replica replica : strategy.getAddressReplicas(before, endpoint))
-                shrinkAffectedReplicas.add(replica);
+            TokenMetadata allShrunk = metadata.cloneOnlyTokenMap();
+            for (Map.Entry<InetAddressAndPort, Set<Token>> shrinking : shrinkingEndpoints.entrySet())
+                if (allShrunk.isMember(shrinking.getKey()) && !leavingEndpoints.contains(shrinking.getKey()))
+                    allShrunk.updateNormalTokens(shrinking.getValue(), shrinking.getKey());
 
-            allLeftMetadata.updateNormalTokens(shrinking.getValue(), endpoint);
-
-            for (Replica replica : shrinkAffectedReplicas)
+            for (Token token : metadata.sortedTokens())
             {
-                Set<InetAddressAndPort> currentEndpoints = strategy.calculateNaturalReplicas(replica.range().right, metadata).endpoints();
-                Set<InetAddressAndPort> newEndpoints = strategy.calculateNaturalReplicas(replica.range().right, allLeftMetadata).endpoints();
-                for (InetAddressAndPort address : Sets.difference(newEndpoints, currentEndpoints))
+                EndpointsForRange currentReplicas = strategy.calculateNaturalReplicas(token, metadata);
+                EndpointsForRange newReplicas = strategy.calculateNaturalReplicas(token, allShrunk);
+                Range<Token> range = currentReplicas.range();
+                for (Replica newReplica : newReplicas)
                 {
-                    RangesAtEndpoint newReplicas = strategy.getAddressReplicas(allLeftMetadata, address);
-                    RangesAtEndpoint oldReplicas = strategy.getAddressReplicas(metadata, address);
-                    newReplicas = newReplicas.filter(r -> !oldReplicas.contains(r));
-                    for (Replica newReplica : newReplicas)
-                        for (Replica pendingReplica : newReplica.subtractSameReplication(oldReplicas))
-                            newPendingRanges.addPendingRange(pendingReplica.range(), pendingReplica);
+                    if (currentReplicas.endpoints().contains(newReplica.endpoint()))
+                        continue;
+                    // already pending for this range because of another range movement
+                    if (newPendingRanges.pendingEndpointsFor(token).endpoints().contains(newReplica.endpoint()))
+                        continue;
+                    newPendingRanges.addPendingRange(range, new Replica(newReplica.endpoint(), range, newReplica.isFull()));
                 }
             }
         }

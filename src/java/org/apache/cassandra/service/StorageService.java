@@ -142,6 +142,7 @@ import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.fql.FullQueryLoggerOptionsCompositeData;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.IFailureDetector;
@@ -213,7 +214,6 @@ import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.transport.ClientResourceLimits;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -473,7 +473,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /* the probability for tracing any particular request, 0 disables tracing and 1 enables for all */
     private double traceProbability = 0.0;
 
-    public enum Mode { STARTING, NORMAL, JOINING, JOINING_FAILED, LEAVING, DECOMMISSIONED, DECOMMISSION_FAILED, MOVING, DRAINING, DRAINED }
+    public enum Mode { STARTING, NORMAL, JOINING, JOINING_FAILED, LEAVING, DECOMMISSIONED, DECOMMISSION_FAILED, MOVING, DRAINING, DRAINED, SHRINKING }
     private volatile Mode operationMode = Mode.STARTING;
 
     /* Used for tracking drain progress */
@@ -769,6 +769,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new RuntimeException(String.format("Cannot replace_address %s because it doesn't exist in gossip", replaceAddress));
 
         validateEndpointSnitch(epStates.keySet());
+        for (Map.Entry<InetAddressAndPort, EndpointState> entry : epStates.entrySet())
+        {
+            if (!entry.getKey().equals(replaceAddress) && VersionedValue.STATUS_SHRINKING.equals(entry.getValue().getStatus()))
+                throw new UnsupportedOperationException("Cannot replace " + replaceAddress + " while " + entry.getKey() + " is shrinking its tokens");
+        }
         return replaceNodeAndOwnTokens(replaceAddress, epStates, state);
     }
 
@@ -922,7 +927,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 assert (pieces.length > 0);
                 String state = pieces[0];
                 if (state.equals(VersionedValue.STATUS_BOOTSTRAPPING) || state.equals(VersionedValue.STATUS_LEAVING) || state.equals(VersionedValue.STATUS_MOVING) || state.equals(VersionedValue.STATUS_SHRINKING))
-                    throw new UnsupportedOperationException("Other bootstrapping/leaving/moving/shrinking nodes detected, cannot bootstrap while " + CONSISTENT_RANGE_MOVEMENT.getKey() + " is true");
+                    throw new UnsupportedOperationException("Other bootstrapping/leaving/moving nodes detected (including shrinking nodes), cannot bootstrap while " + CONSISTENT_RANGE_MOVEMENT.getKey() + " is true");
             }
         }
     }
@@ -1272,6 +1277,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             appStates.put(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(FBUtilities.getJustBroadcastNativeAddress()));
             appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
             appStates.put(ApplicationState.SSTABLE_VERSIONS, valueFactory.sstableVersions(sstablesTracker.versionsInUse()));
+            appStates.put(ApplicationState.SHRINK_TOKENS_SUPPORTED, valueFactory.shrinkTokensSupported());
 
             logger.debug("Starting up server gossip");
             Gossiper.instance.register(this);
@@ -1374,8 +1380,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 {
                     if (!TokenCountOverride.matches(bootstrapTokens, DatabaseDescriptor.getNumTokens()))
                         throw new ConfigurationException("Cannot change the number of tokens from " + bootstrapTokens.size() + " to " + DatabaseDescriptor.getNumTokens() +
-                                                         ": changing num_tokens has no effect on a node that joined the ring. Set num_tokens back to " + bootstrapTokens.size() +
-                                                         "; to reduce the number of tokens of a live node use 'nodetool settokens' (see docs/operations/num-tokens-reduction-design.md), " +
+                                                         ": changing num_tokens (or initial_token) has no effect on a node that joined the ring. Set num_tokens back to " + bootstrapTokens.size() +
+                                                         "; to reduce the number of tokens of a live node use 'nodetool settokens' (planned with tokenreductionplanner), " +
                                                          "or add nodes (e.g. a new datacenter) with the new num_tokens.");
                     logger.warn("This node has {} tokens, set by 'nodetool settokens', but num_tokens is {}: update num_tokens to {} in cassandra.yaml",
                                 bootstrapTokens.size(), DatabaseDescriptor.getNumTokens(), bootstrapTokens.size());
@@ -2180,7 +2186,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             String leavingTokens = StringUtils.join(getTokenMetadata().getLeavingEndpoints(), ',');
             String movingTokens = StringUtils.join(getTokenMetadata().getMovingEndpoints().stream().map(e -> e.right).toArray(), ',');
             String shrinkingNodes = StringUtils.join(getTokenMetadata().getShrinkingEndpoints().keySet(), ',');
-            throw new UnsupportedOperationException(String.format("Other bootstrapping/leaving/moving/shrinking nodes detected, cannot bootstrap while %s is true. Nodes detected, bootstrapping: %s; leaving: %s; moving: %s; shrinking: %s;",
+            throw new UnsupportedOperationException(String.format("Other bootstrapping/leaving/moving nodes detected, cannot bootstrap while %s is true. Nodes detected, bootstrapping: %s; leaving: %s; moving: %s; shrinking: %s;",
                                                                   CONSISTENT_RANGE_MOVEMENT.getKey(), bootstrapTokens, leavingTokens, movingTokens, shrinkingNodes));
         }
 
@@ -3354,16 +3360,17 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         boolean isMember = getTokenMetadata().isMember(endpoint);
         boolean isMoving = getTokenMetadata().isMoving(endpoint);
         boolean isShrinking = getTokenMetadata().isShrinking(endpoint);
+        Set<Token> previousTokens = isMember ? new HashSet<>(getTokenMetadata().getTokens(endpoint)) : Collections.emptySet();
 
         updateTokenMetadata(endpoint, tokens, endpointsToRemove);
+        // e.g. a shrink whose SHRINKING state this node missed
+        boolean tokensChanged = isMember && getTokenMetadata().isMember(endpoint) && !previousTokens.equals(new HashSet<>(getTokenMetadata().getTokens(endpoint)));
 
-        if (isMoving || isShrinking || operationMode == Mode.MOVING)
+        if (isMoving || isShrinking || tokensChanged || operationMode == Mode.MOVING)
         {
             getTokenMetadata().removeFromMoving(endpoint);
             // a shrink that completed (new tokens) or was aborted (same tokens)
             getTokenMetadata().removeFromShrinking(endpoint);
-            if (isShrinking)
-                PendingRangeCalculatorService.instance.update();
             // The above may change the local ownership.
             invalidateLocalRanges();
             notifyMoved(endpoint);
@@ -3443,14 +3450,24 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         ensureUpToDateTokenMetadata(VersionedValue.STATUS_SHRINKING, endpoint);
 
-        assert pieces.length >= 2;
         List<Token> kept = new ArrayList<>(pieces.length - 1);
-        for (int i = 1; i < pieces.length; i++)
-            kept.add(getTokenFactory().fromString(pieces[i]));
+        try
+        {
+            for (int i = 1; i < pieces.length; i++)
+                kept.add(getTokenFactory().fromString(pieces[i]));
+        }
+        catch (RuntimeException e)
+        {
+            logger.error("Ignoring the invalid shrinking state of {}: {}", endpoint, String.join(VersionedValue.DELIMITER_STR, pieces), e);
+            return;
+        }
 
         Collection<Token> current = getTokenMetadata().isMember(endpoint) ? getTokenMetadata().getTokens(endpoint) : Collections.emptyList();
-        if (!current.containsAll(kept))
-            logger.warn("Node {} is shrinking to tokens that are not a subset of its tokens: {} not in {}", endpoint, kept, current);
+        if (kept.isEmpty() || !current.containsAll(kept) || kept.size() >= current.size())
+        {
+            logger.error("Ignoring the shrinking state of {}: the kept tokens {} are not a strict subset of its tokens {}", endpoint, kept, current);
+            return;
+        }
         logger.info("Node {} is shrinking from {} to {} tokens", endpoint, current.size(), kept.size());
 
         getTokenMetadata().addShrinkingEndpoint(kept, endpoint);
@@ -5367,6 +5384,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     throw new UnsupportedOperationException("no other normal nodes in the ring; decommission would be pointless");
             if (operationMode != Mode.NORMAL && operationMode != DECOMMISSION_FAILED)
                 throw new UnsupportedOperationException("Node in " + operationMode + " state; wait for status to become normal or restart");
+            checkNoShrinkingNode("decommission", null);
         }
 
         if (!isDecommissioning.compareAndSet(false, true))
@@ -5733,6 +5751,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new UnsupportedOperationException("This node has more than one token and cannot be moved thusly.");
         }
 
+        checkNoShrinkingNode("move", null);
         List<String> keyspacesToProcess = ImmutableList.copyOf(Schema.instance.distributedKeyspaces().names());
 
         PendingRangeCalculatorService.instance.blockUntilFinished();
@@ -5782,16 +5801,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.debug("Successfully moved to new token {}", getLocalTokens().iterator().next());
     }
 
-    /**
-     * First release that understands the {@link VersionedValue#STATUS_SHRINKING} gossip state, SNAPSHOT builds
-     * included. Nodes running older code ignore it, so they would not send writes to the pending replicas.
-     */
-    @VisibleForTesting
-    static final CassandraVersion SHRINK_TOKENS_MIN_VERSION = new CassandraVersion("5.0.7.0");
-
     /** Limit of the encoded SHRINKING status, well under the 64 KiB limit of the VersionedValue serialization. */
     @VisibleForTesting
     static final int MAX_SHRINKING_STATUS_LENGTH = 32 * 1024;
+
+    /** At most one shrink at a time; not the StorageService monitor, which drain and shutdown need. */
+    private final AtomicBoolean shrinkInProgress = new AtomicBoolean();
 
     public void shrinkTokens(List<String> keptTokens) throws IOException
     {
@@ -5809,15 +5824,25 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (!kept.add(getTokenFactory().fromString(token)))
                 throw new IOException("Token " + token + " is listed more than once");
         }
-        shrinkTokens(kept);
+        if (!shrinkInProgress.compareAndSet(false, true))
+            throw new UnsupportedOperationException("A shrink is already running on this node");
+        try
+        {
+            shrinkTokens(kept);
+        }
+        finally
+        {
+            shrinkInProgress.set(false);
+        }
     }
 
     /**
      * Keeps only a subset of the tokens of this node, online: the ranges the node gives up are streamed to their new
      * replicas, which receive the writes in the meantime as pending replicas; then the node announces its new
-     * tokens. See docs/operations/num-tokens-reduction-design.md.
+     * tokens. Restarting the node aborts the operation (it restarts with its old tokens).
+     * See docs/operations/num-tokens-reduction-design.md.
      */
-    private synchronized void shrinkTokens(Set<Token> kept) throws IOException
+    private void shrinkTokens(Set<Token> kept) throws IOException
     {
         InetAddressAndPort localAddress = FBUtilities.getBroadcastAddressAndPort();
         Collection<Token> current = getLocalTokens();
@@ -5825,18 +5850,25 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         PendingRangeCalculatorService.instance.blockUntilFinished();
         checkCanShrinkTokens(localAddress, current, kept, keyspacesToProcess);
+        // refuse before announcing anything if the node would have to fetch data
+        RangeRelocator.checkShrinkOnlyStreamsOut(kept, keyspacesToProcess, getTokenMetadata());
 
         String description = String.format("Shrinking %s from %d to %d tokens", localAddress, current.size(), kept.size());
         logger.info("{}, keeping {}", description, kept);
         VersionedValue shrinking = valueFactory.shrinking(kept);
         Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS_WITH_PORT, shrinking);
         Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, shrinking);
-        setMode(Mode.MOVING, description, true);
+        setMode(Mode.SHRINKING, String.format("%s: sleeping %s ms before streaming", description, RING_DELAY_MILLIS), true);
+        boolean recorded = false;
         try
         {
-            setMode(Mode.MOVING, String.format("Sleeping %s ms before streaming", RING_DELAY_MILLIS), true);
             Uninterruptibles.sleepUninterruptibly(RING_DELAY_MILLIS, MILLISECONDS);
             PendingRangeCalculatorService.instance.blockUntilFinished();
+            // nothing else may have started in the meantime
+            checkNoOtherRangeMovement(localAddress);
+            Set<Token> announced = getTokenMetadata().getShrinkingEndpoints().get(localAddress);
+            if (!kept.equals(announced))
+                throw new IllegalStateException("The token metadata doesn't have the shrink of this node: " + announced);
 
             RangeRelocator relocator = RangeRelocator.forShrink(kept, keyspacesToProcess, getTokenMetadata());
             relocator.calculateToFromStreams();
@@ -5844,19 +5876,34 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             repairPaxosForTopologyChange("shrink");
             if (relocator.streamsNeeded())
             {
-                setMode(Mode.MOVING, "streaming the ranges given up to their new replicas", true);
+                setMode(Mode.SHRINKING, description + ": streaming the ranges given up to their new replicas", true);
                 relocator.stream().get();
             }
             else
             {
-                setMode(Mode.MOVING, "No ranges to stream", true);
+                setMode(Mode.SHRINKING, description + ": no ranges to stream", true);
             }
+
+            // commit point: record the new count first so that the node can restart with the new tokens until
+            // num_tokens is updated, then save the tokens
+            TokenCountOverride.record(current, kept, DatabaseDescriptor.getNumTokens());
+            recorded = true;
+            SystemKeyspace.updateTokens(kept);
         }
         catch (Throwable t)
         {
             // roll back: announce the unchanged tokens again, so that every node drops the shrinking state and the
             // pending ranges; the data already streamed is removed by a cleanup on the receiving nodes
             logger.error("{} failed, keeping the {} tokens of the node", description, current.size(), t);
+            try
+            {
+                if (recorded)
+                    TokenCountOverride.rollback(current, kept);
+            }
+            catch (Throwable e)
+            {
+                logger.warn("Could not roll back the token count override", e);
+            }
             setGossipTokens(current);
             getTokenMetadata().removeFromShrinking(localAddress);
             PendingRangeCalculatorService.instance.update();
@@ -5869,9 +5916,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new IOException(description + " failed, the node keeps its " + current.size() + " tokens: " + cause.getMessage(), cause);
         }
 
-        // record the new count before saving the tokens, so that the node can restart with them until num_tokens is updated
-        TokenCountOverride.record(kept, DatabaseDescriptor.getNumTokens());
-        setTokens(kept);
+        // the new tokens are saved: announce them
+        setGossipTokens(kept);
+        getTokenMetadata().updateNormalTokens(kept, localAddress);
+        setMode(Mode.NORMAL, false);
+        invalidateLocalRanges();
+        // let every coordinator learn the new tokens before the operator runs cleanup or the next step
+        logger.info("{} completed, sleeping {} ms for the new tokens to propagate", description, RING_DELAY_MILLIS);
+        Uninterruptibles.sleepUninterruptibly(RING_DELAY_MILLIS, MILLISECONDS);
         logger.info("{} completed. Run 'nodetool flush' and 'nodetool cleanup' on this node to remove the data of the ranges it gave up, and set num_tokens to {} in cassandra.yaml",
                     description, kept.size());
     }
@@ -5880,54 +5932,92 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         if (kept.isEmpty())
             throw new IllegalArgumentException("The node must keep at least one token");
+        if (kept.size() == 1 && current.size() > 1)
+            throw new IllegalArgumentException("Shrinking a node with vnodes to a single token is not supported");
         if (!current.containsAll(kept))
             throw new IllegalArgumentException("The tokens to keep must be tokens of this node; not owned: " + Sets.difference(kept, new HashSet<>(current)));
         if (kept.size() == current.size())
             throw new IllegalArgumentException("The node already has exactly these " + current.size() + " tokens");
+        for (Token token : kept)
+            if (getTokenFactory().toString(token).indexOf(VersionedValue.DELIMITER) >= 0)
+                throw new IllegalArgumentException("Tokens containing '" + VersionedValue.DELIMITER + "' are not supported: " + token);
         if (valueFactory.shrinking(kept).value.length() > MAX_SHRINKING_STATUS_LENGTH)
             throw new IllegalArgumentException("Too many tokens to keep (" + kept.size() + ") for the gossip status; shrink in more steps");
 
         if (operationMode != Mode.NORMAL)
             throw new UnsupportedOperationException("Node in " + operationMode + " state; wait for status to become normal or restart");
+        if (!Gossiper.instance.isEnabled())
+            throw new UnsupportedOperationException("Gossip is disabled; the other nodes would not learn about the shrink");
 
-        TokenMetadata metadata = getTokenMetadata();
-        if (!metadata.getBootstrapTokens().isEmpty() || metadata.getSizeOfLeavingEndpoints() > 0
-            || metadata.getSizeOfMovingEndpoints() > 0 || metadata.getSizeOfShrinkingEndpoints() > 0)
-            throw new UnsupportedOperationException(String.format("Other bootstrapping/leaving/moving/shrinking nodes detected, cannot shrink. Bootstrapping: %s; leaving: %s; moving: %s; shrinking: %s",
-                                                                  metadata.getBootstrapTokens().valueSet(), metadata.getLeavingEndpoints(),
-                                                                  metadata.getMovingEndpoints().stream().map(p -> p.right).collect(Collectors.toList()),
-                                                                  metadata.getShrinkingEndpoints().keySet()));
-
-        Map<InetAddressAndPort, EndpointState> states = new HashMap<>();
-        for (InetAddressAndPort endpoint : Gossiper.instance.getEndpoints())
-        {
-            EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-            if (state != null)
-                states.put(endpoint, state);
-        }
-        List<String> blockers = shrinkBlockers(states);
-        if (!blockers.isEmpty())
-            throw new UnsupportedOperationException("Cannot shrink: " + String.join("; ", blockers));
+        checkNoOtherRangeMovement(localAddress);
 
         for (String keyspaceName : keyspaces)
         {
             Keyspace keyspace = Keyspace.open(keyspaceName);
             if (keyspace.getReplicationStrategy().getReplicationFactor().hasTransientReplicas())
                 throw new UnsupportedOperationException("Keyspace " + keyspaceName + " uses transient replication, which is not supported by the shrink operation");
-            if (!metadata.getPendingRanges(keyspaceName, localAddress).isEmpty())
+            if (!getTokenMetadata().getPendingRanges(keyspaceName, localAddress).isEmpty())
                 throw new UnsupportedOperationException("Data is currently moving to this node; unable to shrink");
         }
 
-        if (ActiveRepairService.instance().parentRepairSessionsCount() > 0)
-            throw new UnsupportedOperationException("Repairs involving this node are running; wait for them to finish before shrinking");
+        int repairs = ActiveRepairService.instance().parentRepairSessionsCount();
+        if (repairs > 0)
+            throw new UnsupportedOperationException(repairs + " repair sessions involving this node are running; wait for them to finish, " +
+                                                    "or check them with 'nodetool repair_admin list', before shrinking");
     }
 
     /**
-     * @return why the cluster described by the gossip states can't run a shrink: a node that runs a version that
-     * doesn't know the SHRINKING state, or that is joining, leaving, moving, shrinking, being removed or replaced
+     * Range movements are refused while a node is shrinking: the pending ranges of a shrink are computed assuming
+     * no other movement.
+     *
+     * @param except a node the operation is about, allowed to be shrinking (e.g. a dead shrinking node being removed)
+     */
+    private void checkNoShrinkingNode(String operation, InetAddressAndPort except)
+    {
+        Set<InetAddressAndPort> shrinking = new HashSet<>(getTokenMetadata().getShrinkingEndpoints().keySet());
+        shrinking.remove(except);
+        if (!shrinking.isEmpty())
+            throw new UnsupportedOperationException(String.format("Cannot %s while nodes are shrinking their tokens: %s", operation, shrinking));
+    }
+
+    /**
+     * Refuses if another range movement is in progress, according to the token metadata and to gossip, or if a node
+     * can't take part in the shrink (see {@link #shrinkBlockers}). The shrink of this node itself is ignored.
+     */
+    private void checkNoOtherRangeMovement(InetAddressAndPort localAddress)
+    {
+        TokenMetadata metadata = getTokenMetadata();
+        Set<InetAddressAndPort> shrinking = new HashSet<>(metadata.getShrinkingEndpoints().keySet());
+        shrinking.remove(localAddress);
+        if (!metadata.getBootstrapTokens().isEmpty() || metadata.getSizeOfLeavingEndpoints() > 0
+            || metadata.getSizeOfMovingEndpoints() > 0 || !shrinking.isEmpty())
+            throw new UnsupportedOperationException(String.format("Other bootstrapping/leaving/moving nodes detected (including shrinking nodes), cannot shrink. Bootstrapping: %s; leaving: %s; moving: %s; shrinking: %s",
+                                                                  metadata.getBootstrapTokens().valueSet(), metadata.getLeavingEndpoints(),
+                                                                  metadata.getMovingEndpoints().stream().map(p -> p.right).collect(Collectors.toList()),
+                                                                  shrinking));
+
+        Map<InetAddressAndPort, EndpointState> states = new HashMap<>();
+        for (InetAddressAndPort endpoint : Gossiper.instance.getEndpoints())
+        {
+            if (endpoint.equals(localAddress))
+                continue;
+            EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+            if (state != null)
+                states.put(endpoint, state);
+        }
+        List<String> blockers = shrinkBlockers(states, FailureDetector.instance::isAlive);
+        if (!blockers.isEmpty())
+            throw new UnsupportedOperationException("Cannot shrink: " + String.join("; ", blockers));
+    }
+
+    /**
+     * @return why the cluster described by the gossip states can't run a shrink: a node that doesn't advertise
+     * {@link ApplicationState#SHRINK_TOKENS_SUPPORTED} (it would ignore the SHRINKING state and not send writes to the
+     * pending replicas), that is down or unreachable, or that is joining, leaving, moving, shrinking, being removed or
+     * replaced. Nodes that left or were removed are ignored.
      */
     @VisibleForTesting
-    static List<String> shrinkBlockers(Map<InetAddressAndPort, EndpointState> states)
+    static List<String> shrinkBlockers(Map<InetAddressAndPort, EndpointState> states, java.util.function.Predicate<InetAddressAndPort> isAlive)
     {
         List<String> blockers = new ArrayList<>();
         for (Map.Entry<InetAddressAndPort, EndpointState> entry : states.entrySet())
@@ -5949,36 +6039,15 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     blockers.add(String.format("node %s is in state %s", endpoint, status));
                     break;
             }
-
-            VersionedValue releaseVersion = state.getApplicationState(ApplicationState.RELEASE_VERSION);
-            CassandraVersion version = null;
-            try
+            if (state.getApplicationState(ApplicationState.SHRINK_TOKENS_SUPPORTED) == null)
             {
-                version = releaseVersion == null ? null : new CassandraVersion(releaseVersion.value);
+                VersionedValue releaseVersion = state.getApplicationState(ApplicationState.RELEASE_VERSION);
+                blockers.add(String.format("node %s (version %s) does not support shrinking tokens", endpoint, releaseVersion == null ? "unknown" : releaseVersion.value));
             }
-            catch (IllegalArgumentException e)
-            {
-                // reported below
-            }
-            if (version == null)
-                blockers.add(String.format("the version of node %s is unknown (%s)", endpoint, releaseVersion == null ? "none" : releaseVersion.value));
-            else if (!supportsShrinkTokens(version))
-                blockers.add(String.format("node %s runs %s, which does not support shrinking tokens (%s or later is required)", endpoint, version, SHRINK_TOKENS_MIN_VERSION));
+            if (!isAlive.test(endpoint))
+                blockers.add(String.format("node %s is down or unreachable; bring it back or remove it", endpoint));
         }
         return blockers;
-    }
-
-    /**
-     * Compares major, minor, patch and hotfix only, so that the SNAPSHOT and other pre-release builds of
-     * {@link #SHRINK_TOKENS_MIN_VERSION} are accepted.
-     */
-    @VisibleForTesting
-    static boolean supportsShrinkTokens(CassandraVersion version)
-    {
-        int c = version.compareTo(SHRINK_TOKENS_MIN_VERSION, true);
-        if (c != 0)
-            return c > 0;
-        return version.hotfix >= SHRINK_TOKENS_MIN_VERSION.hotfix;
     }
 
     public String getRemovalStatus()
@@ -6066,6 +6135,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (endpoint.equals(myAddress))
              throw new UnsupportedOperationException("Cannot remove self");
 
+        checkNoShrinkingNode("remove a node", endpoint);
+
         if (Gossiper.instance.getLiveMembers().contains(endpoint))
             throw new UnsupportedOperationException("Node " + endpoint + " is alive and owns this ID. Use decommission command to remove it from the ring");
 
@@ -6152,6 +6223,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public boolean isMoving()
     {
         return operationMode == Mode.MOVING;
+    }
+
+    public boolean isShrinking()
+    {
+        return operationMode == Mode.SHRINKING;
     }
 
     public boolean isJoining()

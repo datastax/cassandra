@@ -238,6 +238,12 @@ public class VersionedValue implements Comparable<VersionedValue>
             return new VersionedValue(VersionedValue.STATUS_MOVING + VersionedValue.DELIMITER + partitioner.getTokenFactory().toString(token));
         }
 
+        /** Value of {@link ApplicationState#SHRINK_TOKENS_SUPPORTED}. */
+        public VersionedValue shrinkTokensSupported()
+        {
+            return new VersionedValue("true");
+        }
+
         /**
          * @param keptTokens the tokens the node keeps
          */

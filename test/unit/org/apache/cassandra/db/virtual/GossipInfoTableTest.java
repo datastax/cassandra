@@ -75,7 +75,8 @@ public class GossipInfoTableTest extends CQLTester
 
         assertThat(resultSet.size()).isEqualTo(1);
         UntypedResultSet.Row row = resultSet.one();
-        assertThat(row.getColumns().size()).isEqualTo(66);
+        // includes the value and version columns of SHRINK_TOKENS_SUPPORTED
+        assertThat(row.getColumns().size()).isEqualTo(68);
 
         assertThat(endpoint).isNotNull();
         assertThat(localState).isNotNull();

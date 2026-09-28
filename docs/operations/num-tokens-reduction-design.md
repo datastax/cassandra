@@ -120,148 +120,153 @@ that, and runs cleanup after every step. The tool plans a 200-node ring in about
 default 256 MB heap. Conclusion:
 subset-only is good enough, and Phase 2 proceeds as designed.
 
-## 4. Phase 2 — core: shrink a node's token set online
+## 4. Phase 2 — core: shrink a node's token set online (implemented)
 
 ### 4.1 Operator interface
 
-* `nodetool settokens --keep-file <file>` (the planner's output), or
-  `--keep <t1,t2,...>`; plus a JMX operation `StorageServiceMBean.shrinkTokens(List<String>)`.
-* Preconditions (refused otherwise):
-  * the new set is a strict, non-empty subset of the node's current tokens;
-  * the node is `NORMAL`, and the local token metadata shows no bootstrapping, leaving,
-    moving or shrinking node (the check done before bootstrap in `prepareForBootstrap`:
-    "Other bootstrapping/leaving/moving nodes detected"; `move` itself does not check this).
-    This only reflects the local gossip view, so two operators starting on two nodes at the
-    same time are not detected: the Phase 3 script serialises the steps. Before bootstrap the
-    check runs only with `useStrictConsistency`; the shrink always runs it;
-  * no endpoint is in HIBERNATE or BOOT_REPLACE state. A replacement at the same address gossips
-    HIBERNATE, gets no bootstrap tokens and is skipped by the version gate (§4.2), yet it may run
-    older code or turn NORMAL while X is SHRINKING and then ignore the status;
-  * every node in the cluster runs a version that understands the new gossip state
-    (§4.2);
-  * the node has no pending ranges;
-  * no keyspace uses transient replication. The pending-range calculation compares endpoint
-    sets only (`Sets.difference` in the moving-endpoint loop), so another replica switching
-    from transient to full when X drops out would get no pending full range.
-* `--dry-run` prints the ranges and estimated bytes each target node will receive.
+* `nodetool settokens --keep-file <file>` (the planner's output) or `--keep <t1,t2,...>`; JMX
+  `StorageServiceMBean.shrinkTokens(List<String>)`. It blocks until the operation is done.
+  **Restarting the node aborts a shrink**: the node comes back with its previous tokens.
+* Preconditions (refused otherwise), checked before anything is announced:
+  * the new set is a strict, non-empty subset of the node's current tokens, with more than one token
+    (shrinking a vnode node to a single token is refused: `num_tokens > 1` would still drive
+    `DiskBoundaryManager` and `RangeCommands`), and its encoded status fits in 32 KB;
+  * the node is `NORMAL`, gossip is enabled, and no other shrink runs on the node (a dedicated
+    guard, not the `StorageService` monitor: `drain` and shutdown are never blocked);
+  * the local token metadata shows no bootstrapping, leaving, moving or shrinking node;
+  * every endpoint in gossip that didn't leave and wasn't removed:
+    * advertises `ApplicationState.SHRINK_TOKENS_SUPPORTED` (§4.2);
+    * is alive;
+    * is not bootstrapping, replacing, hibernating, leaving, moving, shrinking or being removed;
+  * no keyspace uses transient replication (the pending-range calculation compares endpoint sets
+    only), and the node has no pending ranges;
+  * no repair session involving the node is running;
+  * the node would not have to fetch any range (`RangeRelocator.checkShrinkOnlyStreamsOut`, computed
+    on a copy of the ring: impossible with SimpleStrategy and NetworkTopologyStrategy, checked for
+    the others).
+* The other range movements refuse to start while a node is shrinking: `decommission`, `move`,
+  `removenode` (except removing the shrinking node itself) and node replacement, as well as strict
+  bootstrap. This uses the local view only, like the existing checks, so the Phase 3 script
+  serialises the steps.
 
 ### 4.2 Gossip
 
-* New status `SHRINKING,<t1>,<t2>,...` listing the tokens kept
-  (`VersionedValueFactory.shrinking(Collection<Token>)`), published in both
-  `STATUS_WITH_PORT` and the legacy `STATUS`, as `move` does.
-* `nodetool ring`/`status` show the state in an 8-character column, and the planner refuses
-  rows whose state isn't `Normal`. The label for a shrinking node must fit (e.g. `Shrink`), or it
-  runs into the load column.
-* Size: `MAX_NUM_TOKENS` is 1536 and a `RandomPartitioner` token can be 39 digits, so the
-  worst case (~61 KB) comes close to the 65535-byte `writeUTF` limit of `VersionedValue`
-  serialization. The command refuses a kept set whose encoded status exceeds 32 KB. With
-  Murmur3 (≤ 20 characters per token) that still allows about 1500 tokens, so real rings
-  (≤ 256 tokens) are far from the limit.
-* Nodes running older code **silently ignore unknown statuses** (`StorageService.onChange`
-  switch), so they would not send writes to the pending replicas. The operation is therefore
-  gated on a minimum release version (decision 2026-09-28): the first release that contains
-  this code. `Gossiper.getMinVersion()` is not used as is. It is cached for 60 s, it returns
-  `NULL_VERSION` while gossip stabilises, and it skips endpoints in LEFT, REMOVED or HIBERNATE
-  state. The gate reads `RELEASE_VERSION` of every endpoint in gossip except those in LEFT or
-  REMOVED state (live or down, HIBERNATE included, which §4.1 refuses anyway), and refuses if
-  any version is missing, unparsable or older.
-* On completion the node publishes `TOKENS` = kept set and `NORMAL`, exactly like `move`. Peers
-  already handle a `NORMAL` endpoint whose token set shrank: `TokenMetadata.updateNormalTokens`
-  replaces the endpoint's tokens.
+* **Capability** (decision 2026-09-28, replacing a version gate). Every node running this code
+  publishes `ApplicationState.SHRINK_TOKENS_SUPPORTED`. The state is added right above the padding
+  states, so older nodes see its ordinal as `X1` and ignore it, and it is not sent to pre-4.0
+  peers. A version gate was rejected because `base.version` has been 5.0.7.0 for months: builds
+  without this code already report it.
+* **Status.** A new status `SHRINKING,<t1>,<t2>,...` lists the kept tokens
+  (`VersionedValueFactory.shrinking`). It is published in `STATUS_WITH_PORT` and in the legacy
+  `STATUS`, as `move` does. Tokens containing the delimiter `,` are refused.
+* **How it is displayed.** `nodetool ring`/`status` show a shrinking node as `Moving`
+  (`getMovingNodes` includes shrinking nodes), which fits the 8-character state column that the
+  planner parses. The node's own operation mode is `SHRINKING`.
+* **Receiving the status.** A peer registers a shrink only if the kept tokens are a non-empty strict
+  subset of the node's tokens; otherwise it logs an error and ignores the state. The end of the
+  shrink (`NORMAL` with the new tokens) and a rollback (`NORMAL` with the same tokens) both clear the
+  state in `handleStateNormal`. A peer that missed the `SHRINKING` state gets the new tokens there
+  too, and fires the "moved" notification when a member's token set changed.
 
 ### 4.3 Token metadata and pending ranges
 
-* `TokenMetadata`: add `shrinkingEndpoints: Map<InetAddressAndPort, Set<Token>>` (kept
-  tokens) with `addShrinkingEndpoint` / `removeFromShrinking` (bumping the ring version),
-  cleared by `updateNormalTokens`/`removeEndpoint`/`clearUnsafe`, applied by
-  `cloneAfterAllSettled`, and copied into the pending-range snapshot. It must be added to
-  every place that lists range movements, in particular:
-  * the early return of `calculatePendingRanges` / `unsafeCalculatePendingRanges`
-    (`bootstrapTokens.isEmpty() && leavingEndpoints.isEmpty() && movingEndpoints.isEmpty()`).
-    If it is missing there, no pending range is computed and writes are lost;
-  * the "other bootstrapping/leaving/moving nodes" checks, `nodetool status`/`ring` state
-    reporting and `getMovingEndpoints`-style accessors.
-* `calculatePendingRanges`: process shrinking endpoints like the existing moving-endpoint loop.
-  Compute the replicas before and after `allLeftMetadata.updateNormalTokens(kept, endpoint)`;
-  every endpoint that becomes a replica of an affected range gets a pending range. With the
-  subset-only rule, the shrinking node itself never gets one.
-* Writes: coordinators already add pending replicas to the write set, so no change.
-  Reads: served by the current natural replicas until the switch to `NORMAL`, as for
-  move/decommission.
+* `TokenMetadata.shrinkingEndpoints` maps each shrinking endpoint to the tokens it keeps
+  (`addShrinkingEndpoint` / `removeFromShrinking`, both bumping the ring version). It is cleared
+  by `updateNormalTokens`, `removeEndpoint` and `clearUnsafe`, applied by `cloneAfterAllSettled`,
+  included in the early return of `unsafeCalculatePendingRanges`, and checked when a node's
+  address changes.
+* **Pending ranges.** `calculatePendingRanges` builds the ring with every shrink done, then walks
+  the current ring token by token. For each range, the new replicas that aren't current replicas
+  become pending for that range.
+  * This is linear in the ring size: two natural-replica walks per token, per keyspace. A 24×256
+    ring takes well under a second.
+  * It gives disjoint ranges per endpoint, even with several shrinking nodes (a peer can briefly
+    see two shrinks when one ends and the next starts). An endpoint already pending for the range
+    because of another movement is skipped, so the write path never sees duplicate endpoints.
+* **Reads and writes.** Coordinators add the pending replicas to writes. Reads are served by the
+  current natural replicas until the switch to `NORMAL`, as for move and decommission.
 
 ### 4.4 Local operation (`StorageService.shrinkTokens`)
 
-Mirrors `move(Token)`:
-
-1. Validate the preconditions, set mode `SHRINKING`, gossip the `SHRINKING` status, and sleep
-   `RING_DELAY` so that every coordinator sees the pending ranges.
-2. `repairPaxosForTopologyChange("shrink")` (Paxos v2), like bootstrap/decommission/move.
-3. Stream out: `RangeRelocator` generalised to a token set. Today `calculateToFromStreams`
-   loops over the target tokens and asserts `currentTokens.size() == 1`. For a shrink it must
-   call `getPendingAddressRanges(metadata, keptSet, endpoint)` **once** with the whole kept
-   set. If the resulting fetch side isn't empty (the subset property doesn't hold for this
-   strategy), abort before streaming.
-   Hints: a hint for X delivered after X has streamed a range is applied on X only, so the new
-   replica misses it. The Phase 3 script checks with `nodetool listpendinghints` on every node
-   that no hints for X are pending before starting. Writes during the operation reach the new
-   replicas through the pending ranges. The batchlog is unaffected.
-4. `setTokens(kept)`: `SystemKeyspace.updateTokens`, `TokenMetadata` update, gossip `TOKENS` and
-   `NORMAL`, bump the ring version. Disk boundaries and UCS replica-aware shards are recomputed
-   on ring-version change; verify that for `DiskBoundaryManager`, `ShardManagerReplicaAware`
-   and the CNDB token tracker hook in `TokenAllocation`.
-5. Log and `nodetool` output: remind to run `nodetool flush` and `nodetool cleanup` on this
-   node, and to update `num_tokens` in `cassandra.yaml`. Cleanup only rewrites sstables; the
-   writes the node received for the ranges it gave up, while it was still their replica, are in
-   its memtables until flushed.
+1. Check the preconditions (§4.1), gossip `SHRINKING`, set mode `SHRINKING`, and sleep
+   `RING_DELAY`.
+2. Re-check that no other range movement started and that every node can still take part, and that
+   the local token metadata has this shrink.
+3. `repairPaxosForTopologyChange("shrink")` (Paxos v2): it covers the local and pending ranges, i.e.
+   every range the node gives up. Paxos v1 state (`system.paxos`) is not streamed, as with move and
+   decommission.
+4. Stream out with `RangeRelocator.forShrink(kept)`.
+   * The ranges the node gives up go to their new replicas, computed against the current ring
+     with only this shrink applied.
+   * Hints: a hint for the node delivered after it has streamed a range is applied on the node
+     only, so the Phase 3 script checks that no hints for it are pending (`nodetool
+     listpendinghints` on every node) before starting.
+5. Commit point:
+   * `TokenCountOverride.record(previous, kept, num_tokens)`, synced to disk;
+   * then `SystemKeyspace.updateTokens(kept)`.
+6. Announce `TOKENS` and `NORMAL` with the new tokens, update the local token metadata, set mode
+   `NORMAL`, then sleep `RING_DELAY` so that every coordinator knows the new tokens before cleanup
+   or the next step.
+7. The log and the nodetool output remind the operator:
+   * run `nodetool flush` and then `nodetool cleanup` on the node. Cleanup only rewrites sstables,
+     and the writes the node received for the ranges it gave up, while it was still their
+     replica, are in memtables until flushed;
+   * update `num_tokens`.
 
 Failure handling:
 
-* Streaming fails, node still up: explicit rollback. Gossip `NORMAL` with the unchanged
-  tokens, so peers drop the shrinking state and the pending ranges, and set the mode back
-  to `NORMAL`. `move` lacks this and stays `MOVING` forever; the shrink must not copy that.
-* Node restarts mid-operation, before step 4: `system.local` still has the old tokens. On
-  restart the node announces `NORMAL` with them and peers drop the shrinking state
-  (`handleStateNormal`).
-* Crash after step 4 has written `system.local`: the tokens and the recorded token count (§4.5)
-  are written in the same `system.local` mutation, so the restart accepts the new count.
-* In every case, data already streamed to the would-be replicas is harmless and removed by
-  their next `cleanup`, and the operation can be retried.
+* **Any failure before the commit point, node still up.** This covers streaming, the re-checks,
+  and writing the record or `system.local`. The node rolls back: it gossips `NORMAL` with the
+  unchanged tokens, so every peer drops the shrinking state and the pending ranges; it clears its
+  own state, rolls the record back, and sets the mode back to `NORMAL`.
+* **The node restarts mid-operation**, including a graceful stop, which is never blocked by the
+  shrink. `system.local` still has the old tokens, the node announces `NORMAL` with them, and
+  peers drop the shrinking state. A dead shrinking node can also be removed (`removenode` /
+  `assassinate`), which clears the state.
+* **In every case**, the data already streamed to the would-be replicas is harmless and removed
+  by their next cleanup, and the operation can be retried.
 
-### 4.5 Restart after a successful shrink
+UCS and disk boundaries: the local ranges, disk boundaries and the replica-aware shard manager are
+recomputed when the ring version changes, which the shrink bumps. The CNDB token tracker hook in
+`TokenAllocation` is used by CNDB outside this repository.
 
-The `system.local` token count now differs from `num_tokens` in the yaml, and `joinTokenRing`
-would refuse to start. Decision (2026-09-28): **record the shrink and accept it**. Step 4
-writes the new token count to `system.local` (a new nullable column, e.g.
-`token_count_override`, in the same mutation as the tokens). At startup `joinTokenRing`
-accepts saved tokens whose count differs from `num_tokens` only if it equals the recorded
-count, and logs a warning to update `num_tokens` in `cassandra.yaml`. When the yaml matches
-again, the override is cleared.
+### 4.5 Restart after a shrink (`TokenCountOverride`)
 
-In this fork `system.local` is written through `Nodes`/`LocalInfo`, one INSERT per save
-(`NodesPersistence.saveLocal`, `INSERT_LOCAL_STMT`). "Same mutation" therefore means: a new
-`LocalInfo` field, the column in `INSERT_LOCAL_STMT` and in the `SystemKeyspace` table
-definition, and handling in `CC4UpgradeNodesPersistence` / `CC4NodesFileReader`. Downgrade
-risk: an older binary reading `system.local` sstables that contain the unknown column. The
-Phase 2 PR must test the downgrade, or document that downgrading requires the override to be
-cleared first.
+The count of the saved tokens differs from `num_tokens` until the configuration is updated.
+Decision (2026-09-28): record the shrink and accept it, in a file rather than in a `system.local`
+column (no schema change, no downgrade risk).
 
-The Phase 0 restart message ("the number of tokens of a node is fixed when it joins the
-ring") becomes inaccurate once this ships; the Phase 2 PR updates it.
+* `<metadata_directory>/token_count_override` is written atomically and synced (file and
+  directory). It holds:
+  * the token sets the node may have saved: the new set, and the previous one, because the record
+    is written before `system.local`;
+  * the accepted `num_tokens` values: every value configured when a shrink ran, and every token
+    count the node had. So a yaml updated between two rounds is accepted, but not an unrelated
+    value.
+* At startup, `joinTokenRing` accepts saved tokens whose count differs from `num_tokens` only if
+  both the token set and `num_tokens` are in the record, and logs a warning to update the yaml.
+  When `num_tokens` matches the saved tokens again, the record is deleted.
+* A read error is logged and treated as "no record", so the node refuses to start with the usual
+  message.
 
 ### 4.6 Tests
 
-* Unit: `TokenMetadata` pending ranges for shrinking endpoints (SimpleStrategy, NTS with 1
-  rack and with racks == RF), clone-after-settled, interaction with a concurrent leave (must be
-  refused).
-* dtests, extending `ChangeNumTokensTest`:
-  * shrink one node under continuous `QUORUM` writes, then verify with `ALL` reads and
-    `nodetool repair --validate`-style checksums that no write was lost;
-  * restart the shrinking node in the middle of streaming and retry;
-  * refusal while another range movement is in progress, and when the new set isn't a subset;
-  * full rounds 256 → 64 → 16 on 4 nodes following a planner output, with ownership asserted
-    against the planner's prediction;
-  * mixed-version refusal (a node that reports an older `RELEASE_VERSION`).
+* Unit, `ShrinkingEndpointPendingRangesTest`, against the strategies' natural replicas on random
+  clusters (SimpleStrategy and NTS, 1–2 DCs, random racks):
+  * pending endpoints are exactly the new replicas, including with several shrinking nodes, with
+    no duplicates;
+  * the shrinking node never gains a range, and no other node loses one;
+  * bookkeeping, and the time of a 24×256 ring.
+* Unit, `ShrinkTokensChecksTest`: the capability, liveness and state gate; the override across
+  rounds, crash windows and rollbacks.
+* dtests, `ShrinkTokensTest` (4 nodes, 32 random tokens, RF 3):
+  * a shrink under continuous `QUORUM` writes, with no write failures, every row on all its
+    replicas of the new ring, and exact placement after flush and cleanup;
+  * the refusals, and the restart rules;
+  * rollback on a streaming failure, on a failure at the commit point, and with gossip disabled;
+  * a restart during streaming: the graceful stop doesn't hang, other movements are refused
+    meanwhile, and the node comes back with its tokens and can retry;
+  * a planner-driven 32 → 8 reduction, where the ownership matches the planner's prediction.
 
 ## 5. Phase 3 — orchestration and runbook
 
@@ -287,7 +292,10 @@ ring") becomes inaccurate once this ships; the Phase 2 PR updates it.
 
 1. Only subsets of the current tokens (§1).
 2. Replacement with a different `num_tokens` is refused at startup (§2).
-3. Restart after a shrink: record the new count in `system.local`, accept it, warn (§4.5).
-4. Version gate: minimum release version, read directly from gossip (§4.2).
-5. Planner default: halve the token count each round; the factor or explicit rounds can be
+3. Restart after a shrink: record the new count and accept it, in a marker file in the metadata
+   directory rather than a `system.local` column (§4.5).
+4. Cluster support: a gossip capability (`SHRINK_TOKENS_SUPPORTED`), not a minimum version, which
+   builds without the code already report (§4.2).
+5. Nodes that are down or unreachable block a shrink (§4.1).
+6. Planner default: halve the token count each round; the factor or explicit rounds can be
    passed (§3).

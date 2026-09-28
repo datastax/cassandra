@@ -171,6 +171,80 @@ public class ShrinkingEndpointPendingRangesTest
         assertThat(checked).isGreaterThan(1000);
     }
 
+    /**
+     * Several nodes shrinking at the same time (e.g. a peer that hasn't seen the end of a shrink yet when the next one
+     * starts): the pending endpoints of every token are the new replicas of the ring with every shrink done, without
+     * duplicates (which would make the writes fail).
+     */
+    @Test
+    public void testSeveralShrinkingEndpoints() throws UnknownHostException
+    {
+        Random random = new Random(13);
+        for (int iteration = 0; iteration < 200; iteration++)
+        {
+            Cluster cluster = randomCluster(random, 1 + random.nextInt(2));
+            TokenMetadata metadata = cluster.metadata();
+            AbstractReplicationStrategy strategy = strategy(random, cluster, metadata);
+            TokenMetadata before = metadata.cloneOnlyTokenMap();
+            for (Map.Entry<InetAddressAndPort, List<Token>> entry : cluster.tokens.entrySet())
+            {
+                if (entry.getValue().size() > 1 && random.nextBoolean())
+                {
+                    List<Token> current = new ArrayList<>(entry.getValue());
+                    Collections.shuffle(current, random);
+                    metadata.addShrinkingEndpoint(current.subList(0, 1 + random.nextInt(current.size() - 1)), entry.getKey());
+                }
+            }
+            metadata.calculatePendingRanges(strategy, KEYSPACE);
+            TokenMetadata after = metadata.cloneAfterAllSettled();
+            for (Token token : before.sortedTokens())
+            {
+                Set<InetAddressAndPort> oldReplicas = strategy.calculateNaturalReplicas(token, before).endpoints();
+                Set<InetAddressAndPort> newReplicas = strategy.calculateNaturalReplicas(token, after).endpoints();
+                // pendingEndpointsForToken throws on duplicate endpoints
+                assertThat(metadata.pendingEndpointsForToken(token, KEYSPACE).endpoints()).isEqualTo(Sets.difference(newReplicas, oldReplicas));
+            }
+        }
+    }
+
+    /**
+     * The pending ranges of a shrink are computed on every node, for every keyspace: a 256-token ring must be quick.
+     */
+    @Test
+    public void testPendingRangesOfLargeRing() throws UnknownHostException
+    {
+        Random random = new Random(14);
+        Cluster cluster = new Cluster();
+        Set<Token> used = new HashSet<>();
+        for (int i = 1; i <= 24; i++)
+        {
+            InetAddressAndPort endpoint = InetAddressAndPort.getByName("127.0.1." + i);
+            cluster.dcs.put(endpoint, "dc1");
+            cluster.racks.put(endpoint, "rack" + (i % 3));
+            List<Token> tokens = new ArrayList<>();
+            while (tokens.size() < 256)
+            {
+                Token token = Murmur3Partitioner.instance.getRandomToken(random);
+                if (used.add(token))
+                    tokens.add(token);
+            }
+            cluster.tokens.put(endpoint, tokens);
+        }
+        TokenMetadata metadata = cluster.metadata();
+        NetworkTopologyStrategy strategy = new NetworkTopologyStrategy(KEYSPACE, metadata, cluster.snitch, Collections.singletonMap("dc1", "3"));
+        InetAddressAndPort shrinking = InetAddressAndPort.getByName("127.0.1.1");
+        metadata.addShrinkingEndpoint(cluster.tokens.get(shrinking).subList(0, 128), shrinking);
+        long start = System.nanoTime();
+        metadata.calculatePendingRanges(strategy, KEYSPACE);
+        long millis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(millis).as("pending ranges of a 24 x 256 token ring in %s ms", millis).isLessThan(5000);
+        int pending = 0;
+        for (InetAddressAndPort endpoint : cluster.tokens.keySet())
+            pending += metadata.getPendingRanges(KEYSPACE, endpoint).size();
+        assertThat(pending).isGreaterThan(0);
+        assertThat(metadata.getPendingRanges(KEYSPACE, shrinking)).isEmpty();
+    }
+
     @Test
     public void testShrinkingEndpointBookkeeping() throws UnknownHostException
     {

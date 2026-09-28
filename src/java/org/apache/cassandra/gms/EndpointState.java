@@ -587,6 +587,8 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
                 return Map.of();
             case INDEX_STATUS:
                 return Map.of();
+            case SHRINK_TOKENS_SUPPORTED:
+                return Map.of();
             case RELEASE_VERSION:
                 return Map.of(ApplicationState.RELEASE_VERSION, filterValue(state.getKey(), vv, version));
             default:

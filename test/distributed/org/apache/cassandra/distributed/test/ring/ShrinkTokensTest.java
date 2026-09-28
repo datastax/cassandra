@@ -17,6 +17,7 @@
 package org.apache.cassandra.distributed.test.ring;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,20 +25,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import net.bytebuddy.ByteBuddy;
-import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
-import net.bytebuddy.implementation.MethodDelegation;
-import net.bytebuddy.implementation.bind.annotation.SuperCall;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.dht.tokenallocator.TokenReductionPlanner;
@@ -51,9 +48,8 @@ import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.TokenCountOverride;
-import org.apache.cassandra.streaming.StreamState;
 
-import static net.bytebuddy.matcher.ElementMatchers.named;
+import static org.apache.cassandra.config.CassandraRelevantProperties.RING_DELAY;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,17 +58,24 @@ import static org.awaitility.Awaitility.await;
 
 /**
  * In-place reduction of the number of tokens of live nodes with {@code StorageService.shrinkTokens} (nodetool
- * settokens), see docs/operations/num-tokens-reduction-design.md.
+ * settokens), see docs/operations/num-tokens-reduction-design.md. Failures are in {@link ShrinkTokensFailureTest}.
  */
 public class ShrinkTokensTest extends TestBaseImpl
 {
     private static final Logger logger = LoggerFactory.getLogger(ShrinkTokensTest.class);
 
-    private static final int NODES = 4;
-    private static final int TOKENS = 32;
-    private static final int ROWS = 2000;
+    static final int NODES = 4;
+    static final int TOKENS = 32;
+    static final int ROWS = 2000;
 
-    private static TokenSupplier randomTokens(long seed)
+    @BeforeClass
+    public static void setUpRingDelay()
+    {
+        // every shrink waits RING_DELAY before streaming and after announcing its new tokens
+        RING_DELAY.setLong(5000);
+    }
+
+    static TokenSupplier randomTokens(long seed)
     {
         Random random = new Random(seed);
         Set<Long> used = new HashSet<>();
@@ -91,33 +94,35 @@ public class ShrinkTokensTest extends TestBaseImpl
         return node -> tokens.get(node - 1);
     }
 
-    private static Cluster.Builder builder(long seed)
+    static Cluster.Builder builder(long seed)
     {
         return Cluster.build(NODES)
+                      // ports that don't clash with other clusters running on the same host
+                      .withDynamicPortAllocation(true)
                       .withConfig(c -> c.with(GOSSIP, NETWORK))
                       .withTokenCount(TOKENS)
                       .withTokenSupplier(randomTokens(seed));
     }
 
-    private static void createSchema(Cluster cluster)
+    static void createSchema(Cluster cluster)
     {
         cluster.schemaChange(withKeyspace("CREATE KEYSPACE %s WITH replication = {'class': 'NetworkTopologyStrategy', 'datacenter0': 3}"));
         cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v int)"));
     }
 
-    private static void write(Cluster cluster, int from, int to)
+    static void write(Cluster cluster, int from, int to)
     {
         for (int i = from; i < to; i++)
             cluster.coordinator(2).execute(withKeyspace("INSERT INTO %s.tbl (pk, v) VALUES (?, ?)"), ConsistencyLevel.QUORUM, i, i);
     }
 
-    private static List<String> tokens(IInvokableInstance instance)
+    static List<String> tokens(IInvokableInstance instance)
     {
         return instance.callOnInstance(() -> new ArrayList<>(StorageService.instance.getTokens()));
     }
 
     /** Tokens of {@code endpoint} as seen by {@code observer}. */
-    private static Set<String> tokensSeenBy(IInvokableInstance observer, IInvokableInstance endpoint)
+    static Set<String> tokensSeenBy(IInvokableInstance observer, IInvokableInstance endpoint)
     {
         String address = endpoint.config().broadcastAddress().getAddress().getHostAddress() + ':' + endpoint.config().broadcastAddress().getPort();
         return observer.callOnInstance(() -> {
@@ -135,12 +140,12 @@ public class ShrinkTokensTest extends TestBaseImpl
         });
     }
 
-    private static String address(IInvokableInstance instance)
+    static String address(IInvokableInstance instance)
     {
         return instance.config().broadcastAddress().getAddress().getHostAddress() + ':' + instance.config().broadcastAddress().getPort();
     }
 
-    private static void shrink(IInvokableInstance instance, List<String> keep)
+    static void shrink(IInvokableInstance instance, List<String> keep)
     {
         instance.runOnInstance(() -> {
             try
@@ -155,13 +160,13 @@ public class ShrinkTokensTest extends TestBaseImpl
     }
 
     /** Cleanup only rewrites sstables: flush first, the memtables hold writes received while the node was a replica. */
-    private static void cleanup(IInvokableInstance instance)
+    static void cleanup(IInvokableInstance instance)
     {
         instance.nodetoolResult("flush", KEYSPACE).asserts().success();
         instance.nodetoolResult("cleanup", KEYSPACE).asserts().success();
     }
 
-    private static Set<Integer> localKeys(IInvokableInstance instance)
+    static Set<Integer> localKeys(IInvokableInstance instance)
     {
         Set<Integer> keys = new HashSet<>();
         for (Object[] row : instance.executeInternal(withKeyspace("SELECT pk FROM %s.tbl")))
@@ -173,7 +178,7 @@ public class ShrinkTokensTest extends TestBaseImpl
      * Every key is on all its replicas according to the current ring; with {@code exact}, the nodes have no other key
      * (i.e. after cleanup).
      */
-    private static void assertDataPlacement(Cluster cluster, Set<Integer> keys, boolean exact)
+    static void assertDataPlacement(Cluster cluster, Set<Integer> keys, boolean exact)
     {
         String ks = KEYSPACE;
         List<Integer> keyList = new ArrayList<>(keys);
@@ -207,8 +212,10 @@ public class ShrinkTokensTest extends TestBaseImpl
             assertThat(current).hasSize(TOKENS);
 
             // refusals: not a subset, not a strict subset, empty
-            assertThatThrownBy(() -> shrink(node, Collections.singletonList(tokens(cluster.get(2)).get(0))))
+            assertThatThrownBy(() -> shrink(node, Arrays.asList(current.get(0), tokens(cluster.get(2)).get(0))))
             .hasMessageContaining("must be tokens of this node");
+            assertThatThrownBy(() -> shrink(node, Collections.singletonList(current.get(0))))
+            .hasMessageContaining("to a single token is not supported");
             assertThatThrownBy(() -> shrink(node, current)).hasMessageContaining("already has exactly these");
             assertThatThrownBy(() -> shrink(node, Collections.emptyList())).hasMessageContaining("at least one token");
 
@@ -219,12 +226,20 @@ public class ShrinkTokensTest extends TestBaseImpl
             // writes keep flowing during the shrink, at QUORUM, through another coordinator
             AtomicBoolean stop = new AtomicBoolean();
             AtomicInteger written = new AtomicInteger(ROWS);
+            AtomicReference<Throwable> writeError = new AtomicReference<>();
             Thread writer = new Thread(() -> {
-                while (!stop.get())
+                try
                 {
-                    int key = written.get();
-                    cluster.coordinator(2).execute(withKeyspace("INSERT INTO %s.tbl (pk, v) VALUES (?, ?)"), ConsistencyLevel.QUORUM, key, key);
-                    written.incrementAndGet();
+                    while (!stop.get())
+                    {
+                        int key = written.get();
+                        cluster.coordinator(2).execute(withKeyspace("INSERT INTO %s.tbl (pk, v) VALUES (?, ?)"), ConsistencyLevel.QUORUM, key, key);
+                        written.incrementAndGet();
+                    }
+                }
+                catch (Throwable t)
+                {
+                    writeError.set(t);
                 }
             });
             writer.start();
@@ -238,6 +253,8 @@ public class ShrinkTokensTest extends TestBaseImpl
                 writer.join();
             }
             logger.info("{} rows written during the shrink", written.get() - ROWS);
+            // the cluster stays available at QUORUM for the whole operation
+            assertThat(writeError.get()).isNull();
             assertThat(written.get()).isGreaterThan(ROWS);
 
             assertThat(tokens(node)).containsExactlyInAnyOrderElementsOf(keep);
@@ -277,67 +294,9 @@ public class ShrinkTokensTest extends TestBaseImpl
         }
     }
 
-    public static class FailStreaming
-    {
-        public static volatile boolean fail = true;
-
-        static void install(ClassLoader classLoader, Integer node)
-        {
-            if (node != 1)
-                return;
-            new ByteBuddy().rebase(org.apache.cassandra.service.RangeRelocator.class)
-                           .method(named("stream"))
-                           .intercept(MethodDelegation.to(FailStreaming.class))
-                           .make()
-                           .load(classLoader, ClassLoadingStrategy.Default.INJECTION);
-        }
-
-        public static Future<StreamState> stream(@SuperCall Callable<Future<StreamState>> zuper) throws Exception
-        {
-            if (fail)
-                throw new RuntimeException("injected streaming failure");
-            return zuper.call();
-        }
-    }
-
-    @Test
-    public void testFailedShrinkRollsBack() throws Throwable
-    {
-        try (Cluster cluster = builder(3).withInstanceInitializer(FailStreaming::install).start())
-        {
-            createSchema(cluster);
-            write(cluster, 0, 200);
-            IInvokableInstance node = cluster.get(1);
-            List<String> current = tokens(node);
-            List<String> keep = new ArrayList<>(current.subList(0, 4));
-
-            assertThatThrownBy(() -> shrink(node, keep)).hasMessageContaining("failed, the node keeps its " + TOKENS + " tokens")
-                                                         .hasMessageContaining("injected streaming failure");
-            assertThat(tokens(node)).containsExactlyInAnyOrderElementsOf(current);
-            assertThat(node.callOnInstance(() -> StorageService.instance.getOperationMode())).isEqualTo("NORMAL");
-            for (IInvokableInstance observer : cluster)
-            {
-                await().atMost(30, TimeUnit.SECONDS).untilAsserted(() -> {
-                    assertThat(observer.callOnInstance(() -> StorageService.instance.getTokenMetadata().getSizeOfShrinkingEndpoints())).isZero();
-                    assertThat(tokensSeenBy(observer, node)).hasSize(TOKENS);
-                });
-            }
-            assertThat(node.callOnInstance(() -> TokenCountOverride.exists())).isFalse();
-
-            // once the failure is gone the shrink can be retried
-            node.runOnInstance(() -> FailStreaming.fail = false);
-            shrink(node, keep);
-            assertThat(tokens(node)).containsExactlyInAnyOrderElementsOf(keep);
-            Set<Integer> keys = new HashSet<>();
-            for (int i = 0; i < 200; i++)
-                keys.add(i);
-            assertDataPlacement(cluster, keys, false);
-        }
-    }
-
     /**
-     * Plans a reduction from 32 to 8 tokens with the planner, runs every step and compares the resulting ownership
-     * with the plan.
+     * Plans a reduction from 32 to 8 tokens with the planner (one round, to keep the test short), runs every step and
+     * compares the resulting ownership with the plan.
      */
     @Test
     public void testPlannedReduction() throws Throwable
@@ -357,8 +316,8 @@ public class ShrinkTokensTest extends TestBaseImpl
                 nodes.add(new TokenReductionPlanner.Node(address(instance), "datacenter0", "rack0", tokens));
                 byAddress.put(address(instance), instance);
             }
-            TokenReductionPlanner.Plan plan = TokenReductionPlanner.plan(nodes, Collections.singletonMap("datacenter0", 3), TokenReductionPlanner.rounds(TOKENS, 8, 2));
-            assertThat(plan.rounds).hasSize(2);
+            TokenReductionPlanner.Plan plan = TokenReductionPlanner.plan(nodes, Collections.singletonMap("datacenter0", 3), Collections.singletonList(8));
+            assertThat(plan.rounds).hasSize(1);
 
             for (TokenReductionPlanner.Round round : plan.rounds)
             {

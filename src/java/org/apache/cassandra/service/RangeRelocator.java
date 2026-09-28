@@ -77,9 +77,39 @@ public class RangeRelocator
         this.tokens = tokens;
         this.keyspaceNames = keyspaceNames;
         this.shrink = shrink;
-        this.tokenMetaCloneAllSettled = tmd.cloneAfterAllSettled();
         // clone to avoid concurrent modification in calculateNaturalReplicas
         this.tokenMetaClone = tmd.cloneOnlyTokenMap();
+        if (shrink)
+        {
+            // the ring after the shrink of this node only (no other movement is allowed during a shrink)
+            this.tokenMetaCloneAllSettled = tmd.cloneOnlyTokenMap();
+            this.tokenMetaCloneAllSettled.updateNormalTokens(tokens, localAddress);
+        }
+        else
+        {
+            this.tokenMetaCloneAllSettled = tmd.cloneAfterAllSettled();
+        }
+    }
+
+    /**
+     * Refuses a shrink to {@code keptTokens} that would make the local node replicate ranges it doesn't have (not
+     * possible with SimpleStrategy and NetworkTopologyStrategy, checked for the other strategies), before the shrink
+     * is announced.
+     */
+    static void checkShrinkOnlyStreamsOut(Collection<Token> keptTokens, List<String> keyspaceNames, TokenMetadata tmd)
+    {
+        InetAddressAndPort local = FBUtilities.getBroadcastAddressAndPort();
+        TokenMetadata metadata = tmd.cloneOnlyTokenMap();
+        for (String keyspace : keyspaceNames)
+        {
+            AbstractReplicationStrategy strategy = Keyspace.open(keyspace).getReplicationStrategy();
+            RangesAtEndpoint current = strategy.getAddressReplicas(metadata, local);
+            RangesAtEndpoint updated = strategy.getPendingAddressRanges(metadata, keptTokens, local);
+            RangesAtEndpoint toFetch = calculateStreamAndFetchRanges(current, updated).right;
+            if (!toFetch.isEmpty())
+                throw new IllegalStateException(String.format("Keeping a subset of its tokens would make this node replicate new ranges of keyspace %s (%s), which is not supported by the shrink operation",
+                                                              keyspace, toFetch));
+        }
     }
 
     /**
