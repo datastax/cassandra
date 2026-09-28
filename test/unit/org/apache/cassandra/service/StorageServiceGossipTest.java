@@ -48,6 +48,7 @@ import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.RangeStreamer;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
@@ -281,6 +282,29 @@ public class StorageServiceGossipTest
         {
             restorePropertyValue(replaceAddressProperty, oldPropertyVal);
         }
+    }
+
+    @Test
+    public void testReplaceNodeWithDifferentNumTokensIsRefused() throws UnknownHostException
+    {
+        InetAddressAndPort replaceAddress = InetAddressAndPort.getByName("127.0.0.101");
+        IPartitioner partitioner = StorageService.instance.getTokenMetadata().partitioner;
+        EndpointState state = new EndpointState(HeartBeatState.empty());
+        Set<Token> tokens = new HashSet<>(Arrays.asList(StorageService.instance.getTokenFactory().fromString("456"),
+                                                        StorageService.instance.getTokenFactory().fromString("789")));
+        state.addApplicationState(ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(tokens));
+
+        assertEquals(1, DatabaseDescriptor.getNumTokens());
+        try
+        {
+            StorageService.instance.replaceNodeAndOwnTokens(replaceAddress, new HashMap<>(), state);
+            fail("Replacing a node that owns 2 tokens with num_tokens: 1 should be refused");
+        }
+        catch (ConfigurationException e)
+        {
+            assertTrue(e.getMessage(), e.getMessage().contains("owns 2 tokens, with a node configured with num_tokens: 1"));
+        }
+        assertFalse(StorageService.instance.getTokenMetadata().isMember(replaceAddress));
     }
 
     @Test

@@ -56,7 +56,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Documents what happens when an operator tries to reduce {@code num_tokens} (e.g. 256 -> 16) on a live cluster.
  * <ul>
  *     <li>an already bootstrapped node refuses to restart with a different {@code num_tokens};</li>
- *     <li>a replacement node inherits all the tokens of the replaced node, whatever its {@code num_tokens};</li>
+ *     <li>a replacement node takes over all the tokens of the replaced node, so a replacement with a different
+ *     {@code num_tokens} is refused;</li>
  *     <li>a node bootstrapped with fewer tokens into the same datacenter owns a share of data proportional to its
  *     token count, even with the replication aware token allocator;</li>
  *     <li>the supported path is to build a new datacenter with the new {@code num_tokens}, rebuild it from the old
@@ -179,7 +180,7 @@ public class ChangeNumTokensTest extends TestBaseImpl
     }
 
     @Test
-    public void testReplacementInheritsAllTokensOfReplacedNode() throws Throwable
+    public void testReplacementWithDifferentNumTokensIsRefused() throws Throwable
     {
         try (Cluster cluster = buildCluster(1, 0).start())
         {
@@ -194,22 +195,26 @@ public class ChangeNumTokensTest extends TestBaseImpl
                 c.set("auto_bootstrap", true);
                 withNewNumTokens((InstanceConfig) c);
             });
+            InetSocketAddress replaced = toReplace.config().broadcastAddress();
+            String replaceAddress = replaced.getAddress().getHostAddress() + ':' + replaced.getPort();
+
+            // a replacement takes over every token of the replaced node, so a different num_tokens is refused upfront
+            replacement.config().set(Constants.KEY_DTEST_API_STARTUP_FAILURE_AS_SHUTDOWN, false);
+            assertThatThrownBy(() -> ClusterUtils.start(replacement, properties -> {
+                fastRingProperties(properties);
+                properties.set(REPLACE_ADDRESS_FIRST_BOOT, replaceAddress);
+            })).hasMessageContaining("owns " + OLD_NUM_TOKENS + " tokens, with a node configured with num_tokens: " + NEW_NUM_TOKENS);
+            replacement.shutdown().get();
+            replacement.config().set(Constants.KEY_DTEST_API_STARTUP_FAILURE_AS_SHUTDOWN, true);
+
+            // with the same number of tokens the replacement goes through
+            replacement.config().set("num_tokens", OLD_NUM_TOKENS);
             ClusterUtils.start(replacement, properties -> {
                 fastRingProperties(properties);
-                InetSocketAddress replaced = toReplace.config().broadcastAddress();
-                properties.set(REPLACE_ADDRESS_FIRST_BOOT, replaced.getAddress().getHostAddress() + ':' + replaced.getPort());
+                properties.set(REPLACE_ADDRESS_FIRST_BOOT, replaceAddress);
             });
-
-            // num_tokens is ignored by the replacement: it takes over every token of the replaced node
             assertThat(localTokenCount(replacement)).isEqualTo(OLD_NUM_TOKENS);
             assertThat(localRowCount(replacement)).isEqualTo(ROWS);
-
-            // ... and the node cannot be restarted until num_tokens is set back to the number of tokens it owns
-            replacement.shutdown().get();
-            assertRestartRejected(replacement, OLD_NUM_TOKENS, NEW_NUM_TOKENS);
-            replacement.config().set("num_tokens", OLD_NUM_TOKENS);
-            replacement.startup();
-            assertThat(localTokenCount(replacement)).isEqualTo(OLD_NUM_TOKENS);
         }
     }
 

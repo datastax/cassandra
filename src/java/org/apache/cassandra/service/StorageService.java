@@ -778,6 +778,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (tokens == null)
             throw new RuntimeException(String.format("Could not find tokens for %s to replace", replaceAddress));
 
+        // the replacement takes over all the tokens of the replaced node: with a different num_tokens it would
+        // complete the replacement and then refuse to restart (see joinTokenRing)
+        if (tokens.size() != DatabaseDescriptor.getNumTokens())
+            throw new ConfigurationException(String.format("Cannot replace %s, which owns %d tokens, with a node configured with num_tokens: %d. " +
+                                                           "A replacement takes over all the tokens of the replaced node: set num_tokens to %d. " +
+                                                           "To use a different number of tokens, add nodes with the new num_tokens instead of replacing.",
+                                                           replaceAddress, tokens.size(), DatabaseDescriptor.getNumTokens(), tokens.size()));
+
         bootstrapTokens = validateReplacementBootstrapTokens(getTokenMetadata(), replaceAddress, tokens);
 
         if (state.isEmptyWithoutStatus() && REPLACEMENT_ALLOW_EMPTY.getBoolean())
@@ -1362,7 +1370,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             else
             {
                 if (bootstrapTokens.size() != DatabaseDescriptor.getNumTokens())
-                    throw new ConfigurationException("Cannot change the number of tokens from " + bootstrapTokens.size() + " to " + DatabaseDescriptor.getNumTokens());
+                    throw new ConfigurationException("Cannot change the number of tokens from " + bootstrapTokens.size() + " to " + DatabaseDescriptor.getNumTokens() +
+                                                     ": the number of tokens of a node is fixed when it joins the ring. Set num_tokens back to " + bootstrapTokens.size() +
+                                                     "; to use a different number of tokens, add nodes (e.g. a new datacenter) with the new num_tokens.");
                 else
                     logger.debug("Using saved tokens {}", bootstrapTokens);
             }

@@ -24,7 +24,7 @@ unbalanced:
 |---|---|---|
 | Change `num_tokens` in `cassandra.yaml` and restart | Node refuses to start: `Cannot change the number of tokens from 256 to 16` | `StorageService.joinTokenRing` (`StorageService.java:1364`) |
 | `nodetool move` | Rejected for vnodes: `This node has more than one token and cannot be moved thusly.` | `StorageService.move` (`StorageService.java:5667`) |
-| Replace a node (`replace_address_first_boot`) with a node configured with `num_tokens: 16` | Replacement ignores `num_tokens` and takes over **all 256** tokens of the dead node; it then **fails on the next restart** with the error above until `num_tokens` is set back to 256 | `StorageService.replaceNodeAndOwnTokens` (`StorageService.java:775`) takes the tokens from the replaced node's gossip state; restart check as above |
+| Replace a node (`replace_address_first_boot`) with a node configured with `num_tokens: 16` | Refused at startup: `Cannot replace <node>, which owns 256 tokens, with a node configured with num_tokens: 16`. A replacement always takes over **all** the tokens of the dead node (older builds accepted the replacement, took the 256 tokens and then failed on the next restart) | `StorageService.replaceNodeAndOwnTokens` takes the tokens from the replaced node's gossip state and checks them against `num_tokens` |
 | Decommission a node, wipe it, bootstrap it back with `num_tokens: 16` in the same DC (rolling, one node at a time) | Works mechanically, but each converted node owns a share of the data proportional to its token count: in a 4-node RF=3 ring (3×256 + 1×16) the new node replicates 6.1% of the data instead of 75%, the old nodes keep ~98%. As the rollout progresses the remaining 256-token nodes absorb almost all data. Not viable. | `ReplicationAwareTokenAllocator.optimalTokenOwnership` = `replicas / (totalTokens + tokensToAdd)`: the allocator targets equal ownership **per token**, not per node. Random allocation has the same property on average. |
 | New DC with `num_tokens: 16` + rebuild + decommission old DC | **Works**, verified end-to-end by the dtest | see §3 |
 
@@ -39,8 +39,9 @@ unbalanced:
   from `num_tokens`. There is no system property to bypass this and none
   should be invented: editing `system.local` by hand would not move any data.
 * On replacement the new node's tokens are *copied from the replaced node*
-  (`replaceNodeAndOwnTokens`); `num_tokens` is not consulted, so the only way
-  to change the token count of a "slot" is to remove it and add a new node.
+  (`replaceNodeAndOwnTokens`), and the replacement is refused when
+  `num_tokens` differs from their count, so the only way to change the token
+  count of a "slot" is to remove it and add a new node.
 * The token allocator (`TokenAllocation` / `ReplicationAwareTokenAllocator`)
   works per datacenter (and per rack when racks == RF). A new datacenter is
   therefore allocated independently of the old one, which is what makes the
@@ -295,6 +296,6 @@ the same DC.
 | Test | What it proves |
 |---|---|
 | `testRestartWithDifferentNumTokensFails` | restart with 256 saved tokens and `num_tokens: 16` is rejected; setting 256 back fixes it |
-| `testReplacementInheritsAllTokensOfReplacedNode` | a replacement configured with 16 tokens gets the 256 tokens of the dead node and cannot restart until `num_tokens` is set back to 256 |
+| `testReplacementWithDifferentNumTokensIsRefused` | a replacement configured with 16 tokens for a 256-token node is refused before streaming; with `num_tokens: 256` the same replacement succeeds |
 | `testBootstrapWithFewerTokensInSameDatacenterIsUnbalanced` | 3 nodes × 256 random tokens + 1 node × 16 allocated tokens, RF=3: the new node replicates **6.1%** of the ring (60/1000 rows) while the old ones replicate **~98%** each (balanced would be 75%) |
 | `testMigrateToFewerTokensThroughNewDatacenter` | the full §3 procedure: dc2 with 16 tokens joins with `auto_bootstrap: false`, keyspaces (incl. `system_auth`, `system_distributed`, `system_traces`) extended to dc2, `nodetool rebuild dc1`, dc1 dropped from replication, `nodetool decommission --force` on every dc1 node, `system_auth` cleaned up; all data readable at `ALL`, 3 × 16 tokens left in the ring, nodes restart fine, writes at `LOCAL_QUORUM` succeed |
