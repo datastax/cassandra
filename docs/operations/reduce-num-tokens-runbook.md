@@ -22,8 +22,8 @@ unbalanced:
 
 | Attempt | Result | Where in the code |
 |---|---|---|
-| Change `num_tokens` in `cassandra.yaml` and restart | Node refuses to start: `Cannot change the number of tokens from 256 to 16` | `StorageService.joinTokenRing` (`StorageService.java:1364`) |
-| `nodetool move` | Rejected for vnodes: `This node has more than one token and cannot be moved thusly.` | `StorageService.move` (`StorageService.java:5667`) |
+| Change `num_tokens` in `cassandra.yaml` and restart | Node refuses to start: `Cannot change the number of tokens from 256 to 16` | `StorageService.joinTokenRing` |
+| `nodetool move` | Rejected for vnodes: `This node has more than one token and cannot be moved thusly.` | `StorageService.move` |
 | Replace a node (`replace_address_first_boot`) with a node configured with `num_tokens: 16` | Refused at startup: `Cannot replace <node>, which owns 256 tokens, with a node configured with num_tokens: 16`. A replacement always takes over **all** the tokens of the dead node (older builds accepted the replacement, took the 256 tokens and then failed on the next restart) | `StorageService.replaceNodeAndOwnTokens` takes the tokens from the replaced node's gossip state and checks them against `num_tokens` |
 | Decommission a node, wipe it, bootstrap it back with `num_tokens: 16` in the same DC (rolling, one node at a time) | Works mechanically, but each converted node owns a share of the data proportional to its token count: in a 4-node RF=3 ring (3×256 + 1×16) the new node replicates 6.1% of the data instead of 75%, the old nodes keep ~98%. As the rollout progresses the remaining 256-token nodes absorb almost all data. Not viable. | `ReplicationAwareTokenAllocator.optimalTokenOwnership` = `replicas / (totalTokens + tokensToAdd)`: the allocator targets equal ownership **per token**, not per node. Random allocation has the same property on average. |
 | New DC with `num_tokens: 16` + rebuild + decommission old DC | **Works**, verified end-to-end by the dtest | see §3 |

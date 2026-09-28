@@ -285,25 +285,47 @@ public class StorageServiceGossipTest
     }
 
     @Test
-    public void testReplaceNodeWithDifferentNumTokensIsRefused() throws UnknownHostException
+    public void testReplaceNodeOwningMoreTokensThanNumTokensIsRefused() throws UnknownHostException
     {
-        InetAddressAndPort replaceAddress = InetAddressAndPort.getByName("127.0.0.101");
+        // num_tokens is 1 in the test configuration
+        assertReplaceRefused("127.0.0.101", Arrays.asList("456", "789"), 1);
+    }
+
+    @Test
+    public void testReplaceNodeOwningFewerTokensThanNumTokensIsRefused() throws UnknownHostException
+    {
+        Integer numTokens = DatabaseDescriptor.getRawConfig().num_tokens;
+        DatabaseDescriptor.getRawConfig().num_tokens = 4;
+        try
+        {
+            assertReplaceRefused("127.0.0.102", Arrays.asList("456", "789"), 4);
+        }
+        finally
+        {
+            DatabaseDescriptor.getRawConfig().num_tokens = numTokens;
+        }
+    }
+
+    private static void assertReplaceRefused(String address, List<String> replacedTokens, int numTokens) throws UnknownHostException
+    {
+        InetAddressAndPort replaceAddress = InetAddressAndPort.getByName(address);
         IPartitioner partitioner = StorageService.instance.getTokenMetadata().partitioner;
         EndpointState state = new EndpointState(HeartBeatState.empty());
-        Set<Token> tokens = new HashSet<>(Arrays.asList(StorageService.instance.getTokenFactory().fromString("456"),
-                                                        StorageService.instance.getTokenFactory().fromString("789")));
+        Set<Token> tokens = replacedTokens.stream().map(StorageService.instance.getTokenFactory()::fromString).collect(Collectors.toSet());
         state.addApplicationState(ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(tokens));
 
-        assertEquals(1, DatabaseDescriptor.getNumTokens());
+        assertEquals(numTokens, DatabaseDescriptor.getNumTokens());
         try
         {
             StorageService.instance.replaceNodeAndOwnTokens(replaceAddress, new HashMap<>(), state);
-            fail("Replacing a node that owns 2 tokens with num_tokens: 1 should be refused");
+            fail("Replacing a node that owns " + tokens.size() + " tokens with num_tokens: " + numTokens + " should be refused");
         }
         catch (ConfigurationException e)
         {
-            assertTrue(e.getMessage(), e.getMessage().contains("owns 2 tokens, with a node configured with num_tokens: 1"));
+            String expected = String.format("owns %d tokens, with a node configured with num_tokens: %d", tokens.size(), numTokens);
+            assertTrue(e.getMessage(), e.getMessage().contains(expected));
         }
+        // nothing was applied to the token metadata, not even for an empty gossip state (REPLACEMENT_ALLOW_EMPTY)
         assertFalse(StorageService.instance.getTokenMetadata().isMember(replaceAddress));
     }
 

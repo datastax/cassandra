@@ -782,7 +782,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // complete the replacement and then refuse to restart (see joinTokenRing)
         if (tokens.size() != DatabaseDescriptor.getNumTokens())
             throw new ConfigurationException(String.format("Cannot replace %s, which owns %d tokens, with a node configured with num_tokens: %d. " +
-                                                           "A replacement takes over all the tokens of the replaced node: set num_tokens to %d. " +
+                                                           "A replacement takes over all the tokens of the replaced node: set num_tokens to %d (and remove initial_token). " +
                                                            "To use a different number of tokens, add nodes with the new num_tokens instead of replacing.",
                                                            replaceAddress, tokens.size(), DatabaseDescriptor.getNumTokens(), tokens.size()));
 

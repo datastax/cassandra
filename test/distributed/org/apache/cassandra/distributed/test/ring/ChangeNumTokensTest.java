@@ -16,6 +16,7 @@
 
 package org.apache.cassandra.distributed.test.ring;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -25,6 +26,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -39,8 +41,11 @@ import org.apache.cassandra.distributed.impl.InstanceConfig;
 import org.apache.cassandra.distributed.shared.ClusterUtils;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.service.StorageService;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNSAFE_REPLACE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.BOOTSTRAP_SCHEMA_DELAY_MS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.BROADCAST_INTERVAL_MS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.REPLACE_ADDRESS_FIRST_BOOT;
@@ -127,16 +132,27 @@ public class ChangeNumTokensTest extends TestBaseImpl
     }
 
     /**
-     * Restarts the node expecting the num_tokens check to reject the startup; the half started instance is then
+     * Starts the node expecting the startup to be refused with the given message; the half started instance is then
      * shut down so that it releases its resources (ports, threads).
      */
-    private static void assertRestartRejected(IInvokableInstance node, int savedTokens, int configuredTokens) throws Exception
+    private static void assertStartupRefused(IInvokableInstance node, Consumer<WithProperties> properties, String message) throws Exception
     {
         node.config().set(Constants.KEY_DTEST_API_STARTUP_FAILURE_AS_SHUTDOWN, false);
-        assertThatThrownBy(node::startup)
-        .hasMessageContaining("Cannot change the number of tokens from " + savedTokens + " to " + configuredTokens);
-        node.shutdown().get();
-        node.config().set(Constants.KEY_DTEST_API_STARTUP_FAILURE_AS_SHUTDOWN, true);
+        try
+        {
+            assertThatThrownBy(() -> ClusterUtils.start(node, properties)).hasMessageContaining(message);
+            node.shutdown().get();
+        }
+        finally
+        {
+            node.config().set(Constants.KEY_DTEST_API_STARTUP_FAILURE_AS_SHUTDOWN, true);
+        }
+    }
+
+    private static void assertRestartRejected(IInvokableInstance node, int savedTokens, int configuredTokens) throws Exception
+    {
+        assertStartupRefused(node, properties -> {},
+                             "Cannot change the number of tokens from " + savedTokens + " to " + configuredTokens);
     }
 
     private static int localTokenCount(IInvokableInstance instance)
@@ -198,16 +214,31 @@ public class ChangeNumTokensTest extends TestBaseImpl
             InetSocketAddress replaced = toReplace.config().broadcastAddress();
             String replaceAddress = replaced.getAddress().getHostAddress() + ':' + replaced.getPort();
 
-            // a replacement takes over every token of the replaced node, so a different num_tokens is refused upfront
-            replacement.config().set(Constants.KEY_DTEST_API_STARTUP_FAILURE_AS_SHUTDOWN, false);
-            assertThatThrownBy(() -> ClusterUtils.start(replacement, properties -> {
-                fastRingProperties(properties);
-                properties.set(REPLACE_ADDRESS_FIRST_BOOT, replaceAddress);
-            })).hasMessageContaining("owns " + OLD_NUM_TOKENS + " tokens, with a node configured with num_tokens: " + NEW_NUM_TOKENS);
-            replacement.shutdown().get();
-            replacement.config().set(Constants.KEY_DTEST_API_STARTUP_FAILURE_AS_SHUTDOWN, true);
+            // a replacement takes over every token of the replaced node, so a different num_tokens is refused upfront,
+            // with and without streaming, and nothing changes in the ring
+            for (boolean bootstrap : new boolean[]{ false, true })
+            {
+                replacement.config().set("auto_bootstrap", bootstrap);
+                assertStartupRefused(replacement, properties -> {
+                    fastRingProperties(properties);
+                    properties.set(REPLACE_ADDRESS_FIRST_BOOT, replaceAddress);
+                    if (!bootstrap)
+                        properties.set(ALLOW_UNSAFE_REPLACE, true);
+                }, "owns " + OLD_NUM_TOKENS + " tokens, with a node configured with num_tokens: " + NEW_NUM_TOKENS);
+
+                InetAddress replacedAddress = replaced.getAddress();
+                InetAddress replacementAddress = replacement.config().broadcastAddress().getAddress();
+                assertThat(cluster.get(1).callOnInstance(() -> {
+                    TokenMetadata metadata = StorageService.instance.getTokenMetadata();
+                    return metadata.getTokens(InetAddressAndPort.getByAddress(replacedAddress)).size();
+                })).isEqualTo(OLD_NUM_TOKENS);
+                assertThat(cluster.get(1).callOnInstance(() -> StorageService.instance.getTokenMetadata()
+                                                                                      .isMember(InetAddressAndPort.getByAddress(replacementAddress))))
+                .isFalse();
+            }
 
             // with the same number of tokens the replacement goes through
+            replacement.config().set("auto_bootstrap", true);
             replacement.config().set("num_tokens", OLD_NUM_TOKENS);
             ClusterUtils.start(replacement, properties -> {
                 fastRingProperties(properties);

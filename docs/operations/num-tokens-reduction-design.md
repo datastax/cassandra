@@ -1,6 +1,6 @@
 # Design: in-place reduction of `num_tokens`
 
-Status: proposal. Phase 0 is implemented; Phases 1–3 are to be implemented in this order,
+Status: agreed design (decisions in §7). Phase 0 is implemented; Phases 1–3 are to be implemented in this order,
 one pull request each, against `main-5.0` of the eolivelli fork.
 
 Companion documents: `reduce-num-tokens-runbook.md` (today's procedure, via a new datacenter)
@@ -23,10 +23,19 @@ RF=3). Therefore:
 * which tokens each node keeps decides the final balance, so it must be planned (Phase 1).
 
 A node only ever **keeps a subset of its current tokens** (decision recorded 2026-09-28).
-Consequence, from the replica walk of `SimpleStrategy`/`NetworkTopologyStrategy`: removing one
-of X's tokens can only remove X from the replica set of the ranges before that token, never
-add X to a new range. So a shrinking node **only streams data out**, from a single
-consistent source (itself), like a partial decommission. It never fetches.
+Consequence, from the replica walk of `SimpleStrategy`/`NetworkTopologyStrategy` (with or
+without racks, also with fewer racks than RF): removing one of X's tokens `t` merges X's
+primary range `(prev(t), t]` into the next range, and can remove X from the replica sets of
+up to RF−1 ranges before `t`. It can never add X to a range: if X is not a replica of a
+range, every token of X met on that range's walk was rejected by
+`NetworkTopologyStrategy.addEndpointAndCheckIfDone` without changing the walk state, so
+removing it leaves the walk identical. For the same reason, ranges X doesn't replicate are
+not affected at all. So a shrinking node **only streams data out**, like a partial
+decommission. It never fetches. The property is proved for these two strategies only; the
+implementation checks it at runtime (§4.4) instead of assuming it for other strategies.
+
+The data X streams is only as fresh as X's own replicas (as with decommission), so the
+runbook requires a repair of the node's ranges before it shrinks (§5).
 
 ## 2. Phase 0 — fail fast (implemented)
 
@@ -43,7 +52,8 @@ New tool `tools/bin/tokenreductionplanner` (next to `generatetokens`, reusing
 
 * **Input:** the current ring (output of `nodetool ring` or a CSV of
   endpoint, dc, rack, token), replication settings per datacenter (`dc:RF` list), the target token count, and
-  either a step factor or an explicit list of rounds, e.g. `128,64,32,16`.
+  either a step factor (default 2, i.e. halving) or an explicit list of rounds, e.g.
+  `128,64,32,16`.
 * **Selection algorithm:** a variant of `ReplicationAwareTokenAllocator` run in reverse. For each
   node in turn, choose which tokens to *drop*, greedily, always dropping the token whose
   removal most improves the variance of replicated ownership relative to the target (the same
@@ -71,22 +81,36 @@ we revisit the decision to allow new tokens before starting Phase 2.
   `--keep <t1,t2,...>`; plus a JMX operation `StorageServiceMBean.shrinkTokens(List<String>)`.
 * Preconditions (refused otherwise):
   * the new set is a strict, non-empty subset of the node's current tokens;
-  * the node is `NORMAL`, and no other node is bootstrapping/leaving/moving/shrinking (same
-    check as `move`);
+  * the node is `NORMAL`, and the local token metadata shows no bootstrapping, leaving,
+    moving or shrinking node (the check done before bootstrap in `prepareForBootstrap`:
+    "Other bootstrapping/leaving/moving nodes detected"; `move` itself does not check this).
+    This only reflects the local gossip view, so two operators starting on two nodes at the
+    same time are not detected: the Phase 3 script serialises the steps;
   * every node in the cluster runs a version that understands the new gossip state
     (§4.2);
-  * the node has no pending ranges.
+  * the node has no pending ranges;
+  * no keyspace uses transient replication. The pending-range calculation compares endpoint
+    sets only (`Sets.difference` in the moving-endpoint loop), so another replica switching
+    from transient to full when X drops out would get no pending full range.
 * `--dry-run` prints the ranges and estimated bytes each target node will receive.
 
 ### 4.2 Gossip
 
-* New status `SHRINKING,<t1>,<t2>,...` in `STATUS_WITH_PORT`, listing the tokens kept
-  (`VersionedValueFactory.shrinking(Collection<Token>)`). At most 255 tokens × ~20 chars,
-  well under the `writeUTF` limit.
+* New status `SHRINKING,<t1>,<t2>,...` listing the tokens kept
+  (`VersionedValueFactory.shrinking(Collection<Token>)`), published in both
+  `STATUS_WITH_PORT` and the legacy `STATUS`, as `move` does.
+* Size: `MAX_NUM_TOKENS` is 1536 and a `RandomPartitioner` token can be 39 digits, so the
+  worst case (~61 KB) comes close to the 65535-byte `writeUTF` limit of `VersionedValue`
+  serialization. The command refuses a kept set whose encoded status exceeds 32 KB. With
+  Murmur3 (≤ 20 characters per token) that still allows about 1500 tokens, so real rings
+  (≤ 256 tokens) are far from the limit.
 * Nodes running older code **silently ignore unknown statuses** (`StorageService.onChange`
   switch), so they would not send writes to the pending replicas. The operation is therefore
-  gated on `Gossiper.instance.getMinVersion()` ≥ the first release that contains this code,
-  which also covers nodes that are down: their last known version counts.
+  gated on a minimum release version (decision 2026-09-28): the first release that contains
+  this code. `Gossiper.getMinVersion()` is not used as is. It is cached for 60 s, it returns
+  `NULL_VERSION` while gossip stabilises, and it skips endpoints in LEFT, REMOVED or HIBERNATE
+  state. The gate reads `RELEASE_VERSION` of every endpoint in gossip that isn't in a dead
+  state (live or down), and refuses if any version is missing, unparsable or older.
 * On completion the node publishes `TOKENS` = kept set and `NORMAL`, exactly like `move`. Peers
   already handle a `NORMAL` endpoint whose token set shrank: `TokenMetadata.updateNormalTokens`
   replaces the endpoint's tokens.
@@ -94,9 +118,15 @@ we revisit the decision to allow new tokens before starting Phase 2.
 ### 4.3 Token metadata and pending ranges
 
 * `TokenMetadata`: add `shrinkingEndpoints: Map<InetAddressAndPort, Set<Token>>` (kept
-  tokens) with `addShrinkingEndpoint` / `removeFromShrinking`, cloned by `cloneAfterAllSettled`
-  (which applies the kept set), cleared by `updateNormalTokens`/`removeEndpoint`, and included
-  in the "any range movement in progress" checks.
+  tokens) with `addShrinkingEndpoint` / `removeFromShrinking` (bumping the ring version),
+  cleared by `updateNormalTokens`/`removeEndpoint`/`clearUnsafe`, applied by
+  `cloneAfterAllSettled`, and copied into the pending-range snapshot. It must be added to
+  every place that lists range movements, in particular:
+  * the early return of `calculatePendingRanges` / `unsafeCalculatePendingRanges`
+    (`bootstrapTokens.isEmpty() && leavingEndpoints.isEmpty() && movingEndpoints.isEmpty()`).
+    If it is missing there, no pending range is computed and writes are lost;
+  * the "other bootstrapping/leaving/moving nodes" checks, `nodetool status`/`ring` state
+    reporting and `getMovingEndpoints`-style accessors.
 * `calculatePendingRanges`: process shrinking endpoints like the existing moving-endpoint loop.
   Compute the replicas before and after `allLeftMetadata.updateNormalTokens(kept, endpoint)`;
   every endpoint that becomes a replica of an affected range gets a pending range. With the
@@ -112,11 +142,15 @@ Mirrors `move(Token)`:
 1. Validate the preconditions, set mode `SHRINKING`, gossip the `SHRINKING` status, and sleep
    `RING_DELAY` so that every coordinator sees the pending ranges.
 2. `repairPaxosForTopologyChange("shrink")` (Paxos v2), like bootstrap/decommission/move.
-3. Stream out: `RangeRelocator` generalised to a token set. Drop the `currentTokens.size() > 1`
-   assertion and use the existing
-   `getPendingAddressRanges(metadata, Collection<Token>, endpoint)`. With the subset rule the
-   fetch side is empty and the stream side is the ranges whose replica set changes. Hints and
-   batchlog are unaffected.
+3. Stream out: `RangeRelocator` generalised to a token set. Today `calculateToFromStreams`
+   loops over the target tokens and asserts `currentTokens.size() == 1`. For a shrink it must
+   call `getPendingAddressRanges(metadata, keptSet, endpoint)` **once** with the whole kept
+   set. If the resulting fetch side isn't empty (the subset property doesn't hold for this
+   strategy), abort before streaming.
+   Hints: a hint for X delivered after X has streamed a range is applied on X only, so the new
+   replica misses it. The Phase 3 script checks with `nodetool listpendinghints` on every node
+   that no hints for X are pending before starting. Writes during the operation reach the new
+   replicas through the pending ranges. The batchlog is unaffected.
 4. `setTokens(kept)`: `SystemKeyspace.updateTokens`, `TokenMetadata` update, gossip `TOKENS` and
    `NORMAL`, bump the ring version. Disk boundaries and UCS replica-aware shards are recomputed
    on ring-version change; verify that for `DiskBoundaryManager`, `ShardManagerReplicaAware`
@@ -124,19 +158,29 @@ Mirrors `move(Token)`:
 5. Log and `nodetool` output: remind to run `nodetool cleanup` on this node and to update
    `num_tokens` in `cassandra.yaml`.
 
-Failure handling: if streaming fails or the node restarts mid-operation, the tokens in
-`system.local` are still the old ones. On restart the node announces `NORMAL` with its old tokens and
-peers drop the shrinking state (`handleStateNormal`). Data already streamed to the would-be
-replicas is harmless and removed by their next `cleanup`. The operation can simply be retried.
+Failure handling:
+
+* Streaming fails, node still up: explicit rollback. Gossip `NORMAL` with the unchanged
+  tokens, so peers drop the shrinking state and the pending ranges, and set the mode back
+  to `NORMAL`. `move` lacks this and stays `MOVING` forever; the shrink must not copy that.
+* Node restarts mid-operation, before step 4: `system.local` still has the old tokens. On
+  restart the node announces `NORMAL` with them and peers drop the shrinking state
+  (`handleStateNormal`).
+* Crash after step 4 has written `system.local`: the tokens and the recorded token count (§4.5)
+  are written in the same `system.local` mutation, so the restart accepts the new count.
+* In every case, data already streamed to the would-be replicas is harmless and removed by
+  their next `cleanup`, and the operation can be retried.
 
 ### 4.5 Restart after a successful shrink
 
 The `system.local` token count now differs from `num_tokens` in the yaml, and `joinTokenRing`
-refuses to start. Options (decision pending, see §7):
-
-* (a) keep the check: the runbook requires updating `num_tokens` before the next restart; or
-* (b) record the shrink in `system.local` (e.g. the kept token count and the timestamp) and
-  accept a saved count that matches the recorded one, logging a warning to update the yaml.
+would refuse to start. Decision (2026-09-28): **record the shrink and accept it**. Step 4
+writes the new token count to `system.local` (a new nullable column, e.g.
+`token_count_override`, in the same mutation as the tokens). At startup `joinTokenRing`
+accepts saved tokens whose count differs from `num_tokens` only if it equals the recorded
+count, and logs a warning to update `num_tokens` in `cassandra.yaml`. When the yaml matches
+again, the override is cleared. Adding a column to `system.local` has to be checked
+against the fork's system-table upgrade rules during Phase 2.
 
 ### 4.6 Tests
 
@@ -154,9 +198,10 @@ refuses to start. Options (decision pending, see §7):
 
 ## 5. Phase 3 — orchestration and runbook
 
-* Runbook section "in-place reduction": capacity check (disk ≥ the planner's peak), planner
-  run, per-step `settokens` → wait `UN` → `cleanup`, verification after each round,
-  abort/rollback (stop between steps: the ring is always valid).
+* Runbook section "in-place reduction": capacity check (disk ≥ the planner's peak), repair of
+  the node's ranges and no pending hints for it before each step, planner run, per-step
+  `settokens` → wait `UN` → `cleanup`, verification after each round, abort/rollback (stop
+  between steps: the ring is always valid).
 * A small script (`tools/bin/tokenreduction-run`, optional) that drives the steps through
   `nodetool`, one node at a time, stopping on the first failure.
 
@@ -168,13 +213,14 @@ refuses to start. Options (decision pending, see §7):
 * Peak ownership during a round: halving gives up to 2× on one node; the planner must report
   it and the runbook must require the headroom.
 * Interaction with running repairs (incremental repair sessions spanning a topology change):
-  refuse the operation while repairs are running on the node, as `move` implicitly relies on.
+  refuse the operation while repairs are running on the node. `move` doesn't check this
+  either; the shrink should.
 
-## 7. Open decisions
+## 7. Decisions (2026-09-28)
 
-1. Restart after shrink: §4.5 (a) require a yaml update, or (b) record the shrink and accept.
-2. Version gate: a minimum release version (simple; needs the version number at release time)
-   versus a capability advertised in gossip (version-independent, but consumes one of the
-   `X1..X10` padding application states shared with upstream).
-3. Default step factor for the planner: halving (4 rounds from 256 to 16, 2× peak) or a smaller
-   factor (more rounds, lower peak).
+1. Only subsets of the current tokens (§1).
+2. Replacement with a different `num_tokens` is refused at startup (§2).
+3. Restart after a shrink: record the new count in `system.local`, accept it, warn (§4.5).
+4. Version gate: minimum release version, read directly from gossip (§4.2).
+5. Planner default: halve the token count each round; the factor or explicit rounds can be
+   passed (§3).
