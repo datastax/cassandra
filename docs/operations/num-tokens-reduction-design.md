@@ -210,8 +210,10 @@ Mirrors `move(Token)`:
    `NORMAL`, bump the ring version. Disk boundaries and UCS replica-aware shards are recomputed
    on ring-version change; verify that for `DiskBoundaryManager`, `ShardManagerReplicaAware`
    and the CNDB token tracker hook in `TokenAllocation`.
-5. Log and `nodetool` output: remind to run `nodetool cleanup` on this node and to update
-   `num_tokens` in `cassandra.yaml`.
+5. Log and `nodetool` output: remind to run `nodetool flush` and `nodetool cleanup` on this
+   node, and to update `num_tokens` in `cassandra.yaml`. Cleanup only rewrites sstables; the
+   writes the node received for the ranges it gave up, while it was still their replica, are in
+   its memtables until flushed.
 
 Failure handling:
 

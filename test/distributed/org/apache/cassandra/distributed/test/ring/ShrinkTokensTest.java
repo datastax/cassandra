@@ -46,6 +46,7 @@ import org.apache.cassandra.distributed.Constants;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.api.TokenSupplier;
+import org.apache.cassandra.distributed.impl.InstanceConfig;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.StorageService;
@@ -153,6 +154,13 @@ public class ShrinkTokensTest extends TestBaseImpl
         });
     }
 
+    /** Cleanup only rewrites sstables: flush first, the memtables hold writes received while the node was a replica. */
+    private static void cleanup(IInvokableInstance instance)
+    {
+        instance.nodetoolResult("flush", KEYSPACE).asserts().success();
+        instance.nodetoolResult("cleanup", KEYSPACE).asserts().success();
+    }
+
     private static Set<Integer> localKeys(IInvokableInstance instance)
     {
         Set<Integer> keys = new HashSet<>();
@@ -244,7 +252,7 @@ public class ShrinkTokensTest extends TestBaseImpl
             assertDataPlacement(cluster, keys, false);
             // and after cleanup no node has data it doesn't replicate
             for (IInvokableInstance instance : cluster)
-                instance.nodetoolResult("cleanup", KEYSPACE).asserts().success();
+                cleanup(instance);
             assertDataPlacement(cluster, keys, true);
 
             // the node restarts with its 8 tokens although num_tokens is still 32
@@ -254,6 +262,8 @@ public class ShrinkTokensTest extends TestBaseImpl
             assertThat(tokens(node)).containsExactlyInAnyOrderElementsOf(keep);
             // but not with yet another num_tokens
             node.shutdown().get();
+            // the saved tokens are used, initial_token only applies to the first start
+            ((InstanceConfig) node.config()).remove("initial_token");
             node.config().set("num_tokens", 20);
             node.config().set(Constants.KEY_DTEST_API_STARTUP_FAILURE_AS_SHUTDOWN, false);
             assertThatThrownBy(node::startup).hasMessageContaining("Cannot change the number of tokens from 8 to 20");
@@ -372,7 +382,7 @@ public class ShrinkTokensTest extends TestBaseImpl
             for (int i = 0; i < ROWS; i++)
                 keys.add(i);
             for (IInvokableInstance instance : cluster)
-                instance.nodetoolResult("cleanup", KEYSPACE).asserts().success();
+                cleanup(instance);
             assertDataPlacement(cluster, keys, true);
             Object[][] count = cluster.coordinator(1).execute(withKeyspace("SELECT count(*) FROM %s.tbl"), ConsistencyLevel.ALL);
             assertThat(count[0][0]).isEqualTo((long) ROWS);

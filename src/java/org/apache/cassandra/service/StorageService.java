@@ -5872,7 +5872,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // record the new count before saving the tokens, so that the node can restart with them until num_tokens is updated
         TokenCountOverride.record(kept, DatabaseDescriptor.getNumTokens());
         setTokens(kept);
-        logger.info("{} completed. Run 'nodetool cleanup' on this node to remove the data of the ranges it gave up, and set num_tokens to {} in cassandra.yaml",
+        logger.info("{} completed. Run 'nodetool flush' and 'nodetool cleanup' on this node to remove the data of the ranges it gave up, and set num_tokens to {} in cassandra.yaml",
                     description, kept.size());
     }
 

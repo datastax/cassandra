@@ -30,7 +30,7 @@ import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
 
 @Command(name = "settokens", description = "Keep only a subset of the tokens of the node, streaming the ranges it gives up to their new replicas " +
-                                           "(see tokenreductionplanner). Blocks until done; run 'nodetool cleanup' afterwards")
+                                           "(see tokenreductionplanner). Blocks until done; run 'nodetool flush' and 'nodetool cleanup' afterwards")
 public class SetTokens extends NodeToolCmd
 {
     @Option(title = "keep_file", name = { "--keep-file" }, description = "File with the tokens to keep, one per line (as written by tokenreductionplanner)")
@@ -71,7 +71,7 @@ public class SetTokens extends NodeToolCmd
         try
         {
             probe.shrinkTokens(tokens);
-            probe.output().out.printf("The node now has %d tokens. Run 'nodetool cleanup' on it, and set num_tokens to %d in cassandra.yaml.%n",
+            probe.output().out.printf("The node now has %d tokens. Run 'nodetool flush' and 'nodetool cleanup' on it, and set num_tokens to %d in cassandra.yaml.%n",
                                       tokens.size(), tokens.size());
         }
         catch (IOException e)
