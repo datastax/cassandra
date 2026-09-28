@@ -21,17 +21,19 @@ package org.apache.cassandra.cql3.validation.operations;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
-import java.util.stream.Collector;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.HashSet;
-import java.util.Iterator;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableMap;
+
+import io.micrometer.core.annotation.TimedSet;
 
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -299,7 +301,6 @@ public class TTLTest extends CQLTester
     {
         // simple column, clustering
         testRecoverOverflowedExpirationWithScrub(true, true, runScrub, runSStableScrub, reinsertOverflowedTTL);
-        
         // simple column, noclustering
         testRecoverOverflowedExpirationWithScrub(true, false, runScrub, runSStableScrub, reinsertOverflowedTTL);
         // complex column, clustering
@@ -313,7 +314,7 @@ public class TTLTest extends CQLTester
         createTable(simple, clustering, false);
     }
 
-    private void createTable(boolean simple, boolean clustering, boolean withStatic)    
+    private void createTable(boolean simple, boolean clustering, boolean withStatic)
     {
         assert !(withStatic && !clustering);
         assert !(withStatic && !simple);
@@ -321,12 +322,16 @@ public class TTLTest extends CQLTester
         if (simple)
         {
             if (clustering)
+            {
                 if (withStatic)
                     createTable("create table %s (a int, b int, c int static, d text, primary key(a, b))");
                 else
                     createTable("create table %s (k int, a int, b int, primary key(k, a))");
+            }
             else
+            {
                 createTable("create table %s (k int primary key, a int, b int)");
+            }
         }
         else
         {
@@ -358,11 +363,16 @@ public class TTLTest extends CQLTester
      */
     private void checkTTLIsCapped(String field) throws Throwable
     {
+        checkTTLIsCapped(field, "k = 1");
+    }
 
+    private void checkTTLIsCapped(String field, String selectQueryCondition) throws Throwable
+    {
         // TTL is computed dynamically from row expiration time, so if it is
         // equal or higher to the minimum max TTL we compute before the query
         // we are fine.
-        UntypedResultSet execute = execute("SELECT ttl(" + field + ") FROM %s WHERE k = 1");
+        String query = "SELECT ttl(" + field + ") FROM %s" + (selectQueryCondition != null ? " WHERE " + selectQueryCondition : "");
+        UntypedResultSet execute = execute(query);
         int minMaxTTL = computeMaxTTL();
         for (UntypedResultSet.Row row : execute)
         {
@@ -463,6 +473,12 @@ public class TTLTest extends CQLTester
     @Test
     public void testScrubOverflowedSSTableWithStaticColumn() throws Throwable
     {
+        baseTestScrubOverflowedSSTableWithStaticColumn(false);
+        baseTestScrubOverflowedSSTableWithStaticColumn(true);
+    }
+
+    public void baseTestScrubOverflowedSSTableWithStaticColumn(boolean checkData) throws Throwable
+    {
         DatabaseDescriptor.setCorruptedTombstoneStrategy(Config.CorruptedTombstoneStrategy.disabled);
         createTable(true, true, true);
 
@@ -476,25 +492,24 @@ public class TTLTest extends CQLTester
         cfs.loadNewSSTables();
         assertEquals(0, execute("SELECT * FROM %s").stream().count());
 
-        cfs.scrub(true, false, true, true, 1);                      
+        cfs.scrub(true, false, checkData, true, 1);
 
-        List<ImmutableMap<String, Long>> rows = execute("SELECT c, ttl(c) FROM %s").stream()
-                                                                                   .map(row -> ImmutableMap.of("c", (long) row.getInt("c"),
-                                                                                                               "ttl(c)", (long) row.getInt("ttl(c)")))
-                                                                                   .collect(Collectors.toList());
+        List<Map<String, Long>> staticRowsWithTTL = execute("SELECT c, ttl(c) FROM %s").stream()
+                                                                                       .map(row -> ImmutableMap.of("c", (long) row.getInt("c"),
+                                                                                                                   "ttl(c)", (long) row.getInt("ttl(c)")))
+                                                                                       .distinct()
+                                                                                       .collect(Collectors.toList());
+        // Assert that we have two distinct static rows
+        assertEquals(2, staticRowsWithTTL.size());
+        // Assert that ttl is set to maximum possible ttl
+        checkTTLIsCapped("c", null);
 
-        rows = new ArrayList<>(new HashSet<>(rows));
-        rows.sort(Comparator.comparingInt(m -> m.get("c").intValue()));
-
-        assertEquals(2, rows.size());
-
-        assertEquals(2, rows.get(0).get("c").longValue());
-        // assert that ttl is no longer negative
-        assertTrue(rows.get(0).get("ttl(c)")> 0);
-
-        assertEquals(4, rows.get(1).get("c").longValue());
-        // assert that ttl is no longer negative
-        assertTrue(rows.get(1).get("ttl(c)") > 0);
+        // Assert the correctness of row contents
+        assertRows(execute("SELECT * FROM %s"), 
+                   row(1, 1, 2, "one-one"),
+                   row(1, 2, 2, "one-two"),
+                   row(2, 3, 4, "two-three"),
+                   row(2, 4, 4, "two-four"));
     }
 
     private void copySSTablesToTableDir(String table, boolean simple, boolean clustering) throws IOException
