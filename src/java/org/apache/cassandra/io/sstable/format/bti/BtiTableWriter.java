@@ -151,6 +151,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         long dataLength = partitionWriter.getInitialPosition();
         indexWriter.buildPartial(dataLength, partitionIndex ->
         {
+            indexWriter.rowIndexWriter.updateFileHandle(indexWriter.rowIndexFHBuilder);
             BtiTableReader reader = openInternal(OpenReason.EARLY, dataLength, () -> partitionIndex);
             callWhenReady.accept(reader);
         });
@@ -163,7 +164,6 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         indexWriter.complete(); // This will be called by completedPartitionIndex() below too, but we want it done now to
         // ensure outstanding openEarly actions are not triggered.
         dataWriter.sync();
-        indexWriter.rowIndexWriter.sync();
         // Note: Nothing must be written to any of the files after this point, as the chunk cache could pick up and
         // retain a partially-written page.
 
@@ -325,13 +325,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
 
         public boolean buildPartial(long dataPosition, Consumer<PartitionIndex> callWhenReady)
         {
-            long rowIndexPosition = rowIndexWriter.position();
-            return partitionIndex.buildPartial(partitionIndex ->
-                                               {
-                                                   rowIndexFHBuilder.withLengthOverride(rowIndexPosition);
-                                                   callWhenReady.accept(partitionIndex);
-                                               },
-                                               rowIndexPosition, dataPosition);
+            return partitionIndex.buildPartial(callWhenReady, rowIndexWriter.position(), dataPosition);
         }
 
         public void mark()
@@ -353,12 +347,11 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         {
             flushBf();
 
-            // truncate index file
-            rowIndexWriter.prepareToCommit();
-
-            rowIndexWriter.updateFileHandle(rowIndexFHBuilder);
-
             complete();
+
+            // release channels and file buffers
+            rowIndexWriter.prepareToCommit();
+            partitionIndexWriter.prepareToCommit();
         }
 
         void complete() throws FSWriteError
@@ -368,12 +361,11 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
 
             try
             {
+                rowIndexWriter.sync();
+                rowIndexWriter.updateFileHandle(rowIndexFHBuilder);
+
                 partitionIndex.complete();
                 partitionIndexCompleted = true;
-
-                // Update FileHandle builders for encrypted writers
-                rowIndexWriter.updateFileHandle(rowIndexFHBuilder);
-                partitionIndexWriter.updateFileHandle(partitionIndexFHBuilder);
             }
             catch (IOException e)
             {
