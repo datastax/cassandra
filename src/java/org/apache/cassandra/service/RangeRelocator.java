@@ -63,15 +63,32 @@ public class RangeRelocator
     private final TokenMetadata tokenMetaClone;
     private final Collection<Token> tokens;
     private final List<String> keyspaceNames;
+    /** true if the local node is shrinking to {@link #tokens}, a subset of its tokens, rather than moving */
+    private final boolean shrink;
 
 
     RangeRelocator(Collection<Token> tokens, List<String> keyspaceNames, TokenMetadata tmd)
     {
+        this(tokens, keyspaceNames, tmd, false);
+    }
+
+    private RangeRelocator(Collection<Token> tokens, List<String> keyspaceNames, TokenMetadata tmd, boolean shrink)
+    {
         this.tokens = tokens;
         this.keyspaceNames = keyspaceNames;
+        this.shrink = shrink;
         this.tokenMetaCloneAllSettled = tmd.cloneAfterAllSettled();
         // clone to avoid concurrent modification in calculateNaturalReplicas
         this.tokenMetaClone = tmd.cloneOnlyTokenMap();
+    }
+
+    /**
+     * Relocator for the local node keeping only {@code keptTokens}, a subset of its tokens: the ranges the node gives
+     * up are streamed to their new replicas. The token metadata must already know the node is shrinking.
+     */
+    static RangeRelocator forShrink(Collection<Token> keptTokens, List<String> keyspaceNames, TokenMetadata tmd)
+    {
+        return new RangeRelocator(keptTokens, keyspaceNames, tmd, true);
     }
 
     @VisibleForTesting
@@ -79,6 +96,7 @@ public class RangeRelocator
     {
         this.tokens = null;
         this.keyspaceNames = null;
+        this.shrink = false;
         this.tokenMetaCloneAllSettled = null;
         this.tokenMetaClone = null;
     }
@@ -171,6 +189,24 @@ public class RangeRelocator
             AbstractReplicationStrategy strategy = Keyspace.open(keyspace).getReplicationStrategy();
 
             logger.info("Calculating ranges to stream and request for keyspace {}", keyspace);
+            if (shrink)
+            {
+                // all the kept tokens at once: the ranges of the node are those of the whole kept set
+                RangesAtEndpoint currentReplicas = strategy.getAddressReplicas(tokenMetaClone, localAddress);
+                RangesAtEndpoint updatedReplicas = strategy.getPendingAddressRanges(tokenMetaClone, tokens, localAddress);
+                Pair<RangesAtEndpoint, RangesAtEndpoint> streamAndFetchOwnRanges = calculateStreamAndFetchRanges(currentReplicas, updatedReplicas);
+                // a node keeping a subset of its tokens never gains a range with SimpleStrategy and
+                // NetworkTopologyStrategy; don't assume it for other strategies
+                if (!streamAndFetchOwnRanges.right.isEmpty())
+                    throw new IllegalStateException(String.format("Keeping a subset of its tokens would make this node replicate new ranges of keyspace %s (%s), which is not supported by the shrink operation",
+                                                                  keyspace, streamAndFetchOwnRanges.right));
+                RangesByEndpoint rangesToStream = calculateRangesToStreamWithEndpoints(streamAndFetchOwnRanges.left, strategy, tokenMetaClone, tokenMetaCloneAllSettled);
+                logger.info("Endpoint ranges to stream to {}", rangesToStream);
+                for (InetAddressAndPort address : rangesToStream.keySet())
+                    streamPlan.transferRanges(address, keyspace, rangesToStream.get(address));
+                continue;
+            }
+
             //From what I have seen we only ever call this with a single token from StorageService.move(Token)
             for (Token newToken : tokens)
             {

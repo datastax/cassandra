@@ -103,6 +103,9 @@ public class TokenMetadata
     // nodes which are migrating to the new tokens in the ring
     private final Set<Pair<Token, InetAddressAndPort>> movingEndpoints = new HashSet<>();
 
+    // endpoints shrinking to a subset of their tokens, with the tokens they keep (see StorageService.shrinkTokens)
+    private final Map<InetAddressAndPort, Set<Token>> shrinkingEndpoints = new HashMap<>();
+
     /* Use this lock for manipulating the token map */
     private final ReadWriteLock lock = new ReentrantReadWriteLock(true);
     private volatile ArrayList<Token> sortedTokens; // safe to be read without a lock, as it's never mutated
@@ -248,6 +251,7 @@ public class TokenMetadata
                 leavingEndpoints.remove(endpoint);
                 replacementToOriginal.remove(endpoint);
                 removeFromMoving(endpoint); // also removing this endpoint from moving
+                shrinkingEndpoints.remove(endpoint);
 
                 for (Token token : tokens)
                 {
@@ -325,6 +329,16 @@ public class TokenMetadata
             if (movingEndpoints.stream().anyMatch(p -> p.right.equals(current)))
             {
                 throw new RuntimeException(String.format("Node %s is already in moving, can't replace %s", current, existing));
+            }
+
+            // make sure they are not shrinking
+            if (shrinkingEndpoints.containsKey(existing))
+            {
+                throw new RuntimeException(String.format("Node %s is trying to replace node %s in shrinking state.", current, existing));
+            }
+            if (shrinkingEndpoints.containsKey(current))
+            {
+                throw new RuntimeException(String.format("Node %s is already shrinking, can't replace %s", current, existing));
             }
 
             // Note that there is no need to validate replacementToOriginal which is updated together with bootstrapTokens
@@ -635,6 +649,89 @@ public class TokenMetadata
         }
     }
 
+    /**
+     * Add an endpoint that is shrinking to a subset of its tokens.
+     * @param keptTokens the tokens the node keeps, a strict subset of its current tokens
+     * @param endpoint address of the shrinking node
+     */
+    public void addShrinkingEndpoint(Collection<Token> keptTokens, InetAddressAndPort endpoint)
+    {
+        assert endpoint != null;
+        assert keptTokens != null && !keptTokens.isEmpty();
+
+        lock.writeLock().lock();
+        try
+        {
+            shrinkingEndpoints.put(endpoint, ImmutableSet.copyOf(keptTokens));
+            invalidateCachedRingsUnsafe();
+        }
+        finally
+        {
+            lock.writeLock().unlock();
+        }
+    }
+
+    /**
+     * Remove an endpoint from the shrinking endpoints, e.g. when its shrink was aborted.
+     */
+    public void removeFromShrinking(InetAddressAndPort endpoint)
+    {
+        assert endpoint != null;
+
+        lock.writeLock().lock();
+        try
+        {
+            if (shrinkingEndpoints.remove(endpoint) != null)
+                invalidateCachedRingsUnsafe();
+        }
+        finally
+        {
+            lock.writeLock().unlock();
+        }
+    }
+
+    public boolean isShrinking(InetAddressAndPort endpoint)
+    {
+        assert endpoint != null;
+
+        lock.readLock().lock();
+        try
+        {
+            return shrinkingEndpoints.containsKey(endpoint);
+        }
+        finally
+        {
+            lock.readLock().unlock();
+        }
+    }
+
+    /** @return the shrinking endpoints with the tokens they keep */
+    public Map<InetAddressAndPort, Set<Token>> getShrinkingEndpoints()
+    {
+        lock.readLock().lock();
+        try
+        {
+            return ImmutableMap.copyOf(shrinkingEndpoints);
+        }
+        finally
+        {
+            lock.readLock().unlock();
+        }
+    }
+
+    public int getSizeOfShrinkingEndpoints()
+    {
+        lock.readLock().lock();
+        try
+        {
+            return shrinkingEndpoints.size();
+        }
+        finally
+        {
+            lock.readLock().unlock();
+        }
+    }
+
     public void removeEndpoint(InetAddressAndPort endpoint)
     {
         assert endpoint != null;
@@ -643,6 +740,7 @@ public class TokenMetadata
         try
         {
             bootstrapTokens.removeValue(endpoint);
+            shrinkingEndpoints.remove(endpoint);
 
             topology = topology.unbuild().removeEndpoint(endpoint).build();
             leavingEndpoints.remove(endpoint);
@@ -895,6 +993,9 @@ public class TokenMetadata
             for (Pair<Token, InetAddressAndPort> pair : movingEndpoints)
                 metadata.updateNormalToken(pair.left, pair.right);
 
+            for (Map.Entry<InetAddressAndPort, Set<Token>> shrinking : shrinkingEndpoints.entrySet())
+                metadata.updateNormalTokens(shrinking.getValue(), shrinking.getKey());
+
             return metadata;
         }
         finally
@@ -1024,29 +1125,26 @@ public class TokenMetadata
         BiMultiValMap<Token, InetAddressAndPort> bootstrapTokensClone;
         Set<InetAddressAndPort> leavingEndpointsClone;
         Set<Pair<Token, InetAddressAndPort>> movingEndpointsClone;
+        Map<InetAddressAndPort, Set<Token>> shrinkingEndpointsClone;
         TokenMetadata metadata;
 
         lock.readLock().lock();
         try
         {
 
-            if (bootstrapTokens.isEmpty() && leavingEndpoints.isEmpty() && movingEndpoints.isEmpty())
+            if (bootstrapTokens.isEmpty() && leavingEndpoints.isEmpty() && movingEndpoints.isEmpty() && shrinkingEndpoints.isEmpty())
             {
                 if (logger.isTraceEnabled())
-                    logger.trace("No bootstrapping, leaving or moving nodes -> empty pending ranges for {}", keyspaceName);
-                if (bootstrapTokens.isEmpty() && leavingEndpoints.isEmpty() && movingEndpoints.isEmpty())
-                {
-                    if (logger.isTraceEnabled())
-                        logger.trace("No bootstrapping, leaving or moving nodes -> empty pending ranges for {}", keyspaceName);
-                    pendingRanges.put(keyspaceName, new PendingRangeMaps());
+                    logger.trace("No bootstrapping, leaving, moving or shrinking nodes -> empty pending ranges for {}", keyspaceName);
+                pendingRanges.put(keyspaceName, new PendingRangeMaps());
 
-                    return;
-                }
+                return;
             }
 
             bootstrapTokensClone  = new BiMultiValMap<>(this.bootstrapTokens);
             leavingEndpointsClone = new HashSet<>(this.leavingEndpoints);
             movingEndpointsClone = new HashSet<>(this.movingEndpoints);
+            shrinkingEndpointsClone = new HashMap<>(this.shrinkingEndpoints);
             metadata = this.cloneOnlyTokenMap();
         }
         finally
@@ -1055,7 +1153,7 @@ public class TokenMetadata
         }
 
         pendingRanges.put(keyspaceName, calculatePendingRanges(strategy, metadata, bootstrapTokensClone,
-                                                               leavingEndpointsClone, movingEndpointsClone));
+                                                               leavingEndpointsClone, movingEndpointsClone, shrinkingEndpointsClone));
     }
 
     /**
@@ -1065,7 +1163,8 @@ public class TokenMetadata
                                                            TokenMetadata metadata,
                                                            BiMultiValMap<Token, InetAddressAndPort> bootstrapTokens,
                                                            Set<InetAddressAndPort> leavingEndpoints,
-                                                           Set<Pair<Token, InetAddressAndPort>> movingEndpoints)
+                                                           Set<Pair<Token, InetAddressAndPort>> movingEndpoints,
+                                                           Map<InetAddressAndPort, Set<Token>> shrinkingEndpoints)
     {
         PendingRangeMaps newPendingRanges = new PendingRangeMaps();
 
@@ -1170,6 +1269,38 @@ public class TokenMetadata
             }
 
             allLeftMetadata.removeEndpoint(endpoint);
+        }
+
+        // Finally the shrinking nodes. A node that keeps a subset of its tokens only leaves some replica sets and the
+        // nodes that replace it there get pending ranges, like for a leave (with SimpleStrategy and
+        // NetworkTopologyStrategy the shrinking node never gains a range, and never loses one of the ranges of
+        // another node). Shrinks are applied one after the other to allLeftMetadata, like moves.
+        for (Map.Entry<InetAddressAndPort, Set<Token>> shrinking : shrinkingEndpoints.entrySet())
+        {
+            InetAddressAndPort endpoint = shrinking.getKey();
+            if (!allLeftMetadata.isMember(endpoint))
+                continue; // it is also leaving
+            TokenMetadata before = allLeftMetadata.cloneOnlyTokenMap();
+            Set<Replica> shrinkAffectedReplicas = new HashSet<>();
+            for (Replica replica : strategy.getAddressReplicas(before, endpoint))
+                shrinkAffectedReplicas.add(replica);
+
+            allLeftMetadata.updateNormalTokens(shrinking.getValue(), endpoint);
+
+            for (Replica replica : shrinkAffectedReplicas)
+            {
+                Set<InetAddressAndPort> currentEndpoints = strategy.calculateNaturalReplicas(replica.range().right, metadata).endpoints();
+                Set<InetAddressAndPort> newEndpoints = strategy.calculateNaturalReplicas(replica.range().right, allLeftMetadata).endpoints();
+                for (InetAddressAndPort address : Sets.difference(newEndpoints, currentEndpoints))
+                {
+                    RangesAtEndpoint newReplicas = strategy.getAddressReplicas(allLeftMetadata, address);
+                    RangesAtEndpoint oldReplicas = strategy.getAddressReplicas(metadata, address);
+                    newReplicas = newReplicas.filter(r -> !oldReplicas.contains(r));
+                    for (Replica newReplica : newReplicas)
+                        for (Replica pendingReplica : newReplica.subtractSameReplication(oldReplicas))
+                            newPendingRanges.addPendingRange(pendingReplica.range(), pendingReplica);
+                }
+            }
         }
 
         return newPendingRanges;
@@ -1393,6 +1524,7 @@ public class TokenMetadata
             leavingEndpoints.clear();
             pendingRanges.clear();
             movingEndpoints.clear();
+            shrinkingEndpoints.clear();
             sortedTokens.clear();
             topology = Topology.empty();
             invalidateCachedRingsUnsafe();
@@ -1443,6 +1575,17 @@ public class TokenMetadata
                 for (InetAddressAndPort ep : leavingEndpoints)
                 {
                     sb.append(ep);
+                    sb.append(LINE_SEPARATOR.getString());
+                }
+            }
+
+            if (!shrinkingEndpoints.isEmpty())
+            {
+                sb.append("Shrinking Endpoints:");
+                sb.append(LINE_SEPARATOR.getString());
+                for (Map.Entry<InetAddressAndPort, Set<Token>> shrinking : shrinkingEndpoints.entrySet())
+                {
+                    sb.append(shrinking.getKey()).append(" keeping ").append(shrinking.getValue());
                     sb.append(LINE_SEPARATOR.getString());
                 }
             }
