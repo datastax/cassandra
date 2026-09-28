@@ -57,7 +57,8 @@ New tool `tools/bin/tokenreductionplanner` (next to `generatetokens`, reusing
 * **Selection algorithm:** a variant of `ReplicationAwareTokenAllocator` run in reverse. For each
   node in turn, choose which tokens to *drop*, greedily, always dropping the token whose
   removal most improves the variance of replicated ownership relative to the target (the same
-  objective the allocator uses, including rack groups when racks == RF). Candidates are
+  objective the allocator uses; the target of each node is proportional to the number of tokens
+  it keeps, which with racks == RF also balances inside each rack). Candidates are
   restricted to the node's current tokens.
 * **Output:**
   * per round, per node: the tokens to keep (a file per node that Phase 2's command accepts);
@@ -66,9 +67,9 @@ New tool `tools/bin/tokenreductionplanner` (next to `generatetokens`, reusing
   * bytes to stream per step, estimated as ownership change × per-node load (load from
     `nodetool status`, optional input);
   * a comparison with the new-datacenter procedure (RF copies of the data set once).
-* **Tests:** unit tests on synthetic random rings (sizes 3–100 nodes, RF 1/3/5, 1 and 3 racks)
-  asserting that the final ring balance is within a tolerance of what the allocator achieves
-  for a fresh datacenter of the same size, and that the per-step peak matches the prediction.
+* **Tests:** unit tests on synthetic random rings (6–100 nodes, RF 1/3/5, 1, 3 and 5 racks)
+  asserting that the final ring is within 8% of the fair share, and a replay of every step of a
+  plan against the real NetworkTopologyStrategy (ownership after each step, streamed data, peak).
 
 This phase also answers whether subset-only selection balances well enough. If it doesn't,
 we revisit the decision to allow new tokens before starting Phase 2.
@@ -86,26 +87,37 @@ we revisit the decision to allow new tokens before starting Phase 2.
   target ownership. It then replays the steps in execution order (most loaded node first) to
   report ownership after every step, the peak, and the data streamed.
 * `tools/bin/tokenreductionplanner` (`TokenReductionPlannerTool`): reads `nodetool ring` output
-  (with loads, which size the report in bytes) or CSV `endpoint,datacenter,rack,token`. It writes
-  `plan.txt` and `round-<n>-<tokens>/<step>-<endpoint>.tokens`, the kept tokens for Phase 2's
-  `--keep-file`.
+  (with loads, which size the report in bytes) or CSV `endpoint,datacenter,rack,token`. Every row
+  of a `nodetool ring` datacenter section must parse, and nodes that aren't `Normal` are refused,
+  so a ring is never planned with a node silently missing. It writes `plan.txt` and
+  `round-<n>-<tokens>/<datacenter>/<step>-<endpoint>.tokens`, the kept tokens for Phase 2's
+  `--keep-file`, into a new or empty directory only. A datacenter with RF 0 is balanced as RF 1.
 
-Measured on random 256-token rings, RF 3, 256 → 16 by halving. Ownership is relative to the fair
-share. "Streamed" counts copies of the datacenter data set; a new datacenter copies 1.00.
+Measured by `TokenReductionPlannerTest.testPlanBalanceComparedWithNewDatacenter` on random
+256-token rings, 256 → 16 by halving. Ownership is relative to the fair share. "Streamed" counts
+copies of the datacenter data set; a new datacenter copies 1.00.
 
-| Nodes | Racks | Initial max | Final max / min | Peak during rounds | Streamed |
-|---|---|---|---|---|---|
-| 6 | 1 | 1.052 | 1.027 / 0.981 | 1.40 | 1.37 |
-| 12 | 1 | 1.062 | 1.028 / 0.967 | 1.61 | 1.83 |
-| 12 | 3 | 1.067 | 1.018 / 0.983 | 1.47 | 1.28 |
-| 24 | 3 | 1.091 | 1.032 / 0.972 | 1.52 | 1.46 |
-| 48 | 1 | 1.098 | 1.039 / 0.970 | 1.68 | 2.12 |
-| 100 | 3 | 1.188 | 1.052 / 0.948 | 1.54 | 1.57 |
+| Nodes | Racks | RF | Initial max | Final max / min | Peak during rounds | Streamed | Planning time |
+|---|---|---|---|---|---|---|---|
+| 6 | 1 | 3 | 1.047 | 1.024 / 0.984 | 1.47 | 1.41 | 0.1 s |
+| 12 | 1 | 3 | 1.024 | 1.030 / 0.961 | 1.60 | 1.87 | 0.1 s |
+| 12 | 3 | 3 | 1.139 | 1.027 / 0.980 | 1.46 | 1.32 | 0.2 s |
+| 24 | 3 | 3 | 1.093 | 1.035 / 0.962 | 1.53 | 1.47 | 0.4 s |
+| 48 | 1 | 3 | 1.135 | 1.051 / 0.958 | 1.66 | 2.11 | 0.6 s |
+| 100 | 3 | 3 | 1.140 | 1.048 / 0.937 | 1.54 | 1.56 | 1.9 s |
+| 12 | 1 | 1 | 1.061 | 1.036 / 0.974 | 1.52 | 1.50 | < 0.1 s |
+| 20 | 5 | 5 | 1.068 | 1.022 / 0.964 | 1.52 | 1.35 | 0.7 s |
+| 20 | 3 | 5 | 1.093 | 1.027 / 0.957 | 1.62 | 1.93 | 0.5 s |
 
-Keeping a subset balances the final ring better than the initial random ring, and close to a
-fresh allocation (a new datacenter allocated with 16 tokens reaches max ~1.02 with one rack). The
-price is 1.3–2.1× the streaming of the new-datacenter procedure and a 1.4–1.7× peak on one node
-per round, without extra hardware. Planning 100 nodes takes about 5 seconds. Conclusion:
+Keeping a subset ends close to the fair share (within about 6%) and close to a fresh allocation
+(a new datacenter allocated with 16 tokens reaches max ~1.02 with one rack; in this test the
+offline allocator gives max 1.3–1.5 with racks == RF, so rack cases have no useful fresh
+baseline). The price
+is 1.3–2.1× the streaming of the new-datacenter procedure and a 1.5–1.7× peak ownership on one node
+per round, without extra hardware. The peak is ownership, not disk: a shrinking node keeps the data
+of the ranges it gives up until `nodetool cleanup`, so the runbook sizes disks for the peak plus
+that, and runs cleanup after every step. The tool plans a 200-node ring in about 8 seconds with its
+default 256 MB heap. Conclusion:
 subset-only is good enough, and Phase 2 proceeds as designed.
 
 ## 4. Phase 2 — core: shrink a node's token set online
@@ -138,6 +150,9 @@ subset-only is good enough, and Phase 2 proceeds as designed.
 * New status `SHRINKING,<t1>,<t2>,...` listing the tokens kept
   (`VersionedValueFactory.shrinking(Collection<Token>)`), published in both
   `STATUS_WITH_PORT` and the legacy `STATUS`, as `move` does.
+* `nodetool ring`/`status` show the state in an 8-character column, and the planner refuses
+  rows whose state isn't `Normal`. The label for a shrinking node must fit (e.g. `Shrink`), or it
+  runs into the load column.
 * Size: `MAX_NUM_TOKENS` is 1536 and a `RandomPartitioner` token can be 39 digits, so the
   worst case (~61 KB) comes close to the 65535-byte `writeUTF` limit of `VersionedValue`
   serialization. The command refuses a kept set whose encoded status exceeds 32 KB. With

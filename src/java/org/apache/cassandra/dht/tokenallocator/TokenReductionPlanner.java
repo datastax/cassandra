@@ -124,6 +124,17 @@ public class TokenReductionPlanner
             return ownership;
         }
 
+        /** Ownership of every node of the datacenter at the start of the round (0-based). */
+        public Map<String, Double> ownershipBefore(int round, String datacenter)
+        {
+            Map<String, Double> ownership = initialOwnership.get(datacenter);
+            for (int r = 0; r < round; r++)
+                for (Step step : rounds.get(r).steps)
+                    if (step.datacenter.equals(datacenter))
+                        ownership = step.ownershipAfter;
+            return ownership;
+        }
+
         /** Highest ownership of any node of the datacenter at any point of the plan. */
         public double peakOwnership(String datacenter)
         {
@@ -174,7 +185,7 @@ public class TokenReductionPlanner
     /**
      * @param nodes the nodes of the cluster with their current tokens
      * @param replicationFactors replication factor to balance for, per datacenter; every datacenter of {@code nodes}
-     *                           must be present
+     *                           must be present; a datacenter with RF 0 is balanced as if it had RF 1
      * @param rounds target number of tokens of every round, strictly decreasing; a node that has at most the target
      *               of a round is left unchanged in that round
      */
@@ -196,7 +207,10 @@ public class TokenReductionPlanner
             byDatacenter.computeIfAbsent(node.datacenter, dc -> new ArrayList<>()).add(node);
         }
         for (String dc : byDatacenter.keySet())
+        {
             Preconditions.checkArgument(replicationFactors.containsKey(dc), "no replication factor for datacenter %s", dc);
+            Preconditions.checkArgument(replicationFactors.get(dc) >= 0, "negative replication factor for datacenter %s", dc);
+        }
 
         Map<String, List<List<Token>>> tokens = new HashMap<>();
         Map<String, Map<String, Double>> initialOwnership = new TreeMap<>();
@@ -206,7 +220,7 @@ public class TokenReductionPlanner
             for (Node node : dc.getValue())
                 dcTokens.add(new ArrayList<>(node.tokens));
             tokens.put(dc.getKey(), dcTokens);
-            initialOwnership.put(dc.getKey(), ownershipByEndpoint(dc.getValue(), ring(dc.getValue(), dcTokens, replicationFactors.get(dc.getKey()))));
+            initialOwnership.put(dc.getKey(), ownershipByEndpoint(dc.getValue(), ring(dc.getValue(), dcTokens, balancingFactor(replicationFactors.get(dc.getKey())))));
         }
 
         List<Round> plannedRounds = new ArrayList<>();
@@ -217,11 +231,12 @@ public class TokenReductionPlanner
             {
                 List<Node> dcNodes = dc.getValue();
                 List<List<Token>> dcTokens = tokens.get(dc.getKey());
-                List<Step> dcSteps = planRound(dc.getKey(), dcNodes, dcTokens, replicationFactors.get(dc.getKey()), target);
+                Map<String, Integer> index = new HashMap<>();
+                for (int i = 0; i < dcNodes.size(); i++)
+                    index.put(dcNodes.get(i).endpoint, i);
+                List<Step> dcSteps = planRound(dc.getKey(), dcNodes, dcTokens, balancingFactor(replicationFactors.get(dc.getKey())), target);
                 for (Step step : dcSteps)
-                    for (int i = 0; i < dcNodes.size(); i++)
-                        if (dcNodes.get(i).endpoint.equals(step.endpoint))
-                            dcTokens.set(i, new ArrayList<>(step.keep));
+                    dcTokens.set(index.get(step.endpoint), new ArrayList<>(step.keep));
                 steps.addAll(dcSteps);
             }
             plannedRounds.add(new Round(target, steps));
@@ -265,8 +280,9 @@ public class TokenReductionPlanner
             {
                 Token best = null;
                 double bestChange = Double.POSITIVE_INFINITY;
-                for (Token token : ring.tokens(node))
+                for (int i = 0; i < ring.tokenCount(node); i++)
                 {
+                    Token token = ring.token(node, i);
                     double change = ring.balanceChangeIfRemoved(token, targetOwnership);
                     if (change < bestChange)
                     {
@@ -304,6 +320,15 @@ public class TokenReductionPlanner
                                ownershipByEndpoint(nodes, execution)));
         }
         return steps;
+    }
+
+    /**
+     * A datacenter that replicates nothing (RF 0) still has to shrink: balance it as if it had RF 1, so that it is
+     * ready to replicate data later.
+     */
+    private static int balancingFactor(int replicationFactor)
+    {
+        return Math.max(1, replicationFactor);
     }
 
     private static DatacenterRing ring(List<Node> nodes, List<List<Token>> tokens, int rf)

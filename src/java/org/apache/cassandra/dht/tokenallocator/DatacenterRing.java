@@ -20,7 +20,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,6 +46,11 @@ import org.apache.cassandra.dht.Token;
  *     state, so removing it doesn't change the walk.</li>
  * </ul>
  * Each token keeps the list of ranges whose walk accepted its node at it, so both sets are found without scanning.
+ * <p>
+ * Removing a token of X never removes another node from a replica set: after the removed position, the new walk has
+ * one replica less and at least as many acceptable rack repeats, so it accepts every node the old walk accepted
+ * except X, plus exactly one node. Hence the ownership X loses is exactly the ownership the other nodes gain, i.e.
+ * the data X streams, and X never gains a range (the Phase 2 operation checks this at runtime too).
  * Not thread safe.
  */
 public class DatacenterRing
@@ -62,7 +67,7 @@ public class DatacenterRing
         /** For each replica, the token at which the walk accepted it. */
         Vnode[] acceptedAt;
         /** Ranges whose walk accepted {@link #node} at this token. */
-        final Set<Vnode> acceptedIn = new HashSet<>();
+        final Set<Vnode> acceptedIn = new LinkedHashSet<>(); // deterministic iteration, hence summation, order
 
         Vnode(Token token, int node)
         {
@@ -84,6 +89,15 @@ public class DatacenterRing
     private final Map<Token, Vnode> byToken = new HashMap<>();
     private int size;
 
+    // scratch state of the evaluations and of the walks, reused to avoid allocations
+    private final double[] scratchDelta;
+    private final boolean[] scratchTouched;
+    private final int[] touched;
+    private int touchedCount;
+    private final int[] seenNodeEpoch;
+    private final int[] seenRackEpoch;
+    private int walkEpoch;
+
     /**
      * @param replicationFactor replication factor of the datacenter
      * @param racks rack of each node, nodes are identified by their index
@@ -94,11 +108,17 @@ public class DatacenterRing
         Preconditions.checkArgument(replicationFactor > 0, "replication factor must be positive");
         Preconditions.checkArgument(racks.length == tokens.size(), "racks and tokens must have one entry per node");
         Preconditions.checkArgument(racks.length > 0, "the datacenter has no nodes");
+        Preconditions.checkArgument(Arrays.stream(racks).allMatch(rack -> rack >= 0), "racks must be non-negative identifiers");
         this.replicationFactor = replicationFactor;
         this.rackOf = racks.clone();
         this.rackCount = (int) Arrays.stream(racks).distinct().count();
         this.ownership = new double[racks.length];
         this.tokensOf = new ArrayList<>(racks.length);
+        this.scratchDelta = new double[racks.length];
+        this.scratchTouched = new boolean[racks.length];
+        this.touched = new int[racks.length];
+        this.seenNodeEpoch = new int[racks.length];
+        this.seenRackEpoch = new int[Arrays.stream(racks).max().getAsInt() + 1];
 
         List<Vnode> all = new ArrayList<>();
         for (int node = 0; node < racks.length; node++)
@@ -142,6 +162,14 @@ public class DatacenterRing
         return tokensOf.get(node).size();
     }
 
+    /**
+     * @return the i-th token of the node, in no particular order, without copying the token list
+     */
+    public Token token(int node, int i)
+    {
+        return tokensOf.get(node).get(i).token;
+    }
+
     public List<Token> tokens(int node)
     {
         List<Token> tokens = new ArrayList<>(tokensOf.get(node).size());
@@ -168,30 +196,11 @@ public class DatacenterRing
      */
     public double[] ownershipChangeIfRemoved(Token token)
     {
-        Vnode vnode = vnode(token);
+        accumulateRemoval(vnode(token));
         double[] delta = new double[ownership.length];
-
-        // the range ending at the token merges into the next range; the replicas of the next range only change if its
-        // walk wraps around the whole ring up to the removed token
-        Vnode next = vnode.next;
-        int[] nextReplicas = vnode.acceptedIn.contains(next) ? walk(next, vnode).replicas : next.replicas;
-        double merged = vnode.rangeSize();
-        for (int replica : vnode.replicas)
-            delta[replica] -= merged;
-        for (int replica : nextReplicas)
-            delta[replica] += merged;
-
-        for (Vnode range : vnode.acceptedIn)
-        {
-            if (range == vnode)
-                continue;
-            Walk walk = walk(range, vnode);
-            double size = range.rangeSize();
-            for (int replica : range.replicas)
-                delta[replica] -= size;
-            for (int replica : walk.replicas)
-                delta[replica] += size;
-        }
+        for (int i = 0; i < touchedCount; i++)
+            delta[touched[i]] = scratchDelta[touched[i]];
+        resetScratch();
         return delta;
     }
 
@@ -201,14 +210,65 @@ public class DatacenterRing
      */
     public double balanceChangeIfRemoved(Token token, double[] target)
     {
-        double[] delta = ownershipChangeIfRemoved(token);
+        accumulateRemoval(vnode(token));
         double change = 0;
-        for (int node = 0; node < delta.length; node++)
+        for (int i = 0; i < touchedCount; i++)
         {
-            if (delta[node] != 0)
-                change += delta[node] * (2 * (ownership[node] - target[node]) + delta[node]);
+            int node = touched[i];
+            double delta = scratchDelta[node];
+            change += delta * (2 * (ownership[node] - target[node]) + delta);
         }
+        resetScratch();
         return change;
+    }
+
+    /**
+     * Accumulates in {@link #scratchDelta} the ownership change of every node if the token was removed; the nodes
+     * with a change are listed in {@link #touched}.
+     */
+    private void accumulateRemoval(Vnode vnode)
+    {
+        // the range ending at the token merges into the next range; the replicas of the next range only change if its
+        // walk wraps around the whole ring up to the removed token
+        Vnode next = vnode.next;
+        double merged = vnode.rangeSize();
+        for (int replica : vnode.replicas)
+            addScratch(replica, -merged);
+        int[] nextReplicas = vnode.acceptedIn.contains(next) ? walk(next, vnode).replicas : next.replicas;
+        for (int replica : nextReplicas)
+            addScratch(replica, merged);
+
+        for (Vnode range : vnode.acceptedIn)
+        {
+            if (range == vnode)
+                continue;
+            int[] replicas = range == next ? nextReplicas : walk(range, vnode).replicas;
+            double size = range.rangeSize();
+            for (int replica : range.replicas)
+                addScratch(replica, -size);
+            for (int replica : replicas)
+                addScratch(replica, size);
+        }
+    }
+
+    private void addScratch(int node, double delta)
+    {
+        if (!scratchTouched[node])
+        {
+            scratchTouched[node] = true;
+            touched[touchedCount++] = node;
+        }
+        scratchDelta[node] += delta;
+    }
+
+    private void resetScratch()
+    {
+        for (int i = 0; i < touchedCount; i++)
+        {
+            scratchDelta[touched[i]] = 0;
+            scratchTouched[touched[i]] = false;
+        }
+        touchedCount = 0;
     }
 
     /**
@@ -274,21 +334,24 @@ public class DatacenterRing
         int[] replicas = new int[rfLeft];
         Vnode[] acceptedAt = new Vnode[rfLeft];
         int found = 0;
-        boolean[] seenNodes = new boolean[rackOf.length];
-        Set<Integer> seenRacks = new HashSet<>();
+        // a node or rack is seen in this walk if its stamp is the current epoch
+        int epoch = ++walkEpoch;
 
         Vnode current = start == skip ? start.next : start;
         Vnode first = current;
         do
         {
-            if (current != skip && !seenNodes[current.node])
+            if (current != skip && seenNodeEpoch[current.node] != epoch)
             {
-                boolean newRack = seenRacks.add(rackOf[current.node]);
+                int rack = rackOf[current.node];
+                boolean newRack = seenRackEpoch[rack] != epoch;
                 if (newRack || acceptableRackRepeats > 0)
                 {
-                    if (!newRack)
+                    if (newRack)
+                        seenRackEpoch[rack] = epoch;
+                    else
                         acceptableRackRepeats--;
-                    seenNodes[current.node] = true;
+                    seenNodeEpoch[current.node] = epoch;
                     replicas[found] = current.node;
                     acceptedAt[found] = current;
                     found++;
