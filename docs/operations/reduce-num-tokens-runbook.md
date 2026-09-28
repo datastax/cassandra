@@ -332,9 +332,15 @@ decommission. See `num-tokens-reduction-design.md` for how it works and the guar
    care of them.
 5. **Disk capacity.** Size it from the plan (§8.1): the peak ownership of any node, plus the data a
    shrinking node keeps until its cleanup.
-6. **Paxos.** With Paxos v2 each step runs the topology-change Paxos repair. Paxos v1 state
+6. **Out-of-range writes.** Keep `reject_out_of_token_range_requests: false` (the default) during
+   the procedure. Coordinators learn about a shrink and its end through gossip, a few milliseconds
+   apart, so a replica can briefly receive a write for a range it doesn't consider its own yet (or
+   any more). It logs "Receiving mutation(s) for token(s) neither owned nor pending" and applies the
+   write. With the option set to `true` it would reject those writes, which can fail a request at a
+   consistency level that needs that replica.
+7. **Paxos.** With Paxos v2 each step runs the topology-change Paxos repair. Paxos v1 state
    (`system.paxos`) is not streamed, as with move and decommission.
-7. **JMX access for the script.** The script calls every node through JMX. By default
+8. **JMX access for the script.** The script calls every node through JMX. By default
    (`LOCAL_JMX=yes` in `cassandra-env.sh`) JMX only listens on localhost, so either:
    * enable remote JMX (with authentication, and SSL if required) for the duration of the
      procedure; or
@@ -438,4 +444,40 @@ While a node shrinks, `nodetool status`/`ring` show it as `Moving`, and its oper
 | Out of disk during a round | The data of the ranges given up is still on the nodes that shrank | Flush and cleanup the nodes that already shrank; plan again with a smaller `--factor` |
 
 Data streamed to the would-be replicas of an aborted step is harmless; their next cleanup removes it.
+
+### 8.5 Lab validation (2026-09-28)
+
+Three CC5 nodes (VMs with 2 vCPUs and 6 GB RAM each) in three racks, started with 256 random tokens,
+holding about 300 MiB per node: 2 M `cassandra-stress` rows plus a 100,000-row check table, both at
+RF 2 (NTS). The script ran from the operator host, over authenticated remote JMX (`-u`/`-pwf`).
+
+**The reduction:**
+* 256 → 16 in 4 rounds, 12 steps, from a plan made from `nodetool ring -pp`. Final ownership was
+  0.981–1.014 of the fair share, the planner's prediction to the third decimal (initially
+  0.953–1.041).
+* A second plan, 16 → 8, ran as well.
+
+**Step times (shrink, both RING_DELAY waits, flush + cleanup):**
+* about 70 s per step with the final code;
+* before the linear range computation, 15–36 minutes per step, almost all of it computing ranges;
+  that is what found the problem.
+
+**Availability.** Continuous `QUORUM` writes (16 client threads, 2,000–5,500 writes/s) ran during
+steps 1–2 and during the 16 → 8 round: about 19 M writes in total and no error caused by a shrink.
+The only errors (unavailable replicas, nodes shutting down) came from restarting nodes to install a
+build, which with RF 2 and `QUORUM` is expected.
+
+**Correctness, after each plan:**
+* the check table's count at `ALL` was exact;
+* a full preview repair (`nodetool repair --preview --full`) reported "Previewed data was in sync"
+  for both keyspaces;
+* the logs had no ERROR, and only the transient out-of-range warnings described in §8.0.
+
+**Operations exercised:**
+* dry run over all rounds;
+* the script stopped between steps, and also killed during a `settokens` (the node finished the
+  shrink alone; the next run cleaned it up and continued);
+* a node restarted during a shrink (the shrink was aborted, and the node came back with its tokens);
+* nodes restarted with fewer tokens than `num_tokens`, accepted with the warning;
+* `num_tokens` set to the new count, after which the override file was removed at restart.
 
