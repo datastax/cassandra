@@ -243,6 +243,8 @@ public class TokenReductionRunner
     public static int run(Plan plan, ClusterOperations cluster, Options options, PrintStream out) throws IOException
     {
         int run = 0;
+        // in a dry run, the tokens the nodes would have after the steps already checked
+        Map<String, Set<String>> dryRunTokens = new HashMap<>();
         for (int i = 0; i < plan.steps.size(); i++)
         {
             Step step = plan.steps.get(i);
@@ -253,7 +255,7 @@ public class TokenReductionRunner
 
             Set<String> endpoints = cluster.endpoints();
             String endpoint = resolve(step, endpoints);
-            Set<String> current = cluster.tokens(endpoint, endpoint);
+            Set<String> current = dryRunTokens.containsKey(endpoint) ? dryRunTokens.get(endpoint) : cluster.tokens(endpoint, endpoint);
             Set<String> keep = new HashSet<>(step.keep);
 
             if (current.equals(keep))
@@ -285,6 +287,7 @@ public class TokenReductionRunner
             if (options.dryRun)
             {
                 out.println(step + ": would shrink from " + current.size() + " tokens (dry run)");
+                dryRunTokens.put(endpoint, keep);
                 continue;
             }
 

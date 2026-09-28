@@ -350,8 +350,11 @@ public class TokenReductionRunnerTest
     public void testDryRunAndFilters() throws Exception
     {
         Setup setup = plan(true);
+        // a dry run checks every round of the plan, as if the previous steps were done
         TokenReductionRunner.Options options = options();
         options.dryRun = true;
+        assertThat(run(setup, options)).isZero();
+        assertThat(setup.cluster.shrunk).isEmpty();
         options.round = 1;
         assertThat(run(setup, options)).isZero();
         assertThat(setup.cluster.shrunk).isEmpty();

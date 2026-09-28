@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.service;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -105,7 +106,7 @@ public class RangeRelocator
             AbstractReplicationStrategy strategy = Keyspace.open(keyspace).getReplicationStrategy();
             RangesAtEndpoint current = strategy.getAddressReplicas(metadata, local);
             RangesAtEndpoint updated = strategy.getPendingAddressRanges(metadata, keptTokens, local);
-            RangesAtEndpoint toFetch = calculateStreamAndFetchRanges(current, updated).right;
+            RangesAtEndpoint toFetch = notCovered(updated, current);
             if (!toFetch.isEmpty())
                 throw new IllegalStateException(String.format("Keeping a subset of its tokens would make this node replicate new ranges of keyspace %s (%s), which is not supported by the shrink operation",
                                                               keyspace, toFetch));
@@ -224,7 +225,9 @@ public class RangeRelocator
                 // all the kept tokens at once: the ranges of the node are those of the whole kept set
                 RangesAtEndpoint currentReplicas = strategy.getAddressReplicas(tokenMetaClone, localAddress);
                 RangesAtEndpoint updatedReplicas = strategy.getPendingAddressRanges(tokenMetaClone, tokens, localAddress);
-                Pair<RangesAtEndpoint, RangesAtEndpoint> streamAndFetchOwnRanges = calculateStreamAndFetchRanges(currentReplicas, updatedReplicas);
+                // not calculateStreamAndFetchRanges, whose pairwise comparisons take minutes with hundreds of vnodes
+                Pair<RangesAtEndpoint, RangesAtEndpoint> streamAndFetchOwnRanges = Pair.create(notCovered(currentReplicas, updatedReplicas),
+                                                                                               notCovered(updatedReplicas, currentReplicas));
                 // a node keeping a subset of its tokens never gains a range with SimpleStrategy and
                 // NetworkTopologyStrategy; don't assume it for other strategies
                 if (!streamAndFetchOwnRanges.right.isEmpty())
@@ -296,6 +299,64 @@ public class RangeRelocator
                 logger.debug("Keyspace {}: work map {}.", keyspace, rangesToFetch);
             }
         }
+    }
+
+    /**
+     * The parts of the ranges of {@code src} not covered by the ranges of {@code dst}, for replicas that are all full
+     * (transient replication is refused by the shrink). Linear in the number of ranges: {@code dst} is merged into
+     * sorted disjoint ranges once, and each range of {@code src} is only compared with the few of them it overlaps,
+     * found by binary search. With a shrink, the ranges of a node are merges of ranges of the current ring, so a range
+     * is either covered or not at all, but partial overlaps are handled too.
+     */
+    @VisibleForTesting
+    static RangesAtEndpoint notCovered(RangesAtEndpoint src, RangesAtEndpoint dst)
+    {
+        List<Range<Token>> union = Range.normalize(dst.ranges());
+        RangesAtEndpoint.Builder result = RangesAtEndpoint.builder(src.endpoint());
+        for (Replica replica : src)
+        {
+            for (Range<Token> part : replica.range().unwrap())
+            {
+                List<Range<Token>> overlapping = overlapping(union, part);
+                Set<Range<Token>> remainder = overlapping.isEmpty() ? Collections.singleton(part) : part.subtractAll(overlapping);
+                for (Range<Token> piece : remainder)
+                    result.add(replica.decorateSubrange(piece));
+            }
+        }
+        return result.build();
+    }
+
+    /**
+     * @param union sorted, disjoint, non-wrapping ranges (see {@link Range#normalize})
+     * @param part a non-wrapping range
+     * @return the ranges of {@code union} that overlap {@code part}
+     */
+    private static List<Range<Token>> overlapping(List<Range<Token>> union, Range<Token> part)
+    {
+        // the ends of the ranges of the union are increasing: find the first range ending after the start of part
+        int low = 0, high = union.size();
+        while (low < high)
+        {
+            int mid = (low + high) >>> 1;
+            if (endsAfter(union.get(mid), part.left))
+                high = mid;
+            else
+                low = mid + 1;
+        }
+        List<Range<Token>> result = new ArrayList<>(2);
+        for (int i = low; i < union.size() && startsBeforeEnd(union.get(i), part); i++)
+            result.add(union.get(i));
+        return result;
+    }
+
+    private static boolean endsAfter(Range<Token> range, Token token)
+    {
+        return range.right.isMinimum() || range.right.compareTo(token) > 0;
+    }
+
+    private static boolean startsBeforeEnd(Range<Token> range, Range<Token> part)
+    {
+        return part.right.isMinimum() || range.left.compareTo(part.right) < 0;
     }
 
     /**
