@@ -20,7 +20,7 @@ There are two online procedures:
 | Disk headroom | none on the old nodes | the planner's peak ownership (about 1.5–1.7× the fair share on one node per round) plus the data kept until cleanup |
 | Client changes | move clients to the new DC (`LOCAL_*` consistency levels, DC-aware policy) | none |
 | Duration | one rebuild and a decommission | one shrink per node per round (e.g. 4 rounds for 256 → 16) |
-| Rollback | easy until the old DC is dropped from the replication | every step is atomic; stop between steps at any time, the ring is always valid |
+| Rollback | easy until the old DC is dropped from the replication | a step that fails rolls back, and you can stop between steps at any time (the ring is always valid), but a completed step can't be undone: a node can't take tokens back |
 
 Procedure A is the only option on versions without `nodetool settokens`. The rest of this summary
 explains why nothing simpler works.
@@ -323,14 +323,28 @@ decommission. See `num-tokens-reduction-design.md` for how it works and the guar
    * Gossip is enabled on every node.
 2. **No transient replication.** A keyspace that uses it makes every shrink refuse.
 3. **Repairs.** A full repair of every keyspace completed recently: a shrinking node streams its own
-   copy of the ranges it gives up, as decommission does. No repair may run during a step (the step
-   is refused if one involves the shrinking node).
-4. **Hints.** No hints pending for the node about to shrink (the script checks
-   `nodetool listpendinghints` on every node).
+   copy of the ranges it gives up, as decommission does. Pause scheduled repairs for the duration of
+   the procedure. A step is refused if a repair session involving the shrinking node is running when
+   it starts, but repairs started during a step are not refused.
+4. **Hints.** No hints pending for the node about to shrink. The script checks
+   `nodetool listpendinghints` on every node just before each step; hints written afterwards, e.g.
+   because a node goes down during the step, aren't covered, and a repair after the procedure takes
+   care of them.
 5. **Disk capacity.** Size it from the plan (§8.1): the peak ownership of any node, plus the data a
    shrinking node keeps until its cleanup.
 6. **Paxos.** With Paxos v2 each step runs the topology-change Paxos repair. Paxos v1 state
    (`system.paxos`) is not streamed, as with move and decommission.
+7. **JMX access for the script.** The script calls every node through JMX. By default
+   (`LOCAL_JMX=yes` in `cassandra-env.sh`) JMX only listens on localhost, so either:
+   * enable remote JMX (with authentication, and SSL if required) for the duration of the
+     procedure; or
+   * run the script where it can reach every node's JMX, and give `--jmx-addresses <file>` with lines
+     `<endpoint> <jmx host>:<jmx port>` for the nodes whose JMX is not on their address and `--port`
+     (NAT, tunnels, separate management networks).
+
+   Credentials work as for nodetool: `-u <user>` with `-pwf <file>` (default
+   `~/.cassandra/jmxremote.password`) or `-pw` (visible in the process list). `--ssl` reads
+   `~/.cassandra/nodetool-ssl.properties`, and `-D` options are passed to the JVM.
 
 ### 8.1 Plan
 
@@ -370,8 +384,19 @@ For each step it:
 5. runs `nodetool flush` and `nodetool cleanup` on the node. Cleanup only rewrites sstables; the
    writes the node received for the ranges it gave up are in memtables until flushed.
 
-The script stops at the first problem, with the reason. Fix the cause and run the same command
-again: the steps already done are skipped.
+The script stops at the first problem, with the reason (exit code 2; 1 for a usage error). Fix the
+cause and run the same command again:
+* steps whose shrink is already done get their flush and cleanup again (cleanup does nothing on
+  sstables that need nothing), so a run stopped between a shrink and its cleanup doesn't leave data
+  behind;
+* nodes already at a later step are skipped;
+* any other node must be exactly where its previous step (or the initial ring saved in the plan)
+  left it. So `--round 2` before round 1 is done is refused, as is a plan that no longer matches the
+  ring.
+
+`settokens` runs for as long as the streaming takes. The script follows the node's mode and tokens
+over a separate connection, so a lost JMX connection doesn't lose the outcome: the script waits
+while the node is `SHRINKING`, then reports success or failure from what the node did.
 
 Useful options:
 * `--dry-run` checks every step without changing anything;
@@ -396,8 +421,9 @@ While a node shrinks, `nodetool status`/`ring` show it as `Moving`, and its oper
 * `nodetool status <keyspace>`: ownership close to the plan's figures for the round.
 * **`num_tokens`.** Set it in `cassandra.yaml` to the new count, on every node of the round. Until
   then a node restarts with its new token count thanks to `<metadata_directory>/token_count_override`
-  (logging a warning), but it refuses any other `num_tokens` value. The file is removed once
-  `num_tokens` matches.
+  (logging a warning). It accepts the `num_tokens` values configured when its shrinks ran and its
+  previous token counts (a yaml updated between rounds), but refuses any other value. The file is
+  removed once `num_tokens` matches the node's tokens.
 * **At the end.** Set `num_tokens` (and `allocate_tokens_for_local_replication_factor`) for future
   nodes in your configuration management. Run a repair, as after any topology change.
 
@@ -405,10 +431,10 @@ While a node shrinks, `nodetool status`/`ring` show it as `Moving`, and its oper
 
 | What | What happens | What to do |
 |---|---|---|
-| A shrink fails (streaming error, a node went down, a precondition changed during `RING_DELAY`) | The node rolls back: it keeps its tokens and every node drops the shrinking state | Fix the cause, run the script again |
+| A shrink fails: a streaming error (e.g. a stream target went down), a precondition that changed during the first `RING_DELAY` (a node down, another movement started), or saving the new tokens | The node rolls back: it keeps its tokens and every node drops the shrinking state. A node that isn't a stream target going down during streaming doesn't abort the shrink | Fix the cause, run the script again |
 | The shrinking node is restarted or crashes | This aborts the shrink: the node comes back with its previous tokens | Run the script again |
 | The shrinking node dies for good | Its shrink state stays until the node is removed | `nodetool removenode` (allowed for the shrinking node itself) or replace it |
-| You need to stop | Stop the script between steps (Ctrl-C while it waits); a running `settokens` finishes, or restart the node to abort it | Resume later with the same plan, as long as the ring didn't change |
+| You need to stop | Ctrl-C stops the script; a running `settokens` goes on on the node (restart the node to abort it) | Run the script again later with the same plan, as long as the ring didn't change: it flushes and cleans up a node whose shrink finished in the meantime |
 | Out of disk during a round | The data of the ranges given up is still on the nodes that shrank | Flush and cleanup the nodes that already shrank; plan again with a smaller `--factor` |
 
 Data streamed to the would-be replicas of an aborted step is harmless; their next cleanup removes it.

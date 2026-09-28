@@ -125,7 +125,7 @@ public class GossiperTest
     @Test
     public void testPaddingIntact() throws Exception
     {
-        // sanity check that all 10 pads still exist
+        // sanity check that the pads still exist (X10 is now SHRINK_TOKENS_SUPPORTED, see ApplicationStateOrdinalsTest)
         assert ApplicationState.X1 == ApplicationState.X1;
         assert ApplicationState.X2 == ApplicationState.X2;
         assert ApplicationState.X3 == ApplicationState.X3;
@@ -135,7 +135,7 @@ public class GossiperTest
         assert ApplicationState.X7 == ApplicationState.X7;
         assert ApplicationState.X8 == ApplicationState.X8;
         assert ApplicationState.X9 == ApplicationState.X9;
-        assert ApplicationState.X10 == ApplicationState.X10;
+        assert ApplicationState.SHRINK_TOKENS_SUPPORTED == ApplicationState.SHRINK_TOKENS_SUPPORTED;
     }
 
     private void setLiveEndpoint(String address, String version) throws UnknownHostException

@@ -330,7 +330,8 @@ public class TokenReductionPlannerTool
 
     /**
      * Writes one file per step, {@code round-<n>-<tokens>/<datacenter>/<step>-<endpoint>.tokens}, with the tokens
-     * the node keeps, one per line, and the report in {@code plan.txt}.
+     * the node keeps, one per line, the tokens of every node in {@code initial/<datacenter>/<endpoint>.tokens}, and
+     * the report in {@code plan.txt}.
      */
     @VisibleForTesting
     static void write(TokenReductionPlanner.Plan plan, Ring ring, Map<String, Integer> replication, Path output) throws IOException
@@ -353,6 +354,16 @@ public class TokenReductionPlannerTool
                 Path file = dir.resolve(String.format("%04d-%s.tokens", number, step.endpoint.replace(':', '_')));
                 Files.write(file, keep, StandardCharsets.UTF_8);
             }
+        }
+        // the tokens of every node when the plan was made: the runner checks that no step is skipped
+        for (TokenReductionPlanner.Node node : ring.nodes)
+        {
+            Path dir = output.resolve("initial").resolve(node.datacenter);
+            Files.createDirectories(dir);
+            List<String> tokens = new ArrayList<>();
+            for (Token token : node.tokens)
+                tokens.add(token.toString());
+            Files.write(dir.resolve(node.endpoint.replace(':', '_') + ".tokens"), tokens, StandardCharsets.UTF_8);
         }
         try (PrintStream out = new PrintStream(Files.newOutputStream(output.resolve("plan.txt")), true, StandardCharsets.UTF_8.name()))
         {

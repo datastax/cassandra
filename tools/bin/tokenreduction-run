@@ -45,6 +45,28 @@ fi
 
 JVM_OPTS="${JVM_OPTS} -Xmx${MAX_HEAP_SIZE} -XX:MaxDirectMemorySize=${MAX_DIRECT_MEMORY}"
 
+# as nodetool: --ssl reads ~/.cassandra/nodetool-ssl.properties, -D options go to the JVM
+ARGS=""
+SSL_FILE=$HOME/.cassandra/nodetool-ssl.properties
+while [ $# -gt 0 ]; do
+  case $1 in
+    --ssl)
+      if [ -f "$SSL_FILE" ]; then
+          SSL_ARGS=$(cat "$SSL_FILE" | tr '\n' ' ')
+      fi
+      JVM_OPTS="$JVM_OPTS -Dssl.enable=true $SSL_ARGS"
+      ;;
+    -D*)
+      JVM_OPTS="$JVM_OPTS $1"
+      ;;
+    *)
+      ARGS="$ARGS \"$1\""
+      ;;
+  esac
+  shift
+done
+eval set -- "$ARGS"
+
 "${JAVA}" ${JAVA_AGENT} -ea -cp "${CLASSPATH}" ${JVM_OPTS} \
         -Dcassandra.storagedir="${cassandra_storagedir}" \
         -Dlogback.configurationFile=logback-tools.xml \

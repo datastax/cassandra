@@ -57,7 +57,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The planner and the runner of {@code tools/bin} (tokenreductionplanner, tokenreduction-run) end to end, the runner
- * driving the cluster through the same operations it uses over JMX.
+ * driving the cluster through the same operations it uses over JMX. The JMX implementation itself can't be used with
+ * in-JVM nodes: their JMX servers don't have the platform MBeans NodeProbe needs (java.lang:type=Memory).
  */
 public class ShrinkTokensRunnerTest extends TestBaseImpl
 {
@@ -105,6 +106,11 @@ public class ShrinkTokensRunnerTest extends TestBaseImpl
             return tokensSeenBy(instances.get(observer), instances.get(endpoint));
         }
 
+        public String operationMode(String endpoint)
+        {
+            return instances.get(endpoint).callOnInstance(() -> StorageService.instance.getOperationMode());
+        }
+
         public String hostId(String endpoint)
         {
             return coordinator.callOnInstance(() -> {
@@ -137,10 +143,41 @@ public class ShrinkTokensRunnerTest extends TestBaseImpl
             }
         }
 
-        public void flushAndCleanup(String endpoint)
+        public void flushAndCleanup(String endpoint, PrintStream out)
         {
             cleanup(instances.get(endpoint));
         }
+    }
+
+    /** Writes the ring as CSV and plans it with the planner tool, one round to 16 tokens. */
+    private static Path plan(Cluster cluster, Path dir) throws Exception
+    {
+        List<String> ring = new ArrayList<>();
+        for (IInvokableInstance instance : cluster)
+            for (String token : tokens(instance))
+                ring.add(String.format("%s,datacenter0,rack0,%s", address(instance), token));
+        Path ringFile = dir.resolve("ring.csv");
+        Files.write(ringFile, ring, StandardCharsets.UTF_8);
+        Path plan = dir.resolve("plan");
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        PrintStream print = new PrintStream(out, true, StandardCharsets.UTF_8.name());
+        int exit = TokenReductionPlannerTool.run(new String[]{ "--ring", ringFile.toString(), "--replication", "datacenter0:3",
+                                                               "--target", "16", "--output", plan.toString() }, print, print);
+        assertThat(exit).as(out.toString(StandardCharsets.UTF_8.name())).isZero();
+        return plan;
+    }
+
+    private static void assertReduced(Cluster cluster)
+    {
+        for (IInvokableInstance instance : cluster)
+            assertThat(tokens(instance)).hasSize(TOKENS / 2);
+        Set<Integer> keys = new HashSet<>();
+        for (int i = 0; i < ROWS; i++)
+            keys.add(i);
+        // the runner ran flush and cleanup after every step
+        assertDataPlacement(cluster, keys, true);
+        Object[][] count = cluster.coordinator(1).execute(withKeyspace("SELECT count(*) FROM %s.tbl"), ConsistencyLevel.ALL);
+        assertThat(count[0][0]).isEqualTo((long) ROWS);
     }
 
     @Test
@@ -151,43 +188,19 @@ public class ShrinkTokensRunnerTest extends TestBaseImpl
         {
             createSchema(cluster);
             write(cluster, 0, ROWS);
-
-            // the ring, as CSV
-            List<String> ring = new ArrayList<>();
-            for (IInvokableInstance instance : cluster)
-                for (String token : tokens(instance))
-                    ring.add(String.format("%s,datacenter0,rack0,%s", address(instance), token));
-            Path ringFile = dir.resolve("ring.csv");
-            Files.write(ringFile, ring, StandardCharsets.UTF_8);
-
-            Path plan = dir.resolve("plan");
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            PrintStream print = new PrintStream(out, true, StandardCharsets.UTF_8.name());
-            int exit = TokenReductionPlannerTool.run(new String[]{ "--ring", ringFile.toString(), "--replication", "datacenter0:3",
-                                                                   "--target", "16", "--output", plan.toString() }, print, print);
-            assertThat(exit).as(out.toString(StandardCharsets.UTF_8.name())).isZero();
-
-            List<TokenReductionRunner.Step> steps = TokenReductionRunner.readPlan(plan);
-            assertThat(steps).hasSize(4);
+            TokenReductionRunner.Plan plan = TokenReductionRunner.readPlan(plan(cluster, dir));
+            assertThat(plan.steps).hasSize(4);
             TokenReductionRunner.Options options = new TokenReductionRunner.Options();
             options.pollMillis = 500;
             InJvmCluster operations = new InJvmCluster(cluster);
+            PrintStream out = new PrintStream(new ByteArrayOutputStream(), true);
 
             // a run stopped after one step: the next run resumes
-            List<TokenReductionRunner.Step> first = steps.subList(0, 1);
-            assertThat(TokenReductionRunner.run(first, operations, options, print)).isEqualTo(1);
-            assertThat(TokenReductionRunner.run(steps, operations, options, print)).isEqualTo(3);
-            assertThat(TokenReductionRunner.run(steps, operations, options, print)).isZero();
-
-            for (IInvokableInstance instance : cluster)
-                assertThat(tokens(instance)).hasSize(TOKENS / 2);
-            Set<Integer> keys = new HashSet<>();
-            for (int i = 0; i < ROWS; i++)
-                keys.add(i);
-            // the runner ran flush and cleanup after every step
-            assertDataPlacement(cluster, keys, true);
-            Object[][] count = cluster.coordinator(1).execute(withKeyspace("SELECT count(*) FROM %s.tbl"), ConsistencyLevel.ALL);
-            assertThat(count[0][0]).isEqualTo((long) ROWS);
+            TokenReductionRunner.Plan first = new TokenReductionRunner.Plan(plan.steps.subList(0, 1), plan.initialTokens);
+            assertThat(TokenReductionRunner.run(first, operations, options, out)).isEqualTo(1);
+            assertThat(TokenReductionRunner.run(plan, operations, options, out)).isEqualTo(3);
+            assertThat(TokenReductionRunner.run(plan, operations, options, out)).isZero();
+            assertReduced(cluster);
         }
         finally
         {

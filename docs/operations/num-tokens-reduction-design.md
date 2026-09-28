@@ -1,6 +1,6 @@
 # Design: in-place reduction of `num_tokens`
 
-Status: agreed design (decisions in §7). Phases 0 and 1 are implemented; Phases 2–3 are to be implemented in this order,
+Status: implemented (decisions in §7). Phases 0 to 3 were implemented in this order,
 one pull request each, against `main-5.0` of the eolivelli fork.
 
 Companion documents: `reduce-num-tokens-runbook.md` (today's procedure, via a new datacenter)
@@ -268,14 +268,28 @@ column (no schema change, no downgrade risk).
     meanwhile, and the node comes back with its tokens and can retry;
   * a planner-driven 32 → 8 reduction, where the ownership matches the planner's prediction.
 
-## 5. Phase 3 — orchestration and runbook
+## 5. Phase 3 — orchestration and runbook (implemented)
 
-* Runbook section "in-place reduction": capacity check (disk ≥ the planner's peak), repair of
-  the node's ranges and no pending hints for it before each step, planner run, per-step
-  `settokens` → wait `UN` → `cleanup`, verification after each round, abort/rollback (stop
-  between steps: the ring is always valid).
-* A small script (`tools/bin/tokenreduction-run`, optional) that drives the steps through
-  `nodetool`, one node at a time, stopping on the first failure.
+* `reduce-num-tokens-runbook.md` §8 is the operator procedure: prerequisites, plan, run, checks,
+  failure handling. Its summary compares it with the new-datacenter procedure.
+* `tools/bin/tokenreduction-run` (`TokenReductionRunner`) runs a plan through JMX, one node at a
+  time.
+  * **Where the node is.** A node with the tokens of the step gets the step's flush and cleanup
+    again, a node at a later step is skipped, and otherwise the node must have exactly the tokens
+    its previous step (or the initial ring, which the planner saves in the plan) left it with. So a
+    round can't be skipped, and a plan that doesn't match the ring is refused.
+  * **Before each step:** every node up, no joining, leaving or moving node, no hints pending for
+    the node.
+  * **The step.** `settokens` runs on a worker thread while the runner follows the node's mode and
+    tokens over another connection. It then waits until every node sees the new tokens, and runs
+    flush + cleanup (checking that cleanup succeeded).
+  * **Stopping.** It stops at the first problem, and running it again resumes.
+  * **Connection options:** JMX credentials as for nodetool (`-u`/`-pwf`/`-pw`, `--ssl`), and
+    `--jmx-addresses` for nodes whose JMX isn't on their address.
+* Tests:
+  * `TokenReductionRunnerTest` against a fake cluster: resume, cleanup rerun, skipped rounds, a lost
+    connection, preconditions, filters, exit codes;
+  * `ShrinkTokensRunnerTest` on an in-JVM cluster, through the runner's operations and through JMX.
 
 ## 6. Risks
 

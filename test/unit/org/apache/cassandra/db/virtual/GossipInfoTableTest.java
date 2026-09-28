@@ -75,8 +75,7 @@ public class GossipInfoTableTest extends CQLTester
 
         assertThat(resultSet.size()).isEqualTo(1);
         UntypedResultSet.Row row = resultSet.one();
-        // includes the value and version columns of SHRINK_TOKENS_SUPPORTED
-        assertThat(row.getColumns().size()).isEqualTo(68);
+        assertThat(row.getColumns().size()).isEqualTo(66);
 
         assertThat(endpoint).isNotNull();
         assertThat(localState).isNotNull();
@@ -114,7 +113,7 @@ public class GossipInfoTableTest extends CQLTester
         assertValue(row, "x7", localState, ApplicationState.X7);
         assertValue(row, "x8", localState, ApplicationState.X8);
         assertValue(row, "x9", localState, ApplicationState.X9);
-        assertValue(row, "x10", localState, ApplicationState.X10);
+        assertValue(row, "shrink_tokens_supported", localState, ApplicationState.SHRINK_TOKENS_SUPPORTED);
 
         assertVersion(row, "status_version", localState, ApplicationState.STATUS);
         assertVersion(row, "load_version", localState, ApplicationState.LOAD);
@@ -145,7 +144,7 @@ public class GossipInfoTableTest extends CQLTester
         assertVersion(row, "x7", localState, ApplicationState.X7);
         assertVersion(row, "x8", localState, ApplicationState.X8);
         assertVersion(row, "x9", localState, ApplicationState.X9);
-        assertVersion(row, "x10", localState, ApplicationState.X10);
+        assertVersion(row, "shrink_tokens_supported_version", localState, ApplicationState.SHRINK_TOKENS_SUPPORTED);
     }
 
     private void assertValue(UntypedResultSet.Row row, String column, EndpointState localState, ApplicationState key)

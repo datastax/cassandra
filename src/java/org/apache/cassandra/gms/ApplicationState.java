@@ -61,11 +61,6 @@ public enum ApplicationState
     SSTABLE_VERSIONS,
     DISK_USAGE,
     INDEX_STATUS,
-    /**
-     * Set by nodes that understand the SHRINKING status (nodetool settokens). Older nodes see this ordinal as the
-     * X1 padding state and ignore it.
-     */
-    SHRINK_TOKENS_SUPPORTED,
     // DO NOT EDIT OR REMOVE PADDING STATES BELOW - only add new states above.  See CASSANDRA-16484
     X1,
     X2,
@@ -76,5 +71,10 @@ public enum ApplicationState
     X7,
     X8,
     X9,
-    X10,
+    /**
+     * Was the padding state X10. Set by nodes that understand the SHRINKING status (nodetool settokens); older nodes
+     * see this ordinal as X10 and ignore it. It takes the last padding slot so that no other ordinal moves (the
+     * padding slots are used by position, e.g. by the DSE 6 gossip translation, see ApplicationStateOrdinalsTest).
+     */
+    SHRINK_TOKENS_SUPPORTED,
 }

@@ -96,6 +96,8 @@ public final class TokenCountOverride
     {
         Record record = new Record();
         Record existing = read();
+        if (existing == null && file().exists())
+            throw new FSWriteError(new IOException("the token count override is unreadable, it would lose the num_tokens values of the previous shrinks; check or remove it"), file());
         if (existing != null && existing.tokenSets.contains(tokenSet(previous)))
             record.numTokens.addAll(existing.numTokens); // a previous round
         record.numTokens.add(Integer.toString(numTokens));

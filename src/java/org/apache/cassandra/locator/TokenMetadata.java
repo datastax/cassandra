@@ -1293,7 +1293,10 @@ public class TokenMetadata
                 {
                     if (currentReplicas.endpoints().contains(newReplica.endpoint()))
                         continue;
-                    // already pending for this range because of another range movement
+                    // already pending for this range because of another range movement. Only the end of the range is
+                    // checked: a pending range of another movement that covers only part of it would still overlap,
+                    // which can only happen with a movement started while a node shrinks (refused on the nodes
+                    // that know about the shrink, see StorageService)
                     if (newPendingRanges.pendingEndpointsFor(token).endpoints().contains(newReplica.endpoint()))
                         continue;
                     newPendingRanges.addPendingRange(range, new Replica(newReplica.endpoint(), range, newReplica.isFull()));

@@ -36,6 +36,7 @@ import net.bytebuddy.implementation.bind.annotation.SuperCall;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.TokenCountOverride;
@@ -43,6 +44,7 @@ import org.apache.cassandra.streaming.StreamState;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.cassandra.config.CassandraRelevantProperties.RING_DELAY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.distributed.test.ring.ShrinkTokensTest.NODES;
 import static org.apache.cassandra.distributed.test.ring.ShrinkTokensTest.TOKENS;
 import static org.apache.cassandra.distributed.test.ring.ShrinkTokensTest.assertDataPlacement;
@@ -74,6 +76,7 @@ public class ShrinkTokensFailureTest extends TestBaseImpl
         public static volatile boolean blockStream;
         public static volatile boolean streamReached;
         public static volatile boolean failRecord;
+        public static volatile java.util.concurrent.CompletableFuture<StreamState> blockedStream;
 
         static void install(ClassLoader classLoader, Integer node)
         {
@@ -97,7 +100,11 @@ public class ShrinkTokensFailureTest extends TestBaseImpl
             if (failStream)
                 throw new RuntimeException("injected streaming failure");
             if (blockStream)
-                return new java.util.concurrent.CompletableFuture<>(); // never completes
+            {
+                // completes only when the test says so
+                blockedStream = new java.util.concurrent.CompletableFuture<>();
+                return blockedStream;
+            }
             return zuper.call();
         }
 
@@ -209,10 +216,21 @@ public class ShrinkTokensFailureTest extends TestBaseImpl
             cluster.get(2).nodetoolResult("decommission", "--force").asserts().failure().errorContains("while nodes are shrinking");
             node.nodetoolResult("move", "123").asserts().failure();
 
-            // a graceful stop doesn't wait for the shrink
-            node.shutdown().get(2, TimeUnit.MINUTES);
+            // drain (the first step of a graceful stop) doesn't wait for the shrink, and the shrink failing afterwards
+            // doesn't bring the node back to NORMAL
+            node.nodetoolResult("drain").asserts().success();
+            assertThat(node.callOnInstance(() -> StorageService.instance.getOperationMode())).isEqualTo("DRAINED");
+            node.runOnInstance(() -> Faults.blockedStream.completeExceptionally(new RuntimeException("streaming interrupted by the drain")));
             shrinker.join(TimeUnit.MINUTES.toMillis(2));
             assertThat(shrinker.isAlive()).isFalse();
+            assertThat(shrinkError.get()).hasMessageContaining("failed, the node keeps its " + TOKENS + " tokens");
+            assertThat(node.callOnInstance(() -> StorageService.instance.getOperationMode())).isEqualTo("DRAINED");
+
+            // the in-JVM shutdown flushes the schema unless the system keyspaces are unsafe, which a drained node refuses
+            try (WithProperties properties = new WithProperties().set(UNSAFE_SYSTEM, true))
+            {
+                node.shutdown().get(2, TimeUnit.MINUTES);
+            }
 
             node.startup();
             assertThat(tokens(node)).containsExactlyInAnyOrderElementsOf(current);

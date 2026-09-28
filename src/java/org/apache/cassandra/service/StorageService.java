@@ -5860,6 +5860,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, shrinking);
         setMode(Mode.SHRINKING, String.format("%s: sleeping %s ms before streaming", description, RING_DELAY_MILLIS), true);
         boolean recorded = false;
+        boolean saveAttempted = false;
         try
         {
             Uninterruptibles.sleepUninterruptibly(RING_DELAY_MILLIS, MILLISECONDS);
@@ -5888,26 +5889,32 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // num_tokens is updated, then save the tokens
             TokenCountOverride.record(current, kept, DatabaseDescriptor.getNumTokens());
             recorded = true;
+            saveAttempted = true;
             SystemKeyspace.updateTokens(kept);
         }
         catch (Throwable t)
         {
             // roll back: announce the unchanged tokens again, so that every node drops the shrinking state and the
-            // pending ranges; the data already streamed is removed by a cleanup on the receiving nodes
+            // pending ranges; the data already streamed is removed by a cleanup on the receiving nodes. Each step is
+            // attempted on its own: the node may be draining or shutting down at the same time.
             logger.error("{} failed, keeping the {} tokens of the node", description, current.size(), t);
-            try
+            if (saveAttempted)
             {
-                if (recorded)
-                    TokenCountOverride.rollback(current, kept);
+                // system.local may hold either token set: the record keeps both, so the node restarts with the saved one
+                logger.error("Saving the new tokens failed: system.local may hold either {} or {} tokens. Restart the node, " +
+                             "and run a repair if it restarts with {} tokens", current.size(), kept.size(), kept.size());
             }
-            catch (Throwable e)
+            else if (recorded)
             {
-                logger.warn("Could not roll back the token count override", e);
+                rollbackStep("roll back the token count override", () -> TokenCountOverride.rollback(current, kept));
             }
-            setGossipTokens(current);
-            getTokenMetadata().removeFromShrinking(localAddress);
-            PendingRangeCalculatorService.instance.update();
-            setMode(Mode.NORMAL, false);
+            if (Gossiper.instance.isEnabled())
+                rollbackStep("announce the unchanged tokens", () -> setGossipTokens(current));
+            rollbackStep("clear the shrinking state", () -> {
+                getTokenMetadata().removeFromShrinking(localAddress);
+                PendingRangeCalculatorService.instance.update();
+            });
+            setModeIfShrinking(Mode.NORMAL);
             if (t instanceof Error)
                 throw (Error) t;
             if (t instanceof InterruptedException)
@@ -5916,16 +5923,36 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new IOException(description + " failed, the node keeps its " + current.size() + " tokens: " + cause.getMessage(), cause);
         }
 
-        // the new tokens are saved: announce them
-        setGossipTokens(kept);
+        // the new tokens are saved: announce them (unless the node is being drained: it announces them at restart)
+        if (Gossiper.instance.isEnabled())
+            setGossipTokens(kept);
         getTokenMetadata().updateNormalTokens(kept, localAddress);
-        setMode(Mode.NORMAL, false);
+        setModeIfShrinking(Mode.NORMAL);
         invalidateLocalRanges();
         // let every coordinator learn the new tokens before the operator runs cleanup or the next step
         logger.info("{} completed, sleeping {} ms for the new tokens to propagate", description, RING_DELAY_MILLIS);
         Uninterruptibles.sleepUninterruptibly(RING_DELAY_MILLIS, MILLISECONDS);
         logger.info("{} completed. Run 'nodetool flush' and 'nodetool cleanup' on this node to remove the data of the ranges it gave up, and set num_tokens to {} in cassandra.yaml",
                     description, kept.size());
+    }
+
+    private static void rollbackStep(String description, Runnable step)
+    {
+        try
+        {
+            step.run();
+        }
+        catch (Throwable t)
+        {
+            logger.warn("Could not {} while rolling back the shrink", description, t);
+        }
+    }
+
+    /** Changes the mode only if it is still SHRINKING, e.g. not if the node is being drained meanwhile. */
+    private synchronized void setModeIfShrinking(Mode mode)
+    {
+        if (operationMode == Mode.SHRINKING)
+            setMode(mode, false);
     }
 
     private void checkCanShrinkTokens(InetAddressAndPort localAddress, Collection<Token> current, Set<Token> kept, List<String> keyspaces)

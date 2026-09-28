@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -69,9 +70,12 @@ public class TokenReductionRunnerTest
         final Map<String, Set<String>> hints = new HashMap<>();
         final List<String> shrunk = new ArrayList<>();
         final List<String> cleaned = new ArrayList<>();
-        String failShrinkOf;
-        int lag;
         final Map<String, Integer> polls = new HashMap<>();
+        String failShrinkOf;           // the shrink fails and the node keeps its tokens
+        String loseConnectionOf;       // the shrink completes on the node but the call fails
+        String failCleanupOf;
+        String mode = "NORMAL";
+        int lag;
 
         public Set<String> endpoints()
         {
@@ -106,6 +110,11 @@ public class TokenReductionRunnerTest
             return new HashSet<>(seen);
         }
 
+        public String operationMode(String endpoint)
+        {
+            return mode;
+        }
+
         public String hostId(String endpoint)
         {
             return "id-" + endpoint;
@@ -125,10 +134,14 @@ public class TokenReductionRunnerTest
                     seenBy.computeIfAbsent(observer, o -> new HashMap<>()).put(endpoint, new HashSet<>(tokens.get(endpoint)));
             tokens.put(endpoint, new HashSet<>(keep));
             shrunk.add(endpoint);
+            if (endpoint.equals(loseConnectionOf))
+                throw new IOException("connection lost");
         }
 
-        public void flushAndCleanup(String endpoint)
+        public void flushAndCleanup(String endpoint, PrintStream out) throws IOException
         {
+            if (endpoint.equals(failCleanupOf))
+                throw new IOException("injected cleanup failure");
             cleaned.add(endpoint);
         }
     }
@@ -136,7 +149,7 @@ public class TokenReductionRunnerTest
     private static final class Setup
     {
         final FakeCluster cluster = new FakeCluster();
-        List<TokenReductionRunner.Step> steps;
+        TokenReductionRunner.Plan plan;
     }
 
     /** 5 nodes x 32 tokens in dc1 and 3 nodes x 32 tokens in dc2, planned to 8 tokens by halving. */
@@ -169,7 +182,7 @@ public class TokenReductionRunnerTest
         int exit = TokenReductionPlannerTool.run(new String[]{ "--ring", ring.toString(), "--replication", "dc1:3,dc2:2", "--target", "8", "--output", output.toString() },
                                                  new PrintStream(out, true, StandardCharsets.UTF_8.name()), new PrintStream(out, true, StandardCharsets.UTF_8.name()));
         assertThat(exit).as(out.toString(StandardCharsets.UTF_8.name())).isZero();
-        setup.steps = TokenReductionRunner.readPlan(output);
+        setup.plan = TokenReductionRunner.readPlan(output);
         return setup;
     }
 
@@ -183,7 +196,7 @@ public class TokenReductionRunnerTest
 
     private static int run(Setup setup, TokenReductionRunner.Options options) throws IOException
     {
-        return TokenReductionRunner.run(setup.steps, setup.cluster, options, new PrintStream(new ByteArrayOutputStream()));
+        return TokenReductionRunner.run(setup.plan, setup.cluster, options, new PrintStream(new ByteArrayOutputStream()));
     }
 
     @Test
@@ -191,11 +204,11 @@ public class TokenReductionRunnerTest
     {
         Setup setup = plan(true);
         // rounds 16 and 8, every node in each round, dc1 before dc2, steps in order
-        assertThat(setup.steps).hasSize(16);
+        assertThat(setup.plan.steps).hasSize(16);
         int previousRound = 0;
         String previousDc = "";
         int previousNumber = 0;
-        for (TokenReductionRunner.Step step : setup.steps)
+        for (TokenReductionRunner.Step step : setup.plan.steps)
         {
             if (step.round != previousRound)
             {
@@ -214,6 +227,9 @@ public class TokenReductionRunnerTest
             assertThat(step.keep).hasSize(step.round == 1 ? 16 : 8);
             assertThat(step.endpoint).matches("10\\.0\\.0\\.\\d:7000");
         }
+        // the initial ring is in the plan
+        assertThat(setup.plan.initialTokens).hasSize(8);
+        setup.cluster.tokens.forEach((endpoint, tokens) -> assertThat(new HashSet<>(setup.plan.initialTokens.get(endpoint))).isEqualTo(tokens));
         assertThatThrownBy(() -> TokenReductionRunner.readPlan(dir)).hasMessageContaining("not a plan written by tokenreductionplanner");
     }
 
@@ -227,22 +243,26 @@ public class TokenReductionRunnerTest
             assertThat(tokens).hasSize(8);
         assertThat(setup.cluster.cleaned).isEqualTo(setup.cluster.shrunk);
         List<String> order = new ArrayList<>();
-        for (TokenReductionRunner.Step step : setup.steps)
+        for (TokenReductionRunner.Step step : setup.plan.steps)
             order.add(step.endpoint);
         assertThat(setup.cluster.shrunk).isEqualTo(order);
 
-        // a second run has nothing to do
+        // a second run has no shrink to do: the round 1 steps are skipped (the nodes are at round 2), the round 2
+        // steps are done and only flush and clean up again
+        setup.cluster.cleaned.clear();
         assertThat(run(setup, options())).isZero();
         assertThat(setup.cluster.shrunk).hasSize(16);
+        assertThat(setup.cluster.cleaned).hasSize(8);
     }
 
     @Test
     public void testStopsAtFirstFailureAndResumes() throws Exception
     {
         Setup setup = plan(true);
-        String failing = setup.steps.get(3).endpoint;
+        String failing = setup.plan.steps.get(3).endpoint;
         setup.cluster.failShrinkOf = failing;
         assertThatThrownBy(() -> run(setup, options())).hasMessageContaining("nodetool settokens failed: injected failure")
+                                                       .hasMessageContaining("the node kept its tokens")
                                                        .hasMessageContaining(failing);
         assertThat(setup.cluster.shrunk).hasSize(3);
         setup.cluster.failShrinkOf = null;
@@ -250,10 +270,53 @@ public class TokenReductionRunnerTest
     }
 
     @Test
+    public void testCleanupRunsAgainOnResume() throws Exception
+    {
+        Setup setup = plan(true);
+        String failing = setup.plan.steps.get(0).endpoint;
+        setup.cluster.failCleanupOf = failing;
+        assertThatThrownBy(() -> run(setup, options())).hasMessageContaining("injected cleanup failure");
+        assertThat(setup.cluster.shrunk).containsExactly(failing);
+        assertThat(setup.cluster.cleaned).isEmpty();
+        setup.cluster.failCleanupOf = null;
+        TokenReductionRunner.Options options = options();
+        options.round = 1;
+        assertThat(run(setup, options)).isEqualTo(7);
+        // the node of the first step got its cleanup, first
+        assertThat(setup.cluster.cleaned.get(0)).isEqualTo(failing);
+        assertThat(setup.cluster.cleaned).hasSize(8);
+    }
+
+    @Test
+    public void testLostConnectionDuringShrink() throws Exception
+    {
+        Setup setup = plan(true);
+        // the call fails but the node completed the shrink: the runner goes on
+        setup.cluster.loseConnectionOf = setup.plan.steps.get(0).endpoint;
+        TokenReductionRunner.Options options = options();
+        options.round = 1;
+        options.datacenter = "dc1";
+        assertThat(run(setup, options)).isEqualTo(5);
+    }
+
+    @Test
+    public void testRoundsCannotBeSkipped() throws Exception
+    {
+        Setup setup = plan(true);
+        TokenReductionRunner.Options options = options();
+        options.round = 2;
+        assertThatThrownBy(() -> run(setup, options)).hasMessageContaining("a round of the plan was skipped");
+        assertThat(setup.cluster.shrunk).isEmpty();
+        // also in a dry run
+        options.dryRun = true;
+        assertThatThrownBy(() -> run(setup, options)).hasMessageContaining("a round of the plan was skipped");
+    }
+
+    @Test
     public void testPreconditions() throws Exception
     {
         Setup setup = plan(true);
-        String first = setup.steps.get(0).endpoint;
+        String first = setup.plan.steps.get(0).endpoint;
 
         setup.cluster.down.add("10.0.0.8:7000");
         assertThatThrownBy(() -> run(setup, options())).hasMessageContaining("nodes are down: [10.0.0.8:7000]");
@@ -268,8 +331,8 @@ public class TokenReductionRunnerTest
         setup.cluster.hints.clear();
 
         // the ring changed since the plan was made
-        setup.cluster.tokens.put(first, new HashSet<>(Collections.singletonList("123")));
-        assertThatThrownBy(() -> run(setup, options())).hasMessageContaining("the plan doesn't match the ring");
+        setup.cluster.tokens.put(first, new HashSet<>(Arrays.asList("123", "456")));
+        assertThatThrownBy(() -> run(setup, options())).hasMessageContaining("the ring changed since the plan was made");
         assertThat(setup.cluster.shrunk).isEmpty();
     }
 
@@ -280,7 +343,7 @@ public class TokenReductionRunnerTest
         setup.cluster.lag = Integer.MAX_VALUE;
         TokenReductionRunner.Options options = options();
         options.waitTimeoutMillis = 50;
-        assertThatThrownBy(() -> run(setup, options)).hasMessageContaining("don't see the new tokens yet");
+        assertThatThrownBy(() -> run(setup, options)).hasMessageContaining("don't see the new tokens yet").hasMessageContaining("run again to flush and clean up");
     }
 
     @Test
@@ -289,6 +352,7 @@ public class TokenReductionRunnerTest
         Setup setup = plan(true);
         TokenReductionRunner.Options options = options();
         options.dryRun = true;
+        options.round = 1;
         assertThat(run(setup, options)).isZero();
         assertThat(setup.cluster.shrunk).isEmpty();
 
@@ -309,28 +373,53 @@ public class TokenReductionRunnerTest
     public void testPlanWithoutPorts() throws Exception
     {
         Setup setup = plan(false);
-        assertThat(setup.steps.get(0).endpoint).doesNotContain(":");
+        assertThat(setup.plan.steps.get(0).endpoint).doesNotContain(":");
         assertThat(run(setup, options())).isEqualTo(16);
         assertThat(setup.cluster.shrunk).allMatch(e -> e.endsWith(":7000"));
     }
 
     @Test
-    public void testAddress()
+    public void testAddresses() throws Exception
     {
         assertThat(TokenReductionRunner.JmxCluster.address("10.0.0.1:7000")).isEqualTo("10.0.0.1");
         assertThat(TokenReductionRunner.JmxCluster.address("10.0.0.1")).isEqualTo("10.0.0.1");
         assertThat(TokenReductionRunner.JmxCluster.address("[::1]:7000")).isEqualTo("::1");
         assertThat(TokenReductionRunner.JmxCluster.address("::1")).isEqualTo("::1");
+
+        Path file = dir.resolve("jmx.txt");
+        Files.write(file, Arrays.asList("# endpoint jmx", "10.0.0.1:7000 10.1.0.1:7199", "10.0.0.2 jmx2.example:17199"), StandardCharsets.UTF_8);
+        Map<String, String> addresses = TokenReductionRunner.readJmxAddresses(file);
+        TokenReductionRunner.JmxCluster cluster = new TokenReductionRunner.JmxCluster("10.0.0.9", 7199, addresses, null, null);
+        assertThat(cluster.jmxAddress("10.0.0.1:7000")).isEqualTo("10.1.0.1:7199");
+        assertThat(cluster.jmxAddress("10.0.0.2:7000")).isEqualTo("jmx2.example:17199");
+        assertThat(cluster.jmxAddress("10.0.0.3:7000")).isEqualTo("10.0.0.3:7199");
+        assertThat(cluster.jmxAddress("[::3]:7000")).isEqualTo("[::3]:7199");
+        assertThat(cluster.jmxAddress(null)).isEqualTo("10.0.0.9:7199");
+        Files.write(file, Collections.singletonList("10.0.0.1 no-port"), StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> TokenReductionRunner.readJmxAddresses(file)).hasMessageContaining("expected '<endpoint> <jmx host>:<jmx port>'");
     }
 
     @Test
-    public void testUsageErrors()
+    public void testPasswordFile() throws Exception
+    {
+        Path file = dir.resolve("jmxremote.password");
+        Files.write(file, Arrays.asList("monitor secret1", "admin secret2"), StandardCharsets.UTF_8);
+        assertThat(TokenReductionRunner.readPassword("admin", file.toString())).isEqualTo("secret2");
+        assertThatThrownBy(() -> TokenReductionRunner.readPassword("nobody", file.toString())).hasMessageContaining("No password for nobody");
+    }
+
+    @Test
+    public void testExitCodes() throws Exception
     {
         ByteArrayOutputStream err = new ByteArrayOutputStream();
         PrintStream stream = new PrintStream(err, true);
-        assertThat(TokenReductionRunner.run(new String[0], stream, stream)).isEqualTo(1);
+        assertThat(TokenReductionRunner.run(new String[0], stream, stream)).isEqualTo(TokenReductionRunner.USAGE_ERROR);
         assertThat(err.toString()).contains("Missing required option");
-        assertThat(TokenReductionRunner.run(new String[]{ "--plan", dir.toString() }, stream, stream)).isEqualTo(1);
-        assertThat(err.toString()).contains("not a plan written by tokenreductionplanner");
+        assertThat(TokenReductionRunner.run(new String[]{ "--plan", dir.toString(), "--password", "x" }, stream, stream)).isEqualTo(TokenReductionRunner.USAGE_ERROR);
+        assertThat(err.toString()).contains("A password needs a --username");
+        // not a plan: the run stops, without the usage
+        err.reset();
+        assertThat(TokenReductionRunner.run(new String[]{ "--plan", dir.toString(), "--port", "1" }, stream, stream)).isEqualTo(TokenReductionRunner.STOPPED);
+        assertThat(err.toString()).contains("not a plan written by tokenreductionplanner").doesNotContain("Options are");
     }
 }
