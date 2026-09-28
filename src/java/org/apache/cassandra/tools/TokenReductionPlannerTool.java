@@ -92,8 +92,7 @@ public class TokenReductionPlannerTool
     /**
      * @return the exit code
      */
-    @VisibleForTesting
-    static int run(String[] args, PrintStream out, PrintStream err)
+    public static int run(String[] args, PrintStream out, PrintStream err)
     {
         Options options = getOptions();
         try

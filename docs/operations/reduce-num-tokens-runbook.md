@@ -8,14 +8,22 @@ Reproduced by the in-JVM dtest
 
 ## 1. Summary
 
-**A node's token count cannot be changed in place.** The number of vnodes is
-fixed when a node first joins the ring and is persisted in `system.local`.
-The only supported, online way to move a cluster from 256 to fewer vnodes is
-to **build a new logical datacenter with the new `num_tokens`, rebuild it from
-the old datacenter, switch the clients, and decommission the old
-datacenter**. It needs temporary extra hardware (one extra node per node of
-the datacenter being converted), and the clients must be able to pin a local
-datacenter and use `LOCAL_*` consistency levels.
+Changing `num_tokens` in `cassandra.yaml` has no effect on a node that already
+joined the ring: its tokens are fixed at join and persisted in `system.local`.
+There are two online procedures:
+
+| | A. New datacenter (§3) | B. In place, `nodetool settokens` (§8) |
+|---|---|---|
+| Available in | any version | versions with `nodetool settokens` (every node must advertise it) |
+| Extra hardware | one new node per node of the DC | none |
+| Data streamed | one copy of the DC data set | about 1.3–2.1 copies, spread over several rounds |
+| Disk headroom | none on the old nodes | the planner's peak ownership (about 1.5–1.7× the fair share on one node per round) plus the data kept until cleanup |
+| Client changes | move clients to the new DC (`LOCAL_*` consistency levels, DC-aware policy) | none |
+| Duration | one rebuild and a decommission | one shrink per node per round (e.g. 4 rounds for 256 → 16) |
+| Rollback | easy until the old DC is dropped from the replication | every step is atomic; stop between steps at any time, the ring is always valid |
+
+Procedure A is the only option on versions without `nodetool settokens`. The rest of this summary
+explains why nothing simpler works.
 
 Everything else we checked either fails or leaves the cluster badly
 unbalanced:
@@ -261,7 +269,7 @@ nodetool decommission --force
 | 3.5 | Point clients back to `DC_OLD`. |
 | 3.6 onward | `DC_OLD` misses writes: to roll back you must re-add `DC_OLD` to the replication and `nodetool rebuild -- DC_NEW` / repair it, i.e. run the procedure in the other direction. |
 
-## 5. Why not in place (details)
+## 5. Why a plain in-place change doesn't work (details)
 
 With `ReplicationAwareTokenAllocator` a node's ideal ownership is
 `numTokens × replicas / totalTokens`. Replacing one 256-token node of an
@@ -299,3 +307,109 @@ the same DC.
 | `testReplacementWithDifferentNumTokensIsRefused` | a replacement configured with 16 tokens for a 256-token node is refused before streaming; with `num_tokens: 256` the same replacement succeeds |
 | `testBootstrapWithFewerTokensInSameDatacenterIsUnbalanced` | 3 nodes × 256 random tokens + 1 node × 16 allocated tokens, RF=3: the new node replicates **6.1%** of the ring (60/1000 rows) while the old ones replicate **~98%** each (balanced would be 75%) |
 | `testMigrateToFewerTokensThroughNewDatacenter` | the full §3 procedure: dc2 with 16 tokens joins with `auto_bootstrap: false`, keyspaces (incl. `system_auth`, `system_distributed`, `system_traces`) extended to dc2, `nodetool rebuild dc1`, dc1 dropped from replication, `nodetool decommission --force` on every dc1 node, `system_auth` cleaned up; all data readable at `ALL`, 3 × 16 tokens left in the ring, nodes restart fine, writes at `LOCAL_QUORUM` succeed |
+
+## 8. Procedure B: in-place reduction with `nodetool settokens`
+
+Every node keeps a subset of its tokens, in rounds (e.g. 256 → 128 → 64 → 32 → 16), one node at a
+time. Each step streams the ranges the node gives up to their new replicas, like a partial
+decommission. See `num-tokens-reduction-design.md` for how it works and the guarantees.
+
+### 8.0 Prerequisites
+
+1. **Versions and cluster state.**
+   * Every node runs a version with `nodetool settokens`: a shrink is refused while any node that
+     didn't leave doesn't advertise the capability, or is down.
+   * Every node is `UN`, with no bootstrap, decommission, move, replace or removenode in progress.
+   * Gossip is enabled on every node.
+2. **No transient replication.** A keyspace that uses it makes every shrink refuse.
+3. **Repairs.** A full repair of every keyspace completed recently: a shrinking node streams its own
+   copy of the ranges it gives up, as decommission does. No repair may run during a step (the step
+   is refused if one involves the shrinking node).
+4. **Hints.** No hints pending for the node about to shrink (the script checks
+   `nodetool listpendinghints` on every node).
+5. **Disk capacity.** Size it from the plan (§8.1): the peak ownership of any node, plus the data a
+   shrinking node keeps until its cleanup.
+6. **Paxos.** With Paxos v2 each step runs the topology-change Paxos repair. Paxos v1 state
+   (`system.paxos`) is not streamed, as with move and decommission.
+
+### 8.1 Plan
+
+```
+nodetool ring -pp > ring.txt                  # on any node, with ports
+tokenreductionplanner --ring ring.txt --replication dc1:3,dc2:3 --target 16 --output plan-$(date +%F)
+```
+
+* `--replication`: the RF of the keyspaces that hold most of the data, for every datacenter. A DC
+  with RF 0 is balanced as RF 1.
+* The default is to halve the token count each round. Use `--factor 1.5` or
+  `--rounds 192,128,...` for a lower peak with more rounds.
+* Read `plan.txt`:
+  * **peak ownership**: with the loads from `nodetool ring`, the report gives it in bytes; compare
+    it with the free disk of every node;
+  * **streamed data**: gives the expected duration;
+  * **final balance**.
+* Always write a new plan directory; a plan is only valid for the ring it was made from.
+  Re-plan if the ring changes (nodes added or removed).
+
+### 8.2 Run
+
+The script runs the steps of the plan in order, one node at a time:
+
+```
+tokenreduction-run --plan plan-2026-10-01 --host <any node> [--port 7199 -u <jmx user> -pw <jmx password>]
+```
+
+For each step it:
+1. skips the step if the node already has the tokens to keep (or fewer, from a later round of the
+   plan), and stops if they aren't a subset of its tokens;
+2. checks that every node is up, none is joining, leaving or moving, and no node has hints for it;
+3. runs `nodetool settokens --keep-file <step file>` on the node, which blocks until the shrink is
+   done (RING_DELAY before streaming, the streaming itself, RING_DELAY after the new tokens are
+   announced);
+4. waits until every node sees the new tokens;
+5. runs `nodetool flush` and `nodetool cleanup` on the node. Cleanup only rewrites sstables; the
+   writes the node received for the ranges it gave up are in memtables until flushed.
+
+The script stops at the first problem, with the reason. Fix the cause and run the same command
+again: the steps already done are skipped.
+
+Useful options:
+* `--dry-run` checks every step without changing anything;
+* `--round N` and `--datacenter DC` run part of the plan, e.g. one round, then a pause;
+* `--no-cleanup` defers cleanups, for example to run them at night. The disk usage then grows
+  until they run.
+
+Manual equivalent, per step (in the order of the plan's step files):
+
+```
+nodetool listpendinghints                                              # on every node: no hints for the node
+nodetool -h <node> settokens --keep-file plan/round-1-128/dc1/0001-10.0.0.1_7000.tokens
+nodetool -h <each node> ring -pp | grep 10.0.0.1                      # every node sees the new tokens
+nodetool -h <node> flush && nodetool -h <node> cleanup
+```
+
+While a node shrinks, `nodetool status`/`ring` show it as `Moving`, and its operation mode
+(`nodetool info`, `netstats`) is `SHRINKING`.
+
+### 8.3 After each round, and at the end
+
+* `nodetool status <keyspace>`: ownership close to the plan's figures for the round.
+* **`num_tokens`.** Set it in `cassandra.yaml` to the new count, on every node of the round. Until
+  then a node restarts with its new token count thanks to `<metadata_directory>/token_count_override`
+  (logging a warning), but it refuses any other `num_tokens` value. The file is removed once
+  `num_tokens` matches.
+* **At the end.** Set `num_tokens` (and `allocate_tokens_for_local_replication_factor`) for future
+  nodes in your configuration management. Run a repair, as after any topology change.
+
+### 8.4 Failure handling
+
+| What | What happens | What to do |
+|---|---|---|
+| A shrink fails (streaming error, a node went down, a precondition changed during `RING_DELAY`) | The node rolls back: it keeps its tokens and every node drops the shrinking state | Fix the cause, run the script again |
+| The shrinking node is restarted or crashes | This aborts the shrink: the node comes back with its previous tokens | Run the script again |
+| The shrinking node dies for good | Its shrink state stays until the node is removed | `nodetool removenode` (allowed for the shrinking node itself) or replace it |
+| You need to stop | Stop the script between steps (Ctrl-C while it waits); a running `settokens` finishes, or restart the node to abort it | Resume later with the same plan, as long as the ring didn't change |
+| Out of disk during a round | The data of the ranges given up is still on the nodes that shrank | Flush and cleanup the nodes that already shrank; plan again with a smaller `--factor` |
+
+Data streamed to the would-be replicas of an aborted step is harmless; their next cleanup removes it.
+
