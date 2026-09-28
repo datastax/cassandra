@@ -455,9 +455,9 @@ public class TokenReductionPlannerTest
             logger.info("{} nodes, {} racks, RF {}, 256 -> 16 by halving in {} ms: initial max {}, final max {} min {}, peak {}, streamed {} copies; new DC with 16 tokens: max {} min {}",
                         nodeCount, racks, rf, millis, fmt(initialMax), fmt(finalMax), fmt(finalMin), fmt(peak), fmt(streamed), fmt(freshMax), fmt(freshMin));
 
-            // within 8% of the fair share (a new datacenter allocated with 16 tokens reaches ~2% with one rack)
-            assertThat(finalMax).isLessThan(1.08);
-            assertThat(finalMin).isGreaterThan(0.92);
+            // within about 6% of the fair share (a new datacenter allocated with 16 tokens reaches ~2% with one rack)
+            assertThat(finalMax).isLessThan(1.06);
+            assertThat(finalMin).isGreaterThan(0.93);
             // halving: the last node of a round owns at most twice its share
             assertThat(peak).isLessThan(2.0 * initialMax);
         }

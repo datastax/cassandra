@@ -334,7 +334,14 @@ public class DatacenterRing
         int[] replicas = new int[rfLeft];
         Vnode[] acceptedAt = new Vnode[rfLeft];
         int found = 0;
-        // a node or rack is seen in this walk if its stamp is the current epoch
+        // a node or rack is seen in this walk if its stamp is the current epoch; on overflow the stamps are cleared so
+        // that no stale stamp can match
+        if (walkEpoch == Integer.MAX_VALUE)
+        {
+            Arrays.fill(seenNodeEpoch, 0);
+            Arrays.fill(seenRackEpoch, 0);
+            walkEpoch = 0;
+        }
         int epoch = ++walkEpoch;
 
         Vnode current = start == skip ? start.next : start;

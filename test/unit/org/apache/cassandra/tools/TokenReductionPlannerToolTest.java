@@ -23,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -121,6 +122,7 @@ public class TokenReductionPlannerToolTest
                          "127.0.1.1/dc2/r/[-400, 400]");
         // one node has an unknown load, so the loads are not used
         assertThat(ring.loads).isEmpty();
+        assertThat(ring.warnings).containsExactly("the load of 127.0.0.3 is unknown, the report does not show sizes");
     }
 
     @Test
@@ -260,7 +262,7 @@ public class TokenReductionPlannerToolTest
         assertThat(result.exitCode).as(result.err).isEqualTo(0);
         assertThat(result.out).contains("rounds [16, 8, 4]")
                               .contains("Datacenter dc1: 5 nodes, RF 3")
-                              .contains("Datacenter dc2: 3 nodes, RF 0 (balanced as RF 1)")
+                              .contains("Datacenter dc2: 3 nodes, RF 0 (balanced as RF 1")
                               .contains("final ownership");
         String planFile = new String(Files.readAllBytes(output.resolve("plan.txt")), StandardCharsets.UTF_8);
         assertThat(planFile).contains("final ownership");
@@ -323,6 +325,10 @@ public class TokenReductionPlannerToolTest
         Result missingDc = run("--ring", ringFile.toString(), "--replication", "dc9:3", "--target", "2", "--output", dir.resolve("p").toString());
         assertThat(missingDc.exitCode).isEqualTo(1);
         assertThat(missingDc.err).contains("no replication factor for datacenter dc1");
+        Path file = Files.write(dir.resolve("a-file"), Collections.singletonList("x"), StandardCharsets.UTF_8);
+        Result notADirectory = run("--ring", ringFile.toString(), "--replication", "dc1:3", "--target", "2", "--output", file.toString());
+        assertThat(notADirectory.exitCode).isEqualTo(1);
+        assertThat(notADirectory.err).contains("is not a directory");
         Result missingRing = run("--ring", dir.resolve("missing").toString(), "--replication", "dc1:3", "--target", "2", "--output", dir.resolve("p").toString());
         assertThat(missingRing.exitCode).isEqualTo(1);
         assertThat(missingRing.err).contains("I/O error");

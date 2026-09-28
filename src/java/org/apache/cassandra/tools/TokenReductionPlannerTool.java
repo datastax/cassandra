@@ -103,6 +103,8 @@ public class TokenReductionPlannerTool
             if (!(partitioner instanceof Murmur3Partitioner || partitioner instanceof RandomPartitioner))
                 throw new IllegalArgumentException("only Murmur3Partitioner and RandomPartitioner are supported");
             Path output = new File(cmd.getOptionValue(OUTPUT)).toPath();
+            if (Files.exists(output) && !Files.isDirectory(output))
+                throw new IllegalArgumentException("the output " + output + " is not a directory");
             if (Files.exists(output))
             {
                 try (Stream<Path> content = Files.list(output))
@@ -199,6 +201,8 @@ public class TokenReductionPlannerTool
                 token = row.token;
                 if (row.load == null)
                 {
+                    if (loadsUsable)
+                        warnings.add("the load of " + endpoint + " is unknown, the report does not show sizes");
                     loadsUsable = false;
                 }
                 else if (loadsUsable)
@@ -298,8 +302,13 @@ public class TokenReductionPlannerTool
         {
             // rack and status joined, e.g. "us-east-1a-rackUp"
             for (String status : NODETOOL_STATUSES)
+            {
                 if (fields[1].endsWith(status) && fields[1].length() > status.length())
+                {
                     rack = fields[1].substring(0, fields[1].length() - status.length());
+                    break;
+                }
+            }
         }
         if (rack == null)
             throw new IllegalArgumentException("unexpected nodetool ring line: " + raw);
@@ -373,7 +382,7 @@ public class TokenReductionPlannerTool
             double dataSet = total(initial);
 
             int rf = replication.get(dc);
-            out.printf("%nDatacenter %s: %d nodes, RF %d%s%n", dc, initial.size(), rf, rf == 0 ? " (balanced as RF 1)" : "");
+            out.printf("%nDatacenter %s: %d nodes, RF %d%s%n", dc, initial.size(), rf, rf == 0 ? " (balanced as RF 1; ownership and streaming figures assume RF 1)" : "");
             out.printf("  initial ownership: %s%n", stats(initial, fair));
             for (int r = 0; r < plan.rounds.size(); r++)
             {
