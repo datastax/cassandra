@@ -20,6 +20,8 @@ package org.apache.cassandra.io.sstable.format.bti;
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.Set;
+import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +29,10 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.io.compress.CompressionMetadataReaderType;
+import org.apache.cassandra.io.compress.ICompressor;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.KeyReader;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.CompressionInfoComponent;
@@ -43,6 +49,7 @@ import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.Throwables;
@@ -209,10 +216,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
 
         rowIndexFileBuilder.withChunkCache(chunkCache);
         rowIndexFileBuilder.mmapped(ioOptions.indexDiskAccessMode);
-        if (compressionMetadata != null && descriptor.version.indicesAreEncrypted() && compressionMetadata.parameters.getSstableCompressor().encryptionOnly() != null)
-            rowIndexFileBuilder.withCompressionMetadata(compressionMetadata).encryptionOnly();
-
-        return rowIndexFileBuilder;
+        return withIndexEncryption(rowIndexFileBuilder, descriptor, compressionMetadata);
     }
 
     private FileHandle.Builder partitionIndexFileBuilder(CompressionMetadata compressionMetadata)
@@ -224,9 +228,72 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
 
         partitionIndexFileBuilder.withChunkCache(chunkCache);
         partitionIndexFileBuilder.mmapped(ioOptions.indexDiskAccessMode);
-        if (compressionMetadata != null && descriptor.version.indicesAreEncrypted() && compressionMetadata.parameters.getSstableCompressor().encryptionOnly() != null)
-            partitionIndexFileBuilder.withCompressionMetadata(compressionMetadata).encryptionOnly();
+        return withIndexEncryption(partitionIndexFileBuilder, descriptor, compressionMetadata);
+    }
 
-        return partitionIndexFileBuilder;
+    /**
+     * Configures a builder of one of the index files of the given sstable ({@link Components#PARTITION_INDEX} or
+     * {@link Components#ROW_INDEX}) to decrypt the file, if the sstable's indexes are encrypted. Every opener of an
+     * existing sstable's index files must go through this method: an encrypted index read without it is read as
+     * plaintext garbage. {@link BtiTableWriter.IndexWriter} uses it too, for the builders of the early-open index
+     * handles, passing encryption-only metadata built from the table's schema compression parameters.
+     * <p>
+     * When the sstable is not being fully opened (e.g. by offline tools), the compression metadata can be obtained
+     * with {@link #maybeLoadIndexEncryptionMetadata(Descriptor)}.
+     *
+     * @param builder             the builder of the index file handle
+     * @param descriptor          the sstable the index file belongs to
+     * @param compressionMetadata the compression metadata of the sstable (only its parameters are used, so an
+     *                            {@link CompressionMetadata#encryptedOnly(CompressionParams) encryption-only} instance
+     *                            is enough), or {@code null} if the sstable is not compressed; the caller keeps
+     *                            ownership of it and must close it after the builder has completed
+     * @return the given builder
+     */
+    public static FileHandle.Builder withIndexEncryption(FileHandle.Builder builder, Descriptor descriptor, @Nullable CompressionMetadata compressionMetadata)
+    {
+        if (compressionMetadata != null && descriptor.version.indicesAreEncrypted())
+        {
+            ICompressor compressor = compressionMetadata.parameters.getSstableCompressor();
+            if (compressor != null && compressor.encryptionOnly() != null)
+                builder.withCompressionMetadata(compressionMetadata).encryptionOnly();
+        }
+        return builder;
+    }
+
+    /**
+     * Reads the encryption parameters of the indexes of the given sstable, for use with
+     * {@link #withIndexEncryption(FileHandle.Builder, Descriptor, CompressionMetadata)} when the sstable is not
+     * being fully opened (e.g. by offline tools). Only the header of the compression info file is read: no chunk
+     * offsets are loaded.
+     * <p>
+     * An sstable without a compression info file is treated as not encrypted, unless its TOC lists one: then the
+     * file is missing and a {@link CorruptSSTableException} is thrown rather than reading encrypted indexes as
+     * plaintext. This check is best-effort: if the sstable has no TOC, the check is skipped and the indexes are
+     * treated as not encrypted.
+     *
+     * @return an {@link CompressionMetadata#encryptedOnly(CompressionParams) encryption-only} compression metadata
+     * that the caller must close, or {@code null} if the indexes of the sstable are not encrypted
+     * @throws CorruptSSTableException if the TOC lists a compression info file that does not exist
+     */
+    @Nullable
+    public static CompressionMetadata maybeLoadIndexEncryptionMetadata(Descriptor descriptor)
+    {
+        if (!descriptor.version.indicesAreEncrypted())
+            return null;
+
+        CompressionParams params = CompressionInfoComponent.readCompressionParamsIfExists(descriptor, CompressionMetadataReaderType.READ_TIME);
+        if (params == null)
+        {
+            // CompressionInfo.db is known to be absent here, so there is no need to probe the other components:
+            // fail if the TOC says it should be there
+            CompressionInfoComponent.verifyCompressionInfoExistenceIfApplicable(descriptor, Set.of());
+            return null;
+        }
+
+        ICompressor compressor = params.getSstableCompressor();
+        if (compressor == null || compressor.encryptionOnly() == null)
+            return null;
+
+        return CompressionMetadata.encryptedOnly(params);
     }
 }

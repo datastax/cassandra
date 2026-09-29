@@ -130,6 +130,9 @@ public interface SSTableFormat<R extends SSTableReader, W extends SSTableWriter>
         /**
          * Retrieves a key range for the given sstable at the lowest cost - that is, without opening all sstables files
          * if possible.
+         *
+         * @return the first and last key of the sstable, or {@code null} if the component the key range is read from
+         * (the partition index or the index summary, depending on the format) does not exist
          */
         Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException;
 

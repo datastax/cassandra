@@ -231,23 +231,25 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             {
                 if (encryptor != null)
                 {
-                    // Create encrypted writers and configure FileHandle builders for encryption
+                    // Create encrypted writers and configure FileHandle builders for encryption. The index
+                    // encryption helper always configures encryption here: its condition (indices encrypted and a
+                    // compressor with an encryption-only part) is the one that made encryptor non-null.
                     encryptionMetadata = CompressionMetadata.encryptedOnly(params);
                     riWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.ROW_INDEX),
                                                              b.getIOOptions().writerOptions,
                                                              encryptor);
-                    rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
-                                                      .withMmappedRegionsCache(b.getMmappedRegionsCache())
-                                                      .withCompressionMetadata(encryptionMetadata)
-                                                      .encryptionOnly();
+                    rowIndexFHBuilder = BtiTableReaderLoadingBuilder.withIndexEncryption(IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
+                                                                                                       .withMmappedRegionsCache(b.getMmappedRegionsCache()),
+                                                                                         descriptor,
+                                                                                         encryptionMetadata);
 
                     piWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX),
                                                              b.getIOOptions().writerOptions,
                                                              encryptor);
-                    partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
-                                                            .withMmappedRegionsCache(b.getMmappedRegionsCache())
-                                                            .withCompressionMetadata(encryptionMetadata)
-                                                            .encryptionOnly();
+                    partitionIndexFHBuilder = BtiTableReaderLoadingBuilder.withIndexEncryption(IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
+                                                                                                             .withMmappedRegionsCache(b.getMmappedRegionsCache()),
+                                                                                               descriptor,
+                                                                                               encryptionMetadata);
                 }
                 else
                 {
