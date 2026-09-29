@@ -84,8 +84,15 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
         opts.put(CompressionParams.CLASS, Encryptor.class.getName());
         compressionParamsDes = CompressionParams.fromMap(opts);
 
-        // TODO: Figure out why encrypted instance runs much slower
-        COUNT = 24525;
+        // This class has 12 parameterisations against the 6 of PartitionIndexTest, and each one is as fast as a plain
+        // one now that encrypted index reads go through the chunk cache. With the full COUNT the class takes about
+        // 7 minutes here and would take about twice as long on CI, well over the 8-minute class fork timeout
+        // (test.timeout). A quarter of the keys keeps every parameterisation and brings the class to about
+        // 1.5 minutes here (about 3 on CI).
+        // The superclass is initialised before this static initialiser runs, and a class is initialised only once,
+        // so PartitionIndexTest.COUNT still holds its own value and is divided exactly once (the no-chunk-cache
+        // fallback is divided too; that configuration is not used by any test yaml).
+        COUNT = PartitionIndexTest.COUNT / 4;
     }
 
     @Parameterized.Parameters(name="accessMode {0} BC version {1} compressionParams {2} fromFile {3}")
