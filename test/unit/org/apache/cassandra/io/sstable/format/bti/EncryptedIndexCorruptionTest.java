@@ -19,6 +19,7 @@ package org.apache.cassandra.io.sstable.format.bti;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
 import java.util.Set;
 
 import org.junit.After;
@@ -59,6 +60,7 @@ import static org.junit.Assert.assertTrue;
 /**
  * A corrupted page of an encrypted BTI partition or row index must fail the read with a CorruptSSTableException and
  * mark the sstable suspect, like corruption of a plain index does, so that e.g. compaction stops selecting it.
+ * Corruption of a plain index, which is not checksummed, must not leak what the failed read held.
  */
 public class EncryptedIndexCorruptionTest extends CQLTester
 {
@@ -71,6 +73,7 @@ public class EncryptedIndexCorruptionTest extends CQLTester
     private SSTableFormat<?, ?> savedFormat;
     private Config.DiskFailurePolicy savedPolicy;
     private int savedColumnIndexSizeInKiB;
+    private Config.DiskAccessMode savedIndexAccessMode;
 
     @Before
     public void saveConfig()
@@ -78,6 +81,7 @@ public class EncryptedIndexCorruptionTest extends CQLTester
         savedFormat = DatabaseDescriptor.getSelectedSSTableFormat();
         savedPolicy = DatabaseDescriptor.getDiskFailurePolicy();
         savedColumnIndexSizeInKiB = DatabaseDescriptor.getColumnIndexSizeInKiB();
+        savedIndexAccessMode = DatabaseDescriptor.getIndexAccessMode();
         DatabaseDescriptor.setSelectedSSTableFormat(BtiFormat.getInstance());
         DatabaseDescriptor.setDiskFailurePolicy(Config.DiskFailurePolicy.ignore);
     }
@@ -88,6 +92,7 @@ public class EncryptedIndexCorruptionTest extends CQLTester
         DatabaseDescriptor.setSelectedSSTableFormat(savedFormat);
         DatabaseDescriptor.setDiskFailurePolicy(savedPolicy);
         DatabaseDescriptor.setColumnIndexSizeInKiB(savedColumnIndexSizeInKiB);
+        DatabaseDescriptor.setIndexAccessMode(savedIndexAccessMode);
     }
 
     @Test
@@ -257,6 +262,121 @@ public class EncryptedIndexCorruptionTest extends CQLTester
     }
 
     /**
+     * The row index of a plain table is not checksummed, so a walker reading garbage fails with whatever unchecked
+     * exception the garbage leads to (as can a data file read with a crc_check_chance below 1). When that happens
+     * while the sstable iterator is constructed, the caller never gets the iterator to close: the constructor must
+     * release the data file it opened and the row index reader itself.
+     */
+    @Test
+    public void testUncheckedRowIndexFailureInConstructorReleasesResources() throws Throwable
+    {
+        assertNotNull("chunk cache required to detect the leak", ChunkCache.instance);
+        DatabaseDescriptor.setColumnIndexSizeInKiB(0);
+        // read the row index through the chunk cache too, to see whether its reader is released
+        DatabaseDescriptor.setIndexAccessMode(Config.DiskAccessMode.standard);
+        // the static column makes the iterator constructor open the data file to read the static row
+        createTable("CREATE TABLE %s (pk int, ck int, s int static, v text, PRIMARY KEY (pk, ck))");
+        disableCompaction();
+        execute("INSERT INTO %s (pk, s) VALUES (?, ?)", 1, 42);
+        // the plain row index is more compact than the encrypted one: write more rows to span several chunks
+        int rows = 3 * ROWS;
+        for (int ck = 0; ck < rows; ck++)
+            execute("INSERT INTO %s (pk, ck, v) VALUES (?, ?, ?)", 1, ck, "value" + ck);
+        flush();
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        assertTrue(sstable instanceof BtiTableReader);
+        DecoratedKey key = sstable.decorateKey(Int32Type.instance.decompose(1));
+        File dataFile = sstable.descriptor.fileFor(SSTableFormat.Components.DATA);
+        File rowIndex = sstable.descriptor.fileFor(BtiFormat.Components.ROW_INDEX);
+        assertEquals(1, readForward(sstable, key, rows / 2));
+        assertEquals(0, ChunkCache.instance.chunksInUse(dataFile));
+        assertTrue("The row index must be read through the chunk cache", ChunkCache.instance.sizeOfFile(rowIndex) > 0);
+        assertEquals(0, ChunkCache.instance.chunksInUse(rowIndex));
+
+        // Overwrite all but the last chunk (which holds the trie root and the partition header) with garbage and
+        // find a slice whose row index walk fails with an unchecked exception while constructing the iterator.
+        long chunks = rowIndex.length() / EncryptedSequentialWriter.CHUNK_SIZE;
+        assertTrue("Expected a row index spanning several chunks, got " + rowIndex.length(), chunks >= 3);
+        byte[] saved = overwrite(rowIndex, 0, (chunks - 1) * EncryptedSequentialWriter.CHUNK_SIZE, (byte) 0xFF);
+
+        Throwable failure = null;
+        for (int ck = 0; ck < rows && failure == null; ck += 25)
+        {
+            try
+            {
+                readForward(sstable, key, ck);
+            }
+            catch (Throwable t)
+            {
+                if (findCause(t, CorruptSSTableException.class) == null && thrownThrough(t, AbstractSSTableIterator.class, "<init>"))
+                    failure = t;
+            }
+        }
+        try
+        {
+            assertNotNull("No slice read failed with an unchecked exception in the iterator constructor", failure);
+            assertEquals("The iterator construction failed with " + failure + " and leaked the data file",
+                         0, ChunkCache.instance.chunksInUse(dataFile));
+            assertEquals("The iterator construction failed with " + failure + " and leaked the row index reader",
+                         0, ChunkCache.instance.chunksInUse(rowIndex));
+            // an unchecked exception does not by itself say the sstable is corrupted
+            assertFalse(sstable.isMarkedSuspect());
+        }
+        finally
+        {
+            overwrite(rowIndex, 0, saved);
+        }
+        assertEquals(1, readForward(sstable, key, rows / 2));
+    }
+
+    private static int readForward(SSTableReader sstable, DecoratedKey key, int clustering)
+    {
+        ClusteringComparator comparator = sstable.metadata().comparator;
+        int count = 0;
+        Slices slices = Slices.with(comparator, Slice.make(comparator, clustering));
+        try (UnfilteredRowIterator iterator = sstable.rowIterator(key, slices, ColumnFilter.all(sstable.metadata()), false,
+                                                                  SSTableReadsListener.NOOP_LISTENER))
+        {
+            while (iterator.hasNext())
+            {
+                iterator.next();
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Overwrites the given range of the file with the given byte, drops the file's chunks from the chunk cache and
+     * returns the previous content.
+     */
+    private static byte[] overwrite(File file, long position, long length, byte value) throws Exception
+    {
+        byte[] previous = new byte[(int) length];
+        try (FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.READ))
+        {
+            assertEquals(length, channel.read(ByteBuffer.wrap(previous), position));
+        }
+        byte[] garbage = new byte[(int) length];
+        Arrays.fill(garbage, value);
+        overwrite(file, position, garbage);
+        return previous;
+    }
+
+    private static void overwrite(File file, long position, byte[] content) throws Exception
+    {
+        try (FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.READ, StandardOpenOption.WRITE))
+        {
+            assertEquals(content.length, channel.write(ByteBuffer.wrap(content), position));
+            channel.force(true);
+        }
+        if (ChunkCache.instance != null)
+            ChunkCache.instance.invalidateFileNow(file);
+    }
+
+    /**
      * Iterates in reverse order over the rows with the given clusterings, one slice each, and returns the row count.
      */
     private static int readReversed(SSTableReader sstable, DecoratedKey key, int... clusterings)
@@ -341,6 +461,13 @@ public class EncryptedIndexCorruptionTest extends CQLTester
      */
     private static void assertThrownThrough(Throwable t, Class<?> type, String method)
     {
+        if (!thrownThrough(t, type, method))
+            throw new AssertionError("Expected a " + type.getSimpleName() + (method == null ? "" : '.' + method) +
+                                     " frame in the stack trace of " + t);
+    }
+
+    private static boolean thrownThrough(Throwable t, Class<?> type, String method)
+    {
         for (Throwable c = t; c != null; c = c.getCause())
         {
             for (StackTraceElement frame : c.getStackTrace())
@@ -348,10 +475,10 @@ public class EncryptedIndexCorruptionTest extends CQLTester
                 String className = frame.getClassName();
                 if ((className.equals(type.getName()) || className.startsWith(type.getName() + '$'))
                     && (method == null || frame.getMethodName().equals(method)))
-                    return;
+                    return true;
             }
         }
-        throw new AssertionError("Expected a " + type.getSimpleName() + (method == null ? "" : '.' + method) + " frame in the stack trace of " + t);
+        return false;
     }
 
     private static Throwable findCause(Throwable t, Class<? extends Throwable> type)

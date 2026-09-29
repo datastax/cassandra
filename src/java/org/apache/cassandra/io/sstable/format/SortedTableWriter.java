@@ -374,6 +374,14 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
     @Override
     public void resetAndTruncate()
     {
+        // Unlike the BTI index files (see BtiTableWriter.IndexWriter.resetAndTruncate), the data file needs no chunk
+        // cache invalidation here for the readers opened afterwards to see fresh content. A reader opened early only
+        // reads the data file below its length, which is the start of a partition written before the mark, so the
+        // only cached chunk that can hold content at or past the mark is the one containing the length of the latest
+        // early open, lastEarlyOpenLength (the mark is in it, or it was partial on disk when read). openDataFile
+        // invalidates exactly that chunk, by position, at the next open, early or final, before the new handle is
+        // used; the same holds after a truncation of an uncompressed file makes the following flushes unaligned, as
+        // early open lengths are partition boundaries, unaligned anyway.
         dataWriter.resetAndTruncate(dataMark);
         partitionWriter.reset();
         indexWriter.resetAndTruncate();

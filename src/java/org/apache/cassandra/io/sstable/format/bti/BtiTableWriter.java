@@ -31,6 +31,7 @@ import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -112,17 +113,19 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         PartitionIndex partitionIndex = null;
         FileHandle rowIndexFile = null;
 
-        BtiTableReader.Builder builder = unbuildTo(new BtiTableReader.Builder(descriptor), true).setMaxDataAge(maxDataAge)
-                                                                                                .setSerializationHeader(header)
-                                                                                                .setOpenReason(openReason);
-
         try
         {
+            // First, so that the partition index is closed if anything below fails: for an early open it was built
+            // by the caller, which relies on this method to release it.
+            partitionIndex = partitionIndexSupplier.get();
+
+            BtiTableReader.Builder builder = unbuildTo(new BtiTableReader.Builder(descriptor), true).setMaxDataAge(maxDataAge)
+                                                                                                    .setSerializationHeader(header)
+                                                                                                    .setOpenReason(openReason);
             Map<MetadataType, MetadataComponent> finalMetadata = finalizeMetadata();
             builder.setStatsMetadata((StatsMetadata) finalMetadata.get(MetadataType.STATS));
             builder.setCompactionMetadata(Optional.ofNullable((CompactionMetadata)finalMetadata.get(MetadataType.COMPACTION)));
 
-            partitionIndex = partitionIndexSupplier.get();
             rowIndexFile = indexWriter.rowIndexFHBuilder.complete();
             dataFile = openDataFile(lengthOverride, builder.getStatsMetadata());
             filter = indexWriter.getFilterCopy();
@@ -137,8 +140,9 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         }
         catch (RuntimeException | Error ex)
         {
-            JVMStabilityInspector.inspectThrowable(ex);
             Throwables.closeNonNullAndAddSuppressed(ex, filter, dataFile, rowIndexFile, partitionIndex);
+            // last, as it rethrows some errors (e.g. OutOfMemoryError)
+            JVMStabilityInspector.inspectThrowable(ex);
             throw ex;
         }
     }
@@ -152,7 +156,16 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         indexWriter.buildPartial(dataLength, partitionIndex ->
         {
             indexWriter.rowIndexWriter.updateFileHandle(indexWriter.rowIndexFHBuilder);
-            BtiTableReader reader = openInternal(OpenReason.EARLY, dataLength, () -> partitionIndex);
+            BtiTableReader reader;
+            try
+            {
+                reader = openInternal(OpenReason.EARLY, dataLength, () -> partitionIndex);
+            }
+            finally
+            {
+                // also when the open failed: the index handles it completed may have cached partial chunks
+                indexWriter.invalidateChunkCacheIfTruncated();
+            }
             callWhenReady.accept(reader);
         });
     }
@@ -201,6 +214,11 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         private DataPosition piMark;
 
         @Nullable
+        private final ChunkCache chunkCache;
+        // set once resetAndTruncate has truncated the index files, see invalidateChunkCacheIfTruncated
+        private boolean truncated;
+
+        @Nullable
         private final TableMetrics tableMetrics;
 
         // Encryption-only metadata handed to the index FileHandle builders when encryption is enabled;
@@ -213,6 +231,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         IndexWriter(Builder b, SequentialWriter dataWriter)
         {
             super(b);
+            chunkCache = b.getChunkCache();
 
             // Check if encryption is enabled (following trie-index pattern)
             boolean compression = b.getComponents().contains(SSTableFormat.Components.COMPRESSION_INFO);
@@ -341,8 +360,55 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             // we can't un-set the bloom filter addition, but extra keys in there are harmless.
             // we can't reset dbuilder either, but that is the last thing called in after append, so
             // we assume that if that worked then we won't be trying to reset.
+            // A reset within the writer's buffer changes nothing on disk. Otherwise the writer truncates the file
+            // (which moves its last flush offset back) and rewrites the chunk containing the mark.
+            long riFlushed = rowIndexWriter.getLastFlushOffset();
+            long piFlushed = partitionIndexWriter.getLastFlushOffset();
             rowIndexWriter.resetAndTruncate(riMark);
             partitionIndexWriter.resetAndTruncate(piMark);
+            if (rowIndexWriter.getLastFlushOffset() == riFlushed && partitionIndexWriter.getLastFlushOffset() == piFlushed)
+                return;
+
+            // A reader opened early may have cached the chunk containing the mark, and the cache would serve that
+            // stale content to the handles opened later (as the final reader's) for the same file. Give the files a
+            // fresh id in the chunk cache so that handles opened from now on do not see what was cached before.
+            // Handles already open keep the old id, but they only read the index entries of partitions written
+            // before the mark, which the truncation does not change.
+            truncated = true;
+            invalidateChunkCache();
+        }
+
+        /**
+         * After a truncation, a plain (unencrypted) index writer flushes at positions that are no longer aligned to
+         * the chunk size, so a reader opened early at such a boundary may cache a partial last chunk that later
+         * handles for the same file would be served. Called after each early open, this makes the handles opened
+         * later use a fresh chunk cache id. Without truncations flushes are aligned and cached chunks are shared.
+         */
+        void invalidateChunkCacheIfTruncated()
+        {
+            if (truncated)
+                invalidateChunkCache();
+        }
+
+        /**
+         * Opens a handle on what was flushed of the row index so far, like an early open does.
+         */
+        @VisibleForTesting
+        FileHandle openRowIndexHandle()
+        {
+            rowIndexWriter.updateFileHandle(rowIndexFHBuilder);
+            return rowIndexFHBuilder.complete();
+        }
+
+        private void invalidateChunkCache()
+        {
+            // This assumes that the index file handles use the builder's chunk cache, as the default StorageProvider
+            // does. A provider substituting another cache in primaryIndexWriteTimeFileHandleBuilderFor must
+            // invalidate that one itself (ChunkCache.invalidateFile only affects the instance it is called on).
+            if (chunkCache == null)
+                return;
+            chunkCache.invalidateFile(descriptor.fileFor(Components.ROW_INDEX));
+            chunkCache.invalidateFile(descriptor.fileFor(Components.PARTITION_INDEX));
         }
 
         protected void doPrepare()
