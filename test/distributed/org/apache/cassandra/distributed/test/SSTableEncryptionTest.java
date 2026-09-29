@@ -177,9 +177,38 @@ public class SSTableEncryptionTest extends TestBaseImpl
     }
 
     @Test
-    public void shouldEncryptSensitiveDataMinCompressRatio11() throws Exception
+    public void shouldRejectMinCompressRatioWithEncryption() throws Exception
     {
-        shouldEncryptSensitiveData(1.1);
+        try (Cluster cluster = builder().withNodes(1)
+                                        .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                        .start())
+        {
+            String keyspace = createKeyspace(cluster);
+            Path secretKey = createLocalSecretKey(cluster);
+
+            // A chunk that does not reach min_compress_ratio is stored as is, i.e. unencrypted, so the option must be
+            // refused for encrypting compressors. The encryption options all have defaults, so the check must not
+            // depend on cipher_algorithm being spelled out.
+            for (boolean withCipherAlgorithm : new boolean[]{ true, false })
+            {
+                // Deterministic, distinct names per iteration, so that no two statements can target the same table
+                String suffix = withCipherAlgorithm ? "with_cipher" : "without_cipher";
+                String clause = localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString(), 1.1, withCipherAlgorithm);
+                String createTable = String.format("CREATE TABLE %s.%s (id text, cc text, value text, PRIMARY KEY ((id), cc))%s",
+                                                   keyspace, "rejected_" + suffix, clause);
+                Throwable throwable = catchThrowable(() -> cluster.schemaChange(createTable));
+                assertThat(throwable).hasMessageContaining("min_compress_ratio").hasMessageContaining("unencrypted");
+
+                // Same for ALTER TABLE on a valid encrypted table: the rejected change must leave the table usable.
+                String table = createEncryptedTable(cluster, keyspace, secretKey, "altered_" + suffix);
+                String alterTable = String.format("ALTER TABLE %s.%s%s", keyspace, table, clause);
+                throwable = catchThrowable(() -> cluster.schemaChange(alterTable));
+                assertThat(throwable).hasMessageContaining("min_compress_ratio").hasMessageContaining("unencrypted");
+                insertAndFlush(cluster, keyspace, table, 10);
+                Object[][] rows = cluster.coordinator(1).execute(String.format("SELECT * FROM %s.%s", keyspace, table), ALL);
+                assertThat(rows.length).isEqualTo(10);
+            }
+        }
     }
 
     public void shouldEncryptSensitiveData(Double minCompressRatio) throws Exception
@@ -485,7 +514,11 @@ public class SSTableEncryptionTest extends TestBaseImpl
 
     private String createEncryptedTable(Cluster cluster, String keyspace, Path secretKey)
     {
-        String table = randomTableName();
+        return createEncryptedTable(cluster, keyspace, secretKey, randomTableName());
+    }
+
+    private String createEncryptedTable(Cluster cluster, String keyspace, Path secretKey, String table)
+    {
         cluster.schemaChange(String.format("CREATE TABLE %s.%s (id text, cc text, value text, PRIMARY KEY ((id), cc)) WITH compression = " +
                           "{'class' : 'Encryptor', " +
                           "'cipher_algorithm' : 'AES/ECB/PKCS5Padding', " +
@@ -519,11 +552,15 @@ public class SSTableEncryptionTest extends TestBaseImpl
 
     private String localSystemKeyEncryptionCompressionSuffix(String className, String secretKeyPath, Double minCompressRatio)
     {
+        return localSystemKeyEncryptionCompressionSuffix(className, secretKeyPath, minCompressRatio, true);
+    }
+
+    private String localSystemKeyEncryptionCompressionSuffix(String className, String secretKeyPath, Double minCompressRatio, boolean withCipherAlgorithm)
+    {
         return String.format(" WITH compression = " +
                              "{'class' : '%s', " +
                              (minCompressRatio != null ? "'min_compress_ratio': '" + minCompressRatio + "', " : "") +
-                             "'cipher_algorithm' : 'AES/ECB/PKCS5Padding', " +
-                             "'secret_key_strength' : 128, " +
+                             (withCipherAlgorithm ? "'cipher_algorithm' : 'AES/ECB/PKCS5Padding', 'secret_key_strength' : 128, " : "") +
                              "'key_provider' : 'LocalFileSystemKeyProviderFactory', " +
                              "'secret_key_file': '%s' };", className, secretKeyPath);
     }
