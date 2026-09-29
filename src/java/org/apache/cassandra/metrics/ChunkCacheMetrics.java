@@ -64,6 +64,31 @@ public interface ChunkCacheMetrics extends StatsCounter, CacheMetrics
 
     long entries();
 
+    /** Called when the chunk cache runs synchronous reclaim after a pool tryGet miss. */
+    default void recordSyncReclaim() {}
+
+    /** Called when second tryGet after reclaim succeeds. */
+    default void recordReclaimRetrySuccess() {}
+
+    /** Called when pool still cannot allocate after reclaim + retry (bypass also failed). */
+    default void recordPoolExhausted() {}
+
+    /** Elapsed nanos spent in reclaimSync. */
+    default void recordReclaimLatency(long nanos) {}
+
+    /** Uncached bypass serve from the same pool (bytes = allocated capacity). */
+    default void recordBypass(int bytes) {}
+
+    long syncReclaims();
+
+    long reclaimRetrySuccesses();
+
+    long poolExhausted();
+
+    long bypassCount();
+
+    long bypassBytes();
+
     @Nonnull
     @Override
     CacheStats snapshot();

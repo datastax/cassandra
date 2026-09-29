@@ -39,6 +39,13 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     /** Latency of misses */
     public final Timer missLatency;
 
+    private final com.codahale.metrics.Meter syncReclaims;
+    private final com.codahale.metrics.Meter reclaimRetrySuccesses;
+    private final com.codahale.metrics.Meter poolExhausted;
+    private final com.codahale.metrics.Meter bypassCount;
+    private final com.codahale.metrics.Meter bypassBytes;
+    private final Timer reclaimLatency;
+
     /**
      * Create metrics for the provided chunk cache.
      *
@@ -48,6 +55,12 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     {
         metrics = new CodahaleCacheMetrics("ChunkCache", cache);
         missLatency = metrics.registerTimer("MissLatency");
+        syncReclaims = metrics.registerMeter("SyncReclaims");
+        reclaimRetrySuccesses = metrics.registerMeter("ReclaimRetrySuccesses");
+        poolExhausted = metrics.registerMeter("PoolExhausted");
+        bypassCount = metrics.registerMeter("Bypass");
+        bypassBytes = metrics.registerMeter("BypassBytes");
+        reclaimLatency = metrics.registerTimer("ReclaimLatency");
     }
 
     @Override
@@ -151,6 +164,67 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
         return metrics.entries();
     }
 
+    @Override
+    public void recordSyncReclaim()
+    {
+        syncReclaims.mark();
+    }
+
+    @Override
+    public void recordReclaimRetrySuccess()
+    {
+        reclaimRetrySuccesses.mark();
+    }
+
+    @Override
+    public void recordPoolExhausted()
+    {
+        poolExhausted.mark();
+    }
+
+    @Override
+    public void recordReclaimLatency(long nanos)
+    {
+        reclaimLatency.update(nanos, TimeUnit.NANOSECONDS);
+    }
+
+    @Override
+    public long syncReclaims()
+    {
+        return syncReclaims.getCount();
+    }
+
+    @Override
+    public long reclaimRetrySuccesses()
+    {
+        return reclaimRetrySuccesses.getCount();
+    }
+
+    @Override
+    public long poolExhausted()
+    {
+        return poolExhausted.getCount();
+    }
+
+    @Override
+    public void recordBypass(int bytes)
+    {
+        bypassCount.mark();
+        bypassBytes.mark(bytes);
+    }
+
+    @Override
+    public long bypassCount()
+    {
+        return bypassCount.getCount();
+    }
+
+    @Override
+    public long bypassBytes()
+    {
+        return bypassBytes.getCount();
+    }
+
     @Nonnull
     @Override
     public CacheStats snapshot()
@@ -176,6 +250,9 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
                "Moving hit rate: " + hitRate() + System.lineSeparator() +
                "Num entries: " + entries() + System.lineSeparator() +
                "Size in memory: " + FBUtilities.prettyPrintMemory(size()) + System.lineSeparator() +
-               "Capacity: " + FBUtilities.prettyPrintMemory(capacity());
+               "Capacity: " + FBUtilities.prettyPrintMemory(capacity()) + System.lineSeparator() +
+               "Sync reclaims: " + syncReclaims() + System.lineSeparator() +
+               "Bypass: " + bypassCount() + System.lineSeparator() +
+               "Pool exhausted: " + poolExhausted();
     }
 }
