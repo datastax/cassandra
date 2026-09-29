@@ -63,7 +63,7 @@ class Cql3ParsingRuleSet(CqlParsingRuleSet):
             ('sstable_compression', 'chunk_length_kb', 'crc_check_chance')),
         ('caching', None,
             ('rows_per_partition', 'keys')),
-        ('storage_attached_indexing', 'storage_attached_indexing_parameters',
+        ('storage_attached_indexing', None,
             ('query_optimization_level', 'intersection_clause_limit', 'use_term_statistics')),
     )
 
