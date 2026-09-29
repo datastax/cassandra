@@ -164,7 +164,8 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
     @Override
     public void invalidateIfCached(long position)
     {
-        // Encrypted chunks are not cached, so nothing to invalidate
+        // Nothing to do: this reader holds no cached data. When the chunk cache is in use, this reader is wrapped by
+        // ChunkCache.CachingRebufferer, which performs the invalidation.
     }
 
     @Override

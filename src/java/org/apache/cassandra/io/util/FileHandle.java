@@ -481,7 +481,7 @@ public class FileHandle extends SharedCloseableImpl
                                                                   : MmappedRegions.map(channel, fileLength, chunkSize, sliceDescriptor.sliceStart, adviseRandom);
                             // For encrypted files without explicit length override, pass -1 to let EncryptedChunkReader calculate the logical length
                             long encryptedOverrideLength = (lengthOverride >= 0) ? length : -1;
-                            rebuffererFactory = EncryptedChunkReader.createMmap(channel, regions, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength);
+                            rebuffererFactory = maybeCached(EncryptedChunkReader.createMmap(channel, regions, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength));
                         }
                         else
                         {
@@ -511,7 +511,7 @@ public class FileHandle extends SharedCloseableImpl
                             Encryptor encryptor = (Encryptor) compressionMetadata.compressor().encryptionOnly();
                             // For encrypted files without explicit length override, pass -1 to let EncryptedChunkReader calculate the logical length
                             long encryptedOverrideLength = (lengthOverride >= 0) ? length : -1;
-                            rebuffererFactory = EncryptedChunkReader.createStandard(channel, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength);
+                            rebuffererFactory = maybeCached(EncryptedChunkReader.createStandard(channel, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength));
                         }
                         else
                         {
