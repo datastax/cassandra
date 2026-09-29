@@ -20,8 +20,10 @@ package org.apache.cassandra.cql3;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -38,6 +40,7 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.compress.EncryptorTest;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.hamcrest.Matchers;
 
 import static org.junit.Assert.assertEquals;
@@ -62,6 +65,9 @@ public class EarlyOpenCompactionTest extends CQLTester
 
     private final AtomicBoolean stopVerification = new AtomicBoolean(false);
     private final AtomicInteger verificationErrors = new AtomicInteger(0);
+    // the identities of the distinct early opened reader instances seen in the live set (not the readers, so that
+    // they are not retained); only written by the watcher
+    private final Set<Integer> earlyOpenedSeen = new HashSet<>();
     private final Random random = new Random();
     private ExecutorService executor;
 
@@ -128,13 +134,14 @@ public class EarlyOpenCompactionTest extends CQLTester
         
         // Start verification threads
         System.out.println("Starting verification threads...");
-        executor = Executors.newFixedThreadPool(VERIFICATION_THREADS);
+        executor = Executors.newFixedThreadPool(VERIFICATION_THREADS + 1);
         List<Future<?>> futures = new ArrayList<>();
         
         for (int i = 0; i < VERIFICATION_THREADS; i++)
         {
             futures.add(executor.submit(new VerificationTask()));
         }
+        Future<?> watcher = executor.submit(new EarlyOpenWatcher(cfs));
         
         // Wait a bit to ensure verification is running
         Thread.sleep(1000);
@@ -173,10 +180,49 @@ public class EarlyOpenCompactionTest extends CQLTester
         // Verify no errors occurred during verification
         int errors = verificationErrors.get();
         assertEquals("Found " + errors + " verification errors. Check logs for details.", 0, errors);
+
+        // The point of the test is reading while early opened sstables are live: make sure the compaction produced
+        // some, rather than depending on the fixture sizes and the timing.
+        watcher.get(10, TimeUnit.SECONDS); // fails the test if the watcher failed
+        assertTrue("No early opened sstable was seen during the compaction", !earlyOpenedSeen.isEmpty());
         
         System.out.println("Test completed successfully");
     }
     
+    /**
+     * Records the early opened sstables seen in the live set, until the verification stops.
+     */
+    private class EarlyOpenWatcher implements Runnable
+    {
+        private final ColumnFamilyStore cfs;
+
+        EarlyOpenWatcher(ColumnFamilyStore cfs)
+        {
+            this.cfs = cfs;
+        }
+
+        @Override
+        public void run()
+        {
+            while (!stopVerification.get() && !Thread.currentThread().isInterrupted())
+            {
+                for (SSTableReader sstable : cfs.getLiveSSTables())
+                {
+                    if (sstable.openReason == SSTableReader.OpenReason.EARLY)
+                        earlyOpenedSeen.add(System.identityHashCode(sstable));
+                }
+                try
+                {
+                    Thread.sleep(2);
+                }
+                catch (InterruptedException e)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
     private class VerificationTask implements Runnable
     {
         @Override
