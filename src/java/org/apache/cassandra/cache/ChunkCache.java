@@ -22,6 +22,7 @@ package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture; // checkstyle: permit this import
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -833,5 +834,33 @@ public class ChunkCache
         long fileId = fileIdMaybeNull << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS);
         long mask = - (1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
         return (int) cacheAsMap.keySet().stream().filter(x -> (x.readerId & mask) == fileId).count();
+    }
+
+    /**
+     * Returns the number of chunks of the given file, as seen by the handles opened since the last
+     * {@link #invalidateFile}, that are currently cached and referenced by a reader, i.e. whose buffers a reader has
+     * not released. Only intended for tests checking that readers release what they hold.
+     */
+    @VisibleForTesting
+    public int chunksInUse(File file)
+    {
+        Long fileIdMaybeNull = fileIdMap.get(file);
+        if (fileIdMaybeNull == null)
+            return 0;
+        long fileId = fileIdMaybeNull << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS);
+        long mask = - (1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
+        int inUse = 0;
+        for (Map.Entry<Key, CompletableFuture<Chunk>> entry : cacheAsMap.entrySet())
+        {
+            if ((entry.getKey().readerId & mask) != fileId)
+                continue;
+            CompletableFuture<Chunk> future = entry.getValue();
+            if (!future.isDone() || future.isCompletedExceptionally())
+                continue;
+            // the cache holds one reference of its own
+            if (future.join().references > 1)
+                inUse++;
+        }
+        return inUse;
     }
 }

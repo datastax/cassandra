@@ -155,6 +155,15 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
                 closeOnConstructionFailure(reader, file, shouldCloseFile, e);
                 throw e;
             }
+            catch (Throwable t)
+            {
+                // Anything else, e.g. an unchecked exception from a row index walker reading garbage from a corrupted
+                // index that is not checksummed: the caller never gets this iterator to close, so release what we
+                // hold. The sstable is not marked suspect: unlike the typed failures above, such an exception does not
+                // say that the sstable is corrupted (it can as well be a bug, or the read being aborted).
+                closeOnConstructionFailure(reader, file, shouldCloseFile, t);
+                throw t;
+            }
         }
     }
 
@@ -171,8 +180,9 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
             else if (shouldCloseFile && file != null)
                 file.close();
         }
-        catch (IOException suppressed)
+        catch (Throwable suppressed)
         {
+            // do not let a failure to close hide the original failure
             failure.addSuppressed(suppressed);
         }
     }
