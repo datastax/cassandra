@@ -69,7 +69,7 @@ public final class StorageAttachedIndexingParams
                                                         useTermStatistics, USE_TERM_STATISTICS));
         }
 
-        // Validate sai_query_optimization_level if present (range: 0-1)
+        // Validate query_optimization_level if present (range: 0-1)
         validateIntegerInRange(QUERY_OPTIMIZATION_LEVEL, options.remove(QUERY_OPTIMIZATION_LEVEL), 0, 1);
 
         // Validate sai_intersection_clause_limit if present (range: 1-Integer.MAX_VALUE)
