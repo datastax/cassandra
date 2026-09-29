@@ -25,6 +25,8 @@ import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
 import org.apache.cassandra.io.compress.ICompressor;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.memory.BufferPools;
@@ -108,7 +110,7 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         return compressionParams.shouldCheckCrc();
     }
 
-    protected ByteBuffer decrypt(ByteBuffer input, int start, ByteBuffer output, long position) throws IOException
+    protected ByteBuffer decrypt(ByteBuffer input, int start, ByteBuffer output, long position) throws CorruptBlockException
     {
         assert output.capacity() == CHUNK_SIZE;
 
@@ -119,14 +121,24 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
 
             //Change the limit to include the checksum
             input.limit(start + CHUNK_SIZE);
-            if (input.getInt() != checksum)
-                throw new CorruptBlockException(channel.getFile(), position, CHUNK_SIZE);
+            int storedChecksum = input.getInt();
+            if (storedChecksum != checksum)
+                throw new CorruptBlockException(channel.getFile(), position, CHUNK_SIZE, storedChecksum, checksum);
         }
 
         int length = input.getInt(start + CHUNK_SIZE - FOOTER_LENGTH);
+        if (length < 0 || length > CHUNK_SIZE - FOOTER_LENGTH)
+            throw new CorruptBlockException(channel.getFile(), position, CHUNK_SIZE);
         output.clear();
         input.position(start).limit(start + length);
-        encryptor.uncompress(input, output);
+        try
+        {
+            encryptor.uncompress(input, output);
+        }
+        catch (IOException e)
+        {
+            throw new CorruptBlockException(channel.getFile(), position, CHUNK_SIZE, e);
+        }
         output.flip();
 
         return output;
@@ -227,12 +239,17 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
             try
             {
                 input.position(0).limit(CHUNK_SIZE);
-                channel.read(input, position);
+                if (channel.read(input, position) != CHUNK_SIZE)
+                    throw new CorruptBlockException(channel.getFile(), position, CHUNK_SIZE);
                 decrypt(input, 0, buffer, position);
             }
-            catch (IOException e)
+            catch (CorruptBlockException e)
             {
-                throw new RuntimeException(e);
+                StorageProvider.instance.invalidateFileSystemCache(channel.getFile());
+
+                // Make sure reader does not see stale data.
+                buffer.position(0).limit(0);
+                throw new CorruptSSTableException(e, channel.filePath());
             }
             finally
             {
@@ -269,11 +286,17 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
             MmappedRegions.Region r = regions.floor(position);
             try
             {
-                decrypt(r.buffer(), (int) (position - r.offset()), buffer, position);
+                ByteBuffer input = r.buffer();
+                int start = (int) (position - r.offset());
+                if (start + CHUNK_SIZE > input.capacity())
+                    throw new CorruptBlockException(channel.getFile(), position, CHUNK_SIZE);
+                decrypt(input, start, buffer, position);
             }
-            catch (IOException e)
+            catch (CorruptBlockException e)
             {
-                throw new RuntimeException(e);
+                // Make sure reader does not see stale data.
+                buffer.position(0).limit(0);
+                throw new CorruptSSTableException(e, channel.filePath());
             }
         }
 

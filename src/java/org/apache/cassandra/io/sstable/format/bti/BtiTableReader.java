@@ -169,6 +169,12 @@ public class BtiTableReader extends SSTableReaderWithFilter
                 markSuspect();
                 throw new CorruptSSTableException(e, rowIndexFile.path());
             }
+            catch (CorruptSSTableException e)
+            {
+                // e.g. a chunk of an encrypted index failing its checksum or decryption
+                markSuspect();
+                throw e;
+            }
         }
 
         throw new IllegalArgumentException("Invalid op: " + operator);
@@ -216,6 +222,12 @@ public class BtiTableReader extends SSTableReaderWithFilter
         {
             markSuspect();
             throw new CorruptSSTableException(e, rowIndexFile.path());
+        }
+        catch (CorruptSSTableException e)
+        {
+            // e.g. a chunk of an encrypted index failing its checksum or decryption
+            markSuspect();
+            throw e;
         }
     }
 
@@ -384,6 +396,12 @@ public class BtiTableReader extends SSTableReaderWithFilter
         {
             markSuspect();
             throw new CorruptSSTableException(e, rowIndexFile.path());
+        }
+        catch (CorruptSSTableException e)
+        {
+            // e.g. a chunk of an encrypted index failing its checksum or decryption
+            markSuspect();
+            throw e;
         }
     }
 

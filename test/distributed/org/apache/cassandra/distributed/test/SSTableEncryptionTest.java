@@ -327,8 +327,9 @@ public class SSTableEncryptionTest extends TestBaseImpl
         }
     }
 
+    // The deleted key file is recreated with a fresh random key by LocalFileSystemKeyProvider at startup: a wrong-key scenario.
     @Test
-    public void shouldNotReadRowsFromEncryptedTableWithoutTheSecretKey() throws Exception
+    public void shouldNotReadRowsWhenSecretKeyIsRecreated() throws Exception
     {
         try (Cluster cluster = builder().withNodes(1)
                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
@@ -349,19 +350,34 @@ public class SSTableEncryptionTest extends TestBaseImpl
             // delete secret key file
             assertTrue("secret key should be deleted", Files.deleteIfExists(secretKey));
 
-            // restart to clear in memory secret key cache
-            waitOn(cluster.get(1).shutdown());
-            cluster.get(1).startup();
+            // restart to clear in memory secret key cache; the commit log is deleted too, otherwise replaying it
+            // could restore the rows of the encrypted table in the memtable (its sstable cannot be opened, so it
+            // does not tell the replayer that those mutations were already persisted)
+            restartWithDeletedCommitLog(cluster, 1);
+            assertTrue("the secret key file should have been recreated at startup", Files.exists(secretKey));
 
-            // when
-            Object[][] rows = cluster. get(1).executeInternal(String.format("SELECT * FROM %s.%s", keyspace, nonEncryptedTableName));
-            Throwable throwable = catchThrowable(() -> cluster.get(0).executeInternal(String.format("SELECT * FROM %s.%s ", keyspace, encryptedTableName)));
-
-            // then it should be possible to read the table without encryption
-            assertThat(rows.length).isEqualTo(numberOfRows);
-            // then it should not be possible to read the encrypted table
-            assertThat(throwable).isInstanceOf(IndexOutOfBoundsException.class);
+            assertEncryptedTableUnreadable(cluster, keyspace, encryptedTableName, nonEncryptedTableName, numberOfRows);
         }
+    }
+
+    /**
+     * Without the right key, the sstable of the encrypted table cannot be opened at startup: its encrypted metadata
+     * and partition index cannot be decrypted (a missing key file is recreated with a new random key), so
+     * SSTableReaderLoadingBuilder turns the failure into a CorruptSSTableException and SSTableReader.openAll logs it
+     * and skips the sstable. The table then reads as empty, while the table without encryption is unaffected.
+     */
+    private static void assertEncryptedTableUnreadable(Cluster cluster, String keyspace, String encryptedTableName, String nonEncryptedTableName, int numberOfRows)
+    {
+        // when
+        Object[][] rows = cluster.get(1).executeInternal(String.format("SELECT * FROM %s.%s", keyspace, nonEncryptedTableName));
+        Object[][] encryptedRows = cluster.get(1).executeInternal(String.format("SELECT * FROM %s.%s", keyspace, encryptedTableName));
+
+        // then it should be possible to read the table without encryption
+        assertThat(rows.length).isEqualTo(numberOfRows);
+        // then the sstable of the encrypted table was skipped as corrupted and none of its rows can be read
+        List<String> skipped = cluster.get(1).logs().grep("Corrupt sstable .*" + encryptedTableName + "-.*; skipping table").getResult();
+        assertThat(skipped).isNotEmpty();
+        assertThat(encryptedRows.length).isEqualTo(0);
     }
 
     @Test
@@ -393,14 +409,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
             // restart to clear in memory secret key cache
             restartWithDeletedCommitLog(cluster, 1);
 
-            // when
-            Object[][] rows = cluster. get(1).executeInternal(String.format("SELECT * FROM %s.%s", keyspace, nonEncryptedTableName));
-            Throwable throwable = catchThrowable(() -> cluster.get(0).executeInternal(String.format("SELECT * FROM %s.%s ", keyspace, encryptedTableName)));
-
-            // then it should be possible to read the table without encryption
-            assertThat(rows.length).isEqualTo(numberOfRows);
-            // then it should not be possible to read the encrypted table
-            assertThat(throwable).isInstanceOf(IndexOutOfBoundsException.class);
+            assertEncryptedTableUnreadable(cluster, keyspace, encryptedTableName, nonEncryptedTableName, numberOfRows);
         }
     }
 
