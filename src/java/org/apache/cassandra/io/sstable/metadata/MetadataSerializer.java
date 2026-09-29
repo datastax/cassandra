@@ -32,11 +32,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.CompressionMetadataReaderType;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.CompressionInfoComponent;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -336,10 +336,6 @@ public class MetadataSerializer implements IMetadataSerializer
         if (!desc.version.metadataIsEncrypted())
             return null;
         
-        File compressionFile = desc.fileFor(Components.COMPRESSION_INFO);
-        if (!compressionFile.exists())
-            return null;
-
         // During flush the compression info file may not have been uploaded to remote storage yet, so it has to
         // be read through the write-time channel.
         CompressionMetadataReaderType readerType = writeTime ? CompressionMetadataReaderType.WRITE_TIME
@@ -347,11 +343,9 @@ public class MetadataSerializer implements IMetadataSerializer
 
         // We only need the compression parameters, not the chunk offsets, so read just the header. This allocates
         // no off-heap memory and creates no ref-counted resource to release.
-        // hasMaxCompressedSize must match how the file was written - the version flag - otherwise everything the
-        // header stores after the parameters is read at the wrong offset.
-        CompressionParams params = CompressionMetadata.readCompressionParams(compressionFile,
-                                                                             desc.version.hasMaxCompressedLength(),
-                                                                             readerType);
+        CompressionParams params = CompressionInfoComponent.readCompressionParamsIfExists(desc, readerType);
+        if (params == null)
+            return null;
 
         // Note: we use only the encryption component, without any compression. The reason for doing this is to
         // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed

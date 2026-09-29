@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
@@ -205,11 +206,27 @@ public class PartitionIndex implements SharedCloseable
         }
     }
 
+    /**
+     * Reads the first and last key of the partition index of an existing sstable, without preloading it. The index
+     * is decrypted if the sstable's indexes are encrypted (see
+     * {@link BtiTableReaderLoadingBuilder#withIndexEncryption(FileHandle.Builder, Descriptor, CompressionMetadata)}).
+     *
+     * @param descriptor  the sstable
+     * @param component   the partition index component
+     * @param partitioner the partitioner used to decorate the keys
+     * @param version     the byte-comparable version of the sstable
+     */
     public static Pair<DecoratedKey, DecoratedKey> readFirstAndLastKey(Descriptor descriptor, Component component, IPartitioner partitioner, ByteComparable.Version version) throws IOException
     {
-        try (PartitionIndex index = load(StorageProvider.instance.fileHandleBuilderFor(descriptor, component), partitioner, false, version))
+        try (CompressionMetadata encryptionMetadata = BtiTableReaderLoadingBuilder.maybeLoadIndexEncryptionMetadata(descriptor))
         {
-            return Pair.create(index.firstKey(), index.lastKey());
+            FileHandle.Builder builder = BtiTableReaderLoadingBuilder.withIndexEncryption(StorageProvider.instance.fileHandleBuilderFor(descriptor, component),
+                                                                                          descriptor,
+                                                                                          encryptionMetadata);
+            try (PartitionIndex index = load(builder, partitioner, false, version))
+            {
+                return Pair.create(index.firstKey(), index.lastKey());
+            }
         }
     }
 

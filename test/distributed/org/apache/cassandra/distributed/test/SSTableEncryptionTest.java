@@ -47,6 +47,8 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.tools.SSTableMetadataViewer;
+import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.ChecksumType;
 
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
@@ -104,6 +106,8 @@ public class SSTableEncryptionTest extends TestBaseImpl
             String keyspace = createKeyspace(cluster);
             Path secretKey = createLocalSecretKey(cluster);
             String table = createEncryptedTable(cluster, keyspace, secretKey);
+            // keep the sstables stable, so that the paths collected for the sstablemetadata check below stay valid
+            cluster.get(1).nodetoolResult("disableautocompaction", keyspace, table).asserts().success();
             int numberOfRows = 10;
 
             for (int i = 0; i < numberOfRows; i++)
@@ -120,10 +124,12 @@ public class SSTableEncryptionTest extends TestBaseImpl
 
             if (restartNodes)
             {
-                for (int i = 1; i <= cluster.size(); ++i)
-                {
-                    restartWithDeletedCommitLog(cluster, i);
-                }
+                // the offline sstablemetadata tool must be able to read the encrypted sstables, including the first
+                // and last keys, which for BTI sstables are read from the (encrypted) partition index; it is run
+                // while the node is down, so that no log output of the node can end up in the tool's stderr
+                // (the cluster has a single node)
+                List<String> sstablePaths = getPathsFor(cluster, keyspace, table, SSTableFormat.Components.DATA);
+                restartWithDeletedCommitLog(cluster, 1, () -> assertSSTableMetadataToolSucceeds(sstablePaths, true));
             }
 
             // when querying all
@@ -151,13 +157,50 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertThat(byIdRows[0][0]).isEqualTo(String.valueOf(5));
             assertThat(byIdRows[0][1]).isEqualTo(String.valueOf(2));
             assertThat(byIdRows[0][2]).isEqualTo(String.valueOf(2));
+
+            if (!restartNodes)
+            {
+                // same check as above, on the sstables of the running node: its log output may reach the tool's
+                // stderr (the tool runner swaps System.err JVM-wide), so stderr is not checked
+                assertSSTableMetadataToolSucceeds(getPathsFor(cluster, keyspace, table, SSTableFormat.Components.DATA), false);
+            }
+        }
+    }
+
+    /**
+     * Runs the {@code sstablemetadata} tool, in the test JVM, on each of the given sstables.
+     *
+     * @param sstablePaths     paths of the Data.db files of the sstables
+     * @param checkCleanStdErr whether to check that the tool wrote nothing to stderr; only reliable when no node of the
+     *                         cluster is running, as their log output may be routed to the tool's stderr
+     */
+    private static void assertSSTableMetadataToolSucceeds(List<String> sstablePaths, boolean checkCleanStdErr)
+    {
+        assertThat(sstablePaths).isNotEmpty();
+        for (String sstablePath : sstablePaths)
+        {
+            ToolRunner.ToolResult tool = ToolRunner.invokeClass(SSTableMetadataViewer.class, sstablePath);
+            tool.assertOnExitCode();
+            if (checkCleanStdErr)
+                tool.assertCleanStdErr();
+            assertThat(tool.getStdout()).contains("First token")
+                                        .contains("Last token");
         }
     }
 
     private static void restartWithDeletedCommitLog(Cluster cluster, int i)
     {
+        restartWithDeletedCommitLog(cluster, i, () -> {});
+    }
+
+    /**
+     * @param whileDown run after the node has been shut down, before it is started again
+     */
+    private static void restartWithDeletedCommitLog(Cluster cluster, int i, Runnable whileDown)
+    {
         String commitlogpath = cluster.get(1).callOnInstance(() -> DatabaseDescriptor.getCommitLogLocation().path());
         waitOn(cluster.get(i).shutdown());
+        whileDown.run();
         // delete the commit log to make sure we are not recreating the data from it
         PathUtils.deleteRecursive(Path.of(commitlogpath));
         // start-up must now read the sstables

@@ -50,6 +50,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReaderLoadingBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.SortedTableScrubber;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -278,6 +279,12 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         @Override
         public Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException
         {
+            File partitionIndexFile = descriptor.fileFor(Components.PARTITION_INDEX);
+            if (!partitionIndexFile.exists())
+            {
+                logger.debug("Partition index {} does not exist", partitionIndexFile.absolutePath());
+                return null;
+            }
             return PartitionIndex.readFirstAndLastKey(descriptor, Components.PARTITION_INDEX, partitioner, descriptor.version.getByteComparableVersion());
         }
 
