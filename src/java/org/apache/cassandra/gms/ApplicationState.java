@@ -73,8 +73,8 @@ public enum ApplicationState
     X9,
     /**
      * Was the padding state X10. Set by nodes that understand the SHRINKING status (nodetool settokens); older nodes
-     * see this ordinal as X10 and ignore it. It takes the last padding slot so that no other ordinal moves (the
-     * padding slots are used by position, e.g. by the DSE 6 gossip translation, see ApplicationStateOrdinalsTest).
+     * see this ordinal as X10 and ignore it. It takes the last padding slot so that no other ordinal moves (states
+     * are serialized by ordinal, see ApplicationStateOrdinalsTest).
      */
     SHRINK_TOKENS_SUPPORTED,
 }

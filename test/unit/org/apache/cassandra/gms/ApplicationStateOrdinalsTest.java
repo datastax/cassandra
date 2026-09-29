@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Gossip states are serialized by ordinal: an ordinal must never change, and the padding states are used by position
- * (by nodes of other versions, and by the DSE 6 gossip translation). New states replace a padding state in place.
+ * by nodes of other versions. New states replace a padding state in place.
  */
 public class ApplicationStateOrdinalsTest
 {
