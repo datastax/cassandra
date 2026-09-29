@@ -21,9 +21,6 @@ package org.apache.cassandra.io.sstable.format;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
-import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
-import org.apache.cassandra.io.compress.Encryptor;
-import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
@@ -64,25 +61,13 @@ public class DataComponent
         if (metadata.params.compression.isEnabled())
         {
             final CompressionParams compressionParams = buildCompressionParams(metadata, operationType);
-            final ICompressor compressor = compressionParams.getSstableCompressor();
-
-            // Check if this is encryption-only (no actual compression)
-            if (compressor instanceof Encryptor)
-            {
-                return new EncryptedSequentialWriter(descriptor.fileFor(Components.DATA),
-                                                     options,
-                                                     compressor);
-            }
-            else
-            {
-                return new CompressedSequentialWriter(descriptor.fileFor(Components.DATA),
-                                                      descriptor.fileFor(Components.COMPRESSION_INFO),
-                                                      descriptor.fileFor(digestComponent),
+            return new CompressedSequentialWriter(descriptor.fileFor(Components.DATA),
+                                                  descriptor.fileFor(Components.COMPRESSION_INFO),
+                                                  descriptor.fileFor(digestComponent),
                                                       checksumType,
-                                                      options,
-                                                      compressionParams,
-                                                      metadataCollector);
-            }
+                                                  options,
+                                                  compressionParams,
+                                                  metadataCollector);
         }
         else
         {

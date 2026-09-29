@@ -19,6 +19,7 @@
 package org.apache.cassandra.cql3;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -31,16 +32,29 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.io.compress.EncryptorTest;
 import org.hamcrest.Matchers;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(Parameterized.class)
 public class EarlyOpenCompactionTest extends CQLTester
 {
+    @Parameterized.Parameters(name = "encrypted={0}")
+    public static Collection<Object> generateParameters()
+    {
+        return List.of(false, true);
+    }
+
+    @Parameterized.Parameter
+    public boolean encrypted = false;
+
     private static final int NUM_PARTITIONS = 1000;
     private static final int NUM_ROWS_PER_PARTITION = 100;
     private static final int VALUE_SIZE = 1000; // ~1KB per row
@@ -63,6 +77,17 @@ public class EarlyOpenCompactionTest extends CQLTester
         DatabaseDescriptor.setSSTablePreemptiveOpenIntervalInMiB(50);
     }
 
+    private String encryptionParameters()
+    {
+        if (!encrypted)
+            return "";
+
+        return " WITH compression = {'class' : 'Encryptor', " +
+               "'cipher_algorithm' : 'AES/ECB/PKCS5Padding', " +
+               "'secret_key_strength' : 128, " +
+               "'key_provider' : '" + EncryptorTest.KeyProviderFactoryStub.class.getName() + "'}";
+    }
+
     @Test
     public void testEarlyOpenDuringCompaction() throws Throwable
     {
@@ -72,7 +97,7 @@ public class EarlyOpenCompactionTest extends CQLTester
                    "ck int, " +
                    "data text, " +
                    "PRIMARY KEY (pk, ck)" +
-                   ")");
+                   ")" + encryptionParameters());
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         disableCompaction();

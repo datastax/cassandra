@@ -54,6 +54,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
+import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -65,12 +66,13 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.io.util.WrappingRebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.LEGACY;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS41;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS50;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
@@ -92,7 +94,7 @@ public class PartitionIndexTest
 
     static final IPartitioner partitioner = Util.testPartitioner();
     //Lower the size of the indexes when running without the chunk cache, otherwise the test times out on Jenkins
-    static final int COUNT = ChunkCache.instance != null ? 245256 : 24525;
+    static int COUNT = ChunkCache.instance != null ? 245256 : 24525;
 
     @Parameterized.Parameters()
     public static Collection<Object[]> generateData()
@@ -148,7 +150,7 @@ public class PartitionIndexTest
             ch.write(generateRandomKey().getKey(), f.length() * 2 / 3);
         }
 
-        assertThatThrownBy(() -> testGetEq(data)).isInstanceOfAny(AssertionError.class, IndexOutOfBoundsException.class, IllegalArgumentException.class);
+        assertThatThrownBy(() -> testGetEq(data)).satisfies(t -> Throwables.assertAnyCause(t, AssertionError.class, IndexOutOfBoundsException.class, IllegalArgumentException.class, CorruptBlockException.class));
     }
 
     @Test
@@ -492,7 +494,7 @@ public class PartitionIndexTest
             try
             {
                 File file = FileUtils.createTempFile("ColumnTrieReaderTest", "");
-                SequentialWriter writer = new SequentialWriter(file, SequentialWriterOption.newBuilder().finishOnClose(true).build());
+                SequentialWriter writer = makeWriter(file);
                 List<DecoratedKey> list = Lists.newArrayList();
                 String longString = "";
                 for (int i = 0; i < PageAware.PAGE_SIZE + 99; ++i)
@@ -506,9 +508,7 @@ public class PartitionIndexTest
                 list.add(partitioner.decorateKey(ByteBufferUtil.bytes(longString + "D")));
                 list.add(partitioner.decorateKey(ByteBufferUtil.bytes(longString + "E")));
 
-                FileHandle.Builder fhBuilder = new FileHandle.Builder(file)
-                                               .bufferSize(PageAware.PAGE_SIZE)
-                                               .withChunkCache(ChunkCache.instance);
+                FileHandle.Builder fhBuilder = makeHandle(file);
                 try (PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version))
                 {
                     int i = 0;
@@ -713,7 +713,7 @@ public class PartitionIndexTest
 
         ArrayList<DecoratedKey> list = Lists.newArrayList();
         FileHandle.Builder fhBuilder = makeHandle(file);
-        try (SequentialWriter writer = new SequentialWriter(file, SequentialWriterOption.DEFAULT);
+        try (SequentialWriter writer = makeWriter(file);
              PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version)
         )
         {
