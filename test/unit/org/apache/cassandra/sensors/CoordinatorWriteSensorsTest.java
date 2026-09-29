@@ -62,7 +62,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * the local memtable apply. Each test injects a Byteman sleep inside the actual apply method to assert
  * the execution-time sensor gains at least that much time, and also asserts byte sensors are non-zero.
  * <p>
- * Four paths are covered (CAS is disabled — see inline comment):
+ * Five paths are covered:
  * <ul>
  *   <li><b>Single-statement INSERT</b> — {@code performMutationLocally} wraps {@code Keyspace.apply}
  *       and accumulates the elapsed time. Verifies {@link Type#WRITE_EXECUTION_TIME} and
@@ -71,6 +71,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       Verifies {@link Type#WRITE_EXECUTION_TIME} and {@link Type#WRITE_BYTES}.</li>
  *   <li><b>Logged batch</b> — same path via {@code StorageProxy.mutateAtomically()}.
  *       Verifies {@link Type#WRITE_EXECUTION_TIME} and {@link Type#WRITE_BYTES}.</li>
+ *   <li><b>CAS (conditional UPDATE)</b> — a row is pre-inserted so {@code readOne} finds it and
+ *       produces non-zero {@link Type#READ_BYTES}; {@code commitDirect} is timed for
+ *       {@link Type#WRITE_EXECUTION_TIME}. Verifies all three sensor types.</li>
  *   <li><b>Counter update</b> — {@code counterWriteTask} wraps {@code CounterMutation.applyCounterMutation}
  *       and writes the leader apply time directly into the sensor via {@code incrementSensor}.
  *       Since coordinator == leader == only replica, there are no sub-replica ACKs.
@@ -239,25 +242,28 @@ public class CoordinatorWriteSensorsTest
     }
 
     // -------------------------------------------------------------------------
-    // CAS (INSERT IF NOT EXISTS)  (UpdateStatement path → StorageProxy.cas)
+    // CAS (UPDATE IF condition)  (UpdateStatement path → StorageProxy.cas)
     // -------------------------------------------------------------------------
 
     /**
-     * CAS write: Byteman sleeps 50 ms inside {@code PaxosState.commit}, which is the local commit
-     * step executed for the paxos commit round. The commit execution time is accumulated via
-     * {@link org.apache.cassandra.net.ResponseVerbHandler} into the coordinator's
-     * {@link Type#WRITE_EXECUTION_TIME} sensor. The sensor must gain at least 50 ms.
+     * CAS write: a row is pre-inserted so that the CAS condition check ({@code readOne}) finds an
+     * existing row and produces non-zero {@link Type#READ_BYTES} without any cache manipulation.
+     * Byteman sleeps 50 ms inside {@code PaxosState.commitDirect} for the execution-time assertion.
      */
     @Test
-    @BMRule(name = "sleep 50ms in PaxosState.commit to force write execution time >= 50ms (CAS)",
+    @BMRule(name = "sleep 50ms in PaxosState.commitDirect to force write execution time >= 50ms (CAS)",
             targetClass = "org.apache.cassandra.service.paxos.PaxosState",
-            targetMethod = "commit",
+            targetMethod = "commitDirect",
             targetLocation = "AT ENTRY",
             action = "Thread.sleep(50L)")
     public void testCas()
     {
+        // Pre-insert a row so that readOne in the CAS condition check finds it, giving non-zero READ_BYTES
+        QueryProcessor.executeInternal(
+                String.format("INSERT INTO %s.%s (key, val) VALUES ('k', 'v')", KEYSPACE, TABLE));
+
         QueryProcessor.Prepared prepared = QueryProcessor.prepareInternal(
-                String.format("INSERT INTO %s.%s (key, val) VALUES ('k', 'v') IF NOT EXISTS", KEYSPACE, TABLE));
+                String.format("UPDATE %s.%s SET val = 'v2' WHERE key = 'k' IF val = 'v'", KEYSPACE, TABLE));
         UpdateStatement statement = (UpdateStatement) prepared.statement;
 
         QueryOptions options = casQueryOptions();

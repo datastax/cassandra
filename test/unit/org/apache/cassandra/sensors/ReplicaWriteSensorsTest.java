@@ -56,9 +56,9 @@ import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.CommitVerbHandler;
+import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.v1.PrepareVerbHandler;
 import org.apache.cassandra.service.paxos.v1.ProposeVerbHandler;
-import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.db.SystemKeyspace.PAXOS;
@@ -426,7 +426,9 @@ public class ReplicaWriteSensorsTest
         Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isZero();
 
-        // handle the commit again, this time paxos has state because of the first proposal and read bytes will be populated
+        // Evict the in-memory Paxos cache so that the second prepare is forced to read from system.paxos,
+        // which now has state written by the first call — producing non-zero READ_BYTES.
+        PaxosState.unsafeReset();
         handlePaxosPrepare(proposal);
         readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isGreaterThan(0);
@@ -459,7 +461,9 @@ public class ReplicaWriteSensorsTest
         Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isZero();
 
-        // handle the commit again, this time paxos has state because of the first proposal and read bytes will be populated
+        // Evict the in-memory Paxos cache so that the second propose is forced to read from system.paxos,
+        // which now has state written by the first call — producing non-zero READ_BYTES.
+        PaxosState.unsafeReset();
         handlePaxosPropose(proposal);
         readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isGreaterThan(0);

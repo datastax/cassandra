@@ -217,7 +217,10 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ "tbl: point read (paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL }, true });
         result.add(new Object[]{ "tbl: point read (no paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL }, false });
         // CAS is a write operation; READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_TBL }, true });
+        // READ_BYTES comes from the user-table condition-check read (transferred back from the read sensors
+        // in legacyCas). With noPrep the table is empty so the read returns 0 rows → READ_BYTES = 0 and
+        // the header is not emitted (SensorsCustomParams skips zero-valued sensors).
+        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL }, true });
         result.add(new Object[]{ "tbl: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL }, true });
         result.add(new Object[]{ "tbl: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL }, true });
         result.add(new Object[]{ "tbl: range read (paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL }, true });
@@ -276,7 +279,9 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ "2i: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I }, true });
         result.add(new Object[]{ "2i: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I }, true });
         // CAS is a write operation; READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I }, true });
+        // IF NOT EXISTS: noPrep → empty table → condition-check read returns 0 rows → READ_BYTES = 0, not emitted.
+        // IF condition: prep row exists → condition-check read returns the row → READ_BYTES > 0, emitted.
+        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I }, true });
         result.add(new Object[]{ "2i: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I }, true });
         result.add(new Object[]{ "2i+sai: multi-table logged batch", noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
         result.add(new Object[]{ "2i+sai: multi-table unlogged batch", noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
@@ -320,7 +325,9 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ "sai: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
         result.add(new Object[]{ "sai: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
         // CAS is a write operation; READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
+        // IF NOT EXISTS: noPrep → empty table → condition-check read returns 0 rows → READ_BYTES = 0, not emitted.
+        // IF condition: prep row exists → condition-check read returns the row → READ_BYTES > 0, emitted.
+        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
         result.add(new Object[]{ "sai: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
         return result;
     }
@@ -387,12 +394,14 @@ public class SensorsTest extends TestBaseImpl
 
         List<Object[]> result = new ArrayList<>();
         // Conditional batches route through StorageProxy.cas(); READ_EXECUTION_TIME is not recorded (see StorageProxy.cas()).
-        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I }, true });
+        // IF NOT EXISTS / multi-stmt with noPrep: empty table → condition-check read returns 0 rows → READ_BYTES = 0, not emitted.
+        // IF condition: prep row exists → condition-check read returns the row → READ_BYTES > 0, emitted.
+        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I }, true });
         result.add(new Object[]{ "2i cond batch: IF condition (updateRow)", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, INDEX_WRITE_2I }, true });
-        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
+        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I }, true });
+        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
         result.add(new Object[]{ "sai cond batch: IF condition (updateRow)", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
-        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, INDEX_WRITE_SAI }, true });
+        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI }, true });
         return result;
     }
 
