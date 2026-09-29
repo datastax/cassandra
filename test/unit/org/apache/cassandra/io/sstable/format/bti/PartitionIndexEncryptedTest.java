@@ -88,34 +88,35 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
         COUNT = 24525;
     }
 
-    @Parameterized.Parameters(name="accessMode {0} fromFile {1} compressionParams {2} BC version {3}")
+    @Parameterized.Parameters(name="accessMode {0} BC version {1} compressionParams {2} fromFile {3}")
     public static Collection<Object[]> generateData()
     {
         return Arrays.asList(new Object[][]{
-                new Object[] {Config.DiskAccessMode.standard, false, compressionParamsNormal, ByteComparable.Version.LEGACY},
-                new Object[] {Config.DiskAccessMode.standard, false, compressionParamsNormal, ByteComparable.Version.OSS41},
-                new Object[] {Config.DiskAccessMode.standard, false, compressionParamsNormal, ByteComparable.Version.OSS50},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.LEGACY, compressionParamsNormal, false},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.OSS41, compressionParamsNormal, false},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.OSS50, compressionParamsNormal, false},
                 // fromFile and out-of-place have independent implementations, one run suffices to test both
-                new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.LEGACY},
-                new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.OSS41},
-                new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.OSS50},
-                new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.LEGACY},
-                new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.OSS41},
-                new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.OSS50},
-                new Object[] {Config.DiskAccessMode.mmap, true, compressionParamsDes, ByteComparable.Version.LEGACY},
-                new Object[] {Config.DiskAccessMode.mmap, true, compressionParamsDes, ByteComparable.Version.OSS41},
-                new Object[] {Config.DiskAccessMode.mmap, true, compressionParamsDes, ByteComparable.Version.OSS50},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.LEGACY, compressionParamsOutOfPlace, true},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.OSS41, compressionParamsOutOfPlace, true},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.OSS50, compressionParamsOutOfPlace, true},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.LEGACY, compressionParamsBlowfish, false},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.OSS41, compressionParamsBlowfish, false},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.OSS50, compressionParamsBlowfish, false},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.LEGACY, compressionParamsDes, true},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.OSS41, compressionParamsDes, true},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.OSS50, compressionParamsDes, true},
         });
     }
 
-    @Parameterized.Parameter(value = 1)
-    public static boolean fromFile = false;
+    // Parameters 0 (accessMode) and 1 (version) are the fields of PartitionIndexTest, which its test methods read.
+    // Do not redeclare them here: JUnit matches @Parameter fields by name, so a redeclared field would be injected
+    // instead and the base-class field would stay null.
 
     @Parameterized.Parameter(value = 2)
     public static CompressionParams compressionParams;
 
     @Parameterized.Parameter(value = 3)
-    public static ByteComparable.Version version;
+    public static boolean fromFile;
 
     CompressionMetadata compressionMetadata;
 
