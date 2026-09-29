@@ -414,7 +414,9 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     }
 
     /**
-     * Rolls back a prepared checkpoint by clearing the staged state.
+     * Rolls back the changes staged since the last {@link #checkpoint()} (not a prepared or logged state): releases
+     * the readers staged with {@link #update} and forgets the staged obsoletions. See
+     * {@link ILifecycleTransaction#abortCheckpoint}.
      */
     public Throwable abortCheckpoint(Throwable accumulate)
     {
@@ -429,7 +431,9 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
 
     /**
      * update a reader: if !original, this is a reader that is being introduced by this transaction;
-     * otherwise it must be in the originals() set, i.e. a reader guarded by this transaction
+     * otherwise it must be in the originals() set, i.e. a reader guarded by this transaction.
+     * <p>
+     * If this throws, nothing has been staged and the caller keeps the ownership of the reader's reference.
      */
     public void update(SSTableReader reader, boolean original)
     {
@@ -438,10 +442,11 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         // check it isn't obsolete, and that it matches the original flag
         assert !(logged.obsolete.contains(reader) || staged.obsolete.contains(reader)) : "may not update a reader that has been obsoleted";
         assert original == originals.contains(reader) : String.format("the 'original' indicator was incorrect (%s provided): %s", original, reader);
-        staged.update.add(reader);
-        identities.add(reader.instanceId);
+        // before staging, so that a failure leaves nothing staged
         if (!isOffline())
             reader.setupOnline();
+        staged.update.add(reader);
+        identities.add(reader.instanceId);
     }
 
     public void update(Collection<SSTableReader> readers, boolean original)

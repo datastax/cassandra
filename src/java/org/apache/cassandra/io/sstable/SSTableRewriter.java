@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -37,6 +38,9 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 /**
@@ -200,16 +204,31 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             {
                 writer.setMaxDataAge(maxAge);
                 writer.openEarly(reader -> {
+                    // Advance the boundary before anything that can fail, so that a failed early open is retried only
+                    // after another interval's worth of data and not at every following partition.
+                    currentlyOpenedEarlyAt = writer.getFilePointer();
+                    boolean staged = false;
                     try
                     {
                         transaction.update(reader, false);
-                        currentlyOpenedEarlyAt = writer.getFilePointer();
+                        staged = true;
                         moveStarts(reader.getLast());
                     }
                     catch (Throwable ex)
                     {
+                        // A failed periodic early open is not fatal: the readers staged since the last checkpoint
+                        // (this one, and the clones with moved starts) are released and the tracker keeps the
+                        // previous view, which is complete. The final early open in switchWriter is different, see there.
                         ex = transaction.abortCheckpoint(ex);
-                        logger.warn("Aborted early opening attempt due to error", ex);
+                        // update() stages nothing when it throws; the reader is then still ours to release
+                        if (!staged)
+                            ex = reader.selfRef().ensureReleased(ex);
+                        logger.debug("Aborted early opening attempt of {} due to error", reader.descriptor, ex);
+                        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                                         "Aborted early opening attempt of {} due to error", reader.descriptor, ex);
+                        // Last, as it rethrows some errors (e.g. OutOfMemoryError, or an interruption found in the
+                        // cause chain); it also applies the disk failure policy to FSError and CorruptSSTableException.
+                        JVMStabilityInspector.inspectThrowable(ex);
                         return;
                     }
                     transaction.checkpoint();
@@ -276,7 +295,15 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
                 DecoratedKey newStart = latest.firstKeyBeyond(lowerbound);
                 assert newStart != null;
                 SSTableReader replacement = latest.cloneWithNewStart(newStart);
-                transaction.update(replacement, true);
+                try
+                {
+                    transaction.update(replacement, true);
+                }
+                catch (Throwable t)
+                {
+                    // update() stages nothing when it throws: nobody else will release the clone
+                    throw Throwables.throwAsUncheckedException(replacement.selfRef().ensureReleased(t));
+                }
             }
         }
     }
@@ -310,10 +337,23 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         // is null) to permit the compilation of a canonical set of sstables (see View.select).
         if (preemptiveOpenInterval != Long.MAX_VALUE)
         {
+            // Unlike the periodic early open in maybeReopenEarly, a failure here is fatal for the operation: the
+            // next writer's early opens will move the starts of the originals past the end of this sstable, so its
+            // data from the last periodic boundary on would not be visible in any live reader until the operation
+            // completes. The exception aborts the rewriter, whose transaction abort releases whatever was staged.
+
             // we leave it as a tmp file, but we open it and add it to the Tracker
             writer.setMaxDataAge(maxAge);
             SSTableReader reader = writer.openFinalEarly();
-            transaction.update(reader, false);
+            try
+            {
+                transaction.update(reader, false);
+            }
+            catch (Throwable t)
+            {
+                // update() stages nothing when it throws, so the transaction abort would not release the reader
+                throw Throwables.throwAsUncheckedException(reader.selfRef().ensureReleased(t));
+            }
             moveStarts(reader.getLast());
             transaction.checkpoint();
         }
