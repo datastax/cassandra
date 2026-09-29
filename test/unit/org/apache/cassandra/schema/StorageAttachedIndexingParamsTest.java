@@ -325,7 +325,7 @@ public class StorageAttachedIndexingParamsTest extends CQLTester
     @Test
     @Ignore("Enable this test after we persist storage_attached_indexing in the next release. " +
             "storage_attached_indexing not persisted yet for backwards compatibility reasons.")
-    public void testSAIParamsPersistedAcrossKeyspaceReload() throws Throwable
+    public void testSAIParamsPersistedAcrossKeyspaceReload()
     {
         // For this test to pass, one need to add the following line to SchemaKeyspace#addTableParamsToRowBuilder:
         // builder.add("storage_attached_indexing", params.storageAttachedIndexingParams.asMap());
