@@ -72,7 +72,7 @@ public final class StorageAttachedIndexingParams
         // Validate query_optimization_level if present (range: 0-1)
         validateIntegerInRange(QUERY_OPTIMIZATION_LEVEL, options.remove(QUERY_OPTIMIZATION_LEVEL), 0, 1);
 
-        // Validate sai_intersection_clause_limit if present (range: 1-Integer.MAX_VALUE)
+        // Validate intersection_clause_limit if present (range: 1-Integer.MAX_VALUE)
         validateIntegerInRange(INTERSECTION_CLAUSE_LIMIT, options.remove(INTERSECTION_CLAUSE_LIMIT), 1, Integer.MAX_VALUE);
 
         if (!options.isEmpty())
