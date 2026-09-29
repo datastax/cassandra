@@ -73,7 +73,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
 
     protected final Slices slices;
 
-                                  // file on every path where we created it.
+    // On failure, the constructor closes the reader it created, or else the file if it opened it.
     protected AbstractSSTableIterator(SSTableReader sstable,
                                       FileDataInput file,
                                       DecoratedKey key,
@@ -99,6 +99,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
         else
         {
             boolean shouldCloseFile = file == null;
+            Reader reader = null;
             try
             {
                 // We seek to the beginning to the partition if either:
@@ -120,14 +121,14 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
 
                     // Note that this needs to be called after file != null and after the partitionDeletion has been set, but before readStaticRow
                     // (since it uses it) so we can't move that up (but we'll be able to simplify as soon as we drop support for the old file format).
-                    this.reader = createReader(indexEntry, file, shouldCloseFile);
+                    reader = createReader(indexEntry, file, shouldCloseFile);
                     this.staticRow = readStaticRow(sstable, file, helper, columns.fetchedColumns().statics);
                 }
                 else
                 {
                     this.partitionLevelDeletion = indexEntry.deletionTime();
                     this.staticRow = Rows.EMPTY_STATIC_ROW;
-                    this.reader = createReader(indexEntry, file, shouldCloseFile);
+                    reader = createReader(indexEntry, file, shouldCloseFile);
                 }
                 if (!partitionLevelDeletion.validate())
                     UnfilteredValidation.handleInvalid(metadata(), key, sstable, "partitionLevelDeletion="+partitionLevelDeletion.toString());
@@ -137,24 +138,42 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
 
                 if (reader == null && file != null && shouldCloseFile)
                     file.close();
+                this.reader = reader;
             }
             catch (IOException e)
             {
                 sstable.markSuspect();
-                File filePath = file.getFile();
-                if (shouldCloseFile)
-                {
-                    try
-                    {
-                        file.close();
-                    }
-                    catch (IOException suppressed)
-                    {
-                        e.addSuppressed(suppressed);
-                    }
-                }
+                // when file == null the failure may come from a file the reader opened itself (Data.db or index)
+                File filePath = file != null ? file.getFile() : sstable.getDataFile();
+                closeOnConstructionFailure(reader, file, shouldCloseFile, e);
                 throw new CorruptSSTableException(e, filePath);
             }
+            catch (CorruptSSTableException e)
+            {
+                // e.g. a chunk of an encrypted row index failing its checksum or decryption
+                sstable.markSuspect();
+                closeOnConstructionFailure(reader, file, shouldCloseFile, e);
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Releases the resources acquired by a constructor that failed: the reader if it was created (which closes its
+     * index reader and any file it owns, including one it may have opened itself), otherwise the file if we opened it.
+     */
+    private static void closeOnConstructionFailure(Reader reader, FileDataInput file, boolean shouldCloseFile, Throwable failure)
+    {
+        try
+        {
+            if (reader != null)
+                reader.close();
+            else if (shouldCloseFile && file != null)
+                file.close();
+        }
+        catch (IOException suppressed)
+        {
+            failure.addSuppressed(suppressed);
         }
     }
 
@@ -264,6 +283,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
         }
         catch (IOException e)
         {
+            sstable.markSuspect();
             try
             {
                 closeInternal();
@@ -272,8 +292,20 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
             {
                 e.addSuppressed(suppressed);
             }
-            sstable.markSuspect();
             throw new CorruptSSTableException(e, reader.toString());
+        }
+        catch (CorruptSSTableException e)
+        {
+            sstable.markSuspect();
+            try
+            {
+                closeInternal();
+            }
+            catch (IOException suppressed)
+            {
+                e.addSuppressed(suppressed);
+            }
+            throw e;
         }
     }
 
@@ -389,6 +421,19 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
                 sstable.markSuspect();
                 throw new CorruptSSTableException(e, toString());
             }
+            catch (CorruptSSTableException e)
+            {
+                sstable.markSuspect();
+                try
+                {
+                    closeInternal();
+                }
+                catch (IOException suppressed)
+                {
+                    e.addSuppressed(suppressed);
+                }
+                throw e;
+            }
         }
 
         public Unfiltered next()
@@ -409,6 +454,19 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
                 }
                 sstable.markSuspect();
                 throw new CorruptSSTableException(e, toString());
+            }
+            catch (CorruptSSTableException e)
+            {
+                sstable.markSuspect();
+                try
+                {
+                    closeInternal();
+                }
+                catch (IOException suppressed)
+                {
+                    e.addSuppressed(suppressed);
+                }
+                throw e;
             }
         }
 

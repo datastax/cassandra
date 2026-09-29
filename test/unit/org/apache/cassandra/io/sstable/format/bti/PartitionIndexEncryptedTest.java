@@ -39,6 +39,7 @@ import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
 import org.apache.cassandra.io.compress.EncryptionConfig;
 import org.apache.cassandra.io.compress.Encryptor;
 import org.apache.cassandra.io.compress.EncryptorTest;
+import org.apache.cassandra.io.compress.OutOfPlaceEncryptor;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -85,26 +86,6 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
 
         // TODO: Figure out why encrypted instance runs much slower
         COUNT = 24525;
-    }
-
-    public static class OutOfPlaceEncryptor extends Encryptor
-    {
-        public static OutOfPlaceEncryptor create(Map<String, String> options)
-        {
-            EncryptionConfig encryptionConfig = EncryptionConfig.forClass(OutOfPlaceEncryptor.class).fromCompressionOptions(options).build();
-            return new OutOfPlaceEncryptor(encryptionConfig);
-        }
-
-        OutOfPlaceEncryptor(EncryptionConfig encryptionConfig)
-        {
-            super(encryptionConfig);
-        }
-
-        @Override
-        public boolean canDecompressInPlace()
-        {
-            return false;
-        }
     }
 
     @Parameterized.Parameters(name="accessMode {0} fromFile {1} compressionParams {2} BC version {3}")
