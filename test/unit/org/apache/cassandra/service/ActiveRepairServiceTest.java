@@ -163,8 +163,7 @@ public class ActiveRepairServiceTest
         false, PreviewKind.NONE);
         RepairSession session1 = new RepairSession(SharedContext.Global.instance, new Scheduler.NoopScheduler(),
                                                    parentId1, commonRange, KEYSPACE5,
-                                                   RepairParallelism.SEQUENTIAL, false, false, false,
-                                                   PreviewKind.NONE, false, true, false, CF_STANDARD1);
+                                                   options, false, CF_STANDARD1);
         sessionsMap.put(session1.getId(), session1);
 
         // --- Session 2 ---
@@ -175,8 +174,7 @@ public class ActiveRepairServiceTest
         false, PreviewKind.NONE);
         RepairSession session2 = new RepairSession(SharedContext.Global.instance, new Scheduler.NoopScheduler(),
                                                    parentId2, commonRange, KEYSPACE5,
-                                                   RepairParallelism.SEQUENTIAL, false, false, false,
-                                                   PreviewKind.NONE, false, true, false, CF_STANDARD1);
+                                                   options, false, CF_STANDARD1);
         sessionsMap.put(session2.getId(), session2);
 
         // Abort only session 1
