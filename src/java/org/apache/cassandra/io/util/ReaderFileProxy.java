@@ -42,11 +42,26 @@ public interface ReaderFileProxy extends AutoCloseable
     long adjustPosition(long position);
 
     /**
-     * Called to provide the position to be seeked to after skipping the given number of bytes.
-     * Default implementation in AbstractReaderFileProxy just adds the position and bytes.
-     * Overridden by EncryptedChunkReader to properly account for holes.
-     * Rebufferers (which often use a ChunkReader to do the work) must implement it to defer to
-     * their source.
+     * Returns the position {@code bytesToSkip} bytes of content after {@code currentPosition}. For files with holes
+     * (see {@link #adjustPosition}) the holes crossed are not counted as skipped bytes.
+     * <p>
+     * The result is the file pointer that reading the same bytes would leave: when the skipped bytes end exactly at
+     * the usable end of a chunk, it is the start of that chunk's hole. Seeking to such a position, however, moves past
+     * the hole to the start of the next chunk (see {@link #adjustPosition}), so the result is not always a position
+     * to seek to; {@link RandomAccessReader#skipBytes} takes care of that difference.
+     * <p>
+     * Implementations must be strictly increasing in {@code bytesToSkip}, and a skip ending at the usable end of a
+     * chunk must return the start of its hole (not the start of the next chunk): {@link SkipPositions} and
+     * {@link TailOverridingRebufferer} rely on both, and {@link RandomAccessReader#skipBytes} relies on the latter to
+     * recognize skips ending at the start of a hole.
+     * <p>
+     * The default implementation, for files without holes, returns {@code currentPosition + bytesToSkip}. Wrappers
+     * (e.g. rebufferers built over a {@link ChunkReader}) must delegate to their source. A wrapper that does not falls
+     * back to this default, i.e. it only loses the awareness of holes (the behaviour before files with holes were
+     * supported): skips across a hole then land at a wrong position.
      */
-    long positionForSkip(long currentPosition, int bytesToSkip);
+    default long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        return currentPosition + bytesToSkip;
+    }
 }

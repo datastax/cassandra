@@ -74,6 +74,29 @@ public class TailOverridingRebufferer extends WrappingRebufferer
             return position;
     }
 
+    /**
+     * Consistent with {@link #adjustPosition}: the source's arithmetic (e.g. the holes of an encrypted file) applies
+     * before the cutoff only, and the tail from the cutoff on is contiguous.
+     * <p>
+     * A skip crossing the cutoff costs O(log bytesToSkip) calls to the source (see
+     * {@link SkipPositions#bytesSkippableBefore}); in practice there are none, as the early-open partition index
+     * served by this class is only walked by trie readers, which seek and never skip.
+     */
+    @Override
+    public long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        if (currentPosition >= cutoff)
+            return currentPosition + bytesToSkip;
+
+        long position = super.positionForSkip(currentPosition, bytesToSkip);
+        if (position <= cutoff)
+            return position;
+
+        // the skip crosses the cutoff: skip what is before it in the source, and the rest in the tail
+        int bytesBeforeCutoff = SkipPositions.bytesSkippableBefore(wrapped, currentPosition, bytesToSkip, cutoff);
+        return cutoff + (bytesToSkip - bytesBeforeCutoff);
+    }
+
     @Override
     public String toString()
     {
