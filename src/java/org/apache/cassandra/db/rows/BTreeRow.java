@@ -690,10 +690,16 @@ public class BTreeRow extends AbstractRow
             {
                 if (deletion == existingDeletion)
                 {
-                    updateBtree = BTree.transformAndFilter(updateBtree, reconciler::retain);
+                    // The existing row's deletion shadows part of the update. Filter those cells out of
+                    // the UPDATE (incoming) side, but do NOT record their removal: that data was never
+                    // owned by the memtable, so accounting its removal would drive the allocator's
+                    // ownership negative and crash the next flush (CASSANDRA-21469).
+                    updateBtree = BTree.<ColumnData, ColumnData>transformAndFilter(updateBtree, reconciler::removeShadowed);
                 }
                 else
                 {
+                    // The update's deletion shadows part of the existing row. Those cells ARE owned by
+                    // the memtable, so record their removal via retain().
                     existingBtree = BTree.transformAndFilter(existingBtree, reconciler::retain);
                 }
             }
@@ -802,6 +808,14 @@ public class BTreeRow extends AbstractRow
             return removeShadowed(existing, postReconcile);
         }
 
+        /**
+         * Like {@link #retain} but does NOT notify the {@link PostReconciliationFunction} of removed
+         * data. Use this e.g. when filtering shadowed cells out of the UPDATE (incoming) side of a merge:
+         * that data was never allocated to / owned by the memtable, so recording its removal would
+         * make the memtable allocator under-count what it owns and eventually report a negative
+         * release at flush (CASSANDRA-21469). Recording removals (via {@link #retain}) is only correct
+         * for the EXISTING side, whose data the memtable already owns.
+         */
         private ColumnData removeShadowed(ColumnData existing)
         {
             return removeShadowed(existing, ColumnData.noOp);
