@@ -38,12 +38,9 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 
-import org.apache.cassandra.concurrent.ExecutorFactory;
 import org.apache.cassandra.repair.CommonRange;
 import org.apache.cassandra.repair.NoSuchRepairSessionException;
 import org.apache.cassandra.repair.RepairSession;
-import org.apache.cassandra.repair.state.CoordinatorState;
-import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Condition;
 import org.junit.Assert;
