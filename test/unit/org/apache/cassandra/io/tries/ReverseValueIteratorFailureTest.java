@@ -136,12 +136,6 @@ public class ReverseValueIteratorFailureTest extends AbstractTrieTestBase
         {
             return position;
         }
-
-        @Override
-        public long positionForSkip(long currentPosition, int bytesToSkip)
-        {
-            return currentPosition + bytesToSkip;
-        }
     }
 
     @Test
