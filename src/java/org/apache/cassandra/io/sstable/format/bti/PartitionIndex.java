@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format.bti;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -224,12 +225,29 @@ public class PartitionIndex implements SharedCloseable
      */
     public static Pair<DecoratedKey, DecoratedKey> readFirstAndLastKey(Descriptor descriptor, Component component, IPartitioner partitioner, ByteComparable.Version version) throws IOException
     {
+        return readFirstAndLastKey(descriptor, component, partitioner, null, version);
+    }
+
+    /**
+     * Reads the first and last key of the partition index of an existing sstable, without preloading it, like
+     * {@link #readFirstAndLastKey(Descriptor, Component, IPartitioner, ByteComparable.Version)}. If the sstable is a
+     * zero-copy slice of another sstable, whose partition index it shares, the keys are those of the slice, as given
+     * by its zero-copy metadata (see {@link #load(FileHandle, IPartitioner, boolean, ZeroCopyMetadata, ByteComparable.Version)}).
+     *
+     * @param descriptor       the sstable
+     * @param component        the partition index component
+     * @param partitioner      the partitioner used to decorate the keys
+     * @param zeroCopyMetadata the zero-copy metadata of the sstable (from its stats metadata), or {@code null}
+     * @param version          the byte-comparable version of the sstable
+     */
+    public static Pair<DecoratedKey, DecoratedKey> readFirstAndLastKey(Descriptor descriptor, Component component, IPartitioner partitioner, @Nullable ZeroCopyMetadata zeroCopyMetadata, ByteComparable.Version version) throws IOException
+    {
         try (CompressionMetadata encryptionMetadata = BtiTableReaderLoadingBuilder.maybeLoadIndexEncryptionMetadata(descriptor))
         {
             FileHandle.Builder builder = BtiTableReaderLoadingBuilder.withIndexEncryption(StorageProvider.instance.fileHandleBuilderFor(descriptor, component),
                                                                                           descriptor,
                                                                                           encryptionMetadata);
-            try (PartitionIndex index = load(builder, partitioner, false, version))
+            try (PartitionIndex index = load(builder, partitioner, false, zeroCopyMetadata, version))
             {
                 return Pair.create(index.firstKey(), index.lastKey());
             }

@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -33,6 +34,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IScrubber;
 import org.apache.cassandra.io.sstable.MetricsProviders;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -135,6 +137,22 @@ public interface SSTableFormat<R extends SSTableReader, W extends SSTableWriter>
          * (the partition index or the index summary, depending on the format) does not exist
          */
         Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException;
+
+        /**
+         * Like {@link #readKeyRange(Descriptor, IPartitioner)}, for an sstable that may be a zero-copy slice of
+         * another sstable: then the key range is the one of the slice, as given by its zero-copy metadata, rather
+         * than the one of the component the key range is read from, which the slice shares with the original
+         * sstable.
+         * <p>
+         * The default implementation ignores the zero-copy metadata, for formats that do not support zero-copy
+         * slices.
+         *
+         * @param zeroCopyMetadata the zero-copy metadata of the sstable (from its stats metadata), or {@code null}
+         */
+        default Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner, @Nullable ZeroCopyMetadata zeroCopyMetadata) throws IOException
+        {
+            return readKeyRange(descriptor, partitioner);
+        }
 
         Class<R> getReaderClass();
     }

@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
@@ -50,6 +51,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReaderLoadingBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.SortedTableScrubber;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -279,13 +281,19 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         @Override
         public Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException
         {
+            return readKeyRange(descriptor, partitioner, null);
+        }
+
+        @Override
+        public Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner, @Nullable ZeroCopyMetadata zeroCopyMetadata) throws IOException
+        {
             File partitionIndexFile = descriptor.fileFor(Components.PARTITION_INDEX);
             if (!partitionIndexFile.exists())
             {
                 logger.debug("Partition index {} does not exist", partitionIndexFile.absolutePath());
                 return null;
             }
-            return PartitionIndex.readFirstAndLastKey(descriptor, Components.PARTITION_INDEX, partitioner, descriptor.version.getByteComparableVersion());
+            return PartitionIndex.readFirstAndLastKey(descriptor, Components.PARTITION_INDEX, partitioner, zeroCopyMetadata, descriptor.version.getByteComparableVersion());
         }
 
         @Override
