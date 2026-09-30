@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright IBM Corp.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,13 +30,13 @@ import org.apache.cassandra.utils.FBUtilities;
  *
  * <p>The default implementation is {@link NoOpCostCalculator}, which always returns {@code 0}.
  * A custom implementation can be plugged in by setting the
- * {@link CassandraRelevantProperties#COST_CALCULATOR} system property to a fully-qualified class
+ * {@link CassandraRelevantProperties#SENSORS_COST_CALCULATOR} system property to a fully-qualified class
  * name; the class must have a no-arg constructor and implement this interface.
  */
 public interface CostCalculator
 {
-    CostCalculator INSTANCE = CassandraRelevantProperties.COST_CALCULATOR.isPresent()
-                              ? FBUtilities.construct(CassandraRelevantProperties.COST_CALCULATOR.getString(), "cost calculator")
+    CostCalculator INSTANCE = CassandraRelevantProperties.SENSORS_COST_CALCULATOR.isPresent()
+                              ? FBUtilities.construct(CassandraRelevantProperties.SENSORS_COST_CALCULATOR.getString(), "cost calculator")
                               : NoOpCostCalculator.instance;
 
     /**

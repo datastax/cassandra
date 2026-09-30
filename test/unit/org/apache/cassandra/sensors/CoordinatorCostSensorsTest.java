@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright IBM Corp.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -51,7 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Verifies that {@link Type#READ_COST}, {@link Type#WRITE_COST}, and {@link Type#TOTAL_COST} sensors
  * are populated correctly after real CQL operations when {@link TestCostCalculator} is injected via
- * the {@link CassandraRelevantProperties#COST_CALCULATOR} system property.
+ * the {@link CassandraRelevantProperties#SENSORS_COST_CALCULATOR} system property.
  *
  * <p>{@link TestCostCalculator} uses a simple additive formula:
  * <pre>
@@ -92,7 +90,7 @@ public class CoordinatorCostSensorsTest
     public static void defineSchema() throws Exception
     {
         CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
-        CassandraRelevantProperties.COST_CALCULATOR.setString(TestCostCalculator.class.getName());
+        CassandraRelevantProperties.SENSORS_COST_CALCULATOR.setString(TestCostCalculator.class.getName());
 
         SchemaLoader.prepareServer();
         StorageService.instance.initServer();

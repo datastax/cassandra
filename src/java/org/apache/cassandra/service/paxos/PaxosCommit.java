@@ -42,6 +42,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.SensorsCustomParams;
@@ -111,6 +112,10 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
     final int required;
     final OnDone onDone;
 
+    /** Coordinator-side sensors captured at construction; used to accumulate WRITE_EXECUTION_TIME from replica responses. */
+    private final RequestSensors requestSensors;
+    private final ExecutionTimeSensorAccumulator execTimeAccumulator;
+
     /**
      * packs two 32-bit integers;
      * bit 00-31: accepts
@@ -130,6 +135,8 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
         this.replicas = participants.all;
         this.onDone = onDone;
         this.required = participants.requiredFor(consistencyForCommit);
+        this.requestSensors = RequestTracker.instance.get();
+        this.execTimeAccumulator = new ExecutionTimeSensorAccumulator(required > 0 ? required : 1);
         if (required == 0)
             onDone.accept(status());
     }
@@ -137,6 +144,18 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
     public TableMetadata getTableMetadata()
     {
         return commit.update.metadata();
+    }
+
+    @Override
+    public RequestSensors getRequestSensors()
+    {
+        return requestSensors;
+    }
+
+    @Override
+    public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
+        execTimeAccumulator.accumulate(context, type, value);
     }
 
     /**
@@ -246,16 +265,6 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
     }
 
     /**
-     * Record a success response
-     */
-    public void onResponse(Message<NoPayload> response)
-    {
-        logger.trace("{} Success from {}", commit, response.from());
-
-        response(true, response.from());
-    }
-
-    /**
      * Execute locally and record response
      */
     public void executeOnSelf()
@@ -266,6 +275,9 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
     @Override
     public void onResponse(NoPayload response, InetAddressAndPort from)
     {
+        logger.trace("{} Success from {}", commit, from);
+
+        execTimeAccumulator.onResponse(requestSensors);
         response(response != null, from);
     }
 
@@ -322,21 +334,23 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
             RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.update.metadata().keyspace));
             Context context = Context.from(message.payload.update.metadata());
 
-            // Commit phase writes the proposal to the table, so a read sensor is registered in addition to the write sensor
-            sensors.registerSensor(context, Type.READ_BYTES);
+            // Commit phase writes the proposal to the user table.
+            // INDEX_WRITE_BYTES tracks secondary index writes triggered by the commit.
             sensors.registerSensor(context, Type.WRITE_BYTES);
+            sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+            sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
             sensors.registerSensor(context, Type.INTERNODE_BYTES);
             sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
             RequestTracker.instance.set(sensors);
 
+            // WRITE_EXECUTION_TIME is tracked in PaxosState.applyCommit (user-table apply) and
+            // SystemKeyspace.savePaxosCommit (system.paxos write) separately, covering the full commit work.
             NoPayload response = execute(message.payload, message.from());
 
-            // calculate outbound internode bytes before adding the sensor to the response
             if (response != null)
             {
                 Message.Builder<NoPayload> reply = message.responseWithBuilder(response);
-                int size = reply.currentPayloadSize(MessagingService.current_version);
-                sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+                // no need to calculate outbound internode bytes because the response is NoPayload
                 sensors.syncAllSensors();
                 SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
                 MessagingService.instance().send(reply.build(), message.from());
@@ -347,7 +361,7 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
             }
         }
 
-        private static NoPayload execute(Agreed agreed, InetAddressAndPort from)
+        static NoPayload execute(Agreed agreed, InetAddressAndPort from)
         {
             if (!Paxos.isInRangeAndShouldProcess(from, agreed.update.partitionKey(), agreed.update.metadata(), false))
                 return null;

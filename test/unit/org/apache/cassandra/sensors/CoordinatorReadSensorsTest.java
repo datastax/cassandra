@@ -29,6 +29,7 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -41,9 +42,11 @@ import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.paxos.Paxos;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMRules;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -86,10 +89,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       {@code PageSize.inRows(1)} forces the {@code execute(Pager,...)} paging path, routing through
  *       {@code StorageProxy.read} → {@code LocalReadRunnable}.
  *       Verifies {@link Type#READ_EXECUTION_TIME} and {@link Type#READ_BYTES}.</li>
- *   <li><b>SERIAL read</b> — {@code SELECT * WHERE key = ?} with {@link ConsistencyLevel#SERIAL}
- *       routes through {@code StorageProxy.readWithPaxos}, which runs Paxos Prepare+Propose rounds
- *       before the data fetch. The Paxos phases contribute to {@link Type#WRITE_EXECUTION_TIME};
- *       the data fetch contributes to {@link Type#READ_EXECUTION_TIME}. Both must be non-zero.</li>
+ *   <li><b>SERIAL read (v1)</b> — exercises the v1 Paxos path ({@code paxos_variant=v1}).
+ *       {@link Type#WRITE_EXECUTION_TIME} must be >= 50ms (Byteman sleeps in Prepare+Propose writes).
+ *       {@link Type#READ_EXECUTION_TIME} must be >= 50ms (Byteman sleep in data fetch).</li>
+ *   <li><b>SERIAL read (v2)</b> — same assertions over the v2 Paxos path ({@code paxos_variant=v2}).</li>
  * </ul>
  *
  * @see CoordinatorWriteSensorsTest for the write-side counterpart
@@ -320,23 +323,77 @@ public class CoordinatorReadSensorsTest
     }
 
     // -------------------------------------------------------------------------
-    // SERIAL read  (readWithPaxos path)
+    // SERIAL read  (readWithPaxos path) — v1 and v2
     // -------------------------------------------------------------------------
 
     /**
-     * SERIAL read: the Paxos Prepare+Propose rounds execute locally before the data fetch.
-     * Byteman sleeps 50 ms inside {@code ReadCommand.executeLocally} (the data-fetch step) so
-     * {@link Type#READ_EXECUTION_TIME} gains at least 50 ms. {@link Type#WRITE_EXECUTION_TIME}
-     * and {@link Type#WRITE_BYTES} must also be non-zero because the Paxos phases write to
-     * {@code system.paxos} and their times are accumulated into the coordinator's registered sensors.
+     * SERIAL read over the v1 Paxos path ({@code paxos_variant=v1}).
+     * See {@link #assertSerialRead()} for the full assertion contract.
      */
     @Test
-    @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to force read execution time >= 50ms (SERIAL read)",
-            targetClass = "org.apache.cassandra.db.ReadCommand",
-            targetMethod = "executeLocally",
-            targetLocation = "AT ENTRY",
-            action = "Thread.sleep(50L)")
-    public void testSerialRead()
+    @BMRules(rules = {
+        @BMRule(name = "sleep 50ms at Runnable.run in trackPaxosBytes(TableMetadata) to delay Prepare write (v1 SERIAL)",
+                targetClass = "org.apache.cassandra.db.SystemKeyspace",
+                targetMethod = "trackPaxosBytes(org.apache.cassandra.schema.TableMetadata,java.lang.Runnable)",
+                targetLocation = "AT INVOKE Runnable.run",
+                action = "Thread.sleep(50L)"),
+        @BMRule(name = "sleep 50ms at Runnable.run in trackPaxosBytes(Commit) to delay Propose write (v1 SERIAL)",
+                targetClass = "org.apache.cassandra.db.SystemKeyspace",
+                targetMethod = "trackPaxosBytes(org.apache.cassandra.service.paxos.Commit,java.lang.Runnable)",
+                targetLocation = "AT INVOKE Runnable.run",
+                action = "Thread.sleep(50L)"),
+        @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to delay data-fetch phase (v1 SERIAL)",
+                targetClass = "org.apache.cassandra.db.ReadCommand",
+                targetMethod = "executeLocally",
+                targetLocation = "AT ENTRY",
+                action = "Thread.sleep(50L)")
+    })
+    public void testSerialReadV1()
+    {
+        Paxos.setPaxosVariant(Config.PaxosVariant.v1);
+        assertSerialRead(Config.PaxosVariant.v1);
+    }
+
+    /**
+     * SERIAL read over the v2 Paxos path ({@code paxos_variant=v2}).
+     * See {@link #assertSerialRead(Config.PaxosVariant)} for the full assertion contract.
+     */
+    @Test
+    @BMRules(rules = {
+        @BMRule(name = "sleep 50ms at Runnable.run in trackPaxosBytes(TableMetadata) to delay Prepare write (v2 SERIAL)",
+                targetClass = "org.apache.cassandra.db.SystemKeyspace",
+                targetMethod = "trackPaxosBytes(org.apache.cassandra.schema.TableMetadata,java.lang.Runnable)",
+                targetLocation = "AT INVOKE Runnable.run",
+                action = "Thread.sleep(50L)"),
+        @BMRule(name = "sleep 50ms at Runnable.run in trackPaxosBytes(Commit) to delay Propose write (v2 SERIAL)",
+                targetClass = "org.apache.cassandra.db.SystemKeyspace",
+                targetMethod = "trackPaxosBytes(org.apache.cassandra.service.paxos.Commit,java.lang.Runnable)",
+                targetLocation = "AT INVOKE Runnable.run",
+                action = "Thread.sleep(50L)"),
+        @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to delay data-fetch phase (v2 SERIAL)",
+                targetClass = "org.apache.cassandra.db.ReadCommand",
+                targetMethod = "executeLocally",
+                targetLocation = "AT ENTRY",
+                action = "Thread.sleep(50L)")
+    })
+    public void testSerialReadV2()
+    {
+        Paxos.setPaxosVariant(Config.PaxosVariant.v2);
+        assertSerialRead(Config.PaxosVariant.v2);
+    }
+
+    /**
+     * Shared assertion body for {@link #testSerialReadV1()} and {@link #testSerialReadV2()}.
+     * <p>
+     * Byteman sleeps 50ms AT INVOKE of {@code Runnable.run} inside {@code SystemKeyspace.trackPaxosBytes},
+     * which places the sleep between {@code writeStartNanos = nanoTime()} and the final
+     * {@code nanoTime() - writeStartNanos} delta — so it is fully captured in
+     * {@link Type#WRITE_EXECUTION_TIME}. The data-fetch step ({@code ReadCommand.executeLocally})
+     * also sleeps 50ms, so {@link Type#READ_EXECUTION_TIME} must be >= 50ms.
+     * {@link Type#WRITE_BYTES} must be non-zero (system.paxos writes).
+     * {@link Type#READ_BYTES} must be non-zero (user-table rows returned).
+     */
+    private void assertSerialRead(Config.PaxosVariant variant)
     {
         QueryProcessor.Prepared prepared = QueryProcessor.prepareInternal(
                 String.format("SELECT * FROM %s.%s WHERE key = ?", KEYSPACE, TABLE));
@@ -351,19 +408,32 @@ public class CoordinatorReadSensorsTest
 
         // The data-fetch step (executeLocally) sleeps 50ms, so READ_EXECUTION_TIME >= 50ms.
         double readExecTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).get().getValue();
-        assertThat(readExecTime).as("READ_EXECUTION_TIME must be >= 50ms for SERIAL read (data-fetch executed locally)")
+        assertThat(readExecTime).as("READ_EXECUTION_TIME must be >= 50ms for SERIAL read (data-fetch slept 50ms)")
                                 .isGreaterThanOrEqualTo(50_000_000.0);
         Sensor registryReadExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_EXECUTION_TIME).get();
         assertThat(registryReadExecTime.getValue()).as("registry READ_EXECUTION_TIME must equal request sensor")
                                                    .isEqualTo(readExecTime);
 
-        // Paxos Prepare+Propose phases contribute to WRITE_EXECUTION_TIME.
-        double writeExecTime = sensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get().getValue();
-        assertThat(writeExecTime).as("WRITE_EXECUTION_TIME must be > 0 for SERIAL read (Paxos Prepare+Propose phases)")
-                                 .isGreaterThan(0.0);
-        Sensor registryWriteExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_EXECUTION_TIME).get();
-        assertThat(registryWriteExecTime.getValue()).as("registry WRITE_EXECUTION_TIME must equal request sensor")
-                                                    .isEqualTo(writeExecTime);
+        if (variant == Config.PaxosVariant.v1)
+        {
+            // Paxos Prepare and Propose writes each sleep 50ms, so WRITE_EXECUTION_TIME >= 100ms.
+            double writeExecTime = sensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get().getValue();
+            assertThat(writeExecTime).as("WRITE_EXECUTION_TIME must be >= 100ms for SERIAL read (Paxos Prepare/Propose writes slept 50ms each)")
+                                     .isGreaterThanOrEqualTo(100_000_000.0);
+            Sensor registryWriteExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_EXECUTION_TIME).get();
+            assertThat(registryWriteExecTime.getValue()).as("registry WRITE_EXECUTION_TIME must equal request sensor")
+                                                        .isEqualTo(writeExecTime);
+        }
+        else
+        {
+            // V2 doesn't propose (unless required), so time is only 50ms.
+            double writeExecTime = sensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get().getValue();
+            assertThat(writeExecTime).as("WRITE_EXECUTION_TIME must be >= 50ms for SERIAL read (Paxos Prepare write slept 50ms)")
+                                     .isGreaterThanOrEqualTo(50_000_000.0);
+            Sensor registryWriteExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_EXECUTION_TIME).get();
+            assertThat(registryWriteExecTime.getValue()).as("registry WRITE_EXECUTION_TIME must equal request sensor")
+                                                        .isEqualTo(writeExecTime);
+        }
 
         double writeBytes = sensors.getSensor(context, Type.WRITE_BYTES).get().getValue();
         assertThat(writeBytes).as("WRITE_BYTES must be > 0 for SERIAL read (system.paxos writes during Prepare+Propose)")
