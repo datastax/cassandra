@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.concurrent;
 
+import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
@@ -33,8 +34,11 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
  * This class encorporates some Executor best practices for Cassandra.  Most of the executors in the system
@@ -56,6 +60,10 @@ import org.slf4j.LoggerFactory;
 public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements LocalAwareExecutorService
 {
     protected static final Logger logger = LoggerFactory.getLogger(DebuggableThreadPoolExecutor.class);
+
+    // liveness: the running task of each worker thread
+    private final WorkerSlots workerSlots = new WorkerSlots();
+
     public static final RejectedExecutionHandler blockingExecutionHandler = new RejectedExecutionHandler()
     {
         public void rejectedExecution(Runnable task, ThreadPoolExecutor executor)
@@ -157,9 +165,7 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
 
     public void execute(Runnable command, ExecutorLocals locals)
     {
-        super.execute(locals == null || command instanceof LocalSessionWrapper
-                      ? command
-                      : LocalSessionWrapper.create(command, null, locals));
+        super.execute(timed(command, locals));
     }
 
     public boolean canRunImmediately()
@@ -184,10 +190,25 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
     @Override
     public void execute(Runnable command)
     {
-        ExecutorLocals locals = maybeCreateExecutorLocals(command);
-        super.execute(locals != null
-                      ? LocalSessionWrapper.create(command, locals)
-                      : command);
+        super.execute(timed(command, maybeCreateExecutorLocals(command)));
+    }
+
+    /**
+     * Every task that enters the queue is a {@link TimedTask}: a {@link LocalSessionWrapper} when there are executor
+     * locals to propagate, otherwise a {@link TimedRunnable} around the command. Tasks that are already timed pass
+     * through unchanged when they need no locals, so nothing is wrapped twice; a timed task that does need locals
+     * (e.g. from {@link Stage}) is still wrapped, as the locals can only be installed by the wrapper.
+     */
+    private static Runnable timed(Runnable command, ExecutorLocals locals)
+    {
+        Objects.requireNonNull(command);
+        if (command instanceof LocalSessionWrapper)
+            return command;
+        if (locals != null)
+            return LocalSessionWrapper.create(command, locals);
+        if (command instanceof TimedTask)
+            return command;
+        return new TimedRunnable(command);
     }
 
     @Override
@@ -198,7 +219,7 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
             return LocalSessionWrapper.create(runnable, result, locals);
         if (runnable instanceof RunnableFuture)
             return new ForwardingRunnableFuture<>((RunnableFuture) runnable, result);
-        return super.newTaskFor(runnable, result);
+        return new TimedFutureTask<>(runnable, result);
     }
 
     @Override
@@ -207,7 +228,7 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
         ExecutorLocals locals = maybeCreateExecutorLocals(callable);
         if (locals != null)
             return LocalSessionWrapper.create(callable, locals);
-        return super.newTaskFor(callable);
+        return new TimedFutureTask<>(callable);
     }
 
     @Override
@@ -215,8 +236,18 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
     {
         super.afterExecute(r, t);
 
+        markWorkerIdle();
         maybeResetLocalSessionWrapper(r);
         logExceptionsAfterExecute(r, t);
+    }
+
+    /**
+     * Clears the calling worker's running-task stamp. Subclasses that replace {@link #afterExecute} without calling
+     * super must call this, or the worker is reported as running its last task forever.
+     */
+    protected static void markWorkerIdle()
+    {
+        WorkerSlots.markIdle();
     }
 
     protected static void maybeResetLocalSessionWrapper(Runnable r)
@@ -236,7 +267,15 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
         if (r instanceof LocalSessionWrapper)
             ((LocalSessionWrapper) r).setupContext();
 
+        workerSlots.markRunning(taskClassOf(r));
+
         super.beforeExecute(t, r);
+    }
+
+    // the class of the user's work: a timed task knows it, anything else is the work itself
+    private static Class<?> taskClassOf(Object task)
+    {
+        return task instanceof TimedTask ? ((TimedTask) task).taskClass() : task.getClass();
     }
 
     @Override
@@ -249,6 +288,33 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
     public int getPendingTaskCount()
     {
         return getQueue().size();
+    }
+
+    @Override
+    public long oldestQueuedTaskAgeNanos()
+    {
+        Runnable head = getQueue().peek();
+        return head instanceof TimedTask ? TimedTask.ageNanos(((TimedTask) head).enqueuedAtNanos()) : 0L;
+    }
+
+    @Override
+    public long longestRunningTaskAgeNanos()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? 0L : TimedTask.ageNanos(oldest.capturedStartNanos);
+    }
+
+    @Override
+    public Class<?> longestRunningTaskClass()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? null : oldest.taskClass;
+    }
+
+    @VisibleForTesting
+    int workerSlotCount()
+    {
+        return workerSlots.size();
     }
 
     /**
@@ -284,6 +350,7 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
      */
     public static Throwable extractThrowable(Runnable runnable)
     {
+        runnable = TimedRunnable.unwrap(runnable);
         // Check for exceptions wrapped by FutureTask or tasks which wrap FutureTask (HasDelegateFuture interface)
         Throwable throwable = null;
         if (runnable instanceof Future<?>)
@@ -353,14 +420,28 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
      *
      * @param <T>
      */
-    private static class LocalSessionWrapper<T> extends FutureTask<T>
+    private static class LocalSessionWrapper<T> extends FutureTask<T> implements TimedTask
     {
         private final ExecutorLocals locals;
+        private final long enqueuedAtNanos;
+        private final Class<?> taskClass;
 
-        private LocalSessionWrapper(Callable<T> callable, ExecutorLocals locals)
+        private LocalSessionWrapper(Callable<T> callable, ExecutorLocals locals, Class<?> taskClass)
         {
             super(callable);
             this.locals = locals;
+            this.enqueuedAtNanos = approxTime.now();
+            this.taskClass = taskClass;
+        }
+
+        public long enqueuedAtNanos()
+        {
+            return enqueuedAtNanos;
+        }
+
+        public Class<?> taskClass()
+        {
+            return taskClass;
         }
 
         static LocalSessionWrapper<Object> create(Runnable command)
@@ -380,19 +461,22 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
 
         static <T> LocalSessionWrapper<T> create(Runnable command, T result, ExecutorLocals locals)
         {
-            if (command instanceof RunnableFuture)
-                return new FutureLocalSessionWrapper<>((RunnableFuture) command, result, locals);
-            return new LocalSessionWrapper<>(Executors.callable(command, result), locals);
+            Class<?> taskClass = taskClassOf(command);
+            // a future wrapped only to name its task's class must still expose the future to extractThrowable
+            Runnable task = TimedRunnable.unwrap(command);
+            if (task instanceof RunnableFuture)
+                return new FutureLocalSessionWrapper<>((RunnableFuture) task, result, locals, taskClass);
+            return new LocalSessionWrapper<>(Executors.callable(command, result), locals, taskClass);
         }
 
         static <T> LocalSessionWrapper<T> create(Callable<T> command)
         {
-            return new LocalSessionWrapper<>(command, ExecutorLocals.create());
+            return new LocalSessionWrapper<>(command, ExecutorLocals.create(), taskClassOf(command));
         }
 
         static <T> LocalSessionWrapper<T> create(Callable<T> command, ExecutorLocals locals)
         {
-            return new LocalSessionWrapper<>(command, locals);
+            return new LocalSessionWrapper<>(command, locals, taskClassOf(command));
         }
 
         private void setupContext()
@@ -410,12 +494,12 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
     {
         private final RunnableFuture<T> delegate;
 
-        private FutureLocalSessionWrapper(RunnableFuture command, T result, ExecutorLocals locals)
+        private FutureLocalSessionWrapper(RunnableFuture command, T result, ExecutorLocals locals, Class<?> taskClass)
         {
             super(() -> {
                 command.run();
                 return result;
-            }, locals);
+            }, locals, taskClass);
             this.delegate = command;
         }
 
@@ -432,19 +516,67 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
      *
      * @param <T>
      */
-    private static class ForwardingRunnableFuture<T> extends FutureTask<T> implements HasDelegateFuture
+    private static class ForwardingRunnableFuture<T> extends FutureTask<T> implements HasDelegateFuture, TimedTask
     {
         private final RunnableFuture<T> delegate;
+        private final long enqueuedAtNanos;
+        private final Class<?> taskClass;
 
         public ForwardingRunnableFuture(RunnableFuture<T> delegate, T result)
         {
             super(delegate, result);
             this.delegate = delegate;
+            this.enqueuedAtNanos = approxTime.now();
+            this.taskClass = taskClassOf(delegate);
         }
 
         public Future<T> getDelegate()
         {
             return delegate;
+        }
+
+        public long enqueuedAtNanos()
+        {
+            return enqueuedAtNanos;
+        }
+
+        public Class<?> taskClass()
+        {
+            return taskClass;
+        }
+    }
+
+    /**
+     * The future for {@code submit} when there are no executor locals: a plain {@link FutureTask} that carries its own
+     * submission stamp and task class, so {@link #execute(Runnable)} queues it without a {@link TimedRunnable}.
+     */
+    private static class TimedFutureTask<T> extends FutureTask<T> implements TimedTask
+    {
+        private final long enqueuedAtNanos;
+        private final Class<?> taskClass;
+
+        TimedFutureTask(Callable<T> callable)
+        {
+            super(callable);
+            this.enqueuedAtNanos = approxTime.now();
+            this.taskClass = taskClassOf(callable);
+        }
+
+        TimedFutureTask(Runnable runnable, T result)
+        {
+            super(runnable, result);
+            this.enqueuedAtNanos = approxTime.now();
+            this.taskClass = taskClassOf(runnable);
+        }
+
+        public long enqueuedAtNanos()
+        {
+            return enqueuedAtNanos;
+        }
+
+        public Class<?> taskClass()
+        {
+            return taskClass;
         }
     }
 }

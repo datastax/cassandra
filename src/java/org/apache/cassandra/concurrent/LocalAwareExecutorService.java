@@ -22,6 +22,7 @@
 package org.apache.cassandra.concurrent;
 
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public interface LocalAwareExecutorService extends ExecutorService, ResizableThreadPool
 {
@@ -65,6 +66,44 @@ public interface LocalAwareExecutorService extends ExecutorService, ResizableThr
     default int getMaxTasksQueued()
     {
         return -1;
+    }
+
+    // liveness: implementors override the nanos/Class methods; the ms/String getters are derived and not overridden
+    /** Age in nanoseconds of the task at the head of the queue; 0 when empty or untracked. */
+    default long oldestQueuedTaskAgeNanos()
+    {
+        return 0;
+    }
+
+    /** Age in nanoseconds of the oldest task currently executing; 0 when idle. */
+    default long longestRunningTaskAgeNanos()
+    {
+        return 0;
+    }
+
+    /** Class of the oldest task currently executing; null when idle. */
+    default Class<?> longestRunningTaskClass()
+    {
+        return null;
+    }
+
+    @Override
+    default long getOldestQueuedTaskAgeMs()
+    {
+        return TimeUnit.NANOSECONDS.toMillis(oldestQueuedTaskAgeNanos());
+    }
+
+    @Override
+    default long getLongestRunningTaskAgeMs()
+    {
+        return TimeUnit.NANOSECONDS.toMillis(longestRunningTaskAgeNanos());
+    }
+
+    @Override
+    default String getLongestRunningTaskClass()
+    {
+        Class<?> c = longestRunningTaskClass();
+        return c == null ? null : c.getName();
     }
 
     interface MaximumPoolSizeListener

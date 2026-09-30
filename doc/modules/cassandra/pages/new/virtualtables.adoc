@@ -212,38 +212,43 @@ have been modified via jmx/nodetool or virtual tables.
 
 The `thread_pools` table lists information about all thread pools.
 Thread pool information includes active tasks, active tasks limit,
-blocked tasks, blocked tasks all time, completed tasks, and pending
-tasks. A query on the `thread_pools` returns following details:
+blocked tasks, blocked tasks all time, completed tasks, pending
+tasks, the oldest queued task age, and the longest running task and its
+age. `oldest_queued_task_age_ms` is the age of the oldest task waiting in
+the queue; `longest_running_task_age_ms` and `longest_running_task` are
+the age and class of the oldest task currently executing
+(`longest_running_task` is null when the pool is idle). A query on the
+`thread_pools` returns following details:
 
 ....
 cqlsh:system_views> select * from system_views.thread_pools;
 
-name                         | active_tasks | active_tasks_limit | blocked_tasks | blocked_tasks_all_time | completed_tasks | pending_tasks
-------------------------------+--------------+--------------------+---------------+------------------------+-----------------+---------------
-            AntiEntropyStage |            0 |                  1 |             0 |                      0 |               0 |             0
-        CacheCleanupExecutor |            0 |                  1 |             0 |                      0 |               0 |             0
-          CompactionExecutor |            0 |                  2 |             0 |                      0 |             881 |             0
-        CounterMutationStage |            0 |                 32 |             0 |                      0 |               0 |             0
-                 GossipStage |            0 |                  1 |             0 |                      0 |               0 |             0
-             HintsDispatcher |            0 |                  2 |             0 |                      0 |               0 |             0
-       InternalResponseStage |            0 |                  2 |             0 |                      0 |               0 |             0
-         MemtableFlushWriter |            0 |                  2 |             0 |                      0 |               1 |             0
-           MemtablePostFlush |            0 |                  1 |             0 |                      0 |               2 |             0
-       MemtableReclaimMemory |            0 |                  1 |             0 |                      0 |               1 |             0
-              MigrationStage |            0 |                  1 |             0 |                      0 |               0 |             0
-                   MiscStage |            0 |                  1 |             0 |                      0 |               0 |             0
-               MutationStage |            0 |                 32 |             0 |                      0 |               0 |             0
-   Native-Transport-Requests |            1 |                128 |             0 |                      0 |             130 |             0
-      PendingRangeCalculator |            0 |                  1 |             0 |                      0 |               1 |             0
-PerDiskMemtableFlushWriter_0 |            0 |                  2 |             0 |                      0 |               1 |             0
-                   ReadStage |            0 |                 32 |             0 |                      0 |              13 |             0
-                 Repair-Task |            0 |         2147483647 |             0 |                      0 |               0 |             0
-        RequestResponseStage |            0 |                  2 |             0 |                      0 |               0 |             0
-                     Sampler |            0 |                  1 |             0 |                      0 |               0 |             0
-    SecondaryIndexManagement |            0 |                  1 |             0 |                      0 |               0 |             0
-          ValidationExecutor |            0 |         2147483647 |             0 |                      0 |               0 |             0
-           ViewBuildExecutor |            0 |                  1 |             0 |                      0 |               0 |             0
-           ViewMutationStage |            0 |                 32 |             0 |                      0 |               0 |             0
+name                         | active_tasks | active_tasks_limit | blocked_tasks | blocked_tasks_all_time | completed_tasks | longest_running_task                                               | longest_running_task_age_ms | oldest_queued_task_age_ms | pending_tasks
+------------------------------+--------------+--------------------+---------------+------------------------+-----------------+--------------------------------------------------------------------+-----------------------------+---------------------------+---------------
+            AntiEntropyStage |            0 |                  1 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+        CacheCleanupExecutor |            0 |                  1 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+          CompactionExecutor |            0 |                  2 |             0 |                      0 |             881 |                                                               null |                           0 |                         0 |             0
+        CounterMutationStage |            0 |                 32 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+                 GossipStage |            0 |                  1 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+             HintsDispatcher |            0 |                  2 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+       InternalResponseStage |            0 |                  2 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+         MemtableFlushWriter |            0 |                  2 |             0 |                      0 |               1 |                                                               null |                           0 |                         0 |             0
+           MemtablePostFlush |            0 |                  1 |             0 |                      0 |               2 |                                                               null |                           0 |                         0 |             0
+       MemtableReclaimMemory |            0 |                  1 |             0 |                      0 |               1 |                                                               null |                           0 |                         0 |             0
+              MigrationStage |            0 |                  1 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+                   MiscStage |            0 |                  1 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+               MutationStage |            0 |                 32 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+   Native-Transport-Requests |            0 |                128 |             0 |                      0 |             130 |                                                               null |                           0 |                         0 |             0
+      PendingRangeCalculator |            0 |                  1 |             0 |                      0 |               1 |                                                               null |                           0 |                         0 |             0
+PerDiskMemtableFlushWriter_0 |            0 |                  2 |             0 |                      0 |               1 |                                                               null |                           0 |                         0 |             0
+                   ReadStage |            1 |                 32 |             0 |                      0 |              13 | org.apache.cassandra.net.InboundMessageHandler$ProcessSmallMessage |                           3 |                         0 |             0
+                 Repair-Task |            0 |         2147483647 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+        RequestResponseStage |            0 |                  2 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+                     Sampler |            0 |                  1 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+    SecondaryIndexManagement |            0 |                  1 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+          ValidationExecutor |            0 |         2147483647 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+           ViewBuildExecutor |            0 |                  1 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
+           ViewMutationStage |            0 |                 32 |             0 |                      0 |               0 |                                                               null |                           0 |                         0 |             0
 ....
 
 (24 rows)

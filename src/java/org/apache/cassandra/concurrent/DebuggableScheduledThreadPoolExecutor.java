@@ -41,6 +41,8 @@ public class DebuggableScheduledThreadPoolExecutor extends ScheduledThreadPoolEx
 {
     private static final Logger logger = LoggerFactory.getLogger(DebuggableScheduledThreadPoolExecutor.class);
 
+    private final WorkerSlots workerSlots = new WorkerSlots();
+
     public static final RejectedExecutionHandler rejectedExecutionHandler = new RejectedExecutionHandler()
     {
         public void rejectedExecution(Runnable task, ThreadPoolExecutor executor)
@@ -81,12 +83,38 @@ public class DebuggableScheduledThreadPoolExecutor extends ScheduledThreadPoolEx
         setRejectedExecutionHandler(rejectedExecutionHandler);
     }
 
+    @Override
+    protected void beforeExecute(Thread t, Runnable r)
+    {
+        workerSlots.markRunning(r.getClass());
+        super.beforeExecute(t, r);
+    }
+
     // We need this as well as the wrapper for the benefit of non-repeating tasks
     @Override
     public void afterExecute(Runnable r, Throwable t)
     {
         super.afterExecute(r,t);
+        WorkerSlots.markIdle();
         DebuggableThreadPoolExecutor.logExceptionsAfterExecute(r, t);
+    }
+
+    /** Scheduled queues are ordered by trigger time, not submission; head age is not meaningful. */
+    public long oldestQueuedTaskAgeNanos()
+    {
+        return 0L;
+    }
+
+    public long longestRunningTaskAgeNanos()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? 0L : TimedTask.ageNanos(oldest.capturedStartNanos);
+    }
+
+    public Class<?> longestRunningTaskClass()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? null : oldest.taskClass;
     }
 
     // override scheduling to supress exceptions that would cancel future executions

@@ -21,6 +21,7 @@ package org.apache.cassandra.tools.nodetool.stats;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.tools.NodeProbe;
 
 public class TpStatsHolder implements StatsHolder
@@ -48,6 +49,8 @@ public class TpStatsHolder implements StatsHolder
             threadPool.put("CompletedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "CompletedTasks"));
             threadPool.put("CurrentlyBlockedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "CurrentlyBlockedTasks"));
             threadPool.put("TotalBlockedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "TotalBlockedTasks"));
+            threadPool.put(ThreadPoolMetrics.OLDEST_QUEUED_TASK_AGE_MS, probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), ThreadPoolMetrics.OLDEST_QUEUED_TASK_AGE_MS));
+            threadPool.put(ThreadPoolMetrics.LONGEST_RUNNING_TASK_AGE_MS, probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), ThreadPoolMetrics.LONGEST_RUNNING_TASK_AGE_MS));
             threadPools.put(tp.getValue(), threadPool);
         }
         result.put("ThreadPools", threadPools);

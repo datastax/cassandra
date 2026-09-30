@@ -272,6 +272,71 @@ public class SEPExecutor extends AbstractLocalAwareExecutorService implements SE
         return maximumPoolSize.get() - workPermits(permits.get());
     }
 
+    @Override
+    public long oldestQueuedTaskAgeNanos()
+    {
+        FutureTask<?> head = tasks.peek();
+        return head == null ? 0L : TimedTask.ageNanos(head.enqueuedAtNanos());
+    }
+
+    @Override
+    public long longestRunningTaskAgeNanos()
+    {
+        RunningTask oldest = oldestRunningTask();
+        return oldest == null ? 0L : TimedTask.ageNanos(oldest.capturedStartNanos);
+    }
+
+    @Override
+    public Class<?> longestRunningTaskClass()
+    {
+        RunningTask oldest = oldestRunningTask();
+        return oldest == null ? null : oldest.taskClass;
+    }
+
+    // the stamp and class of this executor's oldest task, both captured in the scan that selected it, so neither is
+    // re-read from a worker that may since have moved on
+    private static final class RunningTask
+    {
+        final long capturedStartNanos;
+        final Class<?> taskClass;
+
+        RunningTask(long capturedStartNanos, Class<?> taskClass)
+        {
+            this.capturedStartNanos = capturedStartNanos;
+            this.taskClass = taskClass;
+        }
+    }
+
+    // the oldest task running for this executor, or null when none is running; prunes exited workers.
+    // Must read workingFor (volatile) before the plain stamp and class, see SEPWorker.workingFor; a race with a task
+    // boundary can only under-report by one task.
+    private RunningTask oldestRunningTask()
+    {
+        SEPWorker oldest = null;
+        long oldestStart = Long.MAX_VALUE;
+        Class<?> oldestClass = null;
+        boolean sawExited = false;
+        for (SEPWorker w : pool.allWorkers)
+        {
+            if (w.workingFor != this)
+            {
+                sawExited |= w.hasExited();
+                continue;
+            }
+            long start = w.taskStartedAtNanos;
+            Class<?> taskClass = w.taskClass;
+            if (start < oldestStart)
+            {
+                oldestStart = start;
+                oldestClass = taskClass;
+                oldest = w;
+            }
+        }
+        if (sawExited)
+            pool.allWorkers.removeIf(SEPWorker::hasExited);
+        return oldest == null ? null : new RunningTask(oldestStart, oldestClass);
+    }
+
     public int getCorePoolSize()
     {
         return 0;

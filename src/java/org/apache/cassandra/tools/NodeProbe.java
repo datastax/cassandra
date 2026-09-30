@@ -1504,6 +1504,8 @@ public class NodeProbe implements AutoCloseable
               case ThreadPoolMetrics.PENDING_TASKS:
               case ThreadPoolMetrics.COMPLETED_TASKS:
               case ThreadPoolMetrics.MAX_POOL_SIZE:
+              case ThreadPoolMetrics.OLDEST_QUEUED_TASK_AGE_MS:
+              case ThreadPoolMetrics.LONGEST_RUNNING_TASK_AGE_MS:
                   return JMX.newMBeanProxy(mbeanServerConn, oName, JmxReporter.JmxGaugeMBean.class).getValue();
               case ThreadPoolMetrics.TOTAL_BLOCKED_TASKS:
               case ThreadPoolMetrics.CURRENTLY_BLOCKED_TASKS:

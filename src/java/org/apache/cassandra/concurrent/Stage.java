@@ -59,6 +59,7 @@ import org.apache.cassandra.utils.Throwables;
 
 import static java.util.stream.Collectors.toMap;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 public enum Stage
 {
@@ -438,18 +439,50 @@ public enum Stage
 
     private Runnable withTimeMeasurement(Runnable command, long queueStartTime)
     {
-        return () -> {
+        return new MeasuredRunnable(this, command, queueStartTime);
+    }
+
+    // a named class rather than a lambda, so executors can report the class of the wrapped command
+    private static final class MeasuredRunnable implements Runnable, TimedTask
+    {
+        final Stage stage;
+        final Runnable command;
+        final long queueStartTime;
+        final long enqueuedAtNanos = approxTime.now();
+
+        MeasuredRunnable(Stage stage, Runnable command, long queueStartTime)
+        {
+            this.stage = stage;
+            this.command = command;
+            this.queueStartTime = queueStartTime;
+        }
+
+        @Override
+        public void run()
+        {
             long executionStartTime = System.nanoTime();
             try
             {
-                TaskExecutionCallback.instance.onDequeue(this, executionStartTime - queueStartTime);
+                TaskExecutionCallback.instance.onDequeue(stage, executionStartTime - queueStartTime);
                 command.run();
             }
             finally
             {
-                TaskExecutionCallback.instance.onCompleted(this, System.nanoTime() - executionStartTime);
+                TaskExecutionCallback.instance.onCompleted(stage, System.nanoTime() - executionStartTime);
             }
-        };
+        }
+
+        @Override
+        public long enqueuedAtNanos()
+        {
+            return enqueuedAtNanos;
+        }
+
+        @Override
+        public Class<?> taskClass()
+        {
+            return command.getClass();
+        }
     }
 
     private <T> Callable<T> withTimeMeasurement(Callable<T> command, long queueStartTime)

@@ -32,6 +32,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
+
 public abstract class AbstractLocalAwareExecutorService implements LocalAwareExecutorService
 {
     private static final Logger logger = LoggerFactory.getLogger(AbstractLocalAwareExecutorService.class);
@@ -143,19 +145,38 @@ public abstract class AbstractLocalAwareExecutorService implements LocalAwareExe
         }
     }
 
-    class FutureTask<T> extends SimpleCondition implements Future<T>, Runnable
+    class FutureTask<T> extends SimpleCondition implements Future<T>, Runnable, TimedTask
     {
         private boolean failure;
         private Object result = this;
         private final Callable<T> callable;
+        private final long enqueuedAtNanos;
+        private final Class<?> taskClass;
 
         public FutureTask(Callable<T> callable)
         {
             this.callable = callable;
+            this.enqueuedAtNanos = approxTime.now();
+            this.taskClass = callable.getClass();
         }
+
         public FutureTask(Runnable runnable, T result)
         {
-            this(Executors.callable(runnable, result));
+            this.callable = Executors.callable(runnable, result);
+            this.enqueuedAtNanos = approxTime.now();
+            this.taskClass = runnable instanceof TimedTask ? ((TimedTask) runnable).taskClass() : runnable.getClass();
+        }
+
+        @Override
+        public long enqueuedAtNanos()
+        {
+            return enqueuedAtNanos;
+        }
+
+        @Override
+        public Class<?> taskClass()
+        {
+            return taskClass;
         }
 
         public void run()

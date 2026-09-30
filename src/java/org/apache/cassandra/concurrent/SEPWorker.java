@@ -20,6 +20,7 @@ package org.apache.cassandra.concurrent;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.concurrent.locks.LockSupport;
 
 import org.slf4j.Logger;
@@ -30,15 +31,27 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static org.apache.cassandra.concurrent.SEPExecutor.TakeTaskPermitResult.RETURNED_WORK_PERMIT;
 import static org.apache.cassandra.concurrent.SEPExecutor.TakeTaskPermitResult.TOOK_PERMIT;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnable
 {
     private static final Logger logger = LoggerFactory.getLogger(SEPWorker.class);
     private static final boolean SET_THREAD_NAME = Boolean.parseBoolean(System.getProperty("cassandra.set_sep_thread_name", "true"));
+    private static final AtomicReferenceFieldUpdater<SEPWorker, SEPExecutor> workingForUpdater = AtomicReferenceFieldUpdater.newUpdater(SEPWorker.class, SEPExecutor.class, "workingFor");
 
     final Long workerId;
     final Thread thread;
     final SharedExecutorPool pool;
+
+    // liveness: which executor this worker is currently running a task for, when it started, and the task's class.
+    // Written only by this worker's thread; read by SEPExecutor.longestRunning* on gauge reads.
+    // The worker writes taskClass and taskStartedAtNanos, then publishes workingFor (the only volatile store);
+    // readers read workingFor first, so the happens-before edge makes the plain fields visible, then capture both
+    // the stamp and the class in the same scan. A read that races a task boundary can only see a newer stamp, which
+    // under-reports by at most one task. workingFor is cleared with a release-only lazySet.
+    volatile SEPExecutor workingFor;
+    long taskStartedAtNanos;
+    Class<?> taskClass;
 
     // prevStopCheck stores the value of pool.stopCheck after we last incremented it; if it hasn't changed,
     // we know nobody else was spinning in the interval, so we increment our soleSpinnerSpinTime accordingly,
@@ -53,8 +66,16 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
         this.workerId = workerId;
         thread = new FastThreadLocalThread(this, pool.poolName + "-Worker-" + workerId);
         thread.setDaemon(true);
+        pool.allWorkers.add(this);
         set(initialState);
         thread.start();
+    }
+
+    // true once this worker's thread has run and exited; false before thread.start(), as the constructor
+    // registers the worker in pool.allWorkers before starting its thread
+    boolean hasExited()
+    {
+        return thread.getState() == Thread.State.TERMINATED;
     }
 
     public void run()
@@ -116,7 +137,17 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
                     assigned.maybeSchedule();
 
                     // we know there is work waiting, as we have a work permit, so poll() will always succeed
-                    task.run();
+                    taskClass = task instanceof TimedTask ? ((TimedTask) task).taskClass() : task.getClass();
+                    taskStartedAtNanos = approxTime.now();
+                    workingFor = assigned;   // written last: a reader that sees it sees a valid start
+                    try
+                    {
+                        task.run();
+                    }
+                    finally
+                    {
+                        workingForUpdater.lazySet(this, null);
+                    }
                     task = null;
 
                     if (shutdown = assigned.shuttingDown)

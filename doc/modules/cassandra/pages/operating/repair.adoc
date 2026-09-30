@@ -214,9 +214,13 @@ completed as `Repair-Task` > `Completed` column value of 1:
 [source,none]
 ----
 [ec2-user@ip-10-0-2-238 ~]$ nodetool tpstats
-Pool Name Active   Pending Completed   Blocked  All time blocked
-ReadStage  0           0           99       0              0
+Pool Name Active   Pending Completed   Blocked  All time blocked  Oldest queued (ms)  Longest running (ms)
+ReadStage  0           0           99       0              0                   0                     0
 …
-Repair-Task 0       0           1        0              0
-RequestResponseStage                  0        0        2078        0               0
+Repair-Task 0       0           1        0              0                   0                     0
+RequestResponseStage                  0        0        2078        0               0                   0                     0
 ----
+
+`Oldest queued (ms)` and `Longest running (ms)` show how long the
+head-of-queue task has waited and how long the oldest task currently
+executing has been running.

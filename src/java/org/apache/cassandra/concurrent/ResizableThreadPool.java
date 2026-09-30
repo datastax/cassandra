@@ -39,4 +39,29 @@ public interface ResizableThreadPool
      * Allows user to resize maximum size of the thread pool.
      */
     public void setMaximumPoolSize(int newMaximumPoolSize);
+
+    /**
+     * Age in milliseconds of the task at the head of this pool's queue, 0 when the queue is empty
+     * or the pool does not track it (scheduled executors).
+     */
+    default long getOldestQueuedTaskAgeMs()
+    {
+        return 0;
+    }
+
+    /**
+     * Age in milliseconds of the oldest task currently executing in this pool, 0 when idle.
+     */
+    default long getLongestRunningTaskAgeMs()
+    {
+        return 0;
+    }
+
+    /**
+     * Fully qualified class name of the oldest task currently executing, null when idle.
+     */
+    default String getLongestRunningTaskClass()
+    {
+        return null;
+    }
 }

@@ -66,6 +66,11 @@ public class SharedExecutorPool
     // the collection of executors serviced by this pool; periodically ordered by traffic volume
     public final List<SEPExecutor> executors = new CopyOnWriteArrayList<>();
 
+    // every worker created for this pool that has not been pruned. Workers normally park rather than exit; a worker's
+    // thread exits when the pool shuts down, after finishing a task for an executor that was shut down individually,
+    // or when a Throwable escapes its loop. Read by SEPExecutor liveness gauges, which prune exited workers.
+    final List<SEPWorker> allWorkers = new CopyOnWriteArrayList<>();
+
     // the number of workers currently in a spinning state
     final AtomicInteger spinningCount = new AtomicInteger();
     // see SEPWorker.maybeStop() - used to self coordinate stopping of threads

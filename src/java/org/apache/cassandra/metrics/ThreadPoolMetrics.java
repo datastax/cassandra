@@ -40,6 +40,8 @@ public class ThreadPoolMetrics
     public static final String TOTAL_BLOCKED_TASKS = "TotalBlockedTasks";
     public static final String MAX_POOL_SIZE = "MaxPoolSize";
     public static final String MAX_TASKS_QUEUED = "MaxTasksQueued";
+    public static final String OLDEST_QUEUED_TASK_AGE_MS = "OldestQueuedTaskAgeMs";
+    public static final String LONGEST_RUNNING_TASK_AGE_MS = "LongestRunningTaskAgeMs";
 
     /** Number of active tasks. */
     public final Gauge<Integer> activeTasks;
@@ -65,6 +67,15 @@ public class ThreadPoolMetrics
     /** Maximum number of tasks queued before a task get blocked */
     public final Gauge<Integer> maxTasksQueued;
 
+    /** Age in ms of the task at the head of the queue, 0 when empty. Computed on read. */
+    public final Gauge<Long> oldestQueuedTaskAgeMs;
+
+    /** Age in ms of the oldest task currently executing, 0 when idle. Computed on read. */
+    public final Gauge<Long> longestRunningTaskAgeMs;
+
+    /** The executor these metrics describe; used by the thread_pools virtual table for the running task's class. */
+    public final LocalAwareExecutorService executor;
+
     public final String path;
     public final String poolName;
 
@@ -79,6 +90,7 @@ public class ThreadPoolMetrics
     {
         this.path = path;
         this.poolName = poolName;
+        this.executor = executor;
 
         totalBlocked = new Counter();
         currentBlocked = new Counter();
@@ -87,6 +99,8 @@ public class ThreadPoolMetrics
         completedTasks = executor::getCompletedTaskCount;
         maxPoolSize = executor::getMaximumPoolSize;
         maxTasksQueued = executor::getMaxTasksQueued;
+        oldestQueuedTaskAgeMs = executor::getOldestQueuedTaskAgeMs;
+        longestRunningTaskAgeMs = executor::getLongestRunningTaskAgeMs;
     }
 
     public ThreadPoolMetrics register()
@@ -98,6 +112,8 @@ public class ThreadPoolMetrics
         Metrics.register(makeMetricName(path, poolName, TOTAL_BLOCKED_TASKS), totalBlocked);
         Metrics.register(makeMetricName(path, poolName, MAX_POOL_SIZE), maxPoolSize);
         Metrics.register(makeMetricName(path, poolName, MAX_TASKS_QUEUED), maxTasksQueued);
+        Metrics.register(makeMetricName(path, poolName, OLDEST_QUEUED_TASK_AGE_MS), oldestQueuedTaskAgeMs);
+        Metrics.register(makeMetricName(path, poolName, LONGEST_RUNNING_TASK_AGE_MS), longestRunningTaskAgeMs);
         return Metrics.register(this);
     }
 
@@ -110,6 +126,8 @@ public class ThreadPoolMetrics
         Metrics.remove(makeMetricName(path, poolName, TOTAL_BLOCKED_TASKS));
         Metrics.remove(makeMetricName(path, poolName, MAX_POOL_SIZE));
         Metrics.remove(makeMetricName(path, poolName, MAX_TASKS_QUEUED));
+        Metrics.remove(makeMetricName(path, poolName, OLDEST_QUEUED_TASK_AGE_MS));
+        Metrics.remove(makeMetricName(path, poolName, LONGEST_RUNNING_TASK_AGE_MS));
         Metrics.remove(this);
     }
 

@@ -74,6 +74,7 @@ import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TimedRunnable;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -1986,6 +1987,7 @@ public class CompactionManager implements CompactionManagerMBean
         {
             exactRunningTasks.decrementAndGet();
 
+            DebuggableThreadPoolExecutor.markWorkerIdle();
             DebuggableThreadPoolExecutor.maybeResetLocalSessionWrapper(r);
 
             if (t == null)
@@ -2020,7 +2022,7 @@ public class CompactionManager implements CompactionManagerMBean
 
         public ListenableFuture<?> submitIfRunning(Runnable task, String name)
         {
-            return submitIfRunning(Executors.callable(task, null), name);
+            return submitIfRunning(Executors.callable(task, null), task.getClass(), name);
         }
 
         /**
@@ -2035,6 +2037,12 @@ public class CompactionManager implements CompactionManagerMBean
          */
         public <T> ListenableFuture<T> submitIfRunning(Callable<T> task, String name)
         {
+            return submitIfRunning(task, task.getClass(), name);
+        }
+
+        // taskClass names the user's task for the liveness gauges, which would otherwise report the future's class
+        private <T> ListenableFuture<T> submitIfRunning(Callable<T> task, Class<?> taskClass, String name)
+        {
             if (isShutdown())
             {
                 logger.info("Executor has been shut down, not submitting {}", name);
@@ -2044,7 +2052,7 @@ public class CompactionManager implements CompactionManagerMBean
             try
             {
                 ListenableFutureTask<T> ret = ListenableFutureTask.create(task);
-                execute(ret);
+                execute(new TimedRunnable(ret, taskClass));
                 return ret;
             }
             catch (RejectedExecutionException ex)
