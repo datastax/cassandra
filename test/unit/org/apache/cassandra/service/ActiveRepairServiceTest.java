@@ -38,6 +38,9 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.repair.CommonRange;
+import org.apache.cassandra.repair.NoSuchRepairSessionException;
+import org.apache.cassandra.repair.RepairSession;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Condition;
 import org.junit.Assert;
@@ -71,6 +74,8 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.apache.cassandra.repair.Scheduler;
+import org.apache.cassandra.repair.SharedContext;
 
 import static org.apache.cassandra.repair.messages.RepairOption.DATACENTERS_KEY;
 import static org.apache.cassandra.repair.messages.RepairOption.FORCE_REPAIR_KEY;
@@ -81,6 +86,7 @@ import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABL
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.apache.cassandra.utils.concurrent.Condition.newOneTimeCondition;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -127,6 +133,77 @@ public class ActiveRepairServiceTest
         StorageService.instance.setTokens(Collections.singleton(tmd.partitioner.getRandomToken()));
         tmd.updateNormalToken(tmd.partitioner.getMinimumToken(), REMOTE);
         assert tmd.isMember(REMOTE);
+    }
+
+    @Test
+    public void testAbortSession() throws Exception
+    {
+        ColumnFamilyStore cfs = prepareColumnFamilyStore();
+        InetAddressAndPort local = FBUtilities.getBroadcastAddressAndPort();
+        Collection<Range<Token>> ranges = Collections.singleton(
+        new Range<>(cfs.getPartitioner().getMinimumToken(),
+                    cfs.getPartitioner().getMinimumToken()));
+
+        Set<InetAddressAndPort> neighbors = new HashSet<>(Collections.singletonList(REMOTE));
+        CommonRange commonRange = new CommonRange(neighbors, Collections.emptySet(), ranges);
+        RepairOption options = RepairOption.parse(Collections.emptyMap(), DatabaseDescriptor.getPartitioner());
+
+        // grab the private 'sessions' map via reflection
+        java.lang.reflect.Field sessionsField = ActiveRepairService.class.getDeclaredField("sessions");
+        sessionsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.concurrent.ConcurrentMap<TimeUUID, RepairSession> sessionsMap =
+        (java.util.concurrent.ConcurrentMap<TimeUUID, RepairSession>) sessionsField.get(ActiveRepairService.instance());
+
+        // --- Session 1 ---
+        TimeUUID parentId1 = nextTimeUUID();
+        ActiveRepairService.instance().registerParentRepairSession(
+        parentId1, local, Collections.singletonList(cfs),
+        ranges, false, ActiveRepairService.UNREPAIRED_SSTABLE,
+        false, PreviewKind.NONE);
+        RepairSession session1 = new RepairSession(SharedContext.Global.instance, new Scheduler.NoopScheduler(),
+                                                   parentId1, commonRange, KEYSPACE5,
+                                                   RepairParallelism.SEQUENTIAL, false, false, false,
+                                                   PreviewKind.NONE, false, true, false, CF_STANDARD1);
+        sessionsMap.put(session1.getId(), session1);
+
+        // --- Session 2 ---
+        TimeUUID parentId2 = nextTimeUUID();
+        ActiveRepairService.instance().registerParentRepairSession(
+        parentId2, local, Collections.singletonList(cfs),
+        ranges, false, ActiveRepairService.UNREPAIRED_SSTABLE,
+        false, PreviewKind.NONE);
+        RepairSession session2 = new RepairSession(SharedContext.Global.instance, new Scheduler.NoopScheduler(),
+                                                   parentId2, commonRange, KEYSPACE5,
+                                                   RepairParallelism.SEQUENTIAL, false, false, false,
+                                                   PreviewKind.NONE, false, true, false, CF_STANDARD1);
+        sessionsMap.put(session2.getId(), session2);
+
+        // Abort only session 1
+        ActiveRepairService.instance().abortSession(parentId1);
+
+        // Parent 1 must be gone
+        try
+        {
+            ActiveRepairService.instance().getParentRepairSession(parentId1);
+            fail("Expected NoSuchRepairSessionException for aborted session");
+        }
+        catch (NoSuchRepairSessionException e)
+        {
+            // expected
+        }
+
+        // Child of session 1 must be shut down
+        assertTrue(session1.isDone());
+
+        // Parent 2 must still be alive
+        assertNotNull(ActiveRepairService.instance().getParentRepairSession(parentId2));
+
+        // Child of session 2 must NOT have been shut down
+        assertFalse(session2.isDone());
+
+        // Cleanup
+        ActiveRepairService.instance().terminateSessions();
     }
 
     @Test
