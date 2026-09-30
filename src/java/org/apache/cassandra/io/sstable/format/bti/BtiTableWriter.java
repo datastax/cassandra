@@ -233,12 +233,15 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             super(b);
             chunkCache = b.getChunkCache();
 
-            // Check if encryption is enabled (following trie-index pattern)
-            boolean compression = b.getComponents().contains(SSTableFormat.Components.COMPRESSION_INFO);
+            // The indexes are encrypted with the encryptor of the parameters the data file is written with: those
+            // are the ones stored in the compression info file, which readers take the index encryptor from. They
+            // may differ from the table's schema parameters, as the data writer's are chosen by the pluggable
+            // CompressionParams.Selector (forFlush/forCompaction).
             TableMetadata metadata = b.getTableMetadataRef().getLocal();
-            CompressionParams params = metadata.params.compression;
-            ICompressor encryptor = compression && b.descriptor.version.indicesAreEncrypted() ? params.getSstableCompressor().encryptionOnly()
-                                                                                              : null;
+            CompressionParams params = dataParams(dataWriter, b.getComponents().contains(SSTableFormat.Components.COMPRESSION_INFO));
+            ICompressor compressor = params.getSstableCompressor();
+            ICompressor encryptor = compressor != null && b.descriptor.version.indicesAreEncrypted() ? compressor.encryptionOnly()
+                                                                                                     : null;
             // Build into locals so that a failure partway through construction can release whatever was
             // already created: SortedTableWriter's constructor only sees a null indexWriter in that case
             // and cannot close any of it (including the bloom filter created by the super constructor).

@@ -267,7 +267,8 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
      * {@link Components#ROW_INDEX}) to decrypt the file, if the sstable's indexes are encrypted. Every opener of an
      * existing sstable's index files must go through this method: an encrypted index read without it is read as
      * plaintext garbage. {@link BtiTableWriter.IndexWriter} uses it too, for the builders of the early-open index
-     * handles, passing encryption-only metadata built from the table's schema compression parameters.
+     * handles, passing encryption-only metadata built from the compression parameters of the data writer (the ones
+     * stored in the compression info file).
      * <p>
      * When the sstable is not being fully opened (e.g. by offline tools), the compression metadata can be obtained
      * with {@link #maybeLoadIndexEncryptionMetadata(Descriptor)}.
