@@ -55,10 +55,10 @@ import org.apache.cassandra.utils.memory.BufferPool;
 import org.awaitility.Awaitility;
 import org.mockito.ArgumentCaptor;
 
-import static org.apache.cassandra.distributed.shared.AssertUtils.assertNotNull;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;

@@ -64,7 +64,6 @@ import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Throwables;
 import org.jboss.byteman.contrib.bmunit.BMRule;
-import org.jboss.byteman.contrib.bmunit.BMUnitConfig;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.apache.cassandra.io.compress.EncryptionConfig.CIPHER_ALGORITHM;
@@ -76,7 +75,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(BMUnitRunner.class)
-@BMUnitConfig(debug = true, verbose = true)
 @BMRule(name = "Return specified encryptor",
         targetClass = "MetadataSerializer",
         targetMethod = "getEncryptor",

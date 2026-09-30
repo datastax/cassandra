@@ -43,6 +43,7 @@ import org.apache.cassandra.io.compress.OutOfPlaceEncryptor;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.PageAware;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -214,65 +215,72 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
     public void testSkipAcrossHoles() throws IOException
     {
         int pageSize = PageAware.PAGE_SIZE;
-        File tempFile = new File(java.io.File.createTempFile(getClass().getName(), ".test"));
-        long dataEnd;
-        try (SequentialWriter writer = makeWriter(tempFile))
+        File tempFile = FileUtils.createTempFile(getClass().getName(), ".test");
+        try
         {
-            for (int i = 0; i < pageSize * 8; ++i)
-                writer.writeByte((byte) writer.position());
-            dataEnd = writer.position();
-            writer.finish();
-        }
-
-        FileHandle.Builder fhBuilder = makeHandle(tempFile);
-        try (FileHandle fh = fhBuilder.complete();
-             RandomAccessReader rdr = fh.createReader())
-        {
-            long len = rdr.length();
-            // the last chunk is partially filled: length() is the usable end of that chunk, after the data
-            Assert.assertTrue(dataEnd + " > " + len, dataEnd <= len);
-            for (int readSize : new int[]{ 1, 7, 33, 45, 67, pageSize + 55, pageSize * 2, pageSize * 3 + 34 })
+            long dataEnd;
+            try (SequentialWriter writer = makeWriter(tempFile))
             {
-                byte[] buf = new byte[readSize];
-                for (int seekPos = pageSize - 33; seekPos < len - 1; ++seekPos)
-                {
-                    rdr.seek(seekPos);
-                    int read = rdr.read(buf, 0, buf.length);
-                    long afterRead = rdr.getFilePointer();
-                    int nextByte = getNextByte(rdr);
-                    int expectedNextByte = (int) afterRead & 0xFF;
-
-                    rdr.seek(seekPos);
-                    Assert.assertEquals(read, rdr.skipBytes(read));
-                    long afterSkip = rdr.getFilePointer();
-                    int nextByteAfterSkip = getNextByte(rdr);
-                    String context = String.format("(seek to %x, read %x bytes (of %x) to pos %x next %x; seek to %x skip %x bytes to pos %x next %x)", seekPos, read, readSize, afterRead, nextByte, seekPos, read, afterSkip, nextByteAfterSkip);
-
-                    Assert.assertEquals("Position" + context, afterRead, afterSkip);
-                    Assert.assertEquals("Next byte" + context, nextByte, nextByteAfterSkip);
-
-                    if (nextByte != Integer.MAX_VALUE)
-                    {
-                        Assert.assertEquals("Byte from write pos" + context, expectedNextByte, nextByte);
-                    }
-                    else
-                    {
-                        // The data ends before length(), and the positions in between cannot be read (the last chunk
-                        // is padded on disk; see FileHandle.dataLength()), so stop at the end of the data.
-                        Assert.assertEquals("End of data" + context, dataEnd, afterRead);
-                        break;
-                    }
-                }
+                for (int i = 0; i < pageSize * 8; ++i)
+                    writer.writeByte((byte) writer.position());
+                dataEnd = writer.position();
+                writer.finish();
             }
 
-            // seeking to length() is valid and reads as EOF
-            rdr.seek(len);
-            Assert.assertEquals(len, rdr.getFilePointer());
-            Assert.assertTrue(rdr.isEOF());
-            Assert.assertEquals(0, rdr.bytesRemaining());
-            Assert.assertEquals(Integer.MAX_VALUE, getNextByte(rdr));
-            Assert.assertEquals(0, rdr.skipBytes(1));
-            Assert.assertEquals(len, rdr.getFilePointer());
+            FileHandle.Builder fhBuilder = makeHandle(tempFile);
+            try (FileHandle fh = fhBuilder.complete();
+                 RandomAccessReader rdr = fh.createReader())
+            {
+                long len = rdr.length();
+                // the last chunk is partially filled: length() is the usable end of that chunk, after the data
+                Assert.assertTrue(dataEnd + " > " + len, dataEnd <= len);
+                for (int readSize : new int[]{ 1, 7, 33, 45, 67, pageSize + 55, pageSize * 2, pageSize * 3 + 34 })
+                {
+                    byte[] buf = new byte[readSize];
+                    for (int seekPos = pageSize - 33; seekPos < len - 1; ++seekPos)
+                    {
+                        rdr.seek(seekPos);
+                        int read = rdr.read(buf, 0, buf.length);
+                        long afterRead = rdr.getFilePointer();
+                        int nextByte = getNextByte(rdr);
+                        int expectedNextByte = (int) afterRead & 0xFF;
+
+                        rdr.seek(seekPos);
+                        Assert.assertEquals(read, rdr.skipBytes(read));
+                        long afterSkip = rdr.getFilePointer();
+                        int nextByteAfterSkip = getNextByte(rdr);
+                        String context = String.format("(seek to %x, read %x bytes (of %x) to pos %x next %x; seek to %x skip %x bytes to pos %x next %x)", seekPos, read, readSize, afterRead, nextByte, seekPos, read, afterSkip, nextByteAfterSkip);
+
+                        Assert.assertEquals("Position" + context, afterRead, afterSkip);
+                        Assert.assertEquals("Next byte" + context, nextByte, nextByteAfterSkip);
+
+                        if (nextByte != Integer.MAX_VALUE)
+                        {
+                            Assert.assertEquals("Byte from write pos" + context, expectedNextByte, nextByte);
+                        }
+                        else
+                        {
+                            // The data ends before length(), and the positions in between cannot be read (the last
+                            // chunk is padded on disk; see FileHandle.dataLength()), so stop at the end of the data.
+                            Assert.assertEquals("End of data" + context, dataEnd, afterRead);
+                            break;
+                        }
+                    }
+                }
+
+                // seeking to length() is valid and reads as EOF
+                rdr.seek(len);
+                Assert.assertEquals(len, rdr.getFilePointer());
+                Assert.assertTrue(rdr.isEOF());
+                Assert.assertEquals(0, rdr.bytesRemaining());
+                Assert.assertEquals(Integer.MAX_VALUE, getNextByte(rdr));
+                Assert.assertEquals(0, rdr.skipBytes(1));
+                Assert.assertEquals(len, rdr.getFilePointer());
+            }
+        }
+        finally
+        {
+            tempFile.tryDelete();
         }
     }
 

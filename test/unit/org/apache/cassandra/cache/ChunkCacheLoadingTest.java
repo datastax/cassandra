@@ -18,11 +18,13 @@
 
 package org.apache.cassandra.cache;
 
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
@@ -138,6 +140,8 @@ public class ChunkCacheLoadingTest
             // underlying Caffeine cache. We want to ensure that because in DSE 6 and above (unlike in 5.1) doing a nested read
             // of the same chunk is much harder to handle without resulting in a stall, mostly because of the changes related
             // to the chunk cache now storing chunk futures instead of the chunks themselves.
+            // Only the chunks of the Data.db files of this test's keyspace collide.
+            condition = "org.apache.cassandra.cache.ChunkCacheLoadingTest.isTestDataFileChunk($0)",
             action = "return 1")
     @Test(timeout=5000)
     public void testUncompressionReadCollision() throws Exception
@@ -172,6 +176,81 @@ public class ChunkCacheLoadingTest
 
         ColumnMetadata cm = counterCfs.metadata().getColumn(ByteBufferUtil.bytes("c"));
         assertEquals(12L, counterCfs.getCachedCounter(CounterCacheKey.create(counterCfs.metadata(), bytes(1), Clustering.EMPTY, cm, null)).count);
+        // the rule fired: the loads of the test's Data.db chunks collided
+        Assert.assertTrue("no chunk key collided", COLLIDING_KEYS.get() > 0);
+    }
+
+    /** The answers of {@link #isTestDataFileChunk} by file id, so that the hash of a key never changes. */
+    private static final ConcurrentHashMap<Long, Boolean> TEST_DATA_FILE_IDS = new ConcurrentHashMap<>();
+    /** The number of hash codes the Byteman rule of {@link #testUncompressionReadCollision} replaced. */
+    private static final AtomicInteger COLLIDING_KEYS = new AtomicInteger();
+
+    /**
+     * The condition of the Byteman rule of {@link #testUncompressionReadCollision}: whether the key is a chunk of a
+     * Data.db file of this test's keyspace. The reader id of a key holds the id the cache assigned to the file above
+     * the chunk size and reader type bits (see {@code ChunkCache.readerIdFor}).
+     * <p>
+     * The file id is in the cache's map when a key is created, but the test invalidates files while the rule is
+     * installed, which removes them from the map; the first answer for a file id is cached, so that a key keeps its
+     * hash while it is in the cache.
+     */
+    public static boolean isTestDataFileChunk(ChunkCache.Key key)
+    {
+        boolean result = TEST_DATA_FILE_IDS.computeIfAbsent(key.readerId >>> FileIds.SHIFT, FileIds::isTestDataFile);
+        if (result)
+            COLLIDING_KEYS.incrementAndGet();
+        return result;
+    }
+
+    /**
+     * Reflective access to the file ids of the chunk cache, in a holder class so that ChunkCache is only initialised
+     * when the rule first runs, after the test has set up the configuration.
+     */
+    private static class FileIds
+    {
+        private static final Field MAP;
+        private static final int SHIFT;
+
+        static
+        {
+            try
+            {
+                MAP = ChunkCache.class.getDeclaredField("fileIdMap");
+                MAP.setAccessible(true);
+                Field chunkSizeBits = ChunkCache.class.getDeclaredField("CHUNK_SIZE_LOG2_BITS");
+                chunkSizeBits.setAccessible(true);
+                Field readerTypeBits = ChunkCache.class.getDeclaredField("READER_TYPE_BITS");
+                readerTypeBits.setAccessible(true);
+                SHIFT = chunkSizeBits.getInt(null) + readerTypeBits.getInt(null);
+            }
+            catch (ReflectiveOperationException e)
+            {
+                throw new AssertionError(e);
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        static boolean isTestDataFile(long fileId)
+        {
+            Map<File, Long> fileIdMap;
+            try
+            {
+                fileIdMap = (Map<File, Long>) MAP.get(ChunkCache.instance);
+            }
+            catch (IllegalAccessException e)
+            {
+                throw new AssertionError(e);
+            }
+            for (Map.Entry<File, Long> entry : fileIdMap.entrySet())
+            {
+                if (entry.getValue() == fileId)
+                {
+                    String path = entry.getKey().path();
+                    return path.contains(KEYSPACE) && path.contains("Data.db");
+                }
+            }
+            return false;
+        }
     }
 
     private static void addNonPartitionFiles(Set<File> sstableDataFilePaths, File... roots)
