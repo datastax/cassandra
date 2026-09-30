@@ -327,8 +327,8 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         public static final String earliest_supported_version = "aa";
 
         // aa (DSE 6.0): trie index format
-        // ab (DSE pre-6.8): ILLEGAL - handled as 'b' (predates 'ba'). Pre-GA "LABS" releases of DSE 6.8 used this
-        //                   sstable version.
+        // ab (DSE pre-6.8): ILLEGAL - handled as 'ba' (it was renamed to 'ba'). Pre-GA "LABS" releases of DSE 6.8
+        //                   used this sstable version; its features are those of 'ba' (see mapAb).
         // ac (DSE 6.0.11, 6.7.6): corrected sstable min/max clustering (DB-3691/CASSANDRA-14861)
         // ad (DSE 6.0.14, 6.7.11): added hostId of the node from which the sstable originated (DB-4629)
         // b  (DSE early 6.8 "LABS") has some of 6.8 features but not all
@@ -378,12 +378,15 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         {
             super(format, version);
 
+            isLatestVersion = version.compareTo(current_version) == 0;
+            // the features below are computed for 'ba' when the version is 'ab'
+            version = mapAb(version);
+
             boolean dOrLater = version.compareTo("d") >= 0;
             boolean cOrLater = dOrLater || version.startsWith("c");
             boolean bOrLater = cOrLater || version.startsWith("b");
             boolean aOrLater = bOrLater || version.startsWith("a");
 
-            isLatestVersion = version.compareTo(current_version) == 0;
             correspondingMessagingVersion = MessagingService.VERSION_50;
             byteComparableVersion = version.compareTo("da") >= 0 ? ByteComparable.Version.OSS50
                                                                  : version.compareTo("ca") >= 0 ? ByteComparable.Version.OSS41
@@ -411,6 +414,16 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
             indicesAreEncrypted = bOrLater;
             // metadata encrypted from "ba"
             metadataIsEncrypted = (bOrLater && version.compareTo("ba") >= 0);
+        }
+
+        /**
+         * The 'ab' version was used by pre-GA "LABS" releases of DSE 6.8, and then renamed to 'ba': sstables of
+         * version 'ab' have the features of 'ba'. Only the features are mapped: the version string, which names the
+         * sstable files, is kept.
+         */
+        private static String mapAb(String version)
+        {
+            return "ab".equals(version) ? "ba" : version;
         }
 
         @Override
