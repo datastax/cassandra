@@ -18,6 +18,7 @@ package org.apache.cassandra.io.util;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -84,15 +85,28 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
     @Override
     public long positionForSkip(long currentPosition, int bytesToSkip)
     {
+        return positionForSkip(currentPosition, bytesToSkip, maxBytesInPage);
+    }
+
+    /**
+     * The position {@code bytesToSkip} usable bytes after {@code currentPosition}, in a file whose chunks of
+     * {@code CHUNK_SIZE} bytes hold {@code maxBytesInPage} usable bytes each. A skip that ends exactly at the usable
+     * end of a chunk returns that end, i.e. the start of the chunk's hole (see {@link #adjustPosition}).
+     */
+    @VisibleForTesting
+    static long positionForSkip(long currentPosition, int bytesToSkip, int maxBytesInPage)
+    {
         long currentOffset = inChunkOffset(currentPosition);
-        while (currentOffset + bytesToSkip > maxBytesInPage)
-        {
-            long len = maxBytesInPage - currentOffset;
-            bytesToSkip -= len;
-            currentPosition += CHUNK_SIZE - maxBytesInPage + len;
-            currentOffset = 0;
-        }
-        return currentPosition + bytesToSkip;
+        if (currentOffset + bytesToSkip <= maxBytesInPage)
+            return currentPosition + bytesToSkip;
+
+        // the bytes left after filling the current chunk (at least one) start at the next chunk, and every
+        // maxBytesInPage of them but the last (possibly partial) group fill a further chunk
+        long bytesAfterCurrentChunk = currentOffset + bytesToSkip - maxBytesInPage;
+        long fullChunks = (bytesAfterCurrentChunk - 1) / maxBytesInPage;
+        return currentPosition - currentOffset + CHUNK_SIZE
+               + fullChunks * CHUNK_SIZE
+               + bytesAfterCurrentChunk - fullChunks * maxBytesInPage;
     }
 
     private static long inChunkOffset(long position)
@@ -179,6 +193,18 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
                 fileLength);
     }
 
+    /**
+     * The logical length of a file read without a length override: the position after the last usable byte of the
+     * last chunk (its hole start), which allows partition index readers to find their metadata at the end of the
+     * file. This is exact for files whose last chunk is filled up to its usable end (the partition index), but only an
+     * upper bound for files whose last chunk is partially filled and padded on disk (the row index). A file shorter
+     * than a chunk's hole (i.e. truncated) has length 0.
+     */
+    private static long defaultLength(long fileLength, int maxBytesInPage)
+    {
+        return Math.max(0, fileLength - (CHUNK_SIZE - maxBytesInPage));
+    }
+
     public static Standard createStandard(ChannelProxy channel,
             ICompressor encryptor,
             CompressionParams compressionParams,
@@ -188,10 +214,7 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         int maxBytesInPage = EncryptedSequentialWriter.maxBytesInPage(encryptor);
 
         if (overrideLength <= 0)
-        {
-            // Use the position after the last useable byte to allow partition index readers to find their metadata
-            overrideLength = fileLength - (CHUNK_SIZE - maxBytesInPage);
-        }
+            overrideLength = defaultLength(fileLength, maxBytesInPage);
 
         return new Standard(channel, compressionParams, encryptor, overrideLength, maxBytesInPage);
     }
@@ -206,10 +229,8 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         int maxBytesInPage = EncryptedSequentialWriter.maxBytesInPage(encryptor);
 
         if (overrideLength <= 0)
-        {
-            // Use the position after the last useable byte to allow partition index readers to find their metadata
-            overrideLength = fileLength - (CHUNK_SIZE - maxBytesInPage);
-        }
+            overrideLength = defaultLength(fileLength, maxBytesInPage);
+
         return new Mmap(channel, regions, compressionParams, encryptor, overrideLength, maxBytesInPage);
     }
 

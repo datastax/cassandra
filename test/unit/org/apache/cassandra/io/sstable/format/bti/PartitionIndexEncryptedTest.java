@@ -206,17 +206,19 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
 
     /**
      * Verifies that seeking, reading and skipping over encryption-only files result in the same positions and read the
-     * same data. See DSP-25176.
+     * same data (see DSP-25176), and that the end of the file reads as EOF.
      */
     @Test
     public void testSkipAcrossHoles() throws IOException
     {
         int pageSize = PageAware.PAGE_SIZE;
         File tempFile = new File(java.io.File.createTempFile(getClass().getName(), ".test"));
+        long dataEnd;
         try (SequentialWriter writer = makeWriter(tempFile))
         {
             for (int i = 0; i < pageSize * 8; ++i)
                 writer.writeByte((byte) writer.position());
+            dataEnd = writer.position();
             writer.finish();
         }
 
@@ -225,6 +227,8 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
              RandomAccessReader rdr = fh.createReader())
         {
             long len = rdr.length();
+            // the last chunk is partially filled: length() is the usable end of that chunk, after the data
+            Assert.assertTrue(dataEnd + " > " + len, dataEnd <= len);
             for (int readSize : new int[]{ 1, 7, 33, 45, 67, pageSize + 55, pageSize * 2, pageSize * 3 + 34 })
             {
                 byte[] buf = new byte[readSize];
@@ -237,30 +241,36 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
                     int expectedNextByte = (int) afterRead & 0xFF;
 
                     rdr.seek(seekPos);
-                    BtiTableReader.skipBytesWithCorrectPosition(rdr, read);
+                    Assert.assertEquals(read, rdr.skipBytes(read));
                     long afterSkip = rdr.getFilePointer();
                     int nextByteAfterSkip = getNextByte(rdr);
-                    String context = String.format("(seek to %x, read %x bytes (of %x) to pos %x next %x; seek to %x corrected skip %x bytes to pos %x next %x)", seekPos, read, readSize, afterRead, nextByte, seekPos, read, afterSkip, nextByteAfterSkip);
+                    String context = String.format("(seek to %x, read %x bytes (of %x) to pos %x next %x; seek to %x skip %x bytes to pos %x next %x)", seekPos, read, readSize, afterRead, nextByte, seekPos, read, afterSkip, nextByteAfterSkip);
 
                     Assert.assertEquals("Position" + context, afterRead, afterSkip);
                     Assert.assertEquals("Next byte" + context, nextByte, nextByteAfterSkip);
 
-                    rdr.seek(seekPos);
-                    rdr.skipBytes(read);
-                    afterSkip = rdr.getFilePointer();
-                    nextByteAfterSkip = getNextByte(rdr);
-                    context = String.format("(seek to %x, read %x bytes (of %x) to pos %x next %x; seek to %x plain skip %x bytes to pos %x next %x)", seekPos, read, readSize, afterRead, nextByte, seekPos, read, afterSkip, nextByteAfterSkip);
-
-                    if (afterRead != afterSkip)
-                        System.out.println("Different position after plain skip " + context); // this is expected and corrected for by BtiTableReader.skipBytesWithCorrectPosition
-                    Assert.assertEquals("Next byte" + context, nextByte, nextByteAfterSkip);
-
                     if (nextByte != Integer.MAX_VALUE)
+                    {
                         Assert.assertEquals("Byte from write pos" + context, expectedNextByte, nextByte);
+                    }
                     else
-                        break; // because length() is imprecise, next seeks may hit beyond the end of the file
+                    {
+                        // The data ends before length(), and the positions in between cannot be read (the last chunk
+                        // is padded on disk; see FileHandle.dataLength()), so stop at the end of the data.
+                        Assert.assertEquals("End of data" + context, dataEnd, afterRead);
+                        break;
+                    }
                 }
             }
+
+            // seeking to length() is valid and reads as EOF
+            rdr.seek(len);
+            Assert.assertEquals(len, rdr.getFilePointer());
+            Assert.assertTrue(rdr.isEOF());
+            Assert.assertEquals(0, rdr.bytesRemaining());
+            Assert.assertEquals(Integer.MAX_VALUE, getNextByte(rdr));
+            Assert.assertEquals(0, rdr.skipBytes(1));
+            Assert.assertEquals(len, rdr.getFilePointer());
         }
     }
 

@@ -116,6 +116,13 @@ public class FileHandle extends SharedCloseableImpl
         return channel.filePath();
     }
 
+    /**
+     * @return the length of the data readable through this handle, i.e. the {@link RandomAccessReader#length()} of its
+     * readers. For an {@link Builder#encryptionOnly() encryption-only} file opened without a
+     * {@link Builder#withLengthOverride length override} this is only an upper bound: it is the usable end of the
+     * file's last chunk, whereas the content may end earlier in that chunk (e.g. the row index, whose last chunk is
+     * padded on disk). It is 0 for a file too short to hold any content.
+     */
     public long dataLength()
     {
         return rebuffererFactory.fileLength();
