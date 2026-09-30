@@ -21,6 +21,8 @@ package org.apache.cassandra.concurrent;
  */
 
 
+import java.net.InetAddress;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -42,8 +44,11 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.tracing.KeyspaceTraceStorage;
+import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.TraceStateImpl;
+import org.apache.cassandra.tracing.TraceStorage;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.WrappedRunnable;
@@ -139,12 +144,31 @@ public class DebuggableThreadPoolExecutorTest
         Assertions.assertThat(ClientWarn.instance.getWarnings()).isNullOrEmpty();
 
         ConcurrentLinkedQueue<String> q = new ConcurrentLinkedQueue<>();
-        Tracing.instance.set(new TraceState(clientState, FBUtilities.getLocalAddressAndPort(), UUID.randomUUID(), Tracing.TraceType.NONE)
+        Tracing.instance.set(new TraceState(clientState, FBUtilities.getLocalAddressAndPort(), UUID.randomUUID(), Tracing.TraceType.NONE, false)
         {
             @Override
             protected void traceImpl(String message)
             {
                 q.add(message);
+            }
+
+            @Override
+            public TraceStorage getStorage()
+            {
+                Assertions.fail("Should not ask for storage");
+                return null;
+            }
+
+            @Override
+            public void stopSession()
+            {
+                q.add("Stop");
+            }
+
+            @Override
+            public void begin(InetAddress client, String request, Map<String, String> parameters)
+            {
+                q.add("begin");
             }
         });
         Tracing.trace("msg0");
@@ -235,7 +259,10 @@ public class DebuggableThreadPoolExecutorTest
     {
         TraceState state = Tracing.instance.get();
         try {
-            Tracing.instance.set(new TraceStateImpl(ClientState.forInternalCalls(), InetAddressAndPort.getByAddress(InetAddresses.forString("127.0.0.1")), UUID.randomUUID(), Tracing.TraceType.NONE));
+            Tracing.instance.set(new TraceStateImpl(ClientState.forInternalCalls(),
+                                                    InetAddressAndPort.getByAddress(InetAddresses.forString("127.0.0.1")),
+                                                    UUID.randomUUID(), Tracing.TraceType.NONE, false,
+                                                    TraceKeyspace.asStorage()));
             fn.run();
         }
         finally
