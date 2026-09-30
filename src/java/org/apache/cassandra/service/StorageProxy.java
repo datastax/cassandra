@@ -38,7 +38,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
@@ -1095,9 +1094,9 @@ public class StorageProxy implements StorageProxyMBean
                     PAXOS_PREPARE_REQ.stage.execute(() -> {
                         try
                         {
-                            long prepareStartNanos = System.nanoTime();
+                            long prepareStartNanos = nanoTime();
                             PrepareResponse response = doPrepare(toPrepare);
-                            callback.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, System.nanoTime() - prepareStartNanos);
+                            callback.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, nanoTime() - prepareStartNanos);
                             callback.onResponse(message.responseWith(response));
                         }
                         catch (Exception ex)
@@ -1149,9 +1148,9 @@ public class StorageProxy implements StorageProxyMBean
                     PAXOS_PROPOSE_REQ.stage.execute(() -> {
                         try
                         {
-                            long proposeStartNanos = System.nanoTime();
+                            long proposeStartNanos = nanoTime();
                             Boolean response = doPropose(proposal);
-                            callback.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, System.nanoTime() - proposeStartNanos);
+                            callback.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, nanoTime() - proposeStartNanos);
                             callback.onResponse(message.responseWith(response));
                         }
                         catch (Exception ex)
@@ -1267,9 +1266,9 @@ public class StorageProxy implements StorageProxyMBean
             {
                 try
                 {
-                    long commitStartNanos = System.nanoTime();
+                    long commitStartNanos = nanoTime();
                     PaxosState.commitDirect(message.payload, p -> mutator.onAppliedProposal(p));
-                    long commitElapsedNanos = System.nanoTime() - commitStartNanos;
+                    long commitElapsedNanos = nanoTime() - commitStartNanos;
                     if (responseHandler != null)
                     {
                         Context context = Context.from(message.payload.update.metadata());
@@ -2134,9 +2133,9 @@ public class StorageProxy implements StorageProxyMBean
             {
                 try
                 {
-                    long writeStartNanos = System.nanoTime();
+                    long writeStartNanos = nanoTime();
                     mutation.apply();
-                    long writeElapsedNanos = System.nanoTime() - writeStartNanos;
+                    long writeElapsedNanos = nanoTime() - writeStartNanos;
 
                     if (!tables.isEmpty())
                     {
@@ -2307,9 +2306,9 @@ public class StorageProxy implements StorageProxyMBean
             {
                 assert mutation instanceof CounterMutation;
 
-                long writeStartNanos = System.nanoTime();
+                long writeStartNanos = nanoTime();
                 Mutation result = ((CounterMutation) mutation).applyCounterMutation();
-                long writeElapsedNanos = System.nanoTime() - writeStartNanos;
+                long writeElapsedNanos = nanoTime() - writeStartNanos;
 
                 // Accumulate the leader's apply time into WRITE_EXECUTION_TIME before eventually dispatching the
                 // resulting mutation to replica: their execution time will be accumulated via ResponseVerbHandler.
@@ -2835,7 +2834,7 @@ public class StorageProxy implements StorageProxyMBean
                 command.setMonitoringTime(requestTime.startedAtNanos(), false, deadline - requestTime.startedAtNanos(), DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
 
                 ReadResponse response;
-                long readStartNanos = System.nanoTime();
+                long readStartNanos = nanoTime();
                 try (ReadExecutionController controller = command.executionController(trackRepairedStatus);
                      UnfilteredPartitionIterator iterator = command.executeLocally(controller))
                 {
@@ -2855,7 +2854,7 @@ public class StorageProxy implements StorageProxyMBean
                     response = null;
                     assert !command.isCompleted() : "Local read marked as completed despite being aborted by timeout to table " + command.metadata();
                 }
-                long readElapsedNanos = System.nanoTime() - readStartNanos;
+                long readElapsedNanos = nanoTime() - readStartNanos;
 
                 Context context = Context.from(command);
                 handler.accumulateExecutionTimeSensor(context, Type.READ_EXECUTION_TIME, readElapsedNanos);
