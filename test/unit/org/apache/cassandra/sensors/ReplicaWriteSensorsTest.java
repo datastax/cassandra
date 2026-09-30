@@ -18,6 +18,8 @@ package org.apache.cassandra.sensors;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -28,10 +30,13 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameter;
+import org.junit.runners.Parameterized.Parameters;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -54,9 +59,11 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.CommitVerbHandler;
 import org.apache.cassandra.service.paxos.PaxosState;
+import org.apache.cassandra.service.paxos.PaxosV2TestHelper;
 import org.apache.cassandra.service.paxos.v1.PrepareVerbHandler;
 import org.apache.cassandra.service.paxos.v1.ProposeVerbHandler;
 import org.apache.cassandra.utils.Pair;
@@ -77,12 +84,30 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Each test exercises a specific write path (standard mutation, counter mutation, Paxos LWT rounds,
  * and mutations on indexed tables) and asserts that both the per-request sensor and the corresponding
  * global registry sensor carry the expected values after the verb handler completes.
+ * <p>
+ * The three Paxos LWT tests ({@code testLWTPrepare}, {@code testLWTPropose}, {@code testLWTCommit})
+ * are parametrized over {@code v1} and {@code v2} to exercise both the legacy verb handlers and the
+ * new CAS v2 handlers ({@link org.apache.cassandra.service.paxos.PaxosPrepare.RequestHandler},
+ * {@link org.apache.cassandra.service.paxos.PaxosPropose.RequestHandler},
+ * {@link org.apache.cassandra.service.paxos.PaxosCommit.RequestHandler}).
  *
  * @see CoordinatorWriteSensorsTest for the coordinator-side write counterpart
  * @see ReplicaReadSensorsTest for the replica-side read counterpart
  */
+@RunWith(Parameterized.class)
 public class ReplicaWriteSensorsTest
 {
+    public enum CasVersion { v1, v2 }
+
+    @Parameters(name = "{0}")
+    public static Collection<Object[]> casVersions()
+    {
+        return Arrays.asList(new Object[]{ CasVersion.v1 }, new Object[]{ CasVersion.v2 });
+    }
+
+    @Parameter
+    public CasVersion casVersion;
+
     private static final String KEYSPACE1 = "ReplicaWriteSensorsTest";
     private static final String CF_STANDARD = "Standard";
     private static final String CF_STANDARD2 = "Standard2";
@@ -100,6 +125,11 @@ public class ReplicaWriteSensorsTest
         CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
 
         SchemaLoader.prepareServer();
+
+        // Switch to Murmur3 before createKeyspace so that all tables (including SAI/2i) share a single
+        // partitioner. StorageService.setPartitionerUnsafe also replaces TokenMetadata with a fresh instance
+        // whose partitioner field matches Murmur3, which is required by SAI's ShardBoundaries logic.
+        StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
 
         // build SAI indexes
         Indexes.Builder saiIndexes = Indexes.builder();
@@ -128,18 +158,10 @@ public class ReplicaWriteSensorsTest
                                     SchemaLoader.counterCFMD(KEYSPACE1, CF_COUTNER),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_SAI,
                                                               1, AsciiType.instance, AsciiType.instance, null)
-                                                .partitioner(Murmur3Partitioner.instance)
                                                 .indexes(saiIndexes.build()),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_SECONDARY_INDEX,
                                                               1, AsciiType.instance, AsciiType.instance, null)
-                                                .partitioner(Murmur3Partitioner.instance)
                                                 .indexes(secondaryIndexes.build()));
-
-
-        // Align the global partitioner with the indexed tables (SAI requires Murmur3). This must be
-        // called after createKeyspace so that the plain tables (counter, standard) inherit the default
-        // partitioner during schema creation and are not affected by this switch.
-        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
     }
 
     @Before
@@ -402,15 +424,19 @@ public class ReplicaWriteSensorsTest
     // Paxos LWT paths
     // -------------------------------------------------------------------------
 
+    /**
+     * LWT Prepare: WRITE_BYTES and WRITE_EXECUTION_TIME must be non-zero; READ_BYTES is zero on the
+     * first call and non-zero after the Paxos cache is evicted. Parametrized over v1 and v2.
+     */
     @Test
-    public void testLWTPrepare() {
+    public void testLWTPrepare()
+    {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
         PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
                                  .add("val", "0")
                                  .buildUpdate();
-        Commit proposal = Commit.newPrepare(update.partitionKey(), store.metadata(), nextBallot(NONE));
-        handlePaxosPrepare(proposal);
+        handlePaxosPrepare(store, update);
 
         Sensor bytesSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
         assertThat(bytesSensor.getValue()).isGreaterThan(0);
@@ -429,7 +455,7 @@ public class ReplicaWriteSensorsTest
         // Evict the in-memory Paxos cache so that the second prepare is forced to read from system.paxos,
         // which now has state written by the first call — producing non-zero READ_BYTES.
         PaxosState.unsafeReset();
-        handlePaxosPrepare(proposal);
+        handlePaxosPrepare(store, update);
         readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isGreaterThan(0);
         Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
@@ -437,15 +463,19 @@ public class ReplicaWriteSensorsTest
         assertResponseSensors(Pair.create(readSensor, registryReadSensor));
     }
 
+    /**
+     * LWT Propose: WRITE_BYTES and WRITE_EXECUTION_TIME must be non-zero; READ_BYTES is zero on the
+     * first call and non-zero after the Paxos cache is evicted. Parametrized over v1 and v2.
+     */
     @Test
-    public void testLWTPropose() {
+    public void testLWTPropose()
+    {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
         PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
-                                .add("val", "0")
-                                .buildUpdate();
-        Commit proposal = Commit.newProposal(nextBallot(NONE), update);
-        handlePaxosPropose(proposal);
+                                 .add("val", "0")
+                                 .buildUpdate();
+        handlePaxosPropose(store, update);
 
         Sensor bytesSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
         assertThat(bytesSensor.getValue()).isGreaterThan(0);
@@ -464,7 +494,7 @@ public class ReplicaWriteSensorsTest
         // Evict the in-memory Paxos cache so that the second propose is forced to read from system.paxos,
         // which now has state written by the first call — producing non-zero READ_BYTES.
         PaxosState.unsafeReset();
-        handlePaxosPropose(proposal);
+        handlePaxosPropose(store, update);
         readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isGreaterThan(0);
         Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
@@ -472,15 +502,19 @@ public class ReplicaWriteSensorsTest
         assertResponseSensors(Pair.create(readSensor, registryReadSensor));
     }
 
+    /**
+     * LWT Commit: WRITE_BYTES and WRITE_EXECUTION_TIME must be non-zero; no read is done.
+     * Parametrized over v1 and v2.
+     */
     @Test
-    public void testLWTCommit() {
+    public void testLWTCommit()
+    {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
         PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
                                  .add("val", "0")
                                  .buildUpdate();
-        Commit proposal = Commit.newPrepare(update.partitionKey(), store.metadata(), nextBallot(NONE));
-        handlePaxosCommit(proposal);
+        handlePaxosCommit(store, update);
 
         Sensor bytesSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
         assertThat(bytesSensor.getValue()).isGreaterThan(0);
@@ -661,19 +695,43 @@ public class ReplicaWriteSensorsTest
     // Helpers
     // -------------------------------------------------------------------------
 
-    private static void handlePaxosPrepare(Commit prepare)
+    private void handlePaxosPrepare(ColumnFamilyStore cfs, PartitionUpdate update)
     {
-        PrepareVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_PREPARE_REQ, prepare).build());
+        if (casVersion == CasVersion.v1)
+        {
+            Commit prepare = Commit.newPrepare(update.partitionKey(), cfs.metadata(), nextBallot(NONE));
+            PrepareVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_PREPARE_REQ, prepare).build());
+        }
+        else
+        {
+            PaxosV2TestHelper.dispatchV2Prepare(cfs);
+        }
     }
 
-    private static void handlePaxosPropose(Commit proposal)
+    private void handlePaxosPropose(ColumnFamilyStore cfs, PartitionUpdate update)
     {
-        ProposeVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_PROPOSE_REQ, proposal).build());
+        if (casVersion == CasVersion.v1)
+        {
+            Commit proposal = Commit.newProposal(nextBallot(NONE), update);
+            ProposeVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_PROPOSE_REQ, proposal).build());
+        }
+        else
+        {
+            PaxosV2TestHelper.dispatchV2Propose(cfs);
+        }
     }
 
-    private static void handlePaxosCommit(Commit commit)
+    private void handlePaxosCommit(ColumnFamilyStore cfs, PartitionUpdate update)
     {
-        CommitVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build());
+        if (casVersion == CasVersion.v1)
+        {
+            Commit commit = Commit.newPrepare(update.partitionKey(), cfs.metadata(), nextBallot(NONE));
+            CommitVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build());
+        }
+        else
+        {
+            PaxosV2TestHelper.dispatchV2Commit(cfs);
+        }
     }
 
     private static void handleMutation(Mutation mutation)

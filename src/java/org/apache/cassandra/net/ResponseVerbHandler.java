@@ -135,13 +135,15 @@ public class ResponseVerbHandler implements IVerbHandler
             incrementSensor(sensors, context, Type.INTERNODE_BYTES, message);
             accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
         }
-        // Covers Paxos V2 Prepare, Propose and Commit callbacks
+        // Covers Paxos V2 Prepare, Propose and Commit callbacks.
+        // INDEX_WRITE_BYTES is not tracked for Prepare/Propose: they only write to system.paxos, which has no indexes.
         else if (callbackInfo.callback instanceof org.apache.cassandra.service.paxos.PaxosPrepare)
         {
             org.apache.cassandra.service.paxos.PaxosPrepare paxosCallback = (org.apache.cassandra.service.paxos.PaxosPrepare) callbackInfo.callback;
             Context context = Context.from(paxosCallback.getTableMetadata());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
             incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+            accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
         }
         else if (callbackInfo.callback instanceof org.apache.cassandra.service.paxos.PaxosPropose)
         {
@@ -149,6 +151,7 @@ public class ResponseVerbHandler implements IVerbHandler
             Context context = Context.from(paxosCallback.getTableMetadata());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
             incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+            accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
         }
         else if (callbackInfo.callback instanceof org.apache.cassandra.service.paxos.PaxosCommit)
         {
@@ -156,6 +159,7 @@ public class ResponseVerbHandler implements IVerbHandler
             Context context = Context.from(paxosCallback.getTableMetadata());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
             incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+            accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
         }
     }
 

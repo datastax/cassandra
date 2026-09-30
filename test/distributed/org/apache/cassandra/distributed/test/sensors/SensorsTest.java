@@ -38,6 +38,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -52,6 +53,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.sensors.ActiveSensorsFactory;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.TestCostCalculator;
+import org.apache.cassandra.service.paxos.Paxos;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.TraceKeyspace;
@@ -156,6 +158,14 @@ public class SensorsTest extends TestBaseImpl
     @Parameterized.Parameter(5)
     public boolean serialConsistency;
 
+    /**
+     * Paxos variant to activate on all cluster nodes before executing the test query.
+     * {@link Config.PaxosVariant#v1} runs the legacy verb handlers; {@link Config.PaxosVariant#v2}
+     * runs the new CAS v2 handlers. Only meaningful for CAS and SERIAL-read scenarios.
+     */
+    @Parameterized.Parameter(6)
+    public Config.PaxosVariant paxosVariant;
+
     @BeforeClass
     public static void setupCluster() throws IOException
     {
@@ -226,19 +236,21 @@ public class SensorsTest extends TestBaseImpl
                                              "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "tbl: insert", noPrep, write, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "tbl_counter: counter update", noPrep, counter, new String[]{ WRITE_COUNTER, WRITE_EXECUTION_TIME_COUNTER, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "tbl: point read (paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "tbl: point read (no paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, false, false });
+        result.add(new Object[]{ "tbl: insert", noPrep, write, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "tbl_counter: counter update", noPrep, counter, new String[]{ WRITE_COUNTER, WRITE_EXECUTION_TIME_COUNTER, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "tbl: point read (paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "tbl: point read (no paging)", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, false, false, Config.PaxosVariant.v1 });
         // CAS is a write operation; READ_EXECUTION_TIME is always emitted (Paxos precondition read
         // always executes). READ_BYTES is only emitted when user-table rows are returned — with noPrep
         // the table is empty so READ_BYTES = 0 and is skipped by SensorsCustomParams.
-        result.add(new Object[]{ "tbl: CAS update", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "tbl: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "tbl: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "tbl: range read (paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "tbl: range read (no paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, false, false });
-        result.add(new Object[]{ "tbl: SERIAL read", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, false, true });
+        result.add(new Object[]{ "tbl: CAS update [v1]", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "tbl: CAS update [v2]", noPrep, cas, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
+        result.add(new Object[]{ "tbl: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "tbl: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_TBL, WRITE_EXECUTION_TIME_TBL, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "tbl: range read (paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "tbl: range read (no paging)", new String[]{ write }, range, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, false, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "tbl: SERIAL read [v1]", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, false, true, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "tbl: SERIAL read [v2]", new String[]{ write }, read, new String[]{ READ_TBL, READ_EXECUTION_TIME_TBL, WRITE_TBL, WRITE_EXECUTION_TIME_TBL, READ_COST, TOTAL_COST }, false, true, Config.PaxosVariant.v2 });
         return result;
     }
 
@@ -286,20 +298,22 @@ public class SensorsTest extends TestBaseImpl
                                                        "APPLY BATCH;", KEYSPACE, KEYSPACE, KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "2i: insert (insertRow path)", noPrep, write, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "2i: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "2i: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "2i: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "2i: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "2i: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i: insert (insertRow path)", noPrep, write, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "2i: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "2i: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "2i: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "2i: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "2i: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
         // CAS is a write operation; READ_EXECUTION_TIME is always emitted (Paxos precondition read
         // always executes). READ_BYTES is only emitted when user-table rows are returned — IF NOT EXISTS
         // with noPrep: empty table → READ_BYTES = 0, skipped. IF condition: prep row exists →
         // READ_BYTES > 0, also emitted.
-        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "2i: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "2i+sai: multi-table logged batch", noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "2i+sai: multi-table unlogged batch", noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path) [v1]", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "2i: CAS IF NOT EXISTS (insertRow path) [v2]", noPrep, casInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
+        result.add(new Object[]{ "2i: CAS IF condition (updateRow path) [v1]", new String[]{ write }, cas, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, READ_COST, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "2i: CAS IF condition (updateRow path) [v2]", new String[]{ write }, cas, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, READ_COST, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
+        result.add(new Object[]{ "2i+sai: multi-table logged batch", noPrep, multiTableLoggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "2i+sai: multi-table unlogged batch", noPrep, multiTableUnloggedBatch, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
         return result;
     }
 
@@ -333,18 +347,20 @@ public class SensorsTest extends TestBaseImpl
                                                    "APPLY BATCH;", KEYSPACE, KEYSPACE);
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "sai: insert (insertRow path)", noPrep, write, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "sai: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "sai: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "sai: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "sai: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "sai: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai: insert (insertRow path)", noPrep, write, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai: logged batch insert", noPrep, loggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai: unlogged batch insert", noPrep, unloggedBatch, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai: update (updateRow path)", new String[]{ write }, writeUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai: logged batch update", new String[]{ loggedBatch }, loggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai: unlogged batch update", new String[]{ unloggedBatch }, unloggedBatchUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
         // CAS is a write operation; READ_EXECUTION_TIME is always emitted (Paxos precondition read
         // always executes). READ_BYTES is only emitted when user-table rows are returned — IF NOT EXISTS
         // with noPrep: empty table → READ_BYTES = 0, skipped. IF condition: prep row exists →
         // READ_BYTES > 0, also emitted.
-        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path)", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "sai: CAS IF condition (updateRow path)", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path) [v1]", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path) [v2]", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
+        result.add(new Object[]{ "sai: CAS IF condition (updateRow path) [v1]", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai: CAS IF condition (updateRow path) [v2]", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
         return result;
     }
 
@@ -358,8 +374,8 @@ public class SensorsTest extends TestBaseImpl
         String collectionUpdate = withKeyspace("INSERT INTO %s." + TBL_COL + "(pk, tags) VALUES (1, {'c', 'd'})");
 
         List<Object[]> result = new ArrayList<>();
-        result.add(new Object[]{ "sai collection: insert", new String[0], collectionWrite, new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "sai collection: update", new String[]{ collectionWrite }, collectionUpdate, new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "sai collection: insert", new String[0], collectionWrite, new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai collection: update", new String[]{ collectionWrite }, collectionUpdate, new String[]{ WRITE_COL, WRITE_EXECUTION_TIME_COL, INDEX_WRITE_COL, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
         return result;
     }
 
@@ -413,12 +429,18 @@ public class SensorsTest extends TestBaseImpl
         // (Paxos precondition read always executes). READ_BYTES is only emitted when user-table rows
         // are returned — IF NOT EXISTS / multi-stmt with noPrep: empty table → READ_BYTES = 0, skipped.
         // IF condition: prep row exists → READ_BYTES > 0, also emitted.
-        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "2i cond batch: IF condition (updateRow)", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "2i cond batch: multi-stmt same partition", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow)", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "sai cond batch: IF condition (updateRow)", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false });
-        result.add(new Object[]{ "sai cond batch: multi-stmt same partition", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false });
+        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow) [v1]", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "2i cond batch: IF NOT EXISTS (insertRow) [v2]", noPrep, conditionalBatch2iInsert, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
+        result.add(new Object[]{ "2i cond batch: IF condition (updateRow) [v1]", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, READ_COST, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "2i cond batch: IF condition (updateRow) [v2]", new String[]{ prep2i }, conditionalBatch2iUpdate, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, READ_COST, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
+        result.add(new Object[]{ "2i cond batch: multi-stmt same partition [v1]", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "2i cond batch: multi-stmt same partition [v2]", noPrep, conditionalBatch2iMultiStmt, new String[]{ WRITE_2I, WRITE_EXECUTION_TIME_2I, READ_EXECUTION_TIME_2I, INDEX_WRITE_2I, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
+        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow) [v1]", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai cond batch: IF NOT EXISTS (insertRow) [v2]", noPrep, conditionalBatchSaiInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
+        result.add(new Object[]{ "sai cond batch: IF condition (updateRow) [v1]", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai cond batch: IF condition (updateRow) [v2]", new String[]{ prepSai }, conditionalBatchSaiUpdate, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
+        result.add(new Object[]{ "sai cond batch: multi-stmt same partition [v1]", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai cond batch: multi-stmt same partition [v2]", noPrep, conditionalBatchSaiMultiStmt, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
         return result;
     }
 
@@ -472,6 +494,13 @@ public class SensorsTest extends TestBaseImpl
         // classloader via runOnInstance rather than on the outer test JVM — the node won't see outer JVM property changes.
         // Any methods used inside the runOnInstance() block should be static, otherwise java.io.NotSerializableException will be thrown
         boolean serial = this.serialConsistency;
+        // Switch the paxos variant on all nodes before executing the test query. The variant is restored to v1
+        // after each scenario so that non-CAS scenarios in the shared cluster are not affected.
+        Config.PaxosVariant variant = this.paxosVariant;
+        if (variant != null && variant != Config.PaxosVariant.v1)
+            cluster.forEach(i -> i.runOnInstance(() -> Paxos.setPaxosVariant(variant)));
+        try
+        {
         cluster.get(1).acceptsOnInstance(
                (IIsolatedExecutor.SerializableConsumer<AtomicReference<Map<String, ByteBuffer>>>)
                (reference) -> {
@@ -482,6 +511,13 @@ public class SensorsTest extends TestBaseImpl
                    reference.set(result.getCustomPayload());
                })
                .accept(customPayload);
+        }
+        finally
+        {
+            // Always restore v1 so the shared cluster is not left in v2 mode for subsequent scenarios.
+            if (variant != null && variant != Config.PaxosVariant.v1)
+                cluster.forEach(i -> i.runOnInstance(() -> Paxos.setPaxosVariant(Config.PaxosVariant.v1)));
+        }
         return customPayload.get();
     }
 
