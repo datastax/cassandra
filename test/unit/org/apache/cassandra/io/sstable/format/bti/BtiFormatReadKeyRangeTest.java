@@ -18,6 +18,7 @@ package org.apache.cassandra.io.sstable.format.bti;
 
 import java.nio.file.Files;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 
 import org.junit.Assume;
@@ -46,7 +47,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * Checks that {@link SSTableFormat.SSTableReaderFactory#readKeyRange} - the entry point used by offline tools such as
  * {@code sstablemetadata} to read the first and last key of an sstable without opening it - can read the partition
- * index of BTI sstables whose indexes are encrypted, as well as of compressed and uncompressed (not encrypted) ones.
+ * index of BTI sstables whose indexes are encrypted, as well as of compressed and uncompressed (not encrypted) ones;
+ * and that the index handles of a loaded reader do not hold the data file's compression metadata.
  */
 public class BtiFormatReadKeyRangeTest extends CQLTester
 {
@@ -188,6 +190,45 @@ public class BtiFormatReadKeyRangeTest extends CQLTester
                 FileHandle.Builder bareBuilder = new FileHandle.Builder(descriptor.fileFor(BtiFormat.Components.PARTITION_INDEX));
                 assertThatThrownBy(() -> PartitionIndex.load(bareBuilder, partitioner, false, descriptor.version.getByteComparableVersion()).close())
                     .isInstanceOf(IllegalArgumentException.class);
+            }
+
+            // the index handles of a reader opened from disk (the flushed one was opened by the writer) get only the
+            // encryption parameters of the data file, not its chunk offsets (and none at all if the indexes are not
+            // encrypted)
+            BtiTableReader loaded = (BtiTableReader) descriptor.getFormat()
+                                                              .getReaderFactory()
+                                                              .loadingBuilder(descriptor, cfs.metadata, descriptor.discoverComponents())
+                                                              .build(cfs, false, false);
+            try
+            {
+                BtiTableReader.Builder unbuilt = loaded.unbuildTo(new BtiTableReader.Builder(descriptor), false);
+                for (FileHandle indexFile : new FileHandle[]{ unbuilt.getRowIndexFile(), unbuilt.getPartitionIndex().fileHandle() })
+                {
+                    Optional<CompressionMetadata> indexMetadata = indexFile.compressionMetadata();
+                    if (compression == TableCompression.ENCRYPTED)
+                    {
+                        assertThat(loaded.getCompressionMetadata().hasOffsets()).isTrue();
+                        assertThat(indexMetadata).describedAs(indexFile.path()).isPresent();
+                        assertThat(indexMetadata.get().isEncryptionOnly()).describedAs(indexFile.path()).isTrue();
+                        assertThat(indexMetadata.get().hasOffsets()).describedAs(indexFile.path()).isFalse();
+                        assertThat(indexMetadata.get().parameters).isEqualTo(loaded.getCompressionMetadata().parameters);
+                    }
+                    else
+                    {
+                        assertThat(indexMetadata).describedAs(indexFile.path()).isEmpty();
+                    }
+                }
+                // the index handles keep working after the loader has closed the metadata it created
+                assertThat(unbuilt.getPartitionIndex().firstKey()).isEqualTo(expectedFirst);
+                for (int pk = firstPk; pk < endPk; pk++)
+                {
+                    DecoratedKey key = partitioner.decorateKey(Int32Type.instance.decompose(pk));
+                    assertThat(loaded.getPosition(key, SSTableReader.Operator.EQ)).isGreaterThanOrEqualTo(0);
+                }
+            }
+            finally
+            {
+                loaded.selfRef().release();
             }
 
             Pair<DecoratedKey, DecoratedKey> keyRange = descriptor.getFormat()

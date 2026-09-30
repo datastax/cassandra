@@ -81,11 +81,12 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         checkNotNull(statsMetadata);
 
         try (CompressionMetadata compressionMetadata = CompressionInfoComponent.maybeLoad(descriptor, components, statsMetadata.zeroCopyMetadata);
-             PartitionIndex index = PartitionIndex.load(partitionIndexFileBuilder(compressionMetadata), tableMetadataRef.getLocal().partitioner, false, descriptor.version.getByteComparableVersion());
+             CompressionMetadata indexEncryptionMetadata = indexEncryptionMetadata(compressionMetadata);
+             PartitionIndex index = PartitionIndex.load(partitionIndexFileBuilder(indexEncryptionMetadata), tableMetadataRef.getLocal().partitioner, false, descriptor.version.getByteComparableVersion());
              FileHandle dFile = dataFileBuilder(statsMetadata).withCompressionMetadata(compressionMetadata)
                                                               .withCrcCheckChance(() -> tableMetadataRef.getLocal().params.crcCheckChance)
                                                               .complete();
-             FileHandle riFile = rowIndexFileBuilder(compressionMetadata).complete())
+             FileHandle riFile = rowIndexFileBuilder(indexEncryptionMetadata).complete())
         {
             return PartitionIterator.create(index,
                                             tableMetadataRef.getLocal().partitioner,
@@ -140,7 +141,8 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
                 builder.setLast(partitioner.decorateKey(builder.getStatsMetadata().lastKey));
             }
 
-            try (CompressionMetadata compressionMetadata = CompressionInfoComponent.maybeLoad(descriptor, components, statsComponent.statsMetadata().zeroCopyMetadata))
+            try (CompressionMetadata compressionMetadata = CompressionInfoComponent.maybeLoad(descriptor, components, statsComponent.statsMetadata().zeroCopyMetadata);
+                 CompressionMetadata indexEncryptionMetadata = indexEncryptionMetadata(compressionMetadata))
             {
                 builder.setDataFile(dataFileBuilder(builder.getStatsMetadata())
                                     .withCompressionMetadata(compressionMetadata)
@@ -148,11 +150,11 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
                                     .complete());
 
                 if (builder.getComponents().contains(Components.ROW_INDEX))
-                    builder.setRowIndexFile(rowIndexFileBuilder(compressionMetadata).complete());
+                    builder.setRowIndexFile(rowIndexFileBuilder(indexEncryptionMetadata).complete());
 
                 if (builder.getComponents().contains(Components.PARTITION_INDEX))
                 {
-                    builder.setPartitionIndex(openPartitionIndex(compressionMetadata, !builder.getFilter().isInformative(), statsComponent.statsMetadata().zeroCopyMetadata));
+                    builder.setPartitionIndex(openPartitionIndex(indexEncryptionMetadata, !builder.getFilter().isInformative(), statsComponent.statsMetadata().zeroCopyMetadata));
                     if (builder.getFirst() == null || builder.getLast() == null)
                     {
                         builder.setFirst(builder.getPartitionIndex().firstKey());
@@ -194,9 +196,30 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         return bf;
     }
 
-    private PartitionIndex openPartitionIndex(CompressionMetadata compressionMetadata, boolean preload, ZeroCopyMetadata zeroCopyMetadata) throws IOException
+    /**
+     * The index files only need the encryptor of the data file's compression parameters: hand them an
+     * {@link CompressionMetadata#encryptedOnly(CompressionParams) encryption-only} copy of the parameters rather
+     * than the data file's metadata, so that the index handles do not pin (and expose through
+     * {@link FileHandle#compressionMetadata()}) the data file's chunk offsets. The result carries no off-heap memory;
+     * the caller closes it once the index handles are complete (they take their own shared copy).
+     *
+     * @return the encryption-only metadata, or {@code null} if the sstable is not compressed or its indexes are not
+     * encrypted
+     */
+    @Nullable
+    private CompressionMetadata indexEncryptionMetadata(@Nullable CompressionMetadata compressionMetadata)
     {
-        try (FileHandle indexFile = partitionIndexFileBuilder(compressionMetadata).complete())
+        if (compressionMetadata == null || !descriptor.version.indicesAreEncrypted())
+            return null;
+        ICompressor compressor = compressionMetadata.parameters.getSstableCompressor();
+        if (compressor == null || compressor.encryptionOnly() == null)
+            return null;
+        return CompressionMetadata.encryptedOnly(compressionMetadata.parameters);
+    }
+
+    private PartitionIndex openPartitionIndex(@Nullable CompressionMetadata indexEncryptionMetadata, boolean preload, ZeroCopyMetadata zeroCopyMetadata) throws IOException
+    {
+        try (FileHandle indexFile = partitionIndexFileBuilder(indexEncryptionMetadata).complete())
         {
             return PartitionIndex.load(indexFile, tableMetadataRef.getLocal().partitioner, preload, zeroCopyMetadata, descriptor.version.getByteComparableVersion());
         }
@@ -207,7 +230,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         }
     }
 
-    private FileHandle.Builder rowIndexFileBuilder(CompressionMetadata compressionMetadata)
+    private FileHandle.Builder rowIndexFileBuilder(@Nullable CompressionMetadata indexEncryptionMetadata)
     {
         assert rowIndexFileBuilder == null || rowIndexFileBuilder.file.equals(descriptor.fileFor(Components.ROW_INDEX));
 
@@ -216,10 +239,14 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
 
         rowIndexFileBuilder.withChunkCache(chunkCache);
         rowIndexFileBuilder.mmapped(ioOptions.indexDiskAccessMode);
-        return withIndexEncryption(rowIndexFileBuilder, descriptor, compressionMetadata);
+        // The builder is reused: do not keep the (closed) metadata of a previous call. Its encryptionOnly flag
+        // cannot be cleared, but it never needs to be: whether the indexes are encrypted is fixed for the
+        // descriptor and components this loader is built for.
+        rowIndexFileBuilder.withCompressionMetadata(null);
+        return withIndexEncryption(rowIndexFileBuilder, descriptor, indexEncryptionMetadata);
     }
 
-    private FileHandle.Builder partitionIndexFileBuilder(CompressionMetadata compressionMetadata)
+    private FileHandle.Builder partitionIndexFileBuilder(@Nullable CompressionMetadata indexEncryptionMetadata)
     {
         assert partitionIndexFileBuilder == null || partitionIndexFileBuilder.file.equals(descriptor.fileFor(Components.PARTITION_INDEX));
 
@@ -228,7 +255,11 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
 
         partitionIndexFileBuilder.withChunkCache(chunkCache);
         partitionIndexFileBuilder.mmapped(ioOptions.indexDiskAccessMode);
-        return withIndexEncryption(partitionIndexFileBuilder, descriptor, compressionMetadata);
+        // The builder is reused: do not keep the (closed) metadata of a previous call. Its encryptionOnly flag
+        // cannot be cleared, but it never needs to be: whether the indexes are encrypted is fixed for the
+        // descriptor and components this loader is built for.
+        partitionIndexFileBuilder.withCompressionMetadata(null);
+        return withIndexEncryption(partitionIndexFileBuilder, descriptor, indexEncryptionMetadata);
     }
 
     /**

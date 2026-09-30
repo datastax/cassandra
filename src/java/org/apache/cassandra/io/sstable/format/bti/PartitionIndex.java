@@ -186,6 +186,12 @@ public class PartitionIndex implements SharedCloseable
         fh.addTo(identities);
     }
 
+    @VisibleForTesting
+    FileHandle fileHandle()
+    {
+        return fh;
+    }
+
     public static PartitionIndex load(FileHandle.Builder fhBuilder,
                                       IPartitioner partitioner,
                                       boolean preload,
