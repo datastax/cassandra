@@ -203,6 +203,7 @@ import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_RECLAIM_THREADS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.config.DatabaseDescriptor.getFlushWriters;
 import static org.apache.cassandra.db.commitlog.CommitLogPosition.NONE;
@@ -234,15 +235,31 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                                           ? executorFactory().withJmxInternal().sequential("MemtablePostFlush")
                                                           : null;
 
-    private static final ExecutorPlus reclaimExecutor = DatabaseDescriptor.enableMemtableAndCommitLog()
-                                                        ? executorFactory().withJmxInternal().sequential("MemtableReclaimMemory")
-                                                        : null;
-
     private static final PerDiskFlushExecutors perDiskflushExecutors = DatabaseDescriptor.enableMemtableAndCommitLog()
                                                                        ? new PerDiskFlushExecutors(DatabaseDescriptor.getFlushWriters(),
                                                                                                   DatabaseDescriptor.getNonLocalSystemKeyspacesDataFileLocations(),
                                                                                                   DatabaseDescriptor.useSpecificLocationForLocalSystemData())
                                                                        : null;
+
+    // we use multiple reclaim executors to permit reclaim when a CFS's read order gets blocked
+    private static ExecutorPlus[] reclaimExecutors;
+
+    static
+    {
+        if (DatabaseDescriptor.enableMemtableAndCommitLog())
+        {
+            int count = MEMTABLE_RECLAIM_THREADS.getInt();
+            if (count <= 0)
+                throw new ConfigurationException(MEMTABLE_RECLAIM_THREADS.name() + " must be 1 or greater, was " + count);
+            reclaimExecutors = new ExecutorPlus[count];
+            for (int i = 0; i < count; ++i)
+            {
+                reclaimExecutors[i] = executorFactory().withJmxInternal().sequential("MemtableReclaimMemory" + (i > 0 ? Integer.toString(i) : ""));
+            }
+        }
+        else
+            reclaimExecutors = null;
+    }
 
     /**
      * Reason for initiating a memtable flush.
@@ -451,7 +468,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public static void shutdownExecutorsAndWait(long timeout, TimeUnit unit) throws InterruptedException, TimeoutException
     {
         List<ExecutorService> executors = new ArrayList<>();
-        Collections.addAll(executors, reclaimExecutor, postFlushExecutor, flushExecutor);
+        Collections.addAll(executors, postFlushExecutor, flushExecutor);
+        Collections.addAll(executors, reclaimExecutors);
         perDiskflushExecutors.appendAllExecutors(executors);
         ExecutorUtils.shutdownAndWait(timeout, unit, executors);
     }
@@ -1659,7 +1677,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                     readBarrier.await();
                     memtable.discard();
                 }
-            }, reclaimExecutor);
+            }, reclaimExecutor());
         }
 
         @Override
@@ -1667,6 +1685,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             return "Flush " + keyspace + '.' + name;
         }
+    }
+
+    /**
+     * Choose a reclaim executor, based on the table id's hash code. Each CFS is served by an assigned thread (i.e.
+     * its individual reclamations are still performed in order) as flushes on the same CFS wait on the same read order
+     * and would block multiple threads if spread among the executors.
+     */
+    public ExecutorService reclaimExecutor()
+    {
+        return reclaimExecutors[Math.floorMod(metadata.id.hashCode(), reclaimExecutors.length)];
     }
 
     public Memtable createMemtable(AtomicReference<CommitLogPosition> commitLogUpperBound)
@@ -4109,7 +4137,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
          *
          * @param collection the collection to append to.
          */
-        public void appendAllExecutors(Collection<ExecutorService> collection)
+        public void appendAllExecutors(Collection<? super ExecutorService> collection)
         {
             Collections.addAll(collection, nonLocalSystemflushExecutors);
             if (useSpecificExecutorForSystemKeyspaces)

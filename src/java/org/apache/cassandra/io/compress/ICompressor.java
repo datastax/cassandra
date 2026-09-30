@@ -21,12 +21,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.EnumSet;
 import java.util.Set;
-
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
-
-import org.apache.cassandra.crypto.IKeyProviderFactory;
 
 public interface ICompressor
 {
@@ -103,72 +100,13 @@ public interface ICompressor
     }
 
     /**
-     * Indicates whether this compressor supports encryption metadata
-     * @return true if this compressor can handle encryption metadata
+     * Get an encryption-only version of this compressor (no compression, only encryption)
+     * @return An ICompressor that only encrypts without compression
      */
-    default boolean supportsEncryption()
+    default ICompressor encryptionOnly()
     {
-        return false;
-    }
-
-    /**
-     * Creates an Encryptor instance for this compressor.
-     * This should only be called if supportsEncryption() returns true.
-     *
-     * @param encryption The encryption configuration
-     * @return An Encryptor instance, or null if encryption is not supported
-     * @throws IOException if there's an error creating the encryptor
-     */
-    default Encryptor encryptor(EncryptionConfig encryption) throws IOException
-    {
+        // Default implementation returns null, should be overridden by compressors that support encryption
         return null;
-    }
-
-    /**
-     * For compressors that support encryption, returns the key provider factory
-     * @return The key provider factory, or null if encryption is not supported
-     */
-    default IKeyProviderFactory keyProviderFactory()
-    {
-        return null;
-    }
-
-    /**
-     * Get the number of extra bytes required for encryption metadata
-     * This should only be called if supportsEncryption() returns true.
-     *
-     * @param encryption The encryption configuration
-     * @return The number of extra bytes required, 0 if encryption is not supported
-     */
-    default int extraBytesForEncryption(EncryptionConfig encryption)
-    {
-        return 0;
-    }
-
-    /**
-     * Get the encryption metadata bytes for encrypted data.
-     * This should only be called if supportsEncryption() returns true.
-     *
-     * @param encryption The encryption configuration
-     * @param buffer The buffer containing the encrypted data
-     * @return The encryption metadata bytes, or null if encryption is not supported
-     */
-    default byte[] getEncryptionMetadata(EncryptionConfig encryption, ByteBuffer buffer)
-    {
-        return null;
-    }
-
-    /**
-     * Set encryption metadata in the buffer.
-     * This should only be called if supportsEncryption() returns true.
-     *
-     * @param encryption The encryption configuration
-     * @param buffer The buffer to write metadata to
-     * @param metadata The metadata bytes to write
-     */
-    default void setEncryptionMetadata(EncryptionConfig encryption, ByteBuffer buffer, byte[] metadata)
-    {
-        // Default implementation does nothing
     }
 
     /**
@@ -225,15 +163,5 @@ public interface ICompressor
         }
 
         return rawSize;
-    }
-
-    /**
-     * Get an encryption-only version of this compressor (no compression, only encryption)
-     * @return An ICompressor that only encrypts without compression
-     */
-    default ICompressor encryptionOnly()
-    {
-        // Default implementation returns null, should be overridden by compressors that support encryption
-        return null;
     }
 }

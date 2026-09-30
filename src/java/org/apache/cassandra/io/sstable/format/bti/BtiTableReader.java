@@ -52,6 +52,7 @@ import org.apache.cassandra.io.sstable.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.SSTableReadsListener.SkippingReason;
 import org.apache.cassandra.io.sstable.format.AbstractKeyFetcher;
 import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -84,7 +85,7 @@ public class BtiTableReader extends SSTableReaderWithFilter
         this.approximateBloomFilterMemorySize = isBloomFilterLoaded() ? filter.offHeapSize() : computeExpectedBloomFilterMemorySize();
     }
 
-    protected final Builder unbuildTo(Builder builder, boolean sharedCopy)
+    public final Builder unbuildTo(Builder builder, boolean sharedCopy)
     {
         Builder b = super.unbuildTo(builder, sharedCopy);
         if (builder.getPartitionIndex() == null)
@@ -114,13 +115,16 @@ public class BtiTableReader extends SSTableReaderWithFilter
     }
 
     /**
-     * Whether to filter out data after {@link #last}. Early-open sstables may contain data beyond the switch point
-     * (because an early-opened sstable is not ready until buffers have been flushed), and leaving that data visible
-     * will give a redundant copy with all associated overheads.
+     * Whether to filter out data after {@link #last}. We only do this for zero-copy-streamed sstables where the index
+     * contains more keys than we have streamed.
+     *
+     * Early-open sstables may contain data beyond the switch point, but the partition index is created in a way that
+     * does not surface that data.
      */
-    protected boolean filterLast()
+    @VisibleForTesting
+    public boolean filterLast()
     {
-        return openReason == OpenReason.EARLY && partitionIndex instanceof PartitionIndexEarly || sstableMetadata.zeroCopyMetadata.exists();
+        return sstableMetadata.zeroCopyMetadata.exists();
     }
 
     public long estimatedKeys()
@@ -242,6 +246,27 @@ public class BtiTableReader extends SSTableReaderWithFilter
     }
 
     /**
+     * In encrypted index files skipBytes may end up in a different but equivalent position when it's at the
+     * end of an encrypted chunk. More precisely, if the skipped sequence of bytes lands exactly at the end of the
+     * useable part of a chunk (just before the hole left for encryption metadata), a normal read would leave the file
+     * at that position; before reading the next byte it will silently advance to the start of the next chunk. A skip,
+     * on the other hand, will jump to the position that follows the data, which is correctly converted to the beginning
+     * of the next page in preparation for reading. As a result it will leave the file positioned at the start of the
+     * next page immediately. See {@link PartitionIndexEncryptedTest#testSkipAcrossHoles}.
+     *
+     * To avoid this, we skip one fewer byte and consume the last byte.
+     */
+    @VisibleForTesting
+    static void skipBytesWithCorrectPosition(DataInputPlus in, int skip) throws IOException
+    {
+        if (skip > 0)
+        {
+            in.skipBytesFully(skip - 1);
+            in.readByte();
+        }
+    }
+
+    /**
      * Called by {@link #getRowIndexEntry} above (via Reader.ceiling/floor) to check if the position satisfies the full
      * key constraint. This is called once if there is a prefix match (which can be in any relationship with the sought
      * key, thus assumeNoMatch: false), and if it returns null it is called again for the closest greater position
@@ -255,7 +280,10 @@ public class BtiTableReader extends SSTableReaderWithFilter
             try (FileDataInput in = rowIndexFile.createReader(pos))
             {
                 if (assumeNoMatch)
-                    ByteBufferUtil.skipShortLength(in);
+                {
+                    int skip = ByteBufferUtil.readShortLength(in);
+                    skipBytesWithCorrectPosition(in, skip);
+                }
                 else
                 {
                     ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);

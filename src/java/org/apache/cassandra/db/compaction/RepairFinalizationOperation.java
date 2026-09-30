@@ -36,8 +36,8 @@ public class RepairFinalizationOperation
 {
     private static final Logger logger = LoggerFactory.getLogger(RepairFinalizationOperation.class);
 
-    private final CompactionRealm realm;
-    private final ILifecycleTransaction transaction;
+    public final CompactionRealm realm;
+    public final ILifecycleTransaction transaction;
     private final TimeUUID sessionID;
     private final long repairedAt;
     private final boolean isTransient;
@@ -69,9 +69,11 @@ public class RepairFinalizationOperation
 
         try
         {
-            if (obsoleteSSTables)
+            try
             {
-                logger.info("Obsoleting {} transient repaired sstable(s) for session {} on {}.{}",
+                if (obsoleteSSTables)
+                {
+                    logger.info("Obsoleting {} transient repaired sstable(s) for session {} on {}.{}",
                             sstableCount, sessionID,
                             realm.metadata().keyspace, realm.metadata().name);
                 Preconditions.checkState(Iterables.all(transaction.originals(), SSTableReader::isTransient));
@@ -82,34 +84,38 @@ public class RepairFinalizationOperation
                 logger.info("Moving {} sstable(s) from pending to repaired (repairedAt={}, session={}) on {}.{}",
                             sstableCount, repairedAt, sessionID,
                             realm.metadata().keyspace, realm.metadata().name);
-                realm.mutateRepairedWithLock(transaction.originals(),
-                        repairedAt,
-                        ActiveRepairService.NO_PENDING_REPAIR,
-                        false);
+                    realm.mutateRepairedWithLock(transaction.originals(),
+                                                 repairedAt,
+                                                 ActiveRepairService.NO_PENDING_REPAIR,
+                                                 false);
+                }
+                completed = true;
             }
-            completed = true;
+            finally
+            {
+                if (obsoleteSSTables)
+                {
+                    transaction.prepareToCommit();
+                    transaction.commit();
+                }
+                else
+                {
+                    // we abort here because mutating metadata isn't guarded by LifecycleTransaction, so this won't roll
+                    // anything back. Also, we don't want to obsolete the originals. We're only using it to prevent other
+                    // compactions from marking these sstables compacting, and unmarking them when we're done
+                    transaction.abort();
+                }
+
+                if (completed)
+                {
+                    logger.info("RepairFinishedCompactionTask for session {} on {}.{} complete ({} sstable(s), obsolete={})",
+                            sessionID, realm.metadata().keyspace, realm.metadata().name, sstableCount, obsoleteSSTables);
+                realm.repairSessionCompleted(sessionID);}
+            }
         }
         finally
         {
-            if (obsoleteSSTables)
-            {
-                transaction.prepareToCommit();
-                transaction.commit();
-            }
-            else
-            {
-                // we abort here because mutating metadata isn't guarded by LifecycleTransaction, so this won't roll
-                // anything back. Also, we don't want to obsolete the originals. We're only using it to prevent other
-                // compactions from marking these sstables compacting, and unmarking them when we're done
-                transaction.abort();
-            }
-
-            if (completed)
-            {
-                logger.info("RepairFinishedCompactionTask for session {} on {}.{} complete ({} sstable(s), obsolete={})",
-                            sessionID, realm.metadata().keyspace, realm.metadata().name, sstableCount, obsoleteSSTables);
-                realm.repairSessionCompleted(sessionID);
-            }
+            transaction.close();
         }
     }
 

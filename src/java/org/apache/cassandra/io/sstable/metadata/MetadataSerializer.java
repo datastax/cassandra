@@ -28,7 +28,6 @@ import java.util.function.UnaryOperator;
 import java.util.zip.CRC32;
 
 import com.google.common.base.Throwables;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,7 +35,6 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.CompressionMetadataReaderType;
 import org.apache.cassandra.io.compress.ICompressor;
-import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
@@ -47,8 +45,9 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
+import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
@@ -332,55 +331,34 @@ public class MetadataSerializer implements IMetadataSerializer
      * Returns null if no encryption applies (version doesn't support it, compression is not applied, or the applicable
      * compression does not include encryption).
      */
-    // Package-private for testing
-    static CompressionParams testCompressionParams = null;
-    
     private ICompressor getEncryptor(Descriptor desc, boolean writeTime)
     {
         if (!desc.version.metadataIsEncrypted())
             return null;
         
-        // For testing, use the provided compression params
-        if (testCompressionParams != null)
-        {
-            ICompressor compressor = testCompressionParams.getSstableCompressor();
-            if (compressor != null)
-                return compressor.encryptionOnly();
-            return null;
-        }
-        
         File compressionFile = desc.fileFor(Components.COMPRESSION_INFO);
-
-        try
-        {
-            // During flush the compression info file may not have been uploaded to remote storage yet, so it has to
-            // be read through the write-time channel.
-            CompressionMetadataReaderType readerType = writeTime ? CompressionMetadataReaderType.WRITE_TIME
-                                                                 : CompressionMetadataReaderType.READ_TIME;
-
-            // We only need the compression parameters, not the chunk offsets, so read just the header. This allocates
-            // no off-heap memory and creates no ref-counted resource to release.
-            // hasMaxCompressedSize must match how the file was written - the version flag - otherwise everything the
-            // header stores after the parameters is read at the wrong offset.
-            CompressionParams params = CompressionMetadata.readCompressionParams(compressionFile,
-                                                                                 desc.version.hasMaxCompressedLength(),
-                                                                                 readerType);
-
-            // Note: we use only the encryption component, without any compression. The reason for doing this is to
-            // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
-            // serialization on reads.
-            ICompressor compressor = params.getSstableCompressor();
-            if (compressor != null)
-                return compressor.encryptionOnly();
+        if (!compressionFile.exists())
             return null;
-        }
-        catch (Throwable t)
-        {
-            // If we can't read the compression metadata, assume no encryption.
-            // During flush, the compression file may not be accessible yet in some implementations
-            // causing FSReadError. Catch Throwable to handle both Exception and Error.
-            logger.debug("Could not read compression metadata for {}: {}", desc, t.getMessage());
-            return null;
-        }
+
+        // During flush the compression info file may not have been uploaded to remote storage yet, so it has to
+        // be read through the write-time channel.
+        CompressionMetadataReaderType readerType = writeTime ? CompressionMetadataReaderType.WRITE_TIME
+                                                             : CompressionMetadataReaderType.READ_TIME;
+
+        // We only need the compression parameters, not the chunk offsets, so read just the header. This allocates
+        // no off-heap memory and creates no ref-counted resource to release.
+        // hasMaxCompressedSize must match how the file was written - the version flag - otherwise everything the
+        // header stores after the parameters is read at the wrong offset.
+        CompressionParams params = CompressionMetadata.readCompressionParams(compressionFile,
+                                                                             desc.version.hasMaxCompressedLength(),
+                                                                             readerType);
+
+        // Note: we use only the encryption component, without any compression. The reason for doing this is to
+        // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
+        // serialization on reads.
+        ICompressor compressor = params.getSstableCompressor();
+        if (compressor != null)
+            return compressor.encryptionOnly();
+        return null;
     }
 }

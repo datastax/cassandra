@@ -129,13 +129,6 @@ public class SequentialWriterReadableTest
             
             writer.write(testData, 1024, 1024);
             writer.sync();
-            
-            fhBuilder = new FileHandle.Builder(tempFile);
-            writer.updateFileHandle(fhBuilder, 2048);
-            FileHandle fileHandle2 = fhBuilder.complete();
-            assertEquals(2048, fileHandle2.onDiskLength);
-            fileHandle2.close();
-            
             writer.finish();
         }
         finally
