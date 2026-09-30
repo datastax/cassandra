@@ -417,7 +417,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
             hasImplicitlyFrozenTuples = version.compareTo("cc") < 0 || version.compareTo("da") >= 0; // `da` is found in C* 5.0 and CC `main-5.0`, and both have implicitly frozen tuples
 
-            // encryption support, when the compressor has an ecryption component
+            // encryption support, when the compressor has an encryption component
             // indexes encrypted from "b"
             indicesAreEncrypted = bOrLater;
             // metadata encrypted from "ba"

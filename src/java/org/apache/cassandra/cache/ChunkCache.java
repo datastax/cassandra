@@ -602,7 +602,7 @@ public class ChunkCache
 
     /**
      * A chunk with a single memory region. This is used for reading chunks smaller than PageAware.PAGE_SIZE, but it
-     * always allocated chunks of size PageAware.PAGE_SIZE to avoid fragmenting cache memory.
+     * is always allocated with a size of PageAware.PAGE_SIZE to avoid fragmenting cache memory.
      * See {@link this#newChunk}.
      * <p/>
      * This class is a chunk but also behaves as a {@link Rebufferer.BufferHolder} to save an allocation when
@@ -610,10 +610,10 @@ public class ChunkCache
      * <p/>
      * Only one {@link ByteBuffer} is owned: the object returned by the buffer pool, a full page.
      * Logical chunk size is encoded in {@code buffer.limit()} (with {@code position == 0}); capacity stays at the
-     * allocated size so the pool sees what it handed out on release. {@link #buffer()}  and {@link #read} build a
-     * transient {@code slice()} view whose capacity equals that logical size for {@code readChunk}, and the actual
-     * read size 's {@code clear()}
-     * semantics stay correct — the slice is never returned to the pool.
+     * allocated size so the pool sees what it handed out on release. {@link #buffer()} and {@link #read} build a
+     * transient {@code slice()} view whose capacity equals that logical size, so that {@code readChunk} cannot read
+     * more than that and the view's {@code clear()} semantics stay correct; {@link #read} then applies the actual
+     * read size to the limit. The slice is never returned to the pool.
      */
     private class SingleRegionSubChunk extends SingleRegionChunk
     {

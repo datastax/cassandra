@@ -754,6 +754,12 @@ public final class CompressionParams
             .toHashCode();
     }
 
+    /**
+     * Returns every option, as {@link #asMap()} does, including those of an encrypting compressor: the cipher, the
+     * key strength, the key provider and its options. These appear wherever the parameters are logged, e.g. with the
+     * table parameters of schema changes. The options of the in-tree key provider only name a key file; key providers
+     * must not take secrets as compression options, since these are logged.
+     */
     @Override
     public String toString()
     {
