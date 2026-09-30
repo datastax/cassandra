@@ -41,6 +41,7 @@ import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.metrics.ReadCoordinationMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.UnknownEndpointException;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.StorageProxy.LocalReadRunnable;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
@@ -177,8 +178,26 @@ public abstract class AbstractReadExecutor
      * Perform additional requests if it looks like the original takes "too much time", as defined
      * by the subclass.
      * May block while it waits to see if the original requests are answered first.
+     * <p/>
+     * Never (as much as there is such a thing in Java) throws
      */
-    public abstract void maybeTryAdditionalReplicas();
+    public final void maybeTryAdditionalReplicas()
+    {
+        try
+        {
+            doMaybeTryAdditionalReplicas();
+        }
+        catch (UnknownEndpointException ex)
+        {
+            logger.debug("Failed to send speculative read retries; The target replica is not known: {}", ex.getMessage());
+        }
+        catch (Throwable ex)
+        {
+            logger.warn("Caught exception during speculative read retry; This is unexpected, but we're ignoring it because spec retry is just a best-effort attempt;", ex);
+        }
+    }
+
+    protected abstract void doMaybeTryAdditionalReplicas();
 
     /**
      * send the initial set of requests
@@ -269,7 +288,7 @@ public abstract class AbstractReadExecutor
             this.logFailedSpeculation = logFailedSpeculation;
         }
 
-        public void maybeTryAdditionalReplicas()
+        protected void doMaybeTryAdditionalReplicas()
         {
             if (shouldSpeculateAndMaybeWait() && logFailedSpeculation)
             {
@@ -294,7 +313,7 @@ public abstract class AbstractReadExecutor
             super(cfs, command, replicaPlan, replicaPlan.blockFor() < replicaPlan.contacts().size() ? 2 : 1, queryStartNanoTime, readTracker);
         }
 
-        public void maybeTryAdditionalReplicas()
+        protected void doMaybeTryAdditionalReplicas()
         {
             if (shouldSpeculateAndMaybeWait())
             {
@@ -364,7 +383,7 @@ public abstract class AbstractReadExecutor
             super(cfs, command, replicaPlan, replicaPlan.contacts().size() > 1 ? 2 : 1, queryStartNanoTime, readTracker);
         }
 
-        public void maybeTryAdditionalReplicas()
+        protected void doMaybeTryAdditionalReplicas()
         {
             // no-op
         }
