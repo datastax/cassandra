@@ -64,6 +64,7 @@ import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
@@ -73,6 +74,7 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -425,6 +427,30 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
     public long getEstimatedOnDiskBytesWritten()
     {
         return dataWriter.getEstimatedOnDiskBytesWritten();
+    }
+
+    @Override
+    protected CompressionParams dataCompressionParams()
+    {
+        return dataParams(dataWriter, compression);
+    }
+
+    /**
+     * @param dataWriter  the writer of the data file of an sstable
+     * @param compression whether the sstable is compressed, i.e. has a compression info file
+     * @return the compression parameters the data file is written with (the ones stored in its compression info
+     * file), or {@link CompressionParams#noCompression()} if it is not compressed
+     * @throws IllegalStateException if the sstable is compressed but its data file is not written by a
+     *                               {@link CompressedSequentialWriter}
+     */
+    protected static CompressionParams dataParams(SequentialWriter dataWriter, boolean compression)
+    {
+        if (!compression)
+            return CompressionParams.noCompression();
+        checkState(dataWriter instanceof CompressedSequentialWriter,
+                   "The data file of a compressed sstable must be written by a CompressedSequentialWriter, not by %s",
+                   dataWriter.getClass().getName());
+        return ((CompressedSequentialWriter) dataWriter).parameters();
     }
 
     protected FileHandle openDataFile(long lengthOverride, StatsMetadata statsMetadata)
