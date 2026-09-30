@@ -33,6 +33,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.net.Verb;
@@ -85,6 +87,7 @@ public class RepairSessionTest
     public static void initDD()
     {
         NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.setBoolean(true);
+        DatabaseDescriptor.daemonInitialization();
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE,
                                     org.apache.cassandra.schema.KeyspaceParams.simple(1),
@@ -325,10 +328,6 @@ public class RepairSessionTest
                     banner.contains("[entityId:"));
     }
 
-    // -------------------------------------------------------------------------
-    // start() banner log — new session
-    // -------------------------------------------------------------------------
-
     /**
      * start() INFO banner must contain parentSession, the column family, and the range.
      */
@@ -381,10 +380,6 @@ public class RepairSessionTest
         assertTrue("Banner must contain repairType: " + REPAIR_TYPE,
                    banner.contains("repairType: " + REPAIR_TYPE));
     }
-
-    // -------------------------------------------------------------------------
-    // onSuccess / onFailure callbacks — session-level completion logs
-    // -------------------------------------------------------------------------
 
     /** Subclass that widens protected access so tests can resolve jobs directly. */
     private static class ResolvableRepairJob extends RepairJob
