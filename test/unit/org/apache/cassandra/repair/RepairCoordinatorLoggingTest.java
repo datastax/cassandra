@@ -116,6 +116,14 @@ public class RepairCoordinatorLoggingTest
                             .collect(Collectors.toList());
     }
 
+    private List<String> warnMessages()
+    {
+        return appender.list.stream()
+                            .filter(e -> e.getLevel() == Level.WARN)
+                            .map(ILoggingEvent::getFormattedMessage)
+                            .collect(Collectors.toList());
+    }
+
     private List<String> errorMessages()
     {
         return appender.list.stream()
@@ -130,12 +138,12 @@ public class RepairCoordinatorLoggingTest
         RepairCoordinator coordinator = build(optionsWithEntity());
         coordinator.notifyError(RepairException.warn("simulated abort"));
 
-        String msg = errorMessages().stream()
-                                    .filter(m -> m.contains("failed"))
-                                    .findFirst()
-                                    .orElse("");
+        String msg = warnMessages().stream()
+                                   .filter(m -> m.contains("failed"))
+                                   .findFirst()
+                                   .orElse("");
 
-        assertFalse("notifyError must emit an ERROR 'failed' log", msg.isEmpty());
+        assertFalse("notifyError with warn-level exception must emit a WARN 'failed' log", msg.isEmpty());
         assertTrue("log must contain the repair id",       msg.contains(coordinator.state.id.toString()));
         assertTrue("log must contain [entityId: " + ENTITY_ID, msg.contains("[entityId: " + ENTITY_ID));
         assertTrue("log must contain repairType: " + REPAIR_TYPE, msg.contains("repairType: " + REPAIR_TYPE));
@@ -150,12 +158,12 @@ public class RepairCoordinatorLoggingTest
         RepairCoordinator coordinator = build(optionsWithoutEntity());
         coordinator.notifyError(RepairException.warn("simulated abort"));
 
-        String msg = errorMessages().stream()
-                                    .filter(m -> m.contains("failed"))
-                                    .findFirst()
-                                    .orElse("");
+        String msg = warnMessages().stream()
+                                   .filter(m -> m.contains("failed"))
+                                   .findFirst()
+                                   .orElse("");
 
-        assertFalse("notifyError must emit an ERROR 'failed' log", msg.isEmpty());
+        assertFalse("notifyError with warn-level exception must emit a WARN 'failed' log", msg.isEmpty());
         assertFalse("log must not contain [entityId:] when entityId is absent",
                     msg.contains("[entityId:"));
     }

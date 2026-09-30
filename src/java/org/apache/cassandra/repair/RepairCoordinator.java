@@ -177,8 +177,21 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
     public void notifyError(Throwable error)
     {
         // exception should be ignored
-        if (error instanceof SomeRepairFailedException)
+        if (Throwables.anyCauseMatches(error, t -> t instanceof SomeRepairFailedException))
             return;
+
+        // warn-level failures (e.g. remote validation failure, prepare phase aborted) are expected
+        // degraded-repair outcomes and should not be logged as errors
+        if (Throwables.anyCauseMatches(error, RepairException::shouldWarn))
+        {
+            logger.warn(withEntityContext("Repair {} failed:"), state.id, error);
+            StorageMetrics.repairExceptions.inc();
+            String errorMessage = String.format("Repair command #%d failed with error %s", state.cmd, error.getMessage());
+            fireProgressEvent(jmxEvent(ProgressEventType.ERROR, errorMessage));
+            firstError.compareAndSet(null, error);
+            maybeStoreParentRepairFailure(error);
+            return;
+        }
 
         logger.error(withEntityContext("Repair {} failed:"), state.id, error);
 
