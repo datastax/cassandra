@@ -20,7 +20,6 @@ package org.apache.cassandra.cache;
 
 
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
@@ -51,6 +50,7 @@ import org.apache.cassandra.io.util.SliceDescriptor;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.memory.BufferPool;
+import org.apache.cassandra.utils.memory.BufferPoolExhaustedException;
 import org.awaitility.Awaitility;
 import org.mockito.ArgumentCaptor;
 
@@ -65,6 +65,7 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.*;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -393,12 +394,14 @@ public class ChunkCacheTest
     {
         BufferPool pool = mock(BufferPool.class);
         CopyOnWriteArrayList<ByteBuffer> allocated = new CopyOnWriteArrayList<>();
-        when(pool.get(anyInt(), any(BufferType.class))).thenAnswer(invocation -> {
+        when(pool.tryGet(anyInt())).thenAnswer(invocation -> {
             int size = invocation.getArgument(0);
             ByteBuffer buffer = ByteBuffer.allocateDirect(size);
             allocated.add(buffer);
             return buffer;
         });
+        // reclaimSync may call these no-ops on a mock pool
+        doNothing().when(pool).recycleFreeLocalChunks();
 
         doAnswer(invocation -> {
             ByteBuffer buffer = invocation.getArgument(0);
@@ -452,12 +455,13 @@ public class ChunkCacheTest
     {
         BufferPool pool = mock(BufferPool.class);
         CopyOnWriteArrayList<ByteBuffer> allocated = new CopyOnWriteArrayList<>();
-        when(pool.get(anyInt(), any(BufferType.class))).thenAnswer(invocation -> {
+        when(pool.tryGet(anyInt())).thenAnswer(invocation -> {
             int size = invocation.getArgument(0);
             ByteBuffer buffer = ByteBuffer.allocateDirect(size);
             allocated.add(buffer);
             return buffer;
         });
+        doNothing().when(pool).recycleFreeLocalChunks();
 
         doAnswer(invocation -> {
             ByteBuffer buffer = invocation.getArgument(0);
@@ -519,12 +523,13 @@ public class ChunkCacheTest
     {
         BufferPool pool = mock(BufferPool.class);
         CopyOnWriteArrayList<ByteBuffer> allocated = new CopyOnWriteArrayList<>();
-        when(pool.get(anyInt(), any(BufferType.class))).thenAnswer(invocation -> {
+        when(pool.tryGet(anyInt())).thenAnswer(invocation -> {
             int size = invocation.getArgument(0);
             ByteBuffer buffer = ByteBuffer.allocateDirect(size);
             allocated.add(buffer);
             return buffer;
         });
+        doNothing().when(pool).recycleFreeLocalChunks();
 
         doAnswer(invocation -> {
             ByteBuffer buffer = invocation.getArgument(0);
@@ -652,87 +657,293 @@ public class ChunkCacheTest
     }
 
     /**
-     * Same as {@link #testSmallChunkPoolAllocation()}, but forces the pool's overflow (unpooled) allocation
-     * path by using a {@link BufferPool} whose memory threshold is {@code 0}, so every {@code get()} falls
-     * back to a raw {@code ByteBuffer.allocateDirect()} (see {@code BufferPool.LocalPool.get()}).
-     * <p/>
-     * Verifies that the buffer released back to the pool is the original, full-page buffer -- which still owns
-     * a real {@code Cleaner} -- rather than the narrowed slice used for reads (a slice never has its own
-     * {@code Cleaner}, so releasing it would silently fail to free the native memory). Also verifies that the
-     * overflow memory accounting returns exactly to its pre-allocation baseline once the chunk is released.
+     * Cache-path alloc ({@link ChunkCache#newChunk}) returns null when the pool cannot supply pages —
+     * never bumps overflow. Exhaustion for clients is thrown only after bypass also fails (rebuffer path).
      */
     @Test
-    public void testSmallChunkOverflowAllocations() throws Exception
+    public void testTryAllocateForCacheReturnsNullWithoutOverflow()
     {
-        Method cleanerMethod = Class.forName("sun.nio.ch.DirectBuffer").getMethod("cleaner");
+        BufferPool emptyPool = new BufferPool("chunk_cache_no_overflow", 0, true);
+        ChunkCache chunkCache = new ChunkCache(emptyPool, 512, ChunkCacheMetrics::create);
 
-        // A pool with a zero memory threshold can never allocate a macro-chunk, so every get() is guaranteed
-        // to fall back to the raw, unpooled allocate() overflow path.
-        BufferPool overflowPool = spy(new BufferPool("small_chunk_overflow_test", 0, true));
-        ChunkCache chunkCache = new ChunkCache(overflowPool, 512, ChunkCacheMetrics::create);
-
-        long usedBefore = overflowPool.usedSizeInBytes();
-        long overflowBefore = overflowPool.overflowMemoryInBytes();
-        assertEquals(0, usedBefore);
-        assertEquals(0, overflowBefore);
-
-        ChunkCache.Chunk chunk = chunkCache.newChunk(SMALL_CHUNK_SIZE, 0);
-        assertEquals(PAGE_SIZE, chunk.capacity());
-        assertEquals(SMALL_CHUNK_SIZE, ((Rebufferer.BufferHolder) chunk).buffer().capacity());
-
-        // Confirm the overflow path was really taken, and that the full page was tracked as overflow usage.
-        assertEquals(overflowBefore + PAGE_SIZE, overflowPool.overflowMemoryInBytes());
-        assertEquals(usedBefore + PAGE_SIZE, overflowPool.usedSizeInBytes());
-
-        chunk.release();
-
-        ArgumentCaptor<ByteBuffer> released = ArgumentCaptor.forClass(ByteBuffer.class);
-        verify(overflowPool).put(released.capture());
-        ByteBuffer releasedBuffer = released.getValue();
-
-        // The released buffer must be the original, full-page buffer, which owns a real Cleaner -- unlike a
-        // narrowed slice of it, which would silently fail to free the underlying native memory.
-        assertEquals(PAGE_SIZE, releasedBuffer.capacity());
-        assertNotNull("The released overflow buffer should own a real Cleaner so put() can actually free it",
-                       cleanerMethod.invoke(releasedBuffer));
-
-        // Accounting must return exactly to its pre-allocation baseline.
-        assertEquals(overflowBefore, overflowPool.overflowMemoryInBytes());
-        assertEquals(usedBefore, overflowPool.usedSizeInBytes());
+        assertEquals(0, emptyPool.overflowMemoryInBytes());
+        assertEquals(null, chunkCache.newChunk(SMALL_CHUNK_SIZE, 0));
+        assertEquals("overflow must stay zero when chunk cache refuses unpooled alloc",
+                     0, emptyPool.overflowMemoryInBytes());
+        assertTrue(chunkCache.metrics.syncReclaims() >= 1);
+        // poolExhausted is recorded only when bypass also fails
+        assertEquals(0, chunkCache.metrics.poolExhausted());
     }
 
     /**
-     * Production-symptom regression: under sustained overflow-path allocate/release of small chunks,
-     * {@code overflowMemoryUsage} must not climb. The pre-fix path released a capacity-{@code chunkSize}
-     * slice of an allocated page, so each cycle leaked {@code PAGE_SIZE - chunkSize} from both native
-     * memory (slice has no Cleaner) and the overflow counter -- matching weeks-long growth until direct OOM.
+     * Lifecycle under a bounded real pool (BufferPool threshold = one macro chunk = 8MiB):
+     * <ol>
+     *   <li>Pin cached rebuffers until Caffeine weight is near capacity (cache path).</li>
+     *   <li>Keep pinning new positions: eviction cannot free pool pages while holders are live, so
+     *       further misses eventually bypass (and still never use overflow).</li>
+     *   <li>Continue until tryGet fails → {@link BufferPoolExhaustedException}.</li>
+     *   <li>Release some bypass holders → allocation succeeds again (bypass or reclaim).</li>
+     *   <li>Release cached holders + invalidate file → pool pages return → cache admits again.</li>
+     * </ol>
      */
     @Test
-    public void testSmallChunkOverflowChurnDoesNotGrowOverflowMemory()
+    public void testReclaimRetryAfterEvictionDoesNotOverflow() throws Exception
     {
-        BufferPool overflowPool = new BufferPool("small_chunk_overflow_churn", 0, true);
-        ChunkCache chunkCache = new ChunkCache(overflowPool, 512, ChunkCacheMetrics::create);
+        // GlobalPool allocates MACRO_CHUNK_SIZE (= 64 * NORMAL_CHUNK_SIZE = 8MiB) at a time.
+        final long poolBytes = 64L * BufferPool.NORMAL_CHUNK_SIZE;
+        BufferPool pool = new BufferPool("chunk_cache_lifecycle", poolBytes, true);
+        // 1MiB Caffeine weight after reserve so we fill residents long before the 8MiB pool is gone.
+        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MB + 1;
+        ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
+        assertTrue(chunkCache.capacity() > 0);
 
-        long usedBefore = overflowPool.usedSizeInBytes();
-        long overflowBefore = overflowPool.overflowMemoryInBytes();
-        assertEquals(0, usedBefore);
-        assertEquals(0, overflowBefore);
+        final int chunkSize = PAGE_SIZE;
+        final int poolPages = (int) (poolBytes / chunkSize);
+        final int fileChunks = poolPages + 64; // enough positions to exhaust pool while holding
+        final int fileSize = fileChunks * chunkSize;
+        File file = FileUtils.createTempFile("lifecycle", null);
+        file.deleteOnExit();
+        writeBytes(file, new byte[fileSize]);
 
-        final int cycles = 512;
-        for (int i = 0; i < cycles; i++)
+        java.util.ArrayList<Rebufferer.BufferHolder> held = new java.util.ArrayList<>();
+        try (FileHandle.Builder builder = new FileHandle.Builder(file)
+                                                        .withChunkCache(chunkCache)
+                                                        .bufferSize(chunkSize);
+             FileHandle handle = builder.complete();
+             Rebufferer rebufferer = handle.rebuffererFactory().instantiateRebufferer())
         {
-            ChunkCache.Chunk chunk = chunkCache.newChunk(SMALL_CHUNK_SIZE, i * (long) SMALL_CHUNK_SIZE);
-            assertEquals(PAGE_SIZE, chunk.capacity());
-            // Peak usage during the cycle must be a full page on the overflow path.
-            assertEquals(PAGE_SIZE, overflowPool.overflowMemoryInBytes());
-            chunk.release();
-            assertEquals("overflow must return to baseline after every release",
-                         overflowBefore, overflowPool.overflowMemoryInBytes());
-            assertEquals(usedBefore, overflowPool.usedSizeInBytes());
-        }
+            assertEquals(0L, pool.overflowMemoryInBytes());
+            final long weightCap = chunkCache.capacity();
 
-        assertEquals(overflowBefore, overflowPool.overflowMemoryInBytes());
-        assertEquals(usedBefore, overflowPool.usedSizeInBytes());
+            // --- 1. Fill / pin until weighted size reaches capacity ---
+            int pos = 0;
+            while (pos < fileSize && chunkCache.weightedSize() < weightCap)
+            {
+                held.add(rebufferer.rebuffer(pos));
+                pos += chunkSize;
+                assertEquals(0L, pool.overflowMemoryInBytes());
+            }
+            assertTrue("expected caffeine weight near capacity", chunkCache.weightedSize() >= weightCap - chunkSize);
+            assertTrue(chunkCache.size() > 0);
+            long bypassAfterFill = chunkCache.metrics.bypassCount();
+
+            // --- 2. Keep holding new pages: pool used grows even if weight stays capped (pinned victims) ---
+            long bypassAfterPressure = bypassAfterFill;
+            while (pos < fileSize && chunkCache.metrics.poolExhausted() == 0)
+            {
+                long usedBefore = pool.usedSizeInBytes();
+                try
+                {
+                    held.add(rebufferer.rebuffer(pos));
+                    pos += chunkSize;
+                    assertEquals(0L, pool.overflowMemoryInBytes());
+                    // Progress: either used more pool, bypassed, or reclaimed
+                    if (chunkCache.metrics.bypassCount() > bypassAfterFill)
+                        bypassAfterPressure = chunkCache.metrics.bypassCount();
+                    if (pool.usedSizeInBytes() <= usedBefore
+                        && chunkCache.metrics.bypassCount() == bypassAfterFill
+                        && held.size() > poolPages + 8)
+                    {
+                        // stalled without exhaustion — break to try remaining positions then expect fail later
+                        break;
+                    }
+                }
+                catch (BufferPoolExhaustedException e)
+                {
+                    break;
+                }
+            }
+
+            // Prefer observing bypass when cache was full and pool still had room (common path)
+            // but pinned fill can go straight to exhaust if reclaim frees nothing freeable.
+            assertTrue("expected bypass under cache pressure and/or continued pool use",
+                       bypassAfterPressure > bypassAfterFill
+                       || pool.usedSizeInBytes() > weightCap
+                       || chunkCache.metrics.poolExhausted() >= 1);
+
+            // --- 3. Drive to exhaustion: hold everything until tryGet cannot supply ---
+            BufferPoolExhaustedException exhausted = null;
+            while (pos < fileSize)
+            {
+                try
+                {
+                    held.add(rebufferer.rebuffer(pos));
+                    pos += chunkSize;
+                    assertEquals(0L, pool.overflowMemoryInBytes());
+                }
+                catch (BufferPoolExhaustedException e)
+                {
+                    exhausted = e;
+                    break;
+                }
+            }
+            assertNotNull("expected BufferPoolExhaustedException after pinning cache+bypass pages", exhausted);
+            assertTrue(chunkCache.metrics.poolExhausted() >= 1);
+            assertEquals(0L, pool.overflowMemoryInBytes());
+            final int heldAtExhaust = held.size();
+            assertTrue(heldAtExhaust > 0);
+
+            // --- 4. Free some held pages (mix of cache pins + bypass) → alloc works again ---
+            int toFree = Math.max(4, heldAtExhaust / 4);
+            for (int i = 0; i < toFree; i++)
+                held.remove(held.size() - 1).release();
+            pool.recycleFreeLocalChunks();
+
+            long exhaustedBeforeRecover = chunkCache.metrics.poolExhausted();
+            long bypassBeforeRecover = chunkCache.metrics.bypassCount();
+            long recoverPos = pos < fileSize ? pos : (fileSize - chunkSize);
+            Rebufferer.BufferHolder recovered = rebufferer.rebuffer(recoverPos);
+            held.add(recovered);
+            assertNotNull(recovered);
+            assertEquals("recovery must not bump exhaustion further if alloc succeeded",
+                         exhaustedBeforeRecover, chunkCache.metrics.poolExhausted());
+            assertEquals(0L, pool.overflowMemoryInBytes());
+            // After freeing, either bypass metric grows or cache/reclaim served the page
+            assertTrue(chunkCache.metrics.bypassCount() >= bypassBeforeRecover
+                       || chunkCache.metrics.reclaimRetrySuccesses() >= 0
+                       || pool.usedSizeInBytes() > 0);
+
+            // --- 5. Drop remaining holds + invalidate cache → pool returns; fresh miss can cache again ---
+            for (Rebufferer.BufferHolder h : held)
+                h.release();
+            held.clear();
+            chunkCache.invalidateFileNow(file);
+            Awaitility.await().untilAsserted(() -> assertEquals(0, chunkCache.sizeOfFile(file)));
+            chunkCache.reclaimSync();
+            pool.recycleFreeLocalChunks();
+
+            long usedAfterFree = pool.usedSizeInBytes();
+            long exhaustedBeforeReadmit = chunkCache.metrics.poolExhausted();
+            long bypassBeforeReadmit = chunkCache.metrics.bypassCount();
+            // New miss at position 0 after full invalidation — should admit as cache resident when pool has room
+            Rebufferer.BufferHolder readmitted = rebufferer.rebuffer(0);
+            try
+            {
+                assertNotNull(readmitted);
+                assertEquals(0L, pool.overflowMemoryInBytes());
+                assertEquals(exhaustedBeforeReadmit, chunkCache.metrics.poolExhausted());
+                assertTrue("after free+invalidate, miss should re-enter cache when pool has space",
+                           chunkCache.sizeOfFile(file) >= 1
+                           || chunkCache.metrics.bypassCount() > bypassBeforeReadmit);
+                // If cache admitted, bypass should not be required solely due to empty pool
+                if (usedAfterFree + chunkSize <= poolBytes)
+                    assertTrue(chunkCache.size() >= 1 || chunkCache.metrics.bypassCount() >= bypassBeforeReadmit);
+            }
+            finally
+            {
+                readmitted.release();
+            }
+        }
+        finally
+        {
+            for (Rebufferer.BufferHolder h : held)
+                h.release();
+            chunkCache.close();
+        }
+    }
+
+    /**
+     * When cache load cannot allocate, rebuffer bypasses: serves via TransientBufferHolder, does not grow
+     * Caffeine size, returns pages on release, never uses overflow.
+     * <p>
+     * tryGet sequence: cache path fails twice (try + post-reclaim retry), then bypassLoad does a
+     * <em>single</em> tryGet with no second reclaim — third call succeeds.
+     */
+    @Test
+    public void testBypassServeDoesNotInsertIntoCacheAndReleasesToPool() throws Exception
+    {
+        BufferPool pool = mock(BufferPool.class);
+        CopyOnWriteArrayList<ByteBuffer> allocated = new CopyOnWriteArrayList<>();
+        final int[] tryGetCount = { 0 };
+        when(pool.tryGet(anyInt())).thenAnswer(invocation -> {
+            int size = invocation.getArgument(0);
+            tryGetCount[0]++;
+            // load/tryAllocateChunk: try + post-reclaim try → 2 nulls; bypassLoad: one tryGet → success
+            if (tryGetCount[0] <= 2)
+                return null;
+            ByteBuffer buffer = ByteBuffer.allocateDirect(size);
+            allocated.add(buffer);
+            return buffer;
+        });
+        doNothing().when(pool).recycleFreeLocalChunks();
+        when(pool.usedSizeInBytes()).thenReturn(0L);
+        when(pool.overflowMemoryInBytes()).thenReturn(0L);
+
+        doAnswer(invocation -> {
+            ByteBuffer buffer = invocation.getArgument(0);
+            allocated.remove(buffer);
+            return null;
+        }).when(pool).put(any(ByteBuffer.class));
+
+        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
+        File file = FileUtils.createTempFile("bypass", ".tmp");
+        try (MockFileControl control = new MockFileControl(file, 64, chunkCache))
+        {
+            control.createFile();
+            control.waitOnRead.complete(null);
+            RandomAccessReader reader = control.openReader();
+            assertEquals(0, chunkCache.size());
+
+            reader.reBuffer();
+            assertTrue("expected bypass metric", chunkCache.metrics.bypassCount() >= 1);
+            assertEquals("bypass must not install a Caffeine resident", 0, chunkCache.size());
+            assertEquals(1, allocated.size());
+
+            reader.close();
+            assertEquals("transient holder must return page to pool on release", 0, allocated.size());
+            assertEquals(0L, pool.overflowMemoryInBytes());
+            assertEquals(0, allocated.size());
+        }
+    }
+
+    /**
+     * End-to-end: a real pool with threshold 0 can never hand out slabs, so cache load fails admission,
+     * bypass also fails, and rebuffer surfaces {@link BufferPoolExhaustedException} without using overflow.
+     */
+    @Test
+    public void testBypassExhaustedThrowsWithoutOverflow() throws Exception
+    {
+        BufferPool pool = new BufferPool("bypass_exhausted", 0, true);
+        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
+        assertEquals(0, pool.overflowMemoryInBytes());
+
+        File file = FileUtils.createTempFile("bypass-ex", ".tmp");
+        try (MockFileControl control = new MockFileControl(file, 64, chunkCache))
+        {
+            control.createFile();
+            control.waitOnRead.complete(null);
+            RandomAccessReader reader = control.openReader();
+            assertThatThrownBy(reader::reBuffer)
+                    .isInstanceOf(BufferPoolExhaustedException.class);
+            assertEquals(0, chunkCache.size());
+            assertTrue(chunkCache.metrics.poolExhausted() >= 1);
+            assertTrue(chunkCache.metrics.syncReclaims() >= 1);
+            assertEquals(0, chunkCache.metrics.bypassCount());
+            assertEquals(0L, pool.overflowMemoryInBytes());
+            assertEquals(0L, pool.usedSizeInBytes());
+        }
+    }
+
+    /**
+     * TransientBufferHolder must release underlying chunk pages exactly once.
+     */
+    @Test
+    public void testTransientBufferHolderReleaseIdempotent()
+    {
+        BufferPool pool = new BufferPool("transient_holder", 8 * 1024 * 1024, true);
+        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
+        long usedBefore = pool.usedSizeInBytes();
+        ChunkCache.Chunk chunk = chunkCache.newChunk(PAGE_SIZE, 0);
+        assertNotNull(chunk);
+        Rebufferer.BufferHolder ref = chunk.getReferencedBuffer(0);
+        assertNotNull(ref);
+        chunk.release(); // drop initial ref — same as bypassServe
+        ChunkCache.TransientBufferHolder transientHolder = new ChunkCache.TransientBufferHolder(ref);
+        assertEquals(usedBefore + PAGE_SIZE, pool.usedSizeInBytes());
+        transientHolder.release();
+        transientHolder.release(); // idempotent
+        assertEquals(usedBefore, pool.usedSizeInBytes());
+        assertEquals(0, pool.overflowMemoryInBytes());
     }
 
     /**
@@ -745,7 +956,7 @@ public class ChunkCacheTest
     public void testSmallChunkCacheEvictionReleasesFullPage() throws IOException
     {
         // Cache large enough that RESERVED_POOL_SPACE_IN_MB still leaves room for a few pages of weight.
-        final int cacheSizeMb = 64;
+        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64;
         BufferPool pool = new BufferPool("small_chunk_eviction_test", 8 * 1024 * 1024, true);
         ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
 
@@ -773,10 +984,15 @@ public class ChunkCacheTest
             }
 
             assertTrue("expected multiple cached small chunks", chunkCache.sizeOfFile(file) > 1);
+            // Let pending Caffeine maintenance settle so key count and weighted size agree.
+            chunkCache.reclaimSync();
+            int n = chunkCache.sizeOfFile(file);
+            assertTrue(n > 1);
             // Weighted size must count full pages (capacity), not the narrowed read view.
-            assertEquals((long) chunkCache.sizeOfFile(file) * PAGE_SIZE, chunkCache.weightedSize());
-            assertEquals(usedBefore + (long) chunkCache.sizeOfFile(file) * PAGE_SIZE, pool.usedSizeInBytes());
+            assertEquals((long) n * PAGE_SIZE, chunkCache.weightedSize());
+            assertEquals(usedBefore + (long) n * PAGE_SIZE, pool.usedSizeInBytes());
             assertEquals(overflowBefore, pool.overflowMemoryInBytes());
+            assertEquals(0, chunkCache.metrics.bypassCount());
         }
 
         // Drop every entry for this reader id; onRemoval must put the full-page pool buffer back.

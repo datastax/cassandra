@@ -45,6 +45,12 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     private volatile MicrometerCacheMetrics metrics;
     private volatile Timer missLatency;
     private volatile Counter evictions;
+    private volatile Counter syncReclaims;
+    private volatile Counter reclaimRetrySuccesses;
+    private volatile Counter poolExhausted;
+    private volatile Counter bypassCount;
+    private volatile Counter bypassBytes;
+    private volatile Timer reclaimLatency;
     private final ConcurrentHashMap<RemovalCause, Counter> evitictionByRemovalCause = new ConcurrentHashMap<>();
 
     public MicrometerChunkCacheMetrics(CacheSize cache, String metricsPrefix)
@@ -62,6 +68,12 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
 
         this.missLatency = timer(metricsPrefix + "_miss_latency_seconds");
         this.evictions = counter(metricsPrefix + "_evictions");
+        this.syncReclaims = counter(metricsPrefix + "_sync_reclaims");
+        this.reclaimRetrySuccesses = counter(metricsPrefix + "_reclaim_retry_successes");
+        this.poolExhausted = counter(metricsPrefix + "_pool_exhausted");
+        this.bypassCount = counter(metricsPrefix + "_bypass");
+        this.bypassBytes = counter(metricsPrefix + "_bypass_bytes");
+        this.reclaimLatency = timer(metricsPrefix + "_reclaim_latency_seconds");
 
         for (RemovalCause cause : RemovalCause.values())
         {
@@ -183,6 +195,67 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     }
 
     @Override
+    public void recordSyncReclaim()
+    {
+        syncReclaims.increment();
+    }
+
+    @Override
+    public void recordReclaimRetrySuccess()
+    {
+        reclaimRetrySuccesses.increment();
+    }
+
+    @Override
+    public void recordPoolExhausted()
+    {
+        poolExhausted.increment();
+    }
+
+    @Override
+    public void recordReclaimLatency(long nanos)
+    {
+        reclaimLatency.record(nanos, TimeUnit.NANOSECONDS);
+    }
+
+    @Override
+    public long syncReclaims()
+    {
+        return (long) syncReclaims.count();
+    }
+
+    @Override
+    public long reclaimRetrySuccesses()
+    {
+        return (long) reclaimRetrySuccesses.count();
+    }
+
+    @Override
+    public long poolExhausted()
+    {
+        return (long) poolExhausted.count();
+    }
+
+    @Override
+    public void recordBypass(int bytes)
+    {
+        bypassCount.increment();
+        bypassBytes.increment(bytes);
+    }
+
+    @Override
+    public long bypassCount()
+    {
+        return (long) bypassCount.count();
+    }
+
+    @Override
+    public long bypassBytes()
+    {
+        return (long) bypassBytes.count();
+    }
+
+    @Override
     @VisibleForTesting
     public void reset()
     {
@@ -209,7 +282,9 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
                "Moving hit rate: " + hitRate() + System.lineSeparator() +
                "Num entries: " + entries() + System.lineSeparator() +
                "Size in memory: " + FBUtilities.prettyPrintMemory(size()) + System.lineSeparator() +
-               "Capacity: " + FBUtilities.prettyPrintMemory(capacity());
+               "Capacity: " + FBUtilities.prettyPrintMemory(capacity()) + System.lineSeparator() +
+               "Sync reclaims: " + syncReclaims() + System.lineSeparator() +
+               "Pool exhausted: " + poolExhausted();
     }
 
     public Map<RemovalCause, Double> getEvictionCountByRemovalCause()

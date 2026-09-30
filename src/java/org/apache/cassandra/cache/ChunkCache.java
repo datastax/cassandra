@@ -50,7 +50,6 @@ import org.apache.cassandra.concurrent.ParkedExecutor;
 import org.apache.cassandra.concurrent.ShutdownableExecutor;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
@@ -61,6 +60,7 @@ import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.memory.BufferPool;
+import org.apache.cassandra.utils.memory.BufferPoolExhaustedException;
 import org.apache.cassandra.utils.memory.BufferPools;
 import org.github.jamm.Unmetered;
 
@@ -69,6 +69,15 @@ public class ChunkCache
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
+    /**
+     * Bytes withheld from Caffeine {@code maximumWeight} but still part of the chunk-cache {@link BufferPool}.
+     * <p>
+     * Steady-state cache residents are capped at {@code file_cache_size - RESERVED}. The reserved slice is not a
+     * separate allocator; it is headroom in the <em>same</em> pool so that under pressure we can still
+     * {@code tryGet} short-lived <em>bypass</em> pages.
+     * <p>
+     * 32MiB ≈ {@code 2 (infligh + bypass) × 250 readers/threads × 64KiB} as a shared budget for in-flight + bypass.
+     */
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     private static final int INITIAL_CAPACITY = Integer.getInteger("cassandra.chunkcache_initialcapacity", 16);
     private static final boolean ASYNC_CLEANUP = Boolean.parseBoolean(System.getProperty("cassandra.chunkcache.async_cleanup", "true"));
@@ -78,11 +87,15 @@ public class ChunkCache
     // cached value in order to not call System.getProperty on a hotpath
     private static final int CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS = CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt();
 
+    /** When true on the current thread, Caffeine PerformCleanupTask runs inline instead of on cleanupExecutor. */
+    private static final ThreadLocal<Boolean> FORCE_INLINE_CLEANUP = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
     static
     {
         try
         {
-            logger.info("-Dcassandra.chunkcache.async_cleanup={} dse.chunk.cache.cleaner.threads={}", ASYNC_CLEANUP, CLEANER_THREADS);
+            logger.info("-Dcassandra.chunkcache.async_cleanup={} dse.chunk.cache.cleaner.threads={}",
+                        ASYNC_CLEANUP, CLEANER_THREADS);
             PERFORM_CLEANUP_TASK_CLASS = Class.forName("com.github.benmanes.caffeine.cache.BoundedLocalCache$PerformCleanupTask");
         }
         catch (ClassNotFoundException e)
@@ -132,12 +145,7 @@ public class ChunkCache
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
                         .initialCapacity(INITIAL_CAPACITY)
-                        .executor(r -> {
-                            if (ASYNC_CLEANUP && r.getClass() == PERFORM_CLEANUP_TASK_CLASS)
-                                cleanupExecutor.execute(r);
-                            else
-                                r.run();
-                        })
+                        .executor(this::executeCleanup)
                         .weigher((key, buffer) -> ((Chunk) buffer).capacity())
                         .removalListener(this)
                         .recordStats(() -> metrics)
@@ -146,45 +154,187 @@ public class ChunkCache
         cacheAsMap = cache.asMap();
     }
 
+    /**
+     * Caffeine executor: async cleanup by default; inline under {@link #FORCE_INLINE_CLEANUP} (reclaim path)
+     * so eviction/onRemoval can free pool pages before tryGet is retried.
+     */
+    private void executeCleanup(Runnable r)
+    {
+        if (ASYNC_CLEANUP && r.getClass() == PERFORM_CLEANUP_TASK_CLASS && !FORCE_INLINE_CLEANUP.get())
+            cleanupExecutor.execute(r);
+        else
+            r.run();
+    }
 
+    /**
+     * Load a chunk for the Caffeine cache path: allocate from the pool, read, return ready Chunk.
+     * <p>
+     * On pool pressure returns {@code null} so the caller can
+     * {@link #bypassLoad} instead of completing a cache future with a transient chunk
+     * (that would re-admit pressure allocations into Caffeine and erase the reserve).
+     *
+     * @return loaded chunk, or {@code null} if the pool could not supply pages after reclaim
+     */
+    @Nullable
     private Chunk load(ChunkReader file, long position)
     {
         Chunk chunk = null;
         try
         {
-            chunk = newChunk(file.chunkSize(), position);  // Note: we need `chunk` to be assigned before we call read to release on error
+            chunk = tryAllocateChunk(file.chunkSize(), position);
+            if (chunk == null)
+                return null;
+
             chunk.read(file);
+            return chunk;
         }
         catch (RuntimeException | Error t)
         {
-            if (chunk != null)
-                chunk.release();
+            chunk.release();
             throw t;
         }
+    }
+
+    /**
+     * Uncached load for bypass: pool {@code tryGet} only (no second {@link #reclaimSync}), then
+     * {@link Chunk#read}. Result must <b>never</b> be completed into Caffeine / {@code cacheAsMap}.
+     * Caller wraps it in {@link TransientBufferHolder} and releases as soon as the reader is done.
+     * <p>
+     * Invoked only after {@link #load} already ran tryGet → reclaimSync → tryGet and still failed.
+     * Another reclaim here would mostly re-wait the same pending cleanups and add read latency without
+     * much extra freeable cache memory. If this tryGet fails → {@link BufferPoolExhaustedException}.
+     */
+    private Chunk bypassLoad(ChunkReader file, long position)
+    {
+        // tryGet once only — cache path already reclaimed once on this miss.
+        Chunk chunk = allocateChunk(file.chunkSize(), position);
+        if (chunk == null)
+        {
+            metrics.recordPoolExhausted();
+            throw new BufferPoolExhaustedException(
+                    String.format("Chunk cache buffer pool exhausted during bypass (pool used=%s, overflow=%s, cache capacity=%s). " +
+                                  "Increase file_cache_size_in_mb or reduce concurrent reads; " +
+                                  "chunk cache does not allocate outside the pool.",
+                                  prettyUsed(), prettyOverflow(), prettyCapacity()));
+        }
+        try
+        {
+            chunk.read(file);
+            metrics.recordBypass(chunk.capacity());
+            return chunk;
+        }
+        catch (RuntimeException | Error t)
+        {
+            chunk.release();
+            throw t;
+        }
+    }
+
+    /**
+     * Allocate for the Caffeine path: tryGet, then {@link #reclaimSync} + tryGet once.
+     * Returns null if still unavailable (caller should {@link #bypassLoad} without reclaiming again).
+     */
+    @Nullable
+    private Chunk tryAllocateChunk(int chunkSize, long position)
+    {
+        Chunk chunk = allocateChunk(chunkSize, position);
+        if (chunk != null)
+            return chunk;
+
+        reclaimSync();
+        chunk = allocateChunk(chunkSize, position);
+        if (chunk != null)
+            metrics.recordReclaimRetrySuccess();
         return chunk;
     }
 
-    Chunk newChunk(int chunkSize, long position)
+    private String prettyUsed()
+    {
+        return org.apache.cassandra.utils.FBUtilities.prettyPrintMemory(bufferPool.usedSizeInBytes());
+    }
+
+    private String prettyOverflow()
+    {
+        return org.apache.cassandra.utils.FBUtilities.prettyPrintMemory(bufferPool.overflowMemoryInBytes());
+    }
+
+    private String prettyCapacity()
+    {
+        return org.apache.cassandra.utils.FBUtilities.prettyPrintMemory(cacheSize);
+    }
+
+    /**
+     * When the pool cannot satisfy tryGet: run Caffeine maintenance inline so eviction/onRemoval can
+     * {@code put} pages on this thread, recycle free local slabs, then caller retries tryGet once.
+     * <p>
+     * Does <b>not</b> wait for already-queued async cleanups: under load that backlog can stay non-empty
+     * and a bounded wait mostly adds read latency. Inline {@link Cache#cleanUp()} already blocks for
+     * work started here; remaining recovery is bypass / fail if tryGet still misses.
+     */
+    @VisibleForTesting
+    void reclaimSync()
+    {
+        metrics.recordSyncReclaim();
+        long t0 = System.nanoTime();
+        FORCE_INLINE_CLEANUP.set(Boolean.TRUE);
+        try
+        {
+            synchronousCache.cleanUp();
+        }
+        finally
+        {
+            FORCE_INLINE_CLEANUP.set(Boolean.FALSE);
+        }
+
+        bufferPool.recycleFreeLocalChunks();
+        metrics.recordReclaimLatency(System.nanoTime() - t0);
+    }
+
+    /**
+     * Try to allocate a chunk from the pool only (no overflow). Returns null if the pool is exhausted.
+     * Used by both cache and bypass paths; callers decide admission (Caffeine vs transient).
+     */
+    @Nullable
+    Chunk allocateChunk(int chunkSize, long position)
     {
         if (chunkSize <= PageAware.PAGE_SIZE)
         {
             // Always reserve a full page from the pool, even when the reader requests a smaller chunk.
             // Encode the logical chunk size in the owned buffer's limit (capacity stays PAGE_SIZE so
             // BufferPool.put sees the size it handed out). buffer() builds a transient capacity-narrowed
-            // view from that limit; releasing a slice/duplicate confuses slot/size accounting and can
-            // leak direct memory on the overflow path (see Chunk.free()).
-            ByteBuffer allocated = bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
+            // view from that limit; releasing a slice/duplicate confuses slot/size accounting.
+            ByteBuffer allocated = bufferPool.tryGet(PageAware.PAGE_SIZE);
+            if (allocated == null)
+                return null;
             // position must remain 0: buffer() uses slice(), which bases capacity on remaining.
             assert allocated.position() == 0 : "pool buffer position must be 0";
             allocated.limit(chunkSize);
             return new SingleRegionChunk(position, allocated);
         }
 
-        ByteBuffer[] buffers = bufferPool.getMultiple(chunkSize, PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
+        ByteBuffer[] buffers = bufferPool.tryGetMultiple(chunkSize, PageAware.PAGE_SIZE);
+        if (buffers == null)
+            return null;
         if (buffers.length > 1)
             return new MultiRegionChunk(position, buffers);
         else
             return new SingleRegionChunk(position, buffers[0]);
+    }
+
+    /**
+     * Test helper: allocate for the cache path (reclaim + retry). Returns null if pool exhausted
+     */
+    @VisibleForTesting
+    @Nullable
+    Chunk newChunk(int chunkSize, long position)
+    {
+        return tryAllocateChunk(chunkSize, position);
+    }
+
+    @VisibleForTesting
+    BufferPool bufferPool()
+    {
+        return bufferPool;
     }
 
     @Override
@@ -609,6 +759,60 @@ public class ChunkCache
     }
 
     /**
+     * Short-lived {@link Rebufferer.BufferHolder} for <em>bypass</em> (uncached) serves.
+     * <p>
+     * <b>Lifetime:</b> created only inside {@link CachingRebufferer#bypassServe}, handed to the caller of
+     * {@link Rebufferer#rebuffer(long)}, and must be {@link #release()}'d as soon as that rebuffer window is
+     * done—same contract as cached holders (typically when the reader advances or closes the current buffer).
+     * Do not stash on long-lived structures; pinning bypass pages defeats
+     * {@link #RESERVED_POOL_SPACE_IN_MB} and starves both cache admits and further bypass.
+     * <p>
+     * <b>Who releases:</b> the reader that obtained the holder from {@code rebuffer} (RandomAccessReader /
+     * upper layers), exactly once. This class is not installed in Caffeine; {@link ChunkCache#onRemoval} will
+     * not run for it.
+     * <p>
+     * <b>Do NOT:</b>
+     * <ul>
+     *   <li>complete a {@code CompletableFuture} in {@code cacheAsMap} with the wrapped {@link Chunk}</li>
+     *   <li>call {@link ChunkCache#onRemoval} / treat as a cache resident</li>
+     *   <li>skip {@link #release()} (leaks pool pages until process death)</li>
+     * </ul>
+     * Implementation reuses the same {@link Chunk} allocate+read path as cache loads; only admission differs.
+     */
+    static final class TransientBufferHolder implements Rebufferer.BufferHolder
+    {
+        private final Rebufferer.BufferHolder delegate;
+        private boolean released;
+
+        TransientBufferHolder(Rebufferer.BufferHolder delegate)
+        {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public ByteBuffer buffer()
+        {
+            assert !released : "Already released";
+            return delegate.buffer();
+        }
+
+        @Override
+        public long offset()
+        {
+            return delegate.offset();
+        }
+
+        @Override
+        public void release()
+        {
+            if (released)
+                return;
+            released = true;
+            delegate.release();
+        }
+    }
+
+    /**
      * Rebufferer providing cached chunks where data is obtained from the specified ChunkReader.
      * Thread-safe. One instance per SegmentedFile, created by ChunkCache.maybeWrap if the cache is enabled.
      */
@@ -654,26 +858,43 @@ public class ChunkCache
                             try
                             {
                                 chunk = load(source, pageAlignedPos);
+                                if (chunk == null)
+                                {
+                                    // The chunk cache is full and could not admit a cache resident after reclaim.
+                                    // We will attempt an uncached bypass.
+                                    //
+                                    // Remove the incomplete entry, wake waiters with null which should then uncached bypass.
+                                    // If there are hot keys under pressure returning null means that other threads waiting
+                                    // will also attempt an uncached bypass (allocating from the pool).
+                                    // This is suboptimal and handling hot key under pool pressure would require more complexity
+                                    // in tracking bypass serve requests. We don't want to pre maturely optimize for this case,
+                                    // unless it starts happening more often than expected.
+                                    cacheAsMap.remove(chunkKey, entry);
+                                    entry.complete(null);
+                                    return bypassServe(position, pageAlignedPos);
+                                }
                             }
                             catch (Throwable t)
                             {
-                                // please note that we don't need to remove the entry from the cache here
-                                // because Caffeine automatically removes entries that complete exceptionally
-
-                                // also signal other waiting readers
+                                // Caffeine automatically removes entries that complete exceptionally
                                 entry.completeExceptionally(t);
                                 throw t;
                             }
+                            // Only complete successfully with a chunk that is intended as a cache resident.
                             entry.complete(chunk);
                         }
                         else
                         {
-                            chunk = existing.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                            chunk = awaitCacheChunk(existing);
+                            if (chunk == null)
+                                return bypassServe(position, pageAlignedPos);
                         }
                     }
                     else
                     {
-                        chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                        chunk = awaitCacheChunk(cachedValue);
+                        if (chunk == null)
+                            return bypassServe(position, pageAlignedPos);
                     }
 
                     buf = chunk.getReferencedBuffer(position);
@@ -692,9 +913,52 @@ public class ChunkCache
             }
             catch (Throwable t)
             {
+                // Bypass already threw BufferPoolExhaustedException — do not catch and retry.
+                Throwables.propagateIfInstanceOf(t, BufferPoolExhaustedException.class);
                 Throwables.propagateIfInstanceOf(t.getCause(), CorruptSSTableException.class);
+                // Timeout, disk/load errors, etc.: same as before — surface to the caller (not a bypass signal).
                 throw Throwables.propagate(t);
             }
+        }
+
+        /**
+         * Await a cache load future.
+         * <ul>
+         *   <li>{@code null} — we aborted cache admission and completed the future with null after
+         *       removing the map entry; this waiter should {@link #bypassServe}.</li>
+         *   <li>chunk — normal load.</li>
+         *   <li>{@link java.util.concurrent.TimeoutException} — wait exceeded
+         *       {@code CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS} (slow/stuck IO or loader)
+         *   <li>other load failures — propagate (e.g. corrupt / FS errors via the future).</li>
+         * </ul>
+         */
+        @Nullable
+        private Chunk awaitCacheChunk(CompletableFuture<Chunk> pending) throws Exception
+        {
+            return pending.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        }
+
+        /**
+         * Uncached rebuffer using the same Chunk {@code allocate + read} machinery as {@link #load}, without
+         * installing the result into Caffeine. Memory comes from the chunk-cache pool (reserve headroom);
+         * the holder must be released ASAP by the reader (same contract as any {@link BufferHolder}).
+         */
+        private BufferHolder bypassServe(long position, long pageAlignedPos)
+        {
+            Chunk chunk = bypassLoad(source, pageAlignedPos);
+            // DO NOT put chunk into cacheAsMap / complete a future with it.
+            //
+            // Chunk starts with references=1 (initial ref). For cache loads that ref is owned by Caffeine
+            // until onRemoval. For bypass there is no cache entry: take a reader ref, drop the initial ref,
+            // and wrap so the reader's release() returns pages to the pool immediately.
+            BufferHolder holder = chunk.getReferencedBuffer(position);
+            if (holder == null)
+            {
+                chunk.release();
+                throw new RuntimeException("bypass chunk could not be referenced");
+            }
+            chunk.release(); // drop production ref; holder keeps refs until reader release
+            return new TransientBufferHolder(holder);
         }
 
         @Override

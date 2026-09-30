@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -254,6 +255,45 @@ public class BufferPool
         return buffers;
     }
 
+    /**
+     * Like {@link #getMultiple(int, int, BufferType)} for off-heap, but never falls back to unpooled / overflow
+     * allocation. Returns {@code null} if the pool cannot satisfy the request.
+     * <p>
+     * On partial failure (some pages allocated, a later page cannot), already taken buffers are released back
+     * to the pool before returning {@code null}.
+     *
+     * @return allocated buffers, or {@code null} if the pool is exhausted
+     */
+    @Nullable
+    public ByteBuffer[] tryGetMultiple(int totalSize, int chunkSize)
+    {
+        int numBuffers = totalSize / chunkSize;
+        assert totalSize == chunkSize * numBuffers
+            : "Total size " + totalSize + " is not a multiple of chunk size " + chunkSize;
+
+        LocalPool pool = localPool.get();
+        if (!DISABLE_COMBINED_ALLOCATION)
+        {
+            ByteBuffer full = pool.tryGet(totalSize, false);
+            if (full != null)
+                return new ByteBuffer[]{ full };
+        }
+
+        ByteBuffer[] buffers = new ByteBuffer[numBuffers];
+        for (int idx = 0; idx < numBuffers; ++idx)
+        {
+            ByteBuffer buffer = pool.tryGet(chunkSize, false);
+            if (buffer == null)
+            {
+                for (int releaseIdx = 0; releaseIdx < idx; ++releaseIdx)
+                    put(buffers[releaseIdx]);
+                return null;
+            }
+            buffers[idx] = buffer;
+        }
+        return buffers;
+    }
+
     /** Unlike the get methods, this will return null if the pool is exhausted */
     public ByteBuffer tryGet(int size)
     {
@@ -267,10 +307,12 @@ public class BufferPool
 
     private ByteBuffer allocate(int size, BufferType bufferType)
     {
+        ByteBuffer buffer = bufferType == BufferType.ON_HEAP
+                            ? ByteBuffer.allocate(size)
+                            : ByteBuffer.allocateDirect(size);
+        // Only account overflow after a successful allocation
         updateOverflowMemoryUsage(size);
-        return bufferType == BufferType.ON_HEAP
-               ? ByteBuffer.allocate(size)
-               : ByteBuffer.allocateDirect(size);
+        return buffer;
     }
 
     public void put(ByteBuffer buffer)
@@ -357,11 +399,30 @@ public class BufferPool
      * This is needed because if buffers were freed by a different thread than the one
      * that allocated them, recycling might not have happened and the local pool may still own some
      * fully empty chunks.
+     * <p>
+     * Note this tears down the current thread's {@link LocalPool} (including phantom registration).
+     * Prefer {@link #recycleFreeLocalChunks()} on hot paths that only need free slabs returned.
      */
     @VisibleForTesting
     public void releaseLocal()
     {
         localPool.get().release();
+    }
+
+    /**
+     * Best-effort: return currently fully-free slabs held by <em>this thread's</em> {@link LocalPool} to the
+     * parent / global pool so other threads can {@code tryGet} them. Does not destroy the local pool.
+     * Used when reclaiming memory under pressure (e.g. chunk cache) after pages were freed.
+     * <p>
+     * Always operates on {@code localPool.get()} for the calling thread only — it does not recycle slabs
+     * owned by other threads' LocalPools. Must be invoked on a thread that may own that pool (the reader
+     * doing reclaim), never against another thread's {@link LocalPool} reference.
+     *
+     * @see LocalPool#recycleFullyFreeChunks()
+     */
+    public void recycleFreeLocalChunks()
+    {
+        localPool.get().recycleFullyFreeChunks();
     }
 
     interface Debug
@@ -788,6 +849,14 @@ public class BufferPool
             clearForEach(Chunk::release);
         }
 
+        /**
+         * Release fully free chunks back to the parent/global pool; keep partially used ones.
+         */
+        private void recycleFullyFree()
+        {
+            removeIf((chunk, ignored) -> chunk.isFree(), null);
+        }
+
         private void unsafeRecycle(boolean forceEvicted)
         {
             clearForEach(chunk -> Chunk.unsafeRecycle(chunk, forceEvicted));
@@ -1080,6 +1149,29 @@ public class BufferPool
             reuseObjects.clear();
             localPoolReferences.remove(leakRef);
             leakRef.clear();
+        }
+
+        /**
+         * Return fully free slabs to the parent without destroying this local pool.
+         * <p>
+         * <b>Must run on {@link #owningThread}.</b> The local micro-queue ({@link MicroQueueOfChunks}) is not
+         * thread-safe: only the owning thread may {@code add}/{@code remove}/{@code removeIf} chunks.
+         * Concurrent {@link #put} from other threads may free slot bits on a chunk we own, but peeling a
+         * fully free slab out of the queue (and {@link Chunk#release()}) is the same rule as the
+         * same-thread full-free path in {@link #put} — owner thread only. Calling this from another thread
+         * would race queue mutation and is therefore asserted.
+         * <p>
+         * Via {@link BufferPool#recycleFreeLocalChunks()} the caller always gets <em>their</em> ThreadLocal
+         * pool, so reclaim on a reader thread is safe; do not invoke this on a LocalPool obtained from
+         * another thread.
+         */
+        void recycleFullyFreeChunks()
+        {
+            assert owningThread == Thread.currentThread() : "recycleFullyFreeChunks only on LocalPool owning thread";
+
+            if (tinyPool != null)
+                tinyPool.recycleFullyFreeChunks();
+            chunks.recycleFullyFree();
         }
 
         @VisibleForTesting
