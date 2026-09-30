@@ -198,7 +198,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
      */
     private static void restartWithDeletedCommitLog(Cluster cluster, int i, Runnable whileDown)
     {
-        String commitlogpath = cluster.get(1).callOnInstance(() -> DatabaseDescriptor.getCommitLogLocation().path());
+        String commitlogpath = cluster.get(i).callOnInstance(() -> DatabaseDescriptor.getCommitLogLocation().path());
         waitOn(cluster.get(i).shutdown());
         whileDown.run();
         // delete the commit log to make sure we are not recreating the data from it
@@ -303,10 +303,10 @@ public class SSTableEncryptionTest extends TestBaseImpl
         }
     }
 
-    private static void checkPresence(byte[] nonEncryptedTable, Pattern btiEncodedKey, boolean expected)
+    private static void checkPresence(byte[] fileBytes, Pattern btiEncodedKey, boolean expected)
     {
-        String partitionIndexString = new String(nonEncryptedTable, StandardCharsets.US_ASCII);
-        assertThat(btiEncodedKey.matcher(partitionIndexString).find()).isEqualTo(expected);
+        String fileString = new String(fileBytes, StandardCharsets.US_ASCII);
+        assertThat(btiEncodedKey.matcher(fileString).find()).isEqualTo(expected);
     }
 
     private boolean checkEncryptionCrc(byte[] bytes)
@@ -502,43 +502,18 @@ public class SSTableEncryptionTest extends TestBaseImpl
         return new TestTable(tableName, sstableBytes, sstablePath, partitionIndexBytes, partitionIndexPath, rowIndexBytes, rowIndexPath);
     }
 
-    private enum ComponentType { DATA, PARTITION_INDEX, ROW_INDEX }
-    
+    /**
+     * Returns the paths of the given component of the live sstables of node 1.
+     */
     private List<String> getPathsFor(Cluster cluster, String keyspace, String tableName, Component component)
     {
-        // Determine component type before passing to lambda
-        ComponentType componentType;
-        if (component == SSTableFormat.Components.DATA) {
-            componentType = ComponentType.DATA;
-        } else if (component == BtiFormat.Components.PARTITION_INDEX) {
-            componentType = ComponentType.PARTITION_INDEX;
-        } else if (component == BtiFormat.Components.ROW_INDEX) {
-            componentType = ComponentType.ROW_INDEX;
-        } else {
-            throw new IllegalArgumentException("Unsupported component: " + component);
-        }
-        
-        return cluster.get(1).callOnInstance(() -> {
-            Component comp;
-            switch (componentType) {
-                case DATA:
-                    comp = SSTableFormat.Components.DATA;
-                    break;
-                case PARTITION_INDEX:
-                    comp = BtiFormat.Components.PARTITION_INDEX;
-                    break;
-                case ROW_INDEX:
-                    comp = BtiFormat.Components.ROW_INDEX;
-                    break;
-                default:
-                    throw new IllegalArgumentException("Unsupported component type");
-            }
-            return Keyspace.open(keyspace).getColumnFamilyStore(tableName).getLiveSSTables()
-                           .stream()
-                           .map(SSTableReader::getDescriptor)
-                           .map(d -> d.pathFor(comp).toString())
-                           .collect(Collectors.toList());
-        });
+        // a Component does not cross the instance boundary; its name does, and is parsed again on the instance
+        String componentName = component.name;
+        return cluster.get(1).callOnInstance(() -> Keyspace.open(keyspace).getColumnFamilyStore(tableName).getLiveSSTables()
+                                                           .stream()
+                                                           .map(SSTableReader::getDescriptor)
+                                                           .map(d -> d.pathFor(Component.parse(componentName, d.getFormat())).toString())
+                                                           .collect(Collectors.toList()));
     }
 
     private String createKeyspace(Cluster cluster)
