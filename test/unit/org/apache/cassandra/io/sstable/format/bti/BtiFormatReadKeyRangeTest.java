@@ -17,6 +17,8 @@
 package org.apache.cassandra.io.sstable.format.bti;
 
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
@@ -37,6 +39,8 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.StatsComponent;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.Pair;
@@ -48,7 +52,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Checks that {@link SSTableFormat.SSTableReaderFactory#readKeyRange} - the entry point used by offline tools such as
  * {@code sstablemetadata} to read the first and last key of an sstable without opening it - can read the partition
  * index of BTI sstables whose indexes are encrypted, as well as of compressed and uncompressed (not encrypted) ones;
- * and that the index handles of a loaded reader do not hold the data file's compression metadata.
+ * that the index handles of a loaded reader do not hold the data file's compression metadata; and that an encrypted
+ * sstable whose compression info file is missing is reported as corrupted rather than read as plaintext.
  */
 public class BtiFormatReadKeyRangeTest extends CQLTester
 {
@@ -102,6 +107,46 @@ public class BtiFormatReadKeyRangeTest extends CQLTester
     @Test
     public void testEncryptedTableWithMissingCompressionInfo() throws Throwable
     {
+        withEncryptedSSTableCopyWithoutCompressionInfo((copy, partitioner) -> {
+            assertThatThrownBy(() -> BtiTableReaderLoadingBuilder.maybeLoadIndexEncryptionMetadata(copy))
+                .isInstanceOf(CorruptSSTableException.class);
+            assertThatThrownBy(() -> copy.getFormat().getReaderFactory().readKeyRange(copy, partitioner))
+                .isInstanceOf(CorruptSSTableException.class);
+        });
+    }
+
+    /**
+     * Nor must its encrypted metadata be parsed as plaintext: the missing compression info file is reported instead
+     * of whatever parsing ciphertext yields.
+     */
+    @Test
+    public void testEncryptedMetadataWithMissingCompressionInfo() throws Throwable
+    {
+        withEncryptedSSTableCopyWithoutCompressionInfo((copy, partitioner) -> {
+            assertThat(copy.version.metadataIsEncrypted()).isTrue();
+            File compressionInfo = copy.fileFor(SSTableFormat.Components.COMPRESSION_INFO);
+            assertThatThrownBy(() -> copy.getMetadataSerializer().deserialize(copy, EnumSet.allOf(MetadataType.class)))
+                .isInstanceOf(CorruptSSTableException.class)
+                .hasRootCauseInstanceOf(NoSuchFileException.class)
+                .hasRootCauseMessage(compressionInfo.absolutePath());
+            assertThatThrownBy(() -> StatsComponent.load(copy))
+                .isInstanceOf(CorruptSSTableException.class)
+                .hasRootCauseInstanceOf(NoSuchFileException.class)
+                .hasRootCauseMessage(compressionInfo.absolutePath());
+        });
+    }
+
+    private interface SSTableCopyCheck
+    {
+        void check(Descriptor copy, IPartitioner partitioner) throws Throwable;
+    }
+
+    /**
+     * Flushes an encrypted sstable, copies all its components but the compression info file, and runs the given
+     * check on the copy.
+     */
+    private void withEncryptedSSTableCopyWithoutCompressionInfo(SSTableCopyCheck check) throws Throwable
+    {
         createTable("CREATE TABLE %s (pk int, ck int, v text, PRIMARY KEY (pk, ck))" + TableCompression.ENCRYPTED.tableOptions);
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         disableCompaction();
@@ -123,10 +168,7 @@ public class BtiFormatReadKeyRangeTest extends CQLTester
             assertThat(copy.fileFor(SSTableFormat.Components.TOC).exists()).isTrue();
             assertThat(copy.fileFor(SSTableFormat.Components.COMPRESSION_INFO).exists()).isFalse();
 
-            assertThatThrownBy(() -> BtiTableReaderLoadingBuilder.maybeLoadIndexEncryptionMetadata(copy))
-                .isInstanceOf(CorruptSSTableException.class);
-            assertThatThrownBy(() -> copy.getFormat().getReaderFactory().readKeyRange(copy, cfs.getPartitioner()))
-                .isInstanceOf(CorruptSSTableException.class);
+            check.check(copy, cfs.getPartitioner());
         }
         finally
         {

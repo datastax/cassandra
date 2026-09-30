@@ -24,8 +24,10 @@ import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.UnaryOperator;
 import java.util.zip.CRC32;
+import javax.annotation.Nullable;
 
 import com.google.common.base.Throwables;
 import org.slf4j.Logger;
@@ -49,6 +51,7 @@ import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.TimeUUID;
 
+import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
 /**
@@ -67,7 +70,19 @@ public class MetadataSerializer implements IMetadataSerializer
 
     private static final int CHECKSUM_LENGTH = 4; // CRC32
 
+    @Override
     public void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Descriptor descriptor) throws IOException
+    {
+        serializeWith(components, out, descriptor, getEncryptor(descriptor, CompressionMetadataReaderType.WRITE_TIME));
+    }
+
+    @Override
+    public void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Descriptor descriptor, CompressionParams compressionParams) throws IOException
+    {
+        serializeWith(components, out, descriptor, encryptorFor(descriptor.version, compressionParams));
+    }
+
+    private void serializeWith(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Descriptor descriptor, @Nullable ICompressor encryptor) throws IOException
     {
         Version version = descriptor.version;
         boolean checksum = version.hasMetadataChecksum();
@@ -83,7 +98,6 @@ public class MetadataSerializer implements IMetadataSerializer
         updateChecksumInt(crc, componentsCount);
         maybeWriteChecksum(crc, out, version);
 
-        ICompressor encryptor = getEncryptor(descriptor, true);
         ByteBuffer[] componentsSerializations = new ByteBuffer[componentsCount];
 
         // serialize and possibly encrypt components
@@ -213,7 +227,7 @@ public class MetadataSerializer implements IMetadataSerializer
         MetadataType[] allMetadataTypes = MetadataType.values();
 
         Map<MetadataType, MetadataComponent> components = new EnumMap<>(MetadataType.class);
-        ICompressor encryptor = getEncryptor(descriptor, false);
+        ICompressor encryptor = getEncryptor(descriptor, CompressionMetadataReaderType.READ_TIME);
 
         for (int i = 0; i < count; i++)
         {
@@ -302,12 +316,32 @@ public class MetadataSerializer implements IMetadataSerializer
         rewriteSSTableMetadata(descriptor, currentComponents);
     }
 
+    @Override
     public void rewriteSSTableMetadata(Descriptor descriptor, Map<MetadataType, MetadataComponent> currentComponents) throws IOException
+    {
+        // The TOC is the last component a writer saves (after the metadata, see SSTableWriter.TransactionalProxy),
+        // so an sstable without one is still being written (e.g. by a caller that does not use the overload with
+        // the compression parameters) and its compression info file must be read through the write-time channel.
+        // Complete sstables (e.g. mutateLevel/mutateRepairMetadata) read it like any other of their components.
+        // Checking the TOC is a single local file-existence check. Sstables so old that they have no TOC are read
+        // at write time too, which makes no difference unless the storage distinguishes the two channels.
+        CompressionMetadataReaderType readerType = descriptor.fileFor(Components.TOC).exists() ? CompressionMetadataReaderType.READ_TIME
+                                                                                               : CompressionMetadataReaderType.WRITE_TIME;
+        rewriteWith(descriptor, currentComponents, getEncryptor(descriptor, readerType));
+    }
+
+    @Override
+    public void rewriteSSTableMetadata(Descriptor descriptor, Map<MetadataType, MetadataComponent> currentComponents, CompressionParams compressionParams) throws IOException
+    {
+        rewriteWith(descriptor, currentComponents, encryptorFor(descriptor.version, compressionParams));
+    }
+
+    private void rewriteWith(Descriptor descriptor, Map<MetadataType, MetadataComponent> currentComponents, @Nullable ICompressor encryptor) throws IOException
     {
         File file = descriptor.tmpFileFor(Components.STATS);
         try (DataOutputStreamPlus out = file.newOutputStream(File.WriteMode.OVERWRITE))
         {
-            serialize(currentComponents, out, descriptor);
+            serializeWith(currentComponents, out, descriptor, encryptor);
             out.flush();
         }
         catch (IOException e)
@@ -327,30 +361,56 @@ public class MetadataSerializer implements IMetadataSerializer
 
     /**
      * Read the compression info file pointed by the given descriptor and create the corresponding encryptor.
-     *
+     * <p>
      * Returns null if no encryption applies (version doesn't support it, compression is not applied, or the applicable
      * compression does not include encryption).
+     * <p>
+     * An sstable of a version with encrypted metadata whose compression info file is missing although its TOC lists
+     * it is corrupted: its metadata may be encrypted, so a {@link CorruptSSTableException} is thrown rather than
+     * silently treating it as plaintext (which would fail later with a confusing deserialization error, or write
+     * plaintext metadata). The check is best-effort: without a TOC, a missing compression info file means that the
+     * sstable is not compressed (see {@link CompressionInfoComponent#verifyCompressionInfoExistenceIfApplicable}).
+     *
+     * @param readerType {@link CompressionMetadataReaderType#WRITE_TIME} if the sstable is still being written,
+     *                   {@link CompressionMetadataReaderType#READ_TIME} otherwise
      */
-    private ICompressor getEncryptor(Descriptor desc, boolean writeTime)
+    @Nullable
+    private static ICompressor getEncryptor(Descriptor desc, CompressionMetadataReaderType readerType)
     {
         if (!desc.version.metadataIsEncrypted())
             return null;
-        
-        // During flush the compression info file may not have been uploaded to remote storage yet, so it has to
-        // be read through the write-time channel.
-        CompressionMetadataReaderType readerType = writeTime ? CompressionMetadataReaderType.WRITE_TIME
-                                                             : CompressionMetadataReaderType.READ_TIME;
 
         // We only need the compression parameters, not the chunk offsets, so read just the header. This allocates
         // no off-heap memory and creates no ref-counted resource to release.
         CompressionParams params = CompressionInfoComponent.readCompressionParamsIfExists(desc, readerType);
         if (params == null)
+        {
+            // CompressionInfo.db is known to be absent here, so there is no need to probe the other components:
+            // fail if the TOC says it should be there
+            CompressionInfoComponent.verifyCompressionInfoExistenceIfApplicable(desc, Set.of());
+            return null;
+        }
+
+        return encryptorFor(desc.version, params);
+    }
+
+    /**
+     * @param compressionParams the compression parameters of the data file, not null
+     *                          ({@link CompressionParams#noCompression()} if it is not compressed)
+     * @return the encryptor to use for the metadata of an sstable of the given version whose data file is (being)
+     * written with the given compression parameters, or null if no encryption applies
+     */
+    @Nullable
+    private static ICompressor encryptorFor(Version version, CompressionParams compressionParams)
+    {
+        checkNotNull(compressionParams, "compressionParams must not be null, use CompressionParams.noCompression() for uncompressed sstables");
+        if (!version.metadataIsEncrypted())
             return null;
 
         // Note: we use only the encryption component, without any compression. The reason for doing this is to
         // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
         // serialization on reads.
-        ICompressor compressor = params.getSstableCompressor();
+        ICompressor compressor = compressionParams.getSstableCompressor();
         if (compressor != null)
             return compressor.encryptionOnly();
         return null;
