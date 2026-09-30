@@ -54,6 +54,7 @@ import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
@@ -426,8 +427,11 @@ public class MetadataSerializerTest
         for (char major = 'a'; major <= 'z'; major++){
             for (char minor = 'a'; minor <= 'z'; minor++){
                 Version version = format.getVersion(String.format("%s%s", major, minor));
+                // BTI 'ab' has the features of 'ba' (see BtiFormat.BtiVersion), so it is minor-compatible with the
+                // 'b' versions rather than with the 'a' ones
+                char group = format instanceof BtiFormat && version.version.equals("ab") ? 'b' : major;
                 if (version.isCompatible())
-                    supportedVersions.computeIfAbsent(major, ignored -> new ArrayList<>()).add(version.version);
+                    supportedVersions.computeIfAbsent(group, ignored -> new ArrayList<>()).add(version.version);
             }
         }
 
