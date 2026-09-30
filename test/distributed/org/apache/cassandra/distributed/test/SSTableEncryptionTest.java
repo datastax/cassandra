@@ -98,16 +98,20 @@ public class SSTableEncryptionTest extends TestBaseImpl
 
     public void testQueryableEncryptedSSTables(boolean restartNodes) throws Throwable
     {
-        try (Cluster cluster = builder().withNodes(1)
+        // Without a restart, every node holds a replica of all the data, and each node's flushed encrypted sstables
+        // are read locally below. The restart variant keeps to one node, whose restart makes it open the sstables
+        // from disk.
+        int nodes = restartNodes ? 1 : 2;
+        try (Cluster cluster = builder().withNodes(nodes)
                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                                         .start())
         {
-            // given a table with data encrypted using local key
-            String keyspace = createKeyspace(cluster);
+            // given a table with data encrypted using local key, replicated to every node
+            String keyspace = createKeyspace(cluster, nodes);
             Path secretKey = createLocalSecretKey(cluster);
             String table = createEncryptedTable(cluster, keyspace, secretKey);
             // keep the sstables stable, so that the paths collected for the sstablemetadata check below stay valid
-            cluster.get(1).nodetoolResult("disableautocompaction", keyspace, table).asserts().success();
+            cluster.forEach(instance -> instance.nodetoolResult("disableautocompaction", keyspace, table).asserts().success());
             int numberOfRows = 10;
 
             for (int i = 0; i < numberOfRows; i++)
@@ -118,7 +122,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
                 }
             }
             // flush to make sure we have sstables
-            cluster.get(1).flush(keyspace);
+            cluster.forEach(instance -> instance.flush(keyspace));
 
             insertAndFlush(cluster, keyspace, table, numberOfRows);
 
@@ -131,6 +135,13 @@ public class SSTableEncryptionTest extends TestBaseImpl
                 List<String> sstablePaths = getPathsFor(cluster, keyspace, table, SSTableFormat.Components.DATA);
                 restartWithDeletedCommitLog(cluster, 1, () -> assertSSTableMetadataToolSucceeds(sstablePaths, true));
             }
+
+            // every node can read all the rows from its own sstables (the memtables were flushed), without the
+            // coordinator, whose digest reads and read repair could hide a replica returning fewer rows
+            cluster.forEach(instance -> {
+                assertThat(instance.executeInternal(String.format("SELECT * FROM %s.%s", keyspace, table)).length).isEqualTo(100);
+                assertThat(instance.executeInternal(String.format("SELECT * FROM %s.%s WHERE id = '5'", keyspace, table)).length).isEqualTo(10);
+            });
 
             // when querying all
             Object[][] rows = cluster.coordinator(1).execute(String.format("SELECT * FROM %s.%s ", keyspace, table), ALL);
@@ -160,8 +171,8 @@ public class SSTableEncryptionTest extends TestBaseImpl
 
             if (!restartNodes)
             {
-                // same check as above, on the sstables of the running node: its log output may reach the tool's
-                // stderr (the tool runner swaps System.err JVM-wide), so stderr is not checked
+                // same check as above, on the sstables of the running node 1: the log output of the nodes may
+                // reach the tool's stderr (the tool runner swaps System.err JVM-wide), so stderr is not checked
                 assertSSTableMetadataToolSucceeds(getPathsFor(cluster, keyspace, table, SSTableFormat.Components.DATA), false);
             }
         }
@@ -518,8 +529,13 @@ public class SSTableEncryptionTest extends TestBaseImpl
 
     private String createKeyspace(Cluster cluster)
     {
+        return createKeyspace(cluster, 1);
+    }
+
+    private String createKeyspace(Cluster cluster, int replicationFactor)
+    {
         String randomKeyspaceName = KEYSPACE_PREFIX + "_" + RandomStringUtils.randomNumeric(5);
-        cluster.schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = {'class':'SimpleStrategy','replication_factor':'1'}", randomKeyspaceName));
+        cluster.schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = {'class':'SimpleStrategy','replication_factor':'%d'}", randomKeyspaceName, replicationFactor));
         return randomKeyspaceName;
     }
 
@@ -574,7 +590,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
             cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')", keyspace, table, i, i, i), ALL);
         }
         // flush to make sure we have sstables
-         cluster.get(1).flush(keyspace);
+        cluster.forEach(instance -> instance.flush(keyspace));
     }
 
     private String localSystemKeyEncryptionCompressionSuffix(String className, String secretKeyPath, Double minCompressRatio)

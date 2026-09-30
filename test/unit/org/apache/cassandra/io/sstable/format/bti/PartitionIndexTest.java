@@ -55,6 +55,7 @@ import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.io.compress.CorruptBlockException;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -339,6 +340,57 @@ public class PartitionIndexTest
         Pair<List<DecoratedKey>, PartitionIndex> random = generateRandomIndex(count());
         checkIteration(random.left.size(), random.right);
         random.right.close();
+    }
+
+    /**
+     * The partition index of a zero-copy sliced sstable covers every key of the original sstable; the slice's
+     * {@link ZeroCopyMetadata} restricts the key range and the key count of the loaded index.
+     */
+    @Test
+    public void testZeroCopyOffsets() throws IOException
+    {
+        // a slice and a bounded iteration need no more keys than this
+        int count = count() / 10;
+        int firstKeyOffset = 1;
+        int lastKeyOffset = count - 2;
+        File file = FileUtils.createTempFile("ColumnTrieReaderTest", "");
+        List<DecoratedKey> keys = Lists.newArrayList();
+        FileHandle.Builder fhBuilder = makeHandle(file);
+        try (SequentialWriter writer = makeWriter(file);
+             PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version)
+        )
+        {
+            for (int i = 0; i < count; i++)
+                keys.add(generateRandomKey());
+            Collections.sort(keys);
+
+            for (int i = 0; i < count; i++)
+                builder.addEntry(keys.get(i), i);
+            builder.complete();
+
+            // the data offsets only matter to the data file; any non-zero values make the metadata exist
+            ZeroCopyMetadata zeroCopyMetadata = new ZeroCopyMetadata(4096, 8192, 4096,
+                                                                     lastKeyOffset - firstKeyOffset + 1,
+                                                                     keys.get(firstKeyOffset).getKey(),
+                                                                     keys.get(lastKeyOffset).getKey());
+            try (PartitionIndex index = loadPartitionIndex(fhBuilder, writer, zeroCopyMetadata);
+                 PartitionIndex.IndexPosIterator iter = index.allKeysIterator())
+            {
+                assertEquals(lastKeyOffset - firstKeyOffset + 1, index.size());
+                assertEquals(keys.get(firstKeyOffset), index.firstKey());
+                assertEquals(keys.get(lastKeyOffset), index.lastKey());
+
+                // iteration is limited to the keys of the slice
+                long expected = firstKeyOffset;
+                for (long pos = iter.nextIndexPos(); pos != PartitionIndex.NOT_FOUND; pos = iter.nextIndexPos())
+                    assertEquals(expected++, pos);
+                assertEquals(lastKeyOffset + 1, expected);
+            }
+        }
+        finally
+        {
+            file.tryDelete();
+        }
     }
 
     public void checkIteration(int keysSize, PartitionIndex index)
@@ -919,6 +971,11 @@ public class PartitionIndexTest
 
     protected PartitionIndex loadPartitionIndex(FileHandle.Builder fhBuilder, SequentialWriter writer) throws IOException
     {
-        return PartitionIndex.load(fhBuilder, partitioner, false, version);
+        return loadPartitionIndex(fhBuilder, writer, ZeroCopyMetadata.EMPTY);
+    }
+
+    protected PartitionIndex loadPartitionIndex(FileHandle.Builder fhBuilder, SequentialWriter writer, ZeroCopyMetadata zeroCopyMetadata) throws IOException
+    {
+        return PartitionIndex.load(fhBuilder, partitioner, false, zeroCopyMetadata, version);
     }
 }
