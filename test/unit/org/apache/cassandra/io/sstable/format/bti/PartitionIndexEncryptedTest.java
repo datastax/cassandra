@@ -196,15 +196,15 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
     }
 
     @Override
-    protected PartitionIndex loadPartitionIndex(FileHandle.Builder fhBuilder, SequentialWriter writer) throws IOException
+    protected PartitionIndex loadPartitionIndex(FileHandle.Builder fhBuilder, SequentialWriter writer, ZeroCopyMetadata zeroCopyMetadata) throws IOException
     {
         if (fromFile)
         {
             FileHandle.Builder fromFileBuilder = makeHandle(writer.getFile());
-            return PartitionIndex.load(fromFileBuilder, partitioner, false, ZeroCopyMetadata.EMPTY, version);
+            return PartitionIndex.load(fromFileBuilder, partitioner, false, zeroCopyMetadata, version);
         }
         else
-            return PartitionIndex.load(fhBuilder, partitioner, false, ZeroCopyMetadata.EMPTY, version);
+            return PartitionIndex.load(fhBuilder, partitioner, false, zeroCopyMetadata, version);
     }
 
     /**
