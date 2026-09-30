@@ -52,7 +52,6 @@ import org.apache.cassandra.io.sstable.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.SSTableReadsListener.SkippingReason;
 import org.apache.cassandra.io.sstable.format.AbstractKeyFetcher;
 import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
-import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -258,27 +257,6 @@ public class BtiTableReader extends SSTableReaderWithFilter
     }
 
     /**
-     * In encrypted index files skipBytes may end up in a different but equivalent position when it's at the
-     * end of an encrypted chunk. More precisely, if the skipped sequence of bytes lands exactly at the end of the
-     * useable part of a chunk (just before the hole left for encryption metadata), a normal read would leave the file
-     * at that position; before reading the next byte it will silently advance to the start of the next chunk. A skip,
-     * on the other hand, will jump to the position that follows the data, which is correctly converted to the beginning
-     * of the next page in preparation for reading. As a result it will leave the file positioned at the start of the
-     * next page immediately. See {@link PartitionIndexEncryptedTest#testSkipAcrossHoles}.
-     *
-     * To avoid this, we skip one fewer byte and consume the last byte.
-     */
-    @VisibleForTesting
-    static void skipBytesWithCorrectPosition(DataInputPlus in, int skip) throws IOException
-    {
-        if (skip > 0)
-        {
-            in.skipBytesFully(skip - 1);
-            in.readByte();
-        }
-    }
-
-    /**
      * Called by {@link #getRowIndexEntry} above (via Reader.ceiling/floor) to check if the position satisfies the full
      * key constraint. This is called once if there is a prefix match (which can be in any relationship with the sought
      * key, thus assumeNoMatch: false), and if it returns null it is called again for the closest greater position
@@ -294,7 +272,12 @@ public class BtiTableReader extends SSTableReaderWithFilter
                 if (assumeNoMatch)
                 {
                     int skip = ByteBufferUtil.readShortLength(in);
-                    skipBytesWithCorrectPosition(in, skip);
+                    // TrieIndexEntry.deserialize below needs getFilePointer() to be exactly the position the writer
+                    // recorded after the key (rowIndexWriter.position()), which is where reading the key would
+                    // leave it. RandomAccessReader.skipBytes guarantees that also for encrypted index files, where a
+                    // key ending at the usable end of a chunk leaves the pointer at the start of the chunk's hole
+                    // rather than at the start of the next chunk (see ReaderFileProxy.positionForSkip).
+                    in.skipBytesFully(skip);
                 }
                 else
                 {
