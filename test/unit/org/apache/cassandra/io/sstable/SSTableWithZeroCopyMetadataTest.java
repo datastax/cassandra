@@ -26,6 +26,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.io.FileUtils;
 import org.junit.After;
@@ -49,11 +50,14 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.StatsComponent;
 import org.apache.cassandra.io.sstable.format.bti.BtiTableReader;
 import org.apache.cassandra.io.sstable.format.bti.ScrubPartitionIterator;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.ReadPattern;
@@ -65,6 +69,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.OutputHandler;
+import org.apache.cassandra.utils.Pair;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -205,6 +210,45 @@ public class SSTableWithZeroCopyMetadataTest
                 }
             }).describedAs(sstable.toString()).doesNotThrowAnyException();
         });
+    }
+
+    /**
+     * The key range read without opening the sstable (what {@code sstablemetadata} prints) must be the one of the
+     * slice, not the one of the partition index the slice shares with the original sstable.
+     */
+    @Test
+    public void testReadKeyRange()
+    {
+        AtomicInteger narrowed = new AtomicInteger();
+        LifecycleTransaction.getFiles(tableDataDir, (file, fileType) -> Descriptor.fromFilenameWithComponent(file).right == Components.DATA, Directories.OnTxnErr.THROW).forEach(file -> {
+            Descriptor desc = Descriptor.fromFilename(file);
+            SSTableReader sstable = desc.getFormat().getReaderFactory().loadingBuilder(desc, metadataRef, desc.discoverComponents()).build(realm, true, false);
+            assertThatCode(() -> {
+                try
+                {
+                    ZeroCopyMetadata zeroCopyMetadata = StatsComponent.load(desc).statsMetadata().zeroCopyMetadata;
+                    assertThat(zeroCopyMetadata.exists()).isTrue();
+                    IPartitioner partitioner = sstable.getPartitioner();
+
+                    Pair<DecoratedKey, DecoratedKey> keyRange = desc.getFormat().getReaderFactory().readKeyRange(desc, partitioner, zeroCopyMetadata);
+                    assertThat(keyRange.left).isEqualTo(partitioner.decorateKey(zeroCopyMetadata.firstKey())).isEqualTo(sstable.getFirst());
+                    assertThat(keyRange.right).isEqualTo(partitioner.decorateKey(zeroCopyMetadata.lastKey())).isEqualTo(sstable.getLast());
+
+                    // without the zero-copy metadata, the key range is the one of the whole partition index
+                    Pair<DecoratedKey, DecoratedKey> indexKeyRange = desc.getFormat().getReaderFactory().readKeyRange(desc, partitioner);
+                    assertThat(indexKeyRange.left).isLessThanOrEqualTo(keyRange.left);
+                    assertThat(indexKeyRange.right).isGreaterThanOrEqualTo(keyRange.right);
+                    if (!indexKeyRange.equals(keyRange))
+                        narrowed.incrementAndGet();
+                }
+                finally
+                {
+                    if (sstable.selfRef().globalCount() > 0) sstable.selfRef().release();
+                }
+            }).describedAs(sstable.toString()).doesNotThrowAnyException();
+        });
+        // at least one of the test sstables is a slice that does not cover its whole partition index
+        assertThat(narrowed.get()).isPositive();
     }
 
     private void checkScrubber(SSTableReader sstable)

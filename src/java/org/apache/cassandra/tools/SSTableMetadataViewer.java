@@ -488,7 +488,7 @@ public class SSTableMetadataViewer
         }
         else
         {
-            Pair<DecoratedKey, DecoratedKey> firstLast = descriptor.getFormat().getReaderFactory().readKeyRange(descriptor, partitioner);
+            Pair<DecoratedKey, DecoratedKey> firstLast = descriptor.getFormat().getReaderFactory().readKeyRange(descriptor, partitioner, statsMetadata.zeroCopyMetadata);
             if (firstLast == null)
                 return;
 
