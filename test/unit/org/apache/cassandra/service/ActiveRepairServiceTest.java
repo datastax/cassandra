@@ -37,8 +37,11 @@ import java.util.concurrent.locks.Condition;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.ListeningExecutorService;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -64,7 +67,10 @@ import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.repair.CommonRange;
 import org.apache.cassandra.repair.RepairParallelism;
+import org.apache.cassandra.repair.RepairSession;
+import org.apache.cassandra.repair.Scheduler;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.streaming.PreviewKind;
@@ -127,6 +133,92 @@ public class ActiveRepairServiceTest
         StorageService.instance.setTokens(Collections.singleton(tmd.partitioner.getRandomToken()));
         tmd.updateNormalToken(tmd.partitioner.getMinimumToken(), REMOTE);
         assert tmd.isMember(REMOTE);
+    }
+
+    @After
+    public void tearDown()
+    {
+        ActiveRepairService.instance.terminateSessions();
+    }
+
+    @Test
+    public void testAbortSession() throws Exception
+    {
+        UUID parentRepairSession = UUID.randomUUID();
+        UUID otherParentRepairSession = UUID.randomUUID();
+        ColumnFamilyStore cfs = prepareColumnFamilyStore();
+        Range<Token> range = new Range<>(cfs.getPartitioner().getMinimumToken(), cfs.getPartitioner().getMinimumToken());
+        Collection<Range<Token>> ranges = Collections.singleton(range);
+        CommonRange commonRange = new CommonRange(Collections.singleton(LOCAL), Collections.emptySet(), ranges);
+
+        ActiveRepairService.instance.registerParentRepairSession(parentRepairSession, LOCAL,
+                                                                 Collections.singletonList(cfs), ranges,
+                                                                 false, UNREPAIRED_SSTABLE, false, PreviewKind.NONE);
+        ActiveRepairService.instance.registerParentRepairSession(otherParentRepairSession, LOCAL,
+                                                                 Collections.singletonList(cfs), ranges,
+                                                                 false, UNREPAIRED_SSTABLE, false, PreviewKind.NONE);
+
+        ListeningExecutorService executor = MoreExecutors.listeningDecorator(MoreExecutors.newDirectExecutorService());
+        RepairOption options = RepairOption.parse(Collections.emptyMap(), cfs.getPartitioner());
+        Scheduler scheduler = Scheduler.build(1);
+
+        RepairSession session1 = ActiveRepairService.instance.submitRepairSession(parentRepairSession, commonRange,
+                                                                                  KEYSPACE5, options, false,
+                                                                                  executor, scheduler, CF_STANDARD1);
+        RepairSession session2 = ActiveRepairService.instance.submitRepairSession(parentRepairSession, commonRange,
+                                                                                  KEYSPACE5, options, false,
+                                                                                  executor, scheduler, CF_STANDARD1);
+        RepairSession otherSession = ActiveRepairService.instance.submitRepairSession(otherParentRepairSession, commonRange,
+                                                                                      KEYSPACE5, options, false,
+                                                                                      executor, scheduler, CF_STANDARD1);
+
+        assertNotNull(session1);
+        assertNotNull(session2);
+        assertNotNull(otherSession);
+        assertNotNull(ActiveRepairService.instance.getParentRepairSession(parentRepairSession));
+        assertNotNull(ActiveRepairService.instance.getParentRepairSession(otherParentRepairSession));
+
+        ActiveRepairService.instance.abortSession(parentRepairSession);
+
+        // Verify parent repair session for the aborted session is removed
+        try
+        {
+            ActiveRepairService.instance.getParentRepairSession(parentRepairSession);
+            fail("Expected getParentRepairSession to throw an exception after abortSession");
+        }
+        catch (RuntimeException e)
+        {
+            assertTrue(e.getMessage().contains("has failed"));
+        }
+
+        // Verify the other parent repair session is untouched
+        assertNotNull(ActiveRepairService.instance.getParentRepairSession(otherParentRepairSession));
+
+        // Verify repair sessions belonging to the aborted parent session were force shutdown and terminated
+        assertTrue(session1.isDone());
+        assertTrue(session2.isDone());
+        try
+        {
+            session1.get();
+            fail("Expected ExecutionException on aborted session1");
+        }
+        catch (Exception e)
+        {
+            assertTrue(e.getCause() instanceof java.io.IOException);
+            assertTrue(e.getCause().getMessage().contains("Repair session aborted: " + parentRepairSession));
+        }
+
+        try
+        {
+            session2.get();
+            fail("Expected ExecutionException on aborted session2");
+        }
+        catch (Exception e)
+        {
+            assertTrue(e.getCause() instanceof java.io.IOException);
+            assertTrue(e.getCause().getMessage().contains("Repair session aborted: " + parentRepairSession));
+        }
+        System.out.println("testAbortSession completed successfully");
     }
 
     @Test
