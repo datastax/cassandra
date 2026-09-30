@@ -55,6 +55,8 @@ public class RepairOption
     public static final String REPAIR_PAXOS_KEY = "repairPaxos";
     public static final String PAXOS_ONLY_KEY = "paxosOnly";
     public static final String OFFLINE_SERVICE = "offlineService";
+    public static final String ENTITY_ID_KEY = "entityId";
+    public static final String REPAIR_TYPE_KEY = "repairType";
 
     // we don't want to push nodes too much for repair
     public static final int MAX_JOB_THREADS = 4;
@@ -177,6 +179,18 @@ public class RepairOption
      *              it's not part of the ring. Repair should use tokens and hosts directly from repair options.</td>
      *             <td>false</td>
      *         </tr>
+     *         <tr>
+     *             <td>entityId</td>
+     *             <td>Opaque entity identifier set by CNDB orchestration. Not used by Cassandra internals.
+     *             Included in repair log lines for observability. Ignored when absent.</td>
+     *             <td>null</td>
+     *         </tr>
+     *         <tr>
+     *             <td>repairType</td>
+     *             <td>Source of the repair as set by CNDB (e.g. "continuous", "decommission", "on_demand").
+     *             Not used by Cassandra internals. Included in repair log lines for observability. Ignored when absent.</td>
+     *             <td>null</td>
+     *         </tr>
      *     </tbody>
      * </table>
      *
@@ -205,6 +219,8 @@ public class RepairOption
             Preconditions.checkArgument(!paxosOnly, "paxosOnly must be set to false for preview repairs");
         }
         boolean offlineService = Boolean.parseBoolean(options.get(OFFLINE_SERVICE));
+        String entityId   = options.get(ENTITY_ID_KEY);   // null if absent - no default needed
+        String repairType = options.get(REPAIR_TYPE_KEY);  // null if absent
 
         Preconditions.checkArgument(!pullRepair || !pushRepair, "Cannot use pushRepair and pullRepair as the same time");
 
@@ -225,7 +241,7 @@ public class RepairOption
 
         RepairOption option = new RepairOption(parallelism, primaryRange, incremental, trace, jobThreads, ranges,
                                                !ranges.isEmpty(), pushRepair, pullRepair, force, previewKind, asymmetricSyncing,
-                                               ignoreUnreplicatedKeyspaces, repairPaxos, paxosOnly, offlineService);
+                                               ignoreUnreplicatedKeyspaces, repairPaxos, paxosOnly, offlineService, entityId, repairType);
 
         // data centers
         String dataCentersStr = options.get(DATACENTERS_KEY);
@@ -309,6 +325,8 @@ public class RepairOption
     private final boolean repairPaxos;
     private final boolean paxosOnly;
     private final boolean offlineService;
+    private final String entityId;   // nullable - absent when not set by CNDB
+    private final String repairType; // nullable - e.g. "continuous", "decommission", "on_demand"
 
     private final Collection<String> columnFamilies = new HashSet<>();
     private final Collection<String> dataCenters = new HashSet<>();
@@ -318,7 +336,8 @@ public class RepairOption
     public RepairOption(RepairParallelism parallelism, boolean primaryRange, boolean incremental, boolean trace,
                         int jobThreads, Collection<Range<Token>> ranges, boolean isSubrangeRepair, boolean pushRepair,
                         boolean pullRepair, boolean forceRepair, PreviewKind previewKind, boolean optimiseStreams,
-                        boolean ignoreUnreplicatedKeyspaces, boolean repairPaxos, boolean paxosOnly, boolean offlineService)
+                        boolean ignoreUnreplicatedKeyspaces, boolean repairPaxos, boolean paxosOnly, boolean offlineService,
+                        String entityId, String repairType)
     {
 
         this.parallelism = parallelism;
@@ -337,6 +356,8 @@ public class RepairOption
         this.repairPaxos = repairPaxos;
         this.paxosOnly = paxosOnly;
         this.offlineService = offlineService;
+        this.entityId = entityId;
+        this.repairType = repairType;
     }
 
     public RepairParallelism getParallelism()
@@ -462,6 +483,22 @@ public class RepairOption
         return paxosOnly;
     }
 
+    /**
+     * @return entity identifier supplied by CNDB at repair initiation, or null if not set
+     */
+    public String getEntityId()
+    {
+        return entityId;
+    }
+
+    /**
+     * @return repair source label supplied by CNDB (e.g. "continuous", "decommission", "on_demand"), or null if not set
+     */
+    public String getRepairType()
+    {
+        return repairType;
+    }
+
     @Override
     public String toString()
     {
@@ -483,6 +520,8 @@ public class RepairOption
                ", repairPaxos: " + repairPaxos +
                ", paxosOnly: " + paxosOnly +
                ", offline service: " + offlineService +
+               (entityId   != null ? ", entityId: "   + entityId   : "") +
+               (repairType != null ? ", repairType: " + repairType : "") +
                ')';
     }
 

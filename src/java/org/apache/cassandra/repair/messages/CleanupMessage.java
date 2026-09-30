@@ -47,6 +47,12 @@ public class CleanupMessage extends RepairMessage
     }
 
     @Override
+    public String toString()
+    {
+        return "CleanupMessage{parentRepairSession=" + parentRepairSession + '}';
+    }
+
+    @Override
     public boolean equals(Object o)
     {
         if (!(o instanceof CleanupMessage))

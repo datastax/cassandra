@@ -19,6 +19,9 @@ package org.apache.cassandra.repair;
 
 import java.util.concurrent.ExecutionException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.exceptions.RepairException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.messages.RepairMessage;
@@ -36,6 +39,8 @@ import static org.apache.cassandra.repair.messages.RepairMessage.notDone;
  */
 public class ValidationTask extends AsyncFuture<TreeResponse> implements Runnable
 {
+    private static final Logger logger = LoggerFactory.getLogger(ValidationTask.class);
+
     private final RepairJobDesc desc;
     private final InetAddressAndPort endpoint;
     private final long nowInSec;
@@ -56,6 +61,8 @@ public class ValidationTask extends AsyncFuture<TreeResponse> implements Runnabl
      */
     public void run()
     {
+        logger.info("{} parentSession={} Sending validation request to {}",
+                    previewKind.logPrefix(desc.sessionId), desc.parentSessionId, endpoint);
         RepairMessage.sendMessageWithFailureCB(ctx, notDone(this),
                                                new ValidationRequest(desc, nowInSec),
                                                VALIDATION_REQ,
@@ -72,6 +79,8 @@ public class ValidationTask extends AsyncFuture<TreeResponse> implements Runnabl
     {
         if (trees == null)
         {
+            logger.warn("{} parentSession={} Validation failed on {}", previewKind.logPrefix(desc.sessionId), desc.parentSessionId, endpoint);
+
             tryFailure(RepairException.warn(desc, previewKind, "Validation failed in " + endpoint));
         }
         else if (!trySuccess(new TreeResponse(endpoint, trees)))
@@ -82,7 +91,7 @@ public class ValidationTask extends AsyncFuture<TreeResponse> implements Runnabl
     }
 
     /**
-     * Release any trees already received by this task, and place it a state where any trees 
+     * Release any trees already received by this task, and place it a state where any trees
      * received subsequently will be properly discarded.
      */
     public synchronized void abort(Throwable reason)
@@ -108,7 +117,7 @@ public class ValidationTask extends AsyncFuture<TreeResponse> implements Runnabl
             }
         }
     }
-    
+
     public synchronized boolean isActive()
     {
         return !isDone();

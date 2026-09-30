@@ -176,7 +176,8 @@ public class CoordinatorSession extends ConsistentSession
     {
         Preconditions.checkArgument(allStates(State.PREPARING));
 
-        logger.info("Beginning prepare phase of incremental repair session {}", sessionID);
+        logger.info("Beginning prepare phase of incremental repair session {} coordinated by {} with {} participant(s): {}",
+                    sessionID, coordinator, participants.size(), participants);
 
         PrepareConsistentRequest request = new PrepareConsistentRequest(sessionID, coordinator, participants);
         for (final InetAddressAndPort participant : participants)
@@ -205,7 +206,8 @@ public class CoordinatorSession extends ConsistentSession
             return;
         if (!success)
         {
-            logger.warn("{} failed the prepare phase for incremental repair session {}", participant, sessionID);
+            logger.warn("{} failed the prepare phase for incremental repair session {} (current state: {})",
+                        participant, sessionID, getParticipantState(participant));
             sendFailureMessageToParticipants();
             setParticipantState(participant, State.FAILED);
         }
@@ -265,7 +267,8 @@ public class CoordinatorSession extends ConsistentSession
         }
         else if (!success)
         {
-            logger.warn("Finalization proposal of session {} rejected by {}. Aborting session", sessionID, participant);
+            logger.warn("Finalization proposal of session {} rejected by {} (participant state: {}). Aborting session",
+                        sessionID, participant, getParticipantState(participant));
             fail();
         }
         else
@@ -316,7 +319,8 @@ public class CoordinatorSession extends ConsistentSession
             logger.error("Can't transition endpoints {} to FAILED", cantFail, new RuntimeException());
             return;
         }
-        logger.info("Incremental repair session {} failed", sessionID);
+        logger.warn("Incremental repair session {} failed with {} participant(s): {}",
+                    sessionID, participantStates.size(), participantStates.keySet());
         sendFailureMessageToParticipants();
         setAll(State.FAILED);
 
@@ -340,7 +344,8 @@ public class CoordinatorSession extends ConsistentSession
      */
     public Future<CoordinatedRepairResult> execute(Supplier<Future<CoordinatedRepairResult>> sessionSubmitter)
     {
-        logger.info("Beginning coordination of incremental repair session {}", sessionID);
+        logger.info("Beginning coordination of incremental repair session {} with {} participant(s): {}",
+                    sessionID, participants.size(), participants);
 
         sessionStart = ctx.clock().currentTimeMillis();
         Future<Void> prepareResult = prepare();
@@ -348,8 +353,7 @@ public class CoordinatorSession extends ConsistentSession
         // run repair sessions normally
         Future<CoordinatedRepairResult> repairSessionResults = prepareResult.flatMap(ignore -> {
             repairStart = ctx.clock().currentTimeMillis();
-            if (logger.isDebugEnabled())
-                logger.debug("Incremental repair {} prepare phase completed in {}", sessionID, formatDuration(sessionStart, repairStart));
+            logger.info("Incremental repair {} prepare phase completed in {}", sessionID, formatDuration(sessionStart, repairStart));
             setRepairing();
             return sessionSubmitter.get();
         });
@@ -359,28 +363,25 @@ public class CoordinatorSession extends ConsistentSession
             finalizeStart = ctx.clock().currentTimeMillis();
             if (result.hasFailed())
             {
-                if (logger.isDebugEnabled())
-                    logger.debug("Incremental repair {} validation/stream phase completed in {}", sessionID, formatDuration(repairStart, finalizeStart));
+                logger.info("Incremental repair {} validation/stream phase failed in {}", sessionID, formatDuration(repairStart, finalizeStart));
                 return ImmediateFuture.failure(SomeRepairFailedException.INSTANCE);
             }
+            logger.info("Incremental repair {} validation/stream phase completed in {}", sessionID, formatDuration(repairStart, finalizeStart));
             return ImmediateFuture.success(result);
         });
 
         // mark propose finalization and commit
         Future<CoordinatedRepairResult> proposeFuture = onlySuccessSessionResults.flatMap(results -> finalizePropose().map(ignore -> {
-            if (logger.isDebugEnabled())
-                logger.debug("Incremental repair {} finalization phase completed in {}", sessionID, formatDuration(finalizeStart, ctx.clock().currentTimeMillis()));
+            logger.info("Incremental repair {} finalization phase completed in {}", sessionID, formatDuration(finalizeStart, ctx.clock().currentTimeMillis()));
             finalizeCommit();
-            if (logger.isDebugEnabled())
-                logger.debug("Incremental repair {} phase completed in {}", sessionID, formatDuration(sessionStart, ctx.clock().currentTimeMillis()));
+            logger.info("Incremental repair {} completed in total {}", sessionID, formatDuration(sessionStart, ctx.clock().currentTimeMillis()));
             return results;
         }));
 
         return proposeFuture.addCallback((ignore, failure) -> {
             if (failure != null)
             {
-                if (logger.isDebugEnabled())
-                    logger.debug("Incremental repair {} phase failed in {}", sessionID, formatDuration(sessionStart, ctx.clock().currentTimeMillis()));
+                logger.warn("Incremental repair {} failed after {}", sessionID, formatDuration(sessionStart, ctx.clock().currentTimeMillis()));
                 fail();
             }
         }, ImmediateExecutor.INSTANCE);

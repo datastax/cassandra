@@ -176,7 +176,7 @@ public class RepairRunner extends JMXNotificationProgressListener
                 case IN_PROGRESS:
                     break;
                 default:
-                    printMessage(String.format("WARNING Encountered unexpected RepairRunnable.ParentRepairStatus: %s", parentRepairStatus));
+                    printMessage(String.format("WARNING Encountered unexpected RepairCoordinator.ParentRepairStatus: %s", parentRepairStatus));
                     printMessages(messages);
                     break;
             }

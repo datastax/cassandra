@@ -65,6 +65,7 @@ public class RepairFinalizationOperation
     {
         boolean completed = false;
         boolean obsoleteSSTables = isTransient && repairedAt > 0;
+        int sstableCount = transaction.originals().size();
 
         try
         {
@@ -72,13 +73,17 @@ public class RepairFinalizationOperation
             {
                 if (obsoleteSSTables)
                 {
-                    logger.info("Obsoleting transient repaired sstables for {}", sessionID);
-                    Preconditions.checkState(Iterables.all(transaction.originals(), SSTableReader::isTransient));
-                    transaction.obsoleteOriginals();
-                }
-                else
-                {
-                    logger.info("Moving {} from pending to repaired with repaired at = {} for session id = {}", transaction.originals(), repairedAt, sessionID);
+                    logger.info("Obsoleting {} transient repaired sstable(s) for session {} on {}.{}",
+                            sstableCount, sessionID,
+                            realm.metadata().keyspace, realm.metadata().name);
+                Preconditions.checkState(Iterables.all(transaction.originals(), SSTableReader::isTransient));
+                transaction.obsoleteOriginals();
+            }
+            else
+            {
+                logger.info("Moving {} sstable(s) from pending to repaired (repairedAt={}, session={}) on {}.{}",
+                            sstableCount, repairedAt, sessionID,
+                            realm.metadata().keyspace, realm.metadata().name);
                     realm.mutateRepairedWithLock(transaction.originals(),
                                                  repairedAt,
                                                  ActiveRepairService.NO_PENDING_REPAIR,
@@ -103,8 +108,9 @@ public class RepairFinalizationOperation
 
                 if (completed)
                 {
-                    realm.repairSessionCompleted(sessionID);
-                }
+                    logger.info("RepairFinishedCompactionTask for session {} on {}.{} complete ({} sstable(s), obsolete={})",
+                            sessionID, realm.metadata().keyspace, realm.metadata().name, sstableCount, obsoleteSSTables);
+                realm.repairSessionCompleted(sessionID);}
             }
         }
         finally
