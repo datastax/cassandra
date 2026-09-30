@@ -37,6 +37,7 @@ import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class ValidationExecutorTest
 {
@@ -106,6 +107,28 @@ public class ValidationExecutorTest
         assertThat(validationExecutor.getCorePoolSize()).isEqualTo(corePoolSize * 2);
         assertThat(validationExecutor.getMaximumPoolSize()).isEqualTo(maxPoolSize * 2);
         validationExecutor.shutdownNow();
+    }
+
+    @Test
+    public void testWorkerIdleAfterExecute() throws Exception
+    {
+        // CompactionExecutor replaces afterExecute without calling super, so it must mark the worker idle itself
+        validationExecutor = new CompactionManager.ValidationExecutor();
+        validationExecutor.submit(() -> {}).get(10, TimeUnit.SECONDS);
+        Util.spinAssertEquals(null, validationExecutor::longestRunningTaskClass, 5);
+        assertEquals(0L, validationExecutor.longestRunningTaskAgeNanos());
+    }
+
+    @Test
+    public void testSubmitIfRunningReportsTaskClass() throws Exception
+    {
+        validationExecutor = new CompactionManager.ValidationExecutor();
+        Condition taskBlocked = new SimpleCondition();
+        CountDownLatch taskComplete = new CountDownLatch(1);
+        validationExecutor.submitIfRunning(new Task(taskBlocked, taskComplete), "validationExecutorTest");
+        Util.spinAssertEquals(Task.class, validationExecutor::longestRunningTaskClass, 5);
+        taskBlocked.signalAll();
+        assertTrue(taskComplete.await(10, TimeUnit.SECONDS));
     }
 
     private static class Task implements Runnable

@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -45,6 +46,7 @@ import static org.apache.cassandra.net.Verb.ECHO_REQ;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class NodeToolTPStatsTest extends CQLTester
@@ -111,7 +113,7 @@ public class NodeToolTPStatsTest extends CQLTester
     public void testTPStats() throws Throwable
     {
         ToolResult tool = ToolRunner.invokeNodetool("tpstats");
-        Assertions.assertThat(tool.getStdout()).containsPattern("Pool Name \\s* Active Pending Completed Blocked All time blocked");
+        Assertions.assertThat(tool.getStdout()).containsPattern("Pool Name \\s* Active Pending Completed Blocked All time blocked Oldest queued \\(ms\\) Longest running \\(ms\\)");
         Assertions.assertThat(tool.getStdout()).containsIgnoringCase("Latencies waiting in queue (micros) per dropped message types");
         assertTrue(tool.getCleanedStderr().isEmpty());
         assertEquals(0, tool.getExitCode());
@@ -149,6 +151,23 @@ public class NodeToolTPStatsTest extends CQLTester
         assertNotEquals(origGossip, newGossip);
         Assertions.assertThat(tool.getStdout()).containsPattern("ECHO_REQ\\D.*[1-9].*");
         Assertions.assertThat(tool.getStdout()).containsPattern("ECHO_RSP\\D.*[1-9].*");
+    }
+
+    @Test
+    public void testTPStatsJsonHasLivenessKeys() throws Throwable
+    {
+        ToolResult tool = ToolRunner.invokeNodetool("tpstats", "-F", "json");
+        assertEquals(0, tool.getExitCode());
+        Map<?, ?> root = new ObjectMapper().readValue(tool.getStdout(), Map.class);
+        Map<?, ?> pools = (Map<?, ?>) root.get("ThreadPools");
+        Map<?, ?> postFlush = (Map<?, ?>) pools.get("MemtablePostFlush");
+        assertNotNull(postFlush);
+        for (String key : Arrays.asList("OldestQueuedTaskAgeMs", "LongestRunningTaskAgeMs"))
+        {
+            Object value = postFlush.get(key);
+            assertTrue(key + " = " + value, value instanceof Number);
+            assertTrue(key + " = " + value, ((Number) value).longValue() >= 0);
+        }
     }
 
     @Test

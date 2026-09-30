@@ -33,12 +33,14 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.apache.cassandra.concurrent.DebuggableThreadPoolExecutorTest.checkLocalStateIsPropagated;
+import static org.junit.Assert.*;
 
 public class SEPExecutorTest
 {
@@ -286,4 +288,160 @@ public class SEPExecutorTest
         }
     }
 
+    private static final class Blocker implements Runnable
+    {
+        final CountDownLatch started = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+
+        public void run()
+        {
+            started.countDown();
+            try { release.await(); } catch (InterruptedException e) { throw new AssertionError(e); }
+        }
+    }
+
+    @Test
+    public void testQueueAgeAndLongestRunning() throws Exception
+    {
+        SharedExecutorPool pool = new SharedExecutorPool("LivenessPool");
+        SEPExecutor es = (SEPExecutor) pool.newExecutor(1, "internal", "LivenessStage");
+        try
+        {
+            assertEquals(0L, es.oldestQueuedTaskAgeNanos());
+            assertEquals(0L, es.longestRunningTaskAgeNanos());
+            assertNull(es.longestRunningTaskClass());
+
+            Blocker a = new Blocker();
+            Blocker b = new Blocker();
+            es.execute(a);
+            assertTrue(a.started.await(10, TimeUnit.SECONDS));
+            es.execute(b);                       // 1 thread: b waits at the head of the queue
+            Thread.sleep(50);
+
+            Util.spinAssertEquals(true, () -> es.oldestQueuedTaskAgeNanos() >= MILLISECONDS.toNanos(40), 5);
+            Util.spinAssertEquals(true, () -> es.longestRunningTaskAgeNanos() >= MILLISECONDS.toNanos(40), 5);
+            assertSame(Blocker.class, es.longestRunningTaskClass());
+            Util.spinAssertEquals(true, () -> es.getOldestQueuedTaskAgeMs() >= 40, 5);
+            assertEquals(Blocker.class.getName(), es.getLongestRunningTaskClass());
+
+            a.release.countDown();
+            assertTrue(b.started.await(10, TimeUnit.SECONDS));
+            Util.spinAssertEquals(0L, es::oldestQueuedTaskAgeNanos, 5);
+            b.release.countDown();
+            Util.spinAssertEquals(0L, es::longestRunningTaskAgeNanos, 5);
+            Util.spinAssertEquals(null, es::longestRunningTaskClass, 5);
+        }
+        finally
+        {
+            pool.shutdownAndWait(1, TimeUnit.MINUTES);
+        }
+    }
+
+    @Test
+    public void testLongestRunningTaskClassForLambda() throws Exception
+    {
+        SharedExecutorPool pool = new SharedExecutorPool("LivenessPool2");
+        SEPExecutor es = (SEPExecutor) pool.newExecutor(1, "internal", "LivenessStage2");
+        try
+        {
+            CountDownLatch started = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            es.execute(() -> {
+                started.countDown();
+                try { release.await(); } catch (InterruptedException e) { throw new AssertionError(e); }
+            });
+            assertTrue(started.await(10, TimeUnit.SECONDS));
+            Class<?> c = es.longestRunningTaskClass();
+            assertNotNull(c);
+            assertTrue(c.getName(), c.getName().contains(SEPExecutorTest.class.getName()));
+            release.countDown();
+        }
+        finally
+        {
+            pool.shutdownAndWait(1, TimeUnit.MINUTES);
+        }
+    }
+
+    @Test
+    public void testAgeNeverNegative() throws Exception
+    {
+        SharedExecutorPool pool = new SharedExecutorPool("LivenessPool3");
+        SEPExecutor es = (SEPExecutor) pool.newExecutor(2, "internal", "LivenessStage3");
+        try
+        {
+            for (int i = 0; i < 20_000; i++)
+            {
+                es.execute(() -> {});
+                assertTrue(es.oldestQueuedTaskAgeNanos() >= 0);
+                assertTrue(es.longestRunningTaskAgeNanos() >= 0);
+            }
+        }
+        finally
+        {
+            pool.shutdownAndWait(1, TimeUnit.MINUTES);
+        }
+    }
+
+    @Test
+    public void testLivenessAfterShutdown() throws Exception
+    {
+        SharedExecutorPool pool = new SharedExecutorPool("LivenessPool4");
+        SEPExecutor es = (SEPExecutor) pool.newExecutor(1, "internal", "LivenessStage4");
+        es.execute(() -> {});
+        pool.shutdownAndWait(1, TimeUnit.MINUTES);
+        assertEquals(0L, es.oldestQueuedTaskAgeNanos());
+        assertEquals(0L, es.longestRunningTaskAgeNanos());
+        assertNull(es.longestRunningTaskClass());
+    }
+
+    @Test
+    public void testExitedWorkersArePruned() throws Exception
+    {
+        SharedExecutorPool pool = new SharedExecutorPool("LivenessPool5");
+        SEPExecutor es = (SEPExecutor) pool.newExecutor(1, "internal", "LivenessStage5");
+        SEPExecutor other = (SEPExecutor) pool.newExecutor(1, "internal", "LivenessStage6");
+        try
+        {
+            Blocker a = new Blocker();
+            es.execute(a);
+            assertTrue(a.started.await(10, TimeUnit.SECONDS));
+            SEPWorker worker = pool.allWorkers.stream().filter(w -> w.workingFor == es).findFirst().orElse(null);
+            assertNotNull(worker);
+
+            // a worker exits after finishing a task for an executor that was shut down individually
+            es.shutdown();
+            a.release.countDown();
+            worker.thread.join(TimeUnit.SECONDS.toMillis(10));
+            assertEquals(Thread.State.TERMINATED, worker.thread.getState());
+            assertTrue(pool.allWorkers.contains(worker));
+
+            assertEquals(0L, other.longestRunningTaskAgeNanos());
+            assertFalse(pool.allWorkers.contains(worker));
+        }
+        finally
+        {
+            pool.shutdownAndWait(1, TimeUnit.MINUTES);
+        }
+    }
+
+    @Test
+    public void testLongestRunningTaskClassThroughStage() throws Exception
+    {
+        Blocker blocker = new Blocker();
+        try
+        {
+            Stage.READ.execute(blocker);
+            assertTrue(blocker.started.await(10, TimeUnit.SECONDS));
+            SEPExecutor es = (SEPExecutor) SharedExecutorPool.SHARED.executors.stream()
+                                                                             .filter(e -> e.name.equals("ReadStage"))
+                                                                             .findFirst()
+                                                                             .orElse(null);
+            assertNotNull(es);
+            assertSame(Blocker.class, es.longestRunningTaskClass());
+        }
+        finally
+        {
+            blocker.release.countDown();
+        }
+    }
 }
