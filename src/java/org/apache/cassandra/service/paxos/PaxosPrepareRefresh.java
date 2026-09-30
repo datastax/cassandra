@@ -20,6 +20,7 @@ package org.apache.cassandra.service.paxos;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +36,12 @@ import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.RequestCallbackWithFailure;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsFactory;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit.Agreed;
 import org.apache.cassandra.service.paxos.Commit.Committed;
 import org.apache.cassandra.tracing.Tracing;
@@ -140,7 +147,7 @@ public class PaxosPrepareRefresh implements RequestCallbackWithFailure<PaxosPrep
         callbacks.onRefreshSuccess(response.isSupersededBy, from);
     }
 
-    private static class Request
+    static class Request
     {
         final Ballot promised;
         final Committed missingCommit;
@@ -166,11 +173,37 @@ public class PaxosPrepareRefresh implements RequestCallbackWithFailure<PaxosPrep
         @Override
         public void doVerb(Message<Request> message)
         {
+            // Initialize the sensor and set ExecutorLocals.
+            // This handler commits a missing user-table write (WRITE_BYTES, INDEX_WRITE_BYTES,
+            // WRITE_EXECUTION_TIME) and reads system.paxos state to confirm the promise
+            // (READ_BYTES, READ_EXECUTION_TIME).
+            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.missingCommit.update.metadata().keyspace));
+            Context context = Context.from(message.payload.missingCommit.update.metadata());
+            sensors.registerSensor(context, Type.READ_BYTES);
+            sensors.registerSensor(context, Type.WRITE_BYTES);
+            sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+            sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+            sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+            sensors.registerSensor(context, Type.INTERNODE_BYTES);
+            sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+            RequestTracker.instance.set(sensors);
+
             Response response = execute(message.payload, message.from());
-            if (response == null)
-                MessagingService.instance().respondWithFailure(UNKNOWN, message);
+
+            // calculate outbound internode bytes before adding the sensor to the response
+            if (response != null)
+            {
+                Message.Builder<Response> reply = message.responseWithBuilder(response);
+                int size = reply.currentPayloadSize(MessagingService.current_version);
+                sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+                sensors.syncAllSensors();
+                SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
+                MessagingService.instance().send(reply.build(), message.from());
+            }
             else
-                MessagingService.instance().respond(response, message);
+            {
+                MessagingService.instance().respondWithFailure(UNKNOWN, message);
+            }
         }
 
         public static Response execute(Request request, InetAddressAndPort from)

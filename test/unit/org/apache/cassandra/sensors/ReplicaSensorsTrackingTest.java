@@ -70,6 +70,9 @@ import org.apache.cassandra.service.BatchlogResponseHandler;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.Commit;
+import org.apache.cassandra.service.paxos.PaxosCommit;
+import org.apache.cassandra.service.paxos.PaxosPrepare;
+import org.apache.cassandra.service.paxos.PaxosPropose;
 import org.apache.cassandra.service.paxos.PrepareResponse;
 import org.apache.cassandra.service.paxos.v1.PrepareCallback;
 import org.apache.cassandra.service.paxos.v1.ProposeCallback;
@@ -227,26 +230,11 @@ public class ReplicaSensorsTrackingTest
     targetMethod = "onResponse",
     targetLocation = "AT EXIT",
     action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testSensorsTrackedForWriteCallback_HintsEnabled() throws InterruptedException
+    public void testSensorsTrackedForWriteCallback() throws InterruptedException
     {
-        boolean allowHints = true;
         Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
         Message<Mutation> writeRequest = Message.builder(Verb.MUTATION_REQ, mutation).build();
-        assertSensorsTrackedForWriteRequest(writeRequest, allowHints);
-    }
-
-    @Test
-    @BMRule(name = "signals onResponse about to start latches",
-    targetClass = "org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator",
-    targetMethod = "onResponse",
-    targetLocation = "AT EXIT",
-    action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testSensorsTrackedForWriteCallback_HintsDisabled() throws InterruptedException
-    {
-        boolean allowHints = false;
-        Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
-        Message<Mutation> writeRequest = Message.builder(Verb.MUTATION_REQ, mutation).build();
-        assertSensorsTrackedForWriteRequest(writeRequest, allowHints);
+        assertSensorsTrackedForWriteRequest(writeRequest);
     }
 
     @Test
@@ -286,7 +274,7 @@ public class ReplicaSensorsTrackingTest
         double leaderApplyTime = 500_000L;
         leaderSensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, leaderApplyTime);
 
-        assertReplicaSensors(writeRequest, responseHandler, false,
+        assertReplicaSensors(writeRequest, responseHandler,
                              List.of(Pair.create(actualWriteSensor, mockingWriteSensor)),
                              List.of(Pair.create(actualExecutionTimeSensor, mockingExecutionTimeSensor)));
     }
@@ -331,7 +319,7 @@ public class ReplicaSensorsTrackingTest
         Sensor mockingExecutionTimeSensor = new mockingSensor(context, Type.WRITE_EXECUTION_TIME);
         mockingExecutionTimeSensor.increment(1_000_000L);
 
-        assertReplicaSensors(writeRequest, batchHandler, false,
+        assertReplicaSensors(writeRequest, batchHandler,
                              List.of(Pair.create(actualWriteSensor, mockingWriteSensor),
                                      Pair.create(actualIndexWriteSensor, mockingIndexWriteSensor)),
                              List.of(Pair.create(actualExecutionTimeSensor, mockingExecutionTimeSensor)));
@@ -343,26 +331,11 @@ public class ReplicaSensorsTrackingTest
     targetMethod = "onResponse",
     targetLocation = "AT EXIT",
     action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testSensorsTrackedForWriteCallback_HintsEnabled_PaxosCommit() throws InterruptedException
+    public void testSensorsTrackedForWriteCallback_PaxosCommit() throws InterruptedException
     {
         Commit commit = Commit.emptyCommit(cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes("0")), cfs.metadata());
         Message<Commit> writeRequest = Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build();
-        boolean allowHints = true;
-        assertSensorsTrackedForWriteRequest(writeRequest, allowHints);
-    }
-
-    @Test
-    @BMRule(name = "signals onResponse about to start latches",
-    targetClass = "org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator",
-    targetMethod = "onResponse",
-    targetLocation = "AT EXIT",
-    action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
-    public void testSensorsTrackedForWriteCallback_HintsDisabled_PaxosCommit() throws InterruptedException
-    {
-        Commit commit = Commit.emptyCommit(cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes("0")), cfs.metadata());
-        Message<Commit> writeRequest = Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build();
-        boolean allowHints = false;
-        assertSensorsTrackedForWriteRequest(writeRequest, allowHints);
+        assertSensorsTrackedForWriteRequest(writeRequest);
     }
 
     @Test
@@ -468,6 +441,206 @@ public class ReplicaSensorsTrackingTest
                 .isZero();
     }
 
+    @Test
+    @BMRule(name = "signals onResponse about to start latches",
+    targetClass = "org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator",
+    targetMethod = "onResponse",
+    targetLocation = "AT EXIT",
+    action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
+    public void testSensorsTrackedForPaxosV2PrepareCallback() throws InterruptedException
+    {
+        Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
+        Message<Mutation> prepare = Message.builder(Verb.PAXOS2_PREPARE_REQ, mutation).build();
+
+        // init request sensors, must happen before the callback is created.
+        // READ_BYTES and WRITE_BYTES are both tracked: v2 Prepare reads and writes system.paxos.
+        // Both READ_EXECUTION_TIME and WRITE_EXECUTION_TIME are tracked: system.paxos read time
+        // and the promise write time are reported separately by PaxosPrepare.RequestHandler.
+        RequestSensors requestSensors = new ActiveRequestSensors();
+        Context context = Context.from(cfs.metadata());
+        requestSensors.registerSensor(context, Type.WRITE_BYTES);
+        requestSensors.registerSensor(context, Type.READ_BYTES);
+        requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
+        requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        Sensor actualReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
+        Sensor actualInterNodeSensor = requestSensors.getSensor(context, Type.INTERNODE_BYTES).get();
+        Sensor actualWriteExecutionTimeSensor = requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get();
+        Sensor actualReadExecutionTimeSensor = requestSensors.getSensor(context, Type.READ_EXECUTION_TIME).get();
+        RequestTracker.instance.set(requestSensors);
+
+        // PaxosPrepare has no accessible constructor outside its package, so we use a mock.
+        // We attach a real ExecutionTimeSensorAccumulator so that the Byteman hook on
+        // ExecutionTimeSensorAccumulator#onResponse fires correctly.
+        ExecutionTimeSensorAccumulator accumulator = new ExecutionTimeSensorAccumulator(targets.size());
+        PaxosPrepare mockCallback = Mockito.mock(PaxosPrepare.class);
+        Mockito.when(mockCallback.getRequestSensors()).thenReturn(requestSensors);
+        Mockito.when(mockCallback.getTableMetadata()).thenReturn(cfs.metadata());
+        Mockito.doAnswer(inv -> {
+            accumulator.accumulate(inv.getArgument(0), inv.getArgument(1), (double) inv.getArgument(2));
+            return null;
+        }).when(mockCallback).accumulateExecutionTimeSensor(Mockito.any(), Mockito.any(), Mockito.anyDouble());
+        Mockito.doAnswer(inv -> {
+            accumulator.onResponse(requestSensors);
+            return null;
+        }).when(mockCallback).onResponse(Mockito.any());
+
+        // WRITE_BYTES, READ_BYTES and INTERNODE_BYTES are accumulated additively from each replica response.
+        Sensor mockingWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
+        mockingWriteSensor.increment(13.0);
+        Sensor mockingReadSensor = new mockingSensor(context, Type.READ_BYTES);
+        mockingReadSensor.increment(14.0);
+        Sensor mockingInterNodeSensor = new mockingSensor(context, Type.INTERNODE_BYTES);
+        mockingInterNodeSensor.increment(10.0);
+        // WRITE_EXECUTION_TIME and READ_EXECUTION_TIME are accumulated via ExecutionTimeSensorAccumulator:
+        // the running max for each is written once all targets have responded.
+        Sensor mockingWriteExecutionTimeSensor = new mockingSensor(context, Type.WRITE_EXECUTION_TIME);
+        mockingWriteExecutionTimeSensor.increment(1_000_000L);
+        Sensor mockingReadExecutionTimeSensor = new mockingSensor(context, Type.READ_EXECUTION_TIME);
+        mockingReadExecutionTimeSensor.increment(500_000L);
+
+        assertReplicaSensors(prepare, mockCallback,
+                             List.of(Pair.create(actualWriteSensor, mockingWriteSensor),
+                                     Pair.create(actualReadSensor, mockingReadSensor),
+                                     Pair.create(actualInterNodeSensor, mockingInterNodeSensor)),
+                             List.of(Pair.create(actualWriteExecutionTimeSensor, mockingWriteExecutionTimeSensor),
+                                     Pair.create(actualReadExecutionTimeSensor, mockingReadExecutionTimeSensor)));
+    }
+
+    @Test
+    @BMRule(name = "signals onResponse about to start latches",
+    targetClass = "org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator",
+    targetMethod = "onResponse",
+    targetLocation = "AT EXIT",
+    action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
+    public void testSensorsTrackedForPaxosV2ProposeCallback() throws InterruptedException
+    {
+        Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 0, "0").build();
+        Message<Mutation> propose = Message.builder(Verb.PAXOS2_PROPOSE_REQ, mutation).build();
+
+        // init request sensors, must happen before the callback is created.
+        // READ_BYTES and WRITE_BYTES are both tracked: v2 Propose reads and writes system.paxos.
+        // WRITE_EXECUTION_TIME and READ_EXECUTION_TIME are both tracked by the PaxosPropose branch.
+        RequestSensors requestSensors = new ActiveRequestSensors();
+        Context context = Context.from(cfs.metadata());
+        requestSensors.registerSensor(context, Type.WRITE_BYTES);
+        requestSensors.registerSensor(context, Type.READ_BYTES);
+        requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
+        requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        Sensor actualReadSensor = requestSensors.getSensor(context, Type.READ_BYTES).get();
+        Sensor actualInterNodeSensor = requestSensors.getSensor(context, Type.INTERNODE_BYTES).get();
+        Sensor actualWriteExecutionTimeSensor = requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get();
+        Sensor actualReadExecutionTimeSensor = requestSensors.getSensor(context, Type.READ_EXECUTION_TIME).get();
+        RequestTracker.instance.set(requestSensors);
+
+        // PaxosPropose has no accessible constructor outside its package, so we use a mock.
+        // We attach a real ExecutionTimeSensorAccumulator so that the Byteman hook on
+        // ExecutionTimeSensorAccumulator#onResponse fires correctly.
+        ExecutionTimeSensorAccumulator accumulator = new ExecutionTimeSensorAccumulator(targets.size());
+        PaxosPropose mockCallback = Mockito.mock(PaxosPropose.class);
+        Mockito.when(mockCallback.getRequestSensors()).thenReturn(requestSensors);
+        Mockito.when(mockCallback.getTableMetadata()).thenReturn(cfs.metadata());
+        Mockito.doAnswer(inv -> {
+            accumulator.accumulate(inv.getArgument(0), inv.getArgument(1), (double) inv.getArgument(2));
+            return null;
+        }).when(mockCallback).accumulateExecutionTimeSensor(Mockito.any(), Mockito.any(), Mockito.anyDouble());
+        Mockito.doAnswer(inv -> {
+            accumulator.onResponse(requestSensors);
+            return null;
+        }).when(mockCallback).onResponse(Mockito.any());
+
+        // WRITE_BYTES, READ_BYTES and INTERNODE_BYTES are accumulated additively from each replica response.
+        Sensor mockingWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
+        mockingWriteSensor.increment(15.0);
+        Sensor mockingReadSensor = new mockingSensor(context, Type.READ_BYTES);
+        mockingReadSensor.increment(16.0);
+        Sensor mockingInterNodeSensor = new mockingSensor(context, Type.INTERNODE_BYTES);
+        mockingInterNodeSensor.increment(10.0);
+        // WRITE_EXECUTION_TIME and READ_EXECUTION_TIME are accumulated via ExecutionTimeSensorAccumulator:
+        // the running max for each is written once all targets have responded.
+        Sensor mockingWriteExecutionTimeSensor = new mockingSensor(context, Type.WRITE_EXECUTION_TIME);
+        mockingWriteExecutionTimeSensor.increment(1_000_000L);
+        Sensor mockingReadExecutionTimeSensor = new mockingSensor(context, Type.READ_EXECUTION_TIME);
+        mockingReadExecutionTimeSensor.increment(500_000L);
+
+        assertReplicaSensors(propose, mockCallback,
+                             List.of(Pair.create(actualWriteSensor, mockingWriteSensor),
+                                     Pair.create(actualReadSensor, mockingReadSensor),
+                                     Pair.create(actualInterNodeSensor, mockingInterNodeSensor)),
+                             List.of(Pair.create(actualWriteExecutionTimeSensor, mockingWriteExecutionTimeSensor),
+                                     Pair.create(actualReadExecutionTimeSensor, mockingReadExecutionTimeSensor)));
+    }
+
+    @Test
+    @BMRule(name = "signals onResponse about to start latches",
+    targetClass = "org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator",
+    targetMethod = "onResponse",
+    targetLocation = "AT EXIT",
+    action = "org.apache.cassandra.sensors.ReplicaSensorsTrackingTest.countDownAndAwaitOnResponseLatches();")
+    public void testSensorsTrackedForPaxosV2CommitCallback() throws InterruptedException
+    {
+        Commit commit = Commit.emptyCommit(cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes("0")), cfs.metadata());
+        Message<Commit> commitMsg = Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build();
+
+        // init request sensors, must happen before the callback is created.
+        // READ_BYTES is intentionally not registered: the commit phase never reads system.paxos.
+        // INDEX_WRITE_BYTES is registered: commit writes to the user table which may have secondary indexes.
+        // WRITE_EXECUTION_TIME is tracked; READ_EXECUTION_TIME is not (no system.paxos read).
+        RequestSensors requestSensors = new ActiveRequestSensors();
+        Context context = Context.from(cfs.metadata());
+        requestSensors.registerSensor(context, Type.WRITE_BYTES);
+        requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+        requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
+        requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
+        Sensor actualIndexWriteSensor = requestSensors.getSensor(context, Type.INDEX_WRITE_BYTES).get();
+        Sensor actualInterNodeSensor = requestSensors.getSensor(context, Type.INTERNODE_BYTES).get();
+        Sensor actualWriteExecutionTimeSensor = requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get();
+        RequestTracker.instance.set(requestSensors);
+
+        // PaxosCommit has no accessible constructor outside its package, so we use a mock.
+        // We attach a real ExecutionTimeSensorAccumulator so that the Byteman hook on
+        // ExecutionTimeSensorAccumulator#onResponse fires correctly.
+        ExecutionTimeSensorAccumulator accumulator = new ExecutionTimeSensorAccumulator(targets.size());
+        PaxosCommit mockCallback = Mockito.mock(PaxosCommit.class);
+        Mockito.when(mockCallback.getRequestSensors()).thenReturn(requestSensors);
+        Mockito.when(mockCallback.getTableMetadata()).thenReturn(cfs.metadata());
+        Mockito.doAnswer(inv -> {
+            accumulator.accumulate(inv.getArgument(0), inv.getArgument(1), (double) inv.getArgument(2));
+            return null;
+        }).when(mockCallback).accumulateExecutionTimeSensor(Mockito.any(), Mockito.any(), Mockito.anyDouble());
+        Mockito.doAnswer(inv -> {
+            accumulator.onResponse(requestSensors);
+            return null;
+        }).when(mockCallback).onResponse(Mockito.any());
+
+        // WRITE_BYTES, INDEX_WRITE_BYTES and INTERNODE_BYTES are accumulated additively from each replica response.
+        Sensor mockingWriteSensor = new mockingSensor(context, Type.WRITE_BYTES);
+        mockingWriteSensor.increment(13.0);
+        Sensor mockingIndexWriteSensor = new mockingSensor(context, Type.INDEX_WRITE_BYTES);
+        mockingIndexWriteSensor.increment(7.0);
+        Sensor mockingInterNodeSensor = new mockingSensor(context, Type.INTERNODE_BYTES);
+        mockingInterNodeSensor.increment(10.0);
+        // WRITE_EXECUTION_TIME is accumulated via ExecutionTimeSensorAccumulator:
+        // the running max is written once all targets have responded.
+        Sensor mockingWriteExecutionTimeSensor = new mockingSensor(context, Type.WRITE_EXECUTION_TIME);
+        mockingWriteExecutionTimeSensor.increment(1_000_000L);
+
+        assertReplicaSensors(commitMsg, mockCallback,
+                             List.of(Pair.create(actualWriteSensor, mockingWriteSensor),
+                                     Pair.create(actualIndexWriteSensor, mockingIndexWriteSensor),
+                                     Pair.create(actualInterNodeSensor, mockingInterNodeSensor)),
+                             List.of(Pair.create(actualWriteExecutionTimeSensor, mockingWriteExecutionTimeSensor)));
+
+        // Commit phase never reads system.paxos; READ_BYTES must not be registered.
+        assertThat(requestSensors.getSensor(context, Type.READ_BYTES))
+                .as("READ_BYTES must not be registered for Paxos v2 Commit (commit phase does not read system.paxos)")
+                .isEmpty();
+    }
+
     /**
      * Used by Byteman to count down the onResponseAboutToStartSignal latch and await the onResponseStartSignal latch
      * for the current replica response.
@@ -480,22 +653,26 @@ public class ReplicaSensorsTrackingTest
         assertThat(onResponseStartSignal[replica].await(5, TimeUnit.SECONDS)).isTrue();
     }
 
-    private void assertSensorsTrackedForWriteRequest(Message writeRequest, boolean allowHints) throws InterruptedException
+    private void assertSensorsTrackedForWriteRequest(Message writeRequest) throws InterruptedException
     {
         // init request sensors, must happen before the callback is created.
         // READ_EXECUTION_TIME is registered because StorageProxy.cas() registers it unconditionally
         // (non-zero only for the CAS precondition read); it must stay zero for plain writes and Paxos
         // Commit since MutationVerbHandler and CommitVerbHandler only emit WRITE_EXECUTION_TIME.
+        // INTERNODE_BYTES is derived from the serialized request payload size (sentPayloadSize / tableCount)
+        // for WriteCallbackInfo, not from any sensor value in the replica response.
         RequestSensors requestSensors = new ActiveRequestSensors();
         Context context = Context.from(cfs.metadata());
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
         requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
         Sensor actualWriteSensor = requestSensors.getSensor(context, Type.WRITE_BYTES).get();
         Sensor actualIndexWriteSensor = requestSensors.getSensor(context, Type.INDEX_WRITE_BYTES).get();
         Sensor actualExecutionTimeSensor = requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get();
         Sensor actualReadExecutionTimeSensor = requestSensors.getSensor(context, Type.READ_EXECUTION_TIME).get();
+        Sensor actualInterNodeSensor = requestSensors.getSensor(context, Type.INTERNODE_BYTES).get();
         RequestTracker.instance.set(requestSensors);
 
         // init callback
@@ -511,7 +688,7 @@ public class ReplicaSensorsTrackingTest
         Sensor mockingExecutionTimeSensor = new mockingSensor(context, Type.WRITE_EXECUTION_TIME);
         mockingExecutionTimeSensor.increment(1_000_000L);
 
-        assertReplicaSensors(writeRequest, callback, allowHints,
+        assertReplicaSensors(writeRequest, callback,
                              List.of(Pair.create(actualWriteSensor, mockingWriteSensor), Pair.create(actualIndexWriteSensor, mockingIndexWriteSensor)),
                              List.of(Pair.create(actualExecutionTimeSensor, mockingExecutionTimeSensor)));
 
@@ -519,16 +696,17 @@ public class ReplicaSensorsTrackingTest
         assertThat(actualReadExecutionTimeSensor.getValue())
                 .as("READ_EXECUTION_TIME must remain zero for plain write/Paxos Commit (verb handler emits WRITE_EXECUTION_TIME only)")
                 .isZero();
+
+        // INTERNODE_BYTES is derived from the serialized request payload size (sentPayloadSize / tableCount),
+        // not from any sensor value in the replica response. With a single-table mutation and targets.size()
+        // replicas, the expected total is: targets.size() * (payloadSize / 1 table).
+        int payloadSize = writeRequest.payloadSize(MessagingService.current_version);
+        assertThat(actualInterNodeSensor.getValue())
+                .as("INTERNODE_BYTES must equal targets.size() * serialized request payload size")
+                .isEqualTo((double) targets.size() * payloadSize);
     }
 
     private void assertReplicaSensors(Message<?> request, RequestCallback<?> callback,
-                                      List<Pair<Sensor, Sensor>> additiveSensors,
-                                      List<Pair<Sensor, Sensor>> maxSensors) throws InterruptedException
-    {
-        assertReplicaSensors(request, callback, false, additiveSensors, maxSensors);
-    }
-
-    private void assertReplicaSensors(Message<?> request, RequestCallback<?> callback, boolean allowHints,
                                       List<Pair<Sensor, Sensor>> additiveSensors,
                                       List<Pair<Sensor, Sensor>> maxSensors) throws InterruptedException
     {
@@ -554,7 +732,7 @@ public class ReplicaSensorsTrackingTest
 
         for (int responseIdx = 1; responseIdx <= targets.size(); responseIdx++)
         {
-            simulateResponseFromReplica(targets.get(responseIdx - 1), request, callback, allowHints, allReplicaSensors);
+            simulateResponseFromReplica(targets.get(responseIdx - 1), request, callback, allReplicaSensors);
 
             // don't wait indefinitely if the test is stuck. Delay the assertion of the await results to give a better
             // chance of a meaningful error by virtue of the core test assertion
@@ -580,7 +758,7 @@ public class ReplicaSensorsTrackingTest
             pair.left.reset();
     }
 
-    private void simulateResponseFromReplica(Replica replica, Message<?> request, RequestCallback<?> callback, boolean allowHints, Sensor... sensor)
+    private void simulateResponseFromReplica(Replica replica, Message<?> request, RequestCallback<?> callback, Sensor... sensor)
     {
         new Thread(() -> {
             // AbstractWriteResponseHandler has a special handling for the callback
@@ -617,6 +795,10 @@ public class ReplicaSensorsTrackingTest
             return createResponseMessage(Verb.PAXOS_PROPOSE_RSP, true, endpoint, request.id(), sensors);
         else if (request.verb() == Verb.PAXOS_COMMIT_REQ)
             return createResponseMessage(Verb.PAXOS_COMMIT_RSP, NoPayload.noPayload, endpoint, request.id(), sensors);
+        else if (request.verb() == Verb.PAXOS2_PREPARE_REQ)
+            return createResponseMessage(Verb.PAXOS2_PREPARE_RSP, NoPayload.noPayload, endpoint, request.id(), sensors);
+        else if (request.verb() == Verb.PAXOS2_PROPOSE_REQ)
+            return createResponseMessage(Verb.PAXOS2_PROPOSE_RSP, NoPayload.noPayload, endpoint, request.id(), sensors);
         else
             throw new IllegalArgumentException("Unsupported verb: " + request.verb());
     }

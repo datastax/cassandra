@@ -40,6 +40,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.SensorsCustomParams;
@@ -137,6 +138,10 @@ public class PaxosPropose<OnDone extends Consumer<? super PaxosPropose.Status>> 
     /** Invoke on reaching a terminal status */
     final OnDone onDone;
 
+    /** Coordinator-side sensors captured at construction; used to accumulate WRITE_EXECUTION_TIME from replica responses. */
+    private final RequestSensors requestSensors;
+    private final ExecutionTimeSensorAccumulator execTimeAccumulator;
+
     /**
      * bit 0-20:  accepts
      * bit 21-41: refusals/errors
@@ -161,11 +166,25 @@ public class PaxosPropose<OnDone extends Consumer<? super PaxosPropose.Status>> 
         this.participants = participants;
         this.required = required;
         this.onDone = onDone;
+        this.requestSensors = RequestTracker.instance.get();
+        this.execTimeAccumulator = new ExecutionTimeSensorAccumulator(required);
     }
 
     public TableMetadata getTableMetadata()
     {
         return proposal.update.metadata();
+    }
+
+    @Override
+    public RequestSensors getRequestSensors()
+    {
+        return requestSensors;
+    }
+
+    @Override
+    public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
+        execTimeAccumulator.accumulate(context, type, value);
     }
 
     /**
@@ -263,6 +282,8 @@ public class PaxosPropose<OnDone extends Consumer<? super PaxosPropose.Status>> 
     {
         if (logger.isTraceEnabled())
             logger.trace("{} for {} from {}", response, proposal, from);
+
+        execTimeAccumulator.onResponse(requestSensors);
 
         Ballot supersededBy = response.supersededBy;
         if (supersededBy != null)
@@ -425,13 +446,19 @@ public class PaxosPropose<OnDone extends Consumer<? super PaxosPropose.Status>> 
             RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.proposal.update.metadata().keyspace));
             Context context = Context.from(message.payload.proposal.update.metadata());
 
-            // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor
+            // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor.
+            // INDEX_WRITE_BYTES is not registered here because propose only writes to system.paxos, which has no indexes.
+            // READ_EXECUTION_TIME tracks the system.paxos read time (loadPaxosState), transferred to user-table context.
             sensors.registerSensor(context, Type.READ_BYTES);
+            sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
             sensors.registerSensor(context, Type.WRITE_BYTES);
+            sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
             sensors.registerSensor(context, Type.INTERNODE_BYTES);
             sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
             RequestTracker.instance.set(sensors);
 
+            // WRITE_EXECUTION_TIME is tracked in SystemKeyspace.savePaxosProposal, so that it
+            // only covers the system.paxos write and not the preceding loadPaxosState read.
             Response response = execute(message.payload.proposal, message.from());
 
             // calculate outbound internode bytes before adding the sensor to the response

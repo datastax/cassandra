@@ -18,6 +18,8 @@ package org.apache.cassandra.sensors;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -28,10 +30,13 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameter;
+import org.junit.runners.Parameterized.Parameters;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -54,9 +59,11 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.CommitVerbHandler;
 import org.apache.cassandra.service.paxos.PaxosState;
+import org.apache.cassandra.service.paxos.PaxosV2TestHelper;
 import org.apache.cassandra.service.paxos.v1.PrepareVerbHandler;
 import org.apache.cassandra.service.paxos.v1.ProposeVerbHandler;
 import org.apache.cassandra.utils.Pair;
@@ -73,16 +80,46 @@ import static org.assertj.core.api.Assertions.assertThat;
  * to the global {@link SensorsRegistry} by the replica verb handlers:
  * {@link MutationVerbHandler}, {@link CounterMutationVerbHandler}, {@link PrepareVerbHandler},
  * {@link ProposeVerbHandler}, and {@link CommitVerbHandler}.
+ * The Paxos LWT tests additionally assert the read sensors ({@link Type#READ_BYTES},
+ * {@link Type#READ_EXECUTION_TIME}) produced when the Paxos state is loaded from {@code system.paxos}.
  * <p>
  * Each test exercises a specific write path (standard mutation, counter mutation, Paxos LWT rounds,
  * and mutations on indexed tables) and asserts that both the per-request sensor and the corresponding
- * global registry sensor carry the expected values after the verb handler completes.
+ * global registry sensor carry the expected values after the verb handler completes. The sensors are
+ * also checked in the response message's custom params, before and after serialization.
+ * <p>
+ * The three Paxos LWT tests ({@code testLWTPrepare}, {@code testLWTPropose}, {@code testLWTCommit})
+ * are parametrized over {@code v1} and {@code v2} to exercise both the legacy verb handlers and the
+ * new CAS v2 handlers ({@link org.apache.cassandra.service.paxos.PaxosPrepare.RequestHandler},
+ * {@link org.apache.cassandra.service.paxos.PaxosPropose.RequestHandler},
+ * {@link org.apache.cassandra.service.paxos.PaxosCommit.RequestHandler}).
+ * <p>
+ * Two further tests are v2-only, as the messages do not exist in v1: {@code testLWTv2CommitAndPrepare}
+ * ({@link org.apache.cassandra.service.paxos.PaxosCommitAndPrepare.RequestHandler}) and
+ * {@code testLWTv2PrepareRefresh}
+ * ({@link org.apache.cassandra.service.paxos.PaxosPrepareRefresh.RequestHandler}). They always dispatch
+ * to the v2 handlers, regardless of the {@code casVersion} parameter.
+ * <p>
+ * {@code testPaxosCommitWithSAI} and {@code testPaxosCommitWithSecondaryIndex} dispatch directly to
+ * {@link CommitVerbHandler} (v1) and are likewise independent of the {@code casVersion} parameter.
  *
  * @see CoordinatorWriteSensorsTest for the coordinator-side write counterpart
  * @see ReplicaReadSensorsTest for the replica-side read counterpart
  */
+@RunWith(Parameterized.class)
 public class ReplicaWriteSensorsTest
 {
+    public enum CasVersion { v1, v2 }
+
+    @Parameters(name = "{0}")
+    public static Collection<Object[]> casVersions()
+    {
+        return Arrays.asList(new Object[]{ CasVersion.v1 }, new Object[]{ CasVersion.v2 });
+    }
+
+    @Parameter
+    public CasVersion casVersion;
+
     private static final String KEYSPACE1 = "ReplicaWriteSensorsTest";
     private static final String CF_STANDARD = "Standard";
     private static final String CF_STANDARD2 = "Standard2";
@@ -100,6 +137,11 @@ public class ReplicaWriteSensorsTest
         CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
 
         SchemaLoader.prepareServer();
+
+        // Switch to Murmur3 before createKeyspace so that all tables (including SAI/2i) share a single
+        // partitioner. StorageService.setPartitionerUnsafe also replaces TokenMetadata with a fresh instance
+        // whose partitioner field matches Murmur3, which is required by SAI's ShardBoundaries logic.
+        StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
 
         // build SAI indexes
         Indexes.Builder saiIndexes = Indexes.builder();
@@ -128,23 +170,19 @@ public class ReplicaWriteSensorsTest
                                     SchemaLoader.counterCFMD(KEYSPACE1, CF_COUTNER),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_SAI,
                                                               1, AsciiType.instance, AsciiType.instance, null)
-                                                .partitioner(Murmur3Partitioner.instance)
                                                 .indexes(saiIndexes.build()),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_SECONDARY_INDEX,
                                                               1, AsciiType.instance, AsciiType.instance, null)
-                                                .partitioner(Murmur3Partitioner.instance)
                                                 .indexes(secondaryIndexes.build()));
-
-
-        // Align the global partitioner with the indexed tables (SAI requires Murmur3). This must be
-        // called after createKeyspace so that the plain tables (counter, standard) inherit the default
-        // partitioner during schema creation and are not affected by this switch.
-        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
     }
 
     @Before
     public void beforeTest()
     {
+        // Reset PaxosState in-memory cache so each test starts with a cold cache and
+        // loadPaxosState is always called on the first Paxos operation, ensuring test
+        // ordering does not affect READ_EXECUTION_TIME / READ_BYTES assertions.
+        PaxosState.unsafeReset();
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE1).getMetadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).metadata());
@@ -402,15 +440,22 @@ public class ReplicaWriteSensorsTest
     // Paxos LWT paths
     // -------------------------------------------------------------------------
 
+    /**
+     * LWT Prepare: WRITE_BYTES and WRITE_EXECUTION_TIME must be non-zero; READ_BYTES is zero on the
+     * first call (no prior paxos state) and non-zero after the Paxos cache is evicted (loadPaxosState
+     * reads from disk). READ_EXECUTION_TIME is non-zero on the first call because loadPaxosState always
+     * times the system.paxos read regardless of cache state. INTERNODE_BYTES must be non-zero.
+     * Parametrized over v1 and v2.
+     */
     @Test
-    public void testLWTPrepare() {
+    public void testLWTPrepare()
+    {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
         PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
                                  .add("val", "0")
                                  .buildUpdate();
-        Commit proposal = Commit.newPrepare(update.partitionKey(), store.metadata(), nextBallot(NONE));
-        handlePaxosPrepare(proposal);
+        handlePaxosPrepare(store, update);
 
         Sensor bytesSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
         assertThat(bytesSensor.getValue()).isGreaterThan(0);
@@ -421,66 +466,60 @@ public class ReplicaWriteSensorsTest
         Sensor executionRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_EXECUTION_TIME);
         assertThat(executionRegistrySensor).isEqualTo(executionSensor);
         assertThat(executionRegistrySensor.getValue()).isEqualTo(executionSensor.getValue());
-        assertResponseSensors(Pair.create(bytesSensor, bytesRegistrySensor),
-                              Pair.create(executionSensor, executionRegistrySensor));
         Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isZero();
+        // loadPaxosState always times the system.paxos read (even when there is no prior paxos state),
+        // so READ_EXECUTION_TIME is non-zero on the first call for both v1 and v2.
+        Sensor readExecSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecSensor.getValue()).as("READ_EXECUTION_TIME must be > 0 on first prepare (loadPaxosState always times the read)").isGreaterThan(0);
+        Sensor readExecRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecRegistrySensor).isEqualTo(readExecSensor);
+        Sensor internodeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeSensor.getValue()).as("INTERNODE_BYTES must be > 0 after prepare").isGreaterThan(0);
+        Sensor internodeRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeRegistrySensor).isEqualTo(internodeSensor);
+        assertResponseSensors(Pair.create(bytesSensor, bytesRegistrySensor),
+                              Pair.create(executionSensor, executionRegistrySensor),
+                              Pair.create(readExecSensor, readExecRegistrySensor),
+                              Pair.create(internodeSensor, internodeRegistrySensor));
 
         // Evict the in-memory Paxos cache so that the second prepare is forced to read from system.paxos,
-        // which now has state written by the first call — producing non-zero READ_BYTES.
+        // which now has state written by the first call — producing non-zero READ_BYTES and READ_EXECUTION_TIME.
         PaxosState.unsafeReset();
-        handlePaxosPrepare(proposal);
+        handlePaxosPrepare(store, update);
         readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isGreaterThan(0);
         Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
         assertThat(registryReadSensor).isEqualTo(readSensor);
-        assertResponseSensors(Pair.create(readSensor, registryReadSensor));
+        readExecSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecSensor.getValue()).as("READ_EXECUTION_TIME must be > 0 after cache eviction (loadPaxosState reads from disk)").isGreaterThan(0);
+        readExecRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecRegistrySensor).isEqualTo(readExecSensor);
+        internodeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeSensor.getValue()).as("INTERNODE_BYTES must be > 0 after second prepare").isGreaterThan(0);
+        internodeRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeRegistrySensor).isEqualTo(internodeSensor);
+        assertResponseSensors(Pair.create(readSensor, registryReadSensor),
+                              Pair.create(readExecSensor, readExecRegistrySensor),
+                              Pair.create(internodeSensor, internodeRegistrySensor));
     }
 
+    /**
+     * LWT Propose: WRITE_BYTES and WRITE_EXECUTION_TIME must be non-zero; READ_BYTES is zero on the
+     * first call (no prior paxos state on disk) and non-zero after the Paxos cache is evicted
+     * (loadPaxosState reads from disk). READ_EXECUTION_TIME is non-zero on the first call because
+     * loadPaxosState always times the system.paxos read. INTERNODE_BYTES must be non-zero.
+     * Parametrized over v1 and v2.
+     */
     @Test
-    public void testLWTPropose() {
-        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
-        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
-        PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
-                                .add("val", "0")
-                                .buildUpdate();
-        Commit proposal = Commit.newProposal(nextBallot(NONE), update);
-        handlePaxosPropose(proposal);
-
-        Sensor bytesSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
-        assertThat(bytesSensor.getValue()).isGreaterThan(0);
-        Sensor bytesRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
-        assertThat(bytesRegistrySensor).isEqualTo(bytesSensor);
-        Sensor executionSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_EXECUTION_TIME);
-        assertThat(executionSensor.getValue()).isGreaterThan(0);
-        Sensor executionRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_EXECUTION_TIME);
-        assertThat(executionRegistrySensor).isEqualTo(executionSensor);
-        assertThat(executionRegistrySensor.getValue()).isEqualTo(executionSensor.getValue());
-        assertResponseSensors(Pair.create(bytesSensor, bytesRegistrySensor),
-                              Pair.create(executionSensor, executionRegistrySensor));
-        Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
-        assertThat(readSensor.getValue()).isZero();
-
-        // Evict the in-memory Paxos cache so that the second propose is forced to read from system.paxos,
-        // which now has state written by the first call — producing non-zero READ_BYTES.
-        PaxosState.unsafeReset();
-        handlePaxosPropose(proposal);
-        readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
-        assertThat(readSensor.getValue()).isGreaterThan(0);
-        Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
-        assertThat(registryReadSensor).isEqualTo(readSensor);
-        assertResponseSensors(Pair.create(readSensor, registryReadSensor));
-    }
-
-    @Test
-    public void testLWTCommit() {
+    public void testLWTPropose()
+    {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
         PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
                                  .add("val", "0")
                                  .buildUpdate();
-        Commit proposal = Commit.newPrepare(update.partitionKey(), store.metadata(), nextBallot(NONE));
-        handlePaxosCommit(proposal);
+        handlePaxosPropose(store, update);
 
         Sensor bytesSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
         assertThat(bytesSensor.getValue()).isGreaterThan(0);
@@ -491,12 +530,212 @@ public class ReplicaWriteSensorsTest
         Sensor executionRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_EXECUTION_TIME);
         assertThat(executionRegistrySensor).isEqualTo(executionSensor);
         assertThat(executionRegistrySensor.getValue()).isEqualTo(executionSensor.getValue());
+        Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
+        assertThat(readSensor.getValue()).isZero();
+        // loadPaxosState always times the system.paxos read (even when there is no prior paxos state),
+        // so READ_EXECUTION_TIME is non-zero on the first call for both v1 and v2.
+        Sensor readExecSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecSensor.getValue()).as("READ_EXECUTION_TIME must be > 0 on first propose (loadPaxosState always times the read)").isGreaterThan(0);
+        Sensor readExecRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecRegistrySensor).isEqualTo(readExecSensor);
+        Sensor internodeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeSensor.getValue()).as("INTERNODE_BYTES must be > 0 after propose").isGreaterThan(0);
+        Sensor internodeRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeRegistrySensor).isEqualTo(internodeSensor);
         assertResponseSensors(Pair.create(bytesSensor, bytesRegistrySensor),
-                              Pair.create(executionSensor, executionRegistrySensor));
+                              Pair.create(executionSensor, executionRegistrySensor),
+                              Pair.create(readExecSensor, readExecRegistrySensor),
+                              Pair.create(internodeSensor, internodeRegistrySensor));
 
+        // Evict the in-memory Paxos cache so that the second propose is forced to read from system.paxos,
+        // which now has state written by the first call — producing non-zero READ_BYTES and READ_EXECUTION_TIME.
+        PaxosState.unsafeReset();
+        handlePaxosPropose(store, update);
+        readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
+        assertThat(readSensor.getValue()).isGreaterThan(0);
+        Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
+        assertThat(registryReadSensor).isEqualTo(readSensor);
+        readExecSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecSensor.getValue()).as("READ_EXECUTION_TIME must be > 0 after cache eviction (loadPaxosState reads from disk)").isGreaterThan(0);
+        readExecRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecRegistrySensor).isEqualTo(readExecSensor);
+        internodeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeSensor.getValue()).as("INTERNODE_BYTES must be > 0 after second propose").isGreaterThan(0);
+        internodeRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeRegistrySensor).isEqualTo(internodeSensor);
+        assertResponseSensors(Pair.create(readSensor, registryReadSensor),
+                              Pair.create(readExecSensor, readExecRegistrySensor),
+                              Pair.create(internodeSensor, internodeRegistrySensor));
+    }
+
+    /**
+     * LWT Commit: WRITE_BYTES and WRITE_EXECUTION_TIME must be non-zero; no read is done.
+     * INDEX_WRITE_BYTES is registered; for a plain table its value is 0, but for an SAI-indexed
+     * table it must be non-zero. INTERNODE_BYTES must be non-zero. Parametrized over v1 and v2.
+     */
+    @Test
+    public void testLWTCommit()
+    {
+        // Plain table: INDEX_WRITE_BYTES is registered but zero (no indexes).
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+        PartitionUpdate update = new RowUpdateBuilder(store.metadata(), 0, "0")
+                                 .add("val", "0")
+                                 .buildUpdate();
+        handlePaxosCommit(store, update);
+
+        Sensor bytesSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(bytesSensor.getValue()).isGreaterThan(0);
+        Sensor bytesRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
+        assertThat(bytesRegistrySensor).isEqualTo(bytesSensor);
+        Sensor executionSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_EXECUTION_TIME);
+        assertThat(executionSensor.getValue()).isGreaterThan(0);
+        Sensor executionRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_EXECUTION_TIME);
+        assertThat(executionRegistrySensor).isEqualTo(executionSensor);
+        assertThat(executionRegistrySensor.getValue()).isEqualTo(executionSensor.getValue());
+        // INDEX_WRITE_BYTES is registered even for a plain table; value is 0 (no secondary index writes)
+        Sensor indexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_WRITE_BYTES);
+        assertThat(indexWriteSensor).as("INDEX_WRITE_BYTES sensor must be registered for commit").isNotNull();
+        assertThat(indexWriteSensor.getValue()).as("INDEX_WRITE_BYTES must be 0 for plain table commit").isZero();
+        Sensor internodeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeSensor.getValue()).as("INTERNODE_BYTES must be > 0 after commit").isGreaterThan(0);
+        Sensor internodeRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeRegistrySensor).isEqualTo(internodeSensor);
+        assertResponseSensors(Pair.create(bytesSensor, bytesRegistrySensor),
+                              Pair.create(executionSensor, executionRegistrySensor),
+                              Pair.create(internodeSensor, internodeRegistrySensor));
         // No read is done in the commit phase
         assertThat(RequestTracker.instance.get().getSensor(context, Type.READ_BYTES)).isEmpty();
         assertThat(SensorsRegistry.instance.getSensor(context, Type.READ_BYTES)).isEmpty();
+
+        // SAI-indexed table: INDEX_WRITE_BYTES must be non-zero (SAI index writes triggered by commit).
+        ColumnFamilyStore saiStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SAI);
+        Context saiContext = new Context(KEYSPACE1, CF_STANDARD_SAI, saiStore.metadata.id.toString());
+        PartitionUpdate saiUpdate = new RowUpdateBuilder(saiStore.metadata(), 0, "0")
+                                    .add("val", "0")
+                                    .buildUpdate();
+        handlePaxosCommit(saiStore, saiUpdate);
+
+        Sensor saiIndexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(saiContext, Type.INDEX_WRITE_BYTES);
+        assertThat(saiIndexWriteSensor.getValue()).as("INDEX_WRITE_BYTES must be > 0 for SAI-indexed table commit").isGreaterThan(0);
+        Sensor saiIndexWriteRegistrySensor = SensorsTestUtil.getRegistrySensor(saiContext, Type.INDEX_WRITE_BYTES);
+        assertThat(saiIndexWriteRegistrySensor).isEqualTo(saiIndexWriteSensor);
+        assertResponseSensors(Pair.create(saiIndexWriteSensor, saiIndexWriteRegistrySensor));
+    }
+
+    /**
+     * v2 CommitAndPrepare: the fused commit+prepare message used in the v2 fast path.
+     * The commit writes to the user table (WRITE_BYTES, WRITE_EXECUTION_TIME, INDEX_WRITE_BYTES);
+     * the prepare reads and writes system.paxos (READ_BYTES, READ_EXECUTION_TIME, WRITE_BYTES).
+     * INTERNODE_BYTES must be non-zero. This is v2-only — CommitAndPrepare does not exist in v1.
+     * INDEX_WRITE_BYTES is verified for both a plain table (zero) and an SAI-indexed table (non-zero).
+     */
+    @Test
+    public void testLWTv2CommitAndPrepare()
+    {
+        // Plain table: INDEX_WRITE_BYTES is registered but zero (no indexes).
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+
+        PaxosV2TestHelper.dispatchV2CommitAndPrepare(store);
+
+        Sensor bytesSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(bytesSensor.getValue()).as("WRITE_BYTES must be > 0 for CommitAndPrepare").isGreaterThan(0);
+        Sensor bytesRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
+        assertThat(bytesRegistrySensor).isEqualTo(bytesSensor);
+
+        Sensor executionSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_EXECUTION_TIME);
+        assertThat(executionSensor.getValue()).as("WRITE_EXECUTION_TIME must be > 0 for CommitAndPrepare").isGreaterThan(0);
+        Sensor executionRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_EXECUTION_TIME);
+        assertThat(executionRegistrySensor).isEqualTo(executionSensor);
+
+        // INDEX_WRITE_BYTES is registered; value is 0 for a plain table (no secondary indexes)
+        Sensor indexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_WRITE_BYTES);
+        assertThat(indexWriteSensor).as("INDEX_WRITE_BYTES sensor must be registered for CommitAndPrepare").isNotNull();
+        assertThat(indexWriteSensor.getValue()).as("INDEX_WRITE_BYTES must be 0 for plain table CommitAndPrepare").isZero();
+
+        Sensor readExecSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecSensor.getValue()).as("READ_EXECUTION_TIME must be > 0 for CommitAndPrepare (loadPaxosState always times the read)").isGreaterThan(0);
+        Sensor readExecRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecRegistrySensor).isEqualTo(readExecSensor);
+
+        Sensor internodeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeSensor.getValue()).as("INTERNODE_BYTES must be > 0 after CommitAndPrepare").isGreaterThan(0);
+        Sensor internodeRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeRegistrySensor).isEqualTo(internodeSensor);
+
+        assertResponseSensors(Pair.create(bytesSensor, bytesRegistrySensor),
+                              Pair.create(executionSensor, executionRegistrySensor),
+                              Pair.create(internodeSensor, internodeRegistrySensor));
+
+        // SAI-indexed table: INDEX_WRITE_BYTES must be non-zero (SAI index writes triggered by the commit phase).
+        ColumnFamilyStore saiStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SAI);
+        Context saiContext = new Context(KEYSPACE1, CF_STANDARD_SAI, saiStore.metadata.id.toString());
+
+        PaxosV2TestHelper.dispatchV2CommitAndPrepare(saiStore);
+
+        Sensor saiIndexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(saiContext, Type.INDEX_WRITE_BYTES);
+        assertThat(saiIndexWriteSensor.getValue()).as("INDEX_WRITE_BYTES must be > 0 for SAI-indexed table CommitAndPrepare").isGreaterThan(0);
+        Sensor saiIndexWriteRegistrySensor = SensorsTestUtil.getRegistrySensor(saiContext, Type.INDEX_WRITE_BYTES);
+        assertThat(saiIndexWriteRegistrySensor).isEqualTo(saiIndexWriteSensor);
+        assertResponseSensors(Pair.create(saiIndexWriteSensor, saiIndexWriteRegistrySensor));
+    }
+
+    /**
+     * v2 PrepareRefresh: commits a missing user-table write (WRITE_BYTES, WRITE_EXECUTION_TIME,
+     * INDEX_WRITE_BYTES) then reads system.paxos state to confirm the promise (READ_EXECUTION_TIME).
+     * INTERNODE_BYTES must be non-zero. This is v2-only.
+     * INDEX_WRITE_BYTES is verified for both a plain table (zero) and an SAI-indexed table (non-zero).
+     */
+    @Test
+    public void testLWTv2PrepareRefresh()
+    {
+        // Plain table: INDEX_WRITE_BYTES is registered but zero (no indexes).
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+
+        PaxosV2TestHelper.dispatchV2PrepareRefresh(store);
+
+        Sensor bytesSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(bytesSensor.getValue()).as("WRITE_BYTES must be > 0 for PrepareRefresh").isGreaterThan(0);
+        Sensor bytesRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
+        assertThat(bytesRegistrySensor).isEqualTo(bytesSensor);
+
+        Sensor executionSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_EXECUTION_TIME);
+        assertThat(executionSensor.getValue()).as("WRITE_EXECUTION_TIME must be > 0 for PrepareRefresh").isGreaterThan(0);
+        Sensor executionRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_EXECUTION_TIME);
+        assertThat(executionRegistrySensor).isEqualTo(executionSensor);
+
+        // INDEX_WRITE_BYTES is registered; value is 0 for a plain table (no secondary indexes)
+        Sensor indexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_WRITE_BYTES);
+        assertThat(indexWriteSensor).as("INDEX_WRITE_BYTES sensor must be registered for PrepareRefresh").isNotNull();
+        assertThat(indexWriteSensor.getValue()).as("INDEX_WRITE_BYTES must be 0 for plain table PrepareRefresh").isZero();
+
+        Sensor readExecSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecSensor.getValue()).as("READ_EXECUTION_TIME must be > 0 for PrepareRefresh (loadPaxosState always times the read)").isGreaterThan(0);
+        Sensor readExecRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecRegistrySensor).isEqualTo(readExecSensor);
+
+        Sensor internodeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeSensor.getValue()).as("INTERNODE_BYTES must be > 0 after PrepareRefresh").isGreaterThan(0);
+        Sensor internodeRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeRegistrySensor).isEqualTo(internodeSensor);
+
+        assertResponseSensors(Pair.create(bytesSensor, bytesRegistrySensor),
+                              Pair.create(executionSensor, executionRegistrySensor),
+                              Pair.create(internodeSensor, internodeRegistrySensor));
+
+        // SAI-indexed table: INDEX_WRITE_BYTES must be non-zero (SAI index writes triggered by the commit phase).
+        ColumnFamilyStore saiStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SAI);
+        Context saiContext = new Context(KEYSPACE1, CF_STANDARD_SAI, saiStore.metadata.id.toString());
+
+        PaxosV2TestHelper.dispatchV2PrepareRefresh(saiStore);
+
+        Sensor saiIndexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(saiContext, Type.INDEX_WRITE_BYTES);
+        assertThat(saiIndexWriteSensor.getValue()).as("INDEX_WRITE_BYTES must be > 0 for SAI-indexed table PrepareRefresh").isGreaterThan(0);
+        Sensor saiIndexWriteRegistrySensor = SensorsTestUtil.getRegistrySensor(saiContext, Type.INDEX_WRITE_BYTES);
+        assertThat(saiIndexWriteRegistrySensor).isEqualTo(saiIndexWriteSensor);
+        assertResponseSensors(Pair.create(saiIndexWriteSensor, saiIndexWriteRegistrySensor));
     }
 
     // -------------------------------------------------------------------------
@@ -661,19 +900,43 @@ public class ReplicaWriteSensorsTest
     // Helpers
     // -------------------------------------------------------------------------
 
-    private static void handlePaxosPrepare(Commit prepare)
+    private void handlePaxosPrepare(ColumnFamilyStore cfs, PartitionUpdate update)
     {
-        PrepareVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_PREPARE_REQ, prepare).build());
+        if (casVersion == CasVersion.v1)
+        {
+            Commit prepare = Commit.newPrepare(update.partitionKey(), cfs.metadata(), nextBallot(NONE));
+            PrepareVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_PREPARE_REQ, prepare).build());
+        }
+        else
+        {
+            PaxosV2TestHelper.dispatchV2Prepare(cfs);
+        }
     }
 
-    private static void handlePaxosPropose(Commit proposal)
+    private void handlePaxosPropose(ColumnFamilyStore cfs, PartitionUpdate update)
     {
-        ProposeVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_PROPOSE_REQ, proposal).build());
+        if (casVersion == CasVersion.v1)
+        {
+            Commit proposal = Commit.newProposal(nextBallot(NONE), update);
+            ProposeVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_PROPOSE_REQ, proposal).build());
+        }
+        else
+        {
+            PaxosV2TestHelper.dispatchV2Propose(cfs);
+        }
     }
 
-    private static void handlePaxosCommit(Commit commit)
+    private void handlePaxosCommit(ColumnFamilyStore cfs, PartitionUpdate update)
     {
-        CommitVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build());
+        if (casVersion == CasVersion.v1)
+        {
+            Commit commit = Commit.newProposal(nextBallot(NONE), update);
+            CommitVerbHandler.instance.doVerb(Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build());
+        }
+        else
+        {
+            PaxosV2TestHelper.dispatchV2Commit(cfs);
+        }
     }
 
     private static void handleMutation(Mutation mutation)

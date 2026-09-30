@@ -30,7 +30,6 @@ import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
-
 public class ProposeVerbHandler extends AbstractPaxosVerbHandler implements IVerbHandler<Commit>
 {
     public static final ProposeVerbHandler instance = new ProposeVerbHandler();
@@ -51,16 +50,18 @@ public class ProposeVerbHandler extends AbstractPaxosVerbHandler implements IVer
 
         // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor.
         // INDEX_WRITE_BYTES is not registered here because propose only writes to system.paxos, which has no indexes.
+        // READ_EXECUTION_TIME tracks the system.paxos read time (loadPaxosState), transferred to user-table context.
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);
 
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
 
-        long proposeStartNanos = System.nanoTime();
+        // WRITE_EXECUTION_TIME is tracked in SystemKeyspace.savePaxosProposal, so that it
+        // only covers the system.paxos write and not the preceding loadPaxosState read.
         Message.Builder<Boolean> reply = message.responseWithBuilder(doPropose(message.payload));
-        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, System.nanoTime() - proposeStartNanos);
 
         int size = reply.currentPayloadSize(MessagingService.current_version);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);

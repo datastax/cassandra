@@ -42,6 +42,7 @@ import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -118,7 +119,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
             command.trackWarnings();
 
         ReadResponse response;
-        long readStartNanos = System.nanoTime();
+        long readStartNanos = Clock.Global.nanoTime();
         try (ReadExecutionController controller = command.executionController(message.trackRepairedData());
              UnfilteredPartitionIterator iterator = command.executeLocally(controller))
         {
@@ -155,7 +156,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         if (command.complete())
         {
-            long readElapsedNanos = System.nanoTime() - readStartNanos;
+            long readElapsedNanos = Clock.Global.nanoTime() - readStartNanos;
             requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
             requestSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, readElapsedNanos);
 

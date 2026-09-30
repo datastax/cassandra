@@ -35,7 +35,6 @@ import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.MutatorProvider;
 import org.apache.cassandra.tracing.Tracing;
-
 public class CommitVerbHandler implements IVerbHandler<Commit>
 {
     public static final CommitVerbHandler instance = new CommitVerbHandler();
@@ -52,9 +51,9 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
-        long commitStartNanos = System.nanoTime();
+        // WRITE_EXECUTION_TIME is tracked in PaxosState.applyCommit (user-table apply) and
+        // SystemKeyspace.savePaxosCommit (system.paxos write) separately, covering the full commit work.
         PaxosState.commitDirect(message.payload, WriteOrigin.fromMessage(message), p -> MutatorProvider.instance.onAppliedProposal(p));
-        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, System.nanoTime() - commitStartNanos);
 
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
         Message.Builder<NoPayload> reply = message.emptyResponseBuilder();

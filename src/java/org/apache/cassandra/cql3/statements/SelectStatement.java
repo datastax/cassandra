@@ -881,9 +881,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    aggregationSpec);
 
         // Sensors are not tracked for internal execution: RequestSensors is only initialised by StorageProxy and the
-        // verb handlers (for internode messages), so RequestTracker.instance.get() always returns null here. This path
-        // is reached via executeLocally(), which is only invoked for NODE_LOCAL consistency — a debug-only mode that
-        // deliberately bypasses the coordinator stack entirely.
+        // verb handlers (for internode messages), so RequestTracker.instance.get() always returns null here.
         try (ReadExecutionController executionController = query.executionController())
         {
             if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize, query.isTopK()))

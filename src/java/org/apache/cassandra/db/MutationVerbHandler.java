@@ -38,6 +38,7 @@ import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.MonotonicClock;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -132,11 +133,11 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
             requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, (double) message.payloadSize(MessagingService.current_version) / tables.size());
         }
 
-        long writeStartNanos = System.nanoTime();
+        long writeStartNanos = Clock.Global.nanoTime();
         // The origin was stamped in doVerb, before the payload could be handed to the forwarding path.
         message.payload.applyFuture(WriteOptions.DEFAULT)
                        .addCallback(o -> {
-                                        long writeElapsedNanos = System.nanoTime() - writeStartNanos;
+                                        long writeElapsedNanos = Clock.Global.nanoTime() - writeStartNanos;
                                         for (Context writeContext : writeContexts)
                                         {
                                             requestSensors.incrementSensor(writeContext, Type.WRITE_EXECUTION_TIME, (double) writeElapsedNanos / writeContexts.size());

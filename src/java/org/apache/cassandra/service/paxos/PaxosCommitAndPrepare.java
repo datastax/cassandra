@@ -19,6 +19,7 @@
 package org.apache.cassandra.service.paxos;
 
 import java.io.IOException;
+import java.util.Set;
 
 import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.db.DecoratedKey;
@@ -30,6 +31,12 @@ import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsFactory;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit.Agreed;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -56,7 +63,7 @@ public class PaxosCommitAndPrepare
         return prepare;
     }
 
-    private static class Request extends PaxosPrepare.AbstractRequest<Request>
+    static class Request extends PaxosPrepare.AbstractRequest<Request>
     {
         final Agreed commit;
 
@@ -66,7 +73,7 @@ public class PaxosCommitAndPrepare
             this.commit = commit;
         }
 
-        private Request(Agreed commit, Ballot ballot, Paxos.Electorate electorate, DecoratedKey partitionKey, TableMetadata table, boolean isWrite)
+        Request(Agreed commit, Ballot ballot, Paxos.Electorate electorate, DecoratedKey partitionKey, TableMetadata table, boolean isWrite)
         {
             super(ballot, electorate, partitionKey, table, isWrite);
             this.commit = commit;
@@ -122,11 +129,40 @@ public class PaxosCommitAndPrepare
         @Override
         public void doVerb(Message<Request> message)
         {
+            // Initialize the sensor and set ExecutorLocals.
+            // This handler performs a commit (user-table write) followed by a prepare (system.paxos write
+            // with optional user-table precondition read), so it combines the sensor sets of both
+            // PaxosCommit.RequestHandler and PaxosPrepare.RequestHandler:
+            // - INDEX_WRITE_BYTES: user-table index writes triggered by the commit phase
+            // - READ_BYTES / READ_EXECUTION_TIME: system.paxos read (loadPaxosState) and optional precondition read
+            // - WRITE_BYTES / WRITE_EXECUTION_TIME: system.paxos and user-table writes
+            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.table.keyspace));
+            Context context = Context.from(message.payload.table);
+            sensors.registerSensor(context, Type.READ_BYTES);
+            sensors.registerSensor(context, Type.WRITE_BYTES);
+            sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+            sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+            sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+            sensors.registerSensor(context, Type.INTERNODE_BYTES);
+            sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+            RequestTracker.instance.set(sensors);
+
             PaxosPrepare.Response response = execute(message.payload, message.from());
-            if (response == null)
-                MessagingService.instance().respondWithFailure(UNKNOWN, message);
+
+            // calculate outbound internode bytes before adding the sensor to the response
+            if (response != null)
+            {
+                Message.Builder<PaxosPrepare.Response> reply = message.responseWithBuilder(response);
+                int size = reply.currentPayloadSize(MessagingService.current_version);
+                sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+                sensors.syncAllSensors();
+                SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
+                MessagingService.instance().send(reply.build(), message.from());
+            }
             else
-                MessagingService.instance().respond(response, message);
+            {
+                MessagingService.instance().respondWithFailure(UNKNOWN, message);
+            }
         }
 
         private static PaxosPrepare.Response execute(Request request, InetAddressAndPort from)

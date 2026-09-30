@@ -75,6 +75,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
+import org.mockito.Mockito;
 
 import static org.apache.cassandra.Util.dk;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -295,7 +296,10 @@ public class MutatorCasTest
          */
         private static AbstractWriteResponseHandler<Commit> throwingCommitHandler(RuntimeException failure)
         {
-            return new AbstractWriteResponseHandler<Commit>(null, null, WriteType.SIMPLE, null,
+            ReplicaPlan.ForWrite replicaPlan = Mockito.mock(ReplicaPlan.ForWrite.class);
+            Mockito.when(replicaPlan.writeQuorum()).thenReturn(1);
+
+            return new AbstractWriteResponseHandler<Commit>(replicaPlan, null, WriteType.SIMPLE, null,
                                                             Dispatcher.RequestTime.forImmediateExecution())
             {
                 @Override
