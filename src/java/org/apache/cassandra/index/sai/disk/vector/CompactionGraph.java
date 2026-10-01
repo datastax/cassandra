@@ -54,10 +54,8 @@ import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
-import io.github.jbellis.jvector.quantization.MutableCompressedVectors;
 import io.github.jbellis.jvector.quantization.MutablePQVectors;
 import io.github.jbellis.jvector.quantization.NVQuantization;
-import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
@@ -152,8 +150,8 @@ public class CompactionGraph implements Closeable, Accountable
     private final ReadWriteLock trainingLock = new ReentrantReadWriteLock();
     private boolean pqFinetuned = false;
     // not final; will be updated to different objects after fine-tuning
-    private VectorCompressor<?> compressor;
-    private MutableCompressedVectors compressedVectors;
+    private ProductQuantization compressor;
+    private MutablePQVectors compressedVectors;
     private GraphIndexBuilder builder;
 
     private final VectorFloat<?> globalMean;
@@ -183,7 +181,9 @@ public class CompactionGraph implements Closeable, Accountable
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
         similarityFunction = indexConfig.getSimilarityFunction();
         postingsStructure = Structure.ONE_TO_ONE; // until proven otherwise
-        this.compressor = compressor;
+        if (!(compressor instanceof ProductQuantization))
+            throw new IllegalArgumentException("Unsupported compressor: " + compressor);
+        this.compressor = (ProductQuantization) compressor;
         // `allRowsHaveVectors` only tells us about data for which we have already built indexes; if we
         // are adding previously unindexed data then we could still encounter rows with null vectors,
         // so this is just a best guess.  If the guess is wrong then the penalty is that we end up
@@ -207,16 +207,8 @@ public class CompactionGraph implements Closeable, Accountable
         vectorsByOrdinalTmpFile = perIndexComponents.tmpFileFor("vectors_by_ordinal");
         onDiskVectorValuesWriter = new OnDiskVectorValuesWriter(vectorsByOrdinalTmpFile, dimension);
 
-        BuildScoreProvider bsp;
-        if (compressor instanceof ProductQuantization)
-        {
-            compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
-            bsp = BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors);
-        }
-        else
-        {
-            throw new IllegalArgumentException("Unsupported compressor: " + compressor);
-        }
+        compressedVectors = new MutablePQVectors(this.compressor);
+        BuildScoreProvider bsp = BuildScoreProvider.pqBuildScoreProvider(similarityFunction, compressedVectors);
         int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
         if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
             logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
@@ -257,8 +249,8 @@ public class CompactionGraph implements Closeable, Accountable
         writerBuilder.with(nvq != null ? new NVQ(nvq) : new InlineVectors(dimension))
                      .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
                      .withMapper(ordinalMapper);
-        if (compressor instanceof ProductQuantization && JVectorVersionUtil.shouldWriteFused(context.version()))
-            writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
+        if (JVectorVersionUtil.shouldWriteFused(context.version()))
+            writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), compressor));
         return writerBuilder.build();
     }
 
@@ -331,7 +323,7 @@ public class CompactionGraph implements Closeable, Accountable
                 absentEntry.doInsert(data);
 
                 // fine-tune the PQ if we've collected enough vectors
-                if (compressor instanceof ProductQuantization && !pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
+                if (!pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
                 {
                     // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
                     // and (2) a map of vectors keyed by ordinal
@@ -352,13 +344,13 @@ public class CompactionGraph implements Closeable, Accountable
                     try
                     {
                         // Fine tune the pq codebook
-                        compressor = ((ProductQuantization) compressor).refine(new ListRandomAccessVectorValues(trainingVectors, dimension));
+                        compressor = compressor.refine(new ListRandomAccessVectorValues(trainingVectors, dimension));
                         trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
 
                         long originalBytesUsed = compressedVectors.ramBytesUsed();
                         // re-encode the vectors added so far
                         int encodedVectorCount = compressedVectors.count();
-                        compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
+                        compressedVectors = new MutablePQVectors(compressor);
                         compactionFjp.submit(() -> {
                             IntStream.range(0, encodedVectorCount)
                                      .parallel()
@@ -376,7 +368,7 @@ public class CompactionGraph implements Closeable, Accountable
                         bytesUsed += (compressedVectors.ramBytesUsed() - originalBytesUsed);
 
                         // Keep the existing edges but recompute their scores
-                        builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
+                        builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, compressedVectors));
                         markCopiedNodesComplete((OnHeapGraphIndex) builder.getGraph());
                     }
                     finally
@@ -539,7 +531,7 @@ public class CompactionGraph implements Closeable, Accountable
                 compressor.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
             else
             {
-                MutableCompressedVectors<?> remappedPQCodes = maybeRemapPQCodes(rp);
+                MutablePQVectors remappedPQCodes = maybeRemapPQCodes(rp);
                 remappedPQCodes.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
             }
             long pqLength = pqOutput.getFilePointer() - pqOffset;
@@ -574,7 +566,7 @@ public class CompactionGraph implements Closeable, Accountable
                     {
                         try (var view = builder.getGraph().getView())
                         {
-                            supplier.put(FeatureId.FUSED_PQ, ordinal -> new FusedPQ.State(view, (PQVectors) compressedVectors, ordinal));
+                            supplier.put(FeatureId.FUSED_PQ, ordinal -> new FusedPQ.State(view, compressedVectors, ordinal));
                             writer.write(supplier);
                         }
                     }
@@ -639,21 +631,19 @@ public class CompactionGraph implements Closeable, Accountable
      * containing only the live codes renumbered to match the postings ordinals in {@code rp}.
      * For other structures the numbering is already dense, so {@link #compressedVectors} is returned as-is.
      */
-    private MutableCompressedVectors<?> maybeRemapPQCodes(V5VectorPostingsWriter.RemappedPostings rp)
+    private MutablePQVectors maybeRemapPQCodes(V5VectorPostingsWriter.RemappedPostings rp)
     {
         // No renumbering needed for ONE_TO_ONE and ONE_TO_MANY, because the numbering is already dense
         if (rp.structure != Structure.ZERO_OR_ONE_TO_MANY)
             return compressedVectors;
 
-        assert compressedVectors instanceof MutablePQVectors;
-        MutablePQVectors sourceCodes = (MutablePQVectors) compressedVectors;
-        MutablePQVectors remappedCV = new MutablePQVectors((ProductQuantization) compressor);
-        int subspaceCount = sourceCodes.getCompressedSize();
+        MutablePQVectors remappedCV = new MutablePQVectors(compressor);
+        int subspaceCount = compressedVectors.getCompressedSize();
         for (int newOrdinal = 0; newOrdinal <= rp.maxNewOrdinal; newOrdinal++)
         {
             int oldOrdinal = rp.ordinalMapper.newToOld(newOrdinal);
             remappedCV.setZero(newOrdinal);  // allocates the slot
-            remappedCV.get(newOrdinal).copyFrom(sourceCodes.get(oldOrdinal), 0, 0, subspaceCount);
+            remappedCV.get(newOrdinal).copyFrom(compressedVectors.get(oldOrdinal), 0, 0, subspaceCount);
         }
         return remappedCV;
     }
