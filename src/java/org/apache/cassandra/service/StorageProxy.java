@@ -560,12 +560,6 @@ public class StorageProxy implements StorageProxyMBean
         //    detects AbstractPaxosCallback instances and calls incrementSensor() on this RequestSensors
         //    object with the user-table context, accumulating all replica contributions here.
         //
-        // 3. User-table condition-check read (coordinator-local):
-        //    The CAS precondition read (readOne) internally calls StorageProxy.read(), which creates its
-        //    own RequestSensors and overwrites RequestTracker. After readOne returns, the READ_BYTES it
-        //    accumulated are transferred back into this sensors object and RequestTracker is restored,
-        //    so the user-table read is also attributed to the CAS operation.
-        //
         // The Commit object carries the user-table TableMetadata (set in Commit.newPrepare via
         // Schema.instance.validateTable above), so message.payload.update.metadata() on every verb handler
         // is the user-table metadata, not system.paxos — guaranteeing consistent context across all replicas.
@@ -601,18 +595,6 @@ public class StorageProxy implements StorageProxyMBean
                     try (RowIterator rowIter = readOne(readCommand, readConsistency, clientState, requestTime, lwtTracker))
                     {
                         current = FilteredPartition.create(rowIter);
-                    }
-
-                    // readOne (via StorageProxy.read) creates its own RequestSensors and overwrites RequestTracker.
-                    // Transfer the READ_BYTES it accumulated for the user-table condition check back into the CAS
-                    // sensors, then restore RequestTracker so subsequent paxos phases (savePaxosWritePromise etc.)
-                    // still operate against the right sensors object.
-                    RequestSensors readSensors = RequestTracker.instance.get();
-                    if (readSensors != null && readSensors != sensors)
-                    {
-                        readSensors.getSensor(context, Type.READ_BYTES)
-                                   .ifPresent(s -> sensors.incrementSensor(context, Type.READ_BYTES, s.getValue()));
-                        RequestTracker.instance.set(sensors);
                     }
 
                     if (!request.appliesTo(current))

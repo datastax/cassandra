@@ -31,7 +31,13 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RowUpdateBuilder;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.service.paxos.Ballot;
+import org.apache.cassandra.service.paxos.Commit;
+import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.ActiveRequestSensors;
@@ -45,9 +51,18 @@ import org.apache.cassandra.sensors.Type;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests for ResponseVerbHandler sensor tracking, specifically:
- * - Paxos commit responses now track READ_BYTES in addition to WRITE_BYTES
- * - Paxos V2 callbacks (PaxosPrepare, PaxosPropose, PaxosCommit) track both READ and WRITE bytes
+ * Tests for {@link ResponseVerbHandler} sensor tracking:
+ * <ul>
+ *   <li>Read responses ({@link ReadCallback}) track {@link Type#READ_BYTES} only.</li>
+ *   <li>Paxos V1 commit responses ({@code PAXOS_COMMIT_REQ} via {@link RequestCallbacks.WriteCallbackInfo})
+ *       track only {@link Type#WRITE_BYTES} — the commit phase does not read system.paxos.</li>
+ *   <li>Regular mutation responses (same {@link RequestCallbacks.WriteCallbackInfo} branch) also track
+ *       only {@link Type#WRITE_BYTES}.</li>
+ *   <li>Paxos V2 callbacks ({@link org.apache.cassandra.service.paxos.PaxosPrepare},
+ *       {@link org.apache.cassandra.service.paxos.PaxosPropose},
+ *       {@link org.apache.cassandra.service.paxos.PaxosCommit}) track both
+ *       {@link Type#READ_BYTES} and {@link Type#WRITE_BYTES}.</li>
+ * </ul>
  */
 public class ResponseVerbHandlerSensorsTest
 {
@@ -81,35 +96,76 @@ public class ResponseVerbHandlerSensorsTest
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
     }
 
+    /**
+     * Read responses go through the {@link ReadCallback} branch in
+     * {@link ResponseVerbHandler#trackReplicaSensors} and track only {@link Type#READ_BYTES};
+     * {@link Type#WRITE_BYTES} is not touched by the read path.
+     */
     @Test
-    public void testPaxosCommitResponseIncludesReadBytes() throws Exception
+    public void testReadCallbackResponseTracksReadBytesOnly() throws Exception
     {
-        Mutation mutation = new RowUpdateBuilder(metadata, 0, "key1").build();
+        ReadCallback<?, ?> mockReadCallback = Mockito.mock(ReadCallback.class);
+        Mockito.when(mockReadCallback.command()).thenReturn(
+            SinglePartitionReadCommand.fullPartitionRead(metadata, 0, ByteBufferUtil.bytes("key0")));
+        Mockito.when(mockReadCallback.getRequestSensors()).thenReturn(requestSensors);
 
         InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.1");
-        Message<Mutation> requestMessage = Message.builder(Verb.PAXOS_COMMIT_REQ, mutation).build();
+        Mutation requestMutation = new RowUpdateBuilder(metadata, 0, "key0").build();
+        Message<Mutation> requestMessage = Message.builder(Verb.READ_REQ, requestMutation).build();
+        RequestCallbacks.CallbackInfo callbackInfo = new RequestCallbacks.CallbackInfo(requestMessage, peer, mockReadCallback);
+
+        Message<?> responseMessage = createResponseMessageWithSensors(300.0, 400.0);
+
+        trackReplicaSensors(callbackInfo, responseMessage);
+
+        assertThat(requestSensors.getSensor(context, Type.READ_BYTES).get().getValue())
+            .as("READ_BYTES should be tracked for read responses")
+            .isEqualTo(300.0);
+        assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue())
+            .as("WRITE_BYTES should NOT be tracked for read responses")
+            .isEqualTo(0.0);
+    }
+
+    /**
+     * Paxos V1 commit uses a plain {@link Commit} payload on {@code PAXOS_COMMIT_REQ} and goes
+     * through the {@link RequestCallbacks.WriteCallbackInfo} branch in
+     * {@link ResponseVerbHandler#trackReplicaSensors}.  That branch tracks only {@link Type#WRITE_BYTES};
+     * {@link Type#READ_BYTES} is intentionally not tracked there because the commit phase does not
+     * read from system.paxos — only Prepare and Propose do.
+     */
+    @Test
+    public void testPaxosV1CommitResponseTracksWriteBytesOnly() throws Exception
+    {
+        Mutation mutation = new RowUpdateBuilder(metadata, 0, "key1").build();
+        PartitionUpdate update = mutation.getPartitionUpdate(metadata);
+        Commit commit = new Commit(Ballot.none(), update);
+
+        InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.1");
+        Message<Commit> requestMessage = Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build();
         RequestCallbacks.WriteCallbackInfo callbackInfo = createWriteCallbackInfo(requestMessage, peer);
 
-        // Create a response message with sensor data (simulating 100 bytes read, 200 bytes written)
         Message<?> responseMessage = createResponseMessageWithSensors(100.0, 200.0);
 
         trackReplicaSensors(callbackInfo, responseMessage);
 
-        // Verify both READ_BYTES and WRITE_BYTES were incremented
-        // This validates the change in ResponseVerbHandler where commit responses now track READ_BYTES
-        assertThat(requestSensors.getSensor(context, Type.READ_BYTES).get().getValue())
-            .as("READ_BYTES should be tracked for Paxos commit responses (CNDB-15911)")
-            .isEqualTo(100.0);
-
+        // WRITE_BYTES is tracked for the commit response
         assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue())
-            .as("WRITE_BYTES should be tracked for Paxos commit responses")
+            .as("WRITE_BYTES should be tracked for Paxos V1 commit responses")
             .isEqualTo(200.0);
+
+        // READ_BYTES is not tracked for commit: the commit phase writes to system.paxos but does not read it
+        assertThat(requestSensors.getSensor(context, Type.READ_BYTES).get().getValue())
+            .as("READ_BYTES should NOT be tracked for Paxos V1 commit responses (no system.paxos read during commit)")
+            .isEqualTo(0.0);
     }
 
+    /**
+     * Regular mutation responses go through the {@link RequestCallbacks.WriteCallbackInfo} branch and
+     * track only {@link Type#WRITE_BYTES}, not {@link Type#READ_BYTES}.
+     */
     @Test
-    public void testRegularMutationResponseIncludesReadBytes() throws Exception
+    public void testRegularMutationResponseTracksWriteBytesOnly() throws Exception
     {
-        // For regular mutations, the WriteCallbackInfo path should also track READ_BYTES
         Mutation mutation = new RowUpdateBuilder(metadata, 0, "key2").build();
 
         InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.1");
@@ -119,11 +175,18 @@ public class ResponseVerbHandlerSensorsTest
 
         trackReplicaSensors(callbackInfo, responseMessage);
 
-        // Both sensors should be incremented
-        assertThat(requestSensors.getSensor(context, Type.READ_BYTES).get().getValue()).isEqualTo(50.0);
-        assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue()).isEqualTo(150.0);
+        assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue())
+            .as("WRITE_BYTES should be tracked for regular mutation responses")
+            .isEqualTo(150.0);
+        assertThat(requestSensors.getSensor(context, Type.READ_BYTES).get().getValue())
+            .as("READ_BYTES should NOT be tracked for regular mutation responses")
+            .isEqualTo(0.0);
     }
 
+    /**
+     * {@link Type#WRITE_BYTES} accumulates additively across multiple replica responses for the same
+     * request: two responses each carrying 175 bytes should sum to 350 bytes.
+     */
     @Test
     public void testSensorValuesAccumulateFromMessage() throws Exception
     {
@@ -135,11 +198,22 @@ public class ResponseVerbHandlerSensorsTest
         Message<?> responseMessage = createResponseMessageWithSensors(75.0, 175.0);
 
         trackReplicaSensors(callbackInfo, responseMessage);
+        trackReplicaSensors(callbackInfo, responseMessage);
 
-        assertThat(requestSensors.getSensor(context, Type.READ_BYTES).get().getValue()).isEqualTo(75.0);
-        assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue()).isEqualTo(175.0);
+        assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue())
+            .as("WRITE_BYTES should accumulate additively across two replica responses")
+            .isEqualTo(350.0);
+        assertThat(requestSensors.getSensor(context, Type.READ_BYTES).get().getValue())
+            .as("READ_BYTES should remain zero for mutation responses")
+            .isEqualTo(0.0);
     }
 
+    /**
+     * Paxos V2 Prepare responses go through the {@link org.apache.cassandra.service.paxos.PaxosPrepare}
+     * branch in {@link ResponseVerbHandler#trackReplicaSensors} and track both
+     * {@link Type#READ_BYTES} (system.paxos read via {@code loadPaxosState}) and
+     * {@link Type#WRITE_BYTES} (system.paxos write via {@code savePaxosReadPromise/savePaxosWritePromise}).
+     */
     @Test
     public void testPaxosV2PrepareCallbackSensors() throws Exception
     {
@@ -161,6 +235,12 @@ public class ResponseVerbHandlerSensorsTest
             .isEqualTo(120.0);
     }
 
+    /**
+     * Paxos V2 Propose responses go through the {@link org.apache.cassandra.service.paxos.PaxosPropose}
+     * branch in {@link ResponseVerbHandler#trackReplicaSensors} and track both
+     * {@link Type#READ_BYTES} (system.paxos read via {@code loadPaxosState}) and
+     * {@link Type#WRITE_BYTES} (system.paxos write via {@code savePaxosProposal}).
+     */
     @Test
     public void testPaxosV2ProposeCallbackSensors() throws Exception
     {
@@ -182,6 +262,12 @@ public class ResponseVerbHandlerSensorsTest
             .isEqualTo(130.0);
     }
 
+    /**
+     * Paxos V2 Commit responses go through the {@link org.apache.cassandra.service.paxos.PaxosCommit}
+     * branch in {@link ResponseVerbHandler#trackReplicaSensors} and track both
+     * {@link Type#READ_BYTES} and {@link Type#WRITE_BYTES} (system.paxos write via {@code savePaxosCommit},
+     * plus the user-table mutation apply when the condition was met).
+     */
     @Test
     public void testPaxosV2CommitCallbackSensors() throws Exception
     {
@@ -196,7 +282,7 @@ public class ResponseVerbHandlerSensorsTest
         trackReplicaSensors(callbackInfo, responseMessage);
 
         assertThat(requestSensors.getSensor(context, Type.READ_BYTES).get().getValue())
-            .as("PaxosCommit V2 should track READ_BYTES (CNDB-15911)")
+            .as("PaxosCommit V2 should track READ_BYTES")
             .isEqualTo(95.0);
         assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue())
             .as("PaxosCommit V2 should track WRITE_BYTES")
@@ -204,11 +290,12 @@ public class ResponseVerbHandlerSensorsTest
     }
 
     /**
-     * Create a WriteCallbackInfo with the given message and peer
+     * Builds a {@link RequestCallbacks.WriteCallbackInfo} backed by a minimal {@link RequestCallback}
+     * that exposes {@link #requestSensors}. Used for the {@link RequestCallbacks.WriteCallbackInfo}
+     * branch tests (mutations and Paxos V1 commit).
      */
     private RequestCallbacks.WriteCallbackInfo createWriteCallbackInfo(Message message, InetAddressAndPort peer)
     {
-        // Create a minimal callback that returns our request sensors
         RequestCallback<?> callback = new RequestCallback<Object>()
         {
             @Override
@@ -229,7 +316,8 @@ public class ResponseVerbHandlerSensorsTest
     }
 
     /**
-     * Create a CallbackInfo with the given callback (for testing Paxos V2 callbacks)
+     * Builds a plain {@link RequestCallbacks.CallbackInfo} wrapping the given callback.
+     * Used for the Paxos V2 branch tests where the callback itself carries the sensor reference.
      */
     private RequestCallbacks.CallbackInfo createCallbackInfo(RequestCallback<?> callback) throws Exception
     {
@@ -241,7 +329,8 @@ public class ResponseVerbHandlerSensorsTest
     }
 
     /**
-     * Create a response message with sensor data in custom params
+     * Builds a response {@link Message} with {@link Type#READ_BYTES} and {@link Type#WRITE_BYTES}
+     * encoded as custom parameters, simulating a replica response that carries sensor data.
      */
     private Message<?> createResponseMessageWithSensors(double readBytes, double writeBytes) throws Exception
     {
@@ -267,7 +356,7 @@ public class ResponseVerbHandlerSensorsTest
     }
 
     /**
-     * Mock sensor for testing
+     * Minimal {@link Sensor} subclass used to build response messages with known sensor values.
      */
     static class MockSensor extends Sensor
     {
@@ -278,7 +367,8 @@ public class ResponseVerbHandlerSensorsTest
     }
 
     /**
-     * Use reflection to call the private trackReplicaSensors method
+     * Invokes the private {@link ResponseVerbHandler#trackReplicaSensors} method via reflection,
+     * accumulating the sensor values from {@code message} into the callback's {@link RequestSensors}.
      */
     private void trackReplicaSensors(RequestCallbacks.CallbackInfo callbackInfo, Message<?> message) throws Exception
     {
