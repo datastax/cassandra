@@ -169,6 +169,16 @@ public interface ExecutorPlus extends ExecutorService, ResizableThreadPool
      */
     boolean inExecutor();
 
+    /**
+     * The queue time native-transport backpressure reads: for SEP executors, the age of the head task only when it is
+     * a submitted {@link DebuggableTask}, measured from its creation, and 0 otherwise; for any other executor, its
+     * {@link #oldestTaskQueueTime()}. {@link #oldestTaskQueueTime()} itself measures every task from when it was queued.
+     */
+    default long oldestDebuggableTaskQueueTime()
+    {
+        return oldestTaskQueueTime();
+    }
+
     default <T> List<java.util.concurrent.Future<T>> invokeAll(Collection<? extends Callable<T>> tasks) throws InterruptedException
     {
         throw new UnsupportedOperationException();

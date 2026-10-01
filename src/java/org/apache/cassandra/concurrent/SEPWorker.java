@@ -20,6 +20,7 @@ package org.apache.cassandra.concurrent;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.concurrent.locks.LockSupport;
 
 import org.slf4j.Logger;
@@ -32,11 +33,13 @@ import static org.apache.cassandra.concurrent.SEPExecutor.TakeTaskPermitResult.R
 import static org.apache.cassandra.concurrent.SEPExecutor.TakeTaskPermitResult.TOOK_PERMIT;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SET_SEP_THREAD_NAME;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
 final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnable
 {
     private static final Logger logger = LoggerFactory.getLogger(SEPWorker.class);
     private static final boolean SET_THREAD_NAME = SET_SEP_THREAD_NAME.getBoolean();
+    private static final AtomicReferenceFieldUpdater<SEPWorker, SEPExecutor> runningForUpdater = AtomicReferenceFieldUpdater.newUpdater(SEPWorker.class, SEPExecutor.class, "runningFor");
 
     final Long workerId;
     final Thread thread;
@@ -49,7 +52,16 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
     long prevStopCheck = 0;
     long soleSpinnerSpinTime = 0;
 
-    private final AtomicReference<Runnable> currentTask = new AtomicReference<>();
+    final AtomicReference<Runnable> currentTask = new AtomicReference<>();
+
+    // liveness: the executor this worker last took work from, and when its current task was taken. Written only by
+    // this worker's thread, and both written before currentTask publishes the task (a release store), so a reader that
+    // sees a task in currentTask sees the executor and stamp of that task or of a later one. runningFor is written once
+    // per assignment, with a release-only lazySet; it is volatile so that a reader can order its read between two
+    // reads of currentTask, and trust it only if both return the same task (see SEPExecutor.oldestRunningTask).
+    // taskStartedAtNanos is a plain field; a newer stamp can only under-report.
+    volatile SEPExecutor runningFor;
+    long taskStartedAtNanos;
 
     SEPWorker(ThreadGroup threadGroup, Long workerId, Work initialState, SharedExecutorPool pool)
     {
@@ -124,7 +136,9 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
                 if (SET_THREAD_NAME)
                     Thread.currentThread().setName(assigned.name + '-' + workerId);
 
+                runningForUpdater.lazySet(this, assigned);
                 task = assigned.tasks.poll();
+                taskStartedAtNanos = approxTime.now();
                 currentTask.lazySet(task);
 
                 // if we do have tasks assigned, nobody will change our state so we can simply set it to WORKING
@@ -151,6 +165,7 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
                         break;
 
                     task = assigned.tasks.poll();
+                    taskStartedAtNanos = approxTime.now();
                     currentTask.lazySet(task);
                 }
 

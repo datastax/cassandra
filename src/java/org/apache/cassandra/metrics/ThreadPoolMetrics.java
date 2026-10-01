@@ -18,6 +18,7 @@
 package org.apache.cassandra.metrics;
 
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.function.Supplier;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
@@ -41,6 +42,7 @@ public class ThreadPoolMetrics
     public static final String MAX_POOL_SIZE = "MaxPoolSize";
     public static final String MAX_TASKS_QUEUED = "MaxTasksQueued";
     public static final String OLDEST_TASK_QUEUE_TIME = "OldestTaskQueueTime";
+    public static final String LONGEST_RUNNING_TASK_TIME = "LongestRunningTaskTime";
 
     /** Number of active tasks. */
     public final Gauge<Integer> activeTasks;
@@ -69,6 +71,12 @@ public class ThreadPoolMetrics
     /** Maximum number of tasks queued before a task get blocked */
     public final Gauge<Integer> maxTasksQueued;
 
+    /** For how long, in nanoseconds, the oldest task currently executing has been running */
+    public final Gauge<Long> longestRunningTaskTime;
+
+    /** Class name of the oldest task currently executing, null when idle; not registered as a metric */
+    public final Supplier<String> longestRunningTaskClass;
+
     public final String path;
     public final String poolName;
 
@@ -92,6 +100,8 @@ public class ThreadPoolMetrics
         maxPoolSize = executor::getMaximumPoolSize;
         maxTasksQueued = executor::getMaxTasksQueued;
         oldestTaskQueueTime = executor::oldestTaskQueueTime;
+        longestRunningTaskTime = executor::longestRunningTaskTime;
+        longestRunningTaskClass = executor::getLongestRunningTaskClass;
     }
 
     public ThreadPoolMetrics register()
@@ -104,6 +114,7 @@ public class ThreadPoolMetrics
         Metrics.register(makeMetricName(path, poolName, MAX_POOL_SIZE), maxPoolSize);
         Metrics.register(makeMetricName(path, poolName, MAX_TASKS_QUEUED), maxTasksQueued);
         Metrics.register(makeMetricName(path, poolName, OLDEST_TASK_QUEUE_TIME), oldestTaskQueueTime);
+        Metrics.register(makeMetricName(path, poolName, LONGEST_RUNNING_TASK_TIME), longestRunningTaskTime);
         return Metrics.register(this);
     }
 
@@ -117,6 +128,7 @@ public class ThreadPoolMetrics
         Metrics.remove(makeMetricName(path, poolName, MAX_POOL_SIZE));
         Metrics.remove(makeMetricName(path, poolName, MAX_TASKS_QUEUED));
         Metrics.remove(makeMetricName(path, poolName, OLDEST_TASK_QUEUE_TIME));
+        Metrics.remove(makeMetricName(path, poolName, LONGEST_RUNNING_TASK_TIME));
         Metrics.remove(this);
     }
 

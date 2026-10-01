@@ -332,6 +332,15 @@ pool.
 
 |MaxTasksQueued |Gauge<Integer> |The maximum number of tasks queued
 before a task get blocked.
+
+|OldestTaskQueueTime |Gauge<Long> |Nanoseconds the task at the head of
+the queue has been waiting since it was queued, for every executor; 0
+when the queue is empty. Scheduled pools report how far past its
+scheduled time their next task is.
+
+|LongestRunningTaskTime |Gauge<Long> |Nanoseconds the oldest task
+currently executing has been running, 0 when the pool is idle. The
+pool's MBean reports that task's class as `LongestRunningTaskClass`.
 |===
 
 The following thread pools can be monitored.

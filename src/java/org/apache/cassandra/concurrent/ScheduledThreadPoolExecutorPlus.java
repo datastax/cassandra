@@ -49,6 +49,9 @@ public class ScheduledThreadPoolExecutorPlus extends ScheduledThreadPoolExecutor
     private static final Logger logger = LoggerFactory.getLogger(ScheduledThreadPoolExecutorPlus.class);
     private static final TaskFactory taskFactory = TaskFactory.standard();
 
+    // liveness: the running task of each worker thread
+    private final WorkerSlots workerSlots = new WorkerSlots();
+
     public static final RejectedExecutionHandler rejectedExecutionHandler = (task, executor) ->
     {
         if (executor.isShutdown())
@@ -98,6 +101,47 @@ public class ScheduledThreadPoolExecutorPlus extends ScheduledThreadPoolExecutor
     public ScheduledFuture<?> scheduleWithFixedDelay(Runnable task, long initialDelay, long delay, TimeUnit unit)
     {
         return super.scheduleWithFixedDelay(suppressing(task), initialDelay, delay, unit);
+    }
+
+    @Override
+    protected void beforeExecute(Thread t, Runnable r)
+    {
+        workerSlots.markRunning(WrappedTask.classOf(r));
+        super.beforeExecute(t, r);
+    }
+
+    @Override
+    protected void afterExecute(Runnable r, Throwable t)
+    {
+        super.afterExecute(r, t);
+        WorkerSlots.markIdle();
+    }
+
+    /**
+     * The queue is ordered by trigger time, so the head is the task due first; it has been waiting to run for as long
+     * as it is past its trigger time, and is not waiting at all before that.
+     */
+    @Override
+    public long oldestTaskQueueTime()
+    {
+        Runnable head = getQueue().peek();
+        if (!(head instanceof Delayed))
+            return 0L;
+        return Math.max(0L, -((Delayed) head).getDelay(NANOSECONDS));
+    }
+
+    @Override
+    public long longestRunningTaskTime()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? 0L : TimedTask.ageNanos(oldest.capturedStartNanos);
+    }
+
+    @Override
+    public String getLongestRunningTaskClass()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? null : oldest.taskClass.getName();
     }
 
     @Override
