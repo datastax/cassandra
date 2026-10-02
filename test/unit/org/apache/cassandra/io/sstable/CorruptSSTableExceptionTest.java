@@ -29,8 +29,8 @@ import static org.junit.Assert.assertSame;
 
 public class CorruptSSTableExceptionTest
 {
-    private static final File FILE = new File("/tmp/ks/tbl/nb-1-big-Partitions.db");
-    private static final File OTHER_FILE = new File("/tmp/ks/tbl/nb-1-big-Rows.db");
+    private static final File FILE = new File("ks/tbl/nb-1-big-Partitions.db");
+    private static final File OTHER_FILE = new File("ks/tbl/nb-1-big-Rows.db");
 
     @Test
     public void testIOExceptionIsWrappedForFile()
