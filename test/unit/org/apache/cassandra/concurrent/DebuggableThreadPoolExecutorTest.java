@@ -46,6 +46,7 @@ import org.apache.cassandra.utils.WrappedRunnable;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
+import static org.apache.cassandra.utils.MonotonicClock.Global.preciseTime;
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
@@ -371,6 +372,28 @@ public class DebuggableThreadPoolExecutorTest
     }
 
     @Test
+    public void testDebuggableTaskQueueTimeIsZero() throws Exception
+    {
+        // only SEP executors report it, so a custom native-transport executor never applies backpressure
+        ExecutorPlus es = executorFactory().sequential("liveness-debuggable");
+        try
+        {
+            Blocker a = new Blocker();
+            es.execute(a);
+            Assert.assertTrue(a.started.await(10, TimeUnit.SECONDS));
+            es.execute(() -> {});
+            Thread.sleep(50);
+            Util.spinAssertEquals(true, () -> es.oldestTaskQueueTime() >= MILLISECONDS.toNanos(40), 5);
+            Assert.assertEquals(0L, es.oldestDebuggableTaskQueueTime());
+            a.release.countDown();
+        }
+        finally
+        {
+            es.shutdownNow();
+        }
+    }
+
+    @Test
     public void testSubmitReportsUserClass() throws Exception
     {
         ThreadPoolExecutorPlus es = (ThreadPoolExecutorPlus) executorFactory().sequential("liveness-submit");
@@ -392,6 +415,24 @@ public class DebuggableThreadPoolExecutorTest
             Assert.assertEquals(2, queued.length);
             Assert.assertSame(callable.getClass(), WrappedTask.classOf(queued[0]));
             Assert.assertSame(runnable.getClass(), WrappedTask.classOf(queued[1]));
+            a.release.countDown();
+        }
+        finally
+        {
+            es.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testAtLeastOnceTriggerReportsUserClass() throws Exception
+    {
+        SequentialExecutorPlus es = executorFactory().sequential("liveness-at-least-once");
+        try
+        {
+            Blocker a = new Blocker();
+            Assert.assertTrue(es.atLeastOnceTrigger(a).trigger());
+            Assert.assertTrue(a.started.await(10, TimeUnit.SECONDS));
+            Assert.assertEquals(Blocker.class.getName(), es.getLongestRunningTaskClass());
             a.release.countDown();
         }
         finally
@@ -595,7 +636,7 @@ public class DebuggableThreadPoolExecutorTest
                     // no task can have been running longer than this test; a stamp re-read after the worker cleared
                     // it would report the whole clock value instead
                     long age = es.longestRunningTaskTime();
-                    long elapsed = approxTime.now() - begin;
+                    long elapsed = preciseTime.now() - begin;
                     Assert.assertTrue(age + " > " + elapsed, elapsed + TimeUnit.SECONDS.toNanos(1) >= age);
                 }
             }

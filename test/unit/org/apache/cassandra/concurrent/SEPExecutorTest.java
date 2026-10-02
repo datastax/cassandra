@@ -513,7 +513,7 @@ public class SEPExecutorTest
                 for (int i = 0; i < 1000; i++)
                 {
                     long age = es.longestRunningTaskTime();
-                    long elapsed = approxTime.now() - begin;
+                    long elapsed = preciseTime.now() - begin;
                     Assert.assertTrue(age + " > " + elapsed, elapsed + TimeUnit.SECONDS.toNanos(1) >= age);
                 }
             }
@@ -546,7 +546,7 @@ public class SEPExecutorTest
             Blocker a = new Blocker();
             es.execute(a);
             Assert.assertTrue(a.started.await(10, TimeUnit.SECONDS));
-            SEPWorker worker = pool.allWorkers.stream().filter(w -> w.runningFor == es && w.currentTask.get() != null).findFirst().orElse(null);
+            SEPWorker worker = pool.allWorkers.stream().filter(w -> w.runningFor.get() == es && w.currentTask.get() != null).findFirst().orElse(null);
             Assert.assertNotNull(worker);
             Assert.assertEquals(Blocker.class.getName(), es.getLongestRunningTaskClass());
 
@@ -558,6 +558,24 @@ public class SEPExecutorTest
             Assert.assertFalse(pool.allWorkers.contains(worker));
             Assert.assertEquals(0L, es.longestRunningTaskTime());
             Assert.assertNull(es.getLongestRunningTaskClass());
+        }
+        finally
+        {
+            pool.shutdownAndWait(1, TimeUnit.MINUTES);
+        }
+    }
+
+    @Test
+    public void testIdleWorkerDoesNotReferenceExecutor() throws Exception
+    {
+        SharedExecutorPool pool = new SharedExecutorPool("LivenessPool6");
+        SEPExecutor es = (SEPExecutor) pool.newExecutor(1, "internal", "LivenessStage6");
+        try
+        {
+            es.submit(() -> {}).get(10, TimeUnit.SECONDS);
+            Assert.assertFalse(pool.allWorkers.isEmpty());
+            // once idle, no worker keeps the executor it last served reachable
+            Util.spinAssertEquals(false, () -> pool.allWorkers.stream().anyMatch(w -> w.runningFor.get() == es), 5);
         }
         finally
         {
