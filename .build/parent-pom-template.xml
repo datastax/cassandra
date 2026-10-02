@@ -1260,7 +1260,7 @@
       <dependency>
         <groupId>io.github.jbellis</groupId>
         <artifactId>jvector</artifactId>
-        <version>4.0.0-rc.8-hf1</version>
+        <version>4.0.0-rc.8-remap</version>
       </dependency>
       <dependency>
         <groupId>com.carrotsearch.randomizedtesting</groupId>
