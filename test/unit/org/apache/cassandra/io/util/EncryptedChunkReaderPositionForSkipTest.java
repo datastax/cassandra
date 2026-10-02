@@ -317,13 +317,17 @@ public class EncryptedChunkReaderPositionForSkipTest
                                 continue;
                             String context = String.format("maxBytesInPage %d, start %d, %d bytes", maxBytesInPage, start, n);
                             reader.seek(start);
+                            assertEquals("Remaining " + context, remaining, reader.bytesRemaining());
                             reader.readFully(new byte[n]);
                             long afterRead = reader.getFilePointer();
+                            assertEquals("Remaining after read " + context, remaining - n, reader.bytesRemaining());
+                            assertEquals("EOF after read " + context, remaining == n, reader.isEOF());
                             int nextAfterRead = nextByte(reader);
 
                             reader.seek(start);
                             assertEquals(context, n, reader.skipBytes(n));
                             assertEquals("Position " + context, afterRead, reader.getFilePointer());
+                            assertEquals("Remaining after skip " + context, remaining - n, reader.bytesRemaining());
                             assertEquals("Next byte " + context, nextAfterRead, nextByte(reader));
                         }
 
