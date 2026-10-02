@@ -50,6 +50,7 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.io.sstable.CorruptSSTableException.maybeWrapInCorruptSSTableException;
 import static org.apache.cassandra.utils.vint.VIntCoding.VIntOutOfRangeException;
 
 
@@ -140,20 +141,14 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
                     file.close();
                 this.reader = reader;
             }
-            catch (IOException e)
+            catch (IOException | CorruptSSTableException e)
             {
+                // CorruptSSTableException: e.g. a chunk of an encrypted row index failing its checksum or decryption
                 sstable.markSuspect();
                 // when file == null the failure may come from a file the reader opened itself (Data.db or index)
                 File filePath = file != null ? file.getFile() : sstable.getDataFile();
                 closeOnConstructionFailure(reader, file, shouldCloseFile, e);
-                throw new CorruptSSTableException(e, filePath);
-            }
-            catch (CorruptSSTableException e)
-            {
-                // e.g. a chunk of an encrypted row index failing its checksum or decryption
-                sstable.markSuspect();
-                closeOnConstructionFailure(reader, file, shouldCloseFile, e);
-                throw e;
+                throw maybeWrapInCorruptSSTableException(e, filePath);
             }
             catch (Throwable t)
             {
@@ -291,7 +286,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
             if (reader != null)
                 reader.setForSlice(slice);
         }
-        catch (IOException e)
+        catch (IOException | CorruptSSTableException e)
         {
             sstable.markSuspect();
             try
@@ -302,20 +297,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
             {
                 e.addSuppressed(suppressed);
             }
-            throw new CorruptSSTableException(e, reader.toString());
-        }
-        catch (CorruptSSTableException e)
-        {
-            sstable.markSuspect();
-            try
-            {
-                closeInternal();
-            }
-            catch (IOException suppressed)
-            {
-                e.addSuppressed(suppressed);
-            }
-            throw e;
+            throw maybeWrapInCorruptSSTableException(e, reader.toString());
         }
     }
 
@@ -418,20 +400,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
             {
                 return hasNextInternal();
             }
-            catch (IOException | IndexOutOfBoundsException | VIntOutOfRangeException e)
-            {
-                try
-                {
-                    closeInternal();
-                }
-                catch (IOException suppressed)
-                {
-                    e.addSuppressed(suppressed);
-                }
-                sstable.markSuspect();
-                throw new CorruptSSTableException(e, toString());
-            }
-            catch (CorruptSSTableException e)
+            catch (IOException | IndexOutOfBoundsException | VIntOutOfRangeException | CorruptSSTableException e)
             {
                 sstable.markSuspect();
                 try
@@ -442,7 +411,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
                 {
                     e.addSuppressed(suppressed);
                 }
-                throw e;
+                throw maybeWrapInCorruptSSTableException(e, toString());
             }
         }
 
@@ -452,20 +421,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
             {
                 return nextInternal();
             }
-            catch (IOException e)
-            {
-                try
-                {
-                    closeInternal();
-                }
-                catch (IOException suppressed)
-                {
-                    e.addSuppressed(suppressed);
-                }
-                sstable.markSuspect();
-                throw new CorruptSSTableException(e, toString());
-            }
-            catch (CorruptSSTableException e)
+            catch (IOException | CorruptSSTableException e)
             {
                 sstable.markSuspect();
                 try
@@ -476,7 +432,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
                 {
                     e.addSuppressed(suppressed);
                 }
-                throw e;
+                throw maybeWrapInCorruptSSTableException(e, toString());
             }
         }
 
