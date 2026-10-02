@@ -60,6 +60,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.OutputHandler;
 
+import static org.apache.cassandra.io.sstable.CorruptSSTableException.maybeWrapInCorruptSSTableException;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.EQ;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GE;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GT;
@@ -163,16 +164,11 @@ public class BtiTableReader extends SSTableReaderWithFilter
                     notifySkipped(SkippingReason.INDEX_ENTRY_NOT_FOUND, listener, operator, updateStats);
                 return rie;
             }
-            catch (IOException e)
+            catch (IOException | CorruptSSTableException e)
             {
+                // CorruptSSTableException: e.g. a chunk of an encrypted index failing its checksum or decryption
                 markSuspect();
-                throw new CorruptSSTableException(e, rowIndexFile.path());
-            }
-            catch (CorruptSSTableException e)
-            {
-                // e.g. a chunk of an encrypted index failing its checksum or decryption
-                markSuspect();
-                throw e;
+                throw maybeWrapInCorruptSSTableException(e, rowIndexFile.path());
             }
         }
 
@@ -217,16 +213,11 @@ public class BtiTableReader extends SSTableReaderWithFilter
                 return isLeftBound || assumeNoMatch ? new TrieIndexEntry(~pos) : null;
             });
         }
-        catch (IOException e)
+        catch (IOException | CorruptSSTableException e)
         {
+            // CorruptSSTableException: e.g. a chunk of an encrypted index failing its checksum or decryption
             markSuspect();
-            throw new CorruptSSTableException(e, rowIndexFile.path());
-        }
-        catch (CorruptSSTableException e)
-        {
-            // e.g. a chunk of an encrypted index failing its checksum or decryption
-            markSuspect();
-            throw e;
+            throw maybeWrapInCorruptSSTableException(e, rowIndexFile.path());
         }
     }
 
@@ -375,16 +366,11 @@ public class BtiTableReader extends SSTableReaderWithFilter
                 }
             }
         }
-        catch (IOException | IllegalArgumentException | ArrayIndexOutOfBoundsException | AssertionError e)
+        catch (IOException | IllegalArgumentException | ArrayIndexOutOfBoundsException | AssertionError | CorruptSSTableException e)
         {
+            // CorruptSSTableException: e.g. a chunk of an encrypted index failing its checksum or decryption
             markSuspect();
-            throw new CorruptSSTableException(e, rowIndexFile.path());
-        }
-        catch (CorruptSSTableException e)
-        {
-            // e.g. a chunk of an encrypted index failing its checksum or decryption
-            markSuspect();
-            throw e;
+            throw maybeWrapInCorruptSSTableException(e, rowIndexFile.path());
         }
     }
 
