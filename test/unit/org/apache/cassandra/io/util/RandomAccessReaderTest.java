@@ -973,7 +973,8 @@ public class RandomAccessReaderTest
 
     /**
      * An early-open reader can read past its length override from its buffer (reads within the buffer do not check
-     * length()); a skip leaving the buffer from there skips nothing and does not move the pointer.
+     * length()); from there the reader is at EOF with no bytes remaining, and a skip leaving the buffer skips nothing
+     * and does not move the pointer.
      */
     @Test
     public void testSkipBytesPastLengthOverride() throws IOException
@@ -1002,9 +1003,53 @@ public class RandomAccessReaderTest
             reader.readFully(new byte[20]);
             assertEquals(60, reader.getFilePointer());
             assertTrue(reader.getFilePointer() > reader.length());
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.bytesRemaining());
 
             assertEquals(0, reader.skipBytes(bufferSize));
             assertEquals(60, reader.getFilePointer());
+        }
+    }
+
+    /**
+     * A reader of an empty file (served by an EmptyRebufferer), and a reader created at a position after length(), are
+     * at EOF with no bytes remaining, and reads report EOF.
+     */
+    @Test
+    public void testEmptyFileAndReaderCreatedPastLength() throws IOException
+    {
+        File empty = writeFile(writer -> false);
+        try (FileHandle fh = new FileHandle.Builder(empty).complete();
+             RandomAccessReader reader = fh.createReader())
+        {
+            assertTrue(fh.rebuffererFactory() instanceof EmptyRebufferer);
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.bytesRemaining());
+            assertEquals(0, reader.available());
+            assertEquals(-1, reader.read());
+            assertEquals(0, reader.skipBytes(1));
+        }
+
+        File f = writeFile(writer -> {
+            try
+            {
+                writer.write(new byte[100]);
+            }
+            catch (IOException e)
+            {
+                throw new AssertionError(e);
+            }
+            return false;
+        });
+        try (FileHandle fh = new FileHandle.Builder(f).complete();
+             RandomAccessReader reader = fh.createReader(110))
+        {
+            assertEquals(110, reader.getFilePointer());
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.bytesRemaining());
+            assertEquals(-1, reader.read());
+            assertEquals(0, reader.skipBytes(1));
+            assertEquals(110, reader.getFilePointer());
         }
     }
 

@@ -281,18 +281,30 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     }
 
     /**
-     * @return true if there is no more data to read. For files with holes (see {@link EncryptedChunkReader}) this can
-     * be false while the next read reports EOF: at the previous chunk's hole start when the length is a chunk start,
-     * and at the end of the data of a padded last chunk opened without a length override.
+     * @return true if there is no more data to read, i.e. if {@link #bytesRemaining()} is 0. There are two exceptions:
+     * <ul>
+     * <li>Reads within the buffer rely on its limit having taken {@link #length()} into account. When it has not (an
+     * uncompressed file read without mmap with a length override, or an encryption-only file with a length override in
+     * the middle of a chunk), this is true at and after {@link #length()}, although reads within the buffer still
+     * return data.</li>
+     * <li>For an encryption-only file opened without a length override whose last chunk is padded on disk,
+     * {@link #length()} is only an upper bound (see {@link FileHandle#dataLength()}): at the end of the data this is
+     * false, although reads report EOF.</li>
+     * </ul>
      */
     public boolean isEOF()
     {
-        return current() == length();
+        return rebufferer.remainingBytes(current()) == 0;
     }
 
+    /**
+     * @return the number of bytes between the file pointer and {@link #length()}, not counting holes (see
+     * {@link ReaderFileProxy#remainingBytes}), or 0 after {@link #length()}; this is the number of bytes reads return
+     * before reporting EOF, except in the cases noted in {@link #isEOF()}
+     */
     public long bytesRemaining()
     {
-        return length() - getFilePointer();
+        return rebufferer.remainingBytes(getFilePointer());
     }
 
     @Override
