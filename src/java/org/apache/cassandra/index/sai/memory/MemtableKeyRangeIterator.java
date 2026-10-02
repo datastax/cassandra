@@ -99,17 +99,16 @@ public class MemtableKeyRangeIterator extends KeyRangeIterator
         // otherwise its rows would be returned if there are no more partitions after the skip target.
         FileUtils.closeQuietly(rowIterator);
         rowIterator = null;
+        FileUtils.closeQuietly(partitionIterator);
 
         if (!keyRange.right.isMinimum() && start.compareTo(keyRange.right) > 0)
         {
-            FileUtils.closeQuietly(partitionIterator);
             partitionIterator = EmptyIterators.unfilteredPartition(memtable.metadata());
             return;
         }
 
         AbstractBounds<PartitionPosition> partitionBounds = AbstractBounds.bounds(start, true, keyRange.right, true);
         DataRange dataRange = new DataRange(partitionBounds, new ClusteringIndexSliceFilter(Slices.ALL, false));
-        FileUtils.closeQuietly(partitionIterator);
         partitionIterator = memtable.partitionIterator(columns, dataRange, SSTableReadsListener.NOOP_LISTENER);
         if (partitionIterator.hasNext())
         {
