@@ -27,7 +27,6 @@ import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Integration tests for per-query SAI optimizer options via {@code WITH query_options = {...}}.
