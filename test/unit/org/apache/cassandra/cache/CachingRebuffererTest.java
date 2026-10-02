@@ -137,6 +137,11 @@ public class CachingRebuffererTest
                 return currentPosition + bytesToSkip;
             }
 
+            public long remainingBytes(long position)
+            {
+                return Math.max(0, fileLength() - position);
+            }
+
             public void close()
             {
 

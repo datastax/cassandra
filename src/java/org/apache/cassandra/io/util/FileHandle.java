@@ -121,7 +121,9 @@ public class FileHandle extends SharedCloseableImpl
      * readers. For an {@link Builder#encryptionOnly() encryption-only} file opened without a
      * {@link Builder#withLengthOverride length override} this is only an upper bound: it is the usable end of the
      * file's last chunk, whereas the content may end earlier in that chunk (e.g. the row index, whose last chunk is
-     * padded on disk). It is 0 for a file too short to hold any content.
+     * padded on disk). A truncated file that does not end with a full chunk keeps its physical length if it ends in
+     * the usable part of a chunk (reading that chunk reports it as corrupted), and cannot be opened if it ends inside
+     * a hole.
      */
     public long dataLength()
     {
@@ -514,7 +516,8 @@ public class FileHandle extends SharedCloseableImpl
                                                                   : MmappedRegions.map(channel, fileLength, chunkSize, sliceDescriptor.sliceStart, adviseRandom);
                             // Without an explicit length override pass -1: EncryptedChunkReader then derives the
                             // logical length from the file length minus the part of the last chunk that cannot hold
-                            // data (encryption padding and footer)
+                            // data (encryption padding and footer), if the file ends with a full chunk (see
+                            // EncryptedChunkReader.defaultLength)
                             long encryptedOverrideLength = (lengthOverride >= 0) ? length : -1;
                             rebuffererFactory = maybeCached(EncryptedChunkReader.createMmap(channel, regions, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength));
                         }
@@ -546,7 +549,8 @@ public class FileHandle extends SharedCloseableImpl
                             ICompressor encryptor = compressionMetadata.compressor().encryptionOnly();
                             // Without an explicit length override pass -1: EncryptedChunkReader then derives the
                             // logical length from the file length minus the part of the last chunk that cannot hold
-                            // data (encryption padding and footer)
+                            // data (encryption padding and footer), if the file ends with a full chunk (see
+                            // EncryptedChunkReader.defaultLength)
                             long encryptedOverrideLength = (lengthOverride >= 0) ? length : -1;
                             rebuffererFactory = maybeCached(EncryptedChunkReader.createStandard(channel, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength));
                         }

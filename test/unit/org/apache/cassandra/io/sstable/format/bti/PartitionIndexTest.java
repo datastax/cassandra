@@ -698,6 +698,16 @@ public class PartitionIndexTest
             return jumped(wrapped.fileLength(), cutoffs, offsets);
         }
 
+        /**
+         * Overridden as {@link #fileLength()} is: the source's count is against its own length. This ignores the
+         * source's holes, as trie readers only seek through this rebufferer and never skip.
+         */
+        @Override
+        public long remainingBytes(long position)
+        {
+            return Math.max(0, fileLength() - position);
+        }
+
         @Override
         public String toString()
         {

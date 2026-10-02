@@ -755,6 +755,12 @@ public class ChunkCache
         }
 
         @Override
+        public long remainingBytes(long position)
+        {
+            return source.remainingBytes(position);
+        }
+
+        @Override
         public void close()
         {
             source.close();

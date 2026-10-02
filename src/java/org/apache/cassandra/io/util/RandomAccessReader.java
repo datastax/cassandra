@@ -69,13 +69,12 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
 
     private void reBufferAt(long position)
     {
-        // Check for the end of the file before adjusting the position: for files with holes (see
-        // EncryptedChunkReader) length() may be the start of the last chunk's hole, which adjustPosition would move
-        // to the physical end of the file, where there is no chunk to read.
-        if (position < length())
+        // For files with holes (see EncryptedChunkReader) length() may be the start of the last chunk's hole, which
+        // adjustPosition would move to the physical end of the file, where there is no chunk to read.
+        if (position != length())
             position = rebufferer.adjustPosition(position);
         bufferHolder.release();
-        if (position >= length())
+        if (position == length())
         {
             bufferHolder = Rebufferer.emptyBufferHolderAt(position);
             buffer = bufferHolder.buffer();
@@ -85,10 +84,13 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             bufferHolder = Rebufferer.EMPTY; // prevents double release if the call below fails
             bufferHolder = rebufferer.rebuffer(position);
             buffer = bufferHolder.buffer();
-            // A position after the end of the chunk's data (e.g. in the padding of the last chunk of an encrypted
-            // row index, whose default length() is the chunk's usable end) leaves the buffer at its limit, so that
-            // readers see EOF.
-            buffer.position(Math.min(Ints.checkedCast(position - bufferHolder.offset()), buffer.limit()));
+            long positionInBuffer = position - bufferHolder.offset();
+            // e.g. a position in the padding of the last chunk of an encrypted row index opened without a length
+            // override; the holder stays referenced by this reader, which releases it on the next rebuffer or close
+            if (positionInBuffer > buffer.limit())
+                throw new IllegalArgumentException(String.format("Unable to seek to position %d in %s (%d bytes) in read-only mode: past the end of the data at %d",
+                                                                 position, getFile(), length(), bufferHolder.offset() + buffer.limit()));
+            buffer.position(Ints.checkedCast(positionInBuffer));
         }
         buffer.order(order);
     }
@@ -279,9 +281,9 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     }
 
     /**
-     * @return true if there is no more data to read. After a seek into the padding of the last chunk of an
-     * encryption-only file opened without a length override (see {@link FileHandle#dataLength()}) this is false,
-     * although reads give EOF.
+     * @return true if there is no more data to read. For files with holes (see {@link EncryptedChunkReader}) this can
+     * be false while the next read reports EOF: at the previous chunk's hole start when the length is a chunk start,
+     * and at the end of the data of a padded last chunk opened without a length override.
      */
     public boolean isEOF()
     {
@@ -333,11 +335,6 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
     }
 
-    /**
-     * Moves the file pointer to the given position, at most {@link #length()}. Seeking into the padding of the last
-     * chunk of an encryption-only file opened without a length override (see {@link FileHandle#dataLength()}) leaves
-     * {@link #getFilePointer()} at the end of the data, where reads give EOF.
-     */
     @Override
     public void seek(long newPosition)
     {
@@ -361,16 +358,13 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     }
 
     /**
-     * Skips {@code n} bytes, or up to the end of the data (at most {@link #length()}) if fewer remain, leaving the file
-     * pointer where reading the same bytes would leave it.
+     * Skips {@code n} bytes, or up to {@link #length()} if fewer remain, leaving the file pointer where reading the same
+     * bytes would leave it. Like reads, skips within the current buffer do not check {@link #length()}.
      * <p>
      * For files with holes (see {@link EncryptedChunkReader}) this matters when the skipped bytes end exactly at the
-     * usable end of a chunk: a read leaves the pointer there (at the start of the hole) and only moves to the next
-     * chunk when the following byte is read, while seeking to {@link Rebufferer#positionForSkip} would already be at
-     * the start of the next chunk. Callers compare file pointers with positions recorded by the writer (e.g.
-     * {@code TrieIndexEntry.deserialize}), so the two must agree: when a skip ends at the start of a hole, the slow
-     * path below seeks to the last skipped byte and consumes it through the buffer, like a read would. Other skips
-     * seek to their end directly.
+     * usable end of a chunk: a read leaves the pointer there (at the start of the hole), while a seek to that position
+     * moves on to the start of the next chunk. Callers compare file pointers with positions recorded by the writer
+     * (e.g. {@code TrieIndexEntry.deserialize}), so the two must agree.
      *
      * @return the number of bytes skipped, i.e. {@code n} unless the end of the file was reached first
      */
@@ -381,56 +375,31 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             return 0;
         if (buffer == null)
             throw new IOException("Attempted skipBytes() on a closed RAR");
-
-        long current = current();
-        long length = length();
-        // the buffer may extend beyond length() (e.g. early-open readers with a length override inside a chunk)
-        long inBuffer = Math.min(buffer.remaining(), length - current);
-        if (n <= inBuffer)
+        if (n <= buffer.remaining())
         {
             buffer.position(buffer.position() + n);
             return n;
         }
-        if (current >= length)
+
+        long current = current();
+        long remaining = rebufferer.remainingBytes(current);
+        if (remaining <= 0)
             return 0;
-
-        long lastByte = rebufferer.positionForSkip(current, n - 1);
-        if (lastByte >= length)
+        if (n > remaining)
+            n = (int) remaining;
+        long target = rebufferer.positionForSkip(current, n);
+        if (rebufferer.adjustPosition(target) == target)
         {
-            // Fewer than n bytes before length(): skip those only.
-            n = SkipPositions.bytesSkippableBefore(rebufferer, current, n, length);
-            if (n == 0)
-                return 0;
-            lastByte = rebufferer.positionForSkip(current, n - 1);
-        }
-
-        // lastByte is the position of the last byte skipped, or the start of the hole just before it
-        long lastBytePosition = rebufferer.adjustPosition(lastByte);
-        long target = lastBytePosition + 1;
-        if (lastBytePosition < length && rebufferer.adjustPosition(target) == target)
-        {
-            // Not the start of a hole, where reading and seeking agree (always the case for files without holes):
-            // seek there directly, which reads no more chunks than the reads that follow need (none at length()).
             seek(target);
-            if (current() == target)
-                return n;
         }
         else
         {
-            // The target is the start of a hole (the last byte skipped is the last usable byte of a chunk), or the
-            // last byte would be at or after length(): consume the last byte through the buffer, to leave the pointer
-            // where a read leaves it.
-            seek(lastByte);
-            if (buffer.hasRemaining())
-            {
-                buffer.position(buffer.position() + 1);
-                return n;
-            }
+            // target is the start of a hole, where a seek would move on to the next chunk: seek to the last skipped
+            // byte (the chunk's last usable one) and consume it through the buffer, like a read
+            seek(target - 1);
+            buffer.position(buffer.position() + 1);
         }
-
-        // The data ended before the last byte (e.g. in the padded last chunk of an encrypted row index opened without
-        // a length override, see reBufferAt): the pointer is at the end of the data.
-        return SkipPositions.bytesSkippableBefore(rebufferer, current, n, current());
+        return n;
     }
 
     /**

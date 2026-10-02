@@ -235,6 +235,12 @@ abstract public class AbstractTrieTestBase
         }
 
         @Override
+        public long remainingBytes(long position)
+        {
+            return Math.max(0, fileLength() - position);
+        }
+
+        @Override
         public BufferHolder rebuffer(long position)
         {
             return this;

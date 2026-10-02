@@ -209,7 +209,7 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
 
     /**
      * Verifies that seeking, reading and skipping over encryption-only files result in the same positions and read the
-     * same data (see DSP-25176), and that the end of the file reads as EOF.
+     * same data (see DSP-25176), that the end of the file reads as EOF, and that positions past the data are errors.
      */
     @Test
     public void testSkipAcrossHoles() throws IOException
@@ -276,6 +276,11 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
                 Assert.assertEquals(Integer.MAX_VALUE, getNextByte(rdr));
                 Assert.assertEquals(0, rdr.skipBytes(1));
                 Assert.assertEquals(len, rdr.getFilePointer());
+
+                // seeking past length(), or past the data of the padded last chunk, is an error
+                Assert.assertThrows(IllegalArgumentException.class, () -> rdr.seek(len + 1));
+                if (dataEnd + 1 < len)
+                    Assert.assertThrows(IllegalArgumentException.class, () -> rdr.seek(dataEnd + 1));
             }
         }
         finally

@@ -88,25 +88,58 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         return positionForSkip(currentPosition, bytesToSkip, maxBytesInPage);
     }
 
+    @Override
+    public long remainingBytes(long position)
+    {
+        return remainingBytes(position, fileLength(), maxBytesInPage);
+    }
+
     /**
      * The position {@code bytesToSkip} usable bytes after {@code currentPosition}, in a file whose chunks of
-     * {@code CHUNK_SIZE} bytes hold {@code maxBytesInPage} usable bytes each. A skip that ends exactly at the usable
-     * end of a chunk returns that end, i.e. the start of the chunk's hole (see {@link #adjustPosition}).
+     * {@code CHUNK_SIZE} bytes hold {@code maxBytesInPage} usable bytes each. A skip of at least one byte that ends
+     * exactly at the usable end of a chunk returns that end, i.e. the start of the chunk's hole (see
+     * {@link ReaderFileProxy#positionForSkip}).
      */
     @VisibleForTesting
     static long positionForSkip(long currentPosition, int bytesToSkip, int maxBytesInPage)
     {
-        long currentOffset = inChunkOffset(currentPosition);
-        if (currentOffset + bytesToSkip <= maxBytesInPage)
-            return currentPosition + bytesToSkip;
+        if (bytesToSkip == 0)
+            return currentPosition;
+        return toPhysical(toLogical(currentPosition, maxBytesInPage) + bytesToSkip, maxBytesInPage);
+    }
 
-        // the bytes left after filling the current chunk (at least one) start at the next chunk, and every
-        // maxBytesInPage of them but the last (possibly partial) group fill a further chunk
-        long bytesAfterCurrentChunk = currentOffset + bytesToSkip - maxBytesInPage;
-        long fullChunks = (bytesAfterCurrentChunk - 1) / maxBytesInPage;
-        return currentPosition - currentOffset + CHUNK_SIZE
-               + fullChunks * CHUNK_SIZE
-               + bytesAfterCurrentChunk - fullChunks * maxBytesInPage;
+    /**
+     * The number of usable bytes between {@code position} and {@code fileLength}, in a file whose chunks of
+     * {@code CHUNK_SIZE} bytes hold {@code maxBytesInPage} usable bytes each (see
+     * {@link ReaderFileProxy#remainingBytes}).
+     */
+    @VisibleForTesting
+    static long remainingBytes(long position, long fileLength, int maxBytesInPage)
+    {
+        if (position >= fileLength)
+            return 0;
+        return toLogical(fileLength, maxBytesInPage) - toLogical(position, maxBytesInPage);
+    }
+
+    /**
+     * Converts a file position to "non-holed space", i.e. to the number of usable bytes before it. A position inside
+     * a hole maps to the usable end of its chunk.
+     */
+    private static long toLogical(long position, int maxBytesInPage)
+    {
+        return position / CHUNK_SIZE * maxBytesInPage + Math.min(inChunkOffset(position), maxBytesInPage);
+    }
+
+    /**
+     * Converts a positive number of usable bytes back to a file position. At a chunk boundary there are two such
+     * positions, the start of a chunk's hole and the start of the next chunk: this returns the former, which is where
+     * reading that many bytes from the start of the file leaves the file pointer.
+     */
+    private static long toPhysical(long logicalPosition, int maxBytesInPage)
+    {
+        assert logicalPosition > 0 : logicalPosition;
+        long lastByte = logicalPosition - 1; // the physical position of the last byte is unambiguous
+        return lastByte / maxBytesInPage * CHUNK_SIZE + lastByte % maxBytesInPage + 1;
     }
 
     private static long inChunkOffset(long position)
@@ -194,15 +227,25 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
     }
 
     /**
-     * The logical length of a file read without a length override: the position after the last usable byte of the
-     * last chunk (its hole start), which allows partition index readers to find their metadata at the end of the
-     * file. This is exact for files whose last chunk is filled up to its usable end (the partition index), but only an
-     * upper bound for files whose last chunk is partially filled and padded on disk (the row index). A file shorter
-     * than a chunk's hole (i.e. truncated) has length 0.
+     * The logical length of a file read without a length override. Files written by {@link EncryptedSequentialWriter}
+     * end with a full chunk, i.e. right after a hole: their length is the usable end of the last chunk (the start of
+     * its hole), which allows partition index readers to find their metadata at the end of the file. This is exact
+     * for files whose last chunk is filled up to its usable end (the partition index), but only an upper bound for
+     * files whose last chunk is partially filled and padded on disk (the row index).
+     * <p>
+     * A file that does not end with a full chunk has been truncated. If it ends in the usable part of a chunk its
+     * length is left unchanged, and reading the incomplete chunk reports it as corrupted; if it ends inside a hole
+     * (i.e. there is no valid logical length), it is reported as corrupted here.
      */
-    private static long defaultLength(long fileLength, int maxBytesInPage)
+    private static long defaultLength(ChannelProxy channel, long fileLength, int maxBytesInPage)
     {
-        return Math.max(0, fileLength - (CHUNK_SIZE - maxBytesInPage));
+        long inChunkOffset = inChunkOffset(fileLength);
+        if (inChunkOffset == 0)
+            return Math.max(0, fileLength - (CHUNK_SIZE - maxBytesInPage));
+        if (inChunkOffset <= maxBytesInPage)
+            return fileLength;
+        throw new CorruptSSTableException(new CorruptBlockException(channel.getFile(), fileLength - inChunkOffset, CHUNK_SIZE),
+                                          channel.filePath());
     }
 
     public static Standard createStandard(ChannelProxy channel,
@@ -214,7 +257,7 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         int maxBytesInPage = EncryptedSequentialWriter.maxBytesInPage(encryptor);
 
         if (overrideLength <= 0)
-            overrideLength = defaultLength(fileLength, maxBytesInPage);
+            overrideLength = defaultLength(channel, fileLength, maxBytesInPage);
 
         return new Standard(channel, compressionParams, encryptor, overrideLength, maxBytesInPage);
     }
@@ -229,7 +272,7 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         int maxBytesInPage = EncryptedSequentialWriter.maxBytesInPage(encryptor);
 
         if (overrideLength <= 0)
-            overrideLength = defaultLength(fileLength, maxBytesInPage);
+            overrideLength = defaultLength(channel, fileLength, maxBytesInPage);
 
         return new Mmap(channel, regions, compressionParams, encryptor, overrideLength, maxBytesInPage);
     }
