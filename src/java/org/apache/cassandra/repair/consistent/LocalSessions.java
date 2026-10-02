@@ -1097,7 +1097,7 @@ public class LocalSessions
         else
         {
             sendMessage(from, Message.out(STATUS_RSP, new StatusResponse(sessionID, session.getState())));
-            logger.info("Responding to status response message for incremental repair session {} with local state {}", sessionID, session.getState());
+            logger.info("Responding to status response message for incremental repair session {} with local state {} to {}", sessionID, session.getState(), from);
        }
     }
 
