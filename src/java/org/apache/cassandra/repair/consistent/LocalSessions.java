@@ -859,7 +859,7 @@ public class LocalSessions
                 }
                 else if (session.getState() != FAILED)
                 {
-                    logger.info("Failing local repair session {}", session.sessionID);
+                    logger.info("Failing local repair session {}", session.sessionID, new RuntimeException());
                     setStateAndSave(session, FAILED);
                 }
             }
@@ -872,7 +872,7 @@ public class LocalSessions
 
     public synchronized void deleteSession(UUID sessionID)
     {
-        logger.info("Deleting local repair session {}", sessionID);
+        logger.info("Deleting local repair session {}", sessionID, new RuntimeException());
         LocalSession session = getSession(sessionID);
         Preconditions.checkArgument(session.isCompleted(), "Cannot delete incomplete sessions");
 
@@ -1122,7 +1122,7 @@ public class LocalSessions
         else
         {
             sendMessage(from, Message.out(STATUS_RSP, new StatusResponse(sessionID, session.getState())));
-            logger.info("Responding to status response message for incremental repair session {} with local state {}", sessionID, session.getState());
+            logger.info("Responding to status response message for incremental repair session {} with local state {} to {}", sessionID, session.getState(), from);
        }
     }
 
