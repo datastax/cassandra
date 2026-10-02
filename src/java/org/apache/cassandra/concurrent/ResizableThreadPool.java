@@ -91,6 +91,8 @@ public interface ResizableThreadPool
 
     /**
      * Nanoseconds the oldest task currently executing in this pool has been running, 0 when idle or untracked.
+     * An implementation should also implement {@link RunningTaskSource}, which reads this time with the task's class
+     * and thread in one scan, as reading this and {@link #getLongestRunningTaskClass()} separately can mix two tasks.
      */
     default long longestRunningTaskTime()
     {

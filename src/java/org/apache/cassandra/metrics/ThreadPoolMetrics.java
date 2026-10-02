@@ -23,6 +23,7 @@ import java.util.function.Supplier;
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
 import org.apache.cassandra.concurrent.ResizableThreadPool;
+import org.apache.cassandra.concurrent.RunningTaskSnapshot;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry.MetricName;
 
 import static java.lang.String.format;
@@ -77,6 +78,12 @@ public class ThreadPoolMetrics
     /** Class name of the oldest task currently executing, null when idle; not registered as a metric */
     public final Supplier<String> longestRunningTaskClass;
 
+    /**
+     * The oldest task currently executing, with its running time, class and thread, null when idle; not a metric. The
+     * thread name is null for a pool that is not a {@link org.apache.cassandra.concurrent.RunningTaskSource}.
+     */
+    public final Supplier<RunningTaskSnapshot> longestRunningTask;
+
     public final String path;
     public final String poolName;
 
@@ -102,6 +109,7 @@ public class ThreadPoolMetrics
         oldestTaskQueueTime = executor::oldestTaskQueueTime;
         longestRunningTaskTime = executor::longestRunningTaskTime;
         longestRunningTaskClass = executor::getLongestRunningTaskClass;
+        longestRunningTask = () -> RunningTaskSnapshot.longestRunningTask(executor);
     }
 
     public ThreadPoolMetrics register()
