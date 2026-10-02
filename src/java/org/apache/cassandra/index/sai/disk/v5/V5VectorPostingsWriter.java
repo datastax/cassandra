@@ -438,7 +438,7 @@ public class V5VectorPostingsWriter<T>
 
         // create the mapping
         if (structure == Structure.ZERO_OR_ONE_TO_MANY)
-            return createGenericRenumberedMapping(ordinalMap::containsKey, maxRow, maxOldOrdinal);
+            return createGenericRenumberedMapping(ordinalMap::containsKey, maxRow, maxOldOrdinal, ordinalMap.size());
         var ordinalMapper = new BiMapMapper(maxNewOrdinal, ordinalMap);
         return new RemappedPostings(structure, maxNewOrdinal, maxRow, extraPostings, ordinalMapper);
     }
@@ -466,7 +466,9 @@ public class V5VectorPostingsWriter<T>
         postingsMap.forEachEntry(entry ->
             liveOrdinals.set(VectorPostings.CompactionVectorPostings.Marshaller.extractOrdinal(entry))
         );
-        return createGenericRenumberedMapping(liveOrdinals::get, maxRowId, maxOldOrdinal);
+        // Size the forward map by live cardinality, not the ordinal range, to avoid allocating
+        // O(maxOldOrdinal) memory when the segment has many holes (e.g. sparse ZERO_OR_ONE_TO_MANY).
+        return createGenericRenumberedMapping(liveOrdinals::get, maxRowId, maxOldOrdinal, liveOrdinals.cardinality());
     }
 
     /**
@@ -474,10 +476,11 @@ public class V5VectorPostingsWriter<T>
      *
      * @param isLive predicate that returns {@code true} for each old ordinal that has at least one live row;
      *               ordinals for which this returns {@code false} are omitted from the new numbering
+     * @param liveCount number of live ordinals; used to size the forward map without over-allocating
      */
-    private static RemappedPostings createGenericRenumberedMapping(IntPredicate isLive, int maxRow, int maxOldOrdinal)
+    private static RemappedPostings createGenericRenumberedMapping(IntPredicate isLive, int maxRow, int maxOldOrdinal, int liveCount)
     {
-        var oldToNew = new Int2IntHashMap(maxOldOrdinal, 0.65f, Integer.MIN_VALUE);
+        var oldToNew = new Int2IntHashMap(liveCount, 0.65f, Integer.MIN_VALUE);
         int nextOrdinal = 0;
         for (int i = 0; i <= maxOldOrdinal; i++) {
             if (isLive.test(i))
