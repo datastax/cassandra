@@ -141,7 +141,7 @@ public class ScheduledThreadPoolExecutorPlus extends ScheduledThreadPoolExecutor
     public String getLongestRunningTaskClass()
     {
         WorkerSlots.Running oldest = workerSlots.oldestRunning();
-        return oldest == null ? null : oldest.taskClass.getName();
+        return oldest == null ? null : oldest.taskClassName;
     }
 
     @Override
@@ -170,6 +170,9 @@ public class ScheduledThreadPoolExecutorPlus extends ScheduledThreadPoolExecutor
 
     /*======== BEGIN DIRECT COPY OF ThreadPoolExecutorPlus ===============*/
 
+    // deliberately does not stamp TimedTask, unlike ThreadPoolExecutorPlus: the approximate clock's refresher runs here
+    // and nothing reachable from MonotonicClock.Global.<clinit> may stamp (see TimedTask.markEnqueued); the queue time
+    // of a scheduled pool is read from its tasks' trigger times instead
     private <T extends Runnable> T addTask(T task)
     {
         super.execute(task);

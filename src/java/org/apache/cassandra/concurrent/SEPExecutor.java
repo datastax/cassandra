@@ -142,7 +142,9 @@ public class SEPExecutor implements LocalAwareExecutorPlus, SEPExecutorMBean
     }
 
     // the oldest task running for this executor, or null when none is; see SEPWorker.runningFor for the read protocol.
-    // A read that races a task boundary skips that worker, so it can only under-report by one task.
+    // The stamp read is at least as new as the task and executor read, so this never over-reports. A read racing a task
+    // boundary or a reassignment can attribute the new task's near-zero running time to the previous task's class
+    // (possibly a task of the executor the worker just left); we accept that, as the reported time is then near zero.
     private RunningTask oldestRunningTask()
     {
         Runnable oldest = null;
@@ -150,11 +152,9 @@ public class SEPExecutor implements LocalAwareExecutorPlus, SEPExecutorMBean
         for (SEPWorker worker : pool.allWorkers)
         {
             Runnable task = worker.currentTask.get();
-            if (task == null || worker.runningFor != this)
+            if (task == null || worker.runningFor.get() != this)
                 continue;
             long start = worker.taskStartedAtNanos;
-            if (worker.currentTask.get() != task)
-                continue;
             if (start < oldestStart)
             {
                 oldestStart = start;

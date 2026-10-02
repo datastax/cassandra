@@ -39,7 +39,15 @@ interface TimedTask extends WrappedTask
     /** The approximate-clock time at which the executor queued this task, or 0 if it was never queued. */
     long enqueuedAtNanos();
 
-    /** Called by the executor on the submitting thread, before the task is added to its queue. */
+    /**
+     * Called by the executor on the submitting thread, before the task is added to its queue.
+     * <p>
+     * Nothing reachable from {@code MonotonicClock.Global.<clinit>} may stamp: while it initialises,
+     * {@link org.apache.cassandra.utils.MonotonicClock.SampledClock} schedules its refresher on a scheduled executor
+     * through {@link ExecutionFailure}, and {@code approxTime} is not yet set. This is why tasks are stamped in the
+     * executor's {@code addTask} rather than when they are built, and why the {@code addTask} of
+     * {@link ScheduledThreadPoolExecutorPlus} does not stamp.
+     */
     void markEnqueued(long approxNanos);
 
     /** The age of an approximate-clock stamp, read against the precise clock. */

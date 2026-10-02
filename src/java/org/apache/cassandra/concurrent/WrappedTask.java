@@ -31,6 +31,10 @@ interface WrappedTask
     /** The class of the work {@code task} runs: the wrapped task's class when it is a wrapper, else its own. */
     static Class<?> classOf(Object task)
     {
+        // test TimedTask first, as the executor does on the submitting thread: testing the same class against two
+        // interfaces from two threads thrashes its one-entry secondary supers cache (JDK-8180450)
+        if (task instanceof TimedTask)
+            return ((TimedTask) task).taskClass();
         return task instanceof WrappedTask ? ((WrappedTask) task).taskClass() : task.getClass();
     }
 }

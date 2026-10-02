@@ -29,19 +29,29 @@ import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
  * {@code beforeExecute}/{@code afterExecute} hooks and scanned by its liveness gauges. A worker registers its slot on
  * its first task; slots of exited threads are pruned when a new worker registers and when a gauge is read, never on
  * the per-task path. No locks and no background threads.
+ * <p>
+ * The slot is held in a static thread-local, so a worker thread must belong to exactly one executor. This rules out
+ * work-stealing pools whose threads serve several executors, such as {@link SharedExecutorPool}'s {@link SEPWorker},
+ * which must not use WorkerSlots; {@link SEPExecutor} tracks its running tasks through {@link SEPWorker} instead.
  */
 final class WorkerSlots
 {
-    // a worker thread belongs to exactly one executor, so a single static index serves every pool
-    private static final FastThreadLocal<WorkerSlot> SLOT = new FastThreadLocal<>();
+    // a worker thread belongs to exactly one executor, so a single static index serves every pool. Held lazily: the
+    // FastThreadLocal initialises netty's InternalThreadLocalMap and its logger, which must not happen at executor
+    // construction (the in-JVM dtest Instance builds an executor before it sets the node's log identity)
+    private static final class Holder
+    {
+        static final FastThreadLocal<WorkerSlot> SLOT = new FastThreadLocal<>();
+    }
 
     private final List<WorkerSlot> slots = new CopyOnWriteArrayList<>();
 
     /**
-     * One worker thread's running task, written only by that thread. The worker writes the plain taskClass, then
-     * publishes it with the volatile store of startedAtNanos; readers read startedAtNanos first, then taskClass, and
-     * capture both in the same scan, so they see at least the class of the task whose stamp they read (a read racing
-     * a task boundary sees a newer class). The idle clear is a release-only lazySet.
+     * One worker thread's running task, written only by that thread. The worker writes the plain taskClassName, then
+     * publishes it with the volatile store of startedAtNanos; readers read startedAtNanos first, then taskClassName,
+     * and capture both in the same scan, so they see at least the class name of the task whose stamp they read (a read
+     * racing a task boundary sees a newer class name). The idle clear is a release-only lazySet. The name is held
+     * rather than the Class, so an idle worker pins no class or class loader.
      */
     static final class WorkerSlot
     {
@@ -49,7 +59,7 @@ final class WorkerSlots
 
         final Thread thread;
         volatile long startedAtNanos;   // 0 when idle
-        Class<?> taskClass;
+        String taskClassName;
 
         WorkerSlot(Thread thread)
         {
@@ -57,26 +67,26 @@ final class WorkerSlots
         }
     }
 
-    /** The oldest running task: the stamp that selected it and its class, both captured in the scan, never re-read. */
+    /** The oldest running task: the stamp that selected it and its class name, both captured in the scan, never re-read. */
     static final class Running
     {
         final long capturedStartNanos;
-        final Class<?> taskClass;
+        final String taskClassName;
 
-        Running(long capturedStartNanos, Class<?> taskClass)
+        Running(long capturedStartNanos, String taskClassName)
         {
             this.capturedStartNanos = capturedStartNanos;
-            this.taskClass = taskClass;
+            this.taskClassName = taskClassName;
         }
     }
 
     /** Called on the worker thread before each task. */
     void markRunning(Class<?> taskClass)
     {
-        WorkerSlot slot = SLOT.get();
+        WorkerSlot slot = Holder.SLOT.get();
         if (slot == null)
             slot = register(Thread.currentThread());
-        slot.taskClass = taskClass;
+        slot.taskClassName = taskClass.getName();
         slot.startedAtNanos = approxTime.now();
     }
 
@@ -84,7 +94,7 @@ final class WorkerSlots
     private WorkerSlot register(Thread thread)
     {
         WorkerSlot slot = new WorkerSlot(thread);
-        SLOT.set(slot);
+        Holder.SLOT.set(slot);
         slots.removeIf(s -> !s.thread.isAlive());
         slots.add(slot);
         return slot;
@@ -93,7 +103,7 @@ final class WorkerSlots
     /** Called on the worker thread after each task. */
     static void markIdle()
     {
-        WorkerSlot slot = SLOT.get();
+        WorkerSlot slot = Holder.SLOT.get();
         if (slot != null)
             WorkerSlot.startedAtNanosUpdater.lazySet(slot, 0L);
     }
@@ -101,9 +111,8 @@ final class WorkerSlots
     /** The oldest task running on a live worker, or null when none is; prunes slots of exited threads. */
     Running oldestRunning()
     {
-        WorkerSlot oldest = null;
         long oldestStart = Long.MAX_VALUE;
-        Class<?> oldestClass = null;
+        String oldestClassName = null;
         boolean sawExited = false;
         for (WorkerSlot s : slots)
         {
@@ -114,17 +123,16 @@ final class WorkerSlots
                 continue;
             }
             long start = s.startedAtNanos;
-            Class<?> taskClass = s.taskClass;
+            String taskClassName = s.taskClassName;
             if (start != 0L && start < oldestStart)
             {
                 oldestStart = start;
-                oldestClass = taskClass;
-                oldest = s;
+                oldestClassName = taskClassName;
             }
         }
         if (sawExited)
             slots.removeIf(s -> !s.thread.isAlive());
-        return oldest == null ? null : new Running(oldestStart, oldestClass);
+        return oldestStart == Long.MAX_VALUE ? null : new Running(oldestStart, oldestClassName);
     }
 
     int size()

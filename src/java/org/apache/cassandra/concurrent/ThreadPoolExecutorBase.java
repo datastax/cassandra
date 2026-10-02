@@ -189,7 +189,7 @@ public class ThreadPoolExecutorBase extends ThreadPoolExecutor implements Resiza
     public String getLongestRunningTaskClass()
     {
         WorkerSlots.Running oldest = workerSlots.oldestRunning();
-        return oldest == null ? null : oldest.taskClass.getName();
+        return oldest == null ? null : oldest.taskClassName;
     }
 
     @VisibleForTesting
