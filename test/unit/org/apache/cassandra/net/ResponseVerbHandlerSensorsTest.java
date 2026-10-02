@@ -94,7 +94,10 @@ public class ResponseVerbHandlerSensorsTest
         context = Context.from(metadata);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
+        requestSensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
         requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
+        requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
     }
 
     /**
@@ -130,12 +133,14 @@ public class ResponseVerbHandlerSensorsTest
     /**
      * Paxos V1 commit uses a plain {@link Commit} payload on {@code PAXOS_COMMIT_REQ} and goes
      * through the {@link RequestCallbacks.WriteCallbackInfo} branch in
-     * {@link ResponseVerbHandler#trackReplicaSensors}.  That branch tracks only {@link Type#WRITE_BYTES};
-     * {@link Type#READ_BYTES} is intentionally not tracked there because the commit phase does not
-     * read from system.paxos — only Prepare and Propose do.
+     * {@link ResponseVerbHandler#trackReplicaSensors}. That branch tracks {@link Type#WRITE_BYTES},
+     * {@link Type#INDEX_WRITE_BYTES} (secondary index writes on the user table),
+     * {@link Type#INTERNODE_BYTES}, and {@link Type#WRITE_EXECUTION_TIME}.
+     * {@link Type#READ_BYTES} and {@link Type#READ_EXECUTION_TIME} are not tracked because the
+     * commit phase does not read from system.paxos.
      */
     @Test
-    public void testPaxosV1CommitResponseTracksWriteBytesOnly() throws Exception
+    public void testPaxosV1CommitResponseTracksWriteAndIndexWriteBytes() throws Exception
     {
         Mutation mutation = new RowUpdateBuilder(metadata, 0, "key1").build();
         PartitionUpdate update = mutation.getPartitionUpdate(metadata);
@@ -145,18 +150,33 @@ public class ResponseVerbHandlerSensorsTest
         Message<Commit> requestMessage = Message.builder(Verb.PAXOS_COMMIT_REQ, commit).build();
         RequestCallbacks.WriteCallbackInfo callbackInfo = createWriteCallbackInfo(requestMessage, peer);
 
-        Message<?> responseMessage = createResponseMessageWithSensors(100.0, 200.0);
+        // readExecTime=55.0 is present in the message but must NOT be accumulated: the WriteCallbackInfo
+        // branch only calls accumulateExecutionTimeSensor for WRITE_EXECUTION_TIME, not READ_EXECUTION_TIME.
+        Message<?> responseMessage = createResponseMessageWithSensors(100.0, 200.0, 0.0, 55.0, 85.0, 45.0);
 
         trackReplicaSensors(callbackInfo, responseMessage);
 
-        // WRITE_BYTES is tracked for the commit response
+        // INTERNODE_BYTES for WriteCallbackInfo is derived from the serialized request payload size
+        // (sentPayloadSize / tableCount), not from the response message's sensor value.
+        int expectedInternodeBytes = requestMessage.payloadSize(org.apache.cassandra.net.MessagingService.current_version);
+
         assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue())
             .as("WRITE_BYTES should be tracked for Paxos V1 commit responses")
             .isEqualTo(200.0);
-
-        // READ_BYTES is not tracked for commit: the commit phase writes to system.paxos but does not read it
+        assertThat(requestSensors.getSensor(context, Type.INDEX_WRITE_BYTES).get().getValue())
+            .as("INDEX_WRITE_BYTES should be tracked for Paxos V1 commit responses (user-table secondary index writes)")
+            .isEqualTo(45.0);
+        assertThat(requestSensors.getSensor(context, Type.INTERNODE_BYTES).get().getValue())
+            .as("INTERNODE_BYTES for WriteCallbackInfo is the serialized request payload size, not a response sensor value")
+            .isEqualTo(expectedInternodeBytes);
+        assertThat(requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get().getValue())
+            .as("WRITE_EXECUTION_TIME should be tracked for Paxos V1 commit responses")
+            .isEqualTo(85.0);
         assertThat(requestSensors.getSensor(context, Type.READ_BYTES).get().getValue())
             .as("READ_BYTES should NOT be tracked for Paxos V1 commit responses (no system.paxos read during commit)")
+            .isEqualTo(0.0);
+        assertThat(requestSensors.getSensor(context, Type.READ_EXECUTION_TIME).get().getValue())
+            .as("READ_EXECUTION_TIME should NOT be tracked for Paxos V1 commit responses (no system.paxos read during commit)")
             .isEqualTo(0.0);
     }
 
@@ -214,6 +234,8 @@ public class ResponseVerbHandlerSensorsTest
      * branch in {@link ResponseVerbHandler#trackReplicaSensors} and track both
      * {@link Type#READ_BYTES} (system.paxos read via {@code loadPaxosState}) and
      * {@link Type#WRITE_BYTES} (system.paxos write via {@code savePaxosReadPromise/savePaxosWritePromise}).
+     * {@link Type#READ_EXECUTION_TIME} is also accumulated from the response (measured in
+     * {@link org.apache.cassandra.service.paxos.PaxosPrepare.RequestHandler} around the precondition read).
      */
     @Test
     public void testPaxosV2PrepareCallbackSensors() throws Exception
@@ -222,9 +244,14 @@ public class ResponseVerbHandlerSensorsTest
             Mockito.mock(org.apache.cassandra.service.paxos.PaxosPrepare.class);
         Mockito.when(mockCallback.getTableMetadata()).thenReturn(metadata);
         Mockito.when(mockCallback.getRequestSensors()).thenReturn(requestSensors);
+        // Forward accumulateExecutionTimeSensor to the real requestSensors so we can assert values directly.
+        Mockito.doAnswer(inv -> {
+            requestSensors.incrementSensor(inv.getArgument(0), inv.getArgument(1), (double) inv.getArgument(2));
+            return null;
+        }).when(mockCallback).accumulateExecutionTimeSensor(Mockito.any(), Mockito.any(), Mockito.anyDouble());
 
         RequestCallbacks.CallbackInfo callbackInfo = createCallbackInfo(mockCallback);
-        Message<?> responseMessage = createResponseMessageWithSensors(80.0, 120.0, 60.0);
+        Message<?> responseMessage = createResponseMessageWithSensors(80.0, 120.0, 60.0, 55.0, 75.0);
 
         trackReplicaSensors(callbackInfo, responseMessage);
 
@@ -237,6 +264,12 @@ public class ResponseVerbHandlerSensorsTest
         assertThat(requestSensors.getSensor(context, Type.INTERNODE_BYTES).get().getValue())
             .as("PaxosPrepare V2 should track INTERNODE_BYTES")
             .isEqualTo(60.0);
+        assertThat(requestSensors.getSensor(context, Type.READ_EXECUTION_TIME).get().getValue())
+            .as("PaxosPrepare V2 should track READ_EXECUTION_TIME from the precondition read")
+            .isEqualTo(55.0);
+        assertThat(requestSensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get().getValue())
+            .as("PaxosPrepare V2 should track WRITE_EXECUTION_TIME")
+            .isEqualTo(75.0);
     }
 
     /**
@@ -271,9 +304,10 @@ public class ResponseVerbHandlerSensorsTest
 
     /**
      * Paxos V2 Commit responses go through the {@link org.apache.cassandra.service.paxos.PaxosCommit}
-     * branch in {@link ResponseVerbHandler#trackReplicaSensors} and track both
-     * {@link Type#READ_BYTES} and {@link Type#WRITE_BYTES} (system.paxos write via {@code savePaxosCommit},
-     * plus the user-table mutation apply when the condition was met).
+     * branch in {@link ResponseVerbHandler#trackReplicaSensors}.
+     * The commit phase writes to the user table and system.paxos but never reads system.paxos,
+     * so only {@link Type#WRITE_BYTES}, {@link Type#INDEX_WRITE_BYTES}, and {@link Type#INTERNODE_BYTES}
+     * are tracked — {@link Type#READ_BYTES} is not.
      */
     @Test
     public void testPaxosV2CommitCallbackSensors() throws Exception
@@ -284,16 +318,19 @@ public class ResponseVerbHandlerSensorsTest
         Mockito.when(mockCallback.getRequestSensors()).thenReturn(requestSensors);
 
         RequestCallbacks.CallbackInfo callbackInfo = createCallbackInfo(mockCallback);
-        Message<?> responseMessage = createResponseMessageWithSensors(95.0, 140.0, 80.0);
+        Message<?> responseMessage = createResponseMessageWithSensors(95.0, 140.0, 80.0, 0.0, 0.0, 45.0);
 
         trackReplicaSensors(callbackInfo, responseMessage);
 
         assertThat(requestSensors.getSensor(context, Type.READ_BYTES).get().getValue())
-            .as("PaxosCommit V2 should track READ_BYTES")
-            .isEqualTo(95.0);
+            .as("PaxosCommit V2 should NOT track READ_BYTES (commit phase does not read system.paxos)")
+            .isEqualTo(0.0);
         assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue())
             .as("PaxosCommit V2 should track WRITE_BYTES")
             .isEqualTo(140.0);
+        assertThat(requestSensors.getSensor(context, Type.INDEX_WRITE_BYTES).get().getValue())
+            .as("PaxosCommit V2 should track INDEX_WRITE_BYTES from replica secondary index writes")
+            .isEqualTo(45.0);
         assertThat(requestSensors.getSensor(context, Type.INTERNODE_BYTES).get().getValue())
             .as("PaxosCommit V2 should track INTERNODE_BYTES")
             .isEqualTo(80.0);
@@ -320,6 +357,12 @@ public class ResponseVerbHandlerSensorsTest
 
             @Override
             public boolean invokeOnFailure() { return true; }
+
+            @Override
+            public void accumulateExecutionTimeSensor(Context ctx, Type type, double value)
+            {
+                requestSensors.incrementSensor(ctx, type, value);
+            }
         };
 
         return new RequestCallbacks.WriteCallbackInfo(message, peer, callback);
@@ -354,6 +397,23 @@ public class ResponseVerbHandlerSensorsTest
      */
     private Message<?> createResponseMessageWithSensors(double readBytes, double writeBytes, double internodeBytes) throws Exception
     {
+        return createResponseMessageWithSensors(readBytes, writeBytes, internodeBytes, 0.0, 0.0, 0.0);
+    }
+
+    private Message<?> createResponseMessageWithSensors(double readBytes, double writeBytes, double internodeBytes,
+                                                        double readExecTime, double writeExecTime) throws Exception
+    {
+        return createResponseMessageWithSensors(readBytes, writeBytes, internodeBytes, readExecTime, writeExecTime, 0.0);
+    }
+
+    /**
+     * Builds a response {@link Message} with all sensor types encoded as custom parameters,
+     * simulating a replica response that carries sensor data.
+     */
+    private Message<?> createResponseMessageWithSensors(double readBytes, double writeBytes, double internodeBytes,
+                                                        double readExecTime, double writeExecTime,
+                                                        double indexWriteBytes) throws Exception
+    {
         InetAddressAndPort from = InetAddressAndPort.getByName("127.0.0.2");
         Message.Builder<NoPayload> builder = Message.builder(Verb.MUTATION_RSP, NoPayload.noPayload)
                                                     .from(from);
@@ -362,8 +422,14 @@ public class ResponseVerbHandlerSensorsTest
         readSensor.increment(readBytes);
         MockSensor writeSensor = new MockSensor(context, Type.WRITE_BYTES);
         writeSensor.increment(writeBytes);
+        MockSensor indexWriteSensor = new MockSensor(context, Type.INDEX_WRITE_BYTES);
+        indexWriteSensor.increment(indexWriteBytes);
         MockSensor internodeSensor = new MockSensor(context, Type.INTERNODE_BYTES);
         internodeSensor.increment(internodeBytes);
+        MockSensor readExecSensor = new MockSensor(context, Type.READ_EXECUTION_TIME);
+        readExecSensor.increment(readExecTime);
+        MockSensor writeExecSensor = new MockSensor(context, Type.WRITE_EXECUTION_TIME);
+        writeExecSensor.increment(writeExecTime);
 
         builder.withCustomParam(
             SensorsCustomParams.paramForRequestSensor(readSensor).get(),
@@ -374,8 +440,20 @@ public class ResponseVerbHandlerSensorsTest
             SensorsCustomParams.sensorValueAsBytes(writeSensor.getValue())
         );
         builder.withCustomParam(
+            SensorsCustomParams.paramForRequestSensor(indexWriteSensor).get(),
+            SensorsCustomParams.sensorValueAsBytes(indexWriteSensor.getValue())
+        );
+        builder.withCustomParam(
             SensorsCustomParams.paramForRequestSensor(internodeSensor).get(),
             SensorsCustomParams.sensorValueAsBytes(internodeSensor.getValue())
+        );
+        builder.withCustomParam(
+            SensorsCustomParams.paramForRequestSensor(readExecSensor).get(),
+            SensorsCustomParams.sensorValueAsBytes(readExecSensor.getValue())
+        );
+        builder.withCustomParam(
+            SensorsCustomParams.paramForRequestSensor(writeExecSensor).get(),
+            SensorsCustomParams.sensorValueAsBytes(writeExecSensor.getValue())
         );
 
         return builder.build();

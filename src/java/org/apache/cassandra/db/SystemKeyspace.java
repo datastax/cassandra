@@ -141,6 +141,7 @@ import static org.apache.cassandra.service.paxos.Commit.latest;
 import static org.apache.cassandra.utils.CassandraVersion.NULL_VERSION;
 import static org.apache.cassandra.utils.CassandraVersion.UNREADABLE_VERSION;
 import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.utils.FBUtilities.now;
 
 public final class SystemKeyspace
@@ -1139,14 +1140,21 @@ public final class SystemKeyspace
      */
     public static PaxosState.Snapshot loadPaxosState(DecoratedKey partitionKey, TableMetadata metadata, long nowInSec)
     {
-        // Track bytes read from the Paxos system table for the commit that initiated Paxos
+        // Track bytes and execution time for reading from system.paxos, staged under PaxosContext then
+        // transferred to the user-table context — consistent with how WRITE_BYTES is handled for paxos writes.
         registerPaxosSensor(Type.READ_BYTES);
+        registerPaxosSensor(Type.READ_EXECUTION_TIME);
 
         String cql = "SELECT * FROM system." + PAXOS + " WHERE row_key = ? AND cf_id = ?";
+        long readStartNanos = nanoTime();
         List<Row> results = QueryProcessor.executeInternalRawWithNow(nowInSec, cql, partitionKey.getKey(), metadata.id.asUUID()).get(partitionKey);
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+            sensors.incrementSensor(PaxosContext, Type.READ_EXECUTION_TIME, nanoTime() - readStartNanos);
 
-        // transfer bytes read off of Paxos system table to the user table for the commit that initiated Paxos
+        // transfer read bytes and execution time from system.paxos to the user-table context
         transferPaxosSensorBytes(metadata, Type.READ_BYTES);
+        transferPaxosSensorBytes(metadata, Type.READ_EXECUTION_TIME);
 
         if (results == null || results.isEmpty())
         {

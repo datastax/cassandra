@@ -126,8 +126,11 @@ public class PaxosV2SensorsTest
         assertThat(readSensor.getValue()).as("v2 Prepare: READ_BYTES must be 0 on first prepare (cache empty)").isZero();
 
         assertWriteExecutionTimeNonZero(context);
+        // request.read is always present in dispatchV2Prepare so READ_EXECUTION_TIME is non-zero even on
+        // the first prepare: the user-table read runs regardless of whether there are existing rows.
+        assertReadExecutionTimeNonZero(context);
         assertInternodeBytesNonZero(context);
-        assertResponseContainsSensorParams(Type.WRITE_BYTES, Type.WRITE_EXECUTION_TIME);
+        assertResponseContainsSensorParams(Type.WRITE_BYTES, Type.WRITE_EXECUTION_TIME, Type.READ_EXECUTION_TIME);
 
         // evict cache and re-prepare: now reads from system.paxos → READ_BYTES > 0
         PaxosState.unsafeReset();
@@ -138,7 +141,8 @@ public class PaxosV2SensorsTest
         assertThat(readSensor.getValue()).as("v2 Prepare: READ_BYTES must be > 0 after cache eviction").isGreaterThan(0);
         assertThat(SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES))
                 .as("v2 Prepare: registry READ_BYTES must equal request sensor").isEqualTo(readSensor);
-        assertResponseContainsSensorParams(Type.READ_BYTES, Type.WRITE_EXECUTION_TIME);
+        assertReadExecutionTimeNonZero(context);
+        assertResponseContainsSensorParams(Type.READ_BYTES, Type.WRITE_EXECUTION_TIME, Type.READ_EXECUTION_TIME);
     }
 
     // -------------------------------------------------------------------------
@@ -167,10 +171,12 @@ public class PaxosV2SensorsTest
         assertThat(readSensor.getValue()).as("v2 Propose: READ_BYTES must be 0 on first propose (cache empty)").isZero();
 
         assertWriteExecutionTimeNonZero(context);
+        // On first propose the cache is warm (no disk read), so READ_EXECUTION_TIME is zero
+        assertReadExecutionTimeZero(context);
         assertInternodeBytesNonZero(context);
         assertResponseContainsSensorParams(Type.WRITE_BYTES, Type.WRITE_EXECUTION_TIME);
 
-        // evict cache and re-propose: READ_BYTES now > 0
+        // evict cache and re-propose: READ_BYTES > 0 and READ_EXECUTION_TIME > 0 (loadPaxosState reads from disk)
         PaxosState.unsafeReset();
         resetState();
         PaxosV2TestHelper.dispatchV2Propose(store);
@@ -179,7 +185,8 @@ public class PaxosV2SensorsTest
         assertThat(readSensor.getValue()).as("v2 Propose: READ_BYTES must be > 0 after cache eviction").isGreaterThan(0);
         assertThat(SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES))
                 .as("v2 Propose: registry READ_BYTES must equal request sensor").isEqualTo(readSensor);
-        assertResponseContainsSensorParams(Type.READ_BYTES, Type.WRITE_EXECUTION_TIME);
+        assertReadExecutionTimeNonZero(context);
+        assertResponseContainsSensorParams(Type.READ_BYTES, Type.WRITE_EXECUTION_TIME, Type.READ_EXECUTION_TIME);
     }
 
     // -------------------------------------------------------------------------
@@ -239,6 +246,20 @@ public class PaxosV2SensorsTest
         assertThat(execTimeSensor.getValue()).as("WRITE_EXECUTION_TIME must be > 0").isGreaterThan(0);
         assertThat(SensorsTestUtil.getRegistrySensor(context, Type.WRITE_EXECUTION_TIME))
                 .as("registry WRITE_EXECUTION_TIME must equal request sensor").isEqualTo(execTimeSensor);
+    }
+
+    private void assertReadExecutionTimeNonZero(Context context)
+    {
+        Sensor execTimeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(execTimeSensor.getValue()).as("READ_EXECUTION_TIME must be > 0").isGreaterThan(0);
+        assertThat(SensorsTestUtil.getRegistrySensor(context, Type.READ_EXECUTION_TIME))
+                .as("registry READ_EXECUTION_TIME must equal request sensor").isEqualTo(execTimeSensor);
+    }
+
+    private void assertReadExecutionTimeZero(Context context)
+    {
+        Sensor execTimeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(execTimeSensor.getValue()).as("READ_EXECUTION_TIME must be 0").isZero();
     }
 
     private void assertInternodeBytesNonZero(Context context)

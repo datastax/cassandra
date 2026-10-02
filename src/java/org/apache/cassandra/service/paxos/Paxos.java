@@ -688,14 +688,8 @@ public class Paxos
                 // read the current values and check they validate the conditions
                 Tracing.trace("Reading existing values for CAS precondition");
 
-                long beginStartNanos = nanoTime();
                 BeginResult begin = begin(proposeDeadline, readCommand, consistencyForConsensus,
                         true, minimumBallot, failedAttemptsDueToContention);
-                // In v2 the precondition read is embedded in the prepare phase; measure the coordinator-side
-                // round-trip of begin() as READ_EXECUTION_TIME to mirror what legacyCas accumulates via ReadCallback.
-                RequestSensors casSensors = RequestTracker.instance.get();
-                if (casSensors != null)
-                    casSensors.incrementSensor(Context.from(metadata), Type.READ_EXECUTION_TIME, nanoTime() - beginStartNanos);
                 Participants participants = begin.participants;
                 failedAttemptsDueToContention = begin.failedAttemptsDueToContention;
 
@@ -1061,13 +1055,7 @@ public class Paxos
             while (true)
             {
                 // does the work of applying in-progress writes; throws UAE or timeout if it can't
-                long beginStartNanos = nanoTime();
                 final BeginResult begin = begin(deadline, read, consistencyForConsensus, false, minimumBallot, failedAttemptsDueToContention);
-                // In v2 the user-table read is embedded in the prepare phase; measure the coordinator-side
-                // round-trip of begin() as READ_EXECUTION_TIME so SERIAL reads report it like legacyReadWithPaxos.
-                RequestSensors readSensors = RequestTracker.instance.get();
-                if (readSensors != null)
-                    readSensors.incrementSensor(Context.from(read.metadata()), Type.READ_EXECUTION_TIME, nanoTime() - beginStartNanos);
                 failedAttemptsDueToContention = begin.failedAttemptsDueToContention;
 
                 switch (PAXOS_VARIANT)

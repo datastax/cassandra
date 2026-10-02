@@ -1072,9 +1072,12 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
 
             // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor.
             // INDEX_WRITE_BYTES is not registered here because prepare only writes to system.paxos, which has no indexes.
+            // READ_EXECUTION_TIME tracks the user-table precondition read (request.read.executeLocally()) when present,
+            // mirroring what ReadCommandVerbHandler does for regular reads and legacyCas does via ReadCallback.
             sensors.registerSensor(context, Type.READ_BYTES);
             sensors.registerSensor(context, Type.WRITE_BYTES);
             sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+            sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
             sensors.registerSensor(context, Type.INTERNODE_BYTES);
             sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
             RequestTracker.instance.set(sensors);
@@ -1146,11 +1149,21 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
 
                     if (request.read != null)
                     {
+                        long readStartNanos = nanoTime();
                         try (ReadExecutionController executionController = request.read.executionController();
                              UnfilteredPartitionIterator iterator = request.read.executeLocally(executionController))
                         {
                             readResponse = request.read.createResponse(iterator, executionController.getRepairedDataInfo());
                         }
+                        // Track the user-table precondition read execution time in addition to the system.paxos
+                        // read time already tracked inside loadPaxosState() (called via PaxosState.get() above).
+                        // Uses RequestTracker so it works for both the remote path (replica sensors set in doVerb)
+                        // and the local/single-node path (coordinator sensors set by Paxos.registerCasSensors).
+                        // PaxosPropose has no equivalent: it performs no user-table read, only the system.paxos
+                        // read via PaxosState.get() which is already covered by loadPaxosState().
+                        RequestSensors sensors = RequestTracker.instance.get();
+                        if (sensors != null)
+                            sensors.incrementSensor(Context.from(request.read), Type.READ_EXECUTION_TIME, nanoTime() - readStartNanos);
 
                         if (hasProposalStability)
                         {
