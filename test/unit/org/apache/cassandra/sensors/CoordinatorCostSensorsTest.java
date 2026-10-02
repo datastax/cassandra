@@ -49,7 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Verifies that {@link Type#READ_COST}, {@link Type#WRITE_COST}, and {@link Type#TOTAL_COST} sensors
  * are populated correctly after real CQL operations when {@link TestCostCalculator} is injected via
- * the {@link CassandraRelevantProperties#COST_CALCULATOR} system property.
+ * the {@link CassandraRelevantProperties#SENSORS_COST_CALCULATOR} system property.
  *
  * <p>{@link TestCostCalculator} uses a simple additive formula:
  * <pre>
@@ -90,7 +90,7 @@ public class CoordinatorCostSensorsTest
     public static void defineSchema() throws Exception
     {
         CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
-        CassandraRelevantProperties.COST_CALCULATOR.setString(TestCostCalculator.class.getName());
+        CassandraRelevantProperties.SENSORS_COST_CALCULATOR.setString(TestCostCalculator.class.getName());
 
         SchemaLoader.prepareServer();
         StorageService.instance.initServer();

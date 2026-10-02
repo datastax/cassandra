@@ -73,7 +73,7 @@ public class CoordinatorSensorRegistrySyncTest extends TestBaseImpl
     public static void setupCluster() throws IOException
     {
         CassandraRelevantProperties.SENSORS_FACTORY.setString(ActiveSensorsFactory.class.getName());
-        CassandraRelevantProperties.COST_CALCULATOR.setString(TestCostCalculator.class.getName());
+        CassandraRelevantProperties.SENSORS_COST_CALCULATOR.setString(TestCostCalculator.class.getName());
         cluster = init(Cluster.build(NODES_COUNT).start());
     }
 

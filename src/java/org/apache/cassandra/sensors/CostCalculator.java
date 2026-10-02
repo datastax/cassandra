@@ -30,13 +30,13 @@ import org.apache.cassandra.utils.FBUtilities;
  *
  * <p>The default implementation is {@link NoOpCostCalculator}, which always returns {@code 0}.
  * A custom implementation can be plugged in by setting the
- * {@link CassandraRelevantProperties#COST_CALCULATOR} system property to a fully-qualified class
+ * {@link CassandraRelevantProperties#SENSORS_COST_CALCULATOR} system property to a fully-qualified class
  * name; the class must have a no-arg constructor and implement this interface.
  */
 public interface CostCalculator
 {
-    CostCalculator INSTANCE = CassandraRelevantProperties.COST_CALCULATOR.isPresent()
-                              ? FBUtilities.construct(CassandraRelevantProperties.COST_CALCULATOR.getString(), "cost calculator")
+    CostCalculator INSTANCE = CassandraRelevantProperties.SENSORS_COST_CALCULATOR.isPresent()
+                              ? FBUtilities.construct(CassandraRelevantProperties.SENSORS_COST_CALCULATOR.getString(), "cost calculator")
                               : NoOpCostCalculator.instance;
 
     /**

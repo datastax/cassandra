@@ -94,6 +94,7 @@ public class ResponseVerbHandlerSensorsTest
         context = Context.from(metadata);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         requestSensors.registerSensor(context, Type.WRITE_BYTES);
+        requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
     }
 
     /**
@@ -223,7 +224,7 @@ public class ResponseVerbHandlerSensorsTest
         Mockito.when(mockCallback.getRequestSensors()).thenReturn(requestSensors);
 
         RequestCallbacks.CallbackInfo callbackInfo = createCallbackInfo(mockCallback);
-        Message<?> responseMessage = createResponseMessageWithSensors(80.0, 120.0);
+        Message<?> responseMessage = createResponseMessageWithSensors(80.0, 120.0, 60.0);
 
         trackReplicaSensors(callbackInfo, responseMessage);
 
@@ -233,6 +234,9 @@ public class ResponseVerbHandlerSensorsTest
         assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue())
             .as("PaxosPrepare V2 should track WRITE_BYTES")
             .isEqualTo(120.0);
+        assertThat(requestSensors.getSensor(context, Type.INTERNODE_BYTES).get().getValue())
+            .as("PaxosPrepare V2 should track INTERNODE_BYTES")
+            .isEqualTo(60.0);
     }
 
     /**
@@ -250,7 +254,7 @@ public class ResponseVerbHandlerSensorsTest
         Mockito.when(mockCallback.getRequestSensors()).thenReturn(requestSensors);
 
         RequestCallbacks.CallbackInfo callbackInfo = createCallbackInfo(mockCallback);
-        Message<?> responseMessage = createResponseMessageWithSensors(90.0, 130.0);
+        Message<?> responseMessage = createResponseMessageWithSensors(90.0, 130.0, 70.0);
 
         trackReplicaSensors(callbackInfo, responseMessage);
 
@@ -260,6 +264,9 @@ public class ResponseVerbHandlerSensorsTest
         assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue())
             .as("PaxosPropose V2 should track WRITE_BYTES")
             .isEqualTo(130.0);
+        assertThat(requestSensors.getSensor(context, Type.INTERNODE_BYTES).get().getValue())
+            .as("PaxosPropose V2 should track INTERNODE_BYTES")
+            .isEqualTo(70.0);
     }
 
     /**
@@ -277,7 +284,7 @@ public class ResponseVerbHandlerSensorsTest
         Mockito.when(mockCallback.getRequestSensors()).thenReturn(requestSensors);
 
         RequestCallbacks.CallbackInfo callbackInfo = createCallbackInfo(mockCallback);
-        Message<?> responseMessage = createResponseMessageWithSensors(95.0, 140.0);
+        Message<?> responseMessage = createResponseMessageWithSensors(95.0, 140.0, 80.0);
 
         trackReplicaSensors(callbackInfo, responseMessage);
 
@@ -287,6 +294,9 @@ public class ResponseVerbHandlerSensorsTest
         assertThat(requestSensors.getSensor(context, Type.WRITE_BYTES).get().getValue())
             .as("PaxosCommit V2 should track WRITE_BYTES")
             .isEqualTo(140.0);
+        assertThat(requestSensors.getSensor(context, Type.INTERNODE_BYTES).get().getValue())
+            .as("PaxosCommit V2 should track INTERNODE_BYTES")
+            .isEqualTo(80.0);
     }
 
     /**
@@ -334,6 +344,16 @@ public class ResponseVerbHandlerSensorsTest
      */
     private Message<?> createResponseMessageWithSensors(double readBytes, double writeBytes) throws Exception
     {
+        return createResponseMessageWithSensors(readBytes, writeBytes, 0.0);
+    }
+
+    /**
+     * Builds a response {@link Message} with {@link Type#READ_BYTES}, {@link Type#WRITE_BYTES},
+     * and {@link Type#INTERNODE_BYTES} encoded as custom parameters, simulating a replica response
+     * that carries sensor data.
+     */
+    private Message<?> createResponseMessageWithSensors(double readBytes, double writeBytes, double internodeBytes) throws Exception
+    {
         InetAddressAndPort from = InetAddressAndPort.getByName("127.0.0.2");
         Message.Builder<NoPayload> builder = Message.builder(Verb.MUTATION_RSP, NoPayload.noPayload)
                                                     .from(from);
@@ -342,6 +362,8 @@ public class ResponseVerbHandlerSensorsTest
         readSensor.increment(readBytes);
         MockSensor writeSensor = new MockSensor(context, Type.WRITE_BYTES);
         writeSensor.increment(writeBytes);
+        MockSensor internodeSensor = new MockSensor(context, Type.INTERNODE_BYTES);
+        internodeSensor.increment(internodeBytes);
 
         builder.withCustomParam(
             SensorsCustomParams.paramForRequestSensor(readSensor).get(),
@@ -350,6 +372,10 @@ public class ResponseVerbHandlerSensorsTest
         builder.withCustomParam(
             SensorsCustomParams.paramForRequestSensor(writeSensor).get(),
             SensorsCustomParams.sensorValueAsBytes(writeSensor.getValue())
+        );
+        builder.withCustomParam(
+            SensorsCustomParams.paramForRequestSensor(internodeSensor).get(),
+            SensorsCustomParams.sensorValueAsBytes(internodeSensor.getValue())
         );
 
         return builder.build();

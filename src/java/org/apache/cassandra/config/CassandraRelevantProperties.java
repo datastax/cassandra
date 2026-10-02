@@ -316,13 +316,6 @@ public enum CassandraRelevantProperties
     CONSISTENT_DIRECTORY_LISTINGS("cassandra.consistent_directory_listings"),
     CONSISTENT_RANGE_MOVEMENT("cassandra.consistent.rangemovement", "true"),
     CONSISTENT_SIMULTANEOUS_MOVES_ALLOW("cassandra.consistent.simultaneousmoves.allow"),
-    /**
-     * Allows plugging a custom {@link org.apache.cassandra.sensors.CostCalculator} implementation
-     * without having to subclass {@link SensorsFactory}.
-     * When set, the named class is instantiated directly via {@link org.apache.cassandra.utils.FBUtilities#construct}.
-     * When absent, {@link NoOpCostCalculator} is used.
-     */
-    COST_CALCULATOR("cassandra.cost_calculator_class"),
     COUNTER_LOCK_FAIR_LOCK("cassandra.counter_lock.fair_lock", "false"),
     COUNTER_LOCK_NUM_STRIPES_PER_THREAD("cassandra.counter_lock.num_stripes_per_thread", "1024"),
     CRYPTO_PROVIDER_CLASS_NAME("cassandra.crypto_provider_class_name"),
@@ -992,6 +985,13 @@ public enum CassandraRelevantProperties
      * The default used in SimpleSeedProvider is 20.
      */
     SEED_COUNT_WARN_THRESHOLD("cassandra.seed_count_warn_threshold"),
+    /**
+     * Allows plugging a custom {@link org.apache.cassandra.sensors.CostCalculator} implementation
+     * without having to subclass {@link SensorsFactory}.
+     * When set, the named class is instantiated directly via {@link org.apache.cassandra.utils.FBUtilities#construct}.
+     * When absent, {@link NoOpCostCalculator} is used.
+     */
+    SENSORS_COST_CALCULATOR("cassandra.cost_calculator_class"),
     /**
      * Allows custom implementation of {@link SensorsFactory} to optionally create
      * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
