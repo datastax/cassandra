@@ -45,21 +45,14 @@ public interface ILifecycleTransaction extends Transactional, LifecycleNewTracke
      * so it is not released here.
      * <p>
      * Transactions that defer their checkpoint to an enclosing operation, like {@link PartialLifecycleTransaction} and
-     * the shared transaction of anticompaction, implement this as a no-op, like {@link #checkpoint()}.
-     * <p>
-     * The default implementation is such a no-op, which keeps implementations written before this method existed
-     * compiling. It is only correct for transactions that stage nothing between checkpoints, or defer their checkpoint
-     * to an enclosing operation that owns the staged state. A wrapper that forwards {@link #update} and
+     * the shared transaction of anticompaction, implement this as a no-op, like {@link #checkpoint()}; a no-op is also
+     * correct for transactions that stage nothing between checkpoints. A wrapper that forwards {@link #update} and
      * {@link #obsolete} to a delegate must forward this method too (see {@link WrappedLifecycleTransaction}). A
-     * transaction that stages readers must override it to release them, otherwise a failed early open leaks their
-     * references.
+     * transaction that stages readers must release them here, otherwise a failed early open leaks their references.
      *
      * @return the given accumulator, with any failure to release a reader merged into it
      */
-    default Throwable abortCheckpoint(Throwable accumulate)
-    {
-        return accumulate;
-    }
+    Throwable abortCheckpoint(Throwable accumulate);
 
     /**
      * Stages a new version of a reader, see {@link LifecycleTransaction#update(SSTableReader, boolean)}. If this
