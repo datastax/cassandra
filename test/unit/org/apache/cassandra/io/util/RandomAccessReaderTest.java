@@ -914,16 +914,17 @@ public class RandomAccessReaderTest
     }
 
     /**
-     * A skip must stop at length(), also when a length override ends inside the reader's buffer (as for early-open
-     * readers).
+     * A skip that leaves the current buffer must stop at length(), also when it is a length override (as for
+     * early-open readers). Like reads, skips within the current buffer are not checked against length().
      */
     @Test
     public void testSkipBytesStopsAtLengthOverride() throws IOException
     {
+        int bufferSize = 4096;
         final File f = writeFile(writer -> {
             try
             {
-                for (int i = 0; i < 100; ++i)
+                for (int i = 0; i < 3 * bufferSize; ++i)
                     writer.writeByte(i);
             }
             catch (IOException e)
@@ -933,38 +934,77 @@ public class RandomAccessReaderTest
             return false;
         });
 
+        long lengthOverride = bufferSize + 50;
+        int available = (int) (lengthOverride - 100);
         for (boolean mmapped : new boolean[]{ false, true })
         {
-            FileHandle.Builder builder = new FileHandle.Builder(f).bufferSize(4096)
+            FileHandle.Builder builder = new FileHandle.Builder(f).bufferSize(bufferSize)
                                                                   .mmapped(mmapped)
-                                                                  .withLengthOverride(50);
+                                                                  .withLengthOverride(lengthOverride);
             try (FileHandle fh = builder.complete();
                  RandomAccessReader reader = fh.createReader())
             {
-                assertEquals(50, reader.length());
-                reader.seek(40);
-                assertEquals(10, reader.skipBytes(20));
-                assertEquals(50, reader.getFilePointer());
+                assertEquals(lengthOverride, reader.length());
+                reader.seek(100);
+                assertEquals(available, reader.skipBytes(available + 20));
+                assertEquals(lengthOverride, reader.getFilePointer());
                 assertTrue(reader.isEOF());
                 assertEquals(0, reader.bytesRemaining());
                 assertEquals(0, reader.skipBytes(1));
 
-                reader.seek(40);
+                reader.seek(100);
                 try
                 {
-                    reader.skipBytesFully(11);
+                    reader.skipBytesFully(available + 1);
                     fail("Expected EOFException");
                 }
                 catch (EOFException e)
                 {
                     // expected
                 }
-                assertEquals(50, reader.getFilePointer());
+                assertEquals(lengthOverride, reader.getFilePointer());
 
-                reader.seek(40);
-                assertEquals(10, reader.skipBytes(10));
-                assertEquals(50, reader.getFilePointer());
+                reader.seek(100);
+                assertEquals(available, reader.skipBytes(available));
+                assertEquals(lengthOverride, reader.getFilePointer());
             }
+        }
+    }
+
+    /**
+     * An early-open reader can read past its length override from its buffer (reads within the buffer do not check
+     * length()); a skip leaving the buffer from there skips nothing and does not move the pointer.
+     */
+    @Test
+    public void testSkipBytesPastLengthOverride() throws IOException
+    {
+        int bufferSize = 4096;
+        final File f = writeFile(writer -> {
+            try
+            {
+                for (int i = 0; i < 3 * bufferSize; ++i)
+                    writer.writeByte(i);
+            }
+            catch (IOException e)
+            {
+                throw new AssertionError(e);
+            }
+            return false;
+        });
+
+        FileHandle.Builder builder = new FileHandle.Builder(f).bufferSize(bufferSize)
+                                                              .mmapped(false)
+                                                              .withLengthOverride(50);
+        try (FileHandle fh = builder.complete();
+             RandomAccessReader reader = fh.createReader())
+        {
+            reader.seek(40);
+            reader.readFully(new byte[20]);
+            assertEquals(60, reader.getFilePointer());
+            assertTrue(reader.getFilePointer() > reader.length());
+
+            assertEquals(0, reader.skipBytes(bufferSize));
+            assertEquals(60, reader.getFilePointer());
         }
     }
 

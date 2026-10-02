@@ -76,11 +76,8 @@ public class TailOverridingRebufferer extends WrappingRebufferer
 
     /**
      * Consistent with {@link #adjustPosition}: the source's arithmetic (e.g. the holes of an encrypted file) applies
-     * before the cutoff only, and the tail from the cutoff on is contiguous.
-     * <p>
-     * A skip crossing the cutoff costs O(log bytesToSkip) calls to the source (see
-     * {@link SkipPositions#bytesSkippableBefore}); in practice there are none, as the early-open partition index
-     * served by this class is only walked by trie readers, which seek and never skip.
+     * before the cutoff only, and the tail from the cutoff on is contiguous. See {@link #bytesBeforeCutoff} for the
+     * positions where this is defined.
      */
     @Override
     public long positionForSkip(long currentPosition, int bytesToSkip)
@@ -88,13 +85,34 @@ public class TailOverridingRebufferer extends WrappingRebufferer
         if (currentPosition >= cutoff)
             return currentPosition + bytesToSkip;
 
-        long position = super.positionForSkip(currentPosition, bytesToSkip);
-        if (position <= cutoff)
-            return position;
-
-        // the skip crosses the cutoff: skip what is before it in the source, and the rest in the tail
-        int bytesBeforeCutoff = SkipPositions.bytesSkippableBefore(wrapped, currentPosition, bytesToSkip, cutoff);
+        long bytesBeforeCutoff = bytesBeforeCutoff(currentPosition);
+        if (bytesToSkip <= bytesBeforeCutoff)
+            return super.positionForSkip(currentPosition, bytesToSkip);
         return cutoff + (bytesToSkip - bytesBeforeCutoff);
+    }
+
+    @Override
+    public long remainingBytes(long position)
+    {
+        if (position >= cutoff)
+            return Math.max(0, fileLength() - position);
+        return bytesBeforeCutoff(position) + tail.limit();
+    }
+
+    /**
+     * The source's content between {@code position} (before the cutoff) and the cutoff, counted with the source's
+     * {@link #remainingBytes}, i.e. up to the source's own length.
+     * <p>
+     * The source's length (the writer's last content position) may be shorter than the cutoff (the writer's padded
+     * position): the gap between the two is unaddressable, as nothing points into it, and is not counted as
+     * skippable, although reads through this rebufferer would return its bytes for an index without holes. The results
+     * of {@link #positionForSkip} and {@link #remainingBytes} are therefore only defined for positions up to the
+     * source's length or at/after the cutoff. This rebufferer is only built for the early-open partition index, whose
+     * trie walkers seek and never skip.
+     */
+    private long bytesBeforeCutoff(long position)
+    {
+        return wrapped.remainingBytes(position) - wrapped.remainingBytes(cutoff);
     }
 
     @Override

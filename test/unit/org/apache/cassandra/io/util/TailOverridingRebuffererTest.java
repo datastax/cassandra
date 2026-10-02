@@ -138,6 +138,9 @@ public class TailOverridingRebuffererTest
         int maxBytesInPage = CHUNK_SIZE - 40;
         when(r.positionForSkip(anyLong(), anyInt()))
         .thenAnswer(invocation -> EncryptedChunkReader.positionForSkip(invocation.getArgument(0), invocation.getArgument(1), maxBytesInPage));
+        // a source extending past both cutoffs below
+        when(r.remainingBytes(anyLong()))
+        .thenAnswer(invocation -> EncryptedChunkReader.remainingBytes(invocation.getArgument(0), 4L * CHUNK_SIZE, maxBytesInPage));
         when(r.adjustPosition(anyLong())).thenAnswer(invocation -> {
             long position = invocation.getArgument(0);
             return (position & (CHUNK_SIZE - 1)) < maxBytesInPage ? position : position - maxBytesInPage + CHUNK_SIZE;
@@ -162,12 +165,65 @@ public class TailOverridingRebuffererTest
         assertEquals(cutoff + 3 + 2L * CHUNK_SIZE, tor.positionForSkip(cutoff + 3, 2 * CHUNK_SIZE));
         assertEquals(cutoff, tor.positionForSkip(cutoff, 0));
 
-        // cutoff at the usable end of a chunk (the writer's position when that chunk is full)
+        // a cutoff at the usable end (hole start) of a chunk, which the writer does not produce (the cutoff comes from
+        // paddedPosition(), always chunk-aligned), for robustness
         cutoff = holeStart;
         tor = new TailOverridingRebufferer(r, cutoff, tail.duplicate());
         assertEquals(cutoff, tor.positionForSkip(cutoff - 10, 10));
         assertEquals(cutoff + 1, tor.positionForSkip(cutoff - 10, 11));
         assertEquals(cutoff + 2L * CHUNK_SIZE, tor.positionForSkip(cutoff - 10, 10 + 2 * CHUNK_SIZE));
         assertEquals(cutoff + 2L * CHUNK_SIZE, tor.positionForSkip(cutoff, 2 * CHUNK_SIZE));
+    }
+
+    /**
+     * The content before the cutoff is counted with the source's arithmetic (holes excluded), up to the source's
+     * length, and the tail after it is contiguous.
+     */
+    @Test
+    public void testRemainingBytes()
+    {
+        int maxBytesInPage = CHUNK_SIZE - 40;
+        long holeStart = CHUNK_SIZE + maxBytesInPage; // the usable end of the second chunk
+        long[] sourceLength = { holeStart }; // the writer's last content position when the index was opened early
+        when(r.remainingBytes(anyLong()))
+        .thenAnswer(invocation -> EncryptedChunkReader.remainingBytes(invocation.getArgument(0), sourceLength[0], maxBytesInPage));
+        when(r.positionForSkip(anyLong(), anyInt()))
+        .thenAnswer(invocation -> EncryptedChunkReader.positionForSkip(invocation.getArgument(0), invocation.getArgument(1), maxBytesInPage));
+        int tailLength = 3 * CHUNK_SIZE;
+        ByteBuffer longTail = ByteBuffer.allocate(tailLength);
+
+        // cutoff at a chunk start, the source ending at the hole start of the previous chunk
+        long cutoff = 2L * CHUNK_SIZE;
+        Rebufferer tor = new TailOverridingRebufferer(r, cutoff, longTail.duplicate());
+        assertEquals(cutoff + tailLength, tor.fileLength());
+        // before the cutoff, across the source's holes
+        assertEquals(2L * maxBytesInPage - 10 + tailLength, tor.remainingBytes(10));
+        assertEquals(5 + maxBytesInPage + tailLength, tor.remainingBytes(maxBytesInPage - 5));
+        assertEquals(10 + tailLength, tor.remainingBytes(holeStart - 10));
+        assertEquals(tailLength, tor.remainingBytes(holeStart));
+        // skipping everything lands at the end of the tail
+        assertEquals(cutoff + tailLength, tor.positionForSkip(10, (int) tor.remainingBytes(10)));
+        assertEquals(cutoff + 1, tor.positionForSkip(holeStart, 1));
+        // from the cutoff on
+        assertEquals(tailLength, tor.remainingBytes(cutoff));
+        assertEquals(tailLength - 3, tor.remainingBytes(cutoff + 3));
+        assertEquals(0, tor.remainingBytes(cutoff + tailLength));
+        assertEquals(0, tor.remainingBytes(cutoff + tailLength + 1));
+        // a source extending past the cutoff does not change the counts
+        sourceLength[0] = 3L * CHUNK_SIZE + maxBytesInPage;
+        assertEquals(2L * maxBytesInPage - 10 + tailLength, tor.remainingBytes(10));
+        assertEquals(tailLength, tor.remainingBytes(holeStart));
+
+        // a cutoff at the hole start of a chunk, which the writer does not produce (the cutoff comes from
+        // paddedPosition(), always chunk-aligned), for robustness
+        cutoff = holeStart;
+        sourceLength[0] = holeStart;
+        tor = new TailOverridingRebufferer(r, cutoff, longTail.duplicate());
+        assertEquals(2L * maxBytesInPage - 5 + tailLength, tor.remainingBytes(5));
+        assertEquals(10 + tailLength, tor.remainingBytes(cutoff - 10));
+        assertEquals(tailLength, tor.remainingBytes(cutoff));
+        assertEquals(tailLength - 1, tor.remainingBytes(cutoff + 1));
+        assertEquals(cutoff + tailLength, tor.positionForSkip(5, (int) tor.remainingBytes(5)));
+        assertEquals(cutoff, tor.positionForSkip(cutoff - 10, 10));
     }
 }

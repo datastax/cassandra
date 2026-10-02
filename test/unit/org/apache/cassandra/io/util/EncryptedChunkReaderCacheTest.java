@@ -611,8 +611,9 @@ public class EncryptedChunkReaderCacheTest
     }
 
     /**
-     * Skips must stop at length(), also when it is a length override in the middle of a chunk whose buffer holds more
-     * data (early-open readers), and must report the number of bytes skipped not counting the holes crossed.
+     * Skips leaving the current buffer must stop at length(), also when it is a length override in the middle of a
+     * chunk (early-open readers), and must report the number of bytes skipped not counting the holes crossed. (Like
+     * reads, skips within the current buffer are not checked against length().)
      */
     @Test
     public void testSkipStopsAtLength() throws IOException
@@ -629,16 +630,6 @@ public class EncryptedChunkReaderCacheTest
             {
                 assertEquals(lengthOverride, reader.length());
 
-                // within the buffer: the chunk's buffer continues after the override
-                reader.seek(lengthOverride - 10);
-                assertEquals(10, reader.skipBytes(20));
-                assertEquals(lengthOverride, reader.getFilePointer());
-                assertTrue(reader.isEOF());
-                assertEquals(0, reader.bytesRemaining());
-                assertEquals(0, reader.skipBytes(1));
-                // (reads are not clipped: like any buffered read past an early-open length, they would still be
-                // served from the rest of the buffer)
-
                 // across holes: 10 bytes before the hole of the previous chunk, then the data of the last chunk
                 long start = lastChunkStart - CHUNK_SIZE + maxBytesInPage - 10;
                 int expectedSkipped = (int) (10 + lengthOverride - lastChunkStart);
@@ -646,6 +637,8 @@ public class EncryptedChunkReaderCacheTest
                 assertEquals(expectedSkipped, reader.skipBytes(3 * maxBytesInPage));
                 assertEquals(lengthOverride, reader.getFilePointer());
                 assertTrue(reader.isEOF());
+                assertEquals(0, reader.bytesRemaining());
+                assertEquals(0, reader.skipBytes(1));
 
                 reader.seek(start);
                 assertEquals(expectedSkipped, reader.skipBytes(expectedSkipped));
@@ -660,41 +653,50 @@ public class EncryptedChunkReaderCacheTest
 
     /**
      * A skip whose last byte would be the first byte of the chunk at a length override (the previous chunk being full)
-     * stops at the override, one byte short.
+     * stops one byte short, where reading the bytes before the override leaves the pointer: at the start of the
+     * previous chunk's hole, from which the next read gives EOF.
      */
     @Test
     public void testSkipOverHoleToChunkStartLength() throws IOException
     {
         long lengthOverride = 4L * CHUNK_SIZE;
-        long start = lengthOverride - CHUNK_SIZE + maxBytesInPage - 10; // 10 bytes before the previous chunk's hole
+        long holeStart = lengthOverride - CHUNK_SIZE + maxBytesInPage;
+        long start = holeStart - 10;
         for (ChunkCache chunkCache : new ChunkCache[]{ ChunkCache.instance, null })
         {
             try (FileHandle fh = handleBuilder(chunkCache).withLengthOverride(lengthOverride).complete();
                  RandomAccessReader reader = fh.createReader())
             {
                 reader.seek(start);
+                reader.readFully(new byte[10]);
+                assertEquals(holeStart, reader.getFilePointer());
+                assertThrows(EOFException.class, reader::readByte);
+
+                reader.seek(start);
                 assertEquals(10, reader.skipBytes(11));
-                assertEquals(lengthOverride, reader.getFilePointer());
-                assertTrue(reader.isEOF());
+                assertEquals(holeStart, reader.getFilePointer());
+                assertEquals(0, reader.skipBytes(1));
+                assertThrows(EOFException.class, reader::readByte);
 
                 reader.seek(start);
                 assertThrows(EOFException.class, () -> reader.skipBytesFully(11));
-                assertTrue(reader.isEOF());
+                assertEquals(holeStart, reader.getFilePointer());
 
                 reader.seek(start);
                 assertEquals(10, reader.skipBytes(10));
-                assertEquals(lengthOverride - CHUNK_SIZE + maxBytesInPage, reader.getFilePointer());
+                assertEquals(holeStart, reader.getFilePointer());
             }
         }
     }
 
     /**
      * Without a length override, length() is the usable end of the last chunk, but the data may end before it (the
-     * last chunk is padded on disk, like in a row index): seeking or skipping into that gap must give EOF at the end
-     * of the data rather than an IllegalArgumentException.
+     * last chunk is padded on disk, like in a row index). Seeking to length() is a clean EOF, and so is reaching the
+     * end of the data, but a position between the two cannot be read: seeking or skipping there is an error, as it is
+     * for any position past the data of a chunk.
      */
     @Test
-    public void testSeekAndSkipPastDataEndAreEOF() throws IOException
+    public void testSeekAndSkipPastDataEndAreErrors() throws IOException
     {
         long dataEnd = writtenPositions[writtenPositions.length - 1] + 1;
         long lastChunkStart = dataEnd - (dataEnd & (CHUNK_SIZE - 1));
@@ -703,40 +705,39 @@ public class EncryptedChunkReaderCacheTest
             try (FileHandle fh = handleBuilder(chunkCache).complete();
                  RandomAccessReader reader = fh.createReader())
             {
-                assertTrue(dataEnd + 5 < reader.length());
+                long length = reader.length();
+                assertTrue(dataEnd + 5 < length);
 
-                reader.seek(dataEnd + 5);
+                reader.seek(length);
+                assertTrue(reader.isEOF());
+                assertThrows(EOFException.class, reader::readByte);
+
+                IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> reader.seek(dataEnd + 5));
+                assertTrue(e.getMessage(), e.getMessage().contains(file.path()) && e.getMessage().contains("past the end of the data"));
+                assertThrows(IllegalArgumentException.class, () -> reader.seek(length + 1));
+
+                reader.seek(dataEnd - 5);
+                assertEquals(5, reader.skipBytes(5));
                 assertEquals(dataEnd, reader.getFilePointer());
                 assertThrows(EOFException.class, reader::readByte);
 
                 reader.seek(dataEnd - 5);
-                assertEquals(5, reader.skipBytes(10));
-                assertEquals(dataEnd, reader.getFilePointer());
-                assertThrows(EOFException.class, reader::readByte);
+                assertThrows(IllegalArgumentException.class, () -> reader.skipBytes(10));
 
+                // a skip longer than what is left before length() stops at length(), whose last byte is past the data
                 reader.seek(dataEnd - 5);
-                assertThrows(EOFException.class, () -> reader.skipBytesFully(10));
-
-                // a skip longer than what is left before length() stops at the end of the data as well
-                reader.seek(dataEnd - 5);
-                assertEquals(5, reader.skipBytes(100));
-                assertEquals(dataEnd, reader.getFilePointer());
+                assertThrows(IllegalArgumentException.class, () -> reader.skipBytes(100));
 
                 // from the previous chunk, across its hole
                 long start = lastChunkStart - CHUNK_SIZE + maxBytesInPage - 10;
                 int available = (int) (10 + dataEnd - lastChunkStart);
                 reader.seek(start);
-                assertEquals(available, reader.skipBytes(available + 5));
-                assertEquals(dataEnd, reader.getFilePointer());
-
-                reader.seek(start);
-                assertEquals(available, reader.skipBytes(available + 100));
-                assertEquals(dataEnd, reader.getFilePointer());
-
-                reader.seek(start);
                 assertEquals(available, reader.skipBytes(available));
                 assertEquals(dataEnd, reader.getFilePointer());
                 assertThrows(EOFException.class, reader::readByte);
+
+                reader.seek(start);
+                assertThrows(IllegalArgumentException.class, () -> reader.skipBytes(available + 5));
             }
         }
     }
@@ -769,18 +770,39 @@ public class EncryptedChunkReaderCacheTest
         }
     }
 
-    /**
-     * A file too short to hold any content (e.g. truncated) opened without a length override has length 0 and reads
-     * as EOF.
-     */
-    @Test
-    public void testShortFileWithoutOverrideIsEmpty() throws IOException
+    private void truncateFile(long length) throws IOException
     {
         try (FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.WRITE))
         {
-            channel.truncate(CHUNK_SIZE - maxBytesInPage - 1);
+            channel.truncate(length);
+        }
+        assertEquals(length, file.length());
+        ChunkCache.instance.invalidateFile(file); // drop the chunks cached before the truncation
+    }
+
+    /**
+     * Without a length override, a file ending with a full chunk (i.e. right after a hole, like every file written by
+     * EncryptedSequentialWriter) has the usable end of its last chunk as length; an empty file has length 0.
+     */
+    @Test
+    public void testDefaultLengthOfFileEndingAfterHole() throws IOException
+    {
+        truncateFile(2L * CHUNK_SIZE);
+        for (ChunkCache chunkCache : new ChunkCache[]{ ChunkCache.instance, null })
+        {
+            try (FileHandle fh = handleBuilder(chunkCache).complete();
+                 RandomAccessReader reader = fh.createReader())
+            {
+                long length = CHUNK_SIZE + maxBytesInPage;
+                assertEquals(length, fh.dataLength());
+                assertEquals(length, reader.length());
+                readAndVerifyUpTo(reader, length);
+                assertEquals(length, reader.getFilePointer());
+                assertThrows(EOFException.class, reader::readByte);
+            }
         }
 
+        truncateFile(0);
         for (ChunkCache chunkCache : new ChunkCache[]{ ChunkCache.instance, null })
         {
             try (FileHandle fh = handleBuilder(chunkCache).complete();
@@ -788,12 +810,57 @@ public class EncryptedChunkReaderCacheTest
             {
                 assertEquals(0, fh.dataLength());
                 assertEquals(0, reader.length());
-                assertEquals(0, reader.getFilePointer());
                 assertTrue(reader.isEOF());
                 assertThrows(EOFException.class, reader::readByte);
-                assertEquals(0, reader.skipBytes(1));
-                reader.seek(0);
-                assertTrue(reader.isEOF());
+            }
+        }
+    }
+
+    /**
+     * Without a length override, a (truncated) file ending in the usable part of a chunk, or exactly at its hole start,
+     * keeps its length, and reading the incomplete chunk reports it as corrupted.
+     */
+    @Test
+    public void testDefaultLengthOfFileEndingInUsablePart() throws IOException
+    {
+        // decreasing lengths, as truncation cannot extend the file
+        for (long fileLength : new long[]{ CHUNK_SIZE + maxBytesInPage, CHUNK_SIZE + 100, CHUNK_SIZE - maxBytesInPage - 1 })
+        {
+            truncateFile(fileLength);
+            for (ChunkCache chunkCache : new ChunkCache[]{ ChunkCache.instance, null })
+            {
+                try (FileHandle fh = handleBuilder(chunkCache).complete())
+                {
+                    assertEquals(fileLength, fh.dataLength());
+                    if (fileLength > CHUNK_SIZE)
+                    {
+                        try (RandomAccessReader reader = fh.createReader())
+                        {
+                            assertEquals(fileLength, reader.length());
+                            readAndVerifyUpTo(reader, maxBytesInPage);
+                        }
+                    }
+                    assertCorruptChunk(fh, (int) (fileLength / CHUNK_SIZE));
+                }
+            }
+        }
+    }
+
+    /**
+     * Without a length override, a (truncated) file ending inside the hole of a chunk has no valid length and is
+     * reported as corrupted when opened.
+     */
+    @Test
+    public void testDefaultLengthOfFileEndingInHoleIsCorrupt() throws IOException
+    {
+        // decreasing lengths, as truncation cannot extend the file
+        for (long fileLength : new long[]{ 2L * CHUNK_SIZE - 1, CHUNK_SIZE + maxBytesInPage + 1 })
+        {
+            truncateFile(fileLength);
+            for (ChunkCache chunkCache : new ChunkCache[]{ ChunkCache.instance, null })
+            {
+                CorruptSSTableException e = assertThrows(CorruptSSTableException.class, () -> handleBuilder(chunkCache).complete());
+                assertTrue("Unexpected cause " + e.getCause(), e.getCause() instanceof CorruptBlockException);
             }
         }
     }

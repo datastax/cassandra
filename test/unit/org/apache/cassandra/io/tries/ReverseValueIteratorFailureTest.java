@@ -142,6 +142,12 @@ public class ReverseValueIteratorFailureTest extends AbstractTrieTestBase
         {
             return currentPosition + bytesToSkip;
         }
+
+        @Override
+        public long remainingBytes(long position)
+        {
+            return Math.max(0, fileLength() - position);
+        }
     }
 
     @Test

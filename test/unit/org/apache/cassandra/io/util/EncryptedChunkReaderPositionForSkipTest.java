@@ -27,11 +27,13 @@ import org.junit.Test;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_RANDOM_SEED;
 import static org.apache.cassandra.io.compress.EncryptedSequentialWriter.CHUNK_SIZE;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /**
- * Checks that the closed form of {@link EncryptedChunkReader#positionForSkip} gives the same results as the
- * chunk-by-chunk loop it replaced, and that {@link RandomAccessReader#skipBytes} over holes of any size leaves the
- * position a read leaves.
+ * Checks that {@link EncryptedChunkReader#positionForSkip}, computed through the conversion to and from "non-holed
+ * space", gives the same results as the chunk-by-chunk loop it replaced; that {@link EncryptedChunkReader#remainingBytes}
+ * counts the usable bytes before the length; and that {@link RandomAccessReader#skipBytes} over holes of any size
+ * leaves the position a read leaves.
  */
 public class EncryptedChunkReaderPositionForSkipTest
 {
@@ -131,6 +133,70 @@ public class EncryptedChunkReaderPositionForSkipTest
     }
 
     /**
+     * A position strictly inside a hole counts as the usable end of its chunk: a skip from there continues at the start
+     * of the next chunk. This intentionally differs from the original loop, which overshot by the distance between
+     * the position and the hole start (such positions are never file pointers: reads and seeks move past holes).
+     */
+    @Test
+    public void testSkipFromInsideHole()
+    {
+        for (int maxBytesInPage : MAX_BYTES_IN_PAGE)
+        {
+            if (maxBytesInPage > CHUNK_SIZE - 2)
+                continue; // no position strictly inside a hole of a single byte
+            long chunkStart = 5L * CHUNK_SIZE;
+            long nextChunkStart = chunkStart + CHUNK_SIZE;
+            for (long position : new long[]{ chunkStart + maxBytesInPage + 1, nextChunkStart - 1 })
+            {
+                assertEquals(nextChunkStart + 1, EncryptedChunkReader.positionForSkip(position, 1, maxBytesInPage));
+                assertEquals(nextChunkStart + maxBytesInPage, EncryptedChunkReader.positionForSkip(position, maxBytesInPage, maxBytesInPage));
+                assertEquals(nextChunkStart + CHUNK_SIZE + 1, EncryptedChunkReader.positionForSkip(position, maxBytesInPage + 1, maxBytesInPage));
+                assertEquals(position, EncryptedChunkReader.positionForSkip(position, 0, maxBytesInPage));
+                assertEquals(maxBytesInPage, EncryptedChunkReader.remainingBytes(position, nextChunkStart + CHUNK_SIZE, maxBytesInPage));
+            }
+        }
+    }
+
+    /**
+     * {@code remainingBytes(p)} must be the number of usable bytes between {@code p} and the length (counted one by
+     * one), and skipping them all must land at the last usable position before the length: the length itself, or the
+     * hole start of the previous chunk when the length is a chunk start.
+     */
+    @Test
+    public void testRemainingBytes()
+    {
+        int chunks = 4;
+        for (int maxBytesInPage : MAX_BYTES_IN_PAGE)
+        {
+            for (int chunk = 0; chunk < chunks; ++chunk)
+            {
+                long chunkStart = (long) chunk * CHUNK_SIZE;
+                long[] lengths = { chunkStart, chunkStart + 1, chunkStart + maxBytesInPage / 2, chunkStart + maxBytesInPage };
+                for (long length : lengths)
+                {
+                    long lastUsable = length > 0 && (length & (CHUNK_SIZE - 1)) == 0 ? length - CHUNK_SIZE + maxBytesInPage
+                                                                                     : length;
+                    // count the usable bytes from the end, one position at a time
+                    long usableAfter = 0;
+                    for (long position = length + CHUNK_SIZE; position >= 0; --position)
+                    {
+                        if (position < length && (position & (CHUNK_SIZE - 1)) < maxBytesInPage)
+                            ++usableAfter;
+                        long remaining = EncryptedChunkReader.remainingBytes(position, length, maxBytesInPage);
+                        long afterSkip = remaining > 0 ? EncryptedChunkReader.positionForSkip(position, (int) remaining, maxBytesInPage) : lastUsable;
+                        if (remaining != usableAfter || afterSkip != lastUsable)
+                        {
+                            String context = String.format("from %d to %d with %d usable bytes per chunk", position, length, maxBytesInPage);
+                            assertEquals("Remaining bytes " + context, usableAfter, remaining);
+                            assertEquals("Skip of all bytes " + context, lastUsable, afterSkip);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * An in-memory file with the chunk layout of an encryption-only file: every chunk of {@code CHUNK_SIZE} bytes
      * holds {@code maxBytesInPage} usable bytes followed by a hole. Usable bytes hold their logical index.
      */
@@ -170,6 +236,12 @@ public class EncryptedChunkReaderPositionForSkipTest
         public long positionForSkip(long currentPosition, int bytesToSkip)
         {
             return EncryptedChunkReader.positionForSkip(currentPosition, bytesToSkip, maxBytesInPage);
+        }
+
+        @Override
+        public long remainingBytes(long position)
+        {
+            return EncryptedChunkReader.remainingBytes(position, length, maxBytesInPage);
         }
 
         @Override
@@ -254,6 +326,13 @@ public class EncryptedChunkReaderPositionForSkipTest
                             assertEquals("Position " + context, afterRead, reader.getFilePointer());
                             assertEquals("Next byte " + context, nextAfterRead, nextByte(reader));
                         }
+
+                        // a skip longer than what remains stops at length(), the hole start of the last chunk
+                        reader.seek(start);
+                        assertEquals(remaining, reader.skipBytes(Integer.MAX_VALUE));
+                        assertEquals(rebufferer.length, reader.getFilePointer());
+                        assertTrue(reader.isEOF());
+                        assertEquals(0, reader.skipBytes(1));
                     }
                 }
             }
