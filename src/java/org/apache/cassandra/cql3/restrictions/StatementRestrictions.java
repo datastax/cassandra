@@ -54,6 +54,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.filter.SaiQueryOptions;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
@@ -1157,8 +1158,9 @@ public class StatementRestrictions
                                       && Keyspace.open(table.keyspace).getReplicationStrategy().getReplicationFactor().allReplicas > 1;
 
         ANNOptions annOptions = selectOptions.parseANNOptions();
+        SaiQueryOptions queryOptions = selectOptions.parseQueryOptions();
 
-        RowFilter.Builder filterBuilder = new RowFilter.Builder(needsReconciliation, indexRegistry, indexHints);
+        RowFilter.Builder filterBuilder = new RowFilter.Builder(needsReconciliation, indexRegistry, indexHints, queryOptions);
         RowFilter rowFilter = filterBuilder.buildFromRestrictions(this, table, options, clientState, annOptions);
 
         if (hasAnnOptions && !rowFilter.hasANN())
