@@ -22,7 +22,6 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
 
@@ -105,20 +104,23 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         return entry;
     }
 
+    /**
+     * Opens a reader over what has been written so far.
+     *
+     * @param partitionIndex the partition index of the reader, not null. This method takes ownership of it as soon as
+     *                       it is called: it is handed to the returned reader, or closed if the open fails. Callers
+     *                       must therefore not do anything that can throw between obtaining the index and calling
+     *                       this method.
+     */
     @SuppressWarnings({ "resource", "RedundantSuppression" }) // dataFile is closed along with the reader
-    private BtiTableReader openInternal(OpenReason openReason, long lengthOverride, Supplier<PartitionIndex> partitionIndexSupplier)
+    private BtiTableReader openInternal(OpenReason openReason, long lengthOverride, PartitionIndex partitionIndex)
     {
         IFilter filter = null;
         FileHandle dataFile = null;
-        PartitionIndex partitionIndex = null;
         FileHandle rowIndexFile = null;
 
         try
         {
-            // First, so that the partition index is closed if anything below fails: for an early open it was built
-            // by the caller, which relies on this method to release it.
-            partitionIndex = partitionIndexSupplier.get();
-
             BtiTableReader.Builder builder = unbuildTo(new BtiTableReader.Builder(descriptor), true).setMaxDataAge(maxDataAge)
                                                                                                     .setSerializationHeader(header)
                                                                                                     .setOpenReason(openReason);
@@ -155,11 +157,13 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         long dataLength = partitionWriter.getInitialPosition();
         indexWriter.buildPartial(dataLength, partitionIndex ->
         {
+            // openInternal takes ownership of the partial partition index and closes it if the open fails; the only
+            // statement before it hands the index over is a plain setter of the file handle builder's length.
             indexWriter.rowIndexWriter.updateFileHandle(indexWriter.rowIndexFHBuilder);
             BtiTableReader reader;
             try
             {
-                reader = openInternal(OpenReason.EARLY, dataLength, () -> partitionIndex);
+                reader = openInternal(OpenReason.EARLY, dataLength, partitionIndex);
             }
             finally
             {
@@ -190,7 +194,18 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         if (maxDataAge < 0)
             maxDataAge = Clock.Global.currentTimeMillis();
 
-        return openInternal(openReason, NO_LENGTH_OVERRIDE, indexWriter::completedPartitionIndex);
+        // If completedPartitionIndex() throws, there is no index to release; once it returns, openInternal owns it.
+        PartitionIndex partitionIndex;
+        try
+        {
+            partitionIndex = indexWriter.completedPartitionIndex();
+        }
+        catch (RuntimeException | Error e)
+        {
+            JVMStabilityInspector.inspectThrowable(e);
+            throw e;
+        }
+        return openInternal(openReason, NO_LENGTH_OVERRIDE, partitionIndex);
     }
 
     @Override
