@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright IBM Corp.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +16,7 @@
 
 package org.apache.cassandra.index.sai.memory;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -48,7 +47,7 @@ public class MemtableKeyRangeIteratorSkipToTest extends SAITester
      * must leave the iterator exhausted.
      */
     @Test
-    public void testConsecutiveSkipToPastTheEnd() throws Throwable
+    public void testConsecutiveSkipToPastTheEnd() throws IOException
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, a int, b int)");
         List<DecoratedKey> keys = sortedKeys();
@@ -105,9 +104,12 @@ public class MemtableKeyRangeIteratorSkipToTest extends SAITester
         execute("INSERT INTO %s (k, a, b, c, s) VALUES (?, 0, 1, 1, {1})", first);
         execute("INSERT INTO %s (k, a, b, c, s) VALUES (?, 0, 1, 1, {1})", last);
 
-        assertRowCount(execute("SELECT k FROM %s WHERE a = 1 AND b != 0 AND token(k) < token(?)", last), NUM_KEYS - 2);
-        assertRowCount(execute("SELECT k FROM %s WHERE a = 1 AND s NOT CONTAINS 0 AND token(k) < token(?)", last), NUM_KEYS - 2);
-        assertRowCount(execute("SELECT k FROM %s WHERE a = 1 AND (b != 0 OR c != 0) AND token(k) < token(?)", last), NUM_KEYS - 2);
+        // only the unflushed case exercises the memtable scan, the flushed one is there for completeness
+        beforeAndAfterFlush(() -> {
+            assertRowCount(execute("SELECT k FROM %s WHERE a = 1 AND b != 0 AND token(k) < token(?)", last), NUM_KEYS - 2);
+            assertRowCount(execute("SELECT k FROM %s WHERE a = 1 AND s NOT CONTAINS 0 AND token(k) < token(?)", last), NUM_KEYS - 2);
+            assertRowCount(execute("SELECT k FROM %s WHERE a = 1 AND (b != 0 OR c != 0) AND token(k) < token(?)", last), NUM_KEYS - 2);
+        });
     }
 
     private List<DecoratedKey> sortedKeys()
