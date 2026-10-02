@@ -57,7 +57,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.CounterMutation;
-import org.apache.cassandra.db.CounterMutationCallback;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.Keyspace;
@@ -131,6 +130,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.CostCalculator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.SensorsFactory;
@@ -143,6 +143,7 @@ import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.v1.PrepareCallback;
 import org.apache.cassandra.service.paxos.v1.ProposeCallback;
 import org.apache.cassandra.service.paxos.PaxosUtils;
+import org.apache.cassandra.service.paxos.PrepareResponse;
 import org.apache.cassandra.service.reads.AbstractReadExecutor;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.service.reads.range.RangeCommands;
@@ -244,10 +245,6 @@ public class StorageProxy implements StorageProxyMBean
 
             QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(clientState, true, mutations, consistencyLevel);
 
-            // Request sensors are utilized to track usages from replicas serving atomic batch request
-            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).toArray(String[]::new));
-            RequestTracker.instance.set(sensors);
-
             if (mutations.stream().anyMatch(mutation -> Keyspace.open(mutation.getKeyspaceName()).getReplicationStrategy().hasTransientReplicas()))
                 throw new AssertionError("Logged batches are unsupported with transient replication");
 
@@ -276,7 +273,7 @@ public class StorageProxy implements StorageProxyMBean
                                                               () -> asyncRemoveFromBatchlog(replicaPlan, batchUUID, requestTime));
 
                 // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
-                List<WriteResponseHandlerWrapper> wrappers = wrapBatchResponseHandlers(mutations, consistencyLevel, batchConsistencyLevel, cleanup, requestTime, sensors);
+                List<WriteResponseHandlerWrapper> wrappers = wrapBatchResponseHandlers(mutations, consistencyLevel, batchConsistencyLevel, cleanup, requestTime);
 
                 // write to the batchlog
                 syncWriteToBatchlog(mutations, replicaPlan, batchUUID, requestTime);
@@ -346,20 +343,13 @@ public class StorageProxy implements StorageProxyMBean
                                                                               ConsistencyLevel consistencyLevel,
                                                                               ConsistencyLevel batchConsistencyLevel,
                                                                               BatchlogResponseHandler.BatchlogCleanup cleanup,
-                                                                              Dispatcher.RequestTime requestTime,
-                                                                              RequestSensors sensors)
+                                                                              Dispatcher.RequestTime requestTime)
         {
             List<StorageProxy.WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
 
             // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
             for (Mutation mutation : mutations)
             {
-                // register the sensors for the mutation before the actual write is performed
-                for (PartitionUpdate pu: mutation.getPartitionUpdates())
-                {
-                    if (pu.metadata().isIndex()) continue;
-                    sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
-                }
                 StorageProxy.WriteResponseHandlerWrapper wrapper = StorageProxy.wrapBatchResponseHandler(mutation,
                                                                                                          consistencyLevel,
                                                                                                          batchConsistencyLevel,
@@ -549,11 +539,41 @@ public class StorageProxy implements StorageProxyMBean
                                                                                 key,
                                                                                 consistencyForPaxos,
                                                                                 consistencyForCommit);
-        // Request sensors are utilized to track usages from replicas serving a cas request
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(keyspaceName);
+        // All three sensor types are registered against the user-table context here on the coordinator.
+        // This same context is reused for system.paxos I/O via the following two-step mechanism:
+        //
+        // 1. Re-attribution inside SystemKeyspace (replica-local):
+        //    Every system.paxos read (loadPaxosState) and write (savePaxosPromise / savePaxosProposal /
+        //    savePaxosCommit) temporarily registers a sensor under PaxosContext (system.paxos metadata),
+        //    measures the actual bytes, then calls transferPaxosSensorBytes() which copies that value into
+        //    Context.from(userTableMetadata) on the same RequestSensors — re-keying the measurement from
+        //    system.paxos to the user table before the reply is sent.
+        //    Concretely: Prepare reads+writes system.paxos (loadPaxosState + savePaxosPromise),
+        //    Propose reads+writes system.paxos (loadPaxosState + savePaxosProposal), and
+        //    Commit writes system.paxos (savePaxosCommit) and, when the condition was met, also applies
+        //    the user-table mutation — all of these bytes end up under the user-table context after transfer.
+        //
+        // 2. Merging replica values back into the coordinator sensor (ResponseVerbHandler):
+        //    Each verb handler (PrepareVerbHandler, ProposeVerbHandler, CommitVerbHandler) on the replica
+        //    encodes the accumulated sensor values into the internode response as custom parameters
+        //    (SensorsCustomParams.addSensorsToInternodeResponse). The coordinator's ResponseVerbHandler
+        //    detects AbstractPaxosCallback instances and calls incrementSensor() on this RequestSensors
+        //    object with the user-table context, accumulating all replica contributions here.
+        //
+        // The Commit object carries the user-table TableMetadata (set in Commit.newPrepare via
+        // Schema.instance.validateTable above), so message.payload.update.metadata() on every verb handler
+        // is the user-table metadata, not system.paxos — guaranteeing consistent context across all replicas.
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(keyspaceName));
         Context context = Context.from(metadata);
         sensors.registerSensor(context, Type.WRITE_BYTES); // track user table + paxos table write bytes
         sensors.registerSensor(context, Type.READ_BYTES); // track user table + paxos table read bytes
+        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES); // track secondary index write bytes on commit
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME); // tracks Prepare + Propose + Commit execution time across all replicas
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME); // tracks the CAS precondition read (readOne at QUORUM/LOCAL_QUORUM) execution time
+        Context requestContext = Context.from(sensors);
+        sensors.registerSensor(requestContext, Type.READ_COST);
+        sensors.registerSensor(requestContext, Type.WRITE_COST);
+        sensors.registerSensor(requestContext, Type.TOTAL_COST);
         RequestTracker.instance.set(sensors);
         try
         {
@@ -704,6 +724,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetricsForLevel(consistencyForPaxos).executionTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyForPaxos).serviceTimeMetrics.addNano(latency);
             Keyspace.openAndGetStore(metadata).metric.coordinatorCasWriteLatency.update(latency, NANOSECONDS);
+            CostCalculator.populateCostSensors(sensors);
         }
     }
 
@@ -1051,10 +1072,14 @@ public class StorageProxy implements StorageProxyMBean
                 if (replica.isSelf())
                 {
                     hasLocalRequest = true;
+                    Context context = Context.from(toPrepare.update.metadata());
                     PAXOS_PREPARE_REQ.stage.execute(() -> {
                         try
                         {
-                            callback.onResponse(message.responseWith(doPrepare(toPrepare)));
+                            long prepareStartNanos = nanoTime();
+                            PrepareResponse response = doPrepare(toPrepare);
+                            callback.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, nanoTime() - prepareStartNanos);
+                            callback.onResponse(message.responseWith(response));
                         }
                         catch (Exception ex)
                         {
@@ -1101,11 +1126,14 @@ public class StorageProxy implements StorageProxyMBean
             {
                 if (replica.isSelf())
                 {
+                    Context context = Context.from(proposal.update.metadata());
                     PAXOS_PROPOSE_REQ.stage.execute(() -> {
                         try
                         {
-                            Message<Boolean> response = message.responseWith(doPropose(proposal));
-                            callback.onResponse(response);
+                            long proposeStartNanos = nanoTime();
+                            Boolean response = doPropose(proposal);
+                            callback.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, nanoTime() - proposeStartNanos);
+                            callback.onResponse(message.responseWith(response));
                         }
                         catch (Exception ex)
                         {
@@ -1220,9 +1248,15 @@ public class StorageProxy implements StorageProxyMBean
             {
                 try
                 {
+                    long commitStartNanos = nanoTime();
                     PaxosState.commitDirect(message.payload, p -> mutator.onAppliedProposal(p));
+                    long commitElapsedNanos = nanoTime() - commitStartNanos;
                     if (responseHandler != null)
+                    {
+                        Context context = Context.from(message.payload.update.metadata());
+                        responseHandler.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, commitElapsedNanos);
                         responseHandler.onResponse(null);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1269,12 +1303,15 @@ public class StorageProxy implements StorageProxyMBean
         QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(state, false, mutations, consistencyLevel);
 
         // Request sensors are utilized to track usages from replicas serving a write request
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).toArray(String[]::new));
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).collect(Collectors.toSet()));
         RequestTracker.instance.set(sensors);
 
         List<AbstractWriteResponseHandler<IMutation>> responseHandlers = new ArrayList<>(mutations.size());
         WriteType plainWriteType = mutations.size() <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
 
+        Context requestContext = Context.from(sensors);
+        sensors.registerSensor(requestContext, Type.WRITE_COST);
+        sensors.registerSensor(requestContext, Type.TOTAL_COST);
         try
         {
             for (IMutation mutation : mutations)
@@ -1284,6 +1321,9 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     if (pu.metadata().isIndex()) continue;
                     sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_EXECUTION_TIME);
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.INTERNODE_BYTES);
                 }
 
                 if (mutation instanceof CounterMutation)
@@ -1358,6 +1398,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(latency);
             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
+            CostCalculator.populateCostSensors(sensors);
         }
     }
 
@@ -1589,7 +1630,39 @@ public class StorageProxy implements StorageProxyMBean
                                         ClientState clientState)
     throws UnavailableException, OverloadedException, WriteTimeoutException
     {
-        mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, requestTime, metrics, clientState);
+        // Request sensors are utilized to track usages from replicas serving atomic batch request.
+        // Must be installed on the thread-local before calling mutator.mutateAtomically() so that
+        // AbstractWriteResponseHandler captures a non-null sensors object, and ResponseVerbHandler
+        // can accumulate replica sensor values back into it.
+        // This mirrors the same pattern used in mutate() and cas() for consistency across all
+        // coordinator write paths.
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).collect(Collectors.toSet()));
+        RequestTracker.instance.set(sensors);
+        // Register sensors for each mutation partition before the mutator constructs WriteResponseHandlers.
+        // AbstractWriteResponseHandler captures the sensors reference at construction time, so both
+        // sensor creation (above) and registration (here) must precede any call to getWriteResponseHandler().
+        Context requestContext = Context.from(sensors);
+        sensors.registerSensor(requestContext, Type.WRITE_COST);
+        sensors.registerSensor(requestContext, Type.TOTAL_COST);
+        for (Mutation mutation : mutations)
+        {
+            for (PartitionUpdate pu : mutation.getPartitionUpdates())
+            {
+                if (pu.metadata().isIndex()) continue;
+                sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                sensors.registerSensor(Context.from(pu.metadata()), Type.INDEX_WRITE_BYTES);
+                sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_EXECUTION_TIME);
+                sensors.registerSensor(Context.from(pu.metadata()), Type.INTERNODE_BYTES);
+            }
+        }
+        try
+        {
+            mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, requestTime, metrics, clientState);
+        }
+        finally
+        {
+            CostCalculator.populateCostSensors(sensors);
+        }
     }
 
     public static void updateCoordinatorWriteLatencyTableMetric(Collection<? extends IMutation> mutations, long latency)
@@ -1635,7 +1708,7 @@ public class StorageProxy implements StorageProxyMBean
             logger.trace("Sending batchlog store request {} to {} for {} mutations", batch.id, replica, batch.size());
 
             if (replica.isSelf())
-                performLocally(Stage.MUTATION, replica, () -> BatchlogManager.store(batch), handler, "Batchlog store", requestTime);
+                storeBatchLocally(Stage.MUTATION, replica, () -> BatchlogManager.store(batch), handler, "Batchlog store", requestTime);
             else
                 MessagingService.instance().sendWithCallback(message, replica.endpoint(), handler);
         }
@@ -1651,7 +1724,7 @@ public class StorageProxy implements StorageProxyMBean
                 logger.trace("Sending batchlog remove request {} to {}", uuid, target);
 
             if (target.isSelf())
-                performLocally(Stage.MUTATION, target, () -> BatchlogManager.remove(uuid), "Batchlog remove", requestTime);
+                storeBatchLocally(Stage.MUTATION, target, () -> BatchlogManager.remove(uuid), "Batchlog remove", requestTime);
             else
                 MessagingService.instance().send(message, target.endpoint());
         }
@@ -1694,10 +1767,7 @@ public class StorageProxy implements StorageProxyMBean
         AbstractReplicationStrategy rs = replicaPlan.replicationStrategy();
 
         AbstractWriteResponseHandler<IMutation> responseHandler = rs.getWriteResponseHandler(replicaPlan, callback, writeType, mutation.hintOnFailure(), requestTime);
-        if (callback instanceof CounterMutationCallback)
-        {
-            ((CounterMutationCallback) callback).setReplicaCount(replicaPlan.contacts().size());
-        }
+
         return responseHandler;
     }
 
@@ -1891,7 +1961,7 @@ public class StorageProxy implements StorageProxyMBean
         if (insertLocal)
         {
             Preconditions.checkNotNull(localReplica);
-            performLocally(stage, localReplica, mutation::apply, responseHandler, mutation, requestTime);
+            performMutationLocally(stage, localReplica, mutation, responseHandler, requestTime);
         }
 
         if (localDc != null)
@@ -1966,7 +2036,7 @@ public class StorageProxy implements StorageProxyMBean
         return select.get(ThreadLocalRandom.current().nextInt(0, select.size()));
     }
 
-    private static void performLocally(Stage stage, Replica localReplica, final Runnable runnable, String description, Dispatcher.RequestTime requestTime)
+    private static void storeBatchLocally(Stage stage, Replica localReplica, final Runnable runnable, String description, Dispatcher.RequestTime requestTime)
     {
         stage.maybeExecuteImmediately(new LocalMutationRunnable(localReplica, requestTime)
         {
@@ -1978,7 +2048,7 @@ public class StorageProxy implements StorageProxyMBean
                 }
                 catch (Exception ex)
                 {
-                    logger.error("Failed to apply mutation locally : ", ex);
+                    logger.error("Failed to store batch locally: ", ex);
                 }
             }
 
@@ -1996,7 +2066,7 @@ public class StorageProxy implements StorageProxyMBean
         });
     }
 
-    private static void performLocally(Stage stage, Replica localReplica, final Runnable runnable, final RequestCallback<?> handler, Object description, Dispatcher.RequestTime requestTime)
+    private static void storeBatchLocally(Stage stage, Replica localReplica, final Runnable runnable, final RequestCallback<?> handler, Object description, Dispatcher.RequestTime requestTime)
     {
         stage.maybeExecuteImmediately(new LocalMutationRunnable(localReplica, requestTime)
         {
@@ -2021,6 +2091,57 @@ public class StorageProxy implements StorageProxyMBean
                 // description is an Object and toString() called so we do not have to evaluate the Mutation.toString()
                 // unless expliclitly checked
                 return description.toString();
+            }
+
+            @Override
+            protected Verb verb()
+            {
+                return Verb.MUTATION_REQ;
+            }
+        });
+    }
+
+    private static void performMutationLocally(Stage stage, Replica localReplica, IMutation mutation, RequestCallback<?> handler, Dispatcher.RequestTime requestTime)
+    {
+        Collection<TableMetadata> tables =
+                mutation.getPartitionUpdates().stream()
+                        .map(PartitionUpdate::metadata)
+                        .filter(tm -> !tm.isIndex())
+                        .collect(Collectors.toList());
+
+        stage.maybeExecuteImmediately(new LocalMutationRunnable(localReplica, requestTime)
+        {
+            public void runMayThrow()
+            {
+                try
+                {
+                    long writeStartNanos = nanoTime();
+                    mutation.apply();
+                    long writeElapsedNanos = nanoTime() - writeStartNanos;
+
+                    if (!tables.isEmpty())
+                    {
+                        double elapsedPerTable = (double) writeElapsedNanos / tables.size();
+                        for (TableMetadata tm : tables)
+                        {
+                            Context context = Context.from(tm);
+                            handler.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, elapsedPerTable);
+                        }
+                    }
+                    handler.onResponse(null);
+                }
+                catch (Exception ex)
+                {
+                    if (!(ex instanceof WriteTimeoutException))
+                        logger.error("Failed to apply mutation locally: ", ex);
+                    handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.forException(ex));
+                }
+            }
+
+            @Override
+            public String description()
+            {
+                return "";
             }
 
             @Override
@@ -2167,7 +2288,27 @@ public class StorageProxy implements StorageProxyMBean
             {
                 assert mutation instanceof CounterMutation;
 
+                long writeStartNanos = nanoTime();
                 Mutation result = ((CounterMutation) mutation).applyCounterMutation();
+                long writeElapsedNanos = nanoTime() - writeStartNanos;
+
+                // Accumulate the leader's apply time into WRITE_EXECUTION_TIME before eventually dispatching the
+                // resulting mutation to replica: their execution time will be accumulated via ResponseVerbHandler.
+                RequestSensors sensors = RequestTracker.instance.get();
+                if (sensors != null)
+                {
+                    Collection<TableMetadata> writeTables = mutation.getPartitionUpdates().stream()
+                                                                    .map(PartitionUpdate::metadata)
+                                                                    .filter(tm -> !tm.isIndex())
+                                                                    .collect(Collectors.toList());
+                    if (!writeTables.isEmpty())
+                    {
+                        double elapsedPerTable = (double) writeElapsedNanos / writeTables.size();
+                        for (TableMetadata tm : writeTables)
+                            sensors.incrementSensor(Context.from(tm), Type.WRITE_EXECUTION_TIME, elapsedPerTable);
+                    }
+                }
+
                 responseHandler.onResponse(null);
                 mutator.onAppliedCounter(result, responseHandler);
                 sendToHintedReplicas(result, replicaPlan, responseHandler, localDataCenter, Stage.COUNTER_MUTATION, requestTime);
@@ -2207,19 +2348,34 @@ public class StorageProxy implements StorageProxyMBean
                                                                                       group.metadata(),
                                                                                       group.queries,
                                                                                       consistencyLevel);
-        // Request sensors are utilized to track usages from replicas serving a read request
-        // Check if RequestSensors already exists (e.g., from CAS operation) and reuse it
-        RequestSensors requestSensors = RequestTracker.instance.get();
-        if (requestSensors == null)
-        {
-            requestSensors = SensorsFactory.instance.createRequestSensors(group.metadata().keyspace);
-            RequestTracker.instance.set(requestSensors);
-        }
+        // Request sensors are utilized to track usages from replicas serving a read request:
+        // sensor registration is put specifically here because this method is invoked by the top level
+        // read command and hence must create a new RequestSensors object; invoking this from other "read" methods
+        // would be wrong as it would override any existing RequestSensors.
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(Set.of(group.metadata().keyspace));
         Context context = Context.from(group.metadata());
         requestSensors.registerSensor(context, Type.READ_BYTES);
+        requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        requestSensors.registerSensor(context, Type.WRITE_EXECUTION_TIME); // tracks Paxos Prepare + Propose (+ replay Commit) execution time for SERIAL/LOCAL_SERIAL reads
+        requestSensors.registerSensor(context, Type.WRITE_BYTES);          // tracks system.paxos write bytes from Prepare/Propose (+ replay Commit if any) for SERIAL/LOCAL_SERIAL reads
+        Context requestContext = Context.from(requestSensors);
+        requestSensors.registerSensor(requestContext, Type.READ_COST);
+        requestSensors.registerSensor(requestContext, Type.TOTAL_COST);
+        RequestTracker.instance.set(requestSensors);
         PartitionIterator partitions = read(group, consistencyLevel, clientState, requestTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
-        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
+
+        // Partition iteration is lazy: compute cost sensors once the iterator is fully consumed.
+        return PartitionIterators.doOnClose(partitions, () -> {
+            try
+            {
+                CostCalculator.populateCostSensors(requestSensors);
+            }
+            finally
+            {
+                readTracker.onDone();
+            }
+        });
     }
 
     /**
@@ -2660,6 +2816,7 @@ public class StorageProxy implements StorageProxyMBean
                 command.setMonitoringTime(requestTime.startedAtNanos(), false, deadline - requestTime.startedAtNanos(), DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
 
                 ReadResponse response;
+                long readStartNanos = nanoTime();
                 try (ReadExecutionController controller = command.executionController(trackRepairedStatus);
                      UnfilteredPartitionIterator iterator = command.executeLocally(controller))
                 {
@@ -2679,6 +2836,11 @@ public class StorageProxy implements StorageProxyMBean
                     response = null;
                     assert !command.isCompleted() : "Local read marked as completed despite being aborted by timeout to table " + command.metadata();
                 }
+                long readElapsedNanos = nanoTime() - readStartNanos;
+
+                Context context = Context.from(command);
+                handler.accumulateExecutionTimeSensor(context, Type.READ_EXECUTION_TIME, readElapsedNanos);
+
 
                 if (command.complete())
                 {
@@ -2751,15 +2913,29 @@ public class StorageProxy implements StorageProxyMBean
                                                                               command,
                                                                               consistencyLevel);
         // Request sensors are utilized to track usages from replicas serving a range request
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(command.metadata().keyspace));
         Context context = Context.from(command);
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        Context requestContext = Context.from(sensors);
+        sensors.registerSensor(requestContext, Type.READ_COST);
+        sensors.registerSensor(requestContext, Type.TOTAL_COST);
         RequestTracker.instance.set(sensors);
 
         PartitionIterator partitions = RangeCommands.partitions(command, consistencyLevel, requestTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
 
-        return PartitionIterators.doOnClose(partitions, readTracker::onDone);
+        // Range reads are lazy: compute cost sensors once the iterator is fully consumed.
+        return PartitionIterators.doOnClose(partitions, () -> {
+            try
+            {
+                CostCalculator.populateCostSensors(sensors);
+            }
+            finally
+            {
+                readTracker.onDone();
+            }
+        });
     }
 
     public Map<String, List<String>> getSchemaVersions()
