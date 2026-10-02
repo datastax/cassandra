@@ -55,13 +55,9 @@ public interface ReaderFileProxy extends AutoCloseable
      * {@link TailOverridingRebufferer} rely on both, and {@link RandomAccessReader#skipBytes} relies on the latter to
      * recognize skips ending at the start of a hole.
      * <p>
-     * The default implementation, for files without holes, returns {@code currentPosition + bytesToSkip}. Wrappers
-     * (e.g. rebufferers built over a {@link ChunkReader}) must delegate to their source. A wrapper that does not falls
-     * back to this default, i.e. it only loses the awareness of holes (the behaviour before files with holes were
-     * supported): skips across a hole then land at a wrong position.
+     * Implementations over files without holes return {@code currentPosition + bytesToSkip}. Wrappers (e.g.
+     * rebufferers built over a {@link ChunkReader}) must delegate to their source: otherwise skips across a hole land
+     * at a wrong position.
      */
-    default long positionForSkip(long currentPosition, int bytesToSkip)
-    {
-        return currentPosition + bytesToSkip;
-    }
+    long positionForSkip(long currentPosition, int bytesToSkip);
 }
