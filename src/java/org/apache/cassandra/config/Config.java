@@ -290,7 +290,7 @@ public class Config
     // Similar to internode_tcp_user_timeout but used specifically for streaming connection.
     // The default is 5 minutes. Increase it or set it to 0 in order to increase the timeout.
     @Replaces(oldName = "internode_streaming_tcp_user_timeout_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
-    public volatile DurationSpec.IntMillisecondsBound internode_streaming_tcp_user_timeout = new DurationSpec.IntMillisecondsBound("300s"); // 5 minutes
+    public volatile DurationSpec.IntMillisecondsBound internode_streaming_tcp_user_timeout = new DurationSpec.IntMillisecondsBound("600s"); // 10 minutes
 
     public boolean start_native_transport = true;
     public int native_transport_port = 9042;
