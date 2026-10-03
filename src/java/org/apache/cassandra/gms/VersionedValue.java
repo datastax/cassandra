@@ -78,6 +78,8 @@ public class VersionedValue implements Comparable<VersionedValue>
     public final static String STATUS_LEAVING = "LEAVING";
     public final static String STATUS_LEFT = "LEFT";
     public final static String STATUS_MOVING = "MOVING";
+    /** A node shrinking to a subset of its tokens: {@code SHRINKING,<kept token>,<kept token>,...} */
+    public final static String STATUS_SHRINKING = "SHRINKING";
 
     public final static String REMOVING_TOKEN = "removing";
     public final static String REMOVED_TOKEN = "removed";
@@ -234,6 +236,23 @@ public class VersionedValue implements Comparable<VersionedValue>
         public VersionedValue moving(Token token)
         {
             return new VersionedValue(VersionedValue.STATUS_MOVING + VersionedValue.DELIMITER + partitioner.getTokenFactory().toString(token));
+        }
+
+        /** Value of {@link ApplicationState#SHRINK_TOKENS_SUPPORTED}. */
+        public VersionedValue shrinkTokensSupported()
+        {
+            return new VersionedValue("true");
+        }
+
+        /**
+         * @param keptTokens the tokens the node keeps
+         */
+        public VersionedValue shrinking(Collection<Token> keptTokens)
+        {
+            StringBuilder value = new StringBuilder(VersionedValue.STATUS_SHRINKING);
+            for (Token token : keptTokens)
+                value.append(VersionedValue.DELIMITER).append(partitioner.getTokenFactory().toString(token));
+            return new VersionedValue(value.toString());
         }
 
         public VersionedValue hostId(UUID hostId)
