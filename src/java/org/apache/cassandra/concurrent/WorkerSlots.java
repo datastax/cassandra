@@ -67,16 +67,18 @@ final class WorkerSlots
         }
     }
 
-    /** The oldest running task: the stamp that selected it and its class name, both captured in the scan, never re-read. */
+    /** The oldest running task: the stamp that selected it, its class and thread names, all captured in the scan, never re-read. */
     static final class Running
     {
         final long capturedStartNanos;
         final String taskClassName;
+        final String threadName;
 
-        Running(long capturedStartNanos, String taskClassName)
+        Running(long capturedStartNanos, String taskClassName, String threadName)
         {
             this.capturedStartNanos = capturedStartNanos;
             this.taskClassName = taskClassName;
+            this.threadName = threadName;
         }
     }
 
@@ -113,6 +115,7 @@ final class WorkerSlots
     {
         long oldestStart = Long.MAX_VALUE;
         String oldestClassName = null;
+        Thread oldestThread = null;
         boolean sawExited = false;
         for (WorkerSlot s : slots)
         {
@@ -128,11 +131,12 @@ final class WorkerSlots
             {
                 oldestStart = start;
                 oldestClassName = taskClassName;
+                oldestThread = s.thread;
             }
         }
         if (sawExited)
             slots.removeIf(s -> !s.thread.isAlive());
-        return oldestStart == Long.MAX_VALUE ? null : new Running(oldestStart, oldestClassName);
+        return oldestStart == Long.MAX_VALUE ? null : new Running(oldestStart, oldestClassName, oldestThread.getName());
     }
 
     int size()

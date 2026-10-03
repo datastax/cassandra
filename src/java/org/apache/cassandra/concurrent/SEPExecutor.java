@@ -41,7 +41,7 @@ import static org.apache.cassandra.concurrent.SEPWorker.Work;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 import static org.apache.cassandra.utils.concurrent.Condition.newOneTimeCondition;
 
-public class SEPExecutor implements LocalAwareExecutorPlus, SEPExecutorMBean
+public class SEPExecutor implements LocalAwareExecutorPlus, SEPExecutorMBean, RunningTaskSource
 {
     private static final Logger logger = LoggerFactory.getLogger(SEPExecutor.class);
     private static final TaskFactory taskFactory = TaskFactory.localAware();
@@ -127,17 +127,29 @@ public class SEPExecutor implements LocalAwareExecutorPlus, SEPExecutorMBean
         return oldest == null ? null : oldest.taskClass.getName();
     }
 
-    // the stamp and class of this executor's oldest running task, both captured in the scan that selected it, so
-    // neither is re-read from a worker that may since have moved on
+    @Override
+    public RunningTaskSnapshot longestRunningTask()
+    {
+        RunningTask oldest = oldestRunningTask();
+        return oldest == null ? null : new RunningTaskSnapshot(TimedTask.ageNanos(oldest.capturedStartNanos),
+                                                               oldest.taskClass.getName(),
+                                                               oldest.worker.threadName(this));
+    }
+
+    // the stamp, class and worker of this executor's oldest running task, all captured in the scan that selected it, so
+    // none is re-read from a worker that may since have moved on. The worker's thread name is derived only for a
+    // snapshot, so that the gauges do not build it on every read
     private static final class RunningTask
     {
         final long capturedStartNanos;
         final Class<?> taskClass;
+        final SEPWorker worker;
 
-        RunningTask(long capturedStartNanos, Class<?> taskClass)
+        RunningTask(long capturedStartNanos, Class<?> taskClass, SEPWorker worker)
         {
             this.capturedStartNanos = capturedStartNanos;
             this.taskClass = taskClass;
+            this.worker = worker;
         }
     }
 
@@ -145,9 +157,12 @@ public class SEPExecutor implements LocalAwareExecutorPlus, SEPExecutorMBean
     // The stamp read is at least as new as the task and executor read, so this never over-reports. A read racing a task
     // boundary or a reassignment can attribute the new task's near-zero running time to the previous task's class
     // (possibly a task of the executor the worker just left); we accept that, as the reported time is then near zero.
+    // The thread name is the one the worker gives its thread while it serves this executor, not read from the thread,
+    // which may since have been renamed for another executor.
     private RunningTask oldestRunningTask()
     {
         Runnable oldest = null;
+        SEPWorker oldestWorker = null;
         long oldestStart = Long.MAX_VALUE;
         for (SEPWorker worker : pool.allWorkers)
         {
@@ -159,9 +174,10 @@ public class SEPExecutor implements LocalAwareExecutorPlus, SEPExecutorMBean
             {
                 oldestStart = start;
                 oldest = task;
+                oldestWorker = worker;
             }
         }
-        return oldest == null ? null : new RunningTask(oldestStart, WrappedTask.classOf(oldest));
+        return oldest == null ? null : new RunningTask(oldestStart, WrappedTask.classOf(oldest), oldestWorker);
     }
 
     @Override
