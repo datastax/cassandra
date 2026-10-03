@@ -25,7 +25,12 @@ import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Random;
+import java.util.Set;
+import javax.crypto.spec.DESKeySpec;
 
 import com.google.common.io.Files;
 import org.apache.cassandra.io.util.File;
@@ -36,10 +41,12 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class CompressorTest
 {
@@ -286,4 +293,102 @@ public class CompressorTest
         dest.put(random);
     }
 
+    /**
+     * Simulates the output size of a block cipher with padding: one byte of padding at least, rounded up to 32 bytes.
+     */
+    private static class FakeCompressor implements ICompressor
+    {
+        @Override
+        public int initialCompressedBufferLength(int chunkLength)
+        {
+            return ((chunkLength + 1) + 31) & -32;
+        }
+
+        @Override
+        public int uncompress(byte[] input, int inputOffset, int inputLength, byte[] output, int outputOffset)
+        {
+            throw new AssertionError();
+        }
+
+        @Override
+        public void compress(ByteBuffer input, ByteBuffer output)
+        {
+            throw new AssertionError();
+        }
+
+        @Override
+        public void uncompress(ByteBuffer input, ByteBuffer output)
+        {
+            throw new AssertionError();
+        }
+
+        @Override
+        public BufferType preferredBufferType()
+        {
+            throw new AssertionError();
+        }
+
+        @Override
+        public boolean supports(BufferType bufferType)
+        {
+            throw new AssertionError();
+        }
+
+        @Override
+        public Set<String> supportedOptions()
+        {
+            throw new AssertionError();
+        }
+    }
+
+    private static ICompressor encryptor(Class<? extends ICompressor> encryptorClass, String cipherAlgorithm, int keyStrength)
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(CompressionParams.CLASS, encryptorClass.getName());
+        options.put(EncryptionConfig.CIPHER_ALGORITHM, cipherAlgorithm);
+        options.put(EncryptionConfig.SECRET_KEY_STRENGTH, Integer.toString(keyStrength));
+        options.put(EncryptionConfig.KEY_PROVIDER, EncryptorTest.KeyProviderFactoryStub.class.getName());
+        return CompressionParams.fromMap(options).getSstableCompressor().encryptionOnly();
+    }
+
+    /**
+     * {@link ICompressor#findMaxBytesInChunk} gives the number of bytes of an encrypted index page (see
+     * EncryptedSequentialWriter), i.e. the on-disk layout of encrypted index files: it must return the largest input
+     * whose output fits the target size.
+     */
+    @Test
+    public void testMaxBytesInChunk()
+    {
+        Map<String, ICompressor> tested = new LinkedHashMap<>();
+        for (ICompressor compressor : compressors)
+            tested.put(compressor.getClass().getSimpleName(), compressor);
+        tested.put("FakeCompressor", new FakeCompressor());
+        ICompressor aesCbc = encryptor(Encryptor.class, "AES/CBC/PKCS5Padding", 128);
+        ICompressor desCbc = encryptor(Encryptor.class, "DES/CBC/PKCS5Padding", DESKeySpec.DES_KEY_LEN * 8);
+        tested.put("Encryptor AES/CBC/PKCS5Padding", aesCbc);
+        tested.put("Encryptor AES/ECB/PKCS5Padding", encryptor(Encryptor.class, "AES/ECB/PKCS5Padding", 256));
+        tested.put("Encryptor DES/CBC/PKCS5Padding", desCbc);
+        tested.put("Encryptor Blowfish/CBC/PKCS5Padding", encryptor(Encryptor.class, "Blowfish/CBC/PKCS5Padding", 256));
+        tested.put("OutOfPlaceEncryptor AES/ECB/PKCS5Padding", encryptor(OutOfPlaceEncryptor.class, "AES/ECB/PKCS5Padding", 256));
+
+        for (Map.Entry<String, ICompressor> entry : tested.entrySet())
+        {
+            ICompressor compressor = entry.getValue();
+            for (int sizeBase : new int[]{ 1024, 4096, 16384, 65536 })
+            {
+                for (int size = sizeBase - 25; size <= sizeBase + 25; ++size)
+                {
+                    int inputSize = compressor.findMaxBytesInChunk(size);
+                    String context = String.format("%s target %d input %d", entry.getKey(), size, inputSize);
+                    assertTrue(context, compressor.initialCompressedBufferLength(inputSize) <= size);
+                    assertTrue(context, compressor.initialCompressedBufferLength(inputSize + 1) > size);
+                }
+            }
+        }
+
+        // The data bytes of an encrypted index page are on-disk layout: a change here makes existing encrypted index
+        // files unreadable.
+        assertEquals(4063, EncryptedSequentialWriter.maxBytesInPage(aesCbc));
+        assertEquals(4079, EncryptedSequentialWriter.maxBytesInPage(desCbc));
+    }
 }

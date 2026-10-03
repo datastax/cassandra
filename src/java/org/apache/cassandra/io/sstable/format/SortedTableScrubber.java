@@ -188,8 +188,11 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     {
         List<SSTableReader> finished = new ArrayList<>();
         outputHandler.output("Scrubbing %s (%s)", sstable, FBUtilities.prettyPrintMemory(dataFile.length()));
-        // Do not use early opening with scrub as it is unsafe (scrub may move rows to a different sstable that is not
-        // written until the whole operation completes).
+        // Do not use early opening with scrub as it is unsafe: out-of-order partitions, and the out-of-order rows of
+        // in-order partitions, are collected in memory and written to a separate sstable only at the end
+        // (writeOutOfOrderPartitions). Early opening moves the start of the source sstable (moveStarts) past the
+        // last key K written so far; a partition with a key before K that goes to that separate sstable, whether or
+        // not scrub has reached it yet, is then readable from neither until the operation completes.
         try (SSTableRewriter writer = SSTableRewriter.constructWithoutEarlyOpening(transaction, false, sstable.maxDataAge);
              Refs<SSTableReader> refs = Refs.ref(Collections.singleton(sstable)))
         {

@@ -33,11 +33,14 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
-import org.apache.cassandra.io.compress.Encryptor;
+import org.apache.cassandra.io.compress.ICompressor;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
+
+import static com.google.common.base.Preconditions.checkState;
 
 /**
  * {@link FileHandle} provides access to a file for reading, including the ones written by various {@link SequentialWriter}
@@ -113,6 +116,15 @@ public class FileHandle extends SharedCloseableImpl
         return channel.filePath();
     }
 
+    /**
+     * @return the length of the data readable through this handle, i.e. the {@link RandomAccessReader#length()} of its
+     * readers. For an {@link Builder#encryptionOnly() encryption-only} file opened without a
+     * {@link Builder#withLengthOverride length override} this is only an upper bound: it is the usable end of the
+     * file's last chunk, whereas the content may end earlier in that chunk (e.g. the row index, whose last chunk is
+     * padded on disk). A truncated file that does not end with a full chunk keeps its physical length if it ends in
+     * the usable part of a chunk (reading that chunk reports it as corrupted), and cannot be opened if it ends inside
+     * a hole.
+     */
     public long dataLength()
     {
         return rebuffererFactory.fileLength();
@@ -425,10 +437,22 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
+        /**
+         * Marks the file as encryption-only, i.e. written by
+         * {@link org.apache.cassandra.io.compress.EncryptedSequentialWriter}: it is read through an
+         * {@link EncryptedChunkReader} with the encryptor ({@link ICompressor#encryptionOnly()}) of the compressor of
+         * the {@link #withCompressionMetadata(CompressionMetadata) compression metadata}, and its logical length is
+         * computed from the file itself rather than taken from the metadata.
+         * <p>
+         * The compression metadata must be set, and its compressor must have an encryption-only part;
+         * conversely, an {@link CompressionMetadata#encryptedOnly(CompressionParams) encryption-only} metadata
+         * requires this flag. {@link #complete()} fails with an {@link IllegalStateException} otherwise. Only the
+         * parameters of the metadata are used, so an encryption-only instance is enough.
+         *
+         * @return this object
+         */
         public Builder encryptionOnly()
         {
-            // For encrypted files, we need to ensure compressionMetadata is available
-            // This is needed because encrypted files use the compression framework
             this.encryptionOnly = true;
             return this;
         }
@@ -446,6 +470,17 @@ public class FileHandle extends SharedCloseableImpl
         {
             ChannelProxy channel = null;
             MmappedRegions regions = null;
+            checkState(!encryptionOnly || (this.compressionMetadata != null
+                                           && this.compressionMetadata.compressor() != null
+                                           && this.compressionMetadata.compressor().encryptionOnly() != null),
+                       "%s is marked as encryption-only but its compression metadata has no encrypting compressor " +
+                       "(compression parameters: %s)",
+                       file, this.compressionMetadata == null ? null : this.compressionMetadata.parameters);
+            checkState(encryptionOnly || this.compressionMetadata == null || !this.compressionMetadata.isEncryptionOnly(),
+                       "%s has encryption-only compression metadata but is not marked as encryption-only " +
+                       "(see FileHandle.Builder.encryptionOnly())",
+                       file);
+
             CompressionMetadata compressionMetadata = null;
             try
             {
@@ -473,15 +508,18 @@ public class FileHandle extends SharedCloseableImpl
                         {
                             // For encrypted files, we need to map the actual file size, not logical data length
                             // MmappedRegions maps physical file regions, not logical data
-                            Encryptor encryptor = (Encryptor) compressionMetadata.compressor().encryptionOnly();
-                            
+                            ICompressor encryptor = compressionMetadata.compressor().encryptionOnly();
+
                             // Map the actual file size, with chunks aligned to CHUNK_SIZE
                             int chunkSize = EncryptedSequentialWriter.CHUNK_SIZE;
                             regions = mmappedRegionsCache != null ? mmappedRegionsCache.getOrCreate(channel, fileLength, chunkSize, sliceDescriptor.sliceStart)
                                                                   : MmappedRegions.map(channel, fileLength, chunkSize, sliceDescriptor.sliceStart, adviseRandom);
-                            // For encrypted files without explicit length override, pass -1 to let EncryptedChunkReader calculate the logical length
+                            // Without an explicit length override pass -1: EncryptedChunkReader then derives the
+                            // logical length from the file length minus the part of the last chunk that cannot hold
+                            // data (encryption padding and footer), if the file ends with a full chunk (see
+                            // EncryptedChunkReader.defaultLength)
                             long encryptedOverrideLength = (lengthOverride >= 0) ? length : -1;
-                            rebuffererFactory = EncryptedChunkReader.createMmap(channel, regions, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength);
+                            rebuffererFactory = maybeCached(EncryptedChunkReader.createMmap(channel, regions, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength));
                         }
                         else
                         {
@@ -508,10 +546,13 @@ public class FileHandle extends SharedCloseableImpl
                         // Check if this is encryption rather than compression
                         if (encryptionOnly)
                         {
-                            Encryptor encryptor = (Encryptor) compressionMetadata.compressor().encryptionOnly();
-                            // For encrypted files without explicit length override, pass -1 to let EncryptedChunkReader calculate the logical length
+                            ICompressor encryptor = compressionMetadata.compressor().encryptionOnly();
+                            // Without an explicit length override pass -1: EncryptedChunkReader then derives the
+                            // logical length from the file length minus the part of the last chunk that cannot hold
+                            // data (encryption padding and footer), if the file ends with a full chunk (see
+                            // EncryptedChunkReader.defaultLength)
                             long encryptedOverrideLength = (lengthOverride >= 0) ? length : -1;
-                            rebuffererFactory = EncryptedChunkReader.createStandard(channel, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength);
+                            rebuffererFactory = maybeCached(EncryptedChunkReader.createStandard(channel, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength));
                         }
                         else
                         {

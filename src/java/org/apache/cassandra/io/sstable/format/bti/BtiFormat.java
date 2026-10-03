@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
@@ -50,6 +51,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReaderLoadingBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.SortedTableScrubber;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -278,7 +281,19 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         @Override
         public Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException
         {
-            return PartitionIndex.readFirstAndLastKey(descriptor, Components.PARTITION_INDEX, partitioner, descriptor.version.getByteComparableVersion());
+            return readKeyRange(descriptor, partitioner, null);
+        }
+
+        @Override
+        public Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner, @Nullable ZeroCopyMetadata zeroCopyMetadata) throws IOException
+        {
+            File partitionIndexFile = descriptor.fileFor(Components.PARTITION_INDEX);
+            if (!partitionIndexFile.exists())
+            {
+                logger.debug("Partition index {} does not exist", partitionIndexFile.absolutePath());
+                return null;
+            }
+            return PartitionIndex.readFirstAndLastKey(descriptor, Components.PARTITION_INDEX, partitioner, zeroCopyMetadata, descriptor.version.getByteComparableVersion());
         }
 
         @Override
@@ -320,8 +335,8 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         public static final String earliest_supported_version = "aa";
 
         // aa (DSE 6.0): trie index format
-        // ab (DSE pre-6.8): ILLEGAL - handled as 'b' (predates 'ba'). Pre-GA "LABS" releases of DSE 6.8 used this
-        //                   sstable version.
+        // ab (DSE pre-6.8): ILLEGAL - handled as 'ba' (it was renamed to 'ba'). Pre-GA "LABS" releases of DSE 6.8
+        //                   used this sstable version; its features are those of 'ba' (see mapAb).
         // ac (DSE 6.0.11, 6.7.6): corrected sstable min/max clustering (DB-3691/CASSANDRA-14861)
         // ad (DSE 6.0.14, 6.7.11): added hostId of the node from which the sstable originated (DB-4629)
         // b  (DSE early 6.8 "LABS") has some of 6.8 features but not all
@@ -371,12 +386,15 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         {
             super(format, version);
 
+            isLatestVersion = version.compareTo(current_version) == 0;
+            // the features below are computed for 'ba' when the version is 'ab'
+            version = mapAb(version);
+
             boolean dOrLater = version.compareTo("d") >= 0;
             boolean cOrLater = dOrLater || version.startsWith("c");
             boolean bOrLater = cOrLater || version.startsWith("b");
             boolean aOrLater = bOrLater || version.startsWith("a");
 
-            isLatestVersion = version.compareTo(current_version) == 0;
             correspondingMessagingVersion = MessagingService.VERSION_50;
             byteComparableVersion = version.compareTo("da") >= 0 ? ByteComparable.Version.OSS50
                                                                  : version.compareTo("ca") >= 0 ? ByteComparable.Version.OSS41
@@ -399,11 +417,21 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
             hasImplicitlyFrozenTuples = version.compareTo("cc") < 0 || version.compareTo("da") >= 0; // `da` is found in C* 5.0 and CC `main-5.0`, and both have implicitly frozen tuples
 
-            // encryption support, when the compressor has an ecryption component
+            // encryption support, when the compressor has an encryption component
             // indexes encrypted from "b"
             indicesAreEncrypted = bOrLater;
             // metadata encrypted from "ba"
             metadataIsEncrypted = (bOrLater && version.compareTo("ba") >= 0);
+        }
+
+        /**
+         * The 'ab' version was used by pre-GA "LABS" releases of DSE 6.8, and then renamed to 'ba': sstables of
+         * version 'ab' have the features of 'ba'. Only the features are mapped: the version string, which names the
+         * sstable files, is kept.
+         */
+        private static String mapAb(String version)
+        {
+            return "ab".equals(version) ? "ba" : version;
         }
 
         @Override

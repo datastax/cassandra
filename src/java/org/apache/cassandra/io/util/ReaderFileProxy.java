@@ -42,11 +42,30 @@ public interface ReaderFileProxy extends AutoCloseable
     long adjustPosition(long position);
 
     /**
-     * Called to provide the position to be seeked to after skipping the given number of bytes.
-     * Default implementation in AbstractReaderFileProxy just adds the position and bytes.
-     * Overridden by EncryptedChunkReader to properly account for holes.
-     * Rebufferers (which often use a ChunkReader to do the work) must implement it to defer to
-     * their source.
+     * Returns the position {@code bytesToSkip} bytes of content after {@code currentPosition}. For files with holes
+     * (see {@link #adjustPosition}) the holes crossed are not counted as skipped bytes.
+     * <p>
+     * The result is the file pointer that reading the same bytes would leave: when {@code bytesToSkip > 0} bytes end
+     * exactly at the usable end of a chunk, it is the start of that chunk's hole (not the start of the next chunk).
+     * Seeking to such a position, however, moves past the hole to the start of the next chunk (see
+     * {@link #adjustPosition}), so the result is not always a position to seek to; {@link RandomAccessReader#skipBytes}
+     * takes care of that difference.
+     * <p>
+     * Implementations over files without holes return {@code currentPosition + bytesToSkip}. Wrappers (e.g.
+     * rebufferers built over a {@link ChunkReader}) must delegate to their source: otherwise skips across a hole land
+     * at a wrong position.
      */
     long positionForSkip(long currentPosition, int bytesToSkip);
+
+    /**
+     * Returns the number of bytes of content between {@code position} and {@link #fileLength()}, not counting holes
+     * (see {@link #adjustPosition}), or 0 if {@code position} is not before {@link #fileLength()}. This is the largest
+     * number of bytes {@link #positionForSkip} can skip from {@code position} without going past the end of the file.
+     * <p>
+     * Implementations over files without holes return {@code max(0, fileLength() - position)}. The result is measured
+     * against this proxy's own {@link #fileLength()}: wrappers that change neither the file length nor the positions
+     * delegate to their source, while wrappers that change either (e.g. {@link TailOverridingRebufferer}) must
+     * override it.
+     */
+    long remainingBytes(long position);
 }

@@ -39,9 +39,11 @@ import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
 import org.apache.cassandra.io.compress.EncryptionConfig;
 import org.apache.cassandra.io.compress.Encryptor;
 import org.apache.cassandra.io.compress.EncryptorTest;
+import org.apache.cassandra.io.compress.OutOfPlaceEncryptor;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.PageAware;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -82,59 +84,49 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
         opts.put(EncryptionConfig.SECRET_KEY_STRENGTH, Integer.toString(DESKeySpec.DES_KEY_LEN * 8));
         opts.put(CompressionParams.CLASS, Encryptor.class.getName());
         compressionParamsDes = CompressionParams.fromMap(opts);
-
-        // TODO: Figure out why encrypted instance runs much slower
-        COUNT = 24525;
     }
 
-    public static class OutOfPlaceEncryptor extends Encryptor
+    /**
+     * This class has 12 parameterisations against the 6 of PartitionIndexTest, and each one is as fast as a plain one
+     * now that encrypted index reads go through the chunk cache. With the full count the class takes about 7 minutes
+     * here and would take about twice as long on CI, well over the 8-minute class fork timeout (test.timeout). A
+     * quarter of the keys keeps every parameterisation and brings the class to about 1.5 minutes here (about 3 on CI).
+     */
+    @Override
+    protected int count()
     {
-        public static OutOfPlaceEncryptor create(Map<String, String> options)
-        {
-            EncryptionConfig encryptionConfig = EncryptionConfig.forClass(OutOfPlaceEncryptor.class).fromCompressionOptions(options).build();
-            return new OutOfPlaceEncryptor(encryptionConfig);
-        }
-
-        OutOfPlaceEncryptor(EncryptionConfig encryptionConfig)
-        {
-            super(encryptionConfig);
-        }
-
-        @Override
-        public boolean canDecompressInPlace()
-        {
-            return false;
-        }
+        return COUNT / 4;
     }
 
-    @Parameterized.Parameters(name="accessMode {0} fromFile {1} compressionParams {2} BC version {3}")
+    @Parameterized.Parameters(name="accessMode {0} BC version {1} compressionParams {2} fromFile {3}")
     public static Collection<Object[]> generateData()
     {
         return Arrays.asList(new Object[][]{
-                new Object[] {Config.DiskAccessMode.standard, false, compressionParamsNormal, ByteComparable.Version.LEGACY},
-                new Object[] {Config.DiskAccessMode.standard, false, compressionParamsNormal, ByteComparable.Version.OSS41},
-                new Object[] {Config.DiskAccessMode.standard, false, compressionParamsNormal, ByteComparable.Version.OSS50},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.LEGACY, compressionParamsNormal, false},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.OSS41, compressionParamsNormal, false},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.OSS50, compressionParamsNormal, false},
                 // fromFile and out-of-place have independent implementations, one run suffices to test both
-                new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.LEGACY},
-                new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.OSS41},
-                new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.OSS50},
-                new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.LEGACY},
-                new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.OSS41},
-                new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.OSS50},
-                new Object[] {Config.DiskAccessMode.mmap, true, compressionParamsDes, ByteComparable.Version.LEGACY},
-                new Object[] {Config.DiskAccessMode.mmap, true, compressionParamsDes, ByteComparable.Version.OSS41},
-                new Object[] {Config.DiskAccessMode.mmap, true, compressionParamsDes, ByteComparable.Version.OSS50},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.LEGACY, compressionParamsOutOfPlace, true},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.OSS41, compressionParamsOutOfPlace, true},
+                new Object[] {Config.DiskAccessMode.standard, ByteComparable.Version.OSS50, compressionParamsOutOfPlace, true},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.LEGACY, compressionParamsBlowfish, false},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.OSS41, compressionParamsBlowfish, false},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.OSS50, compressionParamsBlowfish, false},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.LEGACY, compressionParamsDes, true},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.OSS41, compressionParamsDes, true},
+                new Object[] {Config.DiskAccessMode.mmap, ByteComparable.Version.OSS50, compressionParamsDes, true},
         });
     }
 
-    @Parameterized.Parameter(value = 1)
-    public static boolean fromFile = false;
+    // Parameters 0 (accessMode) and 1 (version) are the fields of PartitionIndexTest, which its test methods read.
+    // Do not redeclare them here: JUnit matches @Parameter fields by name, so a redeclared field would be injected
+    // instead and the base-class field would stay null.
 
     @Parameterized.Parameter(value = 2)
     public static CompressionParams compressionParams;
 
     @Parameterized.Parameter(value = 3)
-    public static ByteComparable.Version version;
+    public static boolean fromFile;
 
     CompressionMetadata compressionMetadata;
 
@@ -204,74 +196,96 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
     }
 
     @Override
-    protected PartitionIndex loadPartitionIndex(FileHandle.Builder fhBuilder, SequentialWriter writer) throws IOException
+    protected PartitionIndex loadPartitionIndex(FileHandle.Builder fhBuilder, SequentialWriter writer, ZeroCopyMetadata zeroCopyMetadata) throws IOException
     {
         if (fromFile)
         {
             FileHandle.Builder fromFileBuilder = makeHandle(writer.getFile());
-            return PartitionIndex.load(fromFileBuilder, partitioner, false, ZeroCopyMetadata.EMPTY, version);
+            return PartitionIndex.load(fromFileBuilder, partitioner, false, zeroCopyMetadata, version);
         }
         else
-            return PartitionIndex.load(fhBuilder, partitioner, false, ZeroCopyMetadata.EMPTY, version);
+            return PartitionIndex.load(fhBuilder, partitioner, false, zeroCopyMetadata, version);
     }
 
     /**
      * Verifies that seeking, reading and skipping over encryption-only files result in the same positions and read the
-     * same data. See DSP-25176.
+     * same data (see DSP-25176), that the end of the file reads as EOF, and that positions past the data are errors.
      */
     @Test
     public void testSkipAcrossHoles() throws IOException
     {
         int pageSize = PageAware.PAGE_SIZE;
-        File tempFile = new File(java.io.File.createTempFile(getClass().getName(), ".test"));
-        try (SequentialWriter writer = makeWriter(tempFile))
+        File tempFile = FileUtils.createTempFile(getClass().getName(), ".test");
+        try
         {
-            for (int i = 0; i < pageSize * 8; ++i)
-                writer.writeByte((byte) writer.position());
-            writer.finish();
-        }
-
-        FileHandle.Builder fhBuilder = makeHandle(tempFile);
-        try (FileHandle fh = fhBuilder.complete();
-             RandomAccessReader rdr = fh.createReader())
-        {
-            long len = rdr.length();
-            for (int readSize : new int[]{ 1, 7, 33, 45, 67, pageSize + 55, pageSize * 2, pageSize * 3 + 34 })
+            long dataEnd;
+            try (SequentialWriter writer = makeWriter(tempFile))
             {
-                byte[] buf = new byte[readSize];
-                for (int seekPos = pageSize - 33; seekPos < len - 1; ++seekPos)
-                {
-                    rdr.seek(seekPos);
-                    int read = rdr.read(buf, 0, buf.length);
-                    long afterRead = rdr.getFilePointer();
-                    int nextByte = getNextByte(rdr);
-                    int expectedNextByte = (int) afterRead & 0xFF;
-
-                    rdr.seek(seekPos);
-                    BtiTableReader.skipBytesWithCorrectPosition(rdr, read);
-                    long afterSkip = rdr.getFilePointer();
-                    int nextByteAfterSkip = getNextByte(rdr);
-                    String context = String.format("(seek to %x, read %x bytes (of %x) to pos %x next %x; seek to %x corrected skip %x bytes to pos %x next %x)", seekPos, read, readSize, afterRead, nextByte, seekPos, read, afterSkip, nextByteAfterSkip);
-
-                    Assert.assertEquals("Position" + context, afterRead, afterSkip);
-                    Assert.assertEquals("Next byte" + context, nextByte, nextByteAfterSkip);
-
-                    rdr.seek(seekPos);
-                    rdr.skipBytes(read);
-                    afterSkip = rdr.getFilePointer();
-                    nextByteAfterSkip = getNextByte(rdr);
-                    context = String.format("(seek to %x, read %x bytes (of %x) to pos %x next %x; seek to %x plain skip %x bytes to pos %x next %x)", seekPos, read, readSize, afterRead, nextByte, seekPos, read, afterSkip, nextByteAfterSkip);
-
-                    if (afterRead != afterSkip)
-                        System.out.println("Different position after plain skip " + context); // this is expected and corrected for by BtiTableReader.skipBytesWithCorrectPosition
-                    Assert.assertEquals("Next byte" + context, nextByte, nextByteAfterSkip);
-
-                    if (nextByte != Integer.MAX_VALUE)
-                        Assert.assertEquals("Byte from write pos" + context, expectedNextByte, nextByte);
-                    else
-                        break; // because length() is imprecise, next seeks may hit beyond the end of the file
-                }
+                for (int i = 0; i < pageSize * 8; ++i)
+                    writer.writeByte((byte) writer.position());
+                dataEnd = writer.position();
+                writer.finish();
             }
+
+            FileHandle.Builder fhBuilder = makeHandle(tempFile);
+            try (FileHandle fh = fhBuilder.complete();
+                 RandomAccessReader rdr = fh.createReader())
+            {
+                long len = rdr.length();
+                // the last chunk is partially filled: length() is the usable end of that chunk, after the data
+                Assert.assertTrue(dataEnd + " > " + len, dataEnd <= len);
+                for (int readSize : new int[]{ 1, 7, 33, 45, 67, pageSize + 55, pageSize * 2, pageSize * 3 + 34 })
+                {
+                    byte[] buf = new byte[readSize];
+                    for (int seekPos = pageSize - 33; seekPos < len - 1; ++seekPos)
+                    {
+                        rdr.seek(seekPos);
+                        int read = rdr.read(buf, 0, buf.length);
+                        long afterRead = rdr.getFilePointer();
+                        int nextByte = getNextByte(rdr);
+                        int expectedNextByte = (int) afterRead & 0xFF;
+
+                        rdr.seek(seekPos);
+                        Assert.assertEquals(read, rdr.skipBytes(read));
+                        long afterSkip = rdr.getFilePointer();
+                        int nextByteAfterSkip = getNextByte(rdr);
+                        String context = String.format("(seek to %x, read %x bytes (of %x) to pos %x next %x; seek to %x skip %x bytes to pos %x next %x)", seekPos, read, readSize, afterRead, nextByte, seekPos, read, afterSkip, nextByteAfterSkip);
+
+                        Assert.assertEquals("Position" + context, afterRead, afterSkip);
+                        Assert.assertEquals("Next byte" + context, nextByte, nextByteAfterSkip);
+
+                        if (nextByte != Integer.MAX_VALUE)
+                        {
+                            Assert.assertEquals("Byte from write pos" + context, expectedNextByte, nextByte);
+                        }
+                        else
+                        {
+                            // The data ends before length(), and the positions in between cannot be read (the last
+                            // chunk is padded on disk; see FileHandle.dataLength()), so stop at the end of the data.
+                            Assert.assertEquals("End of data" + context, dataEnd, afterRead);
+                            break;
+                        }
+                    }
+                }
+
+                // seeking to length() is valid and reads as EOF
+                rdr.seek(len);
+                Assert.assertEquals(len, rdr.getFilePointer());
+                Assert.assertTrue(rdr.isEOF());
+                Assert.assertEquals(0, rdr.bytesRemaining());
+                Assert.assertEquals(Integer.MAX_VALUE, getNextByte(rdr));
+                Assert.assertEquals(0, rdr.skipBytes(1));
+                Assert.assertEquals(len, rdr.getFilePointer());
+
+                // seeking past length(), or past the data of the padded last chunk, is an error
+                Assert.assertThrows(IllegalArgumentException.class, () -> rdr.seek(len + 1));
+                if (dataEnd + 1 < len)
+                    Assert.assertThrows(IllegalArgumentException.class, () -> rdr.seek(dataEnd + 1));
+            }
+        }
+        finally
+        {
+            tempFile.tryDelete();
         }
     }
 

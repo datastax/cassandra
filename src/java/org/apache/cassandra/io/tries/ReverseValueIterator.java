@@ -46,7 +46,16 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
     protected ReverseValueIterator(Rebufferer source, long root, boolean collecting, ByteComparable.Version version)
     {
         super(source, root, null, collecting, version);
-        initializeNoRightBound(root, NOT_AT_LIMIT, LeftBoundTreatment.GREATER);
+        try
+        {
+            initializeNoRightBound(root, NOT_AT_LIMIT, LeftBoundTreatment.GREATER);
+        }
+        catch (Throwable t)
+        {
+            // like ValueIterator, release the walker's buffer if the initial descent fails (e.g. on a corrupted page)
+            super.close();
+            throw t;
+        }
     }
 
     protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, ByteComparable.Version version)
@@ -69,10 +78,19 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
     {
         super(source, root, start != null ? start.asComparableBytes(version) : null, collecting, version);
 
-        if (end != null)
-            initializeWithRightBound(root, end.asComparableBytes(version), admitPrefix, limit != null);
-        else
-            initializeNoRightBound(root, limit != null ? limit.next() : NOT_AT_LIMIT, admitPrefix);
+        try
+        {
+            if (end != null)
+                initializeWithRightBound(root, end.asComparableBytes(version), admitPrefix, limit != null);
+            else
+                initializeNoRightBound(root, limit != null ? limit.next() : NOT_AT_LIMIT, admitPrefix);
+        }
+        catch (Throwable t)
+        {
+            // like ValueIterator, release the walker's buffer if the initial descent fails (e.g. on a corrupted page)
+            super.close();
+            throw t;
+        }
     }
 
     void initializeWithRightBound(long root, ByteSource endStream, LeftBoundTreatment admitPrefix, boolean hasLimit)

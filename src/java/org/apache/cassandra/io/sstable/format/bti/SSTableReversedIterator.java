@@ -265,7 +265,11 @@ class SSTableReversedIterator extends AbstractSSTableIterator<TrieIndexEntry>
             currentSlice = slice;
             ClusteringComparator comparator = metadata.comparator;
             if (indexReader != null)
+            {
                 indexReader.close();
+                // do not leave the closed reader in place if creating the new one fails, as it would be closed again
+                indexReader = null;
+            }
             indexReader = new RowIndexReverseIterator(ifile,
                                                       indexEntry,
                                                       comparator.asByteComparable(slice.end()),
