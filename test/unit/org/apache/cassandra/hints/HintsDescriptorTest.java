@@ -261,7 +261,8 @@ public class HintsDescriptorTest
             MessagingService.VERSION_DS_10,
             MessagingService.VERSION_DS_11,
             MessagingService.VERSION_DS_12,
-            MessagingService.VERSION_DS_20
+            MessagingService.VERSION_DS_20,
+            MessagingService.VERSION_DS_21
         };
 
         for (int msgVersion : messagingVersions)
