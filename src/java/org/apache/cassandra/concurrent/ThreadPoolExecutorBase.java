@@ -20,6 +20,8 @@ package org.apache.cassandra.concurrent;
 import java.util.List;
 import java.util.concurrent.*;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 /**
@@ -67,6 +69,9 @@ public class ThreadPoolExecutorBase extends ThreadPoolExecutor implements Resiza
     };
 
     private Runnable onShutdown;
+
+    // liveness: the running task of each worker thread
+    private final WorkerSlots workerSlots = new WorkerSlots();
 
     // maximumPoolSize is only used when corePoolSize == 0
     // if keepAliveTime < 0 and unit == null, we forbid core thread timeouts (e.g. single threaded executors by default)
@@ -151,6 +156,46 @@ public class ThreadPoolExecutorBase extends ThreadPoolExecutor implements Resiza
     public int getPendingTaskCount()
     {
         return getQueue().size();
+    }
+
+    @Override
+    protected void beforeExecute(Thread t, Runnable r)
+    {
+        workerSlots.markRunning(WrappedTask.classOf(r));
+        super.beforeExecute(t, r);
+    }
+
+    @Override
+    protected void afterExecute(Runnable r, Throwable t)
+    {
+        super.afterExecute(r, t);
+        WorkerSlots.markIdle();
+    }
+
+    @Override
+    public long oldestTaskQueueTime()
+    {
+        return TimedTask.queuedNanos(getQueue().peek());
+    }
+
+    @Override
+    public long longestRunningTaskTime()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? 0L : TimedTask.ageNanos(oldest.capturedStartNanos);
+    }
+
+    @Override
+    public String getLongestRunningTaskClass()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? null : oldest.taskClassName;
+    }
+
+    @VisibleForTesting
+    int workerSlotCount()
+    {
+        return workerSlots.size();
     }
 
     public int getCoreThreads()

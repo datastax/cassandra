@@ -36,6 +36,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class ValidationExecutorTest
 {
@@ -105,6 +106,45 @@ public class ValidationExecutorTest
         assertThat(validationExecutor.getCorePoolSize()).isEqualTo(corePoolSize * 2);
         assertThat(validationExecutor.getMaximumPoolSize()).isEqualTo(maxPoolSize * 2);
         validationExecutor.shutdownNow();
+    }
+
+    @Test
+    public void testWorkerIdleAfterExecute() throws Exception
+    {
+        validationExecutor = new CompactionManager.ValidationExecutor();
+        validationExecutor.submit(() -> {}).get(10, TimeUnit.SECONDS);
+        Util.spinAssertEquals(null, validationExecutor::getLongestRunningTaskClass, 5);
+        assertEquals(0L, validationExecutor.longestRunningTaskTime());
+    }
+
+    @Test
+    public void testSubmitIfRunningReportsTaskClass() throws Exception
+    {
+        validationExecutor = new CompactionManager.ValidationExecutor();
+        CountDownLatch taskBlocked = new CountDownLatch(1);
+        CountDownLatch taskComplete = new CountDownLatch(1);
+        validationExecutor.submitIfRunning(new Task(taskBlocked, taskComplete), "validationExecutorTest");
+        Util.spinAssertEquals(Task.class.getName(), validationExecutor::getLongestRunningTaskClass, 5);
+        Util.spinAssertEquals(true, () -> validationExecutor.longestRunningTaskTime() > 0, 5);
+        taskBlocked.countDown();
+        assertTrue(taskComplete.await(10, TimeUnit.SECONDS));
+    }
+
+    @Test
+    public void testQueuedValidationIsAged() throws Exception
+    {
+        DatabaseDescriptor.setConcurrentValidations(1);
+        validationExecutor = new CompactionManager.ValidationExecutor();
+        CountDownLatch taskBlocked = new CountDownLatch(1);
+        CountDownLatch taskComplete = new CountDownLatch(2);
+        validationExecutor.submitIfRunning(new Task(taskBlocked, taskComplete), "running");
+        Util.spinAssertEquals(1, validationExecutor::getActiveTaskCount, 5);
+        validationExecutor.submitIfRunning(new Task(taskBlocked, taskComplete), "queued");
+        TimeUnit.MILLISECONDS.sleep(50);
+        Util.spinAssertEquals(true, () -> validationExecutor.oldestTaskQueueTime() >= TimeUnit.MILLISECONDS.toNanos(40), 5);
+        taskBlocked.countDown();
+        assertTrue(taskComplete.await(10, TimeUnit.SECONDS));
+        Util.spinAssertEquals(0L, validationExecutor::oldestTaskQueueTime, 5);
     }
 
     private static class Task implements Runnable

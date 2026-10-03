@@ -106,6 +106,30 @@ public class WrappedExecutorPlus implements ExecutorPlus
         return executor.getMaxTasksQueued();
     }
 
+    @Override
+    public long oldestTaskQueueTime()
+    {
+        return executor.oldestTaskQueueTime();
+    }
+
+    @Override
+    public long oldestDebuggableTaskQueueTime()
+    {
+        return executor.oldestDebuggableTaskQueueTime();
+    }
+
+    @Override
+    public long longestRunningTaskTime()
+    {
+        return executor.longestRunningTaskTime();
+    }
+
+    @Override
+    public String getLongestRunningTaskClass()
+    {
+        return executor.getLongestRunningTaskClass();
+    }
+
     public int getCorePoolSize()
     {
         return executor.getCorePoolSize();

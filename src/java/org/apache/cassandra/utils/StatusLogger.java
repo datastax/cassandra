@@ -35,6 +35,8 @@ import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.CacheService;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+
 public class StatusLogger
 {
     private static final Logger logger = LoggerFactory.getLogger(StatusLogger.class);
@@ -64,17 +66,23 @@ public class StatusLogger
     private static void logStatus()
     {
         // everything from o.a.c.concurrent
-        logger.info(String.format("%-28s%10s%10s%15s%10s%18s", "Pool Name", "Active", "Pending", "Completed", "Blocked", "All Time Blocked"));
+        String poolFormat = "%-28s%10s%10s%15s%10s%18s%20s%22s  %s";
+        logger.info(String.format(poolFormat, "Pool Name", "Active", "Pending", "Completed", "Blocked", "All Time Blocked",
+                                  "Oldest Queued (us)", "Longest Running (us)", "Longest Running Task"));
 
         for (ThreadPoolMetrics tpool : CassandraMetricsRegistry.Metrics.allThreadPoolMetrics())
         {
-            logger.info(String.format("%-28s%10s%10s%15s%10s%18s",
+            String longestRunningTaskClass = tpool.longestRunningTaskClass.get();
+            logger.info(String.format(poolFormat,
                                       tpool.poolName,
                                       tpool.activeTasks.getValue(),
                                       tpool.pendingTasks.getValue(),
                                       tpool.completedTasks.getValue(),
                                       tpool.currentBlocked.getCount(),
-                                      tpool.totalBlocked.getCount()));
+                                      tpool.totalBlocked.getCount(),
+                                      NANOSECONDS.toMicros(tpool.oldestTaskQueueTime.getValue()),
+                                      NANOSECONDS.toMicros(tpool.longestRunningTaskTime.getValue()),
+                                      longestRunningTaskClass == null ? "-" : longestRunningTaskClass));
         }
 
         // one offs
