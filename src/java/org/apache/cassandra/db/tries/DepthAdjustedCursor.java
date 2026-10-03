@@ -24,6 +24,12 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 abstract class DepthAdjustedCursor<T, C extends Cursor<T>> implements Cursor<T>
 {
     final C source;
+
+    @Override
+    public void close()
+    {
+        source.close();
+    }
     protected long depthAdjustment;
     protected long matchingPositionAtRoot;
 

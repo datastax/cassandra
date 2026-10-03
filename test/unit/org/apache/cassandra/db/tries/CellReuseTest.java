@@ -102,7 +102,7 @@ public class CellReuseTest
         verifyFreeCellsMatchUnreachable(trieLong);
     }
 
-    public static void verifyFreeCellsMatchUnreachable(InMemoryBaseTrie<?> trieLong)
+    public static void verifyFreeCellsMatchUnreachable(InMemoryBaseTrie<?, ?, ?> trieLong)
     {
         // dump some information first
         System.out.println(String.format(" LongLived %s sizes %10s %10s",
@@ -134,7 +134,7 @@ public class CellReuseTest
         }
     }
 
-    private static void verifyReachability(InMemoryBaseTrie<?> trieLong, BitSet reachable, IntArrayList availableList, int allocatedMax, int shift, String name)
+    private static void verifyReachability(InMemoryBaseTrie<?, ?, ?> trieLong, BitSet reachable, IntArrayList availableList, int allocatedMax, int shift, String name)
     {
         BitSet available = new BitSet(reachable.size());
         for (int v : availableList)
@@ -197,7 +197,7 @@ public class CellReuseTest
                         check.filteredEntrySet(ByteBuffer.class).iterator());
     }
 
-    public static void assertCellSetEmpty(BitSet set, InMemoryBaseTrie<?> trie, String message)
+    public static void assertCellSetEmpty(BitSet set, InMemoryBaseTrie<?, ?, ?> trie, String message)
     {
         if (set.isEmpty())
             return;
@@ -220,7 +220,7 @@ public class CellReuseTest
         Assert.fail(set.cardinality() + message);
     }
 
-    public static Pair<BitSet, BitSet> reachableCells(InMemoryBaseTrie<?> trie)
+    public static Pair<BitSet, BitSet> reachableCells(InMemoryBaseTrie<?, ?, ?> trie)
     {
         if (VERBOSE)
             System.out.println(trie.dump(Object::toString));
@@ -230,7 +230,7 @@ public class CellReuseTest
         return Pair.create(set, objs);
     }
 
-    private static void mark(InMemoryBaseTrie<?> trie, int node, BitSet set, BitSet objs)
+    private static void mark(InMemoryBaseTrie<?, ?, ?> trie, int node, BitSet set, BitSet objs)
     {
         set.set(node >> 5);
         if (VERBOSE)
@@ -277,13 +277,13 @@ public class CellReuseTest
         }
     }
 
-    private static void markPrefixContent(InMemoryBaseTrie<?> trie, int pointerAddress, BitSet set, BitSet objs)
+    private static void markPrefixContent(InMemoryBaseTrie<?, ?, ?> trie, int pointerAddress, BitSet set, BitSet objs)
     {
         int content = trie.getIntVolatile(pointerAddress);
         markChild(trie, content, set, objs);
     }
 
-    private static void markChild(InMemoryBaseTrie<?> trie, int child, BitSet set, BitSet objs)
+    private static void markChild(InMemoryBaseTrie<?, ?, ?> trie, int child, BitSet set, BitSet objs)
     {
         if (!InMemoryTrie.isNullOrLeaf(child))
             mark(trie, child, set, objs);

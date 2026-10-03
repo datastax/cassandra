@@ -43,6 +43,19 @@ implements Cursor<T>
 
     final C source;
     final D set;
+
+    @Override
+    public void close()
+    {
+        try
+        {
+            source.close();
+        }
+        finally
+        {
+            set.close();
+        }
+    }
     State state;
 
     IntersectionCursor(C source, D set)

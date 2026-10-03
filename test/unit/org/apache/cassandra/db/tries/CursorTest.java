@@ -25,6 +25,7 @@ import org.quicktheories.generators.SourceDSL;
 
 import static org.junit.Assert.*;
 import static org.quicktheories.QuickTheory.qt;
+import static org.quicktheories.generators.SourceDSL.booleans;
 import static org.quicktheories.generators.SourceDSL.integers;
 
 public class CursorTest
@@ -299,9 +300,11 @@ public class CursorTest
     public void testPositionForSkippingBranch()
     {
         qt().withExamples(EXAMPLES)
-            .forAll(DEPTH_GEN, TRANSITION_GEN, DIRECTION_GEN)
-            .checkAssert((depth, transition, direction) -> {
+            .forAll(DEPTH_GEN, TRANSITION_GEN, DIRECTION_GEN, booleans().all())
+            .checkAssert((depth, transition, direction, returnPath) -> {
                 long pos = Cursor.encode(depth, transition, direction);
+                if (returnPath)
+                    pos |= Cursor.ON_RETURN_PATH_BIT;
                 long newPos = Cursor.positionForSkippingBranch(pos);
                 assertTrue(Cursor.compare(pos, newPos) < 0);
                 assertEquals(depth.intValue(), Cursor.depth(newPos));
@@ -309,6 +312,7 @@ public class CursorTest
                     assertEquals(0x200, VerificationCursor.undecodedTransition(newPos));
                 assertEquals(transition + direction.increase, Cursor.incomingTransition(newPos));
                 assertEquals(direction, Cursor.direction(newPos));
+                assertFalse(Cursor.isOnReturnPath(newPos));
             });
     }
 

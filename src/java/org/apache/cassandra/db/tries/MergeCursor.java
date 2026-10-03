@@ -35,6 +35,19 @@ abstract class MergeCursor<T, C extends Cursor<T>, U, D extends Cursor<U>, R> im
     final C c1;
     final D c2;
 
+    @Override
+    public void close()
+    {
+        try
+        {
+            c1.close();
+        }
+        finally
+        {
+            c2.close();
+        }
+    }
+
     boolean atC1;
     boolean atC2;
     long currentPosition;
