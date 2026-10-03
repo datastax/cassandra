@@ -26,6 +26,7 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -45,12 +46,14 @@ import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.index.sai.utils.GeoUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.util.SloppyMath;
+import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 public class Expression
 {
@@ -61,7 +64,7 @@ public class Expression
         EQ, MATCH, PREFIX, NOT_EQ, RANGE,
         CONTAINS_KEY, CONTAINS_VALUE,
         NOT_CONTAINS_VALUE, NOT_CONTAINS_KEY,
-        IN, ORDER_BY, BOUNDED_ANN;
+        IN, ORDER_BY, BOUNDED_ANN, AUTOMATON;
 
         public static Op valueOf(Operator operator)
         {
@@ -94,7 +97,15 @@ public class Expression
                 case LIKE_PREFIX:
                     return PREFIX;
 
+                // Automaton-served pattern matching: the expression carries the raw pattern (see Expression#add)
+                // and lazily compiles it into a Lucene CompiledAutomaton (see Expression#getAutomaton)
+                // intersected with the terms dictionaries. LIKE_PREFIX stays on its dedicated bounded-range
+                // PREFIX path above.
+                case LIKE_SUFFIX:
+                case LIKE_CONTAINS:
                 case LIKE_MATCHES:
+                    return AUTOMATON;
+
                 case ANALYZER_MATCHES:
                     return MATCH;
 
@@ -148,6 +159,23 @@ public class Expression
     protected Op operation;
 
     public Bound lower, upper;
+
+    /**
+     * For {@link Op#AUTOMATON} expressions, the pattern operator ({@link Operator#LIKE_SUFFIX},
+     * {@link Operator#LIKE_CONTAINS} or {@link Operator#LIKE_MATCHES}) the pattern in {@link #lower} came from;
+     * it defines the pattern syntax. {@code null} for all other operations.
+     */
+    private Operator patternOperator;
+
+    /**
+     * The lazily compiled automaton of an {@link Op#AUTOMATON} expression. Plan expressions are not serialized
+     * (only the {@code RowFilter} expression carrying the raw pattern is), so the automaton is compiled here,
+     * at most once per query per index, and shared by all the segments/memtable shards the expression is
+     * intersected with. Volatile because segment searches may run concurrently; compilation is idempotent, so a
+     * lost race only costs a recompile.
+     */
+    private volatile CompiledAutomaton automaton;
+
     private float boundedAnnEuclideanDistanceThreshold = 0;
     private float searchRadiusMeters = 0;
     private float searchRadiusDegreesSquared = 0;
@@ -181,6 +209,8 @@ public class Expression
         switch (op)
         {
             case LIKE_PREFIX:
+            case LIKE_SUFFIX:
+            case LIKE_CONTAINS:
             case LIKE_MATCHES:
             case ANALYZER_MATCHES:
             case EQ:
@@ -191,6 +221,10 @@ public class Expression
                 lower = new Bound(value, validator, true);
                 upper = lower;
                 operation = Op.valueOf(op);
+                // Automaton-served pattern expressions remember which operator the pattern came from, because
+                // it defines the pattern syntax (see #getAutomaton()).
+                if (operation == Op.AUTOMATON)
+                    patternOperator = op;
                 break;
 
             case NEQ:
@@ -382,6 +416,60 @@ public class Expression
         return getBoundByteComparable(bound, version, terminator);
     }
 
+    /**
+     * For a {@link Op#PREFIX} expression, returns the smallest {@link ByteComparable} that sorts after every term
+     * starting with the prefix, encoded for the trie of the given version, or {@code null} if no such bound exists
+     * (i.e. the prefix is empty or consists solely of {@code 0xFF} bytes). Together with the prefix itself as an
+     * inclusive lower bound, {@code [prefix, nextOf(prefix))} delimits exactly the terms starting with the prefix.
+     * <p>
+     * This is only valid for non-composite literal types, for which
+     * {@link org.apache.cassandra.index.sai.disk.format.OnDiskFormat#encodeForTrie} preserves the raw byte order
+     * of the terms.
+     *
+     * @param version the version of the index
+     * @return the exclusive upper bound of the prefix range, or {@code null} if it is unbounded
+     */
+    public ByteComparable getPrefixUpperBoundByteComparable(Version version)
+    {
+        assert operation == Op.PREFIX : "Prefix upper bound requested for operation " + operation;
+        ByteBuffer prefix = lower.value.encoded;
+        byte[] bytes = ByteBufferUtil.getArray(prefix);
+        int last = bytes.length - 1;
+        while (last >= 0 && bytes[last] == (byte) 0xFF)
+            last--;
+        if (last < 0)
+            return null;
+        byte[] upperBytes = Arrays.copyOf(bytes, last + 1);
+        upperBytes[last]++;
+        return version.onDiskFormat().encodeForTrie(ByteBuffer.wrap(upperBytes), validator);
+    }
+
+    /**
+     * For {@link Op#AUTOMATON} expressions, returns the pattern operator the expression was built from.
+     */
+    public Operator getPatternOperator()
+    {
+        assert operation == Op.AUTOMATON : "Pattern operator requested for operation " + operation;
+        return patternOperator;
+    }
+
+    /**
+     * For {@link Op#AUTOMATON} expressions, returns the compiled byte-level automaton of the pattern carried by
+     * this expression, compiling it on first use. The pattern value in {@link #lower} is the (possibly
+     * normalized, e.g. lowercased) pattern produced by the analysis in {@code Operation#analyzeGroup}, matching
+     * how the stored terms are normalized.
+     *
+     * @throws org.apache.cassandra.exceptions.InvalidRequestException if the pattern is invalid or too complex
+     */
+    public CompiledAutomaton getAutomaton()
+    {
+        assert operation == Op.AUTOMATON : "Automaton requested for operation " + operation;
+        CompiledAutomaton compiled = automaton;
+        if (compiled == null)
+            automaton = compiled = AutomatonQueries.forPatternOperator(patternOperator, lower.value.raw, context.getColumnName());
+        return compiled;
+    }
+
     // This call encodes the byte buffer into a ByteComparable object based on the version of the index, the validator,
     // and whether the expression is in memory or on disk.
     private ByteComparable getBoundByteComparable(ByteBuffer unencodedBound, Version version, int terminator)
@@ -482,6 +570,12 @@ public class Expression
                     case PREFIX:
                         isMatch = ByteBufferUtil.startsWith(term, requestedValue);
                         break;
+
+                    case AUTOMATON:
+                        // pattern matching over the (possibly normalized) term, with the exact same automaton
+                        // used by the index searchers
+                        isMatch = AutomatonQueries.accepts(getAutomaton(), term);
+                        break;
                 }
 
                 if (isMatch)
@@ -560,6 +654,7 @@ public class Expression
     {
         return new HashCodeBuilder().append(context.getColumnName())
                                     .append(operation)
+                                    .append(patternOperator)
                                     .append(validator)
                                     .append(lower).append(upper)
                                     .append(exclusions).build();
@@ -578,6 +673,7 @@ public class Expression
         return Objects.equals(context.getColumnName(), o.context.getColumnName())
                 && validator.equals(o.validator)
                 && operation == o.operation
+                && patternOperator == o.patternOperator
                 && Objects.equals(lower, o.lower)
                 && Objects.equals(upper, o.upper)
                 && exclusions.equals(o.exclusions);

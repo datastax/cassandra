@@ -261,6 +261,99 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         }
     }
 
+    /**
+     * Pins the {@code skipTo} contract used by the automaton-guided intersection:
+     * interleaved with forward iteration, skipping to increasing keys positions the iteration at the least term
+     * greater than or equal to the key, without consuming it, and respects the reader's end bound. The keys
+     * mirror the multi-byte UTF-8 dictionary that exposed a chain-node repositioning bug during development.
+     */
+    @Test
+    public void testSkipToInterleavedWithIteration() throws Exception
+    {
+        // raw UTF-8 bytes of: "😀", "😀a", "😀ab", "😀b", "😁a" (in unsigned byte order)
+        byte[][] terms = {
+            { (byte) 0xf0, (byte) 0x9f, (byte) 0x98, (byte) 0x80 },
+            { (byte) 0xf0, (byte) 0x9f, (byte) 0x98, (byte) 0x80, 0x61 },
+            { (byte) 0xf0, (byte) 0x9f, (byte) 0x98, (byte) 0x80, 0x61, 0x62 },
+            { (byte) 0xf0, (byte) 0x9f, (byte) 0x98, (byte) 0x80, 0x62 },
+            { (byte) 0xf0, (byte) 0x9f, (byte) 0x98, (byte) 0x81, 0x61 }
+        };
+
+        long fp;
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(components))
+        {
+            for (int i = 0; i < terms.length; i++)
+                writer.add(ByteComparable.preencoded(VERSION, terms[i]), i);
+            fp = writer.complete(new MutableLong());
+        }
+
+        // range restricted to the "😀" prefix: [f09f9880, f09f9881] with the inclusive trie end bound
+        ByteComparable lower = ByteComparable.preencoded(VERSION, terms[0]);
+        ByteComparable upper = ByteComparable.preencoded(VERSION, new byte[]{ (byte) 0xf0, (byte) 0x9f, (byte) 0x98, (byte) 0x81 });
+
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
+                                                                              fp, lower, upper, true, true, VERSION))
+        {
+            // iterate to the first term
+            assertTrue(reader.hasNext());
+            assertEquals(0L, (long) reader.next().right);
+
+            // skip to a key strictly between the consumed term and the next one: positions at the next term
+            reader.skipTo(ByteComparable.preencoded(VERSION, new byte[]{ (byte) 0xf0, (byte) 0x9f, (byte) 0x98, (byte) 0x80, 0x00 }));
+            assertTrue(reader.hasNext());
+            assertEquals(1L, (long) reader.next().right);
+
+            // skip to an exact existing key: positions at that term, without consuming it
+            reader.skipTo(ByteComparable.preencoded(VERSION, terms[3]));
+            assertTrue(reader.hasNext());
+            assertEquals(3L, (long) reader.next().right);
+
+            // skip to a key strictly before the current position: a no-op, iteration continues in order (the
+            // range ends before payload 4, which is outside the upper bound)
+            reader.skipTo(ByteComparable.preencoded(VERSION, terms[0]));
+            assertFalse(reader.hasNext());
+        }
+
+        // Pins the documented NON-idempotence for a key exactly equal to the just-consumed term:
+        // like ceiling(), the equal key re-prepares that term and next() yields it a second time —
+        // which is why callers must only pass strictly increasing keys (AutomatonSeeker provably does).
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
+                                                                              fp, lower, upper, true, true, VERSION))
+        {
+            assertTrue(reader.hasNext());
+            assertEquals(0L, (long) reader.next().right);
+            reader.skipTo(ByteComparable.preencoded(VERSION, terms[0]));
+            assertTrue(reader.hasNext());
+            assertEquals(0L, (long) reader.next().right); // re-yielded: equal-key skipTo is not idempotent
+            assertTrue(reader.hasNext());
+            assertEquals(1L, (long) reader.next().right); // iteration then continues in order
+        }
+
+        // separate reader: skipping beyond the end bound exhausts the iteration
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
+                                                                              fp, lower, upper, true, true, VERSION))
+        {
+            assertTrue(reader.hasNext());
+            assertEquals(0L, (long) reader.next().right);
+            reader.skipTo(ByteComparable.preencoded(VERSION, terms[4]));
+            assertFalse(reader.hasNext());
+        }
+
+        // separate reader: skipTo before the first next() tightens the start of the iteration
+        try (FileHandle input = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
+                                                                              fp, lower, upper, true, true, VERSION))
+        {
+            reader.skipTo(ByteComparable.preencoded(VERSION, terms[1]));
+            assertTrue(reader.hasNext());
+            assertEquals(1L, (long) reader.next().right);
+        }
+    }
+
     @Test
     public void testFloor() throws Exception
     {

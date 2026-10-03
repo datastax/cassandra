@@ -120,6 +120,25 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
         return nextAsLong();
     }
 
+    /**
+     * Repositions the iteration at the least term greater than or equal to the given key, without consuming it:
+     * the entry is returned by the following {@link #next()}/{@link #nextAsLong()} call (or {@link #hasNext()}
+     * returns false when no such term exists within the reader's bounds). This is the primitive behind
+     * {@link #ceiling} and shares its statefulness contract: the trie is traversed statefully, so it only
+     * behaves correctly when called for increasing keys, interleaved with forward iteration that has not moved
+     * past the key. Skipping to a key strictly before the current position is a no-op; like {@link #ceiling},
+     * the call is NOT idempotent for a key exactly equal to the just-consumed term — that term is re-prepared
+     * and yielded a second time by the following {@code next()}, so callers must only pass keys strictly
+     * greater than the last consumed term (the automaton-guided intersection provably does:
+     * {@code AutomatonSeeker#nextSeekTerm} always returns a strictly greater string). Requires a collecting
+     * reader. Used by the automaton-guided intersection ({@code TermsReader}) to skip runs of non-matching
+     * terms.
+     */
+    public void skipTo(ByteComparable key)
+    {
+        skipTo(key, LeftBoundTreatment.ADMIT_EXACT);
+    }
+
     public long nextAsLong()
     {
         return nextValueAsLong(this::getCurrentPayload, NOT_FOUND);

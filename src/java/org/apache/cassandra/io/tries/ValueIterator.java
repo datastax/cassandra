@@ -127,9 +127,13 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
         final byte[] collectedBytes = collector.bytes;
         for (pos = 0; pos < collectedLength; ++pos)
         {
-            if (nextByte != collectedBytes[pos])
+            // Compare in the unsigned byte space the trie is ordered by: the collected array stores raw (signed)
+            // bytes while nextByte is an unsigned transition byte in [0, 256) (or END_OF_STREAM == -1, which
+            // correctly sorts before any byte, making a skipTo prefix of the current position a no-op).
+            int collectedByte = collectedBytes[pos] & 0xFF;
+            if (nextByte != collectedByte)
             {
-                if (nextByte < collectedBytes[pos])
+                if (nextByte < collectedByte)
                     return;    // the position we are already advanced to is beyond skipTo
                 else
                     break;     // matched a prefix of skipTo, now we need to advance through the rest of it
