@@ -111,6 +111,7 @@ public class ReverseValueIteratorFailureTest extends AbstractTrieTestBase
         @Override
         public void close()
         {
+            // nothing to close: the test counts closeReader() calls only
         }
 
         @Override

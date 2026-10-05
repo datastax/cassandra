@@ -265,11 +265,13 @@ public class EncryptedChunkReaderPositionForSkipTest
         @Override
         public void closeReader()
         {
+            // no underlying reader to close
         }
 
         @Override
         public void close()
         {
+            // nothing to close: the data is an in-memory array
         }
 
         @Override
