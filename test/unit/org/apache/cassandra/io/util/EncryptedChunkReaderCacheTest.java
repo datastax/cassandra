@@ -901,6 +901,190 @@ public class EncryptedChunkReaderCacheTest
     }
 
     /**
+     * The writer pads a chunk after encrypting it, so decrypting a padded chunk fills only the start of the buffer it
+     * is read into, and the rest of the buffer keeps what it held before: when decrypting from a mapped region (or out
+     * of place), that is whatever a recycled pooled buffer held, e.g. another chunk. These bytes cannot be read,
+     * because the limit of the buffer is the decrypted length: check that the chunk reader sets it, that the
+     * rebufferer reusing its buffer, the chunk cache (whose buffers are recycled through its pool), a wrapping
+     * rebufferer and the reader keep it, and that absolute reads past it (as made by the trie walkers) fail.
+     */
+    @Test
+    public void testPaddedChunkLimitHidesStaleBytes() throws IOException
+    {
+        int content = 100; // in the last chunk
+        long lastChunk = CHUNK_SIZE;
+        File padded = FileUtils.createTempFile("encrypted-padded", ".db");
+        try
+        {
+            try (EncryptedSequentialWriter writer = new EncryptedSequentialWriter(padded,
+                                                                                  SequentialWriterOption.newBuilder().finishOnClose(false).build(),
+                                                                                  compressionParams.getSstableCompressor().encryptionOnly()))
+            {
+                for (int i = 0; i < maxBytesInPage + content; ++i)
+                    writer.writeByte(paddedFileByte(i));
+                writer.finish();
+            }
+            assertEquals(2 * CHUNK_SIZE, padded.length());
+
+            try (FileHandle fh = handleBuilder(padded, null, compressionMetadata).complete())
+            {
+                // the chunk reader, into a buffer full of other bytes
+                ChunkReader chunkReader = (ChunkReader) fh.rebuffererFactory();
+                ByteBuffer buffer = chunkReader.preferredBufferType().allocate(CHUNK_SIZE);
+                while (buffer.hasRemaining())
+                    buffer.put((byte) 0xA5);
+                chunkReader.readChunk(lastChunk, buffer);
+                assertEquals(0, buffer.position());
+                assertPaddedChunkLimit(buffer, content, "chunk reader");
+
+                // the rebufferer used without the chunk cache, which reads every chunk into the same buffer
+                Rebufferer rebufferer = fh.rebuffererFactory().instantiateRebufferer(false);
+                try
+                {
+                    Rebufferer.BufferHolder holder = rebufferer.rebuffer(0);
+                    assertEquals(maxBytesInPage, holder.buffer().limit());
+                    holder.release();
+                    assertPaddedChunkLimit(rebufferer.rebuffer(lastChunk + 10), lastChunk, content, "rebufferer");
+                }
+                finally
+                {
+                    rebufferer.closeReader();
+                }
+
+                // a wrapping rebufferer
+                Rebufferer tailOverriding = new TailOverridingRebufferer(fh.rebuffererFactory().instantiateRebufferer(false),
+                                                                         2 * CHUNK_SIZE, ByteBuffer.allocate(10));
+                try
+                {
+                    assertPaddedChunkLimit(tailOverriding.rebuffer(lastChunk), lastChunk, content, "wrapping rebufferer");
+                }
+                finally
+                {
+                    tailOverriding.closeReader();
+                }
+            }
+
+            // the chunk cache, after releasing a chunk to its pool so that the padded chunk is likely to reuse its buffer
+            try (FileHandle fh = handleBuilder(padded, ChunkCache.instance, compressionMetadata).complete())
+            {
+                Rebufferer rebufferer = fh.rebuffererFactory().instantiateRebufferer(false);
+                Rebufferer.BufferHolder holder = rebufferer.rebuffer(0);
+                assertEquals(maxBytesInPage, holder.buffer().limit());
+                holder.release();
+                ChunkCache.instance.invalidateFileNow(padded);
+                long missesBefore = misses();
+                assertPaddedChunkLimit(rebufferer.rebuffer(lastChunk), lastChunk, content, "chunk cache");
+                assertEquals(1, misses() - missesBefore);
+                // served from the cache
+                assertPaddedChunkLimit(rebufferer.rebuffer(lastChunk + 10), lastChunk, content, "cached chunk");
+                assertEquals(1, misses() - missesBefore);
+            }
+
+            // the reader, also with a length that allows positions in the padding (e.g. the usable end of the chunk)
+            for (ChunkCache chunkCache : new ChunkCache[]{ ChunkCache.instance, null })
+            {
+                for (long lengthOverride : new long[]{ -1, lastChunk + maxBytesInPage })
+                {
+                    FileHandle.Builder builder = handleBuilder(padded, chunkCache, compressionMetadata);
+                    if (lengthOverride >= 0)
+                        builder.withLengthOverride(lengthOverride);
+                    try (FileHandle fh = builder.complete();
+                         RandomAccessReader reader = fh.createReader())
+                    {
+                        String context = "reader, length " + reader.length() + (chunkCache == null ? "" : ", cached");
+                        reader.seek(lastChunk + content - 10);
+                        byte[] read = new byte[20];
+                        assertEquals(context, 10, reader.read(read, 0, read.length));
+                        for (int i = 0; i < 10; ++i)
+                            assertEquals(context, paddedFileByte(maxBytesInPage + content - 10 + i), read[i]);
+                        assertEquals(context, -1, reader.read());
+                        assertThrows(context, IllegalArgumentException.class, () -> reader.seek(lastChunk + content + 1));
+                    }
+                }
+            }
+        }
+        finally
+        {
+            ChunkCache.instance.invalidateFile(padded);
+            padded.tryDelete();
+        }
+    }
+
+    /**
+     * The byte written at the given index of the file of testPaddedChunkLimitHidesStaleBytes, never 0.
+     */
+    private static byte paddedFileByte(int index)
+    {
+        return (byte) (0x80 | index);
+    }
+
+    private void assertPaddedChunkLimit(Rebufferer.BufferHolder holder, long chunkStart, int content, String context)
+    {
+        try
+        {
+            assertEquals(context, chunkStart, holder.offset());
+            assertPaddedChunkLimit(holder.buffer(), content, context);
+        }
+        finally
+        {
+            holder.release();
+        }
+    }
+
+    private void assertPaddedChunkLimit(ByteBuffer buffer, int content, String context)
+    {
+        assertEquals(context, content, buffer.limit());
+        for (int i = 0; i < content; ++i)
+            assertEquals(context, paddedFileByte(maxBytesInPage + i), buffer.get(i));
+        assertThrows(context, IndexOutOfBoundsException.class, () -> buffer.get(content));
+        assertThrows(context, IndexOutOfBoundsException.class, () -> buffer.getInt(content - 3));
+        assertEquals(context, content, buffer.duplicate().limit());
+        assertEquals(context, content, buffer.slice().capacity());
+    }
+
+    /**
+     * A failed read (here of a corrupted chunk) releases the reader's buffer, whose memory may then be reused (by the
+     * chunk cache, or by the failed read itself: the standard reader decrypts in place, into the buffer that the
+     * rebufferer used without the chunk cache reuses): the reader must not read from it afterwards, e.g. after a seek
+     * back into its range. The reader stays at the position it failed to load, and a read there fails again rather
+     * than returning other data.
+     * <p>
+     * Reading the released buffer only returns wrong data deterministically with the parameters mmapped=false and
+     * outOfPlace=false, without the chunk cache: the failed in-place read has overwritten that buffer with the
+     * ciphertext of the corrupted chunk. In the other cases the released buffer still holds the previous chunk (the
+     * mmapped and out-of-place readers fail on the checksum before writing to the buffer, and the cached chunk is
+     * not reused this soon).
+     */
+    @Test
+    public void testFailedReadDoesNotExposeReleasedBuffer() throws IOException
+    {
+        int corruptChunk = 2;
+        long corruptPosition = (long) corruptChunk * CHUNK_SIZE + 100;
+        writeFileByte(corruptPosition, (byte) (readFileByte(corruptPosition) ^ 0x5A));
+
+        for (ChunkCache chunkCache : new ChunkCache[]{ ChunkCache.instance, null })
+        {
+            try (FileHandle fh = handleBuilder(chunkCache).complete();
+                 RandomAccessReader reader = fh.createReader())
+            {
+                String context = chunkCache == null ? "uncached" : "cached";
+                reader.seek(100);
+                assertEquals(context, writtenValues[100], reader.readByte());
+                long corruptChunkStart = (long) corruptChunk * CHUNK_SIZE;
+                assertThrows(context, CorruptSSTableException.class, () -> reader.seek(corruptChunkStart));
+                assertEquals(context, corruptChunkStart, reader.getFilePointer());
+                assertThrows(context, CorruptSSTableException.class, reader::readByte);
+                assertEquals(context, corruptChunkStart, reader.getFilePointer());
+
+                reader.seek(200);
+                byte[] read = new byte[100];
+                reader.readFully(read);
+                assertArrayEquals(context, Arrays.copyOfRange(writtenValues, 200, 300), read);
+            }
+        }
+    }
+
+    /**
      * A skip ending at the start of a hole (the usable end of a full chunk) loads the chunk ending there, like a read
      * of its last byte, and the next read loads the next chunk; a skip ending at a length() that is the start of a hole
      * loads nothing, and neither does the EOF that follows.

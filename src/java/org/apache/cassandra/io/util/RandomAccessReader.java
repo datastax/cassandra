@@ -86,8 +86,19 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
         else
         {
-            bufferHolder = Rebufferer.EMPTY; // prevents double release if the call below fails
-            bufferHolder = rebufferer.rebuffer(position);
+            try
+            {
+                bufferHolder = rebufferer.rebuffer(position);
+            }
+            catch (Throwable t)
+            {
+                // The reader must neither release the holder again nor read from the buffer of the released one, whose
+                // memory may have been reused (by the chunk cache, or by the failed read itself). It stays at the
+                // position it failed to load, so that a later read tries to load it again.
+                bufferHolder = Rebufferer.emptyBufferHolderAt(position);
+                buffer = bufferHolder.buffer();
+                throw t;
+            }
             buffer = bufferHolder.buffer();
             // The buffer may hold data past length(), e.g. a chunk read in full when length() is in its middle, or a
             // chunk cached (or a region mapped) for a handle of the same file with a longer length. Reads stop at
