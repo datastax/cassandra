@@ -124,7 +124,7 @@ public class PlanWithSAIQueryOptionsTest extends SAITester
     // -------------------------------------------------------------------------
 
     @Test
-    public void testOptLevelZeroDisablesOptimizerForThatQueryOnly()
+    public void testOptLevelZeroDisablesOptimizerForThatQueryOnly() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 text, v2 text)");
         String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
@@ -159,7 +159,7 @@ public class PlanWithSAIQueryOptionsTest extends SAITester
     }
 
     @Test
-    public void testOptLevelOneExplicitlyMatchesDefaultBehaviour()
+    public void testOptLevelOneExplicitlyMatchesDefaultBehaviour() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 text, v2 text)");
         String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
