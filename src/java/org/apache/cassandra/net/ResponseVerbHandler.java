@@ -33,9 +33,10 @@ import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.AbstractPaxosCallback;
-import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.NoSpamLogger;
 
+import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
@@ -90,50 +91,60 @@ public class ResponseVerbHandler implements IVerbHandler
      */
     private void trackReplicaSensors(RequestCallbacks.CallbackInfo callbackInfo, Message<?> message)
     {
-        RequestSensors sensors = callbackInfo.callback.getRequestSensors();
-        if (sensors == null)
-            return;
-
-        if (callbackInfo instanceof RequestCallbacks.WriteCallbackInfo)
+        try
         {
-            RequestCallbacks.WriteCallbackInfo writerInfo = (RequestCallbacks.WriteCallbackInfo) callbackInfo;
-            IMutation mutation = writerInfo.iMutation();
-            if (mutation == null)
+            RequestSensors sensors = callbackInfo.callback.getRequestSensors();
+            if (sensors == null)
                 return;
 
-            Collection<PartitionUpdate> nonIndexUpdates = mutation.getPartitionUpdates().stream()
-                                                                  .filter(pu -> !pu.metadata().isIndex())
-                                                                  .collect(Collectors.toList());
-            int allTablesCount = mutation.getPartitionUpdates().size();
-            double internodeBytesPerTable = allTablesCount == 0 ? 0
-                                                                : (double) writerInfo.sentPayloadSize / allTablesCount;
-            for (PartitionUpdate pu : nonIndexUpdates)
+            if (callbackInfo instanceof RequestCallbacks.WriteCallbackInfo)
             {
-                Context context = Context.from(pu.metadata());
+                RequestCallbacks.WriteCallbackInfo writerInfo = (RequestCallbacks.WriteCallbackInfo) callbackInfo;
+                IMutation mutation = writerInfo.iMutation();
+                if (mutation == null)
+                    return;
+
+                Collection<PartitionUpdate> nonIndexUpdates = mutation.getPartitionUpdates().stream()
+                                                                      .filter(pu -> !pu.metadata().isIndex())
+                                                                      .collect(Collectors.toList());
+                int allTablesCount = mutation.getPartitionUpdates().size();
+                double internodeBytesPerTable = allTablesCount == 0 ? 0
+                                                                    : (double) writerInfo.sentPayloadSize / allTablesCount;
+                for (PartitionUpdate pu : nonIndexUpdates)
+                {
+                    Context context = Context.from(pu.metadata());
+                    incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+                    incrementSensor(sensors, context, Type.INDEX_WRITE_BYTES, message);
+                    sensors.incrementSensor(context, Type.INTERNODE_BYTES, internodeBytesPerTable);
+                    accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
+                }
+            }
+            else if (callbackInfo.callback instanceof ReadRequestCallback)
+            {
+                ReadRequestCallback<?> readCallback = (ReadRequestCallback<?>) callbackInfo.callback;
+                Context context = readCallback.sensorsContext();
+                incrementSensor(sensors, context, Type.READ_BYTES, message);
+                incrementSensor(sensors, context, Type.INTERNODE_BYTES, message);
+                accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.READ_EXECUTION_TIME, message);
+            }
+            // Covers Paxos Prepare and Propose callbacks. Paxos Commit callback is a regular WriteCallbackInfo.
+            // INDEX_WRITE_BYTES is not tracked here: prepare/propose only write to system.paxos, which has no indexes.
+            else if (callbackInfo.callback instanceof AbstractPaxosCallback)
+            {
+                AbstractPaxosCallback<?> paxosCallback = (AbstractPaxosCallback<?>) callbackInfo.callback;
+                Context context = Context.from(paxosCallback.getMetadata());
+                incrementSensor(sensors, context, Type.READ_BYTES, message);
                 incrementSensor(sensors, context, Type.WRITE_BYTES, message);
-                incrementSensor(sensors, context, Type.INDEX_WRITE_BYTES, message);
-                sensors.incrementSensor(context, Type.INTERNODE_BYTES, internodeBytesPerTable);
+                incrementSensor(sensors, context, Type.INTERNODE_BYTES, message);
                 accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
             }
+            else
+                NoSpamLogger.log(logger, NoSpamLogger.Level.INFO, 1, MINUTES, "Ignored response callback {} for message {}, no sensors will be tracked.", callbackInfo.callback, message);
         }
-        else if (callbackInfo.callback instanceof ReadCallback)
+        catch (Throwable e)
         {
-            ReadCallback<?, ?> readCallback = (ReadCallback<?, ?>) callbackInfo.callback;
-            Context context = Context.from(readCallback.command());
-            incrementSensor(sensors, context, Type.READ_BYTES, message);
-            incrementSensor(sensors, context, Type.INTERNODE_BYTES, message);
-            accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.READ_EXECUTION_TIME, message);
-        }
-        // Covers Paxos Prepare and Propose callbacks. Paxos Commit callback is a regular WriteCallbackInfo.
-        // INDEX_WRITE_BYTES is not tracked here: prepare/propose only write to system.paxos, which has no indexes.
-        else if (callbackInfo.callback instanceof AbstractPaxosCallback)
-        {
-            AbstractPaxosCallback<?> paxosCallback = (AbstractPaxosCallback<?>) callbackInfo.callback;
-            Context context = Context.from(paxosCallback.getMetadata());
-            incrementSensor(sensors, context, Type.READ_BYTES, message);
-            incrementSensor(sensors, context, Type.WRITE_BYTES, message);
-            incrementSensor(sensors, context, Type.INTERNODE_BYTES, message);
-            accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
+            // Do not let sensor tracking break response handling:
+            NoSpamLogger.log(logger, NoSpamLogger.Level.ERROR, 1, MINUTES, "Error for response callback {} and message {}, no sensors will be tracked.", callbackInfo.callback, message, e);
         }
     }
 
