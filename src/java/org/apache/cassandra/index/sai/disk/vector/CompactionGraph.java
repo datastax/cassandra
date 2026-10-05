@@ -56,6 +56,7 @@ import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
 import io.github.jbellis.jvector.quantization.MutablePQVectors;
 import io.github.jbellis.jvector.quantization.NVQuantization;
+import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
@@ -531,8 +532,10 @@ public class CompactionGraph implements Closeable, Accountable
                 compressor.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
             else
             {
-                MutablePQVectors remappedPQCodes = maybeRemapPQCodes(rp);
-                remappedPQCodes.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
+                PQVectors pqCodes = rp.structure == Structure.ZERO_OR_ONE_TO_MANY
+                                    ? new RemappedPQVectors(compressedVectors, rp.ordinalMapper)
+                                    : compressedVectors;
+                pqCodes.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
             }
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 
@@ -623,30 +626,6 @@ public class CompactionGraph implements Closeable, Accountable
         }
     }
 
-    /**
-     * Returns the PQ codes to write, remapped to dense ordinals if needed.
-     * <p>
-     * For {@link Structure#ZERO_OR_ONE_TO_MANY}, the codes in {@link #compressedVectors} are indexed by
-     * old (sparse) ordinals with holes left by deleted vectors. This method returns a compact instance
-     * containing only the live codes renumbered to match the postings ordinals in {@code rp}.
-     * For other structures the numbering is already dense, so {@link #compressedVectors} is returned as-is.
-     */
-    private MutablePQVectors maybeRemapPQCodes(V5VectorPostingsWriter.RemappedPostings rp)
-    {
-        // No renumbering needed for ONE_TO_ONE and ONE_TO_MANY, because the numbering is already dense
-        if (rp.structure != Structure.ZERO_OR_ONE_TO_MANY)
-            return compressedVectors;
-
-        MutablePQVectors remappedCV = new MutablePQVectors(compressor);
-        int subspaceCount = compressedVectors.getCompressedSize();
-        for (int newOrdinal = 0; newOrdinal <= rp.maxNewOrdinal; newOrdinal++)
-        {
-            int oldOrdinal = rp.ordinalMapper.newToOld(newOrdinal);
-            remappedCV.setZero(newOrdinal);  // allocates the slot
-            remappedCV.get(newOrdinal).copyFrom(compressedVectors.get(oldOrdinal), 0, 0, subspaceCount);
-        }
-        return remappedCV;
-    }
 
     public long ramBytesUsed()
     {
