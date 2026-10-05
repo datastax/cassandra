@@ -165,6 +165,27 @@ ACME_SVC
   fi
 fi
 
+# ── Placeholder TLS secret (first install only) ───────────────────────────────
+# The Jenkins pod cannot start if the tls-cert volume references a non-existent
+# Secret, even with optional: true, when the pod spec was created before that
+# flag was applied.  Create a self-signed placeholder so the pod starts and
+# nginx can serve the HTTP-01 challenge; cert-manager overwrites it with the
+# real Let's Encrypt cert once issuance succeeds.
+if ! $DRY_RUN; then
+  if ! kubectl get secret cassius-jenkins-tls -n default &>/dev/null; then
+    echo "==> Creating placeholder TLS secret (will be replaced by cert-manager)..."
+    openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+      -keyout /tmp/cassius-tls-placeholder.key \
+      -out /tmp/cassius-tls-placeholder.crt \
+      -subj "/CN=placeholder" 2>/dev/null
+    kubectl create secret tls cassius-jenkins-tls \
+      --cert=/tmp/cassius-tls-placeholder.crt \
+      --key=/tmp/cassius-tls-placeholder.key \
+      -n default
+    rm -f /tmp/cassius-tls-placeholder.key /tmp/cassius-tls-placeholder.crt
+  fi
+fi
+
 # ── Handle StatefulSet immutability ──────────────────────────────────────────
 # Kubernetes StatefulSets are immutable for most spec fields (volumes, container
 # definitions).  Adding the nginx sidecar and its volumes requires deleting the

@@ -58,6 +58,15 @@ persistence:
     - name: nginx-tls-config
       configMap:
         name: cassius-jenkins-nginx
+        items:
+          - key: default.conf
+            path: default.conf
+    - name: nginx-main-config
+      configMap:
+        name: cassius-jenkins-nginx
+        items:
+          - key: nginx.conf
+            path: nginx.conf
 
 controller:
   # The chart reads nodeSelector, not node-selector.  jenkins-deployment.yaml
@@ -66,10 +75,23 @@ controller:
   nodeSelector:
     cassandra.jenkins.controller: "true"
 
-  # Expose port 443 on the LoadBalancer Service in addition to port 80.
-  # The NLB forwards 443 → pod:4443 (nginx sidecar below).
-  # 80 is kept open for ACME HTTP-01 renewal challenges.
-  additionalPorts:
+  # Jenkins listens on 8888 so the nginx sidecar can own port 8080.
+  # Setting servicePort changes the chart-rendered --httpPort arg, the
+  # containerPort named "http", the health probe port, and the default service
+  # targetPort in one shot.  We then expose port 80 and port 443 via
+  # additionalPorts pointing at the nginx sidecar ports (8080 and 4443).
+  servicePort: 8888
+  targetPort: 8888
+
+  # Expose port 80 (nginx HTTP / ACME challenge) and port 443 (nginx HTTPS)
+  # on the LoadBalancer Service.
+  # NLB: 80  → pod:8080 (nginx HTTP redirect + ACME)
+  # NLB: 443 → pod:4443 (nginx TLS termination → Jenkins 8888)
+  extraPorts:
+    - name: http-redirect
+      port: 80
+      targetPort: 8080
+      protocol: TCP
     - name: https
       port: 443
       targetPort: 4443
@@ -91,6 +113,10 @@ controller:
             readOnly: true
           - name: nginx-tls-config
             mountPath: /etc/nginx/conf.d
+            readOnly: true
+          - name: nginx-main-config
+            mountPath: /etc/nginx/nginx.conf
+            subPath: nginx.conf
             readOnly: true
         resources:
           requests:

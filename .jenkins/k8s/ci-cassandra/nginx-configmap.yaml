@@ -29,6 +29,35 @@ metadata:
   name: cassius-jenkins-nginx
   namespace: default
 data:
+  nginx.conf: |
+    # Run as non-root — suppress the "user" directive (nginx:alpine default
+    # includes "user nginx;" which errors when not started as root).
+    worker_processes  auto;
+
+    error_log  /var/log/nginx/error.log warn;
+    pid        /tmp/nginx.pid;
+
+    events {
+      worker_connections  1024;
+    }
+
+    http {
+      include       /etc/nginx/mime.types;
+      default_type  application/octet-stream;
+
+      # Redirect nginx temp dirs to /tmp so they are writable by a non-root user.
+      client_body_temp_path  /tmp/client_temp;
+      proxy_temp_path        /tmp/proxy_temp;
+      fastcgi_temp_path      /tmp/fastcgi_temp;
+      uwsgi_temp_path        /tmp/uwsgi_temp;
+      scgi_temp_path         /tmp/scgi_temp;
+
+      sendfile        on;
+      keepalive_timeout  65;
+
+      include /etc/nginx/conf.d/*.conf;
+    }
+
   default.conf: |
     # HTTP server — serves Let's Encrypt HTTP-01 challenge tokens on port 80.
     # cert-manager creates a ClusterIP solver service named cm-acme-http-solver-*
@@ -69,8 +98,9 @@ data:
       ssl_ciphers         HIGH:!aNULL:!MD5;
 
       # Proxy all HTTPS traffic to the Jenkins controller on localhost.
+      # Jenkins listens on 8888 (nginx owns 8080 for HTTP-01/redirect).
       location / {
-        proxy_pass          http://localhost:8080;
+        proxy_pass          http://localhost:8888;
         proxy_set_header    Host              $host;
         proxy_set_header    X-Real-IP         $remote_addr;
         proxy_set_header    X-Forwarded-For   $proxy_add_x_forwarded_for;
