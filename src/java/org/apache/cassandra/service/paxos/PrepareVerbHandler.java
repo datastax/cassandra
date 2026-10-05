@@ -51,7 +51,9 @@ public class PrepareVerbHandler implements IVerbHandler<Commit>
 
         // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor.
         // INDEX_WRITE_BYTES is not registered here because prepare only writes to system.paxos, which has no indexes.
+        // READ_EXECUTION_TIME tracks the system.paxos read time (loadPaxosState), transferred to user-table context.
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);

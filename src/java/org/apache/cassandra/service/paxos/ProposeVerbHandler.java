@@ -51,7 +51,9 @@ public class ProposeVerbHandler implements IVerbHandler<Commit>
 
         // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor.
         // INDEX_WRITE_BYTES is not registered here because propose only writes to system.paxos, which has no indexes.
+        // READ_EXECUTION_TIME tracks the system.paxos read time (loadPaxosState), transferred to user-table context.
         sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
         sensors.registerSensor(context, Type.WRITE_BYTES);
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
         sensors.registerSensor(context, Type.INTERNODE_BYTES);

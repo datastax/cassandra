@@ -598,14 +598,21 @@ public final class SystemKeyspace
 
     public static PaxosState loadPaxosState(DecoratedKey key, TableMetadata metadata, int nowInSec)
     {
-        // Track bytes read from the Paxos system table for the commit that initiated Paxos
+        // Track bytes and execution time for reading from system.paxos, staged under PaxosContext then
+        // transferred to the user-table context — consistent with how WRITE_BYTES is handled for paxos writes.
         registerPaxosSensor(Type.READ_BYTES);
+        registerPaxosSensor(Type.READ_EXECUTION_TIME);
 
         String req = "SELECT * FROM system.%s WHERE row_key = ? AND cf_id = ?";
+        long readStartNanos = System.nanoTime();
         UntypedResultSet results = QueryProcessor.executeInternalWithNow(nowInSec, System.nanoTime(), format(req, PAXOS), key.getKey(), metadata.id.asUUID());
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+            sensors.incrementSensor(PaxosContext, Type.READ_EXECUTION_TIME, System.nanoTime() - readStartNanos);
 
-        // transfer bytes read off of Paxos system table to the user table for the commit that initiated Paxos
+        // transfer read bytes and execution time from system.paxos to the user-table context
         transferPaxosSensorBytes(metadata, Type.READ_BYTES);
+        transferPaxosSensorBytes(metadata, Type.READ_EXECUTION_TIME);
 
         if (results.isEmpty())
             return new PaxosState(key, metadata);
