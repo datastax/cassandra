@@ -1,0 +1,9 @@
+apiVersion: v2
+name: cert-issuer
+description: |
+  Minimal chart that creates a Let's Encrypt ClusterIssuer and a Certificate
+  resource for the ci-cassandra Jenkins instance.  It is a thin wrapper so
+  that the ClusterIssuer and Certificate are managed by Helmfile alongside
+  cert-manager and Jenkins, rather than applied with ad-hoc kubectl commands.
+type: application
+version: 0.1.0

@@ -1,0 +1,87 @@
+---
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# nginx configuration for the TLS-terminating sidecar in the Jenkins pod.
+#
+# Applied separately from Helm because the Jenkins chart has no native support
+# for sidecar ConfigMaps.  The helmfile.yaml deploy script applies this before
+# running `helmfile apply`.
+#
+# To apply manually:
+#   kubectl apply -f nginx-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cassius-jenkins-nginx
+  namespace: default
+data:
+  default.conf: |
+    # HTTP server — serves Let's Encrypt HTTP-01 challenge tokens on port 80.
+    # cert-manager creates a ClusterIP solver service named cm-acme-http-solver-*
+    # in the default namespace on port 8089.  This server proxies the challenge
+    # path to that service so that the NLB's port-80 → pod-8080 flow can be
+    # intercepted here before reaching Jenkins.
+    #
+    # All other HTTP traffic is redirected to HTTPS.
+    server {
+      listen 8080;
+
+      # ACME HTTP-01 challenge path — proxy to cert-manager solver pod.
+      # cert-manager creates a solver pod with label
+      # acme.cert-manager.io/http01-solver=true on port 8089.
+      # A stable headless Service named "acme-solver" (created by deploy.sh)
+      # selects that pod by label, giving a fixed DNS name regardless of the
+      # random cm-acme-http-solver-* service name cert-manager generates.
+      location /.well-known/acme-challenge/ {
+        resolver kube-dns.kube-system.svc.cluster.local valid=10s;
+        set $acme_solver "acme-solver.default.svc.cluster.local";
+        proxy_pass http://$acme_solver:8089;
+        proxy_set_header Host $host;
+      }
+
+      # Redirect all other HTTP to HTTPS.
+      location / {
+        return 301 https://$host$request_uri;
+      }
+    }
+
+    # HTTPS server — TLS termination, proxies to Jenkins.
+    server {
+      listen 4443 ssl;
+
+      ssl_certificate     /etc/nginx/tls/tls.crt;
+      ssl_certificate_key /etc/nginx/tls/tls.key;
+      ssl_protocols       TLSv1.2 TLSv1.3;
+      ssl_ciphers         HIGH:!aNULL:!MD5;
+
+      # Proxy all HTTPS traffic to the Jenkins controller on localhost.
+      location / {
+        proxy_pass          http://localhost:8080;
+        proxy_set_header    Host              $host;
+        proxy_set_header    X-Real-IP         $remote_addr;
+        proxy_set_header    X-Forwarded-For   $proxy_add_x_forwarded_for;
+        # Tell Jenkins the original request was HTTPS so that it generates
+        # correct redirect URLs (e.g. after login).
+        proxy_set_header    X-Forwarded-Proto https;
+        proxy_read_timeout  90s;
+        proxy_send_timeout  90s;
+        # Jenkins sends large headers for JNLP agents; raise the buffer.
+        proxy_buffer_size        16k;
+        proxy_buffers            4 32k;
+        proxy_busy_buffers_size  64k;
+      }
+    }

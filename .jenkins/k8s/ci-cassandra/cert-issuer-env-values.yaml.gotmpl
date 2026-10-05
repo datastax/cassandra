@@ -1,0 +1,9 @@
+# Environment variable overrides for cert-issuer.
+# This file is rendered as a Go template by helmfile so that JENKINS_HOSTNAME
+# and ACME_EMAIL can be injected without editing cert-issuer-values.yaml.
+{{- if env "JENKINS_HOSTNAME" }}
+hostname: {{ env "JENKINS_HOSTNAME" | quote }}
+{{- end }}
+{{- if env "ACME_EMAIL" }}
+acmeEmail: {{ env "ACME_EMAIL" | quote }}
+{{- end }}

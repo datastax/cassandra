@@ -1,0 +1,50 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Helm values for the jetstack/cert-manager release.
+# https://artifacthub.io/packages/helm/cert-manager/cert-manager
+
+# Install the cert-manager CRDs as part of this Helm release so that
+# `helm upgrade` keeps them in sync with the chart version.
+crds:
+  enabled: true
+
+# Pin cert-manager to the controller node so the agent pools (which scale to
+# zero between builds) do not evict it mid-renewal.
+nodeSelector:
+  cassandra.jenkins.controller: "true"
+
+# Minimal resource requests; cert-manager is idle except during issuance/renewal.
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+webhook:
+  nodeSelector:
+    cassandra.jenkins.controller: "true"
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+
+cainjector:
+  nodeSelector:
+    cassandra.jenkins.controller: "true"
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi

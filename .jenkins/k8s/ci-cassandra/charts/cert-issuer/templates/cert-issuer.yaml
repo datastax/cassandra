@@ -1,0 +1,74 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+# ClusterIssuer — tells cert-manager how to talk to Let's Encrypt.
+#
+# Uses the HTTP-01 challenge: Let's Encrypt GETs
+#   http://<hostname>/.well-known/acme-challenge/<token>
+# The NLB already forwards port 80 to the Jenkins pod on port 8080, so the
+# challenge token is served by the temporary ACME solver pod that cert-manager
+# starts, reachable through the same path.
+#
+# The ClusterIssuer is cluster-scoped; the `namespace` field is ignored.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: cert-issuer
+    meta.helm.sh/release-namespace: default
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: {{ .Values.acmeEmail | quote }}
+    # Stores the ACME account private key.
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            # serviceType ClusterIP keeps the solver pod off the public load
+            # balancer; the NLB routes the challenge via the existing port-80
+            # path to the Jenkins Service, which the Kubernetes plugin rewrites
+            # temporarily during issuance.
+            serviceType: ClusterIP
+---
+# Certificate — the actual TLS certificate for the Jenkins hostname.
+#
+# cert-manager watches this resource, drives the HTTP-01 challenge, and writes
+# the resulting certificate + private key into .Values.secretName.  It renews
+# automatically ~30 days before expiry.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cassius-jenkins-tls
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: cert-issuer
+    meta.helm.sh/release-namespace: default
+spec:
+  secretName: {{ .Values.secretName | quote }}
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - {{ .Values.hostname | quote }}

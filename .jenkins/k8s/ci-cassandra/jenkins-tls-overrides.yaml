@@ -1,0 +1,101 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Site-specific Helm value overrides for a ci-cassandra Jenkins cluster.
+#
+# Applied as a second -f after jenkins-deployment.yaml so that the upstream
+# file stays unmodified and upgradable.  See jenkins-deployment.yaml's
+# "Upgrading an existing instance" section for the rationale.
+#
+# What this file adds:
+#   - nginx TLS sidecar that terminates HTTPS on port 4443 and proxies to
+#     Jenkins on localhost:8080.  The Let's Encrypt certificate is mounted
+#     from the Secret that cert-manager writes.
+#   - Port 443 on the LoadBalancer Service, forwarding to the sidecar's 4443.
+#   - nodeSelector fix: the chart reads `nodeSelector`, not `node-selector`.
+#
+# TLS flow:
+#   Browser → NLB:443 (TCP passthrough) → Jenkins pod:4443 (nginx) → localhost:8080 (Jenkins)
+#
+# The NLB on port 80 stays open for two reasons:
+#   1. Let's Encrypt HTTP-01 renewal challenges arrive on port 80.
+#   2. Jenkins agents connect on port 50000 (JNLP), which is already handled
+#      by the chart's agent Service and is not affected by this file.
+
+# storageClass is intentionally omitted: the existing PVC was created with
+# the cluster default (standard-rwo) and StorageClassName is immutable on a
+# bound PVC.  Set storageClass only when creating a fresh cluster.
+# persistence:
+#   storageClass: pd-ssd
+
+persistence:
+  # Pod-level volumes for the Jenkins StatefulSet, shared with the nginx sidecar.
+  # The Jenkins chart renders persistence.volumes into the pod spec.
+  # (controller.volumes uses the Jenkins-plugin volume format — not the same.)
+  volumes:
+    - name: tls-cert
+      secret:
+        # Name matches cert-issuer-values.yaml secretName.
+        # optional: true so the pod starts before cert-manager issues the cert
+        # on first install.  nginx won't serve HTTPS until the secret appears,
+        # but the pod starts and the HTTP-01 challenge can complete; kubelet
+        # then picks up the populated secret without a pod restart.
+        secretName: cassius-jenkins-tls
+        optional: true
+    - name: nginx-tls-config
+      configMap:
+        name: cassius-jenkins-nginx
+
+controller:
+  # The chart reads nodeSelector, not node-selector.  jenkins-deployment.yaml
+  # uses node-selector (which the chart ignores silently), so the controller
+  # can land on an agent node the autoscaler then drains.  This key pins it.
+  nodeSelector:
+    cassandra.jenkins.controller: "true"
+
+  # Expose port 443 on the LoadBalancer Service in addition to port 80.
+  # The NLB forwards 443 → pod:4443 (nginx sidecar below).
+  # 80 is kept open for ACME HTTP-01 renewal challenges.
+  additionalPorts:
+    - name: https
+      port: 443
+      targetPort: 4443
+      protocol: TCP
+
+  # nginx TLS-terminating sidecar.
+  # Reads the Let's Encrypt cert from the cassius-jenkins-tls Secret (written
+  # by cert-manager) and proxies HTTPS → http://localhost:8080.
+  sidecars:
+    additionalSidecarContainers:
+      - name: nginx-tls
+        image: nginx:alpine
+        ports:
+          - name: https
+            containerPort: 4443
+        volumeMounts:
+          - name: tls-cert
+            mountPath: /etc/nginx/tls
+            readOnly: true
+          - name: nginx-tls-config
+            mountPath: /etc/nginx/conf.d
+            readOnly: true
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi

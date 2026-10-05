@@ -1,0 +1,4 @@
+# Default values — override via cert-issuer-values.yaml in the parent directory.
+acmeEmail: "change-me@example.com"
+hostname: "ci-cassandra.example.com"
+secretName: "cassius-jenkins-tls"
