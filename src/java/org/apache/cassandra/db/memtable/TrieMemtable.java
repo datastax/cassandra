@@ -756,12 +756,13 @@ public class TrieMemtable extends AbstractShardedMemtable
                                                       opGroup,
                                                       updater);
                     partitionCount += partitionsAdded;
+                    // A failed merge leaves the trie unchanged, so its partial size change must not be applied.
+                    updateLiveDataSize(updater.dataSize);
                 }
                 finally
                 {
                     indexer.commit();
                     updateMinTimestamp(update.stats().minTimestamp);
-                    updateLiveDataSize(updater.dataSize);
                     updateCurrentOperations(update.operationCount());
 
                     columns = columns.mergeTo(update.columns());
