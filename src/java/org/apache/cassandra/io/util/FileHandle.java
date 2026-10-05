@@ -469,16 +469,7 @@ public class FileHandle extends SharedCloseableImpl
         {
             ChannelProxy channel = null;
             MmappedRegions regions = null;
-            checkState(!encryptionOnly || (this.compressionMetadata != null
-                                           && this.compressionMetadata.compressor() != null
-                                           && this.compressionMetadata.compressor().encryptionOnly() != null),
-                       "%s is marked as encryption-only but its compression metadata has no encrypting compressor " +
-                       "(compression parameters: %s)",
-                       file, this.compressionMetadata == null ? null : this.compressionMetadata.parameters);
-            checkState(encryptionOnly || this.compressionMetadata == null || !this.compressionMetadata.isEncryptionOnly(),
-                       "%s has encryption-only compression metadata but is not marked as encryption-only " +
-                       "(see FileHandle.Builder.encryptionOnly())",
-                       file);
+            checkEncryptionOnly();
 
             CompressionMetadata compressionMetadata = null;
             try
@@ -576,6 +567,23 @@ public class FileHandle extends SharedCloseableImpl
                 Throwables.closeNonNullAndAddSuppressed(t, regions, channel, compressionMetadata);
                 throw t;
             }
+        }
+
+        /**
+         * Checks that the {@link #encryptionOnly()} flag and the compression metadata agree.
+         */
+        private void checkEncryptionOnly()
+        {
+            checkState(!encryptionOnly || (compressionMetadata != null
+                                           && compressionMetadata.compressor() != null
+                                           && compressionMetadata.compressor().encryptionOnly() != null),
+                       "%s is marked as encryption-only but its compression metadata has no encrypting compressor " +
+                       "(compression parameters: %s)",
+                       file, compressionMetadata == null ? null : compressionMetadata.parameters);
+            checkState(encryptionOnly || compressionMetadata == null || !compressionMetadata.isEncryptionOnly(),
+                       "%s has encryption-only compression metadata but is not marked as encryption-only " +
+                       "(see FileHandle.Builder.encryptionOnly())",
+                       file);
         }
 
         private RebuffererFactory maybeCached(ChunkReader reader)

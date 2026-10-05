@@ -216,25 +216,32 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
                     }
                     catch (Throwable ex)
                     {
-                        // A failed periodic early open is not fatal: the readers staged since the last checkpoint
-                        // (this one, and the clones with moved starts) are released and the tracker keeps the
-                        // previous view, which is complete. The final early open in switchWriter is different, see there.
-                        ex = transaction.abortCheckpoint(ex);
-                        // update() stages nothing when it throws; the reader is then still ours to release
-                        if (!staged)
-                            ex = reader.selfRef().ensureReleased(ex);
-                        logger.debug("Aborted early opening attempt of {} due to error", reader.descriptor, ex);
-                        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
-                                         "Aborted early opening attempt of {} due to error", reader.descriptor, ex);
-                        // Last, as it rethrows some errors (e.g. OutOfMemoryError, or an interruption found in the
-                        // cause chain); it also applies the disk failure policy to FSError and CorruptSSTableException.
-                        JVMStabilityInspector.inspectThrowable(ex);
+                        abortEarlyOpen(reader, staged, ex);
                         return;
                     }
                     transaction.checkpoint();
                 });
             }
         }
+    }
+
+    /**
+     * A failed periodic early open is not fatal (unless {@link JVMStabilityInspector} rethrows the error): the readers
+     * staged since the last checkpoint ({@code reader}, and the clones with moved starts) are released and the tracker
+     * keeps the previous view, which is complete. The final early open in switchWriter is different, see there.
+     */
+    private void abortEarlyOpen(SSTableReader reader, boolean staged, Throwable ex)
+    {
+        ex = transaction.abortCheckpoint(ex);
+        // update() stages nothing when it throws; the reader is then still ours to release
+        if (!staged)
+            ex = reader.selfRef().ensureReleased(ex);
+        logger.debug("Aborted early opening attempt of {} due to error", reader.descriptor, ex);
+        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                         "Aborted early opening attempt of {} due to error", reader.descriptor, ex);
+        // Last, as it rethrows some errors (e.g. OutOfMemoryError, or an interruption found in the
+        // cause chain); it also applies the disk failure policy to FSError and CorruptSSTableException.
+        JVMStabilityInspector.inspectThrowable(ex);
     }
 
     protected Throwable doAbort(Throwable accumulate)

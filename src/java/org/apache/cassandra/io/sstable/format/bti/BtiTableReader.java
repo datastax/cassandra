@@ -158,10 +158,7 @@ public class BtiTableReader extends SSTableReaderWithFilter
             try (PartitionIndex.Reader reader = partitionIndex.openReader())
             {
                 TrieIndexEntry rie = reader.ceiling(searchKey, (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch));
-                if (rie != null)
-                    notifySelected(SelectionReason.INDEX_ENTRY_FOUND, listener, operator, updateStats, rie);
-                else
-                    notifySkipped(SkippingReason.INDEX_ENTRY_NOT_FOUND, listener, operator, updateStats);
+                notifyIndexEntryLookup(rie, listener, operator, updateStats);
                 return rie;
             }
             catch (IOException | CorruptSSTableException e)
@@ -173,6 +170,14 @@ public class BtiTableReader extends SSTableReaderWithFilter
         }
 
         throw new IllegalArgumentException("Invalid op: " + operator);
+    }
+
+    private void notifyIndexEntryLookup(TrieIndexEntry rie, SSTableReadsListener listener, Operator operator, boolean updateStats)
+    {
+        if (rie != null)
+            notifySelected(SelectionReason.INDEX_ENTRY_FOUND, listener, operator, updateStats, rie);
+        else
+            notifySkipped(SkippingReason.INDEX_ENTRY_NOT_FOUND, listener, operator, updateStats);
     }
 
     private TrieIndexEntry getApproximatePosition(PartitionPosition key, Operator op, boolean isLeftBound)
