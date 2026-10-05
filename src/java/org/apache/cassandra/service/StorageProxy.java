@@ -512,7 +512,7 @@ public class StorageProxy implements StorageProxyMBean
         sensors.registerSensor(context, Type.READ_BYTES);  // tracks user table + system.paxos read bytes (see comment above)
         sensors.registerSensor(context, Type.INDEX_WRITE_BYTES); // track secondary index write bytes on commit
         sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME); // tracks Prepare + Propose + Commit execution time across all replicas
-        sensors.registerSensor(context, Type.READ_EXECUTION_TIME); // tracks the CAS precondition read (readOne at QUORUM/LOCAL_QUORUM) execution time
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME); // tracks system.paxos read time (Prepare/Propose phases) + CAS precondition read (readOne at QUORUM/LOCAL_QUORUM)
         Context requestContext = Context.from(sensors);
         sensors.registerSensor(requestContext, Type.READ_COST);
         sensors.registerSensor(requestContext, Type.WRITE_COST);

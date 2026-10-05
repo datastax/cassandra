@@ -247,9 +247,11 @@ public class CoordinatorWriteSensorsTest
      * {@link org.apache.cassandra.net.ResponseVerbHandler} into the coordinator's
      * {@link Type#WRITE_EXECUTION_TIME} sensor. The sensor must gain at least 50 ms.
      * <p>
-     * Additionally, the CAS precondition read (executed at QUORUM/LOCAL_QUORUM after the Paxos rounds)
-     * contributes to {@link Type#READ_EXECUTION_TIME}, which is also registered on the coordinator
-     * so that the data-fetch replica time is not silently dropped.
+     * {@link Type#READ_EXECUTION_TIME} is populated by two sources: the {@code system.paxos} read
+     * inside {@code loadPaxosState()} (measured in {@code PrepareVerbHandler} / {@code ProposeVerbHandler}
+     * and accumulated via {@link org.apache.cassandra.net.ResponseVerbHandler}), and the CAS precondition
+     * read (executed locally at QUORUM/LOCAL_QUORUM after the Paxos rounds via {@code ReadCallback}).
+     * Both paths contribute, so the sensor must be {@code > 0}.
      */
     @Test
     @BMRule(name = "sleep 50ms in PaxosState.commit to force write execution time >= 50ms (CAS)",
@@ -275,9 +277,10 @@ public class CoordinatorWriteSensorsTest
         Sensor registryWriteExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_EXECUTION_TIME).get();
         assertThat(registryWriteExecTime.getValue()).as("registry WRITE_EXECUTION_TIME must equal request sensor").isEqualTo(writeExecTime);
 
-        // The CAS precondition read (readOne at QUORUM after Paxos rounds) must also populate READ_EXECUTION_TIME.
+        // READ_EXECUTION_TIME is populated by both the system.paxos reads (Prepare/Propose phases) and
+        // the CAS precondition read (readOne at QUORUM after Paxos rounds).
         double readExecTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).get().getValue();
-        assertThat(readExecTime).as("READ_EXECUTION_TIME must be > 0 for CAS (precondition read executed locally)").isGreaterThan(0.0);
+        assertThat(readExecTime).as("READ_EXECUTION_TIME must be > 0 for CAS (paxos read phase + precondition read)").isGreaterThan(0.0);
         Sensor registryReadExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_EXECUTION_TIME).get();
         assertThat(registryReadExecTime.getValue()).as("registry READ_EXECUTION_TIME must equal request sensor").isEqualTo(readExecTime);
 

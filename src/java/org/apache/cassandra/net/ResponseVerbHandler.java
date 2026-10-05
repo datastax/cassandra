@@ -126,6 +126,7 @@ public class ResponseVerbHandler implements IVerbHandler
         }
         // Covers Paxos Prepare and Propose callbacks. Paxos Commit callback is a regular WriteCallbackInfo.
         // INDEX_WRITE_BYTES is not tracked here: prepare/propose only write to system.paxos, which has no indexes.
+        // READ_EXECUTION_TIME tracks the system.paxos read time (loadPaxosState) measured in the verb handler.
         else if (callbackInfo.callback instanceof AbstractPaxosCallback)
         {
             AbstractPaxosCallback<?> paxosCallback = (AbstractPaxosCallback<?>) callbackInfo.callback;
@@ -134,6 +135,7 @@ public class ResponseVerbHandler implements IVerbHandler
             incrementSensor(sensors, context, Type.WRITE_BYTES, message);
             incrementSensor(sensors, context, Type.INTERNODE_BYTES, message);
             accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
+            accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.READ_EXECUTION_TIME, message);
         }
     }
 
