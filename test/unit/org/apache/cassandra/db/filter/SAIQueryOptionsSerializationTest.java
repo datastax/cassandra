@@ -24,19 +24,19 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
 
-import static org.apache.cassandra.db.filter.SaiQueryOptions.SAI_HYBRID_SORT_ORDER;
-import static org.apache.cassandra.db.filter.SaiQueryOptions.SAI_INTERSECTION_CLAUSE_LIMIT;
-import static org.apache.cassandra.db.filter.SaiQueryOptions.SAI_QUERY_OPTIMIZATION_LEVEL;
-import static org.apache.cassandra.db.filter.SaiQueryOptions.SAI_USE_TERM_STATISTICS;
+import static org.apache.cassandra.db.filter.SAIQueryOptions.SAI_HYBRID_SORT_ORDER;
+import static org.apache.cassandra.db.filter.SAIQueryOptions.SAI_INTERSECTION_CLAUSE_LIMIT;
+import static org.apache.cassandra.db.filter.SAIQueryOptions.SAI_QUERY_OPTIMIZATION_LEVEL;
+import static org.apache.cassandra.db.filter.SAIQueryOptions.SAI_USE_TERM_STATISTICS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Verifies that {@link SaiQueryOptions.Serializer} round-trips correctly at VERSION_DS_20
+ * Verifies that {@link SAIQueryOptions.Serializer} round-trips correctly at VERSION_DS_20
  * and degrades gracefully (returns NONE) for older messaging versions.
  */
-public class SaiQueryOptionsSerializationTest
+public class SAIQueryOptionsSerializationTest
 {
-    private static final SaiQueryOptions.Serializer serializer = SaiQueryOptions.serializer;
+    private static final SAIQueryOptions.Serializer serializer = SAIQueryOptions.serializer;
 
     // -------------------------------------------------------------------------
     // Round-trip at current version
@@ -45,13 +45,13 @@ public class SaiQueryOptionsSerializationTest
     @Test
     public void testNoneRoundTrip() throws IOException
     {
-        assertRoundTrip(SaiQueryOptions.NONE);
+        assertRoundTrip(SAIQueryOptions.NONE);
     }
 
     @Test
     public void testAllOptionsRoundTrip() throws IOException
     {
-        SaiQueryOptions opts = SaiQueryOptions.fromMap(Map.of(
+        SAIQueryOptions opts = SAIQueryOptions.fromMap(Map.of(
                 SAI_QUERY_OPTIMIZATION_LEVEL, "0",
                 SAI_INTERSECTION_CLAUSE_LIMIT, "7",
                 SAI_USE_TERM_STATISTICS, "false",
@@ -62,28 +62,28 @@ public class SaiQueryOptionsSerializationTest
     @Test
     public void testOptLevelOnlyRoundTrip() throws IOException
     {
-        assertRoundTrip(SaiQueryOptions.fromMap(Map.of(SAI_QUERY_OPTIMIZATION_LEVEL, "1")));
+        assertRoundTrip(SAIQueryOptions.fromMap(Map.of(SAI_QUERY_OPTIMIZATION_LEVEL, "1")));
     }
 
     @Test
     public void testIntersectionClauseLimitOnlyRoundTrip() throws IOException
     {
-        assertRoundTrip(SaiQueryOptions.fromMap(Map.of(SAI_INTERSECTION_CLAUSE_LIMIT, "10")));
+        assertRoundTrip(SAIQueryOptions.fromMap(Map.of(SAI_INTERSECTION_CLAUSE_LIMIT, "10")));
     }
 
     @Test
     public void testUseTermStatisticsOnlyRoundTrip() throws IOException
     {
-        assertRoundTrip(SaiQueryOptions.fromMap(Map.of(SAI_USE_TERM_STATISTICS, "true")));
-        assertRoundTrip(SaiQueryOptions.fromMap(Map.of(SAI_USE_TERM_STATISTICS, "false")));
+        assertRoundTrip(SAIQueryOptions.fromMap(Map.of(SAI_USE_TERM_STATISTICS, "true")));
+        assertRoundTrip(SAIQueryOptions.fromMap(Map.of(SAI_USE_TERM_STATISTICS, "false")));
     }
 
     @Test
     public void testHybridSortOrderRoundTrip() throws IOException
     {
-        for (SaiQueryOptions.HybridSortOrder order : SaiQueryOptions.HybridSortOrder.values())
+        for (SAIQueryOptions.HybridSortOrder order : SAIQueryOptions.HybridSortOrder.values())
         {
-            SaiQueryOptions opts = SaiQueryOptions.fromMap(Map.of(SAI_HYBRID_SORT_ORDER, order.name()));
+            SAIQueryOptions opts = SAIQueryOptions.fromMap(Map.of(SAI_HYBRID_SORT_ORDER, order.name()));
             assertRoundTrip(opts);
         }
     }
@@ -98,20 +98,20 @@ public class SaiQueryOptionsSerializationTest
         // NONE should serialize to zero bytes and deserialize back to NONE at old versions
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            serializer.serialize(SaiQueryOptions.NONE, out, MessagingService.VERSION_DS_12);
-            assertThat(serializer.serializedSize(SaiQueryOptions.NONE, MessagingService.VERSION_DS_12)).isEqualTo(0);
+            serializer.serialize(SAIQueryOptions.NONE, out, MessagingService.VERSION_DS_12);
+            assertThat(serializer.serializedSize(SAIQueryOptions.NONE, MessagingService.VERSION_DS_12)).isEqualTo(0);
             assertThat(out.buffer().remaining()).isEqualTo(0);
 
             DataInputBuffer in = new DataInputBuffer(out.buffer(), true);
-            SaiQueryOptions result = serializer.deserialize(in, MessagingService.VERSION_DS_12);
-            assertThat(result).isSameAs(SaiQueryOptions.NONE);
+            SAIQueryOptions result = serializer.deserialize(in, MessagingService.VERSION_DS_12);
+            assertThat(result).isSameAs(SAIQueryOptions.NONE);
         }
     }
 
     @Test
     public void testOptionsThrowAtOlderVersionWhenNonNone()
     {
-        SaiQueryOptions opts = SaiQueryOptions.fromMap(Map.of(SAI_QUERY_OPTIMIZATION_LEVEL, "0"));
+        SAIQueryOptions opts = SAIQueryOptions.fromMap(Map.of(SAI_QUERY_OPTIMIZATION_LEVEL, "0"));
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -128,20 +128,20 @@ public class SaiQueryOptionsSerializationTest
     @Test
     public void testSerializedSizeMatchesBytesWritten() throws IOException
     {
-        SaiQueryOptions[] cases = {
-                SaiQueryOptions.NONE,
-                SaiQueryOptions.fromMap(Map.of(SAI_QUERY_OPTIMIZATION_LEVEL, "0")),
-                SaiQueryOptions.fromMap(Map.of(SAI_INTERSECTION_CLAUSE_LIMIT, "3")),
-                SaiQueryOptions.fromMap(Map.of(SAI_USE_TERM_STATISTICS, "true")),
-                SaiQueryOptions.fromMap(Map.of(SAI_HYBRID_SORT_ORDER, "sort_then_filter")),
-                SaiQueryOptions.fromMap(Map.of(
+        SAIQueryOptions[] cases = {
+                SAIQueryOptions.NONE,
+                SAIQueryOptions.fromMap(Map.of(SAI_QUERY_OPTIMIZATION_LEVEL, "0")),
+                SAIQueryOptions.fromMap(Map.of(SAI_INTERSECTION_CLAUSE_LIMIT, "3")),
+                SAIQueryOptions.fromMap(Map.of(SAI_USE_TERM_STATISTICS, "true")),
+                SAIQueryOptions.fromMap(Map.of(SAI_HYBRID_SORT_ORDER, "sort_then_filter")),
+                SAIQueryOptions.fromMap(Map.of(
                         SAI_QUERY_OPTIMIZATION_LEVEL, "1",
                         SAI_INTERSECTION_CLAUSE_LIMIT, "5",
                         SAI_USE_TERM_STATISTICS, "false",
                         SAI_HYBRID_SORT_ORDER, "auto")),
         };
 
-        for (SaiQueryOptions opts : cases)
+        for (SAIQueryOptions opts : cases)
         {
             try (DataOutputBuffer out = new DataOutputBuffer())
             {
@@ -157,7 +157,7 @@ public class SaiQueryOptionsSerializationTest
     // helper
     // -------------------------------------------------------------------------
 
-    private static void assertRoundTrip(SaiQueryOptions expected) throws IOException
+    private static void assertRoundTrip(SAIQueryOptions expected) throws IOException
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
@@ -166,7 +166,7 @@ public class SaiQueryOptionsSerializationTest
                     .isEqualTo((int) serializer.serializedSize(expected, MessagingService.VERSION_DS_20));
 
             DataInputBuffer in = new DataInputBuffer(out.buffer(), true);
-            SaiQueryOptions actual = serializer.deserialize(in, MessagingService.VERSION_DS_20);
+            SAIQueryOptions actual = serializer.deserialize(in, MessagingService.VERSION_DS_20);
             assertThat(actual).isEqualTo(expected);
         }
     }

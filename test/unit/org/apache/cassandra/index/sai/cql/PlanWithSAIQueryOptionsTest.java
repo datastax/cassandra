@@ -19,10 +19,9 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.filter.SaiQueryOptions;
+import org.apache.cassandra.db.filter.SAIQueryOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 
@@ -33,23 +32,23 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Verifies:
  * <ul>
- *   <li>Valid options parse and are stored in the {@link SaiQueryOptions} on the {@code RowFilter}.</li>
+ *   <li>Valid options parse and are stored in the {@link SAIQueryOptions} on the {@code RowFilter}.</li>
  *   <li>Invalid keys and out-of-range values are rejected at prepare time.</li>
  *   <li>{@code sai_query_optimization_level=0} disables the optimizer for that query only,
- *       without mutating the global {@link QueryController#QUERY_OPT_LEVEL}.</li>
+ *       without mutating the global {@link CassandraRelevantProperties#SAI_QUERY_OPT_LEVEL}.</li>
  *   <li>{@code sai_intersection_clause_limit} and {@code sai_use_term_statistics} are wired
  *       through to the effective values the controller reads.</li>
- *   <li>The global statics are never mutated by per-query options (thread isolation).</li>
+ *   <li>The global properties are never mutated by per-query options (thread isolation).</li>
  * </ul>
  */
-public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
+public class PlanWithSAIQueryOptionsTest extends SAITester
 {
     // -------------------------------------------------------------------------
     // Parsing and validation
     // -------------------------------------------------------------------------
 
     @Test
-    public void testValidQueryOptionsAreParsedAndStored() throws Throwable
+    public void testValidQueryOptionsAreParsedAndStored()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
@@ -65,27 +64,27 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
         disablePreparedReuseForTest();
         ReadCommand command = parseReadCommand(query);
 
-        SaiQueryOptions opts = command.rowFilter().queryOptions;
-        assertThat(opts).isNotSameAs(SaiQueryOptions.NONE);
+        SAIQueryOptions opts = command.rowFilter().queryOptions;
+        assertThat(opts).isNotSameAs(SAIQueryOptions.NONE);
         assertThat(opts.queryOptimizationLevel).isEqualTo(0);
         assertThat(opts.intersectionClauseLimit).isEqualTo(5);
         assertThat(opts.useTermStatistics).isFalse();
-        assertThat(opts.hybridSortOrder).isEqualTo(SaiQueryOptions.HybridSortOrder.SORT_THEN_FILTER);
+        assertThat(opts.hybridSortOrder).isEqualTo(SAIQueryOptions.HybridSortOrder.SORT_THEN_FILTER);
     }
 
     @Test
-    public void testAbsentQueryOptionsResultsInNone() throws Throwable
+    public void testAbsentQueryOptionsResultsInNone()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         disablePreparedReuseForTest();
         ReadCommand command = parseReadCommand(formatQuery("SELECT * FROM %s WHERE v = 1"));
-        assertThat(command.rowFilter().queryOptions).isSameAs(SaiQueryOptions.NONE);
+        assertThat(command.rowFilter().queryOptions).isSameAs(SAIQueryOptions.NONE);
     }
 
     @Test
-    public void testUnknownQueryOptionKeyIsRejected() throws Throwable
+    public void testUnknownQueryOptionKeyIsRejected()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         assertInvalidThrowMessage("Unknown SAI query option: bad_key",
@@ -94,7 +93,7 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
     }
 
     @Test
-    public void testOutOfRangeOptimizationLevelIsRejected() throws Throwable
+    public void testOutOfRangeOptimizationLevelIsRejected()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         assertInvalidThrowMessage("sai_query_optimization_level",
@@ -103,7 +102,7 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
     }
 
     @Test
-    public void testZeroIntersectionClauseLimitIsRejected() throws Throwable
+    public void testZeroIntersectionClauseLimitIsRejected()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         assertInvalidThrowMessage("sai_intersection_clause_limit",
@@ -112,7 +111,7 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
     }
 
     @Test
-    public void testInvalidHybridSortOrderIsRejected() throws Throwable
+    public void testInvalidHybridSortOrderIsRejected()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         assertInvalidThrowMessage("sai_hybrid_sort_order",
@@ -125,7 +124,7 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
     // -------------------------------------------------------------------------
 
     @Test
-    public void testOptLevelZeroDisablesOptimizerForThatQueryOnly() throws Throwable
+    public void testOptLevelZeroDisablesOptimizerForThatQueryOnly()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 text, v2 text)");
         String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
@@ -141,7 +140,7 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
         }
 
         // Sanity: with optimizer ON (level=1), the more selective index is chosen.
-        assertThat(QueryController.QUERY_OPT_LEVEL).isEqualTo(1);
+        assertThat(CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.getInt()).isEqualTo(1);
 
         beforeAndAfterFlush(() -> {
             // With optimizer, idx1 (more selective) should win for a v1 AND v2 query.
@@ -155,12 +154,12 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
             assertThat(rowsReturned).isEqualTo(2);
 
             // The global must not have been mutated.
-            assertThat(QueryController.QUERY_OPT_LEVEL).isEqualTo(1);
+            assertThat(CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.getInt()).isEqualTo(1);
         });
     }
 
     @Test
-    public void testOptLevelOneExplicitlyMatchesDefaultBehaviour() throws Throwable
+    public void testOptLevelOneExplicitlyMatchesDefaultBehaviour()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 text, v2 text)");
         String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
@@ -179,7 +178,7 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
     // -------------------------------------------------------------------------
 
     @Test
-    public void testIntersectionClauseLimitStoredOnRowFilter() throws Throwable
+    public void testIntersectionClauseLimitStoredOnRowFilter()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
@@ -199,7 +198,7 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
     // -------------------------------------------------------------------------
 
     @Test
-    public void testUseTermStatisticsStoredOnRowFilter() throws Throwable
+    public void testUseTermStatisticsStoredOnRowFilter()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
@@ -209,8 +208,8 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
                 formatQuery("SELECT * FROM %s WHERE v = 1 WITH query_options = {'sai_use_term_statistics': 'false'}"));
 
         assertThat(command.rowFilter().queryOptions.useTermStatistics).isFalse();
-        // Global must be unchanged.
-        assertThat(QueryController.QUERY_OPT_USE_TERM_STATS).isTrue();
+        // Global must be unchanged (default is true as set by SAITester.resetQueryOptimizationLevel).
+        assertThat(CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean()).isTrue();
     }
 
     // -------------------------------------------------------------------------
@@ -218,14 +217,14 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
     // -------------------------------------------------------------------------
 
     @Test
-    public void testPerQueryOptionsDoNotMutateGlobals() throws Throwable
+    public void testPerQueryOptionsDoNotMutateGlobals()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         execute("INSERT INTO %s (k, v) VALUES (1, 42)");
 
-        int globalOptLevel = QueryController.QUERY_OPT_LEVEL;
-        boolean globalUseTermStats = QueryController.QUERY_OPT_USE_TERM_STATS;
+        int globalOptLevel = CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.getInt();
+        boolean globalUseTermStats = CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean();
         int globalIntersectionLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
 
         // Execute a query with all overrides set to non-default values.
@@ -237,9 +236,9 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
                 "'sai_use_term_statistics': 'false'" +
                 "}");
 
-        // Globals must be unchanged after query execution.
-        assertThat(QueryController.QUERY_OPT_LEVEL).isEqualTo(globalOptLevel);
-        assertThat(QueryController.QUERY_OPT_USE_TERM_STATS).isEqualTo(globalUseTermStats);
+        // Global properties must be unchanged after query execution.
+        assertThat(CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.getInt()).isEqualTo(globalOptLevel);
+        assertThat(CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean()).isEqualTo(globalUseTermStats);
         assertThat(CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt()).isEqualTo(globalIntersectionLimit);
     }
 
@@ -248,7 +247,7 @@ public class PlanWithSaiQueryOptionsTest extends SAITester.Versioned
     // -------------------------------------------------------------------------
 
     @Test
-    public void testEffectiveValuesReflectPerQueryOptions() throws Throwable
+    public void testEffectiveValuesReflectPerQueryOptions()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");

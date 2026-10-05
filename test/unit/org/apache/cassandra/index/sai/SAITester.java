@@ -62,6 +62,7 @@ import com.datastax.driver.core.QueryTrace;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.exceptions.ReadFailureException;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -247,9 +248,8 @@ public class SAITester extends CQLTester
     public void resetQueryOptimizationLevel() throws Throwable
     {
         // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
-        QueryController.QUERY_OPT_LEVEL = 1;
-        QueryController.QUERY_OPT_USE_TERM_STATS = true;
-
+        CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.setInt(1);
+        CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.setBoolean(true);
     }
 
     @Before
@@ -1068,7 +1068,7 @@ public class SAITester extends CQLTester
 
     public void disableQueryOptimization()
     {
-        QueryController.QUERY_OPT_LEVEL = 0;
+        CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.setInt(0);
     }
 
     /**

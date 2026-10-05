@@ -26,7 +26,7 @@ import com.google.common.collect.ImmutableSet;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.IndexHints;
-import org.apache.cassandra.db.filter.SaiQueryOptions;
+import org.apache.cassandra.db.filter.SAIQueryOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.index.Index;
@@ -105,11 +105,11 @@ public class SelectOptions extends PropertyDefinitions
         return IndexHints.fromCQLNames(included, excluded, table, indexRegistry);
     }
 
-    public SaiQueryOptions parseQueryOptions()
+    public SAIQueryOptions parseQueryOptions()
     {
         Map<String, String> options = getMap(QUERY_OPTIONS);
         return options == null
-               ? SaiQueryOptions.NONE
-               : SaiQueryOptions.fromMap(options);
+               ? SAIQueryOptions.NONE
+               : SAIQueryOptions.fromMap(options);
     }
 }

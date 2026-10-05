@@ -37,6 +37,7 @@ import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
 
@@ -108,7 +109,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
                 useTermStatsTestedValues = new boolean[]{ true, false };
             for (boolean useTermStats : useTermStatsTestedValues)
             {
-                QueryController.QUERY_OPT_USE_TERM_STATS = useTermStats;
+                CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.setBoolean(useTermStats);
 
                 RowCountTest test = new RowCountTest(Operator.NEQ, 25);
                 test.doTest(version, INT, 95, 100);
