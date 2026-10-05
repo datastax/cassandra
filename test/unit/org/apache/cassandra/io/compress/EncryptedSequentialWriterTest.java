@@ -209,12 +209,15 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
                                   .complete();
              RandomAccessReader reader = fh.createReader())
         {
-            // No longer true: assertEquals(dataPre.length + rawPost.length, reader.length());
+            // length() is a file position, which counts the holes; bytesRemaining() does not
+            assertEquals(dataPre.length + rawPost.length, reader.bytesRemaining());
             byte[] result = new byte[dataPre.length + rawPost.length];
 
             reader.readFully(result);
 
-            // Encrypted writer does not guarantee assert(reader.isEOF());
+            // the length of a file opened without a length override is the end of the data in its last chunk
+            assertTrue(reader.isEOF());
+            assertEquals(-1, reader.read());
             reader.close();
 
             byte[] fullInput = new byte[bytesToTest * 2];

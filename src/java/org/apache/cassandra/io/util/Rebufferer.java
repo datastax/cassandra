@@ -30,6 +30,12 @@ public interface Rebufferer extends ReaderFileProxy
      * The only guarantee about the size of the returned data is that unless rebuffering at the end of the file,
      * the buffer will not be empty and will contain the requested position, i.e.
      * {@code offset <= position < offset + bh.buffer().limit()}, but the buffer will not be positioned there.
+     * <p>
+     * The buffer may hold data past {@link #fileLength()}: chunks are read in full, and cached chunks and mapped
+     * regions are shared by the handles of a file, which may have different lengths (e.g. early-open readers).
+     * Readers must not read past {@link #fileLength()}; {@link RandomAccessReader} limits its view of the buffer to it.
+     * Trie walkers ({@link org.apache.cassandra.io.tries.Walker}) do not: they only follow positions recorded by the
+     * writer, which are before the length.
      */
     BufferHolder rebuffer(long position);
 

@@ -49,6 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class CompressedRandomAccessReaderTest
@@ -141,6 +142,68 @@ public class CompressedRandomAccessReaderTest
             File metadata = new File(filename+ ".metadata");
             if (metadata.exists())
                 metadata.tryDelete();
+        }
+    }
+
+    /**
+     * An early-open reader of a compressed file has a length (the data length of its compression metadata) in the
+     * middle of a chunk, which is decompressed in full: reads and skips stop at length(), bytesRemaining() is the
+     * number of bytes reads return, and seeking past length() is an error.
+     */
+    @Test
+    public void testReadsStopAtMidChunkLength() throws IOException
+    {
+        int chunkLength = 4096;
+        long length = chunkLength + 50;
+        File f = FileUtils.createTempFile("compressed_mid_chunk_length", "1");
+        File metadataFile = new File(f.absolutePath() + ".metadata");
+        MetadataCollector sstableMetadataCollector = new MetadataCollector(new ClusteringComparator(BytesType.instance));
+        try (CompressedSequentialWriter writer = new CompressedSequentialWriter(f, metadataFile, null, ChecksumType.CRC32,
+                                                                               SequentialWriterOption.DEFAULT,
+                                                                               CompressionParams.snappy(chunkLength),
+                                                                               sstableMetadataCollector))
+        {
+            for (int i = 0; i < 4 * chunkLength + 10; ++i)
+                writer.writeByte(i);
+
+            for (boolean mmapped : new boolean[]{ false, true })
+            {
+                // what an early open does
+                try (CompressionMetadata metadata = writer.open(length);
+                     FileHandle fh = new FileHandle.Builder(f).mmapped(mmapped).withCompressionMetadata(metadata).complete();
+                     RandomAccessReader reader = fh.createReader())
+                {
+                    assertEquals(length, reader.length());
+
+                    reader.seek(length - 10);
+                    assertEquals(10, reader.bytesRemaining());
+                    byte[] read = new byte[20];
+                    assertEquals(10, reader.read(read, 0, read.length));
+                    for (int i = 0; i < 10; ++i)
+                        assertEquals((byte) (length - 10 + i), read[i]);
+                    assertEquals(length, reader.getFilePointer());
+                    assertTrue(reader.isEOF());
+                    assertEquals(0, reader.bytesRemaining());
+                    assertEquals(-1, reader.read());
+
+                    reader.seek(length - 10);
+                    assertThrows(EOFException.class, () -> reader.readFully(new byte[11]));
+
+                    reader.seek(length - 10);
+                    assertEquals(10, reader.skipBytes(chunkLength));
+                    assertEquals(length, reader.getFilePointer());
+
+                    assertThrows(IllegalArgumentException.class, () -> reader.seek(length + 1));
+                }
+            }
+            writer.finish();
+        }
+        finally
+        {
+            if (f.exists())
+                f.tryDelete();
+            if (metadataFile.exists())
+                metadataFile.tryDelete();
         }
     }
 

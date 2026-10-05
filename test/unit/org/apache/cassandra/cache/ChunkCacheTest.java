@@ -176,6 +176,53 @@ public class ChunkCacheTest
         // We do not invalidate the file on close
     }
 
+    /**
+     * Handles of the same file with different length overrides (e.g. early-open handles) share the cached chunks, but
+     * each reader stops at its own length: a chunk cached by a longer handle is cut at a shorter handle's length in
+     * the middle of it, and a chunk cached by a shorter handle is read in full by a longer one.
+     */
+    @Test
+    public void testHandlesWithDifferentLengthsShareChunks() throws IOException
+    {
+        int chunkSize = RandomAccessReader.DEFAULT_BUFFER_SIZE;
+        File file = FileUtils.createTempFile("foo", null);
+        file.deleteOnExit();
+        byte[] bytes = new byte[chunkSize * 3];
+        for (int i = 0; i < bytes.length; ++i)
+            bytes[i] = (byte) (i ^ (i >> 8));
+        writeBytes(file, bytes);
+
+        long shortLength = chunkSize + 50;
+        for (boolean shortFirst : new boolean[]{ true, false })
+        {
+            ChunkCache.instance.invalidateFile(file);
+            FileHandle.Builder builder = new FileHandle.Builder(file).bufferSize(chunkSize).withChunkCache(ChunkCache.instance);
+            try (FileHandle shortHandle = builder.withLengthOverride(shortLength).complete();
+                 FileHandle longHandle = builder.withLengthOverride(-1).complete();
+                 RandomAccessReader shortReader = shortHandle.createReader();
+                 RandomAccessReader longReader = longHandle.createReader())
+            {
+                assertEquals(shortLength, shortReader.length());
+                assertEquals(bytes.length, longReader.length());
+                for (RandomAccessReader reader : shortFirst ? new RandomAccessReader[]{ shortReader, longReader }
+                                                            : new RandomAccessReader[]{ longReader, shortReader })
+                {
+                    int length = (int) reader.length();
+                    String context = "length " + length + (shortFirst ? ", short first" : ", long first");
+                    assertEquals(context, length, reader.bytesRemaining());
+                    byte[] read = new byte[bytes.length];
+                    assertEquals(context, length, reader.read(read, 0, read.length));
+                    assertTrue(context, Arrays.equals(bytes, 0, length, read, 0, length));
+                    assertEquals(context, length, reader.getFilePointer());
+                    assertTrue(context, reader.isEOF());
+                    assertEquals(context, 0, reader.bytesRemaining());
+                    assertEquals(context, -1, reader.read());
+                }
+                assertEquals(3, ChunkCache.instance.sizeOfFile(file));
+            }
+        }
+    }
+
     @Test
     public void testRandomAccessReadersForDifferentFilesWithCacheInvalidation() throws IOException
     {

@@ -89,9 +89,15 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             bufferHolder = Rebufferer.EMPTY; // prevents double release if the call below fails
             bufferHolder = rebufferer.rebuffer(position);
             buffer = bufferHolder.buffer();
+            // The buffer may hold data past length(), e.g. a chunk read in full when length() is in its middle, or a
+            // chunk cached (or a region mapped) for a handle of the same file with a longer length. Reads stop at
+            // length(); the limit of the buffer, which is this reader's own view, is the place to enforce it.
+            long lengthInBuffer = length() - bufferHolder.offset();
+            if (buffer.limit() > lengthInBuffer)
+                buffer.limit(Ints.checkedCast(lengthInBuffer));
             long positionInBuffer = position - bufferHolder.offset();
-            // e.g. a position in the padding of the last chunk of an encrypted row index opened without a length
-            // override; the holder stays referenced by this reader, which releases it on the next rebuffer or close
+            // e.g. a position in the padding of a chunk of an encryption-only file (see bytesRemaining); the holder
+            // stays referenced by this reader, which releases it on the next rebuffer or close
             if (positionInBuffer > buffer.limit())
                 throw new IllegalArgumentException(String.format("Unable to seek to position %d in %s (%d bytes) in read-only mode: past the end of the data at %d",
                                                                  position, getFile(), length(), bufferHolder.offset() + buffer.limit()));
@@ -286,16 +292,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     }
 
     /**
-     * @return true if there is no more data to read, i.e. if {@link #bytesRemaining()} is 0. There are two exceptions:
-     * <ul>
-     * <li>Reads within the buffer rely on its limit having taken {@link #length()} into account. When it has not (an
-     * uncompressed file read without mmap with a length override, or an encryption-only file with a length override in
-     * the middle of a chunk), this is true at and after {@link #length()}, although reads within the buffer still
-     * return data.</li>
-     * <li>For an encryption-only file opened without a length override whose last chunk is padded on disk,
-     * {@link #length()} is only an upper bound (see {@link FileHandle#dataLength()}): at the end of the data this is
-     * false, although reads report EOF.</li>
-     * </ul>
+     * @return true if there is no more data to read, i.e. if {@link #bytesRemaining()} is 0 (see
+     * {@link #bytesRemaining()} for chunks padded before {@link #length()})
      */
     public boolean isEOF()
     {
@@ -305,7 +303,12 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     /**
      * @return the number of bytes between the file pointer and {@link #length()}, not counting holes (see
      * {@link ReaderFileProxy#remainingBytes}), or 0 after {@link #length()}; this is the number of bytes reads return
-     * before reporting EOF, except in the cases noted in {@link #isEOF()}
+     * before reporting EOF.
+     * <p>
+     * In an encryption-only file a chunk that the writer padded before {@link #length()} (see
+     * {@link org.apache.cassandra.io.compress.EncryptedSequentialWriter#padToPageBoundary}) has less content than its
+     * usable size, which only reading the chunk reveals: the rest of its usable size is counted here, while a read
+     * that reaches it reports EOF. Nothing is written to be read across such padding.
      */
     public long bytesRemaining()
     {
@@ -378,17 +381,15 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
 
     /**
      * Skips {@code n} bytes, or up to {@link #length()} if fewer remain, leaving the file pointer where reading the same
-     * bytes would leave it. Like reads, skips within the current buffer rely on the buffer's limit having taken
-     * {@link #length()} into account.
+     * bytes would leave it.
      * <p>
      * For files with holes (see {@link EncryptedChunkReader}) this matters when the skipped bytes end exactly at the
      * usable end of a chunk: a read leaves the pointer there (at the start of the hole), while {@link #seek} moves on to
      * the start of the next chunk. Callers compare file pointers with positions recorded by the writer (e.g.
      * {@code TrieIndexEntry.deserialize}), so the pointer is moved without adjusting the position.
      * <p>
-     * For an encryption-only file opened without a length override whose last chunk is padded on disk (see
-     * {@link #isEOF()}), a skip ending at {@link #length()} succeeds and counts the padding as skipped, as a
-     * {@link #seek} to {@link #length()} succeeds; a skip ending inside the padding is an error.
+     * A skip ending inside the padding of a chunk padded before {@link #length()} (see {@link #bytesRemaining()}) is an
+     * error.
      *
      * @return the number of bytes skipped, i.e. {@code n} unless the end of the file was reached first
      */

@@ -322,9 +322,11 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     }
 
     /**
-     * Some writers cannot feasibly calculate the exact length of a file. If any user needs to be able to store
-     * metadata at the end, they should use this function to ensure the content to be written can be addressed
-     * using `fileLength - bytesNeeded`.
+     * Places the content to be written next (of {@code bytesNeeded} bytes) at the end of the file, so that it can be
+     * addressed using `fileLength - bytesNeeded`. Writers whose files have holes (see EncryptedSequentialWriter) pad
+     * the last chunk so that the content ends at its usable end: readers of older versions take that position as the
+     * length of a file read without a length override, so the padding is kept for on-disk compatibility (e.g. with
+     * mixed-version streaming or a downgrade), although current readers find the exact length.
      *
      * See PartitionIndexBuilder#complete and PartitionIndex#load for usage example.
      */
