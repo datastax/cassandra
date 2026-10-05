@@ -83,9 +83,13 @@ controller:
   node-selector:
     cassandra.jenkins.controller: true
   scriptApproval:
-    - "staticMethod java.lang.System setProperty java.lang.String java.lang.String"
+    # staticMethod java.lang.System setProperty — removed: flagged dangerous by Jenkins
+    # (allows arbitrary JVM property manipulation from Groovy scripts) and not
+    # used by any Jenkinsfile in this repo.  Upstreamed for removal from apache/cassandra.
+    #
+    # staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods getAt — removed:
+    # flagged dangerous and unused.
     - "staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods combinations java.util.Collection"
-    - "staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods getAt java.lang.Object java.lang.String"
     - "staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods inspect java.lang.Object"
     - "staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods max java.util.Collection"
     - "staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods putAt java.util.List java.util.List java.lang.Object"
