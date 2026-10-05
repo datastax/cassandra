@@ -29,7 +29,9 @@ public interface Rebufferer extends ReaderFileProxy
      * Rebuffer (move on or seek to) a given position, and return a buffer that can be used there.
      * The only guarantee about the size of the returned data is that unless rebuffering at the end of the file,
      * the buffer will not be empty and will contain the requested position, i.e.
-     * {@code offset <= position < offset + bh.buffer().limit()}, but the buffer will not be positioned there.
+     * {@code offset <= position < offset + bh.buffer().limit()}, but the buffer will not be positioned there. For a
+     * chunk padded by {@link org.apache.cassandra.io.compress.EncryptedSequentialWriter} the position may also be the
+     * end of its data, i.e. {@code offset + bh.buffer().limit()}.
      * <p>
      * The buffer may hold data past {@link #fileLength()}: chunks are read in full, and cached chunks and mapped
      * regions are shared by the handles of a file, which may have different lengths (e.g. early-open readers).

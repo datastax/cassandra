@@ -55,10 +55,9 @@ import org.apache.cassandra.utils.ChecksumType;
  * it may cause some surprises (e.g. the difference between two positions is not equal to the size of the data); it is
  * currently used to write keys whose length can go over the page size.
  *
- * The file does not record its data length: a reader opened without a length override finds it by decrypting the
- * last chunk (see EncryptedChunkReader.defaultLength). Data that must be found at the end of the file (the partition
- * index footer) is still placed at the usable end of the last chunk by establishEndAddressablePosition (below), for
- * on-disk compatibility with readers of older versions, which take that position as the length of the file.
+ * This writer does not provide precise data length; instead when constructed from a file on disk it will return the
+ * position after the last useable write. If any user depends on reading data located at the end of the file, they
+ * should make sure that data is positioned at the end of a chunk. See establishEndAddressablePosition below.
  */
 public class EncryptedSequentialWriter extends SequentialWriter
 {
@@ -309,9 +308,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
 
         assert bytesLeftInPage() == bytesNeeded;
 
-        // The padding above should not affect space used at all. It places the data at the usable end of the last
-        // page, which readers of older versions take as the length of the file: it is kept for on-disk compatibility
-        // with them (e.g. mixed-version streaming or a downgrade); current readers decrypt the last page to find the
-        // exact length and do not rely on it.
+        // The padding above should not affect space used at all, but saves us from having to decode the last page to
+        // find the real end position in the file.
     }
 }

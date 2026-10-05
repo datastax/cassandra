@@ -232,8 +232,10 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
                  RandomAccessReader rdr = fh.createReader())
             {
                 long len = rdr.length();
-                // the last chunk is partially filled: length() is the end of the data in it
-                Assert.assertEquals(dataEnd, len);
+                // the last chunk is partially filled: length() is the usable end of that chunk, after the data
+                int maxBytesInPage = EncryptedSequentialWriter.maxBytesInPage(compressionParams.getSstableCompressor().encryptionOnly());
+                Assert.assertEquals(tempFile.length() - EncryptedSequentialWriter.CHUNK_SIZE + maxBytesInPage, len);
+                Assert.assertTrue(dataEnd + " >= " + len, dataEnd < len);
                 for (int readSize : new int[]{ 1, 7, 33, 45, 67, pageSize + 55, pageSize * 2, pageSize * 3 + 34 })
                 {
                     byte[] buf = new byte[readSize];
@@ -260,7 +262,8 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
                         }
                         else
                         {
-                            // the read reached length(), the end of the data
+                            // The data ends before length(), and the positions in between cannot be read (the last
+                            // chunk is padded on disk; see FileHandle.dataLength()), so stop at the end of the data.
                             Assert.assertEquals("End of data" + context, dataEnd, afterRead);
                             break;
                         }
@@ -276,8 +279,15 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
                 Assert.assertEquals(0, rdr.skipBytes(1));
                 Assert.assertEquals(len, rdr.getFilePointer());
 
-                // seeking past length() is an error
+                // at the end of the data the padding is counted as remaining, but reading it is an error
+                rdr.seek(dataEnd);
+                Assert.assertEquals(len - dataEnd, rdr.bytesRemaining());
+                Assert.assertFalse(rdr.isEOF());
+                Assert.assertThrows(EOFException.class, rdr::readByte);
+
+                // seeking past length(), or past the data of the padded last chunk, is an error
                 Assert.assertThrows(IllegalArgumentException.class, () -> rdr.seek(len + 1));
+                Assert.assertThrows(IllegalArgumentException.class, () -> rdr.seek(dataEnd + 1));
             }
         }
         finally

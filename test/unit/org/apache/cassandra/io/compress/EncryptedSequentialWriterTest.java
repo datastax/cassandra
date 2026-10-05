@@ -15,6 +15,7 @@
  */
 package org.apache.cassandra.io.compress;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -46,6 +47,7 @@ import static org.apache.cassandra.io.compress.EncryptedSequentialWriter.CHUNK_S
 import static org.apache.cassandra.io.compress.EncryptedSequentialWriter.FOOTER_LENGTH;
 import static org.apache.commons.io.FileUtils.readFileToByteArray;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class EncryptedSequentialWriterTest extends SequentialWriterTest
@@ -209,15 +211,22 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
                                   .complete();
              RandomAccessReader reader = fh.createReader())
         {
-            // length() is a file position, which counts the holes; bytesRemaining() does not
-            assertEquals(dataPre.length + rawPost.length, reader.bytesRemaining());
+            // Without a length override, length() is the usable end of the last chunk, which the writer padded after
+            // the data: bytesRemaining() counts that padding (but not the holes), which cannot be read.
+            int maxBytesInPage = EncryptedSequentialWriter.maxBytesInPage(encryptor);
+            assertEquals(f.length() - CHUNK_SIZE + maxBytesInPage, reader.length());
+            // the padding is what is left before length() after the data and the holes of all chunks but the last
+            long holes = (f.length() / CHUNK_SIZE - 1) * (CHUNK_SIZE - maxBytesInPage);
+            long padding = reader.length() - holes - (dataPre.length + rawPost.length);
+            assertTrue(padding >= 0 && padding < maxBytesInPage);
+            assertEquals(dataPre.length + rawPost.length + padding, reader.bytesRemaining());
             byte[] result = new byte[dataPre.length + rawPost.length];
 
             reader.readFully(result);
 
-            // the length of a file opened without a length override is the end of the data in its last chunk
-            assertTrue(reader.isEOF());
-            assertEquals(-1, reader.read());
+            assertEquals(padding, reader.bytesRemaining());
+            assertEquals(padding == 0, reader.isEOF());
+            assertThrows(EOFException.class, reader::readByte);
             reader.close();
 
             byte[] fullInput = new byte[bytesToTest * 2];

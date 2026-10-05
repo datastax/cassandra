@@ -64,8 +64,9 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         if (isEOF())
             return;
 
-        // Not at EOF, so there is content after current(): its adjusted position is before length() (unlike in seek,
-        // it cannot be a length() at the start of the last chunk's hole, which adjustPosition would move past it).
+        // Not at EOF, so there is content (or padding, see bytesRemaining) after current(): its adjusted position is
+        // before length() (unlike in seek, it cannot be a length() at the start of the last chunk's hole, which
+        // adjustPosition would move past it). At padding, the reloaded chunk has nothing left: the read reports EOF.
         reBufferAt(rebufferer.adjustPosition(current()));
     }
 
@@ -303,8 +304,9 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     }
 
     /**
-     * @return true if there is no more data to read, i.e. if {@link #bytesRemaining()} is 0 (see
-     * {@link #bytesRemaining()} for chunks padded before {@link #length()})
+     * @return true if there is no more data to read, i.e. if {@link #bytesRemaining()} is 0; at the end of the data
+     * of a chunk padded before {@link #length()} (see {@link #bytesRemaining()}) this is false, although reads report
+     * EOF
      */
     public boolean isEOF()
     {
@@ -314,12 +316,16 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     /**
      * @return the number of bytes between the file pointer and {@link #length()}, not counting holes (see
      * {@link ReaderFileProxy#remainingBytes}), or 0 after {@link #length()}; this is the number of bytes reads return
-     * before reporting EOF.
+     * before reporting EOF, with one exception.
      * <p>
-     * In an encryption-only file a chunk that the writer padded before {@link #length()} (see
-     * {@link org.apache.cassandra.io.compress.EncryptedSequentialWriter#padToPageBoundary}) has less content than its
-     * usable size, which only reading the chunk reveals: the rest of its usable size is counted here, while a read
-     * that reaches it reports EOF. Nothing is written to be read across such padding.
+     * In an encryption-only file a chunk padded before {@link #length()} has less content than its usable size, which
+     * only decrypting the chunk reveals: a chunk in the middle of the file (see
+     * {@link org.apache.cassandra.io.compress.EncryptedSequentialWriter#padToPageBoundary}), or a padded last chunk of
+     * a file opened without a length override, whose length is the usable end of the last chunk (see
+     * {@link FileHandle#dataLength()}; e.g. the row index). The padding is counted here but cannot be read: a read
+     * reaching it reports EOF (an {@link java.io.EOFException}, or -1 from {@link #read()}) without moving on to the
+     * next chunk or to {@link #length()}, and a seek or skip into it is an error. Nothing is written to be read across
+     * such padding.
      */
     public long bytesRemaining()
     {
@@ -400,7 +406,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
      * {@code TrieIndexEntry.deserialize}), so the pointer is moved without adjusting the position.
      * <p>
      * A skip ending inside the padding of a chunk padded before {@link #length()} (see {@link #bytesRemaining()}) is an
-     * error.
+     * error; a skip across the padding, or ending at {@link #length()} after a padded last chunk, counts it as skipped
+     * (as a {@link #seek} to {@link #length()} succeeds).
      *
      * @return the number of bytes skipped, i.e. {@code n} unless the end of the file was reached first
      */

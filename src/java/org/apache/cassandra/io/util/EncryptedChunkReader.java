@@ -231,51 +231,26 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
 
     /**
      * The logical length of a file read without a length override. Files written by {@link EncryptedSequentialWriter}
-     * end with a full chunk, whose content may end before its usable end: the writer pads the last chunk after
-     * encrypting it (e.g. the row index). The length is the end of that content, i.e. the start of the last chunk plus
-     * its decrypted length, which costs one chunk read when the file is opened. For files whose last chunk is filled
-     * up to its usable end (the partition index, which places its metadata there) this is the start of its hole.
+     * end with a full chunk, i.e. right after a hole: their length is the usable end of the last chunk (the start of
+     * its hole), which allows partition index readers to find their metadata at the end of the file (see
+     * {@link SequentialWriter#establishEndAddressablePosition}). This is exact for files whose last chunk is filled up
+     * to its usable end (the partition index), but only an upper bound for files whose last chunk is partially filled
+     * and padded on disk (the row index), like for any padded chunk (see {@link RandomAccessReader#bytesRemaining()}):
+     * finding the end of the content would need decrypting the last chunk when the file is opened.
      * <p>
      * A file that does not end with a full chunk has been truncated. If it ends in the usable part of a chunk its
      * length is left unchanged, and reading the incomplete chunk reports it as corrupted; if it ends inside a hole
      * (i.e. there is no valid logical length), it is reported as corrupted here.
      */
-    private static long defaultLength(ChannelProxy channel,
-                                      ICompressor encryptor,
-                                      CompressionParams compressionParams,
-                                      long fileLength,
-                                      int maxBytesInPage)
+    private static long defaultLength(ChannelProxy channel, long fileLength, int maxBytesInPage)
     {
         long inChunkOffset = inChunkOffset(fileLength);
         if (inChunkOffset == 0)
-            return fileLength == 0 ? 0 : contentEnd(channel, encryptor, compressionParams, fileLength - CHUNK_SIZE, maxBytesInPage);
+            return Math.max(0, fileLength - (CHUNK_SIZE - maxBytesInPage));
         if (inChunkOffset <= maxBytesInPage)
             return fileLength;
         throw new CorruptSSTableException(new CorruptBlockException(channel.getFile(), fileLength - inChunkOffset, CHUNK_SIZE),
                                           channel.filePath());
-    }
-
-    /**
-     * The position where the content of the chunk at {@code chunkStart} ends, read by decrypting the chunk.
-     */
-    private static long contentEnd(ChannelProxy channel,
-                                   ICompressor encryptor,
-                                   CompressionParams compressionParams,
-                                   long chunkStart,
-                                   int maxBytesInPage)
-    {
-        // The reader is only used to read the chunk, which does not depend on its length.
-        Standard reader = new Standard(channel, compressionParams, encryptor, chunkStart + CHUNK_SIZE, maxBytesInPage);
-        ByteBuffer buffer = BufferPools.forNetworking().get(CHUNK_SIZE, reader.preferredBufferType());
-        try
-        {
-            reader.readChunk(chunkStart, buffer);
-            return chunkStart + buffer.limit();
-        }
-        finally
-        {
-            BufferPools.forNetworking().put(buffer);
-        }
     }
 
     public static Standard createStandard(ChannelProxy channel,
@@ -287,7 +262,7 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         int maxBytesInPage = EncryptedSequentialWriter.maxBytesInPage(encryptor);
 
         if (overrideLength <= 0)
-            overrideLength = defaultLength(channel, encryptor, compressionParams, fileLength, maxBytesInPage);
+            overrideLength = defaultLength(channel, fileLength, maxBytesInPage);
 
         return new Standard(channel, compressionParams, encryptor, overrideLength, maxBytesInPage);
     }
@@ -302,7 +277,7 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         int maxBytesInPage = EncryptedSequentialWriter.maxBytesInPage(encryptor);
 
         if (overrideLength <= 0)
-            overrideLength = defaultLength(channel, encryptor, compressionParams, fileLength, maxBytesInPage);
+            overrideLength = defaultLength(channel, fileLength, maxBytesInPage);
 
         return new Mmap(channel, regions, compressionParams, encryptor, overrideLength, maxBytesInPage);
     }
