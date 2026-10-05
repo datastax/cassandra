@@ -14,7 +14,7 @@
 # either express or implied.  See the License for the specific
 # language governing permissions and limitations under the License.
 #
-# Site-specific JCasC values injected from environment variables.
+# Site-specific values injected from environment variables.
 # Rendered by helmfile's Go template engine before being passed to Helm.
 #
 # Required env var:
@@ -25,15 +25,13 @@
 # ~/bin/ci-datastax-deploy.sh (not checked in).
 
 controller:
-  JCasC:
-    configScripts:
-      # Set the Jenkins root URL to the public HTTPS address so that:
-      #   - The "reverse proxy is broken" warning is suppressed.
-      #   - Webhook callbacks, email links, and build URLs are correct.
-      #   - The Kubernetes cloud's jenkins URL stays on the internal service
-      #     (set in jenkins-deployment.yaml) so agents can reach the controller
-      #     without going through the public LB.
-      site-url: |
-        unclassified:
-          location:
-            url: "https://{{ requiredEnv "JENKINS_HOSTNAME" }}"
+  # Sets unclassified.location.url in the chart's default JCasC config so
+  # that Jenkins's root URL matches the public HTTPS address.  This suppresses
+  # the "reverse proxy is broken" warning on the Manage Jenkins page and
+  # ensures webhook callbacks and email links use the correct URL.
+  #
+  # controller.jenkinsUrl overrides the default (http://<svc>:<port>) that the
+  # chart injects into jcasc-default-config.yaml.  Using this value (rather
+  # than a separate configScripts entry) avoids JCasC's "conflicting
+  # configuration" error that occurs when two config files set the same key.
+  jenkinsUrl: "https://{{ requiredEnv `JENKINS_HOSTNAME` }}"
