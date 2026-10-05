@@ -93,3 +93,6 @@ releases:
       # Site-specific overrides for this cluster (nginx sidecar, port 443, storage class, etc.):
       # nginx TLS sidecar, port 443 on the LoadBalancer service, storage class, etc.
       - jenkins-tls-overrides.yaml
+      # Injects JENKINS_HOSTNAME into JCasC so Jenkins's root URL matches the
+      # public HTTPS address (suppresses the "reverse proxy is broken" warning).
+      - jenkins-site-values.yaml.gotmpl
