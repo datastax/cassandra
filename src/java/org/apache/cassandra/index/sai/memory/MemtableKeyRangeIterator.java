@@ -93,16 +93,21 @@ public class MemtableKeyRangeIterator extends KeyRangeIterator
         PartitionPosition start = nextKey.isTokenOnly()
                                   ? nextKey.token().minKeyBound()
                                   : nextKey.partitionKey();
+
+        // Drop the row iterator of the partition we are currently positioned on (possibly by a previous skipTo),
+        // otherwise its rows would be returned if there are no more partitions after the skip target.
+        FileUtils.closeQuietly(rowIterator);
+        rowIterator = null;
+        FileUtils.closeQuietly(partitionIterator);
+
         if (!keyRange.right.isMinimum() && start.compareTo(keyRange.right) > 0)
         {
             partitionIterator = EmptyIterators.unfilteredPartition(memtable.metadata());
-            rowIterator = null;
             return;
         }
 
         AbstractBounds<PartitionPosition> partitionBounds = AbstractBounds.bounds(start, true, keyRange.right, true);
         DataRange dataRange = new DataRange(partitionBounds, new ClusteringIndexSliceFilter(Slices.ALL, false));
-        FileUtils.closeQuietly(partitionIterator);
         partitionIterator = memtable.makePartitionIterator(columns, dataRange);
         if (partitionIterator.hasNext())
         {
