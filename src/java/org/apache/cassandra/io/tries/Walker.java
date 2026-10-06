@@ -51,6 +51,7 @@ public class Walker<CONCRETE extends Walker<CONCRETE>> implements AutoCloseable
 
     // State relating to current node.
     private BufferHolder bh;    // from Rebufferer
+    private boolean closed;
     private int offset;         // offset of current node within buf
     protected TrieNode nodeType;  // type of current node
     protected ByteBuffer buf;   // buffer containing the data
@@ -84,10 +85,22 @@ public class Walker<CONCRETE extends Walker<CONCRETE>> implements AutoCloseable
         }
     }
 
+    /**
+     * Releases the current buffer and the rebufferer. Idempotent: calling it again has no effect.
+     */
     public void close()
     {
-        bh.release();
-        source.closeReader();
+        if (closed)
+            return;
+        closed = true;
+        try
+        {
+            bh.release();
+        }
+        finally
+        {
+            source.closeReader();
+        }
     }
 
     protected final void go(long position)
@@ -96,7 +109,9 @@ public class Walker<CONCRETE extends Walker<CONCRETE>> implements AutoCloseable
         if (curOffset < 0 || curOffset >= buf.limit())
         {
             bh.release();
-            bh = Rebufferer.EMPTY; // prevents double release if the call below fails
+            // if the call below fails, neither release the holder again nor read from its buffer, which may be reused
+            bh = Rebufferer.EMPTY;
+            buf = bh.buffer();
             bh = source.rebuffer(position);
             buf = bh.buffer();
             curOffset = position - bh.offset();

@@ -52,7 +52,6 @@ import org.apache.cassandra.io.sstable.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.SSTableReadsListener.SkippingReason;
 import org.apache.cassandra.io.sstable.format.AbstractKeyFetcher;
 import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
-import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -61,6 +60,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.OutputHandler;
 
+import static org.apache.cassandra.io.sstable.CorruptSSTableException.maybeWrapInCorruptSSTableException;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.EQ;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GE;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GT;
@@ -158,20 +158,26 @@ public class BtiTableReader extends SSTableReaderWithFilter
             try (PartitionIndex.Reader reader = partitionIndex.openReader())
             {
                 TrieIndexEntry rie = reader.ceiling(searchKey, (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch));
-                if (rie != null)
-                    notifySelected(SelectionReason.INDEX_ENTRY_FOUND, listener, operator, updateStats, rie);
-                else
-                    notifySkipped(SkippingReason.INDEX_ENTRY_NOT_FOUND, listener, operator, updateStats);
+                notifyIndexEntryLookup(rie, listener, operator, updateStats);
                 return rie;
             }
-            catch (IOException e)
+            catch (IOException | CorruptSSTableException e)
             {
+                // CorruptSSTableException: e.g. a chunk of an encrypted index failing its checksum or decryption
                 markSuspect();
-                throw new CorruptSSTableException(e, rowIndexFile.path());
+                throw maybeWrapInCorruptSSTableException(e, rowIndexFile.path());
             }
         }
 
         throw new IllegalArgumentException("Invalid op: " + operator);
+    }
+
+    private void notifyIndexEntryLookup(TrieIndexEntry rie, SSTableReadsListener listener, Operator operator, boolean updateStats)
+    {
+        if (rie != null)
+            notifySelected(SelectionReason.INDEX_ENTRY_FOUND, listener, operator, updateStats, rie);
+        else
+            notifySkipped(SkippingReason.INDEX_ENTRY_NOT_FOUND, listener, operator, updateStats);
     }
 
     private TrieIndexEntry getApproximatePosition(PartitionPosition key, Operator op, boolean isLeftBound)
@@ -212,10 +218,11 @@ public class BtiTableReader extends SSTableReaderWithFilter
                 return isLeftBound || assumeNoMatch ? new TrieIndexEntry(~pos) : null;
             });
         }
-        catch (IOException e)
+        catch (IOException | CorruptSSTableException e)
         {
+            // CorruptSSTableException: e.g. a chunk of an encrypted index failing its checksum or decryption
             markSuspect();
-            throw new CorruptSSTableException(e, rowIndexFile.path());
+            throw maybeWrapInCorruptSSTableException(e, rowIndexFile.path());
         }
     }
 
@@ -246,27 +253,6 @@ public class BtiTableReader extends SSTableReaderWithFilter
     }
 
     /**
-     * In encrypted index files skipBytes may end up in a different but equivalent position when it's at the
-     * end of an encrypted chunk. More precisely, if the skipped sequence of bytes lands exactly at the end of the
-     * useable part of a chunk (just before the hole left for encryption metadata), a normal read would leave the file
-     * at that position; before reading the next byte it will silently advance to the start of the next chunk. A skip,
-     * on the other hand, will jump to the position that follows the data, which is correctly converted to the beginning
-     * of the next page in preparation for reading. As a result it will leave the file positioned at the start of the
-     * next page immediately. See {@link PartitionIndexEncryptedTest#testSkipAcrossHoles}.
-     *
-     * To avoid this, we skip one fewer byte and consume the last byte.
-     */
-    @VisibleForTesting
-    static void skipBytesWithCorrectPosition(DataInputPlus in, int skip) throws IOException
-    {
-        if (skip > 0)
-        {
-            in.skipBytesFully(skip - 1);
-            in.readByte();
-        }
-    }
-
-    /**
      * Called by {@link #getRowIndexEntry} above (via Reader.ceiling/floor) to check if the position satisfies the full
      * key constraint. This is called once if there is a prefix match (which can be in any relationship with the sought
      * key, thus assumeNoMatch: false), and if it returns null it is called again for the closest greater position
@@ -282,7 +268,12 @@ public class BtiTableReader extends SSTableReaderWithFilter
                 if (assumeNoMatch)
                 {
                     int skip = ByteBufferUtil.readShortLength(in);
-                    skipBytesWithCorrectPosition(in, skip);
+                    // TrieIndexEntry.deserialize below needs getFilePointer() to be exactly the position the writer
+                    // recorded after the key (rowIndexWriter.position()), which is where reading the key would
+                    // leave it. RandomAccessReader.skipBytes guarantees that also for encrypted index files, where a
+                    // key ending at the usable end of a chunk leaves the pointer at the start of the chunk's hole
+                    // rather than at the start of the next chunk (see ReaderFileProxy.positionForSkip).
+                    in.skipBytesFully(skip);
                 }
                 else
                 {
@@ -380,10 +371,11 @@ public class BtiTableReader extends SSTableReaderWithFilter
                 }
             }
         }
-        catch (IOException | IllegalArgumentException | ArrayIndexOutOfBoundsException | AssertionError e)
+        catch (IOException | IllegalArgumentException | ArrayIndexOutOfBoundsException | AssertionError | CorruptSSTableException e)
         {
+            // CorruptSSTableException: e.g. a chunk of an encrypted index failing its checksum or decryption
             markSuspect();
-            throw new CorruptSSTableException(e, rowIndexFile.path());
+            throw maybeWrapInCorruptSSTableException(e, rowIndexFile.path());
         }
     }
 

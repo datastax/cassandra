@@ -1170,7 +1170,7 @@ public final class SchemaKeyspace
         boolean isCounter = flags.contains(TableMetadata.Flag.COUNTER);
         return TableMetadata.builder(keyspaceName, tableName, TableId.fromUUID(row.getUUID("id")))
                             .flags(flags)
-                            .params(createTableParamsFromRow(row))
+                            .params(createTableParamsFromRow(row, keyspaceName, tableName))
                             .addColumns(fetchColumns(keyspaceName, tableName, types, functions, isCounter))
                             .droppedColumns(fetchDroppedColumns(keyspaceName, tableName, flags.contains(TableMetadata.Flag.COUNTER)))
                             .indexes(fetchIndexes(keyspaceName, tableName))
@@ -1179,14 +1179,14 @@ public final class SchemaKeyspace
     }
 
     @VisibleForTesting
-    static TableParams createTableParamsFromRow(UntypedResultSet.Row row)
+    static TableParams createTableParamsFromRow(UntypedResultSet.Row row, String keyspaceName, String tableName)
     {
         TableParams.Builder builder = TableParams.builder(SchemaConstants.SCHEMA_KEYSPACE_NAME)
                                                  .bloomFilterFpChance(row.getDouble("bloom_filter_fp_chance"))
                                                  .caching(CachingParams.fromMap(row.getFrozenTextMap("caching")))
                                                  .comment(row.getString("comment"))
                                                  .compaction(CompactionParams.fromMap(row.getFrozenTextMap("compaction")))
-                                                 .compression(CompressionParams.fromMap(row.getFrozenTextMap("compression")))
+                                                 .compression(CompressionParams.fromStoredMap(row.getFrozenTextMap("compression"), keyspaceName, tableName))
                                                  // Handles CC4 upgrade compatibility
                                                  .memtable(MemtableParams.getWithCC4Fallback(row, "memtable"))
                                                  .defaultTimeToLive(row.getInt("default_time_to_live"))
@@ -1397,7 +1397,7 @@ public final class SchemaKeyspace
                          .kind(TableMetadata.Kind.VIEW)
                          .addColumns(columns)
                          .droppedColumns(fetchDroppedColumns(keyspaceName, viewName, false))
-                         .params(createTableParamsFromRow(row))
+                         .params(createTableParamsFromRow(row, keyspaceName, viewName))
                          .build();
 
         WhereClause whereClause;
