@@ -225,7 +225,15 @@ public abstract class AbstractCommitLogSegmentManager
                     case SHUTTING_DOWN:
                         // If shutdown() started and finished during segment creation, we are now left with a
                         // segment that no one will consume. Discard it.
-                        discardAvailableSegment();
+                        // Synchronize on 'this' (the AllocatorRunnable) for the same reason as the NORMAL path:
+                        // the InfiniteLoopExecutor uses SYNCHRONIZED interrupts, meaning thread.interrupt() is
+                        // delivered while holding this monitor. Holding it here prevents a new interrupt from
+                        // arriving mid-IO (channel.force / channel.write) and causing ClosedByInterruptException.
+                        synchronized (this)
+                        {
+                            interrupted = Thread.interrupted();
+                            discardAvailableSegment();
+                        }
                         return;
 
                     case NORMAL:
@@ -256,7 +264,11 @@ public abstract class AbstractCommitLogSegmentManager
             {
                 if (!CommitLog.handleCommitError("Failed managing commit log segments", t))
                 {
-                    discardAvailableSegment();
+                    synchronized (this)
+                    {
+                        interrupted = Thread.interrupted();
+                        discardAvailableSegment();
+                    }
                     throw new TerminateException();
                 }
 
@@ -283,7 +295,11 @@ public abstract class AbstractCommitLogSegmentManager
 
             if (interrupted)
             {
-                discardAvailableSegment();
+                synchronized (this)
+                {
+                    Thread.interrupted(); // clear any residual interrupt flag before IO
+                    discardAvailableSegment();
+                }
                 throw new InterruptedException();
             }
         }
@@ -639,23 +655,7 @@ public abstract class AbstractCommitLogSegmentManager
             availableSegment = null;
         }
         if (next != null)
-        {
-            // Clear the interrupt flag before performing IO (close/sync/flush) on the empty pre-allocated segment,
-            // then restore it so the caller can observe the interrupt. This mirrors the same protection applied
-            // before createSegment() in the NORMAL path (see AllocatorRunnable.run()) and prevents
-            // ClosedByInterruptException / FSWriteError when the COMMIT-LOG-ALLOCATOR thread has been interrupted
-            // by the InfiniteLoopExecutor shutdown before discarding the available segment.
-            boolean interrupted = Thread.interrupted();
-            try
-            {
-                next.discard(true);
-            }
-            finally
-            {
-                if (interrupted)
-                    Thread.currentThread().interrupt();
-            }
-        }
+            next.discard(true);
     }
 
     /**
