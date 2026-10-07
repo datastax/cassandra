@@ -106,14 +106,14 @@ public class RowFilter
     private static final Logger logger = LoggerFactory.getLogger(RowFilter.class);
 
     public static final Serializer serializer = new Serializer();
-    public static final RowFilter NONE = new RowFilter(FilterElement.NONE, false, IndexHints.NONE, SAIQueryOptions.NONE);
+    public static final RowFilter NONE = new RowFilter(FilterElement.NONE, false, IndexHints.NONE, OptimizerOptions.NONE);
 
     public final FilterElement root;
     public final IndexHints indexHints;
-    public final SAIQueryOptions queryOptions;
+    public final OptimizerOptions queryOptions;
     private final boolean needsReconciliation;
 
-    protected RowFilter(FilterElement root, boolean needsReconciliation, IndexHints indexHints, SAIQueryOptions queryOptions)
+    protected RowFilter(FilterElement root, boolean needsReconciliation, IndexHints indexHints, OptimizerOptions queryOptions)
     {
         this.root = root;
         this.needsReconciliation = needsReconciliation;
@@ -455,7 +455,7 @@ public class RowFilter
      */
     public RowFilter withoutDisjunctions()
     {
-        return new RowFilter(root.withoutDisjunctions(), needsReconciliation, indexHints,  queryOptions);
+        return new RowFilter(root.withoutDisjunctions(), needsReconciliation, indexHints, queryOptions);
     }
 
     public RowFilter restrict(Predicate<Expression> filter)
@@ -506,10 +506,10 @@ public class RowFilter
 
     public static Builder builder(IndexRegistry indexRegistry, IndexHints indexHints)
     {
-        return new Builder(false, indexRegistry, indexHints, SAIQueryOptions.NONE);
+        return new Builder(false, indexRegistry, indexHints, OptimizerOptions.NONE);
     }
 
-    public static Builder builder(IndexRegistry indexRegistry, IndexHints indexHints, SAIQueryOptions queryOptions)
+    public static Builder builder(IndexRegistry indexRegistry, IndexHints indexHints, OptimizerOptions queryOptions)
     {
         return new Builder(false, indexRegistry, indexHints, queryOptions);
     }
@@ -520,14 +520,14 @@ public class RowFilter
         boolean needsReconciliation = false;
         private final IndexRegistry indexRegistry;
         private final IndexHints indexHints;
-        private final SAIQueryOptions queryOptions;
+        private final OptimizerOptions queryOptions;
 
         public Builder(boolean needsReconciliation, IndexRegistry indexRegistry, IndexHints indexHints)
         {
-            this(needsReconciliation, indexRegistry, indexHints, SAIQueryOptions.NONE);
+            this(needsReconciliation, indexRegistry, indexHints, OptimizerOptions.NONE);
         }
 
-        public Builder(boolean needsReconciliation, IndexRegistry indexRegistry, IndexHints indexHints, SAIQueryOptions queryOptions)
+        public Builder(boolean needsReconciliation, IndexRegistry indexRegistry, IndexHints indexHints, OptimizerOptions queryOptions)
         {
             this.needsReconciliation = needsReconciliation;
             this.indexRegistry = indexRegistry;
@@ -2098,7 +2098,7 @@ public class RowFilter
             out.writeBoolean(false); // Old "is for thrift" boolean
             IndexHints.serializer.serialize(filter.indexHints, out, version); // hints first because the expressions might need them
             FilterElement.serializer.serialize(filter.root, out, version);
-            SAIQueryOptions.serializer.serialize(filter.queryOptions, out, version);
+            OptimizerOptions.serializer.serialize(filter.queryOptions, out, version);
         }
 
         public RowFilter deserialize(DataInputPlus in, int version, TableMetadata metadata, boolean needsReconciliation) throws IOException
@@ -2106,7 +2106,7 @@ public class RowFilter
             in.readBoolean(); // Unused
             IndexHints indexHints = IndexHints.serializer.deserialize(in, version, metadata);
             FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata, indexHints);
-            SAIQueryOptions queryOptions = SAIQueryOptions.serializer.deserialize(in, version);
+            OptimizerOptions queryOptions = OptimizerOptions.serializer.deserialize(in, version);
             return new RowFilter(operation, needsReconciliation, indexHints, queryOptions);
         }
 
@@ -2115,7 +2115,7 @@ public class RowFilter
             return 1 // unused boolean
                    + IndexHints.serializer.serializedSize(filter.indexHints, version)
                    + FilterElement.serializer.serializedSize(filter.root, version)
-                   + SAIQueryOptions.serializer.serializedSize(filter.queryOptions, version);
+                   + OptimizerOptions.serializer.serializedSize(filter.queryOptions, version);
         }
     }
 }

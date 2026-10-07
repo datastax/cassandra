@@ -23,7 +23,7 @@ import org.apache.cassandra.index.sai.plan.Plan;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End-to-end integration tests for per-query SAI optimizer options ({@code WITH query_options = {...}}).
+ * End-to-end integration tests for per-query SAI optimizer options ({@code WITH optimizer_options = {...}}).
  *
  * <p>Covers all four option keys across real query execution:
  * <ul>
@@ -84,7 +84,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
         disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
-                "WITH query_options = {'sai_hybrid_sort_order': 'sort_then_filter'}",
+                "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'}",
                 Plan.AnnIndexScan.class,
                 row(0), row(1));
     }
@@ -105,7 +105,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
         disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n >= 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
-                "WITH query_options = {'sai_hybrid_sort_order': 'sort_then_filter'}",
+                "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'}",
                 Plan.AnnIndexScan.class,
                 row(0), row(1), row(2), row(3), row(4));
     }
@@ -133,7 +133,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
         disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n >= 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
-                "WITH query_options = {'sai_hybrid_sort_order': 'filter_then_sort'}",
+                "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'}",
                 Plan.NumericIndexScan.class,
                 row(0), row(1), row(2), row(3), row(4));
     }
@@ -154,7 +154,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
         disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
-                "WITH query_options = {'sai_hybrid_sort_order': 'filter_then_sort'}",
+                "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'}",
                 Plan.NumericIndexScan.class,
                 row(0), row(1));
     }
@@ -170,14 +170,14 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
         disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
-                "WITH query_options = {'sai_hybrid_sort_order': 'auto'}",
+                "WITH optimizer_options = {'hybrid_sort_order': 'auto'}",
                 Plan.NumericIndexScan.class,
                 row(0), row(1));
 
         disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n >= 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
-                "WITH query_options = {'sai_hybrid_sort_order': 'auto'}",
+                "WITH optimizer_options = {'hybrid_sort_order': 'auto'}",
                 Plan.AnnIndexScan.class,
                 row(0), row(1), row(2), row(3), row(4));
     }
@@ -192,7 +192,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
         // opt_level=0 must disable the optimizer but still return correct results.
         disablePreparedReuseForTest();
         var results = execute("SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
-                              "WITH query_options = {'sai_query_optimization_level': '0'}");
+                              "WITH optimizer_options = {'query_optimization_level': '0'}");
         assertThat(results.size()).isEqualTo(2);
     }
 
@@ -206,7 +206,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
         disablePreparedReuseForTest();
         // A limit of 1 restricts to a single indexed clause; the query must still return results.
         var results = execute("SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
-                              "WITH query_options = {'sai_intersection_clause_limit': '1'}");
+                              "WITH optimizer_options = {'intersection_clause_limit': '1'}");
         assertThat(results.size()).isEqualTo(2);
     }
 
@@ -219,7 +219,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
     {
         disablePreparedReuseForTest();
         var results = execute("SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
-                              "WITH query_options = {'sai_use_term_statistics': 'false'}");
+                              "WITH optimizer_options = {'use_term_statistics': 'false'}");
         assertThat(results.size()).isEqualTo(2);
     }
 
@@ -232,11 +232,11 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
     {
         disablePreparedReuseForTest();
         var results = execute("SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
-                              "WITH query_options = {" +
-                              "'sai_query_optimization_level': '1', " +
-                              "'sai_intersection_clause_limit': '3', " +
-                              "'sai_use_term_statistics': 'true', " +
-                              "'sai_hybrid_sort_order': 'sort_then_filter'" +
+                              "WITH optimizer_options = {" +
+                              "'query_optimization_level': '1', " +
+                              "'intersection_clause_limit': '3', " +
+                              "'use_term_statistics': 'true', " +
+                              "'hybrid_sort_order': 'sort_then_filter'" +
                               "}");
         assertThat(results.size()).isEqualTo(2);
     }
