@@ -34,9 +34,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       plan decision for hybrid queries.</li>
  * </ul>
  *
- * <p>The hybrid sort order tests use {@link Plan.NumericIndexScan} as a proxy for filter-then-sort
- * (keys are materialised from the WHERE-clause index before scoring) and {@link Plan.AnnIndexScan}
- * as a proxy for sort-then-filter (candidates stream from the ANN index, post-filtered by WHERE).
+ * <p>The {@code hybrid_sort_order} option is tested across all three hybrid query flavours:
+ * <ul>
+ *   <li><b>ANN</b>: filter-then-sort uses {@link Plan.NumericIndexScan};
+ *       sort-then-filter uses {@link Plan.AnnIndexScan}.</li>
+ *   <li><b>BM25</b>: filter-then-sort uses {@link Plan.NumericIndexScan};
+ *       sort-then-filter uses {@link Plan.Bm25IndexScan}.</li>
+ *   <li><b>Generic ORDER BY</b>: filter-then-sort uses {@link Plan.NumericIndexScan};
+ *       sort-then-filter uses {@link Plan.LiteralIndexScan}.</li>
+ * </ul>
  */
 public class SaiPerQueryOptimizerOptionsTest extends VectorTester
 {
@@ -239,5 +245,140 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
                               "'hybrid_sort_order': 'sort_then_filter'" +
                               "}");
         assertThat(results.size()).isEqualTo(2);
+    }
+
+    // -----------------------------------------------------------------------
+    // hybrid_sort_order — BM25 hybrid queries
+    //
+    // Table layout (same selectivity split used by ANN tests):
+    //   n=0  → 2 rows  (selective WHERE)
+    //   n>=0 → 10 rows (non-selective WHERE)
+    // 'apple' appears in all 10 rows, so the BM25 index is never more selective
+    // than the numeric index; the optimizer's default mirrors the ANN case.
+    // -----------------------------------------------------------------------
+
+    /**
+     * BM25 + selective WHERE: the optimizer picks filter-then-sort ({@link Plan.NumericIndexScan}).
+     * {@code sort_then_filter} must flip this to sort-then-filter ({@link Plan.Bm25IndexScan}).
+     */
+    @Test
+    public void testSortThenFilterOverridesSelectiveWhereClause_bm25()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = {'index_analyzer': 'standard'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+        for (int i = 0; i < 10; i++)
+            execute("INSERT INTO %s (k, c, s, n) VALUES (0, ?, 'apple', ?)", i, i < 2 ? 0 : 1);
+
+        // Default: selective WHERE → filter-then-sort (NumericIndexScan).
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'apple' LIMIT 5",
+                              Plan.NumericIndexScan.class,
+                              row(0), row(1));
+
+        // Override forces sort-then-filter (Bm25IndexScan), results unchanged.
+        disablePreparedReuseForTest();
+        assertQueryHasSubplan(
+                "SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'apple' LIMIT 5 " +
+                "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'}",
+                Plan.Bm25IndexScan.class,
+                row(0), row(1));
+    }
+
+    /**
+     * BM25 + non-selective WHERE: the optimizer picks sort-then-filter ({@link Plan.Bm25IndexScan}).
+     * {@code filter_then_sort} must flip this to filter-then-sort ({@link Plan.NumericIndexScan}).
+     */
+    @Test
+    public void testFilterThenSortOverridesNonSelectiveWhereClause_bm25()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = {'index_analyzer': 'standard'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+        for (int i = 0; i < 10; i++)
+            execute("INSERT INTO %s (k, c, s, n) VALUES (0, ?, 'apple', ?)", i, i < 2 ? 0 : 1);
+
+        // Default: non-selective WHERE → sort-then-filter (Bm25IndexScan).
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n >= 0 ORDER BY s BM25 OF 'apple' LIMIT 5",
+                              Plan.Bm25IndexScan.class,
+                              row(0), row(1), row(2), row(3), row(4));
+
+        // Override forces filter-then-sort (NumericIndexScan), results unchanged.
+        disablePreparedReuseForTest();
+        assertQueryHasSubplan(
+                "SELECT c FROM %s WHERE n >= 0 ORDER BY s BM25 OF 'apple' LIMIT 5 " +
+                "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'}",
+                Plan.NumericIndexScan.class,
+                row(0), row(1), row(2), row(3), row(4));
+    }
+
+    // -----------------------------------------------------------------------
+    // hybrid_sort_order — generic ORDER BY hybrid queries
+    //
+    // Same table/data layout as the BM25 section above; the ordering index
+    // is a plain (non-analyzed) literal index on column 's'.
+    // -----------------------------------------------------------------------
+
+    /**
+     * Generic ORDER BY + selective WHERE: the optimizer picks filter-then-sort
+     * ({@link Plan.NumericIndexScan}).
+     * {@code sort_then_filter} must flip this to sort-then-filter ({@link Plan.LiteralIndexScan}).
+     */
+    @Test
+    public void testSortThenFilterOverridesSelectiveWhereClause_genericOrderBy()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+        for (int i = 0; i < 10; i++)
+            execute("INSERT INTO %s (k, c, s, n) VALUES (0, ?, ?, ?)",
+                    i, String.valueOf((char) ('a' + i)), i < 2 ? 0 : 1);
+
+        // Default: selective WHERE → filter-then-sort (NumericIndexScan).
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s ASC LIMIT 5",
+                              Plan.NumericIndexScan.class,
+                              row(0), row(1));
+
+        // Override forces sort-then-filter (LiteralIndexScan), results unchanged.
+        disablePreparedReuseForTest();
+        assertQueryHasSubplan(
+                "SELECT c FROM %s WHERE n = 0 ORDER BY s ASC LIMIT 5 " +
+                "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'}",
+                Plan.LiteralIndexScan.class,
+                row(0), row(1));
+    }
+
+    /**
+     * Generic ORDER BY + non-selective WHERE: the optimizer picks sort-then-filter
+     * ({@link Plan.LiteralIndexScan}).
+     * {@code filter_then_sort} must flip this to filter-then-sort ({@link Plan.NumericIndexScan}).
+     */
+    @Test
+    public void testFilterThenSortOverridesNonSelectiveWhereClause_genericOrderBy()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+        for (int i = 0; i < 10; i++)
+            execute("INSERT INTO %s (k, c, s, n) VALUES (0, ?, ?, ?)",
+                    i, String.valueOf((char) ('a' + i)), i < 2 ? 0 : 1);
+
+        // Default: non-selective WHERE → sort-then-filter (LiteralIndexScan).
+        assertQueryHasSubplan("SELECT c FROM %s WHERE n >= 0 ORDER BY s ASC LIMIT 5",
+                              Plan.LiteralIndexScan.class,
+                              row(0), row(1), row(2), row(3), row(4));
+
+        // Override forces filter-then-sort (NumericIndexScan), results unchanged.
+        disablePreparedReuseForTest();
+        assertQueryHasSubplan(
+                "SELECT c FROM %s WHERE n >= 0 ORDER BY s ASC LIMIT 5 " +
+                "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'}",
+                Plan.NumericIndexScan.class,
+                row(0), row(1), row(2), row(3), row(4));
     }
 }
