@@ -48,8 +48,8 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     private volatile Counter syncReclaims;
     private volatile Counter reclaimRetrySuccesses;
     private volatile Counter poolExhausted;
-    private volatile Counter bypassCount;
-    private volatile Counter bypassBytes;
+    private volatile Counter blockedOnPoolAllocation;
+    private volatile Counter poolWaitSuccesses;
     private volatile Timer reclaimLatency;
     private final ConcurrentHashMap<RemovalCause, Counter> evitictionByRemovalCause = new ConcurrentHashMap<>();
 
@@ -71,8 +71,8 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
         this.syncReclaims = counter(metricsPrefix + "_sync_reclaims");
         this.reclaimRetrySuccesses = counter(metricsPrefix + "_reclaim_retry_successes");
         this.poolExhausted = counter(metricsPrefix + "_pool_exhausted");
-        this.bypassCount = counter(metricsPrefix + "_bypass");
-        this.bypassBytes = counter(metricsPrefix + "_bypass_bytes");
+        this.blockedOnPoolAllocation = counter(metricsPrefix + "_blocked_on_pool_allocation");
+        this.poolWaitSuccesses = counter(metricsPrefix + "_pool_wait_successes");
         this.reclaimLatency = timer(metricsPrefix + "_reclaim_latency_seconds");
 
         for (RemovalCause cause : RemovalCause.values())
@@ -237,22 +237,27 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     }
 
     @Override
-    public void recordBypass(int bytes)
+    public void recordBlockedOnPoolAllocation()
     {
-        bypassCount.increment();
-        bypassBytes.increment(bytes);
+        blockedOnPoolAllocation.increment();
     }
 
     @Override
-    public long bypassCount()
+    public void recordPoolWaitSuccess()
     {
-        return (long) bypassCount.count();
+        poolWaitSuccesses.increment();
     }
 
     @Override
-    public long bypassBytes()
+    public long blockedOnPoolAllocation()
     {
-        return (long) bypassBytes.count();
+        return (long) blockedOnPoolAllocation.count();
+    }
+
+    @Override
+    public long poolWaitSuccesses()
+    {
+        return (long) poolWaitSuccesses.count();
     }
 
     @Override
@@ -284,6 +289,8 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
                "Size in memory: " + FBUtilities.prettyPrintMemory(size()) + System.lineSeparator() +
                "Capacity: " + FBUtilities.prettyPrintMemory(capacity()) + System.lineSeparator() +
                "Sync reclaims: " + syncReclaims() + System.lineSeparator() +
+               "Blocked on pool: " + blockedOnPoolAllocation() + System.lineSeparator() +
+               "Pool wait successes: " + poolWaitSuccesses() + System.lineSeparator() +
                "Pool exhausted: " + poolExhausted();
     }
 

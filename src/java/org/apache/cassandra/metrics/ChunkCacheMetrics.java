@@ -70,14 +70,17 @@ public interface ChunkCacheMetrics extends StatsCounter, CacheMetrics
     /** Called when second tryGet after reclaim succeeds. */
     default void recordReclaimRetrySuccess() {}
 
-    /** Called when pool still cannot allocate after reclaim + retry (bypass also failed). */
+    /** Called when pool still cannot allocate after reclaim, wait, and timeout. */
     default void recordPoolExhausted() {}
 
     /** Elapsed nanos spent in reclaimSync. */
     default void recordReclaimLatency(long nanos) {}
 
-    /** Uncached bypass serve from the same pool (bytes = allocated capacity). */
-    default void recordBypass(int bytes) {}
+    /** Miss loader entered WaitQueue after reclaim still could not allocate. */
+    default void recordBlockedOnPoolAllocation() {}
+
+    /** Miss loader obtained pages after waiting on the pool. */
+    default void recordPoolWaitSuccess() {}
 
     long syncReclaims();
 
@@ -85,9 +88,9 @@ public interface ChunkCacheMetrics extends StatsCounter, CacheMetrics
 
     long poolExhausted();
 
-    long bypassCount();
+    long blockedOnPoolAllocation();
 
-    long bypassBytes();
+    long poolWaitSuccesses();
 
     @Nonnull
     @Override

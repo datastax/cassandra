@@ -42,8 +42,8 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     private final com.codahale.metrics.Meter syncReclaims;
     private final com.codahale.metrics.Meter reclaimRetrySuccesses;
     private final com.codahale.metrics.Meter poolExhausted;
-    private final com.codahale.metrics.Meter bypassCount;
-    private final com.codahale.metrics.Meter bypassBytes;
+    private final com.codahale.metrics.Meter blockedOnPoolAllocation;
+    private final com.codahale.metrics.Meter poolWaitSuccesses;
     private final Timer reclaimLatency;
 
     /**
@@ -58,8 +58,8 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
         syncReclaims = metrics.registerMeter("SyncReclaims");
         reclaimRetrySuccesses = metrics.registerMeter("ReclaimRetrySuccesses");
         poolExhausted = metrics.registerMeter("PoolExhausted");
-        bypassCount = metrics.registerMeter("Bypass");
-        bypassBytes = metrics.registerMeter("BypassBytes");
+        blockedOnPoolAllocation = metrics.registerMeter("BlockedOnPoolAllocation");
+        poolWaitSuccesses = metrics.registerMeter("PoolWaitSuccesses");
         reclaimLatency = metrics.registerTimer("ReclaimLatency");
     }
 
@@ -207,22 +207,27 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     }
 
     @Override
-    public void recordBypass(int bytes)
+    public void recordBlockedOnPoolAllocation()
     {
-        bypassCount.mark();
-        bypassBytes.mark(bytes);
+        blockedOnPoolAllocation.mark();
     }
 
     @Override
-    public long bypassCount()
+    public void recordPoolWaitSuccess()
     {
-        return bypassCount.getCount();
+        poolWaitSuccesses.mark();
     }
 
     @Override
-    public long bypassBytes()
+    public long blockedOnPoolAllocation()
     {
-        return bypassBytes.getCount();
+        return blockedOnPoolAllocation.getCount();
+    }
+
+    @Override
+    public long poolWaitSuccesses()
+    {
+        return poolWaitSuccesses.getCount();
     }
 
     @Nonnull
@@ -252,7 +257,8 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
                "Size in memory: " + FBUtilities.prettyPrintMemory(size()) + System.lineSeparator() +
                "Capacity: " + FBUtilities.prettyPrintMemory(capacity()) + System.lineSeparator() +
                "Sync reclaims: " + syncReclaims() + System.lineSeparator() +
-               "Bypass: " + bypassCount() + System.lineSeparator() +
+               "Blocked on pool: " + blockedOnPoolAllocation() + System.lineSeparator() +
+               "Pool wait successes: " + poolWaitSuccesses() + System.lineSeparator() +
                "Pool exhausted: " + poolExhausted();
     }
 }
