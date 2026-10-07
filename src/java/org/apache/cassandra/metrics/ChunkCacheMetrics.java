@@ -96,6 +96,13 @@ public interface ChunkCacheMetrics extends StatsCounter, CacheMetrics
     @Override
     CacheStats snapshot();
 
+    /**
+     * Unregister instruments from the global metrics registry so a later {@link ChunkCache} (e.g. in tests)
+     * gets fresh counters. Safe to call more than once. Production {@link ChunkCache#instance} is not closed
+     * in normal operation.
+     */
+    void close();
+
     @VisibleForTesting
     void reset();
 }

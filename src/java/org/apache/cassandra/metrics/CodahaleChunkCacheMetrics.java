@@ -20,6 +20,7 @@ package org.apache.cassandra.metrics;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 
+import com.codahale.metrics.Meter;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.google.common.annotations.VisibleForTesting;
 
@@ -39,11 +40,11 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     /** Latency of misses */
     public final Timer missLatency;
 
-    private final com.codahale.metrics.Meter syncReclaims;
-    private final com.codahale.metrics.Meter reclaimRetrySuccesses;
-    private final com.codahale.metrics.Meter poolExhausted;
-    private final com.codahale.metrics.Meter blockedOnPoolAllocation;
-    private final com.codahale.metrics.Meter poolWaitSuccesses;
+    private final Meter syncReclaims;
+    private final Meter reclaimRetrySuccesses;
+    private final Meter poolExhausted;
+    private final Meter blockedOnPoolAllocation;
+    private final Meter poolWaitSuccesses;
     private final Timer reclaimLatency;
 
     /**
@@ -235,6 +236,13 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     public CacheStats snapshot()
     {
         return CacheStats.of(metrics.hits.getCount(), metrics.misses.getCount(), missLatency.getCount(), 0L, missLatency.getCount(), 0L, 0L);
+    }
+
+    @Override
+    public void close()
+    {
+        // MissLatency / SyncReclaims / … were registered through metrics.register* and are removed with it.
+        metrics.close();
     }
 
     @Override

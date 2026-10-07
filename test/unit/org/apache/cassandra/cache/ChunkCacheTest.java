@@ -969,6 +969,10 @@ public class ChunkCacheTest
             assertEquals(0L, pool.overflowMemoryInBytes());
             assertEquals(0L, pool.usedSizeInBytes());
         }
+        finally
+        {
+            chunkCache.close();
+        }
     }
 
     /**

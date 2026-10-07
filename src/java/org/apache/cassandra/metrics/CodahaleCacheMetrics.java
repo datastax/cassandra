@@ -19,6 +19,8 @@
 package org.apache.cassandra.metrics;
 
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.DoubleSupplier;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -27,6 +29,7 @@ import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.Timer;
 import org.apache.cassandra.cache.CacheSize;
+import org.apache.cassandra.metrics.CassandraMetricsRegistry.MetricName;
 
 import static java.lang.Double.isInfinite;
 import static java.lang.Double.isNaN;
@@ -63,6 +66,8 @@ public class CodahaleCacheMetrics implements CacheMetrics
     public final String cacheType;
 
     private final MetricNameFactory factory;
+    /** Names registered via {@link #registerGauge}/{@link #registerMeter}/{@link #registerTimer}; removed on {@link #close()}. */
+    private final List<MetricName> registered = new ArrayList<>();
 
     /**
      * Create metrics for given cache.
@@ -187,17 +192,34 @@ public class CodahaleCacheMetrics implements CacheMetrics
 
     protected final <T> Gauge<T> registerGauge(String name, Gauge<T> gauge)
     {
-        return Metrics.register(factory.createMetricName(name), gauge);
+        MetricName metricName = factory.createMetricName(name);
+        registered.add(metricName);
+        return Metrics.register(metricName, gauge);
     }
 
     protected final Meter registerMeter(String name)
     {
-        return Metrics.meter(factory.createMetricName(name));
+        MetricName metricName = factory.createMetricName(name);
+        registered.add(metricName);
+        return Metrics.meter(metricName);
     }
 
     protected final Timer registerTimer(String name)
     {
-        return Metrics.timer(factory.createMetricName(name));
+        MetricName metricName = factory.createMetricName(name);
+        registered.add(metricName);
+        return Metrics.timer(metricName);
+    }
+
+    /**
+     * Remove every metric registered through this instance from the global registry.
+     * Safe to call more than once.
+     */
+    public void close()
+    {
+        for (MetricName name : registered)
+            Metrics.remove(name);
+        registered.clear();
     }
 
     @VisibleForTesting

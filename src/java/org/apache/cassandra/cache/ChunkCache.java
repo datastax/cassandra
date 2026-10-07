@@ -414,6 +414,7 @@ public class ChunkCache
     public void close()
     {
         clear();
+        metrics.close();
         try
         {
             cleanupExecutor.shutdown();

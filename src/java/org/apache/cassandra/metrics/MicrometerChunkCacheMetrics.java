@@ -268,6 +268,12 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
         throw new UnsupportedOperationException("This was not expected to be called and should be implemented if required");
     }
 
+    @Override
+    public void close()
+    {
+        //Noop since simpleMeterRegistry is dropped with the instance.
+    }
+
     @Nonnull
     @Override
     public CacheStats snapshot()
