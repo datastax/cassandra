@@ -116,6 +116,35 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
         assertEquals(0, BufferPools.forChunkCache().usedSizeInBytes());
     }
 
+    /**
+     * With a multi-key provider every page names its own key: the writer sizes pages with the key of
+     * {@code getSecretKey} but must encrypt them with the key written in the page header.
+     */
+    @Test
+    public void testRotatingKeys() throws IOException
+    {
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CompressionParams.CLASS, Encryptor.class.getName());
+        opts.put(EncryptionConfig.CIPHER_ALGORITHM, "AES/CBC/PKCS5Padding");
+        opts.put(EncryptionConfig.SECRET_KEY_STRENGTH, Integer.toString(128));
+        opts.put(EncryptionConfig.KEY_PROVIDER, RotatingKeyProviderFactory.class.getName());
+
+        assertEquals(0, BufferPools.forChunkCache().usedSizeInBytes());
+        compressionParams = CompressionParams.fromMap(opts);
+        encryptor = compressionParams.getSstableCompressor();
+        int headersBefore = RotatingKeyProviderFactory.provider().headersWritten();
+
+        for (boolean useMemmap : new boolean[]{ false, true })
+        {
+            testWrite(createTempFile("rotating_small", useMemmap ? "2" : "1"), 25, useMemmap);
+            testWrite(createTempFile("rotating_large", useMemmap ? "2" : "1"), CHUNK_SIZE * 3 + 100, useMemmap);
+        }
+
+        // per run: one page for the 25-byte write, at least four for the write of more than three pages
+        assertTrue(RotatingKeyProviderFactory.provider().headersWritten() - headersBefore >= 2 * (1 + 4));
+        assertEquals(0, BufferPools.forChunkCache().usedSizeInBytes());
+    }
+
     private File createTempFile(String prefix, String suffix) throws IOException
     {
         return new File(java.io.File.createTempFile(prefix, suffix));
