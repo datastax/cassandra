@@ -657,6 +657,49 @@ public class ChunkCacheTest
         // both memoryInUse and free-slot bits stuck. Returning exactly to baseline means full pages were freed.
     }
 
+    @Test
+    public void testReclaimRetrySuccessAfterReclaimSync() throws Exception
+    {
+        BufferPool pool = mock(BufferPool.class);
+        final java.util.concurrent.atomic.AtomicInteger tryGets =
+                new java.util.concurrent.atomic.AtomicInteger();
+        when(pool.tryGet(anyInt())).thenAnswer(inv -> {
+            // First tryGet in allocateForCache fails; after reclaimSync the retry succeeds.
+            if (tryGets.incrementAndGet() == 1)
+                return null;
+            return ByteBuffer.allocateDirect(inv.getArgument(0));
+        });
+        doNothing().when(pool).recycleFreeLocalChunks();
+        doNothing().when(pool).put(any(ByteBuffer.class));
+        when(pool.usedSizeInBytes()).thenReturn(0L);
+        when(pool.overflowMemoryInBytes()).thenReturn(0L);
+
+        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
+        long retryBefore = chunkCache.metrics.reclaimRetrySuccesses();
+        long reclaimBefore = chunkCache.metrics.syncReclaims();
+        long blockedBefore = chunkCache.metrics.blockedOnPoolAllocation();
+        long waitOkBefore = chunkCache.metrics.poolWaitSuccesses();
+
+        File file = FileUtils.createTempFile("reclaim-retry", ".tmp");
+        try (MockFileControl control = new MockFileControl(file, 64, chunkCache))
+        {
+            control.createFile();
+            control.waitOnRead.complete(null);
+            RandomAccessReader reader = control.openReader();
+            reader.reBuffer();
+            assertTrue(chunkCache.metrics.syncReclaims() > reclaimBefore);
+            assertTrue(chunkCache.metrics.reclaimRetrySuccesses() > retryBefore);
+            assertEquals(blockedBefore, chunkCache.metrics.blockedOnPoolAllocation());
+            assertEquals(waitOkBefore, chunkCache.metrics.poolWaitSuccesses());
+            assertTrue(chunkCache.size() >= 1);
+            reader.close();
+        }
+        finally
+        {
+            chunkCache.close();
+        }
+    }
+
     /**
      * Exhaust the buffer pool, recover after partial free, then full free and pool capacity restors.
      * Admits new data and does not overflow.
