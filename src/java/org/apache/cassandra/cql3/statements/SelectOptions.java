@@ -26,7 +26,7 @@ import com.google.common.collect.ImmutableSet;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.IndexHints;
-import org.apache.cassandra.db.filter.SAIQueryOptions;
+import org.apache.cassandra.db.filter.OptimizerOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.index.Index;
@@ -43,9 +43,9 @@ public class SelectOptions extends PropertyDefinitions
     public static final String ANN_OPTIONS = "ann_options";
     public static final String INCLUDED_INDEXES = "included_indexes";
     public static final String EXCLUDED_INDEXES = "excluded_indexes";
-    public static final String QUERY_OPTIONS = "query_options";
+    public static final String OPTIMIZER_OPTIONS = "optimizer_options";
 
-    private static final Set<String> keywords = ImmutableSet.of(ANN_OPTIONS, INCLUDED_INDEXES, EXCLUDED_INDEXES, QUERY_OPTIONS);
+    private static final Set<String> keywords = ImmutableSet.of(ANN_OPTIONS, INCLUDED_INDEXES, EXCLUDED_INDEXES, OPTIMIZER_OPTIONS);
 
     /**
      * Validates all the {@code SELECT} options.
@@ -65,7 +65,7 @@ public class SelectOptions extends PropertyDefinitions
         validate(keywords, Collections.emptySet());
         parseANNOptions().validate(state, table.keyspace, limit);
         parseIndexHints(table, indexRegistry).validate(indexQueryPlan);
-        parseQueryOptions().validate(state, table.keyspace);
+        parseOptimizerOptions().validate(table.keyspace);
     }
 
     /**
@@ -105,11 +105,11 @@ public class SelectOptions extends PropertyDefinitions
         return IndexHints.fromCQLNames(included, excluded, table, indexRegistry);
     }
 
-    public SAIQueryOptions parseQueryOptions()
+    public OptimizerOptions parseOptimizerOptions()
     {
-        Map<String, String> options = getMap(QUERY_OPTIONS);
+        Map<String, String> options = getMap(OPTIMIZER_OPTIONS);
         return options == null
-               ? SAIQueryOptions.NONE
-               : SAIQueryOptions.fromMap(options);
+               ? OptimizerOptions.NONE
+               : OptimizerOptions.fromMap(options);
     }
 }

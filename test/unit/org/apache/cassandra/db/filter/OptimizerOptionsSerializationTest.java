@@ -24,19 +24,19 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
 
-import static org.apache.cassandra.db.filter.SAIQueryOptions.SAI_HYBRID_SORT_ORDER;
-import static org.apache.cassandra.db.filter.SAIQueryOptions.SAI_INTERSECTION_CLAUSE_LIMIT;
-import static org.apache.cassandra.db.filter.SAIQueryOptions.SAI_QUERY_OPTIMIZATION_LEVEL;
-import static org.apache.cassandra.db.filter.SAIQueryOptions.SAI_USE_TERM_STATISTICS;
+import static org.apache.cassandra.db.filter.OptimizerOptions.HYBRID_SORT_ORDER;
+import static org.apache.cassandra.db.filter.OptimizerOptions.INTERSECTION_CLAUSE_LIMIT;
+import static org.apache.cassandra.db.filter.OptimizerOptions.QUERY_OPTIMIZATION_LEVEL;
+import static org.apache.cassandra.db.filter.OptimizerOptions.USE_TERM_STATISTICS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Verifies that {@link SAIQueryOptions.Serializer} round-trips correctly at VERSION_DS_20
+ * Verifies that {@link OptimizerOptions.Serializer} round-trips correctly at VERSION_DS_20
  * and degrades gracefully (returns NONE) for older messaging versions.
  */
-public class SAIQueryOptionsSerializationTest
+public class OptimizerOptionsSerializationTest
 {
-    private static final SAIQueryOptions.Serializer serializer = SAIQueryOptions.serializer;
+    private static final OptimizerOptions.Serializer serializer = OptimizerOptions.serializer;
 
     // -------------------------------------------------------------------------
     // Round-trip at current version
@@ -45,45 +45,45 @@ public class SAIQueryOptionsSerializationTest
     @Test
     public void testNoneRoundTrip() throws IOException
     {
-        assertRoundTrip(SAIQueryOptions.NONE);
+        assertRoundTrip(OptimizerOptions.NONE);
     }
 
     @Test
     public void testAllOptionsRoundTrip() throws IOException
     {
-        SAIQueryOptions opts = SAIQueryOptions.fromMap(Map.of(
-                SAI_QUERY_OPTIMIZATION_LEVEL, "0",
-                SAI_INTERSECTION_CLAUSE_LIMIT, "7",
-                SAI_USE_TERM_STATISTICS, "false",
-                SAI_HYBRID_SORT_ORDER, "filter_then_sort"));
+        OptimizerOptions opts = OptimizerOptions.fromMap(Map.of(
+                QUERY_OPTIMIZATION_LEVEL, "0",
+                INTERSECTION_CLAUSE_LIMIT, "7",
+                USE_TERM_STATISTICS, "false",
+                HYBRID_SORT_ORDER, "filter_then_sort"));
         assertRoundTrip(opts);
     }
 
     @Test
     public void testOptLevelOnlyRoundTrip() throws IOException
     {
-        assertRoundTrip(SAIQueryOptions.fromMap(Map.of(SAI_QUERY_OPTIMIZATION_LEVEL, "1")));
+        assertRoundTrip(OptimizerOptions.fromMap(Map.of(QUERY_OPTIMIZATION_LEVEL, "1")));
     }
 
     @Test
     public void testIntersectionClauseLimitOnlyRoundTrip() throws IOException
     {
-        assertRoundTrip(SAIQueryOptions.fromMap(Map.of(SAI_INTERSECTION_CLAUSE_LIMIT, "10")));
+        assertRoundTrip(OptimizerOptions.fromMap(Map.of(INTERSECTION_CLAUSE_LIMIT, "10")));
     }
 
     @Test
     public void testUseTermStatisticsOnlyRoundTrip() throws IOException
     {
-        assertRoundTrip(SAIQueryOptions.fromMap(Map.of(SAI_USE_TERM_STATISTICS, "true")));
-        assertRoundTrip(SAIQueryOptions.fromMap(Map.of(SAI_USE_TERM_STATISTICS, "false")));
+        assertRoundTrip(OptimizerOptions.fromMap(Map.of(USE_TERM_STATISTICS, "true")));
+        assertRoundTrip(OptimizerOptions.fromMap(Map.of(USE_TERM_STATISTICS, "false")));
     }
 
     @Test
     public void testHybridSortOrderRoundTrip() throws IOException
     {
-        for (SAIQueryOptions.HybridSortOrder order : SAIQueryOptions.HybridSortOrder.values())
+        for (OptimizerOptions.HybridSortOrder order : OptimizerOptions.HybridSortOrder.values())
         {
-            SAIQueryOptions opts = SAIQueryOptions.fromMap(Map.of(SAI_HYBRID_SORT_ORDER, order.name()));
+            OptimizerOptions opts = OptimizerOptions.fromMap(Map.of(HYBRID_SORT_ORDER, order.name()));
             assertRoundTrip(opts);
         }
     }
@@ -98,20 +98,20 @@ public class SAIQueryOptionsSerializationTest
         // NONE should serialize to zero bytes and deserialize back to NONE at old versions
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            serializer.serialize(SAIQueryOptions.NONE, out, MessagingService.VERSION_DS_12);
-            assertThat(serializer.serializedSize(SAIQueryOptions.NONE, MessagingService.VERSION_DS_12)).isEqualTo(0);
+            serializer.serialize(OptimizerOptions.NONE, out, MessagingService.VERSION_DS_12);
+            assertThat(serializer.serializedSize(OptimizerOptions.NONE, MessagingService.VERSION_DS_12)).isEqualTo(0);
             assertThat(out.buffer().remaining()).isEqualTo(0);
 
             DataInputBuffer in = new DataInputBuffer(out.buffer(), true);
-            SAIQueryOptions result = serializer.deserialize(in, MessagingService.VERSION_DS_12);
-            assertThat(result).isSameAs(SAIQueryOptions.NONE);
+            OptimizerOptions result = serializer.deserialize(in, MessagingService.VERSION_DS_12);
+            assertThat(result).isSameAs(OptimizerOptions.NONE);
         }
     }
 
     @Test
     public void testOptionsThrowAtOlderVersionWhenNonNone()
     {
-        SAIQueryOptions opts = SAIQueryOptions.fromMap(Map.of(SAI_QUERY_OPTIMIZATION_LEVEL, "0"));
+        OptimizerOptions opts = OptimizerOptions.fromMap(Map.of(QUERY_OPTIMIZATION_LEVEL, "0"));
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -128,20 +128,20 @@ public class SAIQueryOptionsSerializationTest
     @Test
     public void testSerializedSizeMatchesBytesWritten() throws IOException
     {
-        SAIQueryOptions[] cases = {
-                SAIQueryOptions.NONE,
-                SAIQueryOptions.fromMap(Map.of(SAI_QUERY_OPTIMIZATION_LEVEL, "0")),
-                SAIQueryOptions.fromMap(Map.of(SAI_INTERSECTION_CLAUSE_LIMIT, "3")),
-                SAIQueryOptions.fromMap(Map.of(SAI_USE_TERM_STATISTICS, "true")),
-                SAIQueryOptions.fromMap(Map.of(SAI_HYBRID_SORT_ORDER, "sort_then_filter")),
-                SAIQueryOptions.fromMap(Map.of(
-                        SAI_QUERY_OPTIMIZATION_LEVEL, "1",
-                        SAI_INTERSECTION_CLAUSE_LIMIT, "5",
-                        SAI_USE_TERM_STATISTICS, "false",
-                        SAI_HYBRID_SORT_ORDER, "auto")),
+        OptimizerOptions[] cases = {
+                OptimizerOptions.NONE,
+                OptimizerOptions.fromMap(Map.of(QUERY_OPTIMIZATION_LEVEL, "0")),
+                OptimizerOptions.fromMap(Map.of(INTERSECTION_CLAUSE_LIMIT, "3")),
+                OptimizerOptions.fromMap(Map.of(USE_TERM_STATISTICS, "true")),
+                OptimizerOptions.fromMap(Map.of(HYBRID_SORT_ORDER, "sort_then_filter")),
+                OptimizerOptions.fromMap(Map.of(
+                        QUERY_OPTIMIZATION_LEVEL, "1",
+                        INTERSECTION_CLAUSE_LIMIT, "5",
+                        USE_TERM_STATISTICS, "false",
+                        HYBRID_SORT_ORDER, "auto")),
         };
 
-        for (SAIQueryOptions opts : cases)
+        for (OptimizerOptions opts : cases)
         {
             try (DataOutputBuffer out = new DataOutputBuffer())
             {
@@ -157,7 +157,7 @@ public class SAIQueryOptionsSerializationTest
     // helper
     // -------------------------------------------------------------------------
 
-    private static void assertRoundTrip(SAIQueryOptions expected) throws IOException
+    private static void assertRoundTrip(OptimizerOptions expected) throws IOException
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
@@ -166,7 +166,7 @@ public class SAIQueryOptionsSerializationTest
                     .isEqualTo((int) serializer.serializedSize(expected, MessagingService.VERSION_DS_20));
 
             DataInputBuffer in = new DataInputBuffer(out.buffer(), true);
-            SAIQueryOptions actual = serializer.deserialize(in, MessagingService.VERSION_DS_20);
+            OptimizerOptions actual = serializer.deserialize(in, MessagingService.VERSION_DS_20);
             assertThat(actual).isEqualTo(expected);
         }
     }

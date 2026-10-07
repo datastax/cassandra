@@ -66,8 +66,8 @@ import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.IndexHints;
+import org.apache.cassandra.db.filter.OptimizerOptions;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.filter.SAIQueryOptions;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
@@ -135,7 +135,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     final Plan.Factory planFactory;
 
     /** Per-query SAI optimizer settings; falls back to global {@link CassandraRelevantProperties} values when not overridden. */
-    private final SAIQueryOptions saiQueryOptions;
+    private final OptimizerOptions saiQueryOptions;
 
     /**
      * Holds the primary key iterators for indexed expressions in the query (i.e. leaves of the expression tree).
@@ -157,8 +157,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     static
     {
         logger.info(String.format("Query plan optimization is %s (level = %d)",
-                                  SAIQueryOptions.NONE.queryOptimizationLevel() > 0 ? "enabled" : "disabled",
-                                  SAIQueryOptions.NONE.queryOptimizationLevel()));
+                                  OptimizerOptions.NONE.queryOptimizationLevel() > 0 ? "enabled" : "disabled",
+                                  OptimizerOptions.NONE.queryOptimizationLevel()));
     }
 
     @VisibleForTesting
@@ -416,9 +416,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         if (Tracing.isTracing())
         {
-            if (saiQueryOptions != SAIQueryOptions.NONE)
+            if (saiQueryOptions != OptimizerOptions.NONE)
                 Tracing.trace("Per-query SAI options: opt_level={}, intersection_clause_limit={}, use_term_statistics={}, hybrid_sort_order={}",
-                              saiQueryOptions.queryOptimizationLevel(), saiQueryOptions.intersectionClauseLimit(), saiQueryOptions.useTermStatistics(), saiQueryOptions.hybridSortOrder());
+                              saiQueryOptions.queryOptimizationLevel(),
+                              saiQueryOptions.intersectionClauseLimit(),
+                              saiQueryOptions.useTermStatistics(),
+                              saiQueryOptions.hybridSortOrder());
 
             Tracing.trace("Query execution plan:\n" + plan.toStringRecursive(Redaction.NONE));
             List<Plan.IndexScan> origIndexScans = keysIterationPlan.nodesOfType(Plan.IndexScan.class);
@@ -495,7 +498,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 Tracing.logAndTrace(logger, "sai_hybrid_sort_order=sort_then_filter: forcing sort-then-filter, replacing filter-then-sort plan");
                 return overridden;
             }
-            case FILTER_THEN_SORT:  // SAIQueryOptions.HybridSortOrder.FILTER_THEN_SORT
+            case FILTER_THEN_SORT:
             {
                 // If the optimizer already chose filter-then-sort (a KeysSort) there is nothing to do.
                 if (sortedPlan instanceof Plan.KeysSort)

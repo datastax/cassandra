@@ -22,7 +22,6 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.commons.lang3.StringUtils;
 
@@ -35,15 +34,24 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * User-provided directives about query optimizer options to be used by a {@code SELECT} query.
- * See {@code SAIQueryOptions.md} for further details.
+ * User-provided directives that override SAI query-optimizer settings for a single {@code SELECT} query.
+ * <p>
+ * Instances are immutable; {@link #NONE} is the sentinel used when no options were specified.
+ * Each option falls back to the corresponding {@link CassandraRelevantProperties} JVM property when the
+ * per-query value is absent, making those defaults dynamically updatable at runtime without a JVM restart.
+ * <p>
+ * See {@code OptimizerOptions.md} for further details.
  */
-public class SAIQueryOptions
+public class OptimizerOptions
 {
-    public static final String SAI_QUERY_OPTIMIZATION_LEVEL = "sai_query_optimization_level";
-    public static final String SAI_INTERSECTION_CLAUSE_LIMIT = "sai_intersection_clause_limit";
-    public static final String SAI_USE_TERM_STATISTICS = "sai_use_term_statistics";
-    public static final String SAI_HYBRID_SORT_ORDER = "sai_hybrid_sort_order";
+    /** Enables or disables the SAI query optimizer for this query (0 = disabled, 1 = enabled). */
+    public static final String QUERY_OPTIMIZATION_LEVEL = "query_optimization_level";
+    /** Caps the number of index clauses that may be intersected for this query. */
+    public static final String INTERSECTION_CLAUSE_LIMIT = "intersection_clause_limit";
+    /** When {@code true}, the optimizer uses per-term statistics for selectivity estimates. */
+    public static final String USE_TERM_STATISTICS = "use_term_statistics";
+    /** Overrides the optimizer's hybrid sort-order plan choice for this query. */
+    public static final String HYBRID_SORT_ORDER = "hybrid_sort_order";
 
     public enum HybridSortOrder
     {
@@ -62,38 +70,52 @@ public class SAIQueryOptions
             catch (IllegalArgumentException e)
             {
                 throw new InvalidRequestException(String.format("Invalid value '%s' for option '%s'. Must be 'auto', 'filter_then_sort', or 'sort_then_filter'.",
-                        s, SAI_HYBRID_SORT_ORDER));
+                        s, HYBRID_SORT_ORDER));
             }
         }
     }
 
-    public static final SAIQueryOptions NONE = new SAIQueryOptions(null, null, null, null)
+    public static final OptimizerOptions NONE = new OptimizerOptions(null, null, null, null)
     {
         @Override
         public String toCQLString() {return StringUtils.EMPTY;}
 
         @Override
-        public void validate(ClientState state, String keyspace)
+        public void validate(String keyspace)
         {
-            // no validation needed for None
+            // no validation needed for NONE
         }
-
     };
     public static final Serializer serializer = new Serializer();
 
+    /**
+     * Per-query optimization level; {@code null} means fall back to
+     * {@link CassandraRelevantProperties#SAI_QUERY_OPT_LEVEL}.
+     */
     @Nullable
-    public final Integer queryOptimizationLevel;
+    private final Integer queryOptimizationLevel;
+    /**
+     * Per-query intersection clause cap; {@code null} means fall back to
+     * {@link CassandraRelevantProperties#SAI_INTERSECTION_CLAUSE_LIMIT}.
+     */
     @Nullable
-    public final HybridSortOrder hybridSortOrder;
+    private final Integer intersectionClauseLimit;
+    /**
+     * Per-query term-statistics flag; {@code null} means fall back to
+     * {@link CassandraRelevantProperties#SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS}.
+     */
     @Nullable
-    public final Integer intersectionClauseLimit;
+    private final Boolean useTermStatistics;
+    /**
+     * Per-query hybrid sort-order override; {@code null} means use {@link HybridSortOrder#AUTO}.
+     */
     @Nullable
-    public final Boolean useTermStatistics;
+    private final HybridSortOrder hybridSortOrder;
 
-    private SAIQueryOptions(@Nullable Integer queryOptimizationLevel,
-                            @Nullable Integer intersectionClauseLimit,
-                            @Nullable Boolean useTermStatistics,
-                            @Nullable HybridSortOrder hybridSortOrder)
+    private OptimizerOptions(@Nullable Integer queryOptimizationLevel,
+                             @Nullable Integer intersectionClauseLimit,
+                             @Nullable Boolean useTermStatistics,
+                             @Nullable HybridSortOrder hybridSortOrder)
     {
         this.queryOptimizationLevel = queryOptimizationLevel;
         this.intersectionClauseLimit = intersectionClauseLimit;
@@ -101,32 +123,41 @@ public class SAIQueryOptions
         this.hybridSortOrder = hybridSortOrder;
     }
 
-    public static SAIQueryOptions create(@Nullable Integer queryOptimizationLevel, @Nullable Integer intersectionClauseLimit, @Nullable Boolean useTermStatistics, @Nullable HybridSortOrder hybridSortOrder)
+    public static OptimizerOptions create(@Nullable Integer queryOptimizationLevel,
+                                          @Nullable Integer intersectionClauseLimit,
+                                          @Nullable Boolean useTermStatistics,
+                                          @Nullable HybridSortOrder hybridSortOrder)
     {
         // if all the options are null, return NONE instance
-        return queryOptimizationLevel == null && intersectionClauseLimit == null && useTermStatistics == null && hybridSortOrder == null ? NONE : new SAIQueryOptions(queryOptimizationLevel, intersectionClauseLimit, useTermStatistics, hybridSortOrder);
+        return queryOptimizationLevel == null &&
+               intersectionClauseLimit == null &&
+               useTermStatistics == null &&
+               hybridSortOrder == null
+               ? NONE
+               : new OptimizerOptions(queryOptimizationLevel, intersectionClauseLimit, useTermStatistics, hybridSortOrder);
     }
 
     /**
-     * Validates the SAI Query Options by checking that peers support the options.
+     * Validates the optimizer options by checking that all peers support them.
      */
-    public void validate(ClientState state, String keyspace)
+    public void validate(String keyspace)
     {
-       assert keyspace != null;
-       Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithConnectionsOnVersionBelow(keyspace, MessagingService.VERSION_DS_20);
-       if (MessagingService.current_version < MessagingService.VERSION_DS_20)
-           badNodes.add(FBUtilities.getBroadcastAddressAndPort());
-       if (!badNodes.isEmpty())
-           throw new InvalidRequestException("SAI Query Options are not supported in clusters below DS 20.");
+        assert keyspace != null;
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithConnectionsOnVersionBelow(keyspace, MessagingService.VERSION_DS_20);
+        if (MessagingService.current_version < MessagingService.VERSION_DS_20)
+            badNodes.add(FBUtilities.getBroadcastAddressAndPort());
+        if (!badNodes.isEmpty())
+            throw new InvalidRequestException("SAI optimizer options are not supported in clusters below DS 20.");
     }
 
     /**
-     * Parses SAI query options from the map provided in the {@code WITH query_options} clause of a {@code SELECT} query.
+     * Parses optimizer options from the map provided in the {@code WITH optimizer_options} clause of a
+     * {@code SELECT} query.
      *
      * @param map the map of option key/value pairs
-     * @return a new {@link SAIQueryOptions} instance, or {@link #NONE} if the map contains no recognized options
+     * @return a new {@link OptimizerOptions} instance, or {@link #NONE} if the map is empty
      */
-    public static SAIQueryOptions fromMap(Map<String, String> map)
+    public static OptimizerOptions fromMap(Map<String, String> map)
     {
         Integer queryOptimizationLevel = null;
         Integer intersectionClauseLimit = null;
@@ -140,23 +171,23 @@ public class SAIQueryOptions
 
             switch (key)
             {
-                case SAI_QUERY_OPTIMIZATION_LEVEL:
+                case QUERY_OPTIMIZATION_LEVEL:
                     queryOptimizationLevel = parseQueryOptimizationLevel(value);
                     break;
-                case SAI_INTERSECTION_CLAUSE_LIMIT:
+                case INTERSECTION_CLAUSE_LIMIT:
                     intersectionClauseLimit = parseIntersectionClauseLimit(value);
                     break;
-                case SAI_USE_TERM_STATISTICS:
+                case USE_TERM_STATISTICS:
                     useTermStatistics = parseUseTermStatistics(value);
                     break;
-                case SAI_HYBRID_SORT_ORDER:
-                    hybridSortOrder = parseHybridSortOrder(value);
+                case HYBRID_SORT_ORDER:
+                    hybridSortOrder = HybridSortOrder.fromString(value);
                     break;
                 default:
-                    throw new InvalidRequestException("Unknown SAI query option: " + key);
+                    throw new InvalidRequestException("Unknown SAI optimizer option: " + key);
             }
         }
-        return SAIQueryOptions.create(queryOptimizationLevel, intersectionClauseLimit, useTermStatistics, hybridSortOrder);
+        return OptimizerOptions.create(queryOptimizationLevel, intersectionClauseLimit, useTermStatistics, hybridSortOrder);
     }
 
     // parsing methods
@@ -170,10 +201,10 @@ public class SAIQueryOptions
         }
         catch (NumberFormatException e)
         {
-            throw new InvalidRequestException(String.format("Invalid '%s' provided. Expected an int value of either 0 or 1 but found '%s'.", SAI_QUERY_OPTIMIZATION_LEVEL, value));
+            throw new InvalidRequestException(String.format("Invalid '%s' provided. Expected an int value of either 0 or 1 but found '%s'.", QUERY_OPTIMIZATION_LEVEL, value));
         }
         if (queryOptimizationLevel < 0 || queryOptimizationLevel > 1)
-            throw new InvalidRequestException(String.format("Invalid '%s' provided. Expected an int value of either 0 or 1 but found '%s'.", SAI_QUERY_OPTIMIZATION_LEVEL, value));
+            throw new InvalidRequestException(String.format("Invalid '%s' provided. Expected an int value of either 0 or 1 but found '%s'.", QUERY_OPTIMIZATION_LEVEL, value));
 
         return queryOptimizationLevel;
     }
@@ -187,10 +218,10 @@ public class SAIQueryOptions
         }
         catch (NumberFormatException e)
         {
-            throw new InvalidRequestException(String.format("Invalid '%s' provided. Expected a positive int but found '%s'.",  SAI_INTERSECTION_CLAUSE_LIMIT, value));
+            throw new InvalidRequestException(String.format("Invalid '%s' provided. Expected a positive int but found '%s'.", INTERSECTION_CLAUSE_LIMIT, value));
         }
         if (intersectionClauseLimit < 1)
-            throw new InvalidRequestException(String.format("invalid value '%s' for option '%s'. Must be between 1 and %d (inclusive).",  value, SAI_INTERSECTION_CLAUSE_LIMIT, Integer.MAX_VALUE));
+            throw new InvalidRequestException(String.format("Invalid value '%s' for option '%s'. Must be between 1 and %d (inclusive).", value, INTERSECTION_CLAUSE_LIMIT, Integer.MAX_VALUE));
 
         return intersectionClauseLimit;
     }
@@ -202,29 +233,39 @@ public class SAIQueryOptions
         if (value.equalsIgnoreCase("false"))
             return false;
         throw new InvalidRequestException(String.format("Invalid value '%s' for option '%s'. Must be 'true' or 'false'.",
-                                                        value, SAI_USE_TERM_STATISTICS));
+                                                        value, USE_TERM_STATISTICS));
     }
 
-    private static HybridSortOrder parseHybridSortOrder(String value)
-    {
-        return HybridSortOrder.fromString(value);
-    }
-
+    /**
+     * Returns the effective optimization level: the per-query override if set, otherwise the value of the
+     * {@code cassandra.sai.query.optimization.level} system property (dynamically updatable at runtime).
+     */
     public int queryOptimizationLevel()
     {
         return queryOptimizationLevel != null ? queryOptimizationLevel : CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.getInt();
     }
 
+    /**
+     * Returns the effective intersection clause limit: the per-query override if set, otherwise the value of the
+     * {@code cassandra.sai.intersection_clause_limit} system property (dynamically updatable at runtime).
+     */
     public int intersectionClauseLimit()
     {
         return intersectionClauseLimit != null ? intersectionClauseLimit : CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
     }
 
+    /**
+     * Returns the effective term-statistics flag: the per-query override if set, otherwise the value of the
+     * {@code cassandra.sai.query_optimization.use_term_statistics} system property (dynamically updatable at runtime).
+     */
     public boolean useTermStatistics()
     {
         return useTermStatistics != null ? useTermStatistics : CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean();
     }
 
+    /**
+     * Returns the effective hybrid sort-order: the per-query override if set, otherwise {@link HybridSortOrder#AUTO}.
+     */
     public HybridSortOrder hybridSortOrder()
     {
         return hybridSortOrder != null ? hybridSortOrder : HybridSortOrder.AUTO;
@@ -237,13 +278,13 @@ public class SAIQueryOptions
 
         List<String> entries = new ArrayList<>();
         if (queryOptimizationLevel != null)
-            entries.add(String.format("'%s': %d", SAI_QUERY_OPTIMIZATION_LEVEL, queryOptimizationLevel));
+            entries.add(String.format("'%s': %d", QUERY_OPTIMIZATION_LEVEL, queryOptimizationLevel));
         if (intersectionClauseLimit != null)
-            entries.add(String.format("'%s': %d", SAI_INTERSECTION_CLAUSE_LIMIT, intersectionClauseLimit));
+            entries.add(String.format("'%s': %d", INTERSECTION_CLAUSE_LIMIT, intersectionClauseLimit));
         if (useTermStatistics != null)
-            entries.add(String.format("'%s': %b", SAI_USE_TERM_STATISTICS, useTermStatistics));
+            entries.add(String.format("'%s': %b", USE_TERM_STATISTICS, useTermStatistics));
         if (hybridSortOrder != null)
-            entries.add(String.format("'%s': '%s'", SAI_HYBRID_SORT_ORDER, hybridSortOrder));
+            entries.add(String.format("'%s': '%s'", HYBRID_SORT_ORDER, hybridSortOrder));
 
         return '{' + String.join(", ", entries) + '}';
     }
@@ -252,8 +293,8 @@ public class SAIQueryOptions
     public boolean equals(Object o)
     {
         if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        SAIQueryOptions that = (SAIQueryOptions) o;
+        if (!(o instanceof OptimizerOptions)) return false;
+        OptimizerOptions that = (OptimizerOptions) o;
         return Objects.equals(queryOptimizationLevel, that.queryOptimizationLevel) &&
                Objects.equals(intersectionClauseLimit, that.intersectionClauseLimit) &&
                Objects.equals(useTermStatistics, that.useTermStatistics) &&
@@ -267,7 +308,7 @@ public class SAIQueryOptions
     }
 
     /**
-     * Serializer for {@link SAIQueryOptions}.
+     * Serializer for {@link OptimizerOptions}.
      * <p>
      * This serializer writes an int containing bit flags that indicate which options are present, allowing the future
      * addition of new options without increasing the messaging version.
@@ -283,12 +324,12 @@ public class SAIQueryOptions
                                                           USE_TERM_STATISTICS_MASK |
                                                           HYBRID_SORT_ORDER_MASK);
 
-        public void serialize(SAIQueryOptions options, DataOutputPlus out, int version) throws IOException
+        public void serialize(OptimizerOptions options, DataOutputPlus out, int version) throws IOException
         {
             if (version < MessagingService.VERSION_DS_20)
             {
                 if (options != NONE)
-                    throw new IllegalStateException("Unable to serialize SAI query options with messaging version: " + version);
+                    throw new IllegalStateException("Unable to serialize SAI optimizer options with messaging version: " + version);
                 return;
             }
 
@@ -305,24 +346,24 @@ public class SAIQueryOptions
                 out.writeUTF(options.hybridSortOrder.name());
         }
 
-        public SAIQueryOptions deserialize(DataInputPlus in, int version) throws IOException
+        public OptimizerOptions deserialize(DataInputPlus in, int version) throws IOException
         {
             if (version < MessagingService.VERSION_DS_20)
-                return SAIQueryOptions.NONE;
+                return OptimizerOptions.NONE;
 
             int flags = in.readInt();
             if ((flags & UNKNOWN_OPTIONS_MASK) != 0)
-                throw new IOException("Found unsupported SAI query options from a newer node.");
+                throw new IOException("Found unsupported SAI optimizer options from a newer node.");
 
             Integer queryOptLevel = (flags & QUERY_OPT_LEVEL_MASK) != 0 ? (int) in.readUnsignedVInt() : null;
             Integer intersectionLimit = (flags & INTERSECTION_CLAUSE_LIMIT_MASK) != 0 ? (int) in.readUnsignedVInt() : null;
             Boolean useTermStats = (flags & USE_TERM_STATISTICS_MASK) != 0 ? in.readBoolean() : null;
             HybridSortOrder sortOrder = (flags & HYBRID_SORT_ORDER_MASK) != 0 ? HybridSortOrder.valueOf(in.readUTF()) : null;
 
-            return SAIQueryOptions.create(queryOptLevel, intersectionLimit, useTermStats, sortOrder);
+            return OptimizerOptions.create(queryOptLevel, intersectionLimit, useTermStats, sortOrder);
         }
 
-        public long serializedSize(SAIQueryOptions options, int version)
+        public long serializedSize(OptimizerOptions options, int version)
         {
             if (version < MessagingService.VERSION_DS_20)
                 return 0;
@@ -342,7 +383,7 @@ public class SAIQueryOptions
             return size;
         }
 
-        private static int flags(SAIQueryOptions options)
+        private static int flags(OptimizerOptions options)
         {
             int flags = 0;
             if (options == NONE)
