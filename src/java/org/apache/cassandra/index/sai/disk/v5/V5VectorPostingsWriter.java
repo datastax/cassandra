@@ -22,10 +22,13 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntFunction;
 import java.util.function.IntPredicate;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
+
+import com.google.common.base.Preconditions;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.BiMap;
@@ -177,6 +180,98 @@ public class V5VectorPostingsWriter<T>
         }
 
         return writer.position();
+    }
+
+    /**
+     * As {@link #writePostings(SequentialWriter, RandomAccessVectorValues, Map)}, but resolving
+     * each new ordinal's postings through {@code postingsByNewOrdinal} — no vector reads, no
+     * value-keyed lookups. Only supports {@link Structure#ZERO_OR_ONE_TO_MANY} (the graph-merge
+     * path). A null function result is treated as an empty posting list.
+     */
+    public long writePostings(SequentialWriter writer,
+                              IntFunction<? extends VectorPostings<T>> postingsByNewOrdinal) throws IOException
+    {
+        var structure = remappedPostings.structure;
+        Preconditions.checkArgument(structure == Structure.ZERO_OR_ONE_TO_MANY,
+                                    "ordinal-keyed postings writing requires ZERO_OR_ONE_TO_MANY; got %s", structure);
+
+        writer.writeInt(MAGIC);
+        writer.writeInt(structure.ordinal());
+        writer.writeInt(remappedPostings.maxNewOrdinal);
+        writer.writeInt(remappedPostings.maxRowId);
+
+        if (remappedPostings.maxNewOrdinal >= 0)
+        {
+            writeGenericOrdinalToRowIdMappingByOrdinal(writer, postingsByNewOrdinal);
+            writeGenericRowIdMappingByOrdinal(writer, postingsByNewOrdinal);
+        }
+
+        return writer.position();
+    }
+
+    private void writeGenericOrdinalToRowIdMappingByOrdinal(SequentialWriter writer,
+                                                            IntFunction<? extends VectorPostings<T>> postingsByNewOrdinal) throws IOException
+    {
+        long ordToRowOffset = writer.getOnDiskFilePointer();
+        int ordinalCount = remappedPostings.maxNewOrdinal + 1;
+
+        var offsetsStartAt = ordToRowOffset + 8L * ordinalCount;
+        var nextOffset = offsetsStartAt;
+        for (var i = 0; i < ordinalCount; i++)
+        {
+            writer.writeLong(nextOffset);
+            var posting = postingsByNewOrdinal.apply(i);
+            int postingListSize = posting == null ? 0 : posting.getRowIds().size();
+            nextOffset += 4 + (postingListSize * 4L);
+        }
+
+        for (var i = 0; i < ordinalCount; i++)
+        {
+            var posting = postingsByNewOrdinal.apply(i);
+            if (posting == null)
+            {
+                writer.writeInt(0);
+                continue;
+            }
+            var sortedRowIds = posting.getRowIds().toIntArray();
+            Arrays.sort(sortedRowIds);
+            writer.writeInt(sortedRowIds.length);
+            for (int rowId : sortedRowIds)
+                writer.writeInt(rowId);
+        }
+    }
+
+    private void writeGenericRowIdMappingByOrdinal(SequentialWriter writer,
+                                                   IntFunction<? extends VectorPostings<T>> postingsByNewOrdinal) throws IOException
+    {
+        long startOffset = writer.position();
+
+        int maxRowId = -1;
+        var rowIdToOrdinalMap = new Int2IntHashMap(remappedPostings.maxNewOrdinal, 0.65f, OrdinalMapper.OMITTED);
+        for (int i = 0; i <= remappedPostings.maxNewOrdinal; i++)
+        {
+            var posting = postingsByNewOrdinal.apply(i);
+            if (posting == null)
+                continue;
+            var rowIds = posting.getRowIds();
+            for (int r = 0; r < rowIds.size(); r++)
+            {
+                var rowId = rowIds.getInt(r);
+                rowIdToOrdinalMap.put(rowId, i);
+                maxRowId = max(maxRowId, rowId);
+            }
+        }
+
+        for (int currentRowId = 0; currentRowId <= maxRowId; currentRowId++)
+        {
+            writer.writeInt(currentRowId);
+            if (rowIdToOrdinalMap.containsKey(currentRowId))
+                writer.writeInt(rowIdToOrdinalMap.get(currentRowId));
+            else
+                writer.writeInt(-1);
+        }
+
+        writer.writeLong(startOffset);
     }
 
     private void writeOneToManyOrdinalMapping(SequentialWriter writer) throws IOException

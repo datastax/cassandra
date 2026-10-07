@@ -19,6 +19,13 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.function.LongConsumer;
+import java.util.zip.CRC32;
 
 import io.github.jbellis.jvector.disk.RandomAccessWriter;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -110,6 +117,67 @@ public class SAICodecUtils
         writeBEInt(out, FOOTER_MAGIC);
         writeBEInt(out, 0);
         writeBELong(out, checksum);
+    }
+
+    /**
+     * Appends an SAI footer (FOOTER_MAGIC, 0, CRC-32 over entire file) to {@code file}, which
+     * already contains the SAI header at offset 0 and the body at {@code [headerSize(), bodyEndOffset)}.
+     * The footer (16 bytes) is written starting at {@code bodyEndOffset}.
+     */
+    public static void writeFooterForExternalBody(Path file, long bodyEndOffset) throws IOException
+    {
+        writeFooterForExternalBody(file, bodyEndOffset, null);
+    }
+
+    /**
+     * As {@link #writeFooterForExternalBody(Path, long)}, but reports cumulative bytes checksummed
+     * to {@code onBytes} (nullable) every ~16 MiB.
+     */
+    public static void writeFooterForExternalBody(Path file, long bodyEndOffset, LongConsumer onBytes) throws IOException
+    {
+        try (FileChannel ch = FileChannel.open(file, StandardOpenOption.READ, StandardOpenOption.WRITE))
+        {
+            ByteBuffer prefix = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
+            prefix.putInt(FOOTER_MAGIC).putInt(0).flip();
+            writeFully(ch, prefix, bodyEndOffset);
+
+            CRC32 crc = new CRC32();
+            ByteBuffer buf = ByteBuffer.allocate(1 << 16);
+            long crcEnd = bodyEndOffset + 8;
+            long pos = 0;
+            long lastReported = 0;
+            while (pos < crcEnd)
+            {
+                buf.clear();
+                buf.limit((int) Math.min(buf.capacity(), crcEnd - pos));
+                int n = ch.read(buf, pos);
+                if (n < 0)
+                    throw new IOException("Unexpected EOF at " + pos + " while checksumming footer of " + file);
+                buf.flip();
+                crc.update(buf);
+                pos += n;
+                if (onBytes != null && pos - lastReported >= (16 << 20))
+                {
+                    onBytes.accept(pos);
+                    lastReported = pos;
+                }
+            }
+            long checksum = crc.getValue();
+            if ((checksum & 0xFFFFFFFF00000000L) != 0)
+                throw new IllegalStateException("Illegal CRC-32 checksum: " + checksum + " (resource=" + file + ')');
+
+            ByteBuffer crcBuf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
+            crcBuf.putLong(checksum).flip();
+            writeFully(ch, crcBuf, bodyEndOffset + 8);
+            ch.force(true);
+        }
+    }
+
+    private static void writeFully(FileChannel ch, ByteBuffer buf, long position) throws IOException
+    {
+        long p = position;
+        while (buf.hasRemaining())
+            p += ch.write(buf, p);
     }
 
     public static Version checkHeader(DataInput in) throws IOException
