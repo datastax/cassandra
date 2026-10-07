@@ -22,8 +22,10 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Preconditions;
@@ -31,6 +33,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -40,17 +43,25 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger;
+import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
+import org.apache.cassandra.index.sai.disk.vector.VectorIndexIntegrity;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceTagRing;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
+import org.apache.cassandra.index.sai.metrics.VectorCompactionMetrics;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
@@ -73,6 +84,11 @@ public class SSTableIndexWriter implements PerIndexWriter
     private final BooleanSupplier isIndexDropped;
     private final BooleanSupplier isIndexUnloaded;
     private final long keyCount;
+    @Nullable
+    private final Set<SSTableReader> inputSSTables;
+    /** Non-null only for a vector-index compaction build: the per-thread row-source tag ring. */
+    @Nullable
+    private final VectorSourceTagRing sourceTagRing;
 
     private boolean aborted = false;
 
@@ -83,6 +99,13 @@ public class SSTableIndexWriter implements PerIndexWriter
     public SSTableIndexWriter(IndexComponents.ForWrite perIndexComponents, NamedMemoryLimiter limiter,
                               BooleanSupplier isIndexDropped, BooleanSupplier isIndexUnloaded, long keyCount)
     {
+        this(perIndexComponents, limiter, isIndexDropped, isIndexUnloaded, keyCount, null);
+    }
+
+    public SSTableIndexWriter(IndexComponents.ForWrite perIndexComponents, NamedMemoryLimiter limiter,
+                              BooleanSupplier isIndexDropped, BooleanSupplier isIndexUnloaded, long keyCount,
+                              @Nullable Set<SSTableReader> inputSSTables)
+    {
         this.perIndexComponents = perIndexComponents;
         this.indexContext = perIndexComponents.context();
         Preconditions.checkNotNull(indexContext, "Provided components %s are the per-sstable ones, expected per-index ones", perIndexComponents);
@@ -91,6 +114,20 @@ public class SSTableIndexWriter implements PerIndexWriter
         this.isIndexDropped = isIndexDropped;
         this.isIndexUnloaded = isIndexUnloaded;
         this.keyCount = keyCount;
+        this.inputSSTables = inputSSTables;
+
+        // Vector compaction: register the row-source tag ring BEFORE any row flows through
+        // the merge listener. Registration is per-compaction-thread and idempotent across
+        // output-writer switches; the compaction iterator's close() drops it.
+        if (indexContext.isVector() && inputSSTables != null && !inputSSTables.isEmpty()
+            && CompactionGraphMerger.ENABLED)
+        {
+            this.sourceTagRing = VectorSourceTagRing.acquireForThread(indexContext.getDefinition());
+        }
+        else
+        {
+            this.sourceTagRing = null;
+        }
     }
 
     @Override
@@ -382,22 +419,75 @@ public class SSTableIndexWriter implements PerIndexWriter
 
         if (indexContext.isVector())
         {
-            // if we have a PQ instance available, we can use it to build a CompactionGraph;
-            // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
-            var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
-            // If no PQ instance available in indexes of completed sstables, check if we just wrote one in the previous segment
-            if (pqi == null && !segments.isEmpty())
-                pqi = maybeReadPqFromLastSegment();
+            // Decide between the bounded jvector merge path (OnDiskGraphIndexCompactor) and the
+            // legacy rebuild path (VectorOffHeap/OnHeapSegmentBuilder). The merge applies only to
+            // the first output segment of a multi-sstable compaction whose sources all carry
+            // INLINE_VECTORS and whose output uses the V5 vector-postings format.
+            final int inputSSTableCount = inputSSTables == null ? 0 : inputSSTables.size();
+            MergeSourceScan scan = null;
+            String rebuildReason; // null => merge path chosen
 
-            if (pqi != null && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+            if (!CompactionGraphMerger.ENABLED)
+                rebuildReason = "merge disabled by killswitch (" + CassandraRelevantProperties.SAI_VECTOR_GRAPH_COMPACTION_MERGE_ENABLED.getKey() + "=false)";
+            else if (!segments.isEmpty())
+                rebuildReason = "not the first output segment (merge applies only to the first segment of a build)";
+            else if (inputSSTables == null || inputSSTables.isEmpty())
+                rebuildReason = "no input sstables to merge (not a multi-sstable compaction)";
+            else
             {
-                var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors, allRowsHaveVectors, limiter);
+                try (io.github.jbellis.jvector.util.work.ProgressTracker.PhaseScope ignored =
+                             VectorCompactionMetrics.INSTANCE.start(
+                                     VectorCompactionMetrics.Phase.SOURCE_SCAN,
+                                     indexContext))
+                {
+                    scan = collectMergeSources();
+                }
+                if (scan.candidateVectorSegments == 0)
+                    rebuildReason = "no vector index segments among the " + scan.inputSSTableCount + " input sstable(s)";
+                else if (scan.inlineVectorSegments < scan.candidateVectorSegments)
+                    rebuildReason = (scan.candidateVectorSegments - scan.inlineVectorSegments) + " of " + scan.candidateVectorSegments
+                                    + " source segments lack INLINE_VECTORS (first: " + scan.firstMissingInlineSource
+                                    + "; likely NVQ — OnDiskGraphIndexCompactor requires INLINE_VECTORS on every source)";
+                else if (scan.uncoveredInputSSTables > 0)
+                    rebuildReason = scan.uncoveredInputSSTables + " input sstable(s) have no vector index segment " +
+                                    "(rows there may carry vectors absent from every source graph)";
+                else if (scan.sources.size() < 2)
+                    rebuildReason = "only " + scan.sources.size() + " mergeable source segment(s); at least 2 required";
+                else if (!V5OnDiskFormat.writeV5VectorPostings(indexContext.version()))
+                    rebuildReason = "output on-disk format " + indexContext.version() + " does not use V5 vector postings (required for merge)";
+                else
+                    rebuildReason = null; // all merge conditions satisfied
+            }
+
+            if (rebuildReason == null)
+            {
+                builder = new SegmentBuilder.VectorMergeSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, scan.sources, limiter);
+                logBuildDecision("MERGE", "streaming merge of " + scan.sources.size() + " on-disk graph segments",
+                                 "LOW (streams on-disk graphs on the compaction thread)", inputSSTableCount, scan);
             }
             else
             {
-                // building on heap is the only way to get a PQ from nothing (CompactionGraph only knows how to fine-tune an existing one)
-                builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
+                // if we have a PQ instance available, we can use it to build a CompactionGraph;
+                // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
+                var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
+                // If no PQ instance available in indexes of completed sstables, check if we just wrote one in the previous segment
+                if (pqi == null && !segments.isEmpty())
+                    pqi = maybeReadPqFromLastSegment();
+
+                if (pqi != null && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+                {
+                    var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
+                    builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors, allRowsHaveVectors, limiter);
+                    logBuildDecision("OFF_HEAP_REBUILD", rebuildReason,
+                                     "MODERATE (vectors off-heap; graph built with all-core jvector pools)", inputSSTableCount, scan);
+                }
+                else
+                {
+                    // building on heap is the only way to get a PQ from nothing (CompactionGraph only knows how to fine-tune an existing one)
+                    builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
+                    logBuildDecision("ON_HEAP_REBUILD", rebuildReason,
+                                     "HIGH (full graph materialized on heap)", inputSSTableCount, scan);
+                }
             }
         }
         else if (indexContext.isLiteral())
@@ -416,6 +506,122 @@ public class SSTableIndexWriter implements PerIndexWriter
                      SegmentBuilder.ACTIVE_BUILDER_COUNT.get() - 1);
 
         return builder;
+    }
+
+    /**
+     * Scans the input sstables' vector index segments for jvector merge eligibility.
+     */
+    private MergeSourceScan collectMergeSources()
+    {
+        var sources = new ArrayList<CompactionGraphMerger.SourceSegment>();
+        int candidateVectorSegments = 0;
+        int inlineVectorSegments = 0;
+        int nonVectorSearchersSkipped = 0;
+        String firstMissingInlineSource = null;
+        int inputSSTableCount = inputSSTables == null ? 0 : inputSSTables.size();
+        var uncoveredInputs = inputSSTables == null
+                              ? java.util.Collections.<SSTableReader>emptySet()
+                              : new java.util.HashSet<>(inputSSTables);
+
+        if (inputSSTables != null && !inputSSTables.isEmpty())
+        {
+            for (SSTableIndex ssTableIndex : indexContext.getView().getIndexes())
+            {
+                if (!inputSSTables.contains(ssTableIndex.getSSTable()))
+                    continue;
+                uncoveredInputs.remove(ssTableIndex.getSSTable());
+
+                long inputRows = ssTableIndex.getSSTable().getTotalRows();
+                if ((ssTableIndex.isEmpty() || ssTableIndex.getSegments().isEmpty()) && inputRows > 0)
+                    throw VectorIndexIntegrity.abort(String.format(
+                            "compaction input %s has %d row(s) but an EMPTY vector index (%s); a merge over it "
+                            + "would silently drop those vectors",
+                            ssTableIndex.getSSTable().descriptor, inputRows,
+                            ssTableIndex.isEmpty() ? "EmptyIndex" : "no segments"));
+
+                for (Segment segment : ssTableIndex.getSegments())
+                {
+                    var searcher = segment.getIndexSearcher();
+                    if (!(searcher instanceof V2VectorIndexSearcher))
+                    {
+                        nonVectorSearchersSkipped++;
+                        continue;
+                    }
+                    candidateVectorSegments++;
+                    var diskAnn = ((V2VectorIndexSearcher) searcher).graph;
+                    if (diskAnn.getOnDiskGraph().getIdUpperBound() == 0)
+                        throw VectorIndexIntegrity.abort(String.format(
+                                "compaction input %s@rowOffset=%d has a vector index segment whose graph is EMPTY",
+                                ssTableIndex.getSSTable().descriptor, segment.metadata.segmentRowIdOffset));
+                    if (!diskAnn.getOnDiskGraph().getFeatureSet().contains(FeatureId.INLINE_VECTORS))
+                    {
+                        if (firstMissingInlineSource == null)
+                            firstMissingInlineSource = ssTableIndex.getSSTable().descriptor
+                                                       + "@rowOffset=" + segment.metadata.segmentRowIdOffset;
+                        continue;
+                    }
+                    inlineVectorSegments++;
+                    sources.add(new CompactionGraphMerger.SourceSegment(diskAnn, segment.metadata.segmentRowIdOffset, ssTableIndex));
+                }
+            }
+        }
+        return new MergeSourceScan(sources, inputSSTableCount, candidateVectorSegments,
+                                   inlineVectorSegments, nonVectorSearchersSkipped, firstMissingInlineSource,
+                                   uncoveredInputs.size());
+    }
+
+    /**
+     * Emits a single INFO line explaining which vector-index build path was chosen for this segment.
+     */
+    private void logBuildDecision(String path, String reason, String heapProfile, int inputSSTableCount, @Nullable MergeSourceScan scan)
+    {
+        logger.info("Vector SAI build decision [{}.{}.{}] sstable={} path={} rows~={} inputs={}: {}. " +
+                    "sources_used={} candidates={} inline_vectors={} non_vector_skipped={}, " +
+                    "output_version={} v5_postings={} heap={}, killswitch={} enable_fused={} enable_nvq={} jvector_version={}",
+                    indexContext.getKeyspace(), indexContext.getTable(), indexContext.getIndexName(),
+                    perIndexComponents.descriptor(), path, keyCount, inputSSTableCount, reason,
+                    scan == null ? 0 : scan.sources.size(),
+                    scan == null ? 0 : scan.candidateVectorSegments,
+                    scan == null ? 0 : scan.inlineVectorSegments,
+                    scan == null ? 0 : scan.nonVectorSearchersSkipped,
+                    indexContext.version(), V5OnDiskFormat.writeV5VectorPostings(indexContext.version()), heapProfile,
+                    CompactionGraphMerger.ENABLED, JVectorVersionUtil.ENABLE_FUSED, JVectorVersionUtil.ENABLE_NVQ,
+                    indexContext.version().onDiskFormat().jvectorFileFormatVersion());
+    }
+
+    /** Result of scanning a compaction's input sstables for jvector merge eligibility. */
+    private static final class MergeSourceScan
+    {
+        /** Candidate source segments carrying INLINE_VECTORS (usable for the merge). */
+        final List<CompactionGraphMerger.SourceSegment> sources;
+        /** Number of input sstables scanned. */
+        final int inputSSTableCount;
+        /** Vector index segments (V2VectorIndexSearcher) found across the inputs. */
+        final int candidateVectorSegments;
+        /** Of the candidates, how many carried INLINE_VECTORS. */
+        final int inlineVectorSegments;
+        /** Searchers skipped because they were not vector searchers. */
+        final int nonVectorSearchersSkipped;
+        /** Human-readable id of the first candidate lacking INLINE_VECTORS, or null. */
+        @Nullable
+        final String firstMissingInlineSource;
+        /**
+         * Input sstables with NO vector index segment in the view. Any > 0 disqualifies the merge.
+         */
+        final int uncoveredInputSSTables;
+
+        MergeSourceScan(List<CompactionGraphMerger.SourceSegment> sources, int inputSSTableCount,
+                        int candidateVectorSegments, int inlineVectorSegments, int nonVectorSearchersSkipped,
+                        @Nullable String firstMissingInlineSource, int uncoveredInputSSTables)
+        {
+            this.sources = sources;
+            this.inputSSTableCount = inputSSTableCount;
+            this.candidateVectorSegments = candidateVectorSegments;
+            this.inlineVectorSegments = inlineVectorSegments;
+            this.nonVectorSearchersSkipped = nonVectorSearchersSkipped;
+            this.firstMissingInlineSource = firstMissingInlineSource;
+            this.uncoveredInputSSTables = uncoveredInputSSTables;
+        }
     }
 
     private static boolean allRowsHaveVectorsInWrittenSegments(IndexContext indexContext)

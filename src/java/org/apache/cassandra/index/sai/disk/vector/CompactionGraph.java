@@ -150,6 +150,30 @@ public class CompactionGraph implements Closeable, Accountable
     // protects the fine-tuning changes (done in maybeAddVector) from addGraphNode threads
     // (and creates happens-before events so we don't need to mark the other fields volatile)
     private final ReadWriteLock trainingLock = new ReentrantReadWriteLock();
+
+    /**
+     * Runs immediately before {@link #trainingLock}'s write lock is taken, to drain every in-flight
+     * {@link #addGraphNode} task off the shared build pool. Installed by the owning segment builder
+     * as {@code insertFanout::awaitCompletion}.
+     *
+     * <p>Why this exists: the critical section below refines the PQ codebook, re-encodes, and
+     * rescores the graph, and all three fan out onto the shared build pool. {@code addGraphNode}
+     * tasks run on that same pool and take the read lock. If the pool's workers are all inside
+     * {@code addGraphNode} when the write lock is taken, they block on the read lock, the training
+     * work can never get a worker, and the write lock is never released — a full deadlock of the
+     * build pool that also strands every other compaction sharing it.
+     *
+     * <p>Draining first guarantees no insert task is queued or running when the write lock is
+     * taken, so the training work has the whole pool.
+     */
+    private volatile Runnable quiesceInserts = () -> {};
+
+    /** Installs the pre-training drain; see {@link #quiesceInserts}. */
+    public void onBeforeTraining(Runnable quiesce)
+    {
+        this.quiesceInserts = quiesce == null ? () -> {} : quiesce;
+    }
+
     private boolean pqFinetuned = false;
     // not final; will be updated to different objects after fine-tuning
     private VectorCompressor<?> compressor;
@@ -347,6 +371,10 @@ public class CompactionGraph implements Closeable, Accountable
                         vectorsByOrdinal.put(VectorPostings.Marshaller.extractOrdinal(entry), vectorClone);
                     });
 
+                    // Drain in-flight addGraphNode tasks off the shared pool BEFORE taking the write lock:
+                    // they take the read lock, the training work below needs pool workers, and a pool
+                    // full of blocked readers is a deadlock (see quiesceInserts).
+                    quiesceInserts.run();
                     // lock the addGraphNode threads out so they don't try to use old pq codepoints against the new codebook
                     trainingLock.writeLock().lock();
                     try
