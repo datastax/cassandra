@@ -27,11 +27,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Covers all four option keys across real query execution:
  * <ul>
- *   <li>{@code sai_query_optimization_level} — disables/enables the optimizer for a single query.</li>
- *   <li>{@code sai_intersection_clause_limit} — limits the number of intersected index clauses.</li>
- *   <li>{@code sai_use_term_statistics} — controls which selectivity estimator is used.</li>
- *   <li>{@code sai_hybrid_sort_order} — overrides the optimizer's filter-then-sort / sort-then-filter
- *       plan decision for hybrid ANN queries.</li>
+ *   <li>{@code query_optimization_level} — disables/enables the optimizer for a single query.</li>
+ *   <li>{@code intersection_clause_limit} — limits the number of intersected index clauses.</li>
+ *   <li>{@code use_term_statistics} — controls which selectivity estimator is used.</li>
+ *   <li>{@code hybrid_sort_order} — overrides the optimizer's filter-then-sort / sort-then-filter
+ *       plan decision for hybrid queries.</li>
  * </ul>
  *
  * <p>The hybrid sort order tests use {@link Plan.NumericIndexScan} as a proxy for filter-then-sort
