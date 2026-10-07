@@ -141,8 +141,17 @@ public final class VectorSourceTagRing implements CompactionRowSourceTagging.Sin
                     SSTableReader source = resolver.sourceOf(i, partitionKey);
                     if (source != null)
                         winner = source.descriptor.id;
+                    org.slf4j.LoggerFactory.getLogger(VectorSourceTagRing.class).info(
+                            "DEBUG onMergedRow: key={}, col={}, match at versionIdx={}, source={}, winner={}",
+                            partitionKey, column.name, i, source != null ? source.descriptor.id : "null", winner);
                     break;
                 }
+            }
+            if (winner == null)
+            {
+                org.slf4j.LoggerFactory.getLogger(VectorSourceTagRing.class).info(
+                        "DEBUG onMergedRow: NO version matched mergedCell for key={}, col={}, versions.length={}",
+                        partitionKey, column.name, versions.length);
             }
             e.columns[slot] = column;
             e.winners[slot] = winner;

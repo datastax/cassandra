@@ -361,10 +361,11 @@ public class CompactionGraphMerger
         final int[] effGlobalToNodeId;
         {
             List<OrdinalMapper> effective = compactor.effectiveRemappers();
-            if (effective == null || effective.size() != sources.size())
+            if (effective == null)
+                effective = remappers;
+            if (effective.size() != sources.size())
                 throw new IllegalStateException("CompactionGraphMerger: effectiveRemappers() returned " +
-                                                (effective == null ? "null" : effective.size() + " mappers") +
-                                                " for " + sources.size() + " sources");
+                                                effective.size() + " mappers for " + sources.size() + " sources");
 
             int[] newSrcIdx = new int[totalGlobalOrdinals];
             int[] newNodeId = new int[totalGlobalOrdinals];

@@ -223,7 +223,11 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             // No match found, return the inverted ceiling
             return rowId;
         // The first index might not have been the correct match in the case of token collisions.
-        return tokenCollisionDetection(key, rowId);
+        long result = tokenCollisionDetection(key, rowId);
+        org.slf4j.LoggerFactory.getLogger(RowAwarePrimaryKeyMap.class).info(
+                "DEBUG skinnyExactRowIdOrInvertedCeiling: sstable={}, key={}, token={}, indexOf={}, tokenCollisionDetection={}",
+                sstableId, key, key.token().getLongValue(), rowId, result);
+        return result;
     }
 
     /**
