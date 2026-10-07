@@ -25,6 +25,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.BoundedFanout;
 import org.apache.cassandra.index.sai.utils.InsertFanout;
 import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
@@ -359,5 +361,70 @@ public class JVectorVersionUtil
     public static boolean versionSupportsFused(Version version)
     {
         return version.onDiskFormat().jvectorFileFormatVersion() >= 6;
+    }
+
+    /**
+     * Logs the effective JVector/SAI vector index configuration at startup so operators can see what parameters
+     * are in effect. Per-index construction parameters show the defaults; they can be overridden per index
+     * via CQL index options (e.g. WITH OPTIONS = {'maximum_node_connections': '32'}).
+     * Global feature flags are controlled by the listed system properties.
+     */
+    public static void logStartupConfig()
+    {
+        // neighborOverflow and alpha are not stored in IndexWriterConfig when unset;
+        // the actual defaults used at build time are inline in CassandraOnHeapGraph / CompactionGraph.
+        float flushNeighborhoodOverflow = 1.0f;
+        float compactionNeighborhoodOverflow = 1.2f;
+        float flushAlphaHighDim = 1.2f;
+        float compactionAlpha = 1.2f;
+
+        String compressionMode = ENABLE_NVQ
+                                 ? String.format("NVQ (num_sub_vectors=%d, -D%s=%d)",
+                                                 NUM_SUB_VECTORS,
+                                                 CassandraRelevantProperties.SAI_VECTOR_NVQ_NUM_SUB_VECTORS.getKey(),
+                                                 NUM_SUB_VECTORS)
+                                 : "PQ (per source_model; NVQ disabled, enable via -D" +
+                                   CassandraRelevantProperties.SAI_VECTOR_ENABLE_NVQ.getKey() + "=true)";
+
+        logger.info("JVector/SAI vector index configuration:" +
+                    "\n  construction defaults (per-index overridable via CQL index options):" +
+                    "\n    outDegree (maximum_node_connections * 2):  {}" +
+                    "\n    efConstruction (construction_beam_width):   {}" +
+                    "\n    neighborOverflow:                           {} (flush) / {} (compaction)" +
+                    "\n    alpha:                                      {} (flush, dim>3) / {} (compaction)" +
+                    "\n    enableHierarchy (enable_hierarchy):         {}" +
+                    "\n    fusedGraph (-D{}):   {}" +
+                    "\n    compression:                                {}" +
+                    "\n  search:" +
+                    "\n    usePruning (-D{}): {}" +
+                    "\n    rerankK (topKOverquery): limit-dependent via source_model overquery; default model applies tapered ~2x for compressed, decaying to 1x at large limits" +
+                    "\n    vectorCacheBytes (-D{}): {}" +
+                    "\n    maxTopK (-D{}): {}" +
+                    "\n  global:" +
+                    "\n    graphCompactionMerge (-D{}): {}" +
+                    "\n    parallelEncoding (-D{}): {}",
+                    IndexWriterConfig.DEFAULT_MAXIMUM_NODE_CONNECTIONS * 2,
+                    IndexWriterConfig.DEFAULT_CONSTRUCTION_BEAM_WIDTH,
+                    flushNeighborhoodOverflow, compactionNeighborhoodOverflow,
+                    flushAlphaHighDim, compactionAlpha,
+                    IndexWriterConfig.DEFAULT_ENABLE_HIERARCHY,
+                    CassandraRelevantProperties.SAI_VECTOR_ENABLE_FUSED.getKey(), ENABLE_FUSED,
+                    compressionMode,
+                    "cassandra.sai.jvector.use_pruning_default",
+                    V3OnDiskFormat.JVECTOR_USE_PRUNING_DEFAULT,
+                    CassandraRelevantProperties.SAI_HNSW_VECTOR_CACHE_BYTES.getKey(),
+                    CassandraRelevantProperties.SAI_HNSW_VECTOR_CACHE_BYTES.getLong(),
+                    CassandraRelevantProperties.SAI_VECTOR_SEARCH_MAX_TOP_K.getKey(),
+                    IndexWriterConfig.MAX_TOP_K,
+                    CassandraRelevantProperties.SAI_VECTOR_GRAPH_COMPACTION_MERGE_ENABLED.getKey(),
+                    CassandraRelevantProperties.SAI_VECTOR_GRAPH_COMPACTION_MERGE_ENABLED.getBoolean(),
+                    CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_ENABLED.getKey(),
+                    CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_ENABLED.getBoolean());
+
+        logger.info("JVector graph build/compaction pool: {} worker threads (-D{}={}, 0 => concurrent_compactors={})",
+                    compactionBuildThreads(),
+                    CassandraRelevantProperties.SAI_VECTOR_COMPACTION_BUILD_THREADS.getKey(),
+                    CassandraRelevantProperties.SAI_VECTOR_COMPACTION_BUILD_THREADS.getInt(),
+                    DatabaseDescriptor.getConcurrentCompactors());
     }
 }

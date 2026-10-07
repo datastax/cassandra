@@ -33,6 +33,7 @@ import com.codahale.metrics.Gauge;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -196,14 +197,38 @@ public class V1OnDiskFormat implements OnDiskFormat
     {
         IndexContext context = index.getIndexContext();
         IndexComponents.ForWrite perIndexComponents = indexDescriptor.newPerIndexComponentsForWrite(context);
-        // If we're not flushing or we haven't yet started the initialization build, flush from SSTable contents.
-        if (tracker.opType() != OperationType.FLUSH || !index.canFlushFromMemtableIndex())
+        OperationType opType = tracker.opType();
+        boolean canFlushFromMemtable = index.canFlushFromMemtableIndex();
+        // A flush of an initialized index serializes the existing memtable index directly (no graph
+        // rebuild); otherwise -- a compaction, or a flush before the memtable index is flushable -- we
+        // (re)build the on-disk index from sstable contents. For vector indexes this fork decides whether
+        // flush stays at memtable-steady-state memory or incurs a full graph rebuild, so it is logged.
+        boolean serializeFromMemtable = opType == OperationType.FLUSH && canFlushFromMemtable;
+
+        if (context.isVector())
+            logger.info("Vector SAI writer selection [{}.{}.{}] op={} canFlushFromMemtableIndex={} -> {}: {}",
+                        context.getKeyspace(), context.getTable(), context.getIndexName(),
+                        opType, canFlushFromMemtable,
+                        serializeFromMemtable ? "MemtableIndexWriter" : "SSTableIndexWriter",
+                        serializeFromMemtable ? "serialize existing on-heap memtable graph (no rebuild)"
+                            : opType == OperationType.FLUSH ? "REBUILD graph from sstable (memtable index not flushable yet)"
+                            : "build graph from sstable inputs");
+
+        if (!serializeFromMemtable)
         {
             NamedMemoryLimiter limiter = SEGMENT_BUILD_MEMORY_LIMITER;
             logger.debug(index.getIndexContext().logMessage("Starting a compaction index build. Global segment memory usage: {}"),
                          prettyPrintMemory(limiter.currentBytesUsed()));
 
-            return new SSTableIndexWriter(perIndexComponents, limiter, index.isDropped(), index.isUnloaded(), keyCount);
+            // Recover the compaction's input sstables to feed the streaming graph MERGE. Test against the
+            // ILifecycleTransaction interface, not the concrete LifecycleTransaction: a sharded/wrapped
+            // compaction carries a PartialLifecycleTransaction / WrappedLifecycleTransaction (both delegate
+            // originals() to the underlying transaction), which would otherwise fail this check and force a
+            // full graph rebuild (OFF_HEAP_REBUILD with inputs=0) instead of the cheap merge.
+            Set<SSTableReader> inputSSTables = opType == OperationType.COMPACTION && tracker instanceof ILifecycleTransaction
+                                               ? ((ILifecycleTransaction) tracker).originals()
+                                               : null;
+            return new SSTableIndexWriter(perIndexComponents, limiter, index.isDropped(), index.isUnloaded(), keyCount, inputSSTables);
         }
 
         return new MemtableIndexWriter(context.getPendingMemtableIndex(tracker),
