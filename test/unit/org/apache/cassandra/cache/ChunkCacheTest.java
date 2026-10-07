@@ -586,12 +586,12 @@ public class ChunkCacheTest
 
     /**
      * Realistic compression chunk length below {@link PageAware#PAGE_SIZE} (e.g. {@code chunk_length_in_kb: 1}).
-     * {@link ChunkCache#newChunk} always reserves a full page for such sizes and must free that full page.
+     * {@link ChunkCache#allocateChunk} always reserves a full page for such sizes and must free that full page.
      */
     private static final int SMALL_CHUNK_SIZE = 1024;
 
     /**
-     * For chunks smaller than {@link PageAware#PAGE_SIZE}, {@link ChunkCache#newChunk} still reserves a whole
+     * For chunks smaller than {@link PageAware#PAGE_SIZE}, {@link ChunkCache#allocateChunk} still reserves a whole
      * page from the pool, encodes the logical size in the owned buffer's limit, and exposes a
      * {@code slice()} view for reads (see {@code SingleRegionChunk}). This test verifies that:
      * <ul>
@@ -620,7 +620,7 @@ public class ChunkCacheTest
         long overflowBefore = pool.overflowMemoryInBytes();
         assertEquals(0, overflowBefore);
 
-        ChunkCache.Chunk chunk = chunkCache.newChunk(SMALL_CHUNK_SIZE, 0);
+        ChunkCache.Chunk chunk = chunkCache.allocateChunk(SMALL_CHUNK_SIZE, 0);
         assertEquals(PAGE_SIZE, chunk.capacity());
         // Read view must stay narrowed to the requested chunk size (alignment / readChunk capacity asserts).
         assertEquals(SMALL_CHUNK_SIZE, ((Rebufferer.BufferHolder) chunk).buffer().capacity());
@@ -645,7 +645,7 @@ public class ChunkCacheTest
         final int cycles = 256;
         for (int i = 0; i < cycles; i++)
         {
-            ChunkCache.Chunk c = chunkCache.newChunk(SMALL_CHUNK_SIZE, i * (long) SMALL_CHUNK_SIZE);
+            ChunkCache.Chunk c = chunkCache.allocateChunk(SMALL_CHUNK_SIZE, i * (long) SMALL_CHUNK_SIZE);
             assertEquals(PAGE_SIZE, c.capacity());
             c.release();
         }
@@ -777,7 +777,7 @@ public class ChunkCacheTest
         }).when(pool).put(any(ByteBuffer.class));
 
         ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
-        ChunkCache.Chunk chunk = chunkCache.newChunk(PAGE_SIZE, 0);
+        ChunkCache.Chunk chunk = chunkCache.allocateChunk(PAGE_SIZE, 0);
         assertNotNull(chunk);
         // newChunk succeeded on first tryGet — no reclaim, so no recycle yet
         assertEquals(0, recycleCalls.get());

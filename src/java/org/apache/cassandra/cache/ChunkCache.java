@@ -391,25 +391,6 @@ public class ChunkCache
             return new SingleRegionChunk(position, buffers[0]);
     }
 
-    /**
-     * Test helper: allocate chunk,  reclaim if needed and retry
-     */
-    @VisibleForTesting
-    @Nullable
-    Chunk newChunk(int chunkSize, long position)
-    {
-        Chunk chunk = allocateChunk(chunkSize, position);
-        if (chunk != null)
-            return chunk;
-
-        reclaimSync();
-        chunk = allocateChunk(chunkSize, position);
-        if (chunk != null)
-            metrics.recordReclaimRetrySuccess();
-
-        return chunk;
-    }
-
     @VisibleForTesting
     BufferPool bufferPool()
     {

@@ -65,22 +65,22 @@ public interface ChunkCacheMetrics extends StatsCounter, CacheMetrics
     long entries();
 
     /** Called when the chunk cache runs synchronous reclaim after a pool tryGet miss. */
-    default void recordSyncReclaim() {}
+    void recordSyncReclaim();
 
     /** Called when second tryGet after reclaim succeeds. */
-    default void recordReclaimRetrySuccess() {}
+    void recordReclaimRetrySuccess();
 
     /** Called when pool still cannot allocate after reclaim, wait, and timeout. */
-    default void recordPoolExhausted() {}
+    void recordPoolExhausted();
 
     /** Elapsed nanos spent in reclaimSync. */
-    default void recordReclaimLatency(long nanos) {}
+    void recordReclaimLatency(long nanos);
 
     /** Miss loader entered WaitQueue after reclaim still could not allocate. */
-    default void recordBlockedOnPoolAllocation() {}
+    void recordBlockedOnPoolAllocation();
 
     /** Miss loader obtained pages after waiting on the pool. */
-    default void recordPoolWaitSuccess() {}
+    void recordPoolWaitSuccess();
 
     long syncReclaims();
 
