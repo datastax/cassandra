@@ -25,7 +25,11 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.utils.BoundedFanout;
+import org.apache.cassandra.index.sai.utils.InsertFanout;
 import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
+import org.apache.cassandra.index.sai.utils.ResizableSemaphore;
+import org.apache.cassandra.index.sai.utils.UnboundedFanout;
 
 public class JVectorVersionUtil
 {
@@ -117,6 +121,30 @@ public class JVectorVersionUtil
 
     private static volatile int desiredInflightPermits = resolveInsertInflightPermits();
 
+    /**
+     * The shared node-wide insert-admission gate, resized in place when the budget changes (affecting all
+     * bounded fan-outs that share it). Created with the startup budget; in unbounded mode it holds 0
+     * permits and is simply unused.
+     */
+    private static final ResizableSemaphore INSERT_BUDGET = new ResizableSemaphore(Math.max(0, desiredInflightPermits));
+
+    /**
+     * A per-build {@link InsertFanout} over the current build pool. Thread concurrency is bounded by the
+     * pool; the admission policy is chosen live from {@link #desiredInflightPermits} — a
+     * {@link BoundedFanout} gated by the shared (in-place-resized) budget, or an {@link UnboundedFanout}
+     * when the budget is disabled.
+     */
+    public static InsertFanout newInsertFanout()
+    {
+        ForkJoinPool pool = currentBuildPool().pool;
+        int permits = desiredInflightPermits;
+        if (permits <= 0)
+            return new UnboundedFanout(pool);
+        if (INSERT_BUDGET.totalPermits() != permits)
+            INSERT_BUDGET.setTotalPermits(permits);
+        return new BoundedFanout(pool, INSERT_BUDGET, permits);
+    }
+
     /** The current in-flight insert budget in MiB, or 0 if unbounded. */
     public static int getInsertInflightMb()
     {
@@ -136,6 +164,91 @@ public class JVectorVersionUtil
         if (mb <= 0)
             return 0;
         return (int) Math.min(Integer.MAX_VALUE, (long) mb * 1024L * 1024L);
+    }
+
+    // --- Concurrent vector-build admission ---------------------------------------------------
+    // A node-wide cap on how many vector segment builds run at once, decoupled from concurrent_compactors.
+
+    /** Desired node-wide concurrent-build permit count; 0 disables the bound. Settable at runtime. */
+    private static volatile int desiredConcurrentBuilds = resolveConcurrentBuilds();
+
+    /** The shared build-admission gate, resized in place when the desired count changes. */
+    private static final ResizableSemaphore BUILD_PERMITS = new ResizableSemaphore(Math.max(0, desiredConcurrentBuilds));
+
+    private static int resolveConcurrentBuilds()
+    {
+        return Math.max(0, CassandraRelevantProperties.SAI_VECTOR_CONCURRENT_BUILDS.getInt());
+    }
+
+    /**
+     * A held build permit. {@link #close()} releases it exactly once; a no-op when the bound is disabled.
+     * Held for the lifetime of one vector segment build (acquire at build start, release on flush/abort).
+     */
+    public static final class BuildPermit implements AutoCloseable
+    {
+        static final BuildPermit UNBOUNDED = new BuildPermit(false);
+        private final boolean held;
+        private boolean released;
+
+        private BuildPermit(boolean held) { this.held = held; }
+
+        @Override
+        public void close()
+        {
+            if (held && !released)
+            {
+                released = true;
+                BUILD_PERMITS.release();
+            }
+        }
+    }
+
+    /**
+     * Acquire a permit to run one vector segment build, parking (no busy-wait) until one is free. Returns a
+     * no-op permit when the bound is disabled ({@code concurrent_builds <= 0}, the default).
+     */
+    public static BuildPermit acquireBuildPermit()
+    {
+        int desired = desiredConcurrentBuilds;
+        if (desired <= 0)
+            return BuildPermit.UNBOUNDED;
+        if (BUILD_PERMITS.totalPermits() != desired)
+            BUILD_PERMITS.setTotalPermits(desired);
+        BUILD_PERMITS.acquireUninterruptibly();
+        return new BuildPermit(true);
+    }
+
+    /** The desired node-wide concurrent-build cap, or 0 if the bound is disabled. */
+    public static int getConcurrentBuilds()
+    {
+        return desiredConcurrentBuilds;
+    }
+
+    /** Set the node-wide concurrent-build cap, or 0 to disable the bound. Takes effect on the next acquire. */
+    public static void setConcurrentBuilds(int n)
+    {
+        desiredConcurrentBuilds = Math.max(0, n);
+    }
+
+    // --- Ingest parallelism ------------------------------------------------------------------
+
+    /**
+     * Whether a vector graph MERGE parallelizes its per-row ingest across the shared build pool instead of
+     * running it inline on the compaction thread. Read once when a merge segment builder is constructed.
+     */
+    private static volatile boolean ingestParallel =
+        CassandraRelevantProperties.SAI_VECTOR_INGEST_PARALLEL.getBoolean();
+
+    /** Whether vector graph merges parallelize per-row ingest across the shared build pool. */
+    public static boolean isIngestParallel()
+    {
+        return ingestParallel;
+    }
+
+    /** Set whether vector graph merges parallelize per-row ingest; takes effect on the next merge build. */
+    public static void setIngestParallel(boolean parallel)
+    {
+        ingestParallel = parallel;
     }
 
     // --- Per-merge memory estimate -----------------------------------------------------------

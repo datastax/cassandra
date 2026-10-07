@@ -71,6 +71,7 @@ public class CassandraDiskAnn
 
     private final SSTableId<?> source;
     private final FileHandle graphHandle;
+    private final FileHandleReaderSupplier graphReaderSupplier;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final Set<FeatureId> features;
     private final ImmutableGraphIndex graph;
@@ -96,7 +97,13 @@ public class CassandraDiskAnn
 
         SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponentType.TERMS_DATA);
         graphHandle = indexFiles.termsData();
-        var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset, false);
+        // NOT graphHandle::createReader. ReaderSupplier is a functional interface whose
+        // prefetch()/willNeed() are default NO-OPS, so a method reference silently disables
+        // every cache-warming path jvector has -- the source pretouch, FrontierPrefetchingView,
+        // and the cross-source seed hint all became no-ops on the graph compaction reads.
+        // See FileHandleReaderSupplier for the measurement that exposed this.
+        graphReaderSupplier = new FileHandleReaderSupplier(graphHandle);
+        var rawGraph = OnDiskGraphIndex.load(graphReaderSupplier, termsMetadata.offset, false);
         features = rawGraph.getFeatureSet();
         graph = rawGraph;
         usesNVQ = features.contains(FeatureId.NVQ_VECTORS);
@@ -306,10 +313,17 @@ public class CassandraDiskAnn
 
     public void close() throws IOException
     {
-        FileUtils.close(ordinalsMap, searchers, graph, graphHandle);
+        // graphReaderSupplier before graphHandle: it only owns the private advice channel, but
+        // closing it after the handle would leave an fd open if the handle's close threw.
+        FileUtils.close(ordinalsMap, searchers, graph, graphReaderSupplier, graphHandle);
         columnQueryMetrics.onGraphClosed(compressedVectors == null ? 0 : compressedVectors.ramBytesUsed(),
                                          ordinalsMap.cachedBytesUsed(),
                                          graph.size(0));
+    }
+
+    public OnDiskOrdinalsMap getOrdinalsMap()
+    {
+        return ordinalsMap;
     }
 
     public OrdinalsView getOrdinalsView()
