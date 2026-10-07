@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -49,6 +50,8 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 
@@ -70,7 +73,10 @@ abstract public class VectorCompactionTest extends VectorTester
     @Parameterized.Parameter(1)
     public boolean enableNVQ;
 
-    @Parameterized.Parameters(name = "version={0} enableNVQ={1}")
+    @Parameterized.Parameter(2)
+    public boolean mergeEnabled;
+
+    @Parameterized.Parameters(name = "version={0} enableNVQ={1} mergeEnabled={2}")
     public static Collection<Object[]> data()
     {
         return data(v -> true);
@@ -87,7 +93,10 @@ abstract public class VectorCompactionTest extends VectorTester
                               Boolean[] enableNVQ = JVectorVersionUtil.versionSupportsNVQ(vd)
                                                     ? new Boolean[]{ true, false }
                                                     : new Boolean[]{ false };
-                              return Arrays.stream(enableNVQ).map(b -> new Object[]{ vd, b });
+                              return Arrays.stream(enableNVQ).flatMap(nvq ->
+                                  Arrays.stream(new Boolean[]{ true, false })
+                                        .map(merge -> new Object[]{ vd, nvq, merge })
+                              );
                           })
                           .collect(Collectors.toList());
     }
@@ -102,6 +111,18 @@ abstract public class VectorCompactionTest extends VectorTester
     public void setEnableNVQ()
     {
         SAIUtil.setEnableNVQ(enableNVQ);
+    }
+
+    @Before
+    public void setMergeEnabledParam()
+    {
+        setMergeEnabled(mergeEnabled);
+    }
+
+    @After
+    public void resetMergeEnabled()
+    {
+        CompactionGraphMerger.ENABLED = CassandraRelevantProperties.SAI_VECTOR_GRAPH_COMPACTION_MERGE_ENABLED.getBoolean();
     }
 
     @Test

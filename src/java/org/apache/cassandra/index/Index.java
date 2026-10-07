@@ -392,6 +392,15 @@ public interface Index
     }
 
     /**
+     * Called once per compaction before any rows flow through the merge iterator, giving indexes a
+     * chance to register any per-thread state (e.g. a row-source tag ring for vector graph merges)
+     * that must be in place before the first row is seen. The default is a no-op.
+     */
+    default void prepareCompactionRowSourceTagging()
+    {
+    }
+
+    /**
      * Return true if this index can be built or rebuilt when the index manager determines it is necessary. Returning
      * false enables the index implementation (or some other component) to control if and when SSTable data is
      * incorporated into the index.

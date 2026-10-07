@@ -258,6 +258,22 @@ public class StorageAttachedIndex implements Index
                                              target.right,
                                              config,
                                              baseCfs);
+        // Fail-fast configuration check for vector indexes: every recently-added vector feature
+        // switch must be explicitly set and recognized, and no typo'd cassandra.sai.vector.*
+        // property may be present. Runs at index construction (schema load), so a misconfigured
+        // node refuses to come up instead of failing mid-benchmark on its first flush or merge.
+        if (this.indexContext.isVector())
+            org.apache.cassandra.index.sai.disk.vector.VectorFeatureFlags.validate();
+    }
+
+    @Override
+    public void prepareCompactionRowSourceTagging()
+    {
+        // Vector graph merge joins output rows to source graph ordinals via per-row source
+        // provenance. The ring must exist before the compaction pulls its first row; registration
+        // is per-thread, idempotent, and cleared when the compaction iterator closes.
+        if (indexContext.isVector() && org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger.ENABLED)
+            org.apache.cassandra.index.sai.disk.vector.VectorSourceTagRing.acquireForThread(indexContext.getDefinition());
     }
 
     /**

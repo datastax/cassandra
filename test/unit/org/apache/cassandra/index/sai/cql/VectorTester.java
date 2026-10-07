@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.reflect.FieldUtils;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.runner.RunWith;
@@ -37,6 +38,7 @@ import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -46,7 +48,9 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
+import org.apache.cassandra.index.sai.disk.vector.VectorFeatureFlags;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,6 +68,45 @@ public class VectorTester extends SAITester
         setMaxBruteForceRows(n);
         // override the global holes allowed so that the one-to-many path gets exercised
         V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = 1.0;
+        // VectorFeatureFlags are REQUIRED-EXPLICIT (no defaults). Set conservative values here
+        // so every VectorTester subclass can create a vector SAI index without errors.
+        // Tests that need a specific value override it before calling createIndex().
+        setVectorFeatureFlagDefaults();
+    }
+
+    /**
+     * Sets the four required-explicit VectorFeatureFlags to false (the conservative baseline)
+     * if they are not already set by the test JVM. Tests that need a specific value should
+     * call the relevant setter before createIndex().
+     */
+    public static void setVectorFeatureFlagDefaults()
+    {
+        if (CassandraRelevantProperties.SAI_VECTOR_AMORTIZE_PQ_ENCODING.getString() == null)
+            CassandraRelevantProperties.SAI_VECTOR_AMORTIZE_PQ_ENCODING.setBoolean(false);
+        if (CassandraRelevantProperties.SAI_VECTOR_SERIALIZE_FLUSH_PQ.getString() == null)
+            CassandraRelevantProperties.SAI_VECTOR_SERIALIZE_FLUSH_PQ.setBoolean(false);
+        if (CassandraRelevantProperties.SAI_VECTOR_FLUSH_REFINE_FINAL_GRAPH.getString() == null)
+            CassandraRelevantProperties.SAI_VECTOR_FLUSH_REFINE_FINAL_GRAPH.setBoolean(false);
+        if (CassandraRelevantProperties.SAI_VECTOR_COMPACTION_RETAIN_LARGEST.getString() == null)
+            CassandraRelevantProperties.SAI_VECTOR_COMPACTION_RETAIN_LARGEST.setBoolean(false);
+    }
+
+    @After
+    public void resetVectorFeatureFlags() throws Exception
+    {
+        CassandraRelevantProperties.SAI_VECTOR_AMORTIZE_PQ_ENCODING.reset();
+        CassandraRelevantProperties.SAI_VECTOR_SERIALIZE_FLUSH_PQ.reset();
+        CassandraRelevantProperties.SAI_VECTOR_FLUSH_REFINE_FINAL_GRAPH.reset();
+        CassandraRelevantProperties.SAI_VECTOR_COMPACTION_RETAIN_LARGEST.reset();
+        // Clear the memoization so the next test's flag values take effect.
+        java.lang.reflect.Field f = VectorFeatureFlags.class.getDeclaredField("validated");
+        f.setAccessible(true);
+        f.set(null, false);
+    }
+
+    public static void setMergeEnabled(boolean enabled)
+    {
+        CompactionGraphMerger.ENABLED = enabled;
     }
 
     public static void setMaxBruteForceRows(int n)
