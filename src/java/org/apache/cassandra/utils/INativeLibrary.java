@@ -85,6 +85,14 @@ public interface INativeLibrary
     void trySkipCache(int fd, long offset, int len, String fileName);
 
     /**
+     * Advise the OS that {@code [offset, offset+len)} will be needed soon so it
+     * can start populating the page cache asynchronously. The POSIX_FADV_WILLNEED counterpart to
+     * {@link #trySkipCache}, which issues POSIX_FADV_DONTNEED over the same plumbing.
+     * A missed hint costs latency and nothing else.
+     */
+    void tryWillNeed(int fd, long offset, int len, String fileName);
+
+    /**
      * advise the OS to expect random i/o performed against the mapped address
      */
     void adviseRandom(MappedByteBuffer buffer, long len, String s);

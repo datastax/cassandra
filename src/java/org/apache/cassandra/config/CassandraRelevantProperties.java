@@ -969,6 +969,32 @@ public enum CassandraRelevantProperties
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
     SAI_VECTOR_USE_PRUNING_DEFAULT("cassandra.sai.jvector.use_pruning_default", "false"),
 
+    // Whether to use OnDiskGraphIndexCompactor rather than rebuilding from individual vectors.
+    // Set to false to fall back to the legacy rebuild path without restarting.
+    SAI_VECTOR_GRAPH_COMPACTION_MERGE_ENABLED("cassandra.sai.vector.graph_compaction_merge_enabled", "true"),
+    // Estimated on-heap working-set bytes per surviving ordinal for a vector graph merge.
+    SAI_VECTOR_COMPACTION_MERGE_BYTES_PER_ORDINAL("cassandra.sai.vector.compaction_merge_bytes_per_ordinal", "128"),
+    // Worker-thread count for the shared jvector graph build/compaction pool. 0 derives from concurrent_compactors.
+    SAI_VECTOR_COMPACTION_BUILD_THREADS("cassandra.sai.vector.compaction_build_threads", "0"),
+    // Route memtable-flush graph build onto the shared jvector build pool instead of caller-runs.
+    SAI_VECTOR_FLUSH_BUILD_PARALLEL("cassandra.sai.vector.flush_build_parallel", "false"),
+    // Node-wide budget (in MiB) for vector-index insert work in flight. Set to 0 to disable the bound.
+    SAI_VECTOR_COMPACTION_INSERT_INFLIGHT_MB("cassandra.sai.vector.compaction_insert_inflight_mb", "128"),
+    // Node-wide cap on concurrent vector-index segment builds. 0 disables the bound.
+    SAI_VECTOR_CONCURRENT_BUILDS("cassandra.sai.vector.concurrent_builds", "0"),
+    // Run a background monitor that warns if any jvector operation escapes onto ForkJoinPool.commonPool().
+    SAI_VECTOR_POOL_ESCAPE_MONITOR("cassandra.sai.vector.pool_escape_monitor", "true"),
+    // Parallelize per-row ingest of a vector graph merge across the shared build pool.
+    SAI_VECTOR_INGEST_PARALLEL("cassandra.sai.vector.ingest_parallel", "false"),
+    // Encode PQ codes incrementally during ingest. REQUIRED-EXPLICIT (no default).
+    SAI_VECTOR_AMORTIZE_PQ_ENCODING("cassandra.sai.vector.amortize_pq_encoding"),
+    // Serialize residual flush-time PQ compute node-wide. REQUIRED-EXPLICIT (no default).
+    SAI_VECTOR_SERIALIZE_FLUSH_PQ("cassandra.sai.vector.serialize_flush_pq"),
+    // Whether GraphIndexBuilder.cleanup() runs its final improveConnections refinement. REQUIRED-EXPLICIT (no default).
+    SAI_VECTOR_FLUSH_REFINE_FINAL_GRAPH("cassandra.sai.vector.flush_refine_final_graph"),
+    // Whether vector graph merges use the experimental retain-largest strategy. REQUIRED-EXPLICIT (no default).
+    SAI_VECTOR_COMPACTION_RETAIN_LARGEST("cassandra.sai.vector.compaction_retain_largest"),
+
     /** The class to use for selecting the current version of the SAI on-disk index format on a per-keyspace basis. */
     SAI_VERSION_SELECTOR_CLASS("cassandra.sai.version.selector.class", ""),
 

@@ -256,6 +256,31 @@ public class NativeLibrary implements INativeLibrary
         }
     }
 
+    @Override
+    public void tryWillNeed(int fd, long offset, int len, String fileName)
+    {
+        if (fd < 0)
+            return;
+
+        try
+        {
+            wrappedLibrary.callPosixFadvise(fd, offset, len, POSIX_FADV_WILLNEED);
+        }
+        catch (UnsatisfiedLinkError e)
+        {
+            // if JNA is unavailable just skipping the hint
+        }
+        catch (NativeError e)
+        {
+            NoSpamLogger.log(logger,
+                             NoSpamLogger.Level.ERROR,
+                             10,
+                             TimeUnit.MINUTES,
+                             "Failed tryWillNeed on file: {} Error: " + e.getMessage(),
+                             fileName);
+        }
+    }
+
     /**
      * @param buffer
      * @param length

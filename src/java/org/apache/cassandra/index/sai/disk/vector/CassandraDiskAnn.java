@@ -332,6 +332,16 @@ public class CassandraDiskAnn
         return pqUnitVectors;
     }
 
+    public io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex getOnDiskGraph()
+    {
+        return (io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex) graph;
+    }
+
+    public boolean isPqUnitVectors()
+    {
+        return pqUnitVectors;
+    }
+
     public int maxDegree()
     {
         return graph.maxDegree();
