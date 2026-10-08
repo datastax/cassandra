@@ -2106,8 +2106,8 @@ public class RowFilter
             in.readBoolean(); // Unused
             IndexHints indexHints = IndexHints.serializer.deserialize(in, version, metadata);
             FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata, indexHints);
-            OptimizerOptions queryOptions = OptimizerOptions.serializer.deserialize(in, version);
-            return new RowFilter(operation, needsReconciliation, indexHints, queryOptions);
+            OptimizerOptions optimizerOptions = OptimizerOptions.serializer.deserialize(in, version);
+            return new RowFilter(operation, needsReconciliation, indexHints, optimizerOptions);
         }
 
         public long serializedSize(RowFilter filter, int version)
