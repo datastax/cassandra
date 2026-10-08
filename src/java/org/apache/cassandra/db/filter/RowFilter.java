@@ -113,12 +113,12 @@ public class RowFilter
     public final OptimizerOptions queryOptions;
     private final boolean needsReconciliation;
 
-    protected RowFilter(FilterElement root, boolean needsReconciliation, IndexHints indexHints, OptimizerOptions queryOptions)
+    protected RowFilter(FilterElement root, boolean needsReconciliation, IndexHints indexHints, OptimizerOptions optimizerOptions)
     {
         this.root = root;
         this.needsReconciliation = needsReconciliation;
         this.indexHints = indexHints;
-        this.queryOptions = queryOptions;
+        this.optimizerOptions = optimizerOptions;
     }
 
     public static RowFilter none()
@@ -408,7 +408,7 @@ public class RowFilter
         if (root.size() == 1)
             return RowFilter.none();
 
-        return new RowFilter(root.filter(e -> !e.equals(expression)), needsReconciliation, indexHints, queryOptions);
+        return new RowFilter(root.filter(e -> !e.equals(expression)), needsReconciliation, indexHints, optimizerOptions);
     }
 
     /**
@@ -420,7 +420,7 @@ public class RowFilter
         if (isEmpty())
             return this;
 
-        return new RowFilter(root.filter(e -> !e.column().equals(column) || e.operator() != op || !e.value.equals(value)), needsReconciliation, indexHints, queryOptions);
+        return new RowFilter(root.filter(e -> !e.column().equals(column) || e.operator() != op || !e.value.equals(value)), needsReconciliation, indexHints, optimizerOptions);
     }
 
     public boolean hasNonKeyExpression()
@@ -460,12 +460,12 @@ public class RowFilter
 
     public RowFilter restrict(Predicate<Expression> filter)
     {
-        return new RowFilter(root.filter(filter), needsReconciliation, indexHints, queryOptions);
+        return new RowFilter(root.filter(filter), needsReconciliation, indexHints, optimizerOptions);
     }
 
     public RowFilter restrictFirstLevel(Predicate<Expression> filter)
     {
-        return new RowFilter(root.filterFirstLevel(filter), needsReconciliation, indexHints, queryOptions);
+        return new RowFilter(root.filterFirstLevel(filter), needsReconciliation, indexHints, optimizerOptions);
     }
 
     public boolean isEmpty()
@@ -509,9 +509,9 @@ public class RowFilter
         return new Builder(false, indexRegistry, indexHints, OptimizerOptions.NONE);
     }
 
-    public static Builder builder(IndexRegistry indexRegistry, IndexHints indexHints, OptimizerOptions queryOptions)
+    public static Builder builder(IndexRegistry indexRegistry, IndexHints indexHints, OptimizerOptions optimizerOptions)
     {
-        return new Builder(false, indexRegistry, indexHints, queryOptions);
+        return new Builder(false, indexRegistry, indexHints, optimizerOptions);
     }
 
     public static class Builder
@@ -520,7 +520,7 @@ public class RowFilter
         boolean needsReconciliation = false;
         private final IndexRegistry indexRegistry;
         private final IndexHints indexHints;
-        private final OptimizerOptions queryOptions;
+        private final OptimizerOptions optimizerOptions;
 
         public Builder(boolean needsReconciliation, IndexRegistry indexRegistry, IndexHints indexHints)
         {
