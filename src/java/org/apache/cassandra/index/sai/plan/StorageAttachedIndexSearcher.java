@@ -86,7 +86,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
-    private Supplier<Monitorable.ExecutionInfo> executionInfoSupplier;
+    private Plan plan;
 
     private static final FastThreadLocal<List<PrimaryKey>> nextKeys = new FastThreadLocal<>()
     {
@@ -101,11 +101,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                         TableQueryMetrics tableQueryMetrics,
                                         ReadCommand command,
                                         Orderer orderer,
-                                        IndexFeatureSet indexFeatureSet,
-                                        long executionQuotaMs)
+                                        IndexFeatureSet indexFeatureSet)
     {
         this.command = command;
-        this.queryContext = new QueryContext(executionQuotaMs);
+        this.queryContext = new QueryContext(command);
         this.controller = new QueryController(cfs, command, orderer, indexFeatureSet, queryContext, tableQueryMetrics);
     }
 
@@ -147,8 +146,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             try
             {
                 FilterTree filterTree = analyzeFilter();
-                Plan plan = controller.buildPlan();
-                executionInfoSupplier = QueryMonitorableExecutionInfo.supplier(queryContext, plan);
+                plan = controller.buildPlan();
 
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
@@ -204,7 +202,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     @Override
     public Supplier<Monitorable.ExecutionInfo> monitorableExecutionInfo()
     {
-        return executionInfoSupplier;
+        return CassandraRelevantProperties.SAI_MONITORING_EXECUTION_INFO_ENABLED.getBoolean()
+               ? () -> QueryMonitorableExecutionInfo.create(queryContext, plan)
+               : Monitorable.ExecutionInfo.EMPTY_SUPPLIER;
     }
 
     /**
@@ -221,7 +221,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         return controller.buildFilter();
     }
 
-    private class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
+    @VisibleForTesting
+    public class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
         private final PrimaryKey firstPrimaryKey;
         private final Iterator<DataRange> keyRanges;
