@@ -55,7 +55,7 @@ public class PostingListKeyRangeIteratorTest
                                                     0,
                                                     3,
                                                     0,
-                                                    new QueryContext(10000),
+                                                    new QueryContext(),
                                                     postingList);
         try (var iterator = new PostingListKeyRangeIterator(mockIndexContext, pkm, indexContext))
         {
@@ -98,7 +98,7 @@ public class PostingListKeyRangeIteratorTest
                                         minRowId,
                                         maxRowId,
                                         0,
-                                        new QueryContext(10000),
+                                        new QueryContext(),
                                         list);
     }
 }
