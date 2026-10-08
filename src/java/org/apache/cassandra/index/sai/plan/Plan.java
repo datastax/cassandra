@@ -2119,6 +2119,16 @@ abstract public class Plan
             return sort(source, ordering, nextId++);
         }
 
+        /**
+         * Constructs a {@link KeysSort} node unconditionally, without applying the collapsing optimisation
+         * that {@link #sort} uses. Use this when a {@code FILTER_THEN_SORT} override must be enforced even
+         * when the optimiser would otherwise produce a {@link ScoredIndexScan}.
+         */
+        public KeysSort sortForced(@Nonnull KeysIteration source, @Nonnull Orderer ordering)
+        {
+            return new KeysSort(this, nextId++, source, defaultAccess, ordering);
+        }
+
         private KeysIteration sort(@Nonnull KeysIteration source, @Nonnull Orderer ordering, int id)
         {
             if (source instanceof IndexScan)
