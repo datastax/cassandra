@@ -36,6 +36,7 @@ import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -169,9 +170,12 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         for (int i = 0; i < 100; i++)
             dictionary.computeIfAbsent(String.format("a%03d", i), k -> new TreeSet<>()).add(rowId++);
 
+        ReadCommand abortedCommand = mock(ReadCommand.class);
+        when(abortedCommand.isAborted()).thenReturn(true);
+
         withIndex(dictionary, fixture ->
         {
-            QueryContext expired = new QueryContext(0);
+            QueryContext expired = new QueryContext(abortedCommand);
             assertThrows(AbortedOperationException.class, () -> intersect(fixture, LikePatterns.patternAutomaton("a%"), expired));
         });
     }
