@@ -55,8 +55,8 @@ public class MultiKeyEncryptorTest
     }
 
     /**
-     * A fresh encryptor initializes its cipher with the key of {@code getSecretKey}; the first chunk must still be
-     * encrypted with the key its header names.
+     * A fresh encryptor initializes a cipher with the key of {@code getSecretKey}; the first chunk must still be
+     * encrypted with the key its header names. The chunk goes straight to {@code compress}, without sizing it first.
      */
     @Test
     public void firstChunkAfterConstructionUsesHeaderKey() throws IOException
@@ -65,7 +65,9 @@ public class MultiKeyEncryptorTest
         {
             Encryptor encryptor = newEncryptor(cipher);
             byte[] input = randomBytes(CHUNK);
-            ByteBuffer encrypted = encrypt(encryptor, input);
+            ByteBuffer encrypted = ByteBuffer.allocate(CHUNK + 64);
+            encryptor.compress(ByteBuffer.wrap(input), encrypted);
+            encrypted.flip();
             assertArrayEquals(cipher, input, decrypt(encryptor, encrypted, input.length));
         }
     }

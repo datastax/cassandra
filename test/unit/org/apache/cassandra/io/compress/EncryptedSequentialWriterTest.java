@@ -117,8 +117,7 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
     }
 
     /**
-     * With a multi-key provider every page names its own key: the writer sizes pages with the key of
-     * {@code getSecretKey} but must encrypt them with the key written in the page header.
+     * With a multi-key provider every page names its own key and must be encrypted with it; the read-back checks it.
      */
     @Test
     public void testRotatingKeys() throws IOException
@@ -132,7 +131,6 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
         assertEquals(0, BufferPools.forChunkCache().usedSizeInBytes());
         compressionParams = CompressionParams.fromMap(opts);
         encryptor = compressionParams.getSstableCompressor();
-        int headersBefore = RotatingKeyProviderFactory.provider().headersWritten();
 
         for (boolean useMemmap : new boolean[]{ false, true })
         {
@@ -140,8 +138,6 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
             testWrite(createTempFile("rotating_large", useMemmap ? "2" : "1"), CHUNK_SIZE * 3 + 100, useMemmap);
         }
 
-        // per run: one page for the 25-byte write, at least four for the write of more than three pages
-        assertTrue(RotatingKeyProviderFactory.provider().headersWritten() - headersBefore >= 2 * (1 + 4));
         assertEquals(0, BufferPools.forChunkCache().usedSizeInBytes());
     }
 

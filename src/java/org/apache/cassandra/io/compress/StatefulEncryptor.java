@@ -21,7 +21,6 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.spec.AlgorithmParameterSpec;
-import java.util.Objects;
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
@@ -38,7 +37,8 @@ import org.apache.cassandra.crypto.KeyAccessException;
 import org.apache.cassandra.crypto.KeyGenerationException;
 
 /**
- * Encrypts blocks of data. Reuses the same Cipher instance and avoids needless initialization.
+ * Encrypts blocks of data. Reuses the same two Cipher instances: one is initialized for every chunk with the key the
+ * chunk is encrypted with and a fresh IV, the other only sizes outputs and is initialized once.
  * Not thread-safe!
  */
 class StatefulEncryptor
@@ -46,12 +46,14 @@ class StatefulEncryptor
     private final SecureRandom random;
     private final EncryptionConfig config;
     private final byte[] iv;
+    /** Encrypts the chunks: {@link #encrypt} initializes it with the key named in the chunk (and a fresh IV). */
     private final Cipher cipher;
+    /**
+     * Only answers {@link Cipher#getOutputSize}, which does not depend on the key: initialized once, in the
+     * constructor, so that {@link #outputLength} never touches the chunk cipher nor the key provider.
+     */
+    private final Cipher sizingCipher;
     private final ISAACRandom fastRandom;
-
-    private boolean initialized = false;
-    /** The key the cipher is currently initialized with; only meaningful while {@link #initialized}. */
-    private SecretKey initializedKey;
 
     StatefulEncryptor(EncryptionConfig config, SecureRandom random) throws NoSuchPaddingException, NoSuchAlgorithmException,
             InvalidAlgorithmParameterException, InvalidKeyException, KeyAccessException, KeyGenerationException
@@ -60,39 +62,21 @@ class StatefulEncryptor
         this.config = config;
         this.iv = new byte[config.getIvLength()];
         cipher = Cipher.getInstance(config.getCipherName());
+        sizingCipher = Cipher.getInstance(config.getCipherName());
         int[] seed = new int[256];
         for (int i = 0; i < seed.length; i++)
             seed[i] = random.nextInt();
         this.fastRandom = new ISAACRandom(seed);
-        maybeInit(config.getKeyProvider().getSecretKey(config.getCipherName(), config.getKeyStrength()));
+        // also reports a bad key or key provider as soon as the encryptor is created
+        init(sizingCipher, config.getKeyProvider().getSecretKey(config.getCipherName(), config.getKeyStrength()));
     }
 
-    /**
-     * Initializes the cipher with the given key, unless it is already initialized with that key. A multi-key provider
-     * can return different keys from {@link IKeyProvider#getSecretKey} (used by the constructor and by
-     * {@link #outputLength}) and from {@link IMultiKeyProvider#writeHeader} (used by {@link #encrypt}): the chunk must
-     * always be encrypted with the key named in its header, so a different key always re-initializes the cipher.
-     * Keys are compared with {@link SecretKey#equals}: a provider should return the same instance, or equal keys,
-     * for the same key, or every chunk pays one extra cipher initialization.
-     */
-    private void maybeInit(SecretKey key) throws InvalidAlgorithmParameterException, InvalidKeyException
+    private void init(Cipher cipher, SecretKey key) throws InvalidAlgorithmParameterException, InvalidKeyException
     {
-        Objects.requireNonNull(key, "the key provider returned a null key");
-        if (!initialized || !key.equals(initializedKey))
-            init(key);
-    }
-
-    private void init(SecretKey key) throws InvalidAlgorithmParameterException, InvalidKeyException
-    {
-        // a failed cipher.init leaves the cipher uninitialized: do not remember the previous key
-        initialized = false;
-        initializedKey = null;
         if (config.isIvEnabled())
             cipher.init(Cipher.ENCRYPT_MODE, key, createIV(), random);
         else
             cipher.init(Cipher.ENCRYPT_MODE, key, random);
-        initializedKey = key;
-        initialized = true;
     }
 
     private AlgorithmParameterSpec createIV()
@@ -122,22 +106,19 @@ class StatefulEncryptor
             key = keyProvider.getSecretKey(config.getCipherName(), config.getKeyStrength());
         }
 
-        // the cipher is initialized with the key named in the header (fresh IV), whatever key was used before
-        maybeInit(key);
+        // every chunk is encrypted with the key it names (the one its header names for a multi-key provider), with a fresh IV
+        init(cipher, key);
         if (config.isIvEnabled())
         {
             output.put(iv);
         }
         cipher.doFinal(input, output);
-        initialized = false;
-        initializedKey = null;
     }
 
-    int outputLength(int inputSize) throws InvalidAlgorithmParameterException, InvalidKeyException, KeyAccessException, KeyGenerationException
+    int outputLength(int inputSize)
     {
         IKeyProvider keyProvider = config.getKeyProvider();
-        maybeInit(keyProvider.getSecretKey(config.getCipherName(), config.getKeyStrength()));
         int headerSize = keyProvider instanceof IMultiKeyProvider ? ((IMultiKeyProvider) keyProvider).headerLength() : 0;
-        return config.getIvLength() + cipher.getOutputSize(inputSize) + headerSize;
+        return config.getIvLength() + sizingCipher.getOutputSize(inputSize) + headerSize;
     }
 }
