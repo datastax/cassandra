@@ -195,7 +195,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
         this.planFactory = new Plan.Factory(cfs.metadata.keyspace, tableMetrics, this, command.rowFilter().indexHints);
-        this.saiQueryOptions = command.rowFilter().queryOptions;
+        this.saiQueryOptions = command.rowFilter().optimizerOptions;
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
