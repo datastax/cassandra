@@ -408,7 +408,7 @@ public class RowFilter
         if (root.size() == 1)
             return RowFilter.none();
 
-        return new RowFilter(root.filter(e -> !e.equals(expression)), needsReconciliation, indexHints, optimizerOptions);
+        return new RowFilter(root.filter(e -> !e.equals(expression)), needsReconciliation, indexHints, queryOptions);
     }
 
     /**
@@ -420,7 +420,7 @@ public class RowFilter
         if (isEmpty())
             return this;
 
-        return new RowFilter(root.filter(e -> !e.column().equals(column) || e.operator() != op || !e.value.equals(value)), needsReconciliation, indexHints, optimizerOptions);
+        return new RowFilter(root.filter(e -> !e.column().equals(column) || e.operator() != op || !e.value.equals(value)), needsReconciliation, indexHints, queryOptions);
     }
 
     public boolean hasNonKeyExpression()
@@ -460,12 +460,12 @@ public class RowFilter
 
     public RowFilter restrict(Predicate<Expression> filter)
     {
-        return new RowFilter(root.filter(filter), needsReconciliation, indexHints, optimizerOptions);
+        return new RowFilter(root.filter(filter), needsReconciliation, indexHints, queryOptions);
     }
 
     public RowFilter restrictFirstLevel(Predicate<Expression> filter)
     {
-        return new RowFilter(root.filterFirstLevel(filter), needsReconciliation, indexHints, optimizerOptions);
+        return new RowFilter(root.filterFirstLevel(filter), needsReconciliation, indexHints, queryOptions);
     }
 
     public boolean isEmpty()
@@ -520,7 +520,7 @@ public class RowFilter
         boolean needsReconciliation = false;
         private final IndexRegistry indexRegistry;
         private final IndexHints indexHints;
-        private final OptimizerOptions optimizerOptions;
+        private final OptimizerOptions queryOptions;
 
         public Builder(boolean needsReconciliation, IndexRegistry indexRegistry, IndexHints indexHints)
         {
