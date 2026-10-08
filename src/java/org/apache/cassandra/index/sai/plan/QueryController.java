@@ -137,6 +137,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /** Per-query SAI optimizer settings; falls back to global {@link CassandraRelevantProperties} values when not overridden. */
     private final OptimizerOptions optimizerOptions;
 
+    /** The WHERE-clause-only keys plan, before the sort node is attached. Used for post-optimization hybrid sort-order override. */
+    private Plan.KeysIteration whereKeysPlan;
+
     /**
      * Holds the primary key iterators for indexed expressions in the query (i.e. leaves of the expression tree).
      * We will construct the final iterator from those.
@@ -408,6 +411,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             plan = origPlan.optimize();
 
         plan = plan.limitIntersectedClauses(optimizerOptions.intersectionClauseLimit());
+
+        // Apply the hybrid sort-order override AFTER optimization, so the optimizer cannot undo it.
+        // (The optimizer replaces any KeysSort back to a ScoredIndexScan for non-selective WHERE clauses.)
+        plan = applyHybridSortOrderOverrideToRows(plan);
         queryContext.recordQueryPlan(origPlan, plan);
         updateIndexMetricsQueriesCount(plan);
 
@@ -439,16 +446,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         // Remove the ORDER BY filter expression from the filter tree, as it is added below.
         var filterElement = filterOperation().filter(e -> !Orderer.isFilterExpressionOrderer(e));
-        Plan.KeysIteration whereKeysPlan = Operation.Node.buildTree(this, filterElement)
-                                                         .analyzeTree(this)
-                                                         .plan(this);
+        whereKeysPlan = Operation.Node.buildTree(this, filterElement)
+                                      .analyzeTree(this)
+                                      .plan(this);
 
         // Because the orderer has a specific queue view
         Plan.KeysIteration keysIterationPlan = whereKeysPlan;
         if (orderer != null)
         {
             keysIterationPlan = planFactory.sort(whereKeysPlan, orderer);
-            keysIterationPlan = applyHybridSortOrderOverride(whereKeysPlan, keysIterationPlan);
         }
 
         // This would mean we have no WHERE nor ANN clauses at all; this can happen in case an index was dropped after the
@@ -460,59 +466,42 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     /**
-     * Applies the {@code sai_hybrid_sort_order} per-query override to the keys iteration plan.
-     *
-     * <p>The optimizer's default choice (encoded in {@code sortedPlan}) is:
-     * <ul>
-     *   <li>{@link Plan.KeysSort} — filter-then-sort: materialize WHERE-clause keys, then score them.</li>
-     *   <li>{@link Plan.ScoredIndexScan} subclass — sort-then-filter: stream scored rows from the ANN/BM25 index
-     *       and post-filter by WHERE predicates.</li>
-     * </ul>
-     *
-     * <p>If the user set {@code SORT_THEN_FILTER}, we remove any {@link Plan.KeysSort} node so execution falls
-     * through to the scored-index-scan path (same as the included-index-hint logic in {@link Plan#optimize()}).
-     * If the user set {@code FILTER_THEN_SORT}, we replace a bare scored-index-scan plan with a
-     * {@link Plan.KeysSort} that drives off the WHERE-clause keys — forcing key materialization first.
-     * {@code AUTO} leaves the plan unchanged.
-     *
-     * @param whereKeysPlan the keys plan before the sort node was attached (WHERE-clause only)
-     * @param sortedPlan    the plan after {@link Plan.Factory#sort} was applied
-     * @return the plan to use, potentially overridden
+     * Applies the {@code hybrid_sort_order} override to the fully-optimised {@link Plan.RowsIteration}.
+     * This must run after {@link Plan#optimize()} because the optimizer may convert any {@link Plan.KeysSort}
+     * back to a {@link Plan.ScoredIndexScan} for non-selective WHERE predicates.
      */
-    private Plan.KeysIteration applyHybridSortOrderOverride(Plan.KeysIteration whereKeysPlan,
-                                                             Plan.KeysIteration sortedPlan)
+    private Plan.RowsIteration applyHybridSortOrderOverrideToRows(Plan.RowsIteration plan)
     {
+        if (orderer == null)
+            return plan;
+
         switch (optimizerOptions.hybridSortOrder())
         {
             case SORT_THEN_FILTER:
             {
-                // If the optimizer already chose sort-then-filter (a ScoredIndexScan) there is nothing to do.
-                if (sortedPlan.isOrderedScanThenFilterHybrid() || !(sortedPlan instanceof Plan.KeysSort))
-                    return sortedPlan;
-
-                // Replace KeysSort (and its WHERE-clause source) with a bare scored index scan.
-                // removeRestriction on the KeysSort node replaces it with factory.sort(everything, ordering),
-                // which Factory.sort() turns into the appropriate ScoredIndexScan.
-                Plan.KeysSort keysSort = (Plan.KeysSort) sortedPlan;
-                Plan.KeysIteration overridden = (Plan.KeysIteration) sortedPlan.removeRestriction(keysSort.id);
+                // Replace any KeysSort with a ScoredIndexScan.
+                List<Plan.KeysSort> keySorts = plan.nodesOfType(Plan.KeysSort.class);
+                if (keySorts.isEmpty())
+                    return plan; // already sort-then-filter; nothing to do
+                Plan.KeysSort keysSort = keySorts.get(0);
+                Plan.RowsIteration overridden = (Plan.RowsIteration) plan.removeRestriction(keysSort.id);
                 Tracing.logAndTrace(logger, "sai_hybrid_sort_order=sort_then_filter: forcing sort-then-filter, replacing filter-then-sort plan");
                 return overridden;
             }
             case FILTER_THEN_SORT:
             {
-                // If the optimizer already chose filter-then-sort (a KeysSort) there is nothing to do.
-                if (sortedPlan instanceof Plan.KeysSort)
-                    return sortedPlan;
-
-                // The optimizer chose a ScoredIndexScan (sort-then-filter). Override by directly wrapping the
-                // WHERE-clause keys plan in a KeysSort, bypassing planFactory.sort() which would re-apply the
-                // same optimisation and collapse back to a ScoredIndexScan.
-                Plan.KeysIteration overridden = planFactory.sortForced(whereKeysPlan, orderer);
+                // Replace any ScoredIndexScan with a KeysSort wrapping the WHERE-clause plan.
+                List<Plan.ScoredIndexScan> scoredScans = plan.nodesOfType(Plan.ScoredIndexScan.class);
+                if (scoredScans.isEmpty())
+                    return plan; // already filter-then-sort; nothing to do
+                Plan.ScoredIndexScan scoredScan = scoredScans.get(0);
+                Plan.KeysSort keysSort = planFactory.sortForced(whereKeysPlan, orderer);
+                Plan.RowsIteration overridden = (Plan.RowsIteration) plan.replaceNode(scoredScan.id, keysSort);
                 Tracing.logAndTrace(logger, "sai_hybrid_sort_order=filter_then_sort: forcing filter-then-sort, replacing sort-then-filter plan");
                 return overridden;
             }
             default:
-                return sortedPlan;
+                return plan;
         }
     }
 

@@ -496,6 +496,17 @@ abstract public class Plan
     }
 
     /**
+     * Replaces the node with the given {@code id} anywhere in the plan tree with {@code replacement}.
+     * If no node with that id is found the plan is returned unchanged.
+     */
+    final Plan replaceNode(int id, Plan replacement)
+    {
+        if (this.id == id)
+            return replacement;
+        return withUpdatedSubplans(subplan -> subplan.replaceNode(id, replacement));
+    }
+
+    /**
      * Returns the estimated cost of preparation steps
      * that must be done before returning the first row / key
      */
