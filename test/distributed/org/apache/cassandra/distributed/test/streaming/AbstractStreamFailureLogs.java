@@ -102,7 +102,12 @@ public class AbstractStreamFailureLogs extends TestBaseImpl
         // grepForErrors will include all ERROR logs even if they don't match the pattern; for this reason need to filter after the fact
         List<String> matches = result.getResult();
 
-        matches = matches.stream().filter(s -> s.startsWith("WARN")).collect(Collectors.toList());
+        // Keep only WARN lines that contain "[Stream #...]" — the StreamResultFuture log format.
+        // RepairJob also logs at WARN and includes the StreamException message (which contains
+        // "Stream failed:"), so without this filter both lines match and the size assertion fails.
+        matches = matches.stream()
+                         .filter(s -> s.startsWith("WARN") && s.contains("[Stream #"))
+                         .collect(Collectors.toList());
         logger.info("Stream failed logs found: {}", String.join("\n", matches));
         if (matches.isEmpty() && !failIfNoMatch)
             return false;
