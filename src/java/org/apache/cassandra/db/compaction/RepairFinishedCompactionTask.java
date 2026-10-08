@@ -48,8 +48,13 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
                                         long repairedAt,
                                         boolean isTransient)
     {
-        super(realm, transaction);
-        this.operation = new RepairFinalizationOperation(realm, transaction, sessionID, repairedAt, isTransient);
+        this(new RepairFinalizationOperation(realm, transaction, sessionID, repairedAt, isTransient));
+    }
+
+    public RepairFinishedCompactionTask(RepairFinalizationOperation op)
+    {
+        super(op.realm, op.transaction);
+        this.operation = op;
     }
 
     @VisibleForTesting
@@ -70,4 +75,6 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
     {
         return 0;  // This is just metadata modification, no overhead.
     }
+
+    // Note: we do not need to override rejection/cleanup, as it will do the right thing (abort the transaction).
 }

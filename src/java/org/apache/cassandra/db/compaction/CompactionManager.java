@@ -1712,6 +1712,8 @@ public class CompactionManager implements CompactionManagerMBean
             public Throwable commit(Throwable accumulate) { return accumulate; }
             public void prepareToCommit() {}
             public void checkpoint() {}
+            @Override
+            public Throwable abortCheckpoint(Throwable accumulate) { return accumulate; }
             public void obsoleteOriginals() {}
             public void close() {}
         }
