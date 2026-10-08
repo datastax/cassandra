@@ -118,7 +118,7 @@ public class RowFilter
         this.root = root;
         this.needsReconciliation = needsReconciliation;
         this.indexHints = indexHints;
-        this.optimizerOptions = optimizerOptions;
+        this.queryOptions = optimizerOptions;
     }
 
     public static RowFilter none()
