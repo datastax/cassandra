@@ -48,7 +48,7 @@ public class PlanWithOptimizerOptionsTest extends SAITester
     // -------------------------------------------------------------------------
 
     @Test
-    public void testValidQueryOptionsAreParsedAndStored()
+    public void testValidOptimizerOptionsAreParsedAndStored()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
@@ -64,7 +64,7 @@ public class PlanWithOptimizerOptionsTest extends SAITester
         disablePreparedReuseForTest();
         ReadCommand command = parseReadCommand(query);
 
-        OptimizerOptions opts = command.rowFilter().queryOptions;
+        OptimizerOptions opts = command.rowFilter().optimizerOptions;
         assertThat(opts).isNotSameAs(OptimizerOptions.NONE);
         assertThat(opts.queryOptimizationLevel()).isEqualTo(0);
         assertThat(opts.intersectionClauseLimit()).isEqualTo(5);
@@ -73,14 +73,14 @@ public class PlanWithOptimizerOptionsTest extends SAITester
     }
 
     @Test
-    public void testAbsentQueryOptionsResultsInNone()
+    public void testAbsentOptimizerOptionsResultsInNone()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         disablePreparedReuseForTest();
         ReadCommand command = parseReadCommand(formatQuery("SELECT * FROM %s WHERE v = 1"));
-        assertThat(command.rowFilter().queryOptions).isSameAs(OptimizerOptions.NONE);
+        assertThat(command.rowFilter().optimizerOptions).isSameAs(OptimizerOptions.NONE);
     }
 
     @Test
@@ -187,7 +187,7 @@ public class PlanWithOptimizerOptionsTest extends SAITester
         ReadCommand command = parseReadCommand(
                 formatQuery("SELECT * FROM %s WHERE v = 1 WITH optimizer_options = {'intersection_clause_limit': '7'}"));
 
-        assertThat(command.rowFilter().queryOptions.intersectionClauseLimit()).isEqualTo(7);
+        assertThat(command.rowFilter().optimizerOptions.intersectionClauseLimit()).isEqualTo(7);
         // Global must be unchanged.
         assertThat(CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt())
                 .isNotEqualTo(7);
@@ -207,7 +207,7 @@ public class PlanWithOptimizerOptionsTest extends SAITester
         ReadCommand command = parseReadCommand(
                 formatQuery("SELECT * FROM %s WHERE v = 1 WITH optimizer_options = {'use_term_statistics': 'false'}"));
 
-        assertThat(command.rowFilter().queryOptions.useTermStatistics()).isFalse();
+        assertThat(command.rowFilter().optimizerOptions.useTermStatistics()).isFalse();
         // Global must be unchanged (default is true as set by SAITester.resetQueryOptimizationLevel).
         assertThat(CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean()).isTrue();
     }
