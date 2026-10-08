@@ -110,7 +110,7 @@ public class RowFilter
 
     public final FilterElement root;
     public final IndexHints indexHints;
-    public final OptimizerOptions queryOptions;
+    public final OptimizerOptions optimizerOptions;
     private final boolean needsReconciliation;
 
     protected RowFilter(FilterElement root, boolean needsReconciliation, IndexHints indexHints, OptimizerOptions optimizerOptions)
@@ -118,7 +118,7 @@ public class RowFilter
         this.root = root;
         this.needsReconciliation = needsReconciliation;
         this.indexHints = indexHints;
-        this.queryOptions = optimizerOptions;
+        this.optimizerOptions = optimizerOptions;
     }
 
     public static RowFilter none()
@@ -408,7 +408,7 @@ public class RowFilter
         if (root.size() == 1)
             return RowFilter.none();
 
-        return new RowFilter(root.filter(e -> !e.equals(expression)), needsReconciliation, indexHints, queryOptions);
+        return new RowFilter(root.filter(e -> !e.equals(expression)), needsReconciliation, indexHints, optimizerOptions);
     }
 
     /**
@@ -420,7 +420,7 @@ public class RowFilter
         if (isEmpty())
             return this;
 
-        return new RowFilter(root.filter(e -> !e.column().equals(column) || e.operator() != op || !e.value.equals(value)), needsReconciliation, indexHints, queryOptions);
+        return new RowFilter(root.filter(e -> !e.column().equals(column) || e.operator() != op || !e.value.equals(value)), needsReconciliation, indexHints, optimizerOptions);
     }
 
     public boolean hasNonKeyExpression()
@@ -455,17 +455,17 @@ public class RowFilter
      */
     public RowFilter withoutDisjunctions()
     {
-        return new RowFilter(root.withoutDisjunctions(), needsReconciliation, indexHints, queryOptions);
+        return new RowFilter(root.withoutDisjunctions(), needsReconciliation, indexHints, optimizerOptions);
     }
 
     public RowFilter restrict(Predicate<Expression> filter)
     {
-        return new RowFilter(root.filter(filter), needsReconciliation, indexHints, queryOptions);
+        return new RowFilter(root.filter(filter), needsReconciliation, indexHints, optimizerOptions);
     }
 
     public RowFilter restrictFirstLevel(Predicate<Expression> filter)
     {
-        return new RowFilter(root.filterFirstLevel(filter), needsReconciliation, indexHints, queryOptions);
+        return new RowFilter(root.filterFirstLevel(filter), needsReconciliation, indexHints, optimizerOptions);
     }
 
     public boolean isEmpty()
@@ -520,24 +520,24 @@ public class RowFilter
         boolean needsReconciliation = false;
         private final IndexRegistry indexRegistry;
         private final IndexHints indexHints;
-        private final OptimizerOptions queryOptions;
+        private final OptimizerOptions optimizerOptions;
 
         public Builder(boolean needsReconciliation, IndexRegistry indexRegistry, IndexHints indexHints)
         {
             this(needsReconciliation, indexRegistry, indexHints, OptimizerOptions.NONE);
         }
 
-        public Builder(boolean needsReconciliation, IndexRegistry indexRegistry, IndexHints indexHints, OptimizerOptions queryOptions)
+        public Builder(boolean needsReconciliation, IndexRegistry indexRegistry, IndexHints indexHints, OptimizerOptions optimizerOptions)
         {
             this.needsReconciliation = needsReconciliation;
             this.indexRegistry = indexRegistry;
             this.indexHints = indexHints;
-            this.queryOptions = queryOptions;
+            this.optimizerOptions = optimizerOptions;
         }
 
         public RowFilter build()
         {
-            return new RowFilter(current.build(), needsReconciliation, indexHints, queryOptions);
+            return new RowFilter(current.build(), needsReconciliation, indexHints, optimizerOptions);
         }
 
         public RowFilter buildFromRestrictions(StatementRestrictions restrictions,
@@ -551,7 +551,7 @@ public class RowFilter
             if (Guardrails.queryFilters.enabled(state))
                 Guardrails.queryFilters.guard(root.numFilteredValues(), "Select query", false, state);
 
-            return new RowFilter(root, needsReconciliation, indexHints, queryOptions);
+            return new RowFilter(root, needsReconciliation, indexHints, optimizerOptions);
         }
 
         private FilterElement doBuild(StatementRestrictions restrictions,
@@ -608,7 +608,7 @@ public class RowFilter
             {
                 // If we're in disjunction mode, we must not pass the current builder to addToRowFilter.
                 // We create a new conjunction sub-builder instead and add all expressions there.
-                var builder = new Builder(needsReconciliation, indexRegistry, indexHints, queryOptions);
+                var builder = new Builder(needsReconciliation, indexRegistry, indexHints, optimizerOptions);
                 addToRowFilterDelegate.accept(builder);
 
                 if (builder.current.expressions.size() == 1 && builder.current.children.isEmpty())
@@ -2098,7 +2098,7 @@ public class RowFilter
             out.writeBoolean(false); // Old "is for thrift" boolean
             IndexHints.serializer.serialize(filter.indexHints, out, version); // hints first because the expressions might need them
             FilterElement.serializer.serialize(filter.root, out, version);
-            OptimizerOptions.serializer.serialize(filter.queryOptions, out, version);
+            OptimizerOptions.serializer.serialize(filter.optimizerOptions, out, version);
         }
 
         public RowFilter deserialize(DataInputPlus in, int version, TableMetadata metadata, boolean needsReconciliation) throws IOException
@@ -2115,7 +2115,7 @@ public class RowFilter
             return 1 // unused boolean
                    + IndexHints.serializer.serializedSize(filter.indexHints, version)
                    + FilterElement.serializer.serializedSize(filter.root, version)
-                   + OptimizerOptions.serializer.serializedSize(filter.queryOptions, version);
+                   + OptimizerOptions.serializer.serializedSize(filter.optimizerOptions, version);
         }
     }
 }
