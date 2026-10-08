@@ -49,6 +49,7 @@ import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.Encryptor;
 import org.apache.cassandra.io.compress.EncryptorTest;
 import org.apache.cassandra.io.compress.ICompressor;
+import org.apache.cassandra.io.compress.RotatingKeyProviderFactory;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
@@ -241,6 +242,55 @@ public class MetadataSerializerTest
                     directory.deleteRecursive();
                 }
             }
+        }
+    }
+
+    /**
+     * With a multi-key provider each metadata component is encrypted with the key named in its own header: the
+     * serializer sizes every component with the key of {@code getSecretKey} right before encrypting it.
+     */
+    @Test
+    public void testEncryptionWithRotatingKeys() throws IOException
+    {
+        assertTrue(testCompressor == null);
+        Version version = DatabaseDescriptor.getSSTableFormats().get("bti").getLatestVersion();
+        assertTrue(version.metadataIsEncrypted());
+
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CompressionParams.CLASS, Encryptor.class.getName());
+        opts.put(CIPHER_ALGORITHM, "AES/CBC/PKCS5Padding");
+        opts.put(SECRET_KEY_STRENGTH, Integer.toString(128));
+        opts.put(KEY_PROVIDER, RotatingKeyProviderFactory.class.getName());
+        CompressionParams rotatingParams = CompressionParams.fromMap(opts);
+
+        Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(false, version);
+        MetadataSerializer serializer = new MetadataSerializer();
+        File directory = new File(Files.createTempDirectory("MetadataSerializerTest"));
+        try
+        {
+            Descriptor desc = new Descriptor(version, directory, "test", "test", new SequenceBasedSSTableId(0));
+            File statsFile = desc.fileFor(Components.STATS);
+            int headersBefore = RotatingKeyProviderFactory.provider().headersWritten();
+            try (DataOutputStreamPlus out = new FileOutputStreamPlus(statsFile))
+            {
+                serializer.serialize(originalMetadata, out, desc, rotatingParams);
+            }
+            assertEquals(originalMetadata.size(), RotatingKeyProviderFactory.provider().headersWritten() - headersBefore);
+            writeCompressionInfo(desc, rotatingParams);
+
+            byte[] contents = com.google.common.io.Files.toByteArray(statsFile.toJavaIOFile());
+            assertEquals(-1, Bytes.indexOf(contents, sensitiveKey.getBytes(StandardCharsets.UTF_8)));
+
+            Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, EnumSet.allOf(MetadataType.class));
+            for (MetadataType type : MetadataType.values())
+            {
+                if ((type != MetadataType.STATS) || version.hasImprovedMinMax())
+                    assertEquals(type.name(), originalMetadata.get(type), deserialized.get(type));
+            }
+        }
+        finally
+        {
+            directory.deleteRecursive();
         }
     }
 
