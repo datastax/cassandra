@@ -490,19 +490,29 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             }
             case FILTER_THEN_SORT:
             {
-                // Replace any ScoredIndexScan with a KeysSort wrapping the WHERE-clause plan.
-                List<Plan.ScoredIndexScan> scoredScans = plan.nodesOfType(Plan.ScoredIndexScan.class);
-                if (scoredScans.isEmpty())
+                // Replace the ordered scan (a ScoredIndexScan for ANN/BM25, or an ordered IndexScan for generic
+                // ORDER BY) with a KeysSort wrapping the WHERE-clause plan.
+                Plan.Leaf orderedScan = plan.nodesOfType(Plan.Leaf.class)
+                                            .stream()
+                                            .filter(QueryController::isOrderedScan)
+                                            .findFirst()
+                                            .orElse(null);
+                if (orderedScan == null)
                     return plan; // already filter-then-sort; nothing to do
-                Plan.ScoredIndexScan scoredScan = scoredScans.get(0);
                 Plan.KeysSort keysSort = planFactory.sortForced(whereKeysPlan, orderer);
-                Plan.RowsIteration overridden = (Plan.RowsIteration) plan.replaceNode(scoredScan.id, keysSort);
+                Plan.RowsIteration overridden = (Plan.RowsIteration) plan.replaceNode(orderedScan.id, keysSort);
                 Tracing.logAndTrace(logger, "sai_hybrid_sort_order=filter_then_sort: forcing filter-then-sort, replacing sort-then-filter plan");
                 return overridden;
             }
             default:
                 return plan;
         }
+    }
+
+    private static boolean isOrderedScan(Plan.Leaf leaf)
+    {
+        return leaf instanceof Plan.ScoredIndexScan
+               || (leaf instanceof Plan.IndexScan && ((Plan.IndexScan) leaf).ordering != null);
     }
 
     public Iterator<? extends PrimaryKey> buildIterator(Plan plan)
