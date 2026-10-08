@@ -1158,9 +1158,9 @@ public class StatementRestrictions
                                       && Keyspace.open(table.keyspace).getReplicationStrategy().getReplicationFactor().allReplicas > 1;
 
         ANNOptions annOptions = selectOptions.parseANNOptions();
-        OptimizerOptions queryOptions = selectOptions.parseOptimizerOptions();
+        OptimizerOptions optimizerOptions = selectOptions.parseOptimizerOptions();
 
-        RowFilter.Builder filterBuilder = new RowFilter.Builder(needsReconciliation, indexRegistry, indexHints, queryOptions);
+        RowFilter.Builder filterBuilder = new RowFilter.Builder(needsReconciliation, indexRegistry, indexHints, optimizerOptions);
         RowFilter rowFilter = filterBuilder.buildFromRestrictions(this, table, options, clientState, annOptions);
 
         if (hasAnnOptions && !rowFilter.hasANN())
