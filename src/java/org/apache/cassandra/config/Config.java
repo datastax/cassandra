@@ -201,7 +201,7 @@ public class Config
     public volatile int internode_tcp_user_timeout_in_ms = 30000;
     // Similar to internode_tcp_user_timeout_in_ms but used specifically for streaming connection.
     // The default is 5 minutes. Increase it or set it to 0 in order to increase the timeout.
-    public volatile int internode_streaming_tcp_user_timeout_in_ms = 300_000; // 5 minutes
+    public volatile int internode_streaming_tcp_user_timeout_in_ms = 600_000; // 10 minutes
 
     public boolean start_native_transport = true;
     public int native_transport_port = 9042;
