@@ -101,12 +101,14 @@ public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCur
     /// the range that covers it (i.e. the `precedingState` of the next marker).
     default S applicableRange(ByteComparable key)
     {
-        RangeCursor<S> cursor = cursor(Direction.FORWARD);
-        final ByteSource bytes = key.asComparableBytes(cursor.byteComparableVersion());
-        if (cursor.descendAlong(bytes))
-            return cursor.state();
-        else
-            return cursor.precedingState();
+        try (RangeCursor<S> cursor = cursor(Direction.FORWARD))
+        {
+            final ByteSource bytes = key.asComparableBytes(cursor.byteComparableVersion());
+            if (cursor.descendAlong(bytes))
+                return cursor.state();
+            else
+                return cursor.precedingState();
+        }
     }
 
     @Override
@@ -176,12 +178,22 @@ public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCur
     default RangeTrie<S> tailTrie(ByteComparable prefix)
     {
         RangeCursor<S> c = cursor(Direction.FORWARD);
-        if (c.descendAlong(prefix.asComparableBytes(c.byteComparableVersion())))
-            return c::tailCursor;
-        else if (c.precedingState() != null)
-            return c::precedingStateCursor;
-        else
-            return null;
+        try
+        {
+            if (c.descendAlong(prefix.asComparableBytes(c.byteComparableVersion())))
+                return c::tailCursor;
+            else if (c.precedingState() != null)
+                return c::precedingStateCursor;
+            else
+                return null;
+        }
+        finally
+        {
+            // The returned trie keeps the cursor as the position to make its cursors from, and has no close of its
+            // own for the caller to reach it with. Release it here; [Cursor#close] leaves `tailCursor` and
+            // [#precedingStateCursor] callable precisely for this.
+            c.close();
+        }
     }
 
     @Override
