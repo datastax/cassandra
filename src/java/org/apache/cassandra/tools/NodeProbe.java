@@ -1018,6 +1018,11 @@ public class NodeProbe implements AutoCloseable
         ssProxy.move(newToken);
     }
 
+    public void shrinkTokens(List<String> keptTokens) throws IOException
+    {
+        ssProxy.shrinkTokens(keptTokens);
+    }
+
     public void removeNode(String token)
     {
         ssProxy.removeNode(token);
