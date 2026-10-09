@@ -678,7 +678,8 @@ class TestCqlshCompletion(CqlshCompletionCase):
                                      'memtable_flush_period_in_ms',
                                      'CLUSTERING',
                                      'COMPACT', 'caching', 'comment',
-                                     'min_index_interval', 'speculative_retry', 'additional_write_policy', 'cdc', 'read_repair'])
+                                     'min_index_interval', 'speculative_retry', 'additional_write_policy', 'cdc', 'read_repair',
+                                     'storage_attached_indexing'])
         self.trycompletions(prefix + ' new_table (col_a int PRIMARY KEY) WITH ',
                             choices=['allow_auto_snapshot',
                                      'bloom_filter_fp_chance', 'compaction',
@@ -690,7 +691,8 @@ class TestCqlshCompletion(CqlshCompletionCase):
                                      'memtable_flush_period_in_ms',
                                      'CLUSTERING',
                                      'COMPACT', 'caching', 'comment',
-                                     'min_index_interval', 'speculative_retry', 'additional_write_policy', 'cdc', 'read_repair'])
+                                     'min_index_interval', 'speculative_retry', 'additional_write_policy', 'cdc', 'read_repair',
+                                     'storage_attached_indexing'])
         self.trycompletions(prefix + ' new_table (col_a int PRIMARY KEY) WITH bloom_filter_fp_chance ',
                             immediate='= ')
         self.trycompletions(prefix + ' new_table (col_a int PRIMARY KEY) WITH bloom_filter_fp_chance = ',
@@ -740,7 +742,8 @@ class TestCqlshCompletion(CqlshCompletionCase):
                                      'memtable_flush_period_in_ms',
                                      'CLUSTERING',
                                      'COMPACT', 'caching', 'comment',
-                                     'min_index_interval', 'speculative_retry', 'additional_write_policy', 'cdc', 'read_repair'])
+                                     'min_index_interval', 'speculative_retry', 'additional_write_policy', 'cdc', 'read_repair',
+                                     'storage_attached_indexing'])
         self.trycompletions(prefix + " new_table (col_a int PRIMARY KEY) WITH compaction = "
                             + "{'class': 'TimeWindowCompactionStrategy', '",
                             choices=['compaction_window_unit', 'compaction_window_size',
@@ -758,8 +761,11 @@ class TestCqlshCompletion(CqlshCompletionCase):
                                      'tombstone_threshold', 'tombstone_compaction_interval',
                                      'unchecked_tombstone_compaction', 'provide_overlapping_tombstones',
                                      'max_threshold', 'only_purge_repaired_tombstones'])
+        self.trycompletions(prefix + " new_table (col_a int PRIMARY KEY) WITH storage_attached_indexing = {",
+                            choices=['query_optimization_level', 'intersection_clause_limit', 'use_term_statistics'])
 
-    def test_complete_in_create_columnfamily(self):
+
+def test_complete_in_create_columnfamily(self):
         self.trycompletions('CREATE C', choices=['COLUMNFAMILY', 'CUSTOM'])
         self.trycompletions('CREATE CO', immediate='LUMNFAMILY ')
         self.create_columnfamily_table_template('COLUMNFAMILY')

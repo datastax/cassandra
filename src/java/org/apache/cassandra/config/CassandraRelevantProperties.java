@@ -849,8 +849,12 @@ public enum CassandraRelevantProperties
      */
     SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false"),
 
-    /** Controls the maximum number of index query intersections that will take part in a query */
-    SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection_clause_limit", "2"),
+    /**
+     * Controls the maximum number of expressions that will be used in a SAI intersection operation.
+     * <p>
+     * This will be overriden at the table level by the option {@code WITH storage_attached_indexing = {'intersection_clause_limit': 2}}
+     */
+    SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection.clause.limit", "2"),
 
     SAI_JVECTOR_VERSION("cassandra.sai.jvector_version", "2"),
 
@@ -893,14 +897,19 @@ public enum CassandraRelevantProperties
     SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_table.enabled", "true"),
 
     /**
+     * Whether to optimize query plans
+     * <p>
+     * This will be overriden at the table level by the option {@code WITH storage_attached_indexing = {'query_optimization_level': 1}}
+     */
+    SAI_QUERY_OPTIMIZATION_LEVEL("cassandra.sai.query_optimization_level", "1"),
+
+    /**
      * If disabled, the query optimizer runs index search to estimate the number of matching keys.
      * If enabled, the query optimizer uses, if present, the term statistics stored
      * with the help of histograms in the metadata component of each SSTable index.
      * Using terms statistics is significantly less costly but less precise.
      */
     SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS("cassandra.sai.query_optimization.use_term_statistics", "false"),
-
-    SAI_QUERY_OPT_LEVEL("cassandra.sai.query.optimization.level", "1"),
 
     /**
      * Whether to enable SAI query plan metrics such as the estimated cost, estimated number of rows,
@@ -910,6 +919,13 @@ public enum CassandraRelevantProperties
     SAI_QUERY_PLAN_METRICS_ENABLED("cassandra.sai.metrics.query_plan.enabled", "true"),
 
     SAI_REDUCE_TOPK_ACROSS_SSTABLES("cassandra.sai.reduce_topk_across_sstables", "true"),
+
+    /**
+     * If true, users are allowed to set the {@code storage_attached_indexing} CQL table option
+     * (e.g. {@code WITH storage_attached_indexing = \{'query_optimization_level': 1\}}).
+     * Disabled by default; set to {@code true} to enable the option in a future release.
+     */
+    SAI_TABLE_PARAMS_ENABLED("cassandra.sai.table_params.enabled", "false"),
 
     /**
      * Whether to enable SAI table state metrics such as disk usage, queryable index count, and index build progress.

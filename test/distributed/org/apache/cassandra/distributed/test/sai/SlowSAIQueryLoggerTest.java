@@ -44,7 +44,6 @@ import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.SecondaryIndexManager;
-import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.plan.QueryMonitorableExecutionInfo;
 import org.assertj.core.api.Assertions;
 import org.awaitility.Awaitility;
@@ -86,7 +85,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                               .start());
         coordinator = cluster.coordinator(1);
         node = cluster.get(1);
-        node.runOnInstance(() -> QueryController.QUERY_OPT_USE_TERM_STATS = true);
+        node.runOnInstance(() -> CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.setBoolean(true));
     }
 
     @AfterClass
@@ -372,7 +371,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                           quote("ordering: s ASC"));
 
         // Disable query optimizer to prevent skipping hybrid query logic and hit orderByResults to verify metrics update
-        node.runOnInstance(() -> QueryController.QUERY_OPT_LEVEL = 0);
+        node.runOnInstance(() -> CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_LEVEL.setInt(0));
         mark = node.logs().mark();
         coordinator.execute(hybridQuery, ConsistencyLevel.ONE);
         assertLogsContain(mark, node,
@@ -401,7 +400,7 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                           "NumericIndexScan",
                           quote("predicate: Expression{name: n, op: RANGE, lower: (?, false), upper: (null, false), exclusions: []}"));
 
-        node.runOnInstance(() -> QueryController.QUERY_OPT_LEVEL = CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.getInt());
+        node.runOnInstance(() -> CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_LEVEL.setInt(1));
 
         // test changing data between identical queries, making one of them slower than the other,
         // so we can check that only the execution info of the slowest query are reported
