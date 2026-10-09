@@ -19,10 +19,21 @@
 package org.apache.cassandra.cql3.validation.operations;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.HashSet;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+
+import com.google.common.collect.ImmutableMap;
+
+import io.micrometer.core.annotation.TimedSet;
 
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -58,6 +69,7 @@ public class TTLTest extends CQLTester
     public static final String SIMPLE_CLUSTERING = "table2";
     public static final String COMPLEX_NOCLUSTERING = "table3";
     public static final String COMPLEX_CLUSTERING = "table4";
+    public static final String SIMPLE_CLUSTERING_WITH_STATIC = "table5";
     private Config.CorruptedTombstoneStrategy corruptTombstoneStrategy;
 
     @Before
@@ -299,12 +311,27 @@ public class TTLTest extends CQLTester
 
     private void createTable(boolean simple, boolean clustering)
     {
+        createTable(simple, clustering, false);
+    }
+
+    private void createTable(boolean simple, boolean clustering, boolean withStatic)
+    {
+        assert !(withStatic && !clustering);
+        assert !(withStatic && !simple);
+        
         if (simple)
         {
             if (clustering)
-                createTable("create table %s (k int, a int, b int, primary key(k, a))");
+            {
+                if (withStatic)
+                    createTable("create table %s (a int, b int, c int static, d text, primary key(a, b))");
+                else
+                    createTable("create table %s (k int, a int, b int, primary key(k, a))");
+            }
             else
+            {
                 createTable("create table %s (k int primary key, a int, b int)");
+            }
         }
         else
         {
@@ -336,11 +363,16 @@ public class TTLTest extends CQLTester
      */
     private void checkTTLIsCapped(String field) throws Throwable
     {
+        checkTTLIsCapped(field, "k = 1");
+    }
 
+    private void checkTTLIsCapped(String field, String selectQueryCondition) throws Throwable
+    {
         // TTL is computed dynamically from row expiration time, so if it is
         // equal or higher to the minimum max TTL we compute before the query
         // we are fine.
-        UntypedResultSet execute = execute("SELECT ttl(" + field + ") FROM %s WHERE k = 1");
+        String query = "SELECT ttl(" + field + ") FROM %s" + (selectQueryCondition != null ? " WHERE " + selectQueryCondition : "");
+        UntypedResultSet execute = execute(query);
         int minMaxTTL = computeMaxTTL();
         for (UntypedResultSet.Row row : execute)
         {
@@ -438,19 +470,66 @@ public class TTLTest extends CQLTester
         }
     }
 
+    @Test
+    public void testScrubOverflowedSSTableWithStaticColumn() throws Throwable
+    {
+        baseTestScrubOverflowedSSTableWithStaticColumn(false);
+        baseTestScrubOverflowedSSTableWithStaticColumn(true);
+    }
+
+    public void baseTestScrubOverflowedSSTableWithStaticColumn(boolean checkData) throws Throwable
+    {
+        DatabaseDescriptor.setCorruptedTombstoneStrategy(Config.CorruptedTombstoneStrategy.disabled);
+        createTable(true, true, true);
+
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(currentTable());
+
+        assertEquals(0, cfs.getLiveSSTables().size());
+
+        copySSTablesToTableDir(currentTable(), true, true, true);
+
+        cfs.loadNewSSTables();
+        assertEquals(0, execute("SELECT * FROM %s").stream().count());
+
+        cfs.scrub(true, false, checkData, true, 1);
+
+        List<Map<String, Long>> staticRowsWithTTL = execute("SELECT c, ttl(c) FROM %s").stream()
+                                                                                       .map(row -> ImmutableMap.of("c", (long) row.getInt("c"),
+                                                                                                                   "ttl(c)", (long) row.getInt("ttl(c)")))
+                                                                                       .distinct()
+                                                                                       .collect(Collectors.toList());
+        // Assert that we have two distinct static rows
+        assertEquals(2, staticRowsWithTTL.size());
+        // Assert that ttl is set to maximum possible ttl
+        checkTTLIsCapped("c", null);
+
+        // Assert the correctness of row contents
+        assertRows(execute("SELECT * FROM %s"), 
+                   row(1, 1, 2, "one-one"),
+                   row(1, 2, 2, "one-two"),
+                   row(2, 3, 4, "two-three"),
+                   row(2, 4, 4, "two-four"));
+    }
+
     private void copySSTablesToTableDir(String table, boolean simple, boolean clustering) throws IOException
     {
+        copySSTablesToTableDir(table, simple, clustering, false);
+    }
+
+    private void copySSTablesToTableDir(String table, boolean simple, boolean clustering, boolean withStatic) throws IOException
+    {
         File destDir = Keyspace.open(keyspace()).getColumnFamilyStore(table).getDirectories().getCFDirectories().iterator().next();
-        File sourceDir = getTableDir(table, simple, clustering);
+        File sourceDir = getTableDir(table, simple, clustering, withStatic);
         for (File file : sourceDir.tryList())
         {
             copyFile(file, destDir);
         }
     }
 
-    private static File getTableDir(String table, boolean simple, boolean clustering)
+    private static File getTableDir(String table, boolean simple, boolean clustering, boolean withStatic)
     {
-        return new File(String.format(NEGATIVE_LOCAL_EXPIRATION_TEST_DIR, getTableName(simple, clustering)));
+        return new File(String.format(NEGATIVE_LOCAL_EXPIRATION_TEST_DIR, getTableName(simple, clustering, withStatic)));
     }
 
     private static void copyFile(File src, File dest) throws IOException
@@ -468,10 +547,12 @@ public class TTLTest extends CQLTester
         }
     }
 
-    public static String getTableName(boolean simple, boolean clustering)
+    public static String getTableName(boolean simple, boolean clustering, boolean withStatic)
     {
+        assert !(withStatic && !clustering);
+        assert !(withStatic && !simple);
         if (simple)
-            return clustering ? SIMPLE_CLUSTERING : SIMPLE_NOCLUSTERING;
+            return clustering ? (withStatic ? SIMPLE_CLUSTERING_WITH_STATIC : SIMPLE_CLUSTERING) : SIMPLE_NOCLUSTERING;
         else
             return clustering ? COMPLEX_CLUSTERING : COMPLEX_NOCLUSTERING;
     }
