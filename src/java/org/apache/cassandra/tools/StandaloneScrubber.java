@@ -71,6 +71,7 @@ public class StandaloneScrubber
     private static final String SKIP_CORRUPTED_OPTION = "skip-corrupted";
     private static final String NO_VALIDATE_OPTION = "no-validate";
     private static final String REINSERT_OVERFLOWED_TTL_OPTION = "reinsert-overflowed-ttl";
+    private static final String OVERWRITE_TTL_OPTION = "overwrite-ttl";
     private static final String HEADERFIX_OPTION = "header-fix";
 
     public static void main(String args[])
@@ -220,7 +221,8 @@ public class StandaloneScrubber
                     try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.SCRUB, sstable))
                     {
                         txn.obsoleteOriginals(); // make sure originals are deleted and avoid NPE if index is missing, CASSANDRA-9591
-                        try (Scrubber scrubber = new Scrubber(cfs, txn, txn.isOffline(), options.skipCorrupted, handler, !options.noValidate, options.reinserOverflowedTTL))
+                        try (Scrubber scrubber = new Scrubber(cfs, txn, txn.isOffline(), options.skipCorrupted, handler, !options.noValidate,
+                                options.overwriteTTLMode))
                         {
                             scrubber.scrub();
                         }
@@ -285,7 +287,7 @@ public class StandaloneScrubber
         public boolean manifestCheckOnly;
         public boolean skipCorrupted;
         public boolean noValidate;
-        public boolean reinserOverflowedTTL;
+        public Scrubber.OverwriteTTLMode overwriteTTLMode = Scrubber.OverwriteTTLMode.NONE;
         public HeaderFixMode headerFixMode = HeaderFixMode.VALIDATE;
 
         enum HeaderFixMode
@@ -346,7 +348,26 @@ public class StandaloneScrubber
                 opts.manifestCheckOnly = cmd.hasOption(MANIFEST_CHECK_OPTION);
                 opts.skipCorrupted = cmd.hasOption(SKIP_CORRUPTED_OPTION);
                 opts.noValidate = cmd.hasOption(NO_VALIDATE_OPTION);
-                opts.reinserOverflowedTTL = cmd.hasOption(REINSERT_OVERFLOWED_TTL_OPTION);
+                if (cmd.hasOption(REINSERT_OVERFLOWED_TTL_OPTION) && cmd.hasOption(OVERWRITE_TTL_OPTION))
+                    errorMsg(String.format("Only one of %s or %s is permitted.", REINSERT_OVERFLOWED_TTL_OPTION, OVERWRITE_TTL_OPTION), options);
+
+                if (cmd.hasOption(REINSERT_OVERFLOWED_TTL_OPTION))
+                {
+                    opts.overwriteTTLMode = Scrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL;
+                }
+                else if (cmd.hasOption(OVERWRITE_TTL_OPTION))
+                {
+                    try
+                    {
+                        opts.overwriteTTLMode = Scrubber.OverwriteTTLMode.valueOf(cmd.getOptionValue(OVERWRITE_TTL_OPTION));
+                    }
+                    catch (Exception e)
+                    {
+                        errorMsg(String.format("Invalid argument value '%s' for --%s", cmd.getOptionValue(OVERWRITE_TTL_OPTION), OVERWRITE_TTL_OPTION), options);
+                        return null;
+                    }
+                }
+
                 if (cmd.hasOption(HEADERFIX_OPTION))
                 {
                     try
@@ -401,6 +422,10 @@ public class StandaloneScrubber
                                                                  "check encountered errors.\n" +
                                                                  "- off: don't perform the serialization-header checks.");
             options.addOption("r", REINSERT_OVERFLOWED_TTL_OPTION, REINSERT_OVERFLOWED_TTL_OPTION_DESCRIPTION);
+            options.addOption("o", OVERWRITE_TTL_OPTION, true, "Overwrite TTL info. Possible argument values:\n" +
+                                                                 "- NONE: does nothing\n" +
+                                                                 "- NO_TTL: removes TTL\n" +
+                                                                 "- REINSERT_OVERFLOWED_TTL: same as reinsert_overflowed_ttl option ");
             return options;
         }
 
