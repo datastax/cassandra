@@ -266,7 +266,7 @@ public abstract class AbstractCommitLogSegmentManager
                 {
                     synchronized (this)
                     {
-                        interrupted = Thread.interrupted();
+                        Thread.interrupted();
                         discardAvailableSegment();
                     }
                     throw new TerminateException();
