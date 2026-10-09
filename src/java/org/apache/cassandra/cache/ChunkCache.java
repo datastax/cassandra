@@ -46,6 +46,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.github.benmanes.caffeine.cache.RemovalListener;
+import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.concurrent.ParkedExecutor;
 import org.apache.cassandra.concurrent.ShutdownableExecutor;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -91,7 +92,14 @@ public class ChunkCache
     private static final int CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS = CassandraRelevantProperties.CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS.getInt();
 
     /** When true on the current thread, Caffeine PerformCleanupTask runs inline instead of on cleanupExecutor. */
-    private static final ThreadLocal<Boolean> FORCE_INLINE_CLEANUP = ThreadLocal.withInitial(() -> Boolean.FALSE);
+    private static final FastThreadLocal<Boolean> FORCE_INLINE_CLEANUP = new FastThreadLocal<Boolean>()
+    {
+        @Override
+        protected Boolean initialValue()
+        {
+            return Boolean.FALSE;
+        }
+    };
 
     static
     {
@@ -122,7 +130,7 @@ public class ChunkCache
     private final ConcurrentMap<Key, CompletableFuture<Chunk>> cacheAsMap;
     private final long cacheSize;
     /**
-     * Miss loaders park here when the pool has no pages after reclaim. {@link #relaseBufferAndSignal} publishes
+     * Miss loaders park here when the pool has no pages after reclaim. {@link #releaseBufferAndSignal} publishes
      * free local slabs (if any waiters) then {@code signalAll} so tryGet can see pages returned on another thread.
      */
     private final WaitQueue hasRoom = new WaitQueue();
@@ -152,6 +160,9 @@ public class ChunkCache
     public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
     {
         cacheSize = 1024L * 1024L * Math.max(0, cacheSizeInMB - RESERVED_POOL_SPACE_IN_MB);
+        if (cacheSizeInMB < RESERVED_POOL_SPACE_IN_MB)
+            logger.warn("File cache size {} MiB is less than the reserved pool space {} MiB. " +
+                        "No chunks will be cached.", cacheSizeInMB, RESERVED_POOL_SPACE_IN_MB);
         cleanupExecutor = ParkedExecutor.createParkedExecutor("ChunkCacheCleanup", CLEANER_THREADS);
         enabled = cacheSize > 0;
         bufferPool = pool;
@@ -227,7 +238,7 @@ public class ChunkCache
     }
 
     /**
-     * Park until pool pages are returned ({@link #relaseBufferAndSignal} → recycle-if-waiters + {@code signalAll})
+     * Park until pool pages are returned ({@link #releaseBufferAndSignal}
      * or {@link CassandraRelevantProperties#CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS} elapses.
      */
     private Chunk awaitAllocateChunk(int chunkSize, long position)
@@ -238,30 +249,14 @@ public class ChunkCache
 
         while (true)
         {
-            Chunk chunk = allocateChunk(chunkSize, position);
-            if (chunk != null)
-            {
-                metrics.recordPoolWaitSuccess();
-                return chunk;
-            }
-
-            long now = System.nanoTime();
-            if (now >= deadline)
-            {
-                metrics.recordPoolExhausted();
-                throw poolExhaustedException(waitMs);
-            }
-
             WaitQueue.Signal signal = hasRoom.register();
-            // Re-check after register so a put between tryGet and park is not missed.
-            chunk = allocateChunk(chunkSize, position);
+            Chunk chunk = allocateChunk(chunkSize, position);
             if (chunk != null)
             {
                 signal.cancel();
                 metrics.recordPoolWaitSuccess();
                 return chunk;
             }
-            // Bounded park
             signal.awaitUntilUninterruptibly(deadline);
             chunk = allocateChunk(chunkSize, position);
             if (chunk != null)
@@ -334,8 +329,6 @@ public class ChunkCache
 
         bufferPool.recycleFreeLocalChunks();
         metrics.recordReclaimLatency(System.nanoTime() - t0);
-        // Bulk free may have returned many pages so signal all waiters
-        hasRoom.signalAll();
     }
 
     /**
@@ -346,12 +339,16 @@ public class ChunkCache
      * parent/global pool before signalling so a woken loader can allocate. Recycle is skipped when the
      * queue is empty.
      */
-    void relaseBufferAndSignal(ByteBuffer buffer)
+    void releaseBufferAndSignal(ByteBuffer buffer)
     {
         bufferPool.put(buffer);
         // Only this thread's LocalPool — matches BufferPool.recycleFreeLocalChunks contract.
         if (hasRoom.hasWaiters())
+        {
+            // Below call is only effective on the thread that owns the LocalPool (the thread that allocated the buffer).
+            // If this is called from async Caffeine cleanup executor that runs on its own thread, the recycling has no effect
             bufferPool.recycleFreeLocalChunks();
+        }
         hasRoom.signalAll();
     }
 
@@ -667,7 +664,7 @@ public class ChunkCache
         void releaseBuffers()
         {
             for (int i = 0; i < buffers.length; ++i)
-                relaseBufferAndSignal(buffers[i]);
+                releaseBufferAndSignal(buffers[i]);
         }
 
         void read(ChunkReader file)
@@ -751,7 +748,6 @@ public class ChunkCache
      * A chunk with a single memory region. This is always used for reading chunks of up to PageAware.PAGE_SIZE (note
      * that the memory allocated will be always at least PageAware.PAGE_SIZE even if the reader requests a smaller
      * buffer), and may also be used for larger chunks if the buffer pool can produce a contiguous memory buffer.
-     * See {@link this#newChunk}.
      * <p/>
      * This class is a chunk but also behaves as a {@link Rebufferer.BufferHolder} to save an allocation when
      * {@link this#getBuffer(long)} is invoked.
@@ -796,7 +792,7 @@ public class ChunkCache
 
         void releaseBuffers()
         {
-            relaseBufferAndSignal(buffer);
+            releaseBufferAndSignal(buffer);
         }
 
         void read(ChunkReader file)
