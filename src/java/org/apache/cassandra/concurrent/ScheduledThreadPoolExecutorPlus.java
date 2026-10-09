@@ -49,6 +49,9 @@ public class ScheduledThreadPoolExecutorPlus extends ScheduledThreadPoolExecutor
     private static final Logger logger = LoggerFactory.getLogger(ScheduledThreadPoolExecutorPlus.class);
     private static final TaskFactory taskFactory = TaskFactory.standard();
 
+    // liveness: the running task of each worker thread
+    private final WorkerSlots workerSlots = new WorkerSlots();
+
     public static final RejectedExecutionHandler rejectedExecutionHandler = (task, executor) ->
     {
         if (executor.isShutdown())
@@ -101,6 +104,47 @@ public class ScheduledThreadPoolExecutorPlus extends ScheduledThreadPoolExecutor
     }
 
     @Override
+    protected void beforeExecute(Thread t, Runnable r)
+    {
+        workerSlots.markRunning(WrappedTask.classOf(r));
+        super.beforeExecute(t, r);
+    }
+
+    @Override
+    protected void afterExecute(Runnable r, Throwable t)
+    {
+        super.afterExecute(r, t);
+        WorkerSlots.markIdle();
+    }
+
+    /**
+     * The queue is ordered by trigger time, so the head is the task due first; it has been waiting to run for as long
+     * as it is past its trigger time, and is not waiting at all before that.
+     */
+    @Override
+    public long oldestTaskQueueTime()
+    {
+        Runnable head = getQueue().peek();
+        if (!(head instanceof Delayed))
+            return 0L;
+        return Math.max(0L, -((Delayed) head).getDelay(NANOSECONDS));
+    }
+
+    @Override
+    public long longestRunningTaskTime()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? 0L : TimedTask.ageNanos(oldest.capturedStartNanos);
+    }
+
+    @Override
+    public String getLongestRunningTaskClass()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? null : oldest.taskClassName;
+    }
+
+    @Override
     public ScheduledFuture<?> scheduleSelfRecurring(Runnable run, long delay, TimeUnit units)
     {
         return schedule(run, delay, units);
@@ -126,6 +170,9 @@ public class ScheduledThreadPoolExecutorPlus extends ScheduledThreadPoolExecutor
 
     /*======== BEGIN DIRECT COPY OF ThreadPoolExecutorPlus ===============*/
 
+    // deliberately does not stamp TimedTask, unlike ThreadPoolExecutorPlus: the approximate clock's refresher runs here
+    // and nothing reachable from MonotonicClock.Global.<clinit> may stamp (see TimedTask.markEnqueued); the queue time
+    // of a scheduled pool is read from its tasks' trigger times instead
     private <T extends Runnable> T addTask(T task)
     {
         super.execute(task);

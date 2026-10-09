@@ -350,7 +350,7 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
         if (threshold <= 0)
             return true;
 
-        return requestExecutor.oldestTaskQueueTime() < (DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS) * threshold);
+        return requestExecutor.oldestDebuggableTaskQueueTime() < (DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS) * threshold);
     }
 
     void processRequest(Channel channel, Message.Request request, FlushItemConverter forFlusher, Overload backpressure, RequestTime requestTime)

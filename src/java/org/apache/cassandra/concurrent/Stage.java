@@ -437,18 +437,43 @@ public enum Stage
 
     private Runnable withTimeMeasurement(Runnable command, long queueStartTime)
     {
-        return () -> {
+        return new MeasuredRunnable(this, command, queueStartTime);
+    }
+
+    // a named class rather than a lambda, so executors can report the class of the wrapped command
+    private static final class MeasuredRunnable implements Runnable, WrappedTask
+    {
+        final Stage stage;
+        final Runnable command;
+        final long queueStartTime;
+
+        MeasuredRunnable(Stage stage, Runnable command, long queueStartTime)
+        {
+            this.stage = stage;
+            this.command = command;
+            this.queueStartTime = queueStartTime;
+        }
+
+        @Override
+        public void run()
+        {
             long executionStartTime = Clock.Global.nanoTime();
             try
             {
-                TaskExecutionCallback.instance.onDequeue(this, executionStartTime - queueStartTime);
+                TaskExecutionCallback.instance.onDequeue(stage, executionStartTime - queueStartTime);
                 command.run();
             }
             finally
             {
-                TaskExecutionCallback.instance.onCompleted(this, Clock.Global.nanoTime() - executionStartTime);
+                TaskExecutionCallback.instance.onCompleted(stage, Clock.Global.nanoTime() - executionStartTime);
             }
-        };
+        }
+
+        @Override
+        public Class<?> taskClass()
+        {
+            return WrappedTask.classOf(command);
+        }
     }
 
     private <T> Callable<T> withTimeMeasurement(Callable<T> command, long queueStartTime)

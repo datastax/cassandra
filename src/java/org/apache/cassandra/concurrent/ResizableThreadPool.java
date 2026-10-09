@@ -80,8 +80,28 @@ public interface ResizableThreadPool
         return -1;
     }
 
+    /**
+     * Nanoseconds the task at the head of this pool's queue has been waiting, 0 when the queue is empty or the pool
+     * does not track it. Scheduled pools report how far past its trigger time their next task is.
+     */
     default long oldestTaskQueueTime()
     {
         return 0;
+    }
+
+    /**
+     * Nanoseconds the oldest task currently executing in this pool has been running, 0 when idle or untracked.
+     */
+    default long longestRunningTaskTime()
+    {
+        return 0;
+    }
+
+    /**
+     * Fully qualified class name of the oldest task currently executing in this pool, null when idle or untracked.
+     */
+    default String getLongestRunningTaskClass()
+    {
+        return null;
     }
 }
