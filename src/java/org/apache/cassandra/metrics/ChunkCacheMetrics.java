@@ -64,9 +64,44 @@ public interface ChunkCacheMetrics extends StatsCounter, CacheMetrics
 
     long entries();
 
+    /** Called when the chunk cache runs synchronous reclaim after a pool tryGet miss. */
+    void recordSyncReclaim();
+
+    /** Called when second tryGet after reclaim succeeds. */
+    void recordReclaimRetrySuccess();
+
+    /** Called when pool still cannot allocate after reclaim, wait, and timeout. */
+    void recordPoolExhausted();
+
+    /** Elapsed nanos spent in reclaimSync. */
+    void recordReclaimLatency(long nanos);
+
+    /** Miss loader entered WaitQueue after reclaim still could not allocate. */
+    void recordBlockedOnPoolAllocation();
+
+    /** Miss loader obtained pages after waiting on the pool. */
+    void recordPoolWaitSuccess();
+
+    long syncReclaims();
+
+    long reclaimRetrySuccesses();
+
+    long poolExhausted();
+
+    long blockedOnPoolAllocation();
+
+    long poolWaitSuccesses();
+
     @Nonnull
     @Override
     CacheStats snapshot();
+
+    /**
+     * Unregister instruments from the global metrics registry so a later {@link ChunkCache} (e.g. in tests)
+     * gets fresh counters. Safe to call more than once. Production {@link ChunkCache#instance} is not closed
+     * in normal operation.
+     */
+    void close();
 
     @VisibleForTesting
     void reset();

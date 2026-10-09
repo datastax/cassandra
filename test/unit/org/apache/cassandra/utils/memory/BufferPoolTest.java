@@ -30,6 +30,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.utils.PageAware;
 
 import static org.junit.Assert.*;
 
@@ -1048,6 +1049,49 @@ public class BufferPoolTest
         bufferPool.put(buffer);
 
         assertEquals(0, bufferPool.usedSizeInBytes());
+    }
+
+    @Test
+    public void testTryGetMultipleReturnsNullWhenExhaustedWithoutOverflow()
+    {
+        BufferPool pool = new BufferPool("tryGetMultiple_exhausted", 0, true);
+        assertEquals(0, pool.overflowMemoryInBytes());
+        assertNull(pool.tryGetMultiple(PageAware.PAGE_SIZE * 2, PageAware.PAGE_SIZE));
+        assertEquals(0, pool.overflowMemoryInBytes());
+        assertEquals(0, pool.usedSizeInBytes());
+    }
+
+    @Test
+    public void testTryGetMultiplePartialFailureRollsBack()
+    {
+        // Pool large enough for one page-sized buffer only (macro chunk threshold is much larger; use tryGet page-by-page).
+        // With a tiny threshold, combined/full tryGet fails and page loop fails after first? Actually threshold 0 → nothing.
+        // Use a pool that can serve exactly one NORMAL-ish page after one macro: take a small pool and allocate almost all.
+        BufferPool pool = new BufferPool("tryGetMultiple_partial", 64L * BufferPool.NORMAL_CHUNK_SIZE, true);
+        int page = PageAware.PAGE_SIZE;
+        // Drain almost all free space with page allocations so a multi-page request cannot fully succeed.
+        java.util.ArrayList<ByteBuffer> held = new java.util.ArrayList<>();
+        while (true)
+        {
+            ByteBuffer b = pool.tryGet(page);
+            if (b == null)
+                break;
+            held.add(b);
+        }
+        assertFalse(held.isEmpty());
+        long used = pool.usedSizeInBytes();
+        long overflow = pool.overflowMemoryInBytes();
+
+        // Free one page so tryGetMultiple can take the first page then fail on the rest if little left —
+        // after freeing one page only one page is free, so 2-page tryGetMultiple should null and roll back.
+        pool.put(held.remove(held.size() - 1));
+        assertNull(pool.tryGetMultiple(page * 2, page));
+        assertEquals(overflow, pool.overflowMemoryInBytes());
+        // used should match one free page relative to after free
+        assertEquals("partial alloc must put back the first page", used - page, pool.usedSizeInBytes());
+
+        for (ByteBuffer b : held)
+            pool.put(b);
     }
 
     private BufferPool.Chunk allocate(int num, int bufferSize, List<ByteBuffer> buffers)

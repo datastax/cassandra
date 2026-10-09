@@ -46,11 +46,11 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.github.benmanes.caffeine.cache.RemovalListener;
+import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.concurrent.ParkedExecutor;
 import org.apache.cassandra.concurrent.ShutdownableExecutor;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
@@ -60,7 +60,9 @@ import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.PageAware;
+import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.apache.cassandra.utils.memory.BufferPool;
+import org.apache.cassandra.utils.memory.BufferPoolExhaustedException;
 import org.apache.cassandra.utils.memory.BufferPools;
 import org.github.jamm.Unmetered;
 
@@ -69,20 +71,43 @@ public class ChunkCache
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
-    public static final int RESERVED_POOL_SPACE_IN_MB = 32;
+    /**
+     * MiB withheld from Caffeine {@code maximumWeight} but still part of the chunk-cache {@link BufferPool}.
+     * <p>
+     * Steady-state cache residents are capped at {@code file_cache_size - reserved}. The reserved slice is not a
+     * separate allocator; it is headroom in the <em>same</em> pool for in-flight cache loads while eviction frees
+     * pages (callers may briefly WaitQueue-park after reclaim if the pool is still empty).
+     * <p>
+     * Default 32MiB ≈ concurrent in-flight readers × typical chunk size. Override with
+     * {@link CassandraRelevantProperties#CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB}.
+     */
+    public static final int RESERVED_POOL_SPACE_IN_MB =
+            CassandraRelevantProperties.CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB.getInt();
     private static final int INITIAL_CAPACITY = Integer.getInteger("cassandra.chunkcache_initialcapacity", 16);
     private static final boolean ASYNC_CLEANUP = Boolean.parseBoolean(System.getProperty("cassandra.chunkcache.async_cleanup", "true"));
     private static final int CLEANER_THREADS = Integer.getInteger("dse.chunk.cache.cleaner.threads",1);
 
     private static final Class PERFORM_CLEANUP_TASK_CLASS;
-    // cached value in order to not call System.getProperty on a hotpath
     private static final int CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS = CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt();
+    private static final int CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS = CassandraRelevantProperties.CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS.getInt();
+
+    /** When true on the current thread, Caffeine PerformCleanupTask runs inline instead of on cleanupExecutor. */
+    private static final FastThreadLocal<Boolean> FORCE_INLINE_CLEANUP = new FastThreadLocal<Boolean>()
+    {
+        @Override
+        protected Boolean initialValue()
+        {
+            return Boolean.FALSE;
+        }
+    };
 
     static
     {
         try
         {
-            logger.info("-Dcassandra.chunkcache.async_cleanup={} dse.chunk.cache.cleaner.threads={}", ASYNC_CLEANUP, CLEANER_THREADS);
+            logger.info("-Dcassandra.chunkcache.async_cleanup={} dse.chunk.cache.cleaner.threads={} " +
+                        "reserved_pool_space_in_mb={} pool_wait_timeout_ms={}",
+                        ASYNC_CLEANUP, CLEANER_THREADS, RESERVED_POOL_SPACE_IN_MB, CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS);
             PERFORM_CLEANUP_TASK_CLASS = Class.forName("com.github.benmanes.caffeine.cache.BoundedLocalCache$PerformCleanupTask");
         }
         catch (ClassNotFoundException e)
@@ -104,6 +129,16 @@ public class ChunkCache
     private final Cache<Key, Chunk> synchronousCache;
     private final ConcurrentMap<Key, CompletableFuture<Chunk>> cacheAsMap;
     private final long cacheSize;
+    /**
+     * Miss loaders park here when the pool has no pages after reclaim. {@link #releaseBufferAndSignal} publishes
+     * free local slabs (if any waiters) then {@code signalAll} so tryGet can see pages returned on another thread.
+     */
+    private final WaitQueue hasRoom = new WaitQueue();
+
+    /* Only used for testing to avoid flakiness */
+    @VisibleForTesting
+    volatile int poolWaitTimeoutMsOverride = -1;
+
     @Unmetered
     public final ChunkCacheMetrics metrics;
     @Unmetered
@@ -125,6 +160,9 @@ public class ChunkCache
     public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
     {
         cacheSize = 1024L * 1024L * Math.max(0, cacheSizeInMB - RESERVED_POOL_SPACE_IN_MB);
+        if (cacheSizeInMB < RESERVED_POOL_SPACE_IN_MB)
+            logger.warn("File cache size {} MiB is less than the reserved pool space {} MiB. " +
+                        "No chunks will be cached.", cacheSizeInMB, RESERVED_POOL_SPACE_IN_MB);
         cleanupExecutor = ParkedExecutor.createParkedExecutor("ChunkCacheCleanup", CLEANER_THREADS);
         enabled = cacheSize > 0;
         bufferPool = pool;
@@ -132,12 +170,7 @@ public class ChunkCache
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
                         .initialCapacity(INITIAL_CAPACITY)
-                        .executor(r -> {
-                            if (ASYNC_CLEANUP && r.getClass() == PERFORM_CLEANUP_TASK_CLASS)
-                                cleanupExecutor.execute(r);
-                            else
-                                r.run();
-                        })
+                        .executor(this::executeCleanup)
                         .weigher((key, buffer) -> ((Chunk) buffer).capacity())
                         .removalListener(this)
                         .recordStats(() -> metrics)
@@ -146,14 +179,32 @@ public class ChunkCache
         cacheAsMap = cache.asMap();
     }
 
+    /**
+     * Caffeine executor: async cleanup by default; inline under {@link #FORCE_INLINE_CLEANUP} (reclaim path)
+     * so eviction/onRemoval can free pool pages before tryGet is retried.
+     */
+    private void executeCleanup(Runnable r)
+    {
+        if (ASYNC_CLEANUP && r.getClass() == PERFORM_CLEANUP_TASK_CLASS && !FORCE_INLINE_CLEANUP.get())
+            cleanupExecutor.execute(r);
+        else
+            r.run();
+    }
 
+    /**
+     * Load a chunk for the Caffeine path: allocate from the pool. If no pages availble in the buffer pool
+     * this call can wait/block until timeout is reached.
+     *
+     * @throws BufferPoolExhaustedException if the pool cannot supply pages after reclaim and wait timeout
+     */
     private Chunk load(ChunkReader file, long position)
     {
         Chunk chunk = null;
         try
         {
-            chunk = newChunk(file.chunkSize(), position);  // Note: we need `chunk` to be assigned before we call read to release on error
+            chunk = allocateForCache(file.chunkSize(), position);
             chunk.read(file);
+            return chunk;
         }
         catch (RuntimeException | Error t)
         {
@@ -161,30 +212,186 @@ public class ChunkCache
                 chunk.release();
             throw t;
         }
-        return chunk;
     }
 
-    Chunk newChunk(int chunkSize, long position)
+    /**
+     * Allocate for cache admission: tryGet → {@link #reclaimSync} → tryGet → optional WaitQueue park
+     * until success or hard timeout.
+     *
+     * @throws BufferPoolExhaustedException on timeout / still exhausted
+     */
+    private Chunk allocateForCache(int chunkSize, long position)
+    {
+        Chunk chunk = allocateChunk(chunkSize, position);
+        if (chunk != null)
+            return chunk;
+
+        reclaimSync();
+        chunk = allocateChunk(chunkSize, position);
+        if (chunk != null)
+        {
+            metrics.recordReclaimRetrySuccess();
+            return chunk;
+        }
+
+        return awaitAllocateChunk(chunkSize, position);
+    }
+
+    /**
+     * Park until pool pages are returned ({@link #releaseBufferAndSignal}
+     * or {@link CassandraRelevantProperties#CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS} elapses.
+     */
+    private Chunk awaitAllocateChunk(int chunkSize, long position)
+    {
+        int waitMs = poolWaitTimeoutMs();
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMs);
+        metrics.recordBlockedOnPoolAllocation();
+
+        while (true)
+        {
+            WaitQueue.Signal signal = hasRoom.register();
+            Chunk chunk = allocateChunk(chunkSize, position);
+            if (chunk != null)
+            {
+                signal.cancel();
+                metrics.recordPoolWaitSuccess();
+                return chunk;
+            }
+            signal.awaitUntilUninterruptibly(deadline);
+            chunk = allocateChunk(chunkSize, position);
+            if (chunk != null)
+            {
+                metrics.recordPoolWaitSuccess();
+                return chunk;
+            }
+            if (System.nanoTime() >= deadline)
+            {
+                metrics.recordPoolExhausted();
+                throw poolExhaustedException(waitMs);
+            }
+        }
+    }
+
+    private int poolWaitTimeoutMs()
+    {
+        int override = poolWaitTimeoutMsOverride;
+        return override >= 0 ? override : CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS;
+    }
+
+    private BufferPoolExhaustedException poolExhaustedException(int waitMs)
+    {
+        return new BufferPoolExhaustedException(
+                String.format("Chunk cache buffer pool exhausted after reclaim and %d ms wait " +
+                              "(pool used=%s, overflow=%s, cache capacity=%s). " +
+                              "Increase file_cache_size_in_mb or reduce concurrent reads; " +
+                              "chunk cache does not allocate outside the pool.",
+                              waitMs, prettyUsed(), prettyOverflow(), prettyCapacity()));
+    }
+
+    private String prettyUsed()
+    {
+        return org.apache.cassandra.utils.FBUtilities.prettyPrintMemory(bufferPool.usedSizeInBytes());
+    }
+
+    private String prettyOverflow()
+    {
+        return org.apache.cassandra.utils.FBUtilities.prettyPrintMemory(bufferPool.overflowMemoryInBytes());
+    }
+
+    private String prettyCapacity()
+    {
+        return org.apache.cassandra.utils.FBUtilities.prettyPrintMemory(cacheSize);
+    }
+
+    /**
+     * When the pool cannot satisfy tryGet: run Caffeine maintenance inline so eviction/onRemoval can
+     * {@code put} pages on this thread, recycle free local slabs, then caller retries tryGet once.
+     * <p>
+     * Does <b>not</b> wait for already-queued async cleanups: under load that backlog can stay non-empty
+     * and a bounded wait mostly adds read latency. Inline {@link Cache#cleanUp()} already blocks for
+     * work started here; remaining recovery is a short {@link #awaitAllocateChunk} wait if tryGet still misses.
+     * Eviction-driven puts signal {@link #hasRoom}.
+     */
+    @VisibleForTesting
+    void reclaimSync()
+    {
+        metrics.recordSyncReclaim();
+        long t0 = System.nanoTime();
+        FORCE_INLINE_CLEANUP.set(Boolean.TRUE);
+        try
+        {
+            synchronousCache.cleanUp();
+        }
+        finally
+        {
+            FORCE_INLINE_CLEANUP.set(Boolean.FALSE);
+        }
+
+        bufferPool.recycleFreeLocalChunks();
+        metrics.recordReclaimLatency(System.nanoTime() - t0);
+    }
+
+    /**
+     * Return a buffer to the chunk-cache pool and wake up miss loaders waiting on {@link #hasRoom}.
+     * <p>
+     * {@link BufferPool#put} may leave a fully free slab on <em>this</em> thread's {@code LocalPool}, where
+     * other threads' {@code tryGet} cannot see it. When waiters exist, push fully free local slabs to the
+     * parent/global pool before signalling so a woken loader can allocate. Recycle is skipped when the
+     * queue is empty.
+     */
+    void releaseBufferAndSignal(ByteBuffer buffer)
+    {
+        bufferPool.put(buffer);
+        // Only this thread's LocalPool — matches BufferPool.recycleFreeLocalChunks contract.
+        if (hasRoom.hasWaiters())
+        {
+            // Below call is only effective on the thread that owns the LocalPool (the thread that allocated the buffer).
+            // If this is called from async Caffeine cleanup executor that runs on its own thread, the recycling has no effect
+            bufferPool.recycleFreeLocalChunks();
+        }
+        hasRoom.signalAll();
+    }
+
+    @VisibleForTesting
+    boolean hasPoolWaiters()
+    {
+        return hasRoom.hasWaiters();
+    }
+
+    /**
+     * Try to allocate a chunk from the pool only (no overflow). Returns null if the pool is exhausted.
+     */
+    @Nullable
+    Chunk allocateChunk(int chunkSize, long position)
     {
         if (chunkSize <= PageAware.PAGE_SIZE)
         {
             // Always reserve a full page from the pool, even when the reader requests a smaller chunk.
             // Encode the logical chunk size in the owned buffer's limit (capacity stays PAGE_SIZE so
             // BufferPool.put sees the size it handed out). buffer() builds a transient capacity-narrowed
-            // view from that limit; releasing a slice/duplicate confuses slot/size accounting and can
-            // leak direct memory on the overflow path (see Chunk.free()).
-            ByteBuffer allocated = bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
+            // view from that limit; releasing a slice/duplicate confuses slot/size accounting.
+            ByteBuffer allocated = bufferPool.tryGet(PageAware.PAGE_SIZE);
+            if (allocated == null)
+                return null;
             // position must remain 0: buffer() uses slice(), which bases capacity on remaining.
             assert allocated.position() == 0 : "pool buffer position must be 0";
             allocated.limit(chunkSize);
             return new SingleRegionChunk(position, allocated);
         }
 
-        ByteBuffer[] buffers = bufferPool.getMultiple(chunkSize, PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
+        ByteBuffer[] buffers = bufferPool.tryGetMultiple(chunkSize, PageAware.PAGE_SIZE);
+        if (buffers == null)
+            return null;
         if (buffers.length > 1)
             return new MultiRegionChunk(position, buffers);
         else
             return new SingleRegionChunk(position, buffers[0]);
+    }
+
+    @VisibleForTesting
+    BufferPool bufferPool()
+    {
+        return bufferPool;
     }
 
     @Override
@@ -204,6 +411,7 @@ public class ChunkCache
     public void close()
     {
         clear();
+        metrics.close();
         try
         {
             cleanupExecutor.shutdown();
@@ -456,7 +664,7 @@ public class ChunkCache
         void releaseBuffers()
         {
             for (int i = 0; i < buffers.length; ++i)
-                bufferPool.put(buffers[i]);
+                releaseBufferAndSignal(buffers[i]);
         }
 
         void read(ChunkReader file)
@@ -540,7 +748,6 @@ public class ChunkCache
      * A chunk with a single memory region. This is always used for reading chunks of up to PageAware.PAGE_SIZE (note
      * that the memory allocated will be always at least PageAware.PAGE_SIZE even if the reader requests a smaller
      * buffer), and may also be used for larger chunks if the buffer pool can produce a contiguous memory buffer.
-     * See {@link this#newChunk}.
      * <p/>
      * This class is a chunk but also behaves as a {@link Rebufferer.BufferHolder} to save an allocation when
      * {@link this#getBuffer(long)} is invoked.
@@ -585,7 +792,7 @@ public class ChunkCache
 
         void releaseBuffers()
         {
-            bufferPool.put(buffer);
+            releaseBufferAndSignal(buffer);
         }
 
         void read(ChunkReader file)
@@ -653,14 +860,12 @@ public class ChunkCache
                         {
                             try
                             {
+                                // load throws BufferPoolExhaustedException after reclaim + wait timeout
                                 chunk = load(source, pageAlignedPos);
                             }
                             catch (Throwable t)
                             {
-                                // please note that we don't need to remove the entry from the cache here
-                                // because Caffeine automatically removes entries that complete exceptionally
-
-                                // also signal other waiting readers
+                                // Caffeine automatically removes entries that complete exceptionally
                                 entry.completeExceptionally(t);
                                 throw t;
                             }
@@ -668,12 +873,12 @@ public class ChunkCache
                         }
                         else
                         {
-                            chunk = existing.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                            chunk = awaitCacheChunk(existing);
                         }
                     }
                     else
                     {
-                        chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                        chunk = awaitCacheChunk(cachedValue);
                     }
 
                     buf = chunk.getReferencedBuffer(position);
@@ -692,9 +897,25 @@ public class ChunkCache
             }
             catch (Throwable t)
             {
+                Throwables.propagateIfInstanceOf(t, BufferPoolExhaustedException.class);
+                Throwables.propagateIfInstanceOf(t.getCause(), BufferPoolExhaustedException.class);
                 Throwables.propagateIfInstanceOf(t.getCause(), CorruptSSTableException.class);
                 throw Throwables.propagate(t);
             }
+        }
+
+        /**
+         * Await a cache load future (IO / loader). Time bound by
+         * {@code CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS}. Pool pressure waits happen inside the loader via
+         * {@link #awaitAllocateChunk}, not here. Failures (including {@link BufferPoolExhaustedException})
+         * propagate from the future.
+         */
+        private Chunk awaitCacheChunk(CompletableFuture<Chunk> pending) throws Exception
+        {
+            Chunk chunk = pending.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            // Successful loads always complete a non-null resident chunk; exceptional completion throws above.
+            assert chunk != null;
+            return chunk;
         }
 
         @Override
