@@ -31,6 +31,8 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.UnaccessibleFieldException;
 
 import org.slf4j.Logger;
@@ -59,6 +61,8 @@ import static java.util.Collections.emptyList;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.SimulatorSafe.UNSAFE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DEBUG_REF_COUNT_COPY_SAMPLE_INTERVAL;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DEBUG_REF_COUNT_PRIMARY_SAMPLE_INTERVAL;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_DEBUG_REF_COUNT;
 import static org.apache.cassandra.utils.Shared.Scope.SIMULATION;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
@@ -99,6 +103,17 @@ public final class Ref<T> implements RefCounted<T>
 {
     static final Logger logger = LoggerFactory.getLogger(Ref.class);
     public static final boolean DEBUG_ENABLED = TEST_DEBUG_REF_COUNT.getBoolean();
+    /**
+     * Without {@link #DEBUG_ENABLED}, one reference in this many, picked at random, gets a {@link Debug} record;
+     * 0 means none. {@code PRIMARY_SAMPLE_INTERVAL} applies to the references {@link #Ref(Object, Tidy)} makes, and
+     * {@code COPY_SAMPLE_INTERVAL} to their copies, made by {@link #ref()} and {@link #tryRef()}. Both are 0 with
+     * {@link #DEBUG_ENABLED}, which records every reference. Sampling never starts the {@link Visitor} or the
+     * {@link StrongLeakDetector}.
+     */
+    static final int PRIMARY_SAMPLE_INTERVAL = sampleInterval(DEBUG_REF_COUNT_PRIMARY_SAMPLE_INTERVAL);
+    static final int COPY_SAMPLE_INTERVAL = sampleInterval(DEBUG_REF_COUNT_COPY_SAMPLE_INTERVAL);
+    private static final String PRIMARY_NO_DEBUG_HINT = noDebugHint(true, PRIMARY_SAMPLE_INTERVAL);
+    private static final String NO_DEBUG_HINT = noDebugHint(false, COPY_SAMPLE_INTERVAL);
     static OnLeak ON_LEAK;
 
     @Shared(scope = SIMULATION)
@@ -112,7 +127,7 @@ public final class Ref<T> implements RefCounted<T>
 
     public Ref(T referent, Tidy tidy)
     {
-        this.state = new State(new GlobalState(tidy), this, referenceQueue);
+        this.state = new PrimaryState(new GlobalState(tidy), this, referenceQueue);
         this.referent = referent;
     }
 
@@ -181,10 +196,10 @@ public final class Ref<T> implements RefCounted<T>
 
     public String printDebugInfo()
     {
-        if (DEBUG_ENABLED)
+        if (state.debug != null)
         {
             state.debug.log(state.toString());
-            return "Memory was freed by " + state.debug.deallocateThread;
+            return "Memory was freed by " + state.debug.deallocateThread();
         }
         return "Memory was freed";
     }
@@ -200,9 +215,9 @@ public final class Ref<T> implements RefCounted<T>
 
     // similar to Ref.GlobalState, but tracks only the management of each unique ref created to the managed object
     // ensures it is only released once, and that it is always released
-    static final class State extends PhantomReference<Ref>
+    static class State extends PhantomReference<Ref>
     {
-        final Debug debug = DEBUG_ENABLED ? new Debug() : null;
+        final Debug debug;
         final GlobalState globalState;
         private volatile int released;
 
@@ -210,14 +225,25 @@ public final class Ref<T> implements RefCounted<T>
 
         State(final GlobalState globalState, Ref reference, ReferenceQueue<? super Ref> q)
         {
+            this(globalState, reference, q, COPY_SAMPLE_INTERVAL);
+        }
+
+        State(final GlobalState globalState, Ref reference, ReferenceQueue<? super Ref> q, int sampleInterval)
+        {
             super(reference, q);
+            this.debug = DEBUG_ENABLED || sampled(sampleInterval) ? new Debug() : null;
             this.globalState = globalState;
             globalState.register(this);
         }
 
+        String noDebugHint()
+        {
+            return NO_DEBUG_HINT;
+        }
+
         void assertNotReleased()
         {
-            if (DEBUG_ENABLED && released == 1)
+            if (debug != null && released == 1)
                 debug.log(toString());
             assert released == 0;
         }
@@ -227,7 +253,7 @@ public final class Ref<T> implements RefCounted<T>
             if (releasedUpdater.getAndSet(this, 1) == 0)
             {
                 accumulate = globalState.release(this, accumulate);
-                if (DEBUG_ENABLED)
+                if (debug != null)
                     debug.deallocate();
             }
             return accumulate;
@@ -241,7 +267,7 @@ public final class Ref<T> implements RefCounted<T>
                 {
                     String id = this.toString();
                     logger.error("BAD RELEASE: attempted to release a reference ({}) that has already been released", id);
-                    if (DEBUG_ENABLED)
+                    if (debug != null)
                         debug.log(id);
                     throw new IllegalStateException("Attempted to release a reference that has already been released");
                 }
@@ -251,14 +277,14 @@ public final class Ref<T> implements RefCounted<T>
             if (leak)
             {
                 String id = this.toString();
-                logger.error("LEAK DETECTED: a reference ({}) to {} was not released before the reference was garbage collected", id, globalState);
-                if (DEBUG_ENABLED)
+                logger.error("LEAK DETECTED: a reference ({}) to {} was not released before the reference was garbage collected{}", id, globalState, debug == null ? noDebugHint() : "");
+                if (debug != null)
                     debug.log(id);
                 OnLeak onLeak = ON_LEAK;
                 if (onLeak != null)
                     onLeak.onLeak(this);
             }
-            else if (DEBUG_ENABLED)
+            else if (debug != null)
             {
                 debug.deallocate();
             }
@@ -273,34 +299,98 @@ public final class Ref<T> implements RefCounted<T>
         }
     }
 
+    /**
+     * The state of a reference made by {@link Ref#Ref(Object, Tidy)}, sampled at {@link #PRIMARY_SAMPLE_INTERVAL}.
+     * It is a subclass rather than a flag so that a leak report can tell a leaked reference from a leaked copy, and
+     * name the interval that applied to it, without making every {@link State} bigger.
+     */
+    static final class PrimaryState extends State
+    {
+        PrimaryState(GlobalState globalState, Ref reference, ReferenceQueue<? super Ref> q)
+        {
+            super(globalState, reference, q, PRIMARY_SAMPLE_INTERVAL);
+        }
+
+        @Override
+        String noDebugHint()
+        {
+            return PRIMARY_NO_DEBUG_HINT;
+        }
+    }
+
     static final class Debug
     {
-        String allocateThread, deallocateThread;
-        StackTraceElement[] allocateTrace, deallocateTrace;
+        // Named, so that when jdk.JavaExceptionThrow or an exception-tracking agent is on, the traces sampling
+        // captures in production can be identified and filtered; jdk.ExceptionStatistics only counts them.
+        private static final class Trace extends Throwable
+        {
+            private static final long serialVersionUID = 1L;
+        }
+
+        final String allocateThread;
+        String deallocateThread;
+        // A Throwable keeps the VM's compact backtrace and builds the frames only if the record is logged. Unlike
+        // a StackTraceElement[], it keeps the class of every frame, and so that class's loader, reachable for as
+        // long as the record lives, and a frame whose method was redefined after the capture (by Byteman or another
+        // retransforming agent) prints without its file and line.
+        final Throwable allocateTrace;
+        Throwable deallocateTrace;
+        private boolean allocateLogged, deallocateLogged;
+        // the id the allocate trace was logged with, for a deallocate trace that comes after it
+        private String loggedId;
         Debug()
         {
             Thread thread = Thread.currentThread();
             allocateThread = thread.toString();
-            allocateTrace = thread.getStackTrace();
+            allocateTrace = new Trace();
         }
         synchronized void deallocate()
         {
             Thread thread = Thread.currentThread();
             deallocateThread = thread.toString();
-            deallocateTrace = thread.getStackTrace();
+            deallocateTrace = new Trace();
+            // The allocate trace was logged before the release, as by the losing release of a concurrent double
+            // release or by a use racing with the release, and nothing may log this record again.
+            if (allocateLogged)
+                logDeallocate(loggedId);
         }
+        synchronized String deallocateThread()
+        {
+            return deallocateThread;
+        }
+        /**
+         * Logs the traces of this record. Only call this once the reference is released or being released: once
+         * the allocate trace is logged, {@link #deallocate()} logs the deallocate trace, so a later legitimate
+         * release would log its trace at ERROR.
+         */
         synchronized void log(String id)
         {
-            logger.error("Allocate trace {}:\n{}", id, print(allocateThread, allocateTrace));
+            // Each trace at most once, as with assertions off a released reference that is still used would log on
+            // every use. The deallocate trace is logged once it exists, even if the allocate trace was logged before
+            // it did: then deallocate() logs it.
+            if (!allocateLogged)
+            {
+                allocateLogged = true;
+                loggedId = id;
+                logger.error("Allocate trace {}:\n{}", id, print(allocateThread, allocateTrace));
+            }
             if (deallocateThread != null)
-                logger.error("Deallocate trace {}:\n{}", id, print(deallocateThread, deallocateTrace));
+                logDeallocate(id);
         }
-        String print(String thread, StackTraceElement[] trace)
+        private void logDeallocate(String id)
+        {
+            if (!deallocateLogged)
+            {
+                deallocateLogged = true;
+                logger.error("Deallocate trace {}:\n{}", id, print(deallocateThread, deallocateTrace));
+            }
+        }
+        String print(String thread, Throwable trace)
         {
             StringBuilder sb = new StringBuilder();
             sb.append(thread);
             sb.append("\n");
-            for (StackTraceElement element : trace)
+            for (StackTraceElement element : trace.getStackTrace())
             {
                 sb.append("\tat ");
                 sb.append(element );
@@ -403,6 +493,56 @@ public final class Ref<T> implements RefCounted<T>
             STRONG_LEAK_DETECTOR.scheduleAtFixedRate(new StrongLeakDetector(), 2, 15, TimeUnit.MINUTES);
         }
         concurrentIterables.addAll(Arrays.asList(concurrentIterableClasses));
+    }
+
+    /**
+     * Reads a sample interval: {@link CassandraRelevantProperties#DEBUG_REF_COUNT_PRIMARY_SAMPLE_INTERVAL} or
+     * {@link CassandraRelevantProperties#DEBUG_REF_COUNT_COPY_SAMPLE_INTERVAL}. Returns 0 with
+     * {@link #DEBUG_ENABLED}, which ignores the intervals. An invalid value logs one warning and turns that sampling
+     * off, rather than failing startup.
+     */
+    @VisibleForTesting
+    static int sampleInterval(CassandraRelevantProperties property)
+    {
+        if (DEBUG_ENABLED)
+            return 0;
+        try
+        {
+            int interval = property.getInt();
+            if (interval >= 0)
+                return interval;
+        }
+        catch (ConfigurationException e)
+        {
+            // reported below
+        }
+        logger.warn("Invalid value '{}' for {}, expected an integer >= 0; this Ref debug sampling is off",
+                    property.getString(), property.getKey());
+        return 0;
+    }
+
+    /**
+     * Whether a new reference gets a {@link Debug} record when only sampling is on: true for one reference in
+     * {@code interval}, at random, and never for 0.
+     */
+    @VisibleForTesting
+    static boolean sampled(int interval)
+    {
+        return interval > 0 && ThreadLocalRandom.current().nextInt(interval) == 0;
+    }
+
+    /**
+     * What a leak report without a {@link Debug} record appends, to say why it has no allocation stack: for a
+     * reference made by {@link #Ref(Object, Tidy)} if {@code primary}, else for a copy.
+     */
+    @VisibleForTesting
+    static String noDebugHint(boolean primary, int sampleInterval)
+    {
+        String what = primary ? "references" : "copied references";
+        String option = "-D" + (primary ? DEBUG_REF_COUNT_PRIMARY_SAMPLE_INTERVAL : DEBUG_REF_COUNT_COPY_SAMPLE_INTERVAL).getKey();
+        return sampleInterval > 0
+               ? "; no allocation stack, as only 1 in " + sampleInterval + ' ' + what + " is sampled (changing " + option + " needs a restart)"
+               : "; no allocation stack, as sampling of " + what + " is off (restart with " + option + "=N to sample 1 in N)";
     }
 
     private static void reapOneReference() throws InterruptedException
