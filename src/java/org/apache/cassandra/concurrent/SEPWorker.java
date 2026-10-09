@@ -131,7 +131,7 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
                 if (assigned == null)
                     continue;
                 if (SET_THREAD_NAME)
-                    Thread.currentThread().setName(assigned.name + '-' + workerId);
+                    Thread.currentThread().setName(threadName(assigned));
 
                 taskStartedAtNanos = approxTime.now();
                 runningFor.lazySet(assigned);
@@ -218,6 +218,14 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
             runningFor.lazySet(null);
             pool.workerEnded(this);
         }
+    }
+
+    // the name of this worker's thread while it serves executor. Derived rather than read from the thread, so a
+    // liveness reader that saw runningFor == executor gets that name even if the worker has since moved on and renamed
+    // its thread for another executor (see SEPExecutor.oldestRunningTask)
+    String threadName(SEPExecutor executor)
+    {
+        return SET_THREAD_NAME ? executor.name + '-' + workerId : thread.getName();
     }
 
     // try to assign this worker the provided work
