@@ -32,6 +32,11 @@ public interface BatchlogManagerMBean
     public long getTotalBatchesReplayed();
 
     /**
+     * @return count of hinted batches replayed since node start
+     */
+    public long getHintedBatchesReplayed();
+
+    /**
      * Forces batchlog replay. Blocks until completion.
      */
     public void forceBatchlogReplay() throws Exception;
