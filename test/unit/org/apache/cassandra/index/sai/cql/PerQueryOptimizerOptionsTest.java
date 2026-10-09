@@ -44,14 +44,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       sort-then-filter uses {@link Plan.LiteralIndexScan}.</li>
  * </ul>
  */
-public class SaiPerQueryOptimizerOptionsTest extends VectorTester
+public class PerQueryOptimizerOptionsTest extends VectorTester
 {
-    // -----------------------------------------------------------------------
-    // Table shared across hybrid sort-order tests:
-    //   - n=0  → 2 rows  (selective WHERE)
-    //   - n>=0 → 20 rows (non-selective WHERE)
-    // -----------------------------------------------------------------------
-
+    /**
+     * Creates a shared table for hybrid sort-order tests.
+     * <p>
+     * Data layout: {@code n=0} → 2 rows (selective WHERE); {@code n>=0} → 20 rows (non-selective WHERE).
+     */
     @Before
     public void createHybridTable()
     {
@@ -87,7 +86,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
 
         // With sort_then_filter override, the plan must use AnnIndexScan (sort-then-filter),
         // and the query must still return the correct rows.
-        disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'}",
@@ -108,7 +106,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
                               row(0), row(1), row(2), row(3), row(4));
 
         // Override should be a no-op.
-        disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n >= 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'}",
@@ -127,7 +124,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
      * (filter-then-sort), while still returning correct results.
      */
     @Test
-    public void testFilterThenSortOverridesNonSelectiveWhereClause()
+    public void testFilterThenSortOverridesNonSelectiveWhereClauseANN()
     {
         // Sanity: without override, the optimizer picks sort-then-filter for n>=0 (non-selective).
         assertQueryHasSubplan("SELECT c FROM %s WHERE n >= 0 ORDER BY v ANN OF [0, 0] LIMIT 5",
@@ -136,7 +133,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
 
         // With filter_then_sort override, the plan must use NumericIndexScan (filter-then-sort),
         // and the query must still return the correct rows.
-        disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n >= 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'}",
@@ -157,7 +153,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
                               row(0), row(1));
 
         // Override should be a no-op.
-        disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'}",
@@ -173,14 +168,12 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
     public void testAutoPreservesOptimizerDecision()
     {
         // auto must not change anything — same plans as without the option.
-        disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'auto'}",
                 Plan.NumericIndexScan.class,
                 row(0), row(1));
 
-        disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n >= 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'auto'}",
@@ -196,7 +189,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
     public void testOptLevelZeroQueryReturnsCorrectResults()
     {
         // opt_level=0 must disable the optimizer but still return correct results.
-        disablePreparedReuseForTest();
         var results = execute("SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
                               "WITH optimizer_options = {'query_optimization_level': '0'}");
         assertThat(results.size()).isEqualTo(2);
@@ -209,7 +201,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
     @Test
     public void testIntersectionClauseLimitQueryReturnsCorrectResults()
     {
-        disablePreparedReuseForTest();
         // A limit of 1 restricts to a single indexed clause; the query must still return results.
         var results = execute("SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
                               "WITH optimizer_options = {'intersection_clause_limit': '1'}");
@@ -223,7 +214,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
     @Test
     public void testUseTermStatisticsFalseQueryReturnsCorrectResults()
     {
-        disablePreparedReuseForTest();
         var results = execute("SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
                               "WITH optimizer_options = {'use_term_statistics': 'false'}");
         assertThat(results.size()).isEqualTo(2);
@@ -236,7 +226,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
     @Test
     public void testAllOptionsTogetherReturnCorrectResults()
     {
-        disablePreparedReuseForTest();
         var results = execute("SELECT c FROM %s WHERE n = 0 ORDER BY v ANN OF [0, 0] LIMIT 5 " +
                               "WITH optimizer_options = {" +
                               "'query_optimization_level': '1', " +
@@ -262,7 +251,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
      * {@code sort_then_filter} must flip this to sort-then-filter ({@link Plan.Bm25IndexScan}).
      */
     @Test
-    public void testSortThenFilterOverridesSelectiveWhereClause_bm25()
+    public void testSortThenFilterOverridesSelectiveWhereClauseBM25()
     {
         createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' " +
@@ -278,7 +267,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
                               row(0), row(1));
 
         // Override forces sort-then-filter (Bm25IndexScan), results unchanged.
-        disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'apple' LIMIT 5 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'}",
@@ -291,7 +279,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
      * {@code filter_then_sort} must flip this to filter-then-sort ({@link Plan.NumericIndexScan}).
      */
     @Test
-    public void testFilterThenSortOverridesNonSelectiveWhereClause_bm25()
+    public void testFilterThenSortOverridesNonSelectiveWhereClauseBM25()
     {
         createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' " +
@@ -307,7 +295,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
                               row(0), row(1), row(2), row(3), row(4));
 
         // Override forces filter-then-sort (NumericIndexScan), results unchanged.
-        disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n >= 0 ORDER BY s BM25 OF 'apple' LIMIT 5 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'}",
@@ -328,7 +315,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
      * {@code sort_then_filter} must flip this to sort-then-filter ({@link Plan.LiteralIndexScan}).
      */
     @Test
-    public void testSortThenFilterOverridesSelectiveWhereClause_genericOrderBy()
+    public void testSortThenFilterOverridesSelectiveWhereClauseGenericOrderBy()
     {
         createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
@@ -344,7 +331,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
                               row(0), row(1));
 
         // Override forces sort-then-filter (LiteralIndexScan), results unchanged.
-        disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n = 0 ORDER BY s ASC LIMIT 5 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'}",
@@ -358,7 +344,7 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
      * {@code filter_then_sort} must flip this to filter-then-sort ({@link Plan.NumericIndexScan}).
      */
     @Test
-    public void testFilterThenSortOverridesNonSelectiveWhereClause_genericOrderBy()
+    public void testFilterThenSortOverridesNonSelectiveWhereClauseGenericOrderBy()
     {
         createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
@@ -374,7 +360,6 @@ public class SaiPerQueryOptimizerOptionsTest extends VectorTester
                               row(0), row(1), row(2), row(3), row(4));
 
         // Override forces filter-then-sort (NumericIndexScan), results unchanged.
-        disablePreparedReuseForTest();
         assertQueryHasSubplan(
                 "SELECT c FROM %s WHERE n >= 0 ORDER BY s ASC LIMIT 5 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'}",
