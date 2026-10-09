@@ -66,6 +66,7 @@ import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.IndexHints;
+import org.apache.cassandra.db.filter.OptimizerOptions;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -108,7 +109,6 @@ import org.apache.cassandra.utils.Throwables;
 
 import static java.lang.Math.max;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL;
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 public class QueryController implements Plan.Executor, Plan.CostEstimator
@@ -117,17 +117,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                              StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE;
     public static final String INDEX_VERSION_DOES_NOT_SUPPORT_BM25 = "%s does not support BM25 scoring until it is rebuilt";
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
-
-    /**
-     * Controls whether we optimize query plans.
-     * 0 disables the optimizer. As a side effect, hybrid ANN queries will default to FilterSortOrder.SCAN_THEN_FILTER.
-     * 1 enables the optimizer.
-     * Note: the config is not final to simplify testing.
-     */
-    @VisibleForTesting
-    public static int QUERY_OPT_LEVEL = SAI_QUERY_OPT_LEVEL.getInt();
-
-    public static volatile boolean QUERY_OPT_USE_TERM_STATS = CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean();
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
@@ -144,6 +133,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private final NavigableSet<Clustering<?>> nextClusterings;
 
     final Plan.Factory planFactory;
+
+    /** Per-query SAI optimizer settings; falls back to global {@link CassandraRelevantProperties} values when not overridden. */
+    private final OptimizerOptions optimizerOptions;
+
+    /** The WHERE-clause-only keys plan, before the sort node is attached. Used for post-optimization hybrid sort-order override. */
+    private Plan.KeysIteration whereKeysPlan;
 
     /**
      * Holds the primary key iterators for indexed expressions in the query (i.e. leaves of the expression tree).
@@ -165,8 +160,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     static
     {
         logger.info(String.format("Query plan optimization is %s (level = %d)",
-                                  QUERY_OPT_LEVEL > 0 ? "enabled" : "disabled",
-                                  QUERY_OPT_LEVEL));
+                                  OptimizerOptions.NONE.queryOptimizationLevel() > 0 ? "enabled" : "disabled",
+                                  OptimizerOptions.NONE.queryOptimizationLevel()));
     }
 
     @VisibleForTesting
@@ -203,6 +198,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
         this.planFactory = new Plan.Factory(cfs.metadata.keyspace, tableMetrics, this, command.rowFilter().indexHints);
+        this.optimizerOptions = command.rowFilter().optimizerOptions;
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
@@ -408,14 +404,17 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // The limit here is higher than the final limit, so that the optimizer has a bit more freedom
         // in which predicates it leaves in the plan and the probability of accidentally removing a good branch
         // here is even lower.
-        int intersectionClauseLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
-        Plan.RowsIteration origPlan = rowsIteration.limitIntersectedClauses(intersectionClauseLimit * 3);
+        Plan.RowsIteration origPlan = rowsIteration.limitIntersectedClauses(optimizerOptions.intersectionClauseLimit() * 3);
         Plan.RowsIteration plan = origPlan;
 
-        if (QUERY_OPT_LEVEL > 0)
+        if (optimizerOptions.queryOptimizationLevel() > 0)
             plan = origPlan.optimize();
 
-        plan = plan.limitIntersectedClauses(intersectionClauseLimit);
+        plan = plan.limitIntersectedClauses(optimizerOptions.intersectionClauseLimit());
+
+        // Apply the hybrid sort-order override AFTER optimization, so the optimizer cannot undo it.
+        // (The optimizer replaces any KeysSort back to a ScoredIndexScan for non-selective WHERE clauses.)
+        plan = applyHybridSortOrderOverrideToRows(plan);
         queryContext.recordQueryPlan(origPlan, plan);
         updateIndexMetricsQueriesCount(plan);
 
@@ -424,6 +423,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         if (Tracing.isTracing())
         {
+            if (optimizerOptions != OptimizerOptions.NONE)
+                Tracing.trace("Per-query SAI options: opt_level={}, intersection_clause_limit={}, use_term_statistics={}, hybrid_sort_order={}",
+                              optimizerOptions.queryOptimizationLevel(),
+                              optimizerOptions.intersectionClauseLimit(),
+                              optimizerOptions.useTermStatistics(),
+                              optimizerOptions.hybridSortOrder());
+
             Tracing.trace("Query execution plan:\n" + plan.toStringRecursive(Redaction.NONE));
             List<Plan.IndexScan> origIndexScans = keysIterationPlan.nodesOfType(Plan.IndexScan.class);
             List<Plan.IndexScan> selectedIndexScans = plan.nodesOfType(Plan.IndexScan.class);
@@ -440,13 +446,16 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         // Remove the ORDER BY filter expression from the filter tree, as it is added below.
         var filterElement = filterOperation().filter(e -> !Orderer.isFilterExpressionOrderer(e));
-        Plan.KeysIteration keysIterationPlan = Operation.Node.buildTree(this, filterElement)
-                                                             .analyzeTree(this)
-                                                             .plan(this);
+        whereKeysPlan = Operation.Node.buildTree(this, filterElement)
+                                      .analyzeTree(this)
+                                      .plan(this);
 
         // Because the orderer has a specific queue view
+        Plan.KeysIteration keysIterationPlan = whereKeysPlan;
         if (orderer != null)
-            keysIterationPlan = planFactory.sort(keysIterationPlan, orderer);
+        {
+            keysIterationPlan = planFactory.sort(whereKeysPlan, orderer);
+        }
 
         // This would mean we have no WHERE nor ANN clauses at all; this can happen in case an index was dropped after the
         // query was initiated
@@ -454,6 +463,60 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             throw invalidRequest(INDEX_MAY_HAVE_BEEN_DROPPED);
 
         return keysIterationPlan;
+    }
+
+    /**
+     * Applies the {@code hybrid_sort_order} override to the fully-optimised {@link Plan.RowsIteration}.
+     * This must run after {@link Plan#optimize()} because the optimizer may convert any {@link Plan.KeysSort}
+     * back to a {@link Plan.ScoredIndexScan} for non-selective WHERE predicates.
+     */
+    private Plan.RowsIteration applyHybridSortOrderOverrideToRows(Plan.RowsIteration plan)
+    {
+        if (orderer == null)
+            return plan;
+
+        switch (optimizerOptions.hybridSortOrder())
+        {
+            case SORT_THEN_FILTER:
+            {
+                // Replace any KeysSort with a ScoredIndexScan.
+                List<Plan.KeysSort> keySorts = plan.nodesOfType(Plan.KeysSort.class);
+                if (keySorts.isEmpty())
+                    return plan; // already sort-then-filter; nothing to do
+                Plan.KeysSort keysSort = keySorts.get(0);
+                Plan.RowsIteration overridden = (Plan.RowsIteration) plan.removeRestriction(keysSort.id);
+                Tracing.logAndTrace(logger, "sai_hybrid_sort_order=sort_then_filter: forcing sort-then-filter, replacing filter-then-sort plan");
+                return overridden;
+            }
+            case FILTER_THEN_SORT:
+            {
+                // Replace the ordered scan (a ScoredIndexScan for ANN/BM25, or an ordered IndexScan for generic
+                // ORDER BY) with a KeysSort wrapping the WHERE-clause plan.
+                Plan.Leaf orderedScan = null;
+                for (Plan.Leaf leaf : plan.nodesOfType(Plan.Leaf.class))
+                {
+                    if (isOrderedScan(leaf))
+                    {
+                        orderedScan = leaf;
+                        break;
+                    }
+                }
+                if (orderedScan == null)
+                    return plan; // already filter-then-sort; nothing to do
+                Plan.KeysSort keysSort = planFactory.sortForced(whereKeysPlan, orderer);
+                Plan.RowsIteration overridden = (Plan.RowsIteration) plan.replaceNode(orderedScan.id, keysSort);
+                Tracing.logAndTrace(logger, "sai_hybrid_sort_order=filter_then_sort: forcing filter-then-sort, replacing sort-then-filter plan");
+                return overridden;
+            }
+            default:
+                return plan;
+        }
+    }
+
+    private static boolean isOrderedScan(Plan.Leaf leaf)
+    {
+        return leaf instanceof Plan.ScoredIndexScan
+               || (leaf instanceof Plan.IndexScan && ((Plan.IndexScan) leaf).ordering != null);
     }
 
     public Iterator<? extends PrimaryKey> buildIterator(Plan plan)
@@ -1001,7 +1064,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             case NOT_CONTAINS_KEY:
             case NOT_CONTAINS_VALUE:
             case RANGE:
-                return (indexFeatureSet.hasTermsHistogram() && QUERY_OPT_USE_TERM_STATS)
+                return (indexFeatureSet.hasTermsHistogram() && optimizerOptions.useTermStatistics())
                        ? estimateMatchingRowCountUsingHistograms(predicate)
                        : estimateMatchingRowCountUsingIndex(predicate);
             default:

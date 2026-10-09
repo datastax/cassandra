@@ -33,7 +33,6 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Plan;
-import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -447,7 +446,7 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         try
         {
             // disable query optimization so we can test the intersection clause limit in a more predictable way
-            QueryController.QUERY_OPT_LEVEL = 0;
+            CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.setInt(0);
 
             beforeAndAfterFlush(() -> {
                 String query = "SELECT * FROM %s WHERE v1=0 AND v2=0 AND v3 = 0";
@@ -495,7 +494,7 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         finally
         {
             CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(defaultIntersectionClauseLimit);
-            QueryController.QUERY_OPT_LEVEL = 1;
+            CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.setInt(1);
         }
     }
 

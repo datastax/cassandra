@@ -26,6 +26,7 @@ import com.google.common.collect.ImmutableSet;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.IndexHints;
+import org.apache.cassandra.db.filter.OptimizerOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.index.Index;
@@ -42,8 +43,18 @@ public class SelectOptions extends PropertyDefinitions
     public static final String ANN_OPTIONS = "ann_options";
     public static final String INCLUDED_INDEXES = "included_indexes";
     public static final String EXCLUDED_INDEXES = "excluded_indexes";
+    public static final String OPTIMIZER_OPTIONS = "optimizer_options";
 
-    private static final Set<String> keywords = ImmutableSet.of(ANN_OPTIONS, INCLUDED_INDEXES, EXCLUDED_INDEXES);
+    private static final Set<String> keywords = ImmutableSet.of(ANN_OPTIONS, INCLUDED_INDEXES, EXCLUDED_INDEXES, OPTIMIZER_OPTIONS);
+
+    /**
+     * Error message thrown when {@code included_indexes} and a non-{@code auto} {@code hybrid_sort_order}
+     * optimizer option are specified together on the same query. The index hint forces a specific index to
+     * be used for sorting, which directly contradicts telling the optimizer to flip the sort order.
+     */
+    public static final String CONFLICTING_OPTIMIZER_OPTIONS_AND_INDEX_HINTS_ERROR =
+            "Cannot combine 'included_indexes' with a non-'auto' 'hybrid_sort_order' optimizer option: " +
+            "the index hint forces a specific sort index, but the optimizer option overrides the sort order.";
 
     /**
      * Validates all the {@code SELECT} options.
@@ -62,7 +73,15 @@ public class SelectOptions extends PropertyDefinitions
     {
         validate(keywords, Collections.emptySet());
         parseANNOptions().validate(state, table.keyspace, limit);
-        parseIndexHints(table, indexRegistry).validate(indexQueryPlan);
+        IndexHints indexHints = parseIndexHints(table, indexRegistry);
+        indexHints.validate(indexQueryPlan);
+        OptimizerOptions optimizerOptions = parseOptimizerOptions();
+        optimizerOptions.validate(table.keyspace);
+        if (!indexHints.included.isEmpty()
+            && optimizerOptions.hybridSortOrder() != OptimizerOptions.HybridSortOrder.AUTO)
+        {
+            throw new InvalidRequestException(CONFLICTING_OPTIMIZER_OPTIONS_AND_INDEX_HINTS_ERROR);
+        }
     }
 
     /**
@@ -100,5 +119,13 @@ public class SelectOptions extends PropertyDefinitions
         Set<QualifiedName> included = getQualifiedNames(INCLUDED_INDEXES);
         Set<QualifiedName> excluded = getQualifiedNames(EXCLUDED_INDEXES);
         return IndexHints.fromCQLNames(included, excluded, table, indexRegistry);
+    }
+
+    public OptimizerOptions parseOptimizerOptions()
+    {
+        Map<String, String> options = getMap(OPTIMIZER_OPTIONS);
+        return options == null
+               ? OptimizerOptions.NONE
+               : OptimizerOptions.fromMap(options);
     }
 }

@@ -22,7 +22,7 @@ import java.util.stream.IntStream;
 
 import org.junit.Test;
 
-import org.apache.cassandra.index.sai.plan.QueryController;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 
@@ -109,7 +109,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     public void testHybridSearchHoleInClusteringColumnOrdering() throws Throwable
     {
         setMaxBruteForceRows(0);
-        QueryController.QUERY_OPT_LEVEL = 0;
+        CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.setInt(0);
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
@@ -192,7 +192,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     public void testHybridQueryWithMissingVectorValuesForMaxSegmentRow() throws Throwable
     {
         // Want to test the search then order path
-        QueryController.QUERY_OPT_LEVEL = 0;
+        CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.setInt(0);
 
         // We use a clustered primary key to simplify the mental model for this test.
         // The bug this test exposed happens when the last row(s) in a segment, based on PK order, are present
@@ -224,7 +224,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     public void testReranklessHybridSearch()
     {
         // Want to test the search then order path
-        QueryController.QUERY_OPT_LEVEL = 0;
+        CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.setInt(0);
 
         createTable("CREATE TABLE %s (pk int, val int, vec vector<float, 128>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");

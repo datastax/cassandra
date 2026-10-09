@@ -496,6 +496,17 @@ abstract public class Plan
     }
 
     /**
+     * Replaces the node with the given {@code id} anywhere in the plan tree with {@code replacement}.
+     * If no node with that id is found the plan is returned unchanged.
+     */
+    final Plan replaceNode(int id, Plan replacement)
+    {
+        if (this.id == id)
+            return replacement;
+        return withUpdatedSubplans(subplan -> subplan.replaceNode(id, replacement));
+    }
+
+    /**
      * Returns the estimated cost of preparation steps
      * that must be done before returning the first row / key
      */
@@ -2117,6 +2128,16 @@ abstract public class Plan
         public KeysIteration sort(@Nonnull KeysIteration source, @Nonnull Orderer ordering)
         {
             return sort(source, ordering, nextId++);
+        }
+
+        /**
+         * Constructs a {@link KeysSort} node unconditionally, without applying the collapsing optimisation
+         * that {@link #sort} uses. Use this when a {@code FILTER_THEN_SORT} override must be enforced even
+         * when the optimiser would otherwise produce a {@link ScoredIndexScan}.
+         */
+        public KeysSort sortForced(@Nonnull KeysIteration source, @Nonnull Orderer ordering)
+        {
+            return new KeysSort(this, nextId++, source, defaultAccess, ordering);
         }
 
         private KeysIteration sort(@Nonnull KeysIteration source, @Nonnull Orderer ordering, int id)

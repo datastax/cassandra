@@ -849,7 +849,13 @@ public enum CassandraRelevantProperties
      */
     SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false"),
 
-    /** Controls the maximum number of index query intersections that will take part in a query */
+    /**
+     * Controls the maximum number of index query intersections that will take part in a query.
+     * <p>
+     * This property is read on every query execution and is therefore dynamically updatable at runtime
+     * without a JVM restart. It can also be overridden per-query via the {@code intersection_clause_limit}
+     * key in the CQL {@code WITH optimizer_options = {...}} clause.
+     */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection_clause_limit", "2"),
 
     SAI_JVECTOR_VERSION("cassandra.sai.jvector_version", "2"),
@@ -897,9 +903,20 @@ public enum CassandraRelevantProperties
      * If enabled, the query optimizer uses, if present, the term statistics stored
      * with the help of histograms in the metadata component of each SSTable index.
      * Using terms statistics is significantly less costly but less precise.
+     * <p>
+     * This property is read on every query execution and is therefore dynamically updatable at runtime
+     * without a JVM restart. It can also be overridden per-query via the {@code use_term_statistics}
+     * key in the CQL {@code WITH optimizer_options = {...}} clause.
      */
     SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS("cassandra.sai.query_optimization.use_term_statistics", "false"),
 
+    /**
+     * Controls the SAI query optimizer level: 0 disables the optimizer, 1 enables it.
+     * <p>
+     * This property is read on every query execution and is therefore dynamically updatable at runtime
+     * without a JVM restart. It can also be overridden per-query via the {@code query_optimization_level}
+     * key in the CQL {@code WITH optimizer_options = {...}} clause.
+     */
     SAI_QUERY_OPT_LEVEL("cassandra.sai.query.optimization.level", "1"),
 
     /**
