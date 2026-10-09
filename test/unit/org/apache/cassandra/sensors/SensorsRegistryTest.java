@@ -106,10 +106,10 @@ public class SensorsRegistryTest
         assertThat(SensorsRegistry.instance.getSensorsByKeyspace(KEYSPACE)).containsAll(
         ImmutableSet.of(context1Type1Sensor, context1Type2Sensor, context2Type1Sensor, context2Type2Sensor));
 
-        assertThat(SensorsRegistry.instance.getSensorsByTableId(context1.getTableId())).containsAll(
+        assertThat(SensorsRegistry.instance.getSensorsByTableId(context1.getTableId().orElseThrow())).containsAll(
         ImmutableSet.of(context1Type1Sensor, context1Type2Sensor));
 
-        assertThat(SensorsRegistry.instance.getSensorsByTableId(context2.getTableId())).containsAll(
+        assertThat(SensorsRegistry.instance.getSensorsByTableId(context2.getTableId().orElseThrow())).containsAll(
         ImmutableSet.of(context2Type1Sensor, context2Type2Sensor));
 
         assertThat(SensorsRegistry.instance.getSensorsByType(type1)).containsAll(
@@ -247,7 +247,7 @@ public class SensorsRegistryTest
         assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
         assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isPresent();
 
-        SensorsRegistry.instance.removeSensorsByKeyspace(context1.getKeyspace());
+        SensorsRegistry.instance.removeSensorsByKeyspace(context1.getKeyspace().orElseThrow());
         assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isEmpty();
         assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isEmpty();
 
@@ -269,11 +269,171 @@ public class SensorsRegistryTest
         assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
         assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isPresent();
 
-        SensorsRegistry.instance.removeSensorsByTableId(context1.getKeyspace(), context1.getTableId());
+        SensorsRegistry.instance.removeSensorsByTableId(context1.getKeyspace().orElseThrow(), context1.getTableId().orElseThrow());
         assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isEmpty();
         assertThat(SensorsRegistry.instance.getSensor(context2, type1)).isPresent();
 
         SensorsRegistry.instance.getOrCreateSensor(context1, type1);
         assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
+    }
+
+    @Test
+    public void testRequestContextSensorCreatedWithoutSchemaRegistration()
+    {
+        // No onCreateKeyspace / onCreateTable called — request-context sensors bypass the schema gate.
+        RequestSensors sensors = new ActiveRequestSensors();
+        assertThat(SensorsRegistry.instance.getOrCreateSensor(Context.from(sensors), Type.TOTAL_COST)).isPresent();
+    }
+
+    @Test
+    public void testRequestContextSensorNotIndexedByKeyspaceOrTableId()
+    {
+        RequestSensors sensors = new ActiveRequestSensors();
+        SensorsRegistry.instance.getOrCreateSensor(Context.from(sensors), Type.TOTAL_COST);
+
+        // The singleton request context has no keyspace or table-id, so it must not appear in
+        // any keyspace- or table-scoped index.
+        assertThat(SensorsRegistry.instance.getSensorsByKeyspace(KEYSPACE)).isEmpty();
+        assertThat(SensorsRegistry.instance.getSensorsByTableId(
+                Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata().id.toString())).isEmpty();
+
+        // But it is reachable by type.
+        assertThat(SensorsRegistry.instance.getSensorsByType(Type.TOTAL_COST)).isNotEmpty();
+    }
+
+    @Test
+    public void testRequestContextSensorSurvivesSchemaDrops()
+    {
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+
+        RequestSensors sensors = new ActiveRequestSensors();
+        Context requestCtx = Context.from(sensors);
+        Sensor totalCostSensor = SensorsRegistry.instance.getOrCreateSensor(requestCtx, Type.TOTAL_COST).get();
+
+        // Dropping the table and then the keyspace must not evict the request-level sensor.
+        SensorsRegistry.instance.onDropTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata(), false);
+        assertThat(SensorsRegistry.instance.getSensor(requestCtx, Type.TOTAL_COST)).hasValue(totalCostSensor);
+
+        SensorsRegistry.instance.onDropKeyspace(Keyspace.open(KEYSPACE).getMetadata(), false);
+        assertThat(SensorsRegistry.instance.getSensor(requestCtx, Type.TOTAL_COST)).hasValue(totalCostSensor);
+    }
+    // ---- removeSensorsByRequestOwner tests ----
+
+    private static RequestSensors sensorsWithOwner(String owner)
+    {
+        return new ActiveRequestSensors()
+        {
+            @Override
+            public String getRequestOwner() { return owner; }
+        };
+    }
+
+    @Test
+    public void testRemoveSensorsByRequestOwnerRemovesSensor()
+    {
+        RequestSensors sensors = sensorsWithOwner("owner1");
+        Context requestCtx = Context.from(sensors);
+        SensorsRegistry.instance.getOrCreateSensor(requestCtx, Type.TOTAL_COST);
+        assertThat(SensorsRegistry.instance.getSensor(requestCtx, Type.TOTAL_COST)).isPresent();
+
+        SensorsRegistry.instance.removeSensorsByRequestOwner("owner1");
+
+        assertThat(SensorsRegistry.instance.getSensor(requestCtx, Type.TOTAL_COST)).isEmpty();
+    }
+
+    @Test
+    public void testRemoveSensorsByRequestOwnerDoesNotAffectOtherOwners()
+    {
+        RequestSensors sensors1 = sensorsWithOwner("owner1");
+        RequestSensors sensors2 = sensorsWithOwner("owner2");
+        Context ctx1 = Context.from(sensors1);
+        Context ctx2 = Context.from(sensors2);
+
+        SensorsRegistry.instance.getOrCreateSensor(ctx1, Type.TOTAL_COST);
+        SensorsRegistry.instance.getOrCreateSensor(ctx2, Type.TOTAL_COST);
+
+        SensorsRegistry.instance.removeSensorsByRequestOwner("owner1");
+
+        assertThat(SensorsRegistry.instance.getSensor(ctx1, Type.TOTAL_COST)).isEmpty();
+        assertThat(SensorsRegistry.instance.getSensor(ctx2, Type.TOTAL_COST)).isPresent();
+    }
+
+    @Test
+    public void testRemoveSensorsByRequestOwnerRemovesFromByType()
+    {
+        RequestSensors sensors = sensorsWithOwner("owner1");
+        Context requestCtx = Context.from(sensors);
+        Sensor sensor = SensorsRegistry.instance.getOrCreateSensor(requestCtx, Type.TOTAL_COST).get();
+        assertThat(SensorsRegistry.instance.getSensorsByType(Type.TOTAL_COST)).contains(sensor);
+
+        SensorsRegistry.instance.removeSensorsByRequestOwner("owner1");
+
+        assertThat(SensorsRegistry.instance.getSensorsByType(Type.TOTAL_COST)).doesNotContain(sensor);
+    }
+
+    @Test
+    public void testRemoveSensorsByRequestOwnerMultipleTypesForSameOwner()
+    {
+        RequestSensors sensors = sensorsWithOwner("owner1");
+        Context requestCtx = Context.from(sensors);
+        Sensor totalCostSensor = SensorsRegistry.instance.getOrCreateSensor(requestCtx, Type.TOTAL_COST).get();
+        Sensor readCostSensor = SensorsRegistry.instance.getOrCreateSensor(requestCtx, Type.READ_COST).get();
+
+        SensorsRegistry.instance.removeSensorsByRequestOwner("owner1");
+
+        assertThat(SensorsRegistry.instance.getSensor(requestCtx, Type.TOTAL_COST)).isEmpty();
+        assertThat(SensorsRegistry.instance.getSensor(requestCtx, Type.READ_COST)).isEmpty();
+        assertThat(SensorsRegistry.instance.getSensorsByType(Type.TOTAL_COST)).doesNotContain(totalCostSensor);
+        assertThat(SensorsRegistry.instance.getSensorsByType(Type.READ_COST)).doesNotContain(readCostSensor);
+    }
+
+    @Test
+    public void testRemoveSensorsByRequestOwnerNotifiesListener()
+    {
+        SensorsRegistryListener listener = Mockito.mock(SensorsRegistryListener.class);
+        SensorsRegistry.instance.registerListener(listener);
+
+        RequestSensors sensors = sensorsWithOwner("owner1");
+        Context requestCtx = Context.from(sensors);
+        Sensor sensor = SensorsRegistry.instance.getOrCreateSensor(requestCtx, Type.TOTAL_COST).get();
+        clearInvocations(listener);
+
+        SensorsRegistry.instance.removeSensorsByRequestOwner("owner1");
+
+        verify(listener, times(1)).onSensorRemoved(sensor);
+        SensorsRegistry.instance.unregisterListener(listener);
+    }
+
+    @Test
+    public void testRemoveSensorsByRequestOwnerDoesNotAffectTableContextSensors()
+    {
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+
+        // Create a table-context sensor alongside a request-context sensor
+        SensorsRegistry.instance.getOrCreateSensor(context1, type1);
+
+        RequestSensors sensors = sensorsWithOwner("owner1");
+        SensorsRegistry.instance.getOrCreateSensor(Context.from(sensors), Type.TOTAL_COST);
+
+        SensorsRegistry.instance.removeSensorsByRequestOwner("owner1");
+
+        // Table-context sensor must be unaffected
+        assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
+    }
+
+    @Test
+    public void testRemoveSensorsByRequestOwnerIsIdempotent()
+    {
+        RequestSensors sensors = sensorsWithOwner("owner1");
+        Context requestCtx = Context.from(sensors);
+        SensorsRegistry.instance.getOrCreateSensor(requestCtx, Type.TOTAL_COST);
+
+        SensorsRegistry.instance.removeSensorsByRequestOwner("owner1");
+        // Second call must not throw and registry must remain clean
+        SensorsRegistry.instance.removeSensorsByRequestOwner("owner1");
+
+        assertThat(SensorsRegistry.instance.getSensor(requestCtx, Type.TOTAL_COST)).isEmpty();
     }
 }

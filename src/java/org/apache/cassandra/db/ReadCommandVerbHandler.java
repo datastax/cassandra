@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -35,12 +36,13 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -101,7 +103,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         MessageParams.reset();
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(Set.of(command.metadata().keyspace));
         Context context = Context.from(command);
         requestSensors.registerSensor(context, Type.READ_BYTES);
         RequestTracker.instance.set(requestSensors);
@@ -117,6 +119,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
             command.trackWarnings();
 
         ReadResponse response;
+        long readStartNanos = Clock.Global.nanoTime();
         try (ReadExecutionController controller = command.executionController(message.trackRepairedData());
              UnfilteredPartitionIterator iterator = command.executeLocally(controller))
         {
@@ -153,6 +156,10 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         if (command.complete())
         {
+            long readElapsedNanos = Clock.Global.nanoTime() - readStartNanos;
+            requestSensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+            requestSensors.incrementSensor(context, Type.READ_EXECUTION_TIME, readElapsedNanos);
+
             Message.Builder<ReadResponse> replyBuilder = message.responseWithBuilder(response);
             int size = replyBuilder.currentPayloadSize(MessagingService.current_version);
             requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, size);

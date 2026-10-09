@@ -55,7 +55,7 @@ public final class SensorsTestUtil
 
     /**
      * Returns the sensor registered in the thread local {@link RequestSensors}
-     * @return the thread local read sensor
+     * @return the thread local sensor
      */
     public static Sensor getThreadLocalRequestSensor(Context context, Type type)
     {

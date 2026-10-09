@@ -15,8 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.service.paxos.v1;
+
+import java.util.Set;
+
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.RequestTracker;
@@ -28,6 +30,7 @@ import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.utils.Clock;
 
 public class PrepareVerbHandler extends AbstractPaxosVerbHandler
 {
@@ -42,23 +45,33 @@ public class PrepareVerbHandler extends AbstractPaxosVerbHandler
     public void processMessage(Message<Commit> message)
     {
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
-        Context context = Context.from(message.payload.update.metadata());
-
-        // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor
-        sensors.registerSensor(context, Type.READ_BYTES);
-        sensors.registerSensor(context, Type.WRITE_BYTES);
-        sensors.registerSensor(context, Type.INTERNODE_BYTES);
-        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.update.metadata().keyspace));
         RequestTracker.instance.set(sensors);
 
-        Message.Builder<PrepareResponse> reply = message.responseWithBuilder(doPrepare(message.payload));
+        Context context = Context.from(message.payload.update.metadata());
 
-        // calculate outbound internode bytes before adding the sensor to the response
+        // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor.
+        // INDEX_WRITE_BYTES is not registered here because prepare only writes to system.paxos, which has no indexes.
+        // READ_EXECUTION_TIME tracks the system.paxos read time (loadPaxosState), transferred to user-table context.
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        sensors.registerSensor(context, Type.INTERNODE_BYTES);
+
+        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+
+        long prepareStartNanos = Clock.Global.nanoTime();
+        Message.Builder<PrepareResponse> reply = message.responseWithBuilder(doPrepare(message.payload));
+        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, Clock.Global.nanoTime() - prepareStartNanos);
+
         int size = reply.currentPayloadSize(MessagingService.current_version);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+
         sensors.syncAllSensors();
+
         SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
+
         MessagingService.instance().send(reply.build(), message.from());
     }
 }

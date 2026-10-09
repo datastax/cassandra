@@ -19,6 +19,7 @@
 package org.apache.cassandra.service.paxos;
 
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import org.slf4j.Logger;
@@ -41,6 +42,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.SensorsCustomParams;
@@ -48,6 +50,7 @@ import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Paxos.Participants;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.concurrent.ConditionAsConsumer;
 
 import static java.util.Collections.emptyMap;
@@ -110,6 +113,10 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
     final int required;
     final OnDone onDone;
 
+    /** Coordinator-side sensors captured at construction; used to accumulate WRITE_EXECUTION_TIME from replica responses. */
+    private final RequestSensors requestSensors;
+    private final ExecutionTimeSensorAccumulator execTimeAccumulator;
+
     /**
      * packs two 32-bit integers;
      * bit 00-31: accepts
@@ -129,6 +136,8 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
         this.replicas = participants.all;
         this.onDone = onDone;
         this.required = participants.requiredFor(consistencyForCommit);
+        this.requestSensors = RequestTracker.instance.get();
+        this.execTimeAccumulator = new ExecutionTimeSensorAccumulator(required > 0 ? required : 1);
         if (required == 0)
             onDone.accept(status());
     }
@@ -136,6 +145,18 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
     public TableMetadata getTableMetadata()
     {
         return commit.update.metadata();
+    }
+
+    @Override
+    public RequestSensors getRequestSensors()
+    {
+        return requestSensors;
+    }
+
+    @Override
+    public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
+        execTimeAccumulator.accumulate(context, type, value);
     }
 
     /**
@@ -251,6 +272,7 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
     {
         logger.trace("{} Success from {}", commit, response.from());
 
+        execTimeAccumulator.onResponse(requestSensors);
         response(true, response.from());
     }
 
@@ -259,7 +281,13 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
      */
     public void executeOnSelf()
     {
-        executeOnSelf(commit, RequestHandler::execute);
+        Context context = Context.from(commit.update.metadata());
+        executeOnSelf(commit, (c, from) -> {
+            long startNanos = Clock.Global.nanoTime();
+            NoPayload response = RequestHandler.execute(c, from);
+            accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, Clock.Global.nanoTime() - startNanos);
+            return response;
+        });
     }
 
     @Override
@@ -318,17 +346,21 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
         public void doVerb(Message<Agreed> message)
         {
             // Initialize the sensor and set ExecutorLocals
-            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
+            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.update.metadata().keyspace));
             Context context = Context.from(message.payload.update.metadata());
 
-            // Commit phase writes the proposal to the table, so a read sensor is registered in addition to the write sensor
-            sensors.registerSensor(context, Type.READ_BYTES);
+            // Commit phase writes the proposal to the user table.
+            // INDEX_WRITE_BYTES tracks secondary index writes triggered by the commit.
             sensors.registerSensor(context, Type.WRITE_BYTES);
+            sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+            sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
             sensors.registerSensor(context, Type.INTERNODE_BYTES);
             sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
             RequestTracker.instance.set(sensors);
 
+            long commitStartNanos = Clock.Global.nanoTime();
             NoPayload response = execute(message.payload, message.from());
+            sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, Clock.Global.nanoTime() - commitStartNanos);
 
             // calculate outbound internode bytes before adding the sensor to the response
             if (response != null)
@@ -346,7 +378,7 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
             }
         }
 
-        private static NoPayload execute(Agreed agreed, InetAddressAndPort from)
+        static NoPayload execute(Agreed agreed, InetAddressAndPort from)
         {
             if (!Paxos.isInRangeAndShouldProcess(from, agreed.update.partitionKey(), agreed.update.metadata(), false))
                 return null;

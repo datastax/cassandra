@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.Set;
 import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -53,6 +54,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.SensorsCustomParams;
@@ -61,6 +63,7 @@ import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.paxos.PaxosPrepare.Status.Outcome;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.util.Collections.emptyMap;
@@ -306,6 +309,10 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
     private PaxosPrepareRefresh refreshStaleParticipants;
     private boolean linearizabilityViolationDetected = false;
 
+    /** Coordinator-side sensors captured at construction; used to accumulate WRITE_EXECUTION_TIME from replica responses. */
+    private final RequestSensors requestSensors;
+    private final ExecutionTimeSensorAccumulator execTimeAccumulator;
+
     PaxosPrepare(Participants participants, AbstractRequest<?> request, boolean acceptEarlyReadPermission, Consumer<Status> onDone)
     {
         this.acceptEarlyReadPermission = acceptEarlyReadPermission;
@@ -316,11 +323,25 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
         this.withLatest = new ArrayList<>(participants.sizeOfConsensusQuorum);
         this.latestAccepted = this.latestCommitted = Committed.none(request.partitionKey, request.table);
         this.onDone = onDone;
+        this.requestSensors = RequestTracker.instance.get();
+        this.execTimeAccumulator = new ExecutionTimeSensorAccumulator(participants.sizeOfConsensusQuorum);
     }
 
     public TableMetadata getTableMetadata()
     {
         return request.table;
+    }
+
+    @Override
+    public RequestSensors getRequestSensors()
+    {
+        return requestSensors;
+    }
+
+    @Override
+    public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
+        execTimeAccumulator.accumulate(context, type, value);
     }
 
     private boolean hasInProgressProposal()
@@ -393,7 +414,18 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
         }
 
         if (executeOnSelf)
-            send.verb().stage.execute(() -> prepare.executeOnSelf(send.payload, selfHandler));
+        {
+            // Wrap the self-handler to measure local execution time and feed it into the coordinator's
+            // WRITE_EXECUTION_TIME accumulator, mirroring what ResponseVerbHandler does for remote replicas.
+            Context context = Context.from(send.payload.table);
+            BiFunction<R, InetAddressAndPort, Response> timedHandler = (payload, from) -> {
+                long startNanos = Clock.Global.nanoTime();
+                Response response = selfHandler.apply(payload, from);
+                prepare.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, Clock.Global.nanoTime() - startNanos);
+                return response;
+            };
+            send.verb().stage.execute(() -> prepare.executeOnSelf(send.payload, timedHandler));
+        }
     }
 
     // TODO: extend Sync?
@@ -454,6 +486,8 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
     {
         if (logger.isTraceEnabled())
             logger.trace("{} for {} from {}", response, request.ballot, from);
+
+        execTimeAccumulator.onResponse(requestSensors);
 
         if (isDone())
         {
@@ -1033,17 +1067,24 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
         public void doVerb(Message<Request> message)
         {
             // Initialize the sensor and set ExecutorLocals
-            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.table.keyspace);
+            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(message.payload.table.keyspace));
             Context context = Context.from(message.payload.table);
 
-            // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor
+            // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor.
+            // INDEX_WRITE_BYTES is not registered here because prepare only writes to system.paxos, which has no indexes.
+            // READ_EXECUTION_TIME tracks the user-table precondition read (request.read.executeLocally()) when present,
+            // mirroring what ReadCommandVerbHandler does for regular reads and legacyCas does via ReadCallback.
             sensors.registerSensor(context, Type.READ_BYTES);
             sensors.registerSensor(context, Type.WRITE_BYTES);
+            sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+            sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
             sensors.registerSensor(context, Type.INTERNODE_BYTES);
             sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
             RequestTracker.instance.set(sensors);
 
+            long prepareStartNanos = Clock.Global.nanoTime();
             Response response = execute(message.payload, message.from());
+            sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, Clock.Global.nanoTime() - prepareStartNanos);
 
             // calculate outbound internode bytes before adding the sensor to the response
             if (response != null)
@@ -1108,11 +1149,21 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
 
                     if (request.read != null)
                     {
+                        long readStartNanos = nanoTime();
                         try (ReadExecutionController executionController = request.read.executionController();
                              UnfilteredPartitionIterator iterator = request.read.executeLocally(executionController))
                         {
                             readResponse = request.read.createResponse(iterator, executionController.getRepairedDataInfo());
                         }
+                        // Track the user-table precondition read execution time in addition to the system.paxos
+                        // read time already tracked inside loadPaxosState() (called via PaxosState.get() above).
+                        // Uses RequestTracker so it works for both the remote path (replica sensors set in doVerb)
+                        // and the local/single-node path (coordinator sensors set by Paxos.registerCasSensors).
+                        // PaxosPropose has no equivalent: it performs no user-table read, only the system.paxos
+                        // read via PaxosState.get() which is already covered by loadPaxosState().
+                        RequestSensors sensors = RequestTracker.instance.get();
+                        if (sensors != null)
+                            sensors.incrementSensor(Context.from(request.read), Type.READ_EXECUTION_TIME, nanoTime() - readStartNanos);
 
                         if (hasProposalStability)
                         {
