@@ -541,6 +541,8 @@ public class DatabaseDescriptor
 
         applyEncryptionContext();
 
+        initializeCommitLogDiskAccessMode();
+
         applySslContext();
 
         applyStartupChecks();
@@ -706,10 +708,6 @@ public class DatabaseDescriptor
         {
             conf.commitlog_directory = storagedirFor("commitlog");
         }
-
-        initializeCommitLogDiskAccessMode();
-        if (commitLogWriteDiskAccessMode != conf.commitlog_disk_access_mode)
-            logger.info("commitlog_disk_access_mode resolved to: {}", commitLogWriteDiskAccessMode);
 
         if (conf.hints_directory == null)
         {
@@ -3119,6 +3117,8 @@ public class DatabaseDescriptor
         Pair<DiskAccessMode, Boolean> accessModeDirectIoPair = resolveCommitLogWriteDiskAccessMode(conf.commitlog_disk_access_mode);
         validateCommitLogWriteDiskAccessMode(accessModeDirectIoPair);
         commitLogWriteDiskAccessMode = accessModeDirectIoPair.left;
+        if (commitLogWriteDiskAccessMode != conf.commitlog_disk_access_mode)
+            logger.info("commitlog_disk_access_mode resolved to: {}", commitLogWriteDiskAccessMode);
     }
 
     public static File getSavedCachesLocation()
