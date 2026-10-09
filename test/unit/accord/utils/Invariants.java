@@ -22,6 +22,7 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 
 import javax.annotation.Nullable;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import static java.lang.String.format;
 
@@ -137,6 +138,83 @@ public class Invariants
     {
         if (!condition)
             illegalState(format(fmt, args));
+    }
+
+    public static IllegalStateException illegalState(String fmt, Object... args)
+    {
+        throw new IllegalStateException(format(fmt, args));
+    }
+
+    public static void require(boolean condition)
+    {
+        if (!condition)
+            illegalState();
+    }
+
+    public static void require(boolean condition, Supplier<String> msg)
+    {
+        if (!condition)
+            illegalState(msg.get());
+    }
+
+    public static void require(boolean condition, String msg)
+    {
+        if (!condition)
+            illegalState(msg);
+    }
+
+    public static void require(boolean condition, String fmt, int p1)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1));
+    }
+
+    public static void require(boolean condition, String fmt, int p1, int p2)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1, p2));
+    }
+
+    public static void require(boolean condition, String fmt, long p1)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1));
+    }
+
+    public static void require(boolean condition, String fmt, long p1, long p2)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1, p2));
+    }
+
+    public static void require(boolean condition, String fmt, @Nullable Object p1)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1));
+    }
+
+    public static void require(boolean condition, String fmt, @Nullable Object p1, @Nullable Object p2)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1, p2));
+    }
+
+    public static void require(boolean condition, String fmt, Object... args)
+    {
+        if (!condition)
+            illegalState(format(fmt, args));
+    }
+
+    public static void requireArgument(boolean condition)
+    {
+        if (!condition)
+            illegalArgument();
+    }
+
+    public static void requireArgument(boolean condition, String msg)
+    {
+        if (!condition)
+            illegalArgument(msg);
     }
 
     public static <T> T nonNull(T param)
