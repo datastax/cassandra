@@ -18,6 +18,7 @@ package org.apache.cassandra.index.sai.cql;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.OptimizerOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -41,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>The global properties are never mutated by per-query options (thread isolation).</li>
  * </ul>
  */
-public class PlanWithOptimizerOptionsTest extends SAITester
+public class OptimizerOptionsTest extends SAITester
 {
     // -------------------------------------------------------------------------
     // Parsing and validation
@@ -61,7 +62,6 @@ public class PlanWithOptimizerOptionsTest extends SAITester
                                    "'hybrid_sort_order': 'sort_then_filter'" +
                                    "}");
 
-        disablePreparedReuseForTest();
         ReadCommand command = parseReadCommand(query);
 
         OptimizerOptions opts = command.rowFilter().optimizerOptions;
@@ -78,13 +78,12 @@ public class PlanWithOptimizerOptionsTest extends SAITester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
-        disablePreparedReuseForTest();
         ReadCommand command = parseReadCommand(formatQuery("SELECT * FROM %s WHERE v = 1"));
         assertThat(command.rowFilter().optimizerOptions).isSameAs(OptimizerOptions.NONE);
     }
 
     @Test
-    public void testUnknownQueryOptionKeyIsRejected()
+    public void testUnknownOptimizerOptionKeyIsRejected()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         assertInvalidThrowMessage("Unknown SAI optimizer option: bad_key",
@@ -177,13 +176,15 @@ public class PlanWithOptimizerOptionsTest extends SAITester
     // intersection_clause_limit — wired through correctly
     // -------------------------------------------------------------------------
 
+    /**
+     * Verify that {@code intersection_clause_limit} is wired through correctly.
+     */
     @Test
     public void testIntersectionClauseLimitStoredOnRowFilter()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
-        disablePreparedReuseForTest();
         ReadCommand command = parseReadCommand(
                 formatQuery("SELECT * FROM %s WHERE v = 1 WITH optimizer_options = {'intersection_clause_limit': '7'}"));
 
@@ -197,13 +198,15 @@ public class PlanWithOptimizerOptionsTest extends SAITester
     // use_term_statistics — wired through correctly
     // -------------------------------------------------------------------------
 
+    /**
+     * Verify that {@code use_term_statistics} is wired through correctly.
+     */
     @Test
     public void testUseTermStatisticsStoredOnRowFilter()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
-        disablePreparedReuseForTest();
         ReadCommand command = parseReadCommand(
                 formatQuery("SELECT * FROM %s WHERE v = 1 WITH optimizer_options = {'use_term_statistics': 'false'}"));
 
@@ -216,8 +219,11 @@ public class PlanWithOptimizerOptionsTest extends SAITester
     // Global isolation — per-query options must never mutate global statics
     // -------------------------------------------------------------------------
 
+    /**
+     * Verify that per-query optimizer options do not mutate global system properties.
+     */
     @Test
-    public void testPerQueryOptionsDoNotMutateGlobals()
+    public void testPerQueryOptimizerOptionsDoNotMutateGlobals()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
@@ -228,7 +234,6 @@ public class PlanWithOptimizerOptionsTest extends SAITester
         int globalIntersectionLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
 
         // Execute a query with all overrides set to non-default values.
-        disablePreparedReuseForTest();
         execute("SELECT * FROM %s WHERE v = 42 " +
                 "WITH optimizer_options = {" +
                 "'query_optimization_level': '0', " +
@@ -246,14 +251,16 @@ public class PlanWithOptimizerOptionsTest extends SAITester
     // Effective values inside QueryController
     // -------------------------------------------------------------------------
 
+    /**
+     * Verify that effective values inside {@code QueryController} reflect per-query optimizer options.
+     */
     @Test
-    public void testEffectiveValuesReflectPerQueryOptions()
+    public void testEffectiveValuesReflectPerQueryOptimizerOptions()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         execute("INSERT INTO %s (k, v) VALUES (1, 1)");
 
-        disablePreparedReuseForTest();
         String query = formatQuery("SELECT * FROM %s WHERE v = 1 " +
                                    "WITH optimizer_options = {" +
                                    "'query_optimization_level': '0', " +
@@ -277,5 +284,45 @@ public class PlanWithOptimizerOptionsTest extends SAITester
         {
             searcher.abort();
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // included_indexes + hybrid_sort_order contradiction
+    // -------------------------------------------------------------------------
+
+    /**
+     * Verify that combining {@code included_indexes} with a non-{@code auto} {@code hybrid_sort_order}
+     * is rejected at prepare time, because the hint forces a specific sort index while the option
+     * overrides the sort order.
+     */
+    @Test
+    public void testIncludedIndexesContradictsHybridSortOrderIsRejected()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
+        String idxS = createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+        for (int i = 0; i < 10; i++)
+            execute("INSERT INTO %s (k, c, s, n) VALUES (0, ?, ?, ?)",
+                    i, String.valueOf((char) ('a' + i)), i < 2 ? 0 : 1);
+
+        // filter_then_sort + included_indexes is contradictory: rejected.
+        assertInvalidThrowMessage(SelectOptions.CONFLICTING_OPTIMIZER_OPTIONS_AND_INDEX_HINTS_ERROR,
+                                  InvalidRequestException.class,
+                                  "SELECT c FROM %s WHERE n >= 0 ORDER BY s ASC LIMIT 5 " +
+                                  "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'} " +
+                                  "AND included_indexes = { " + idxS + " }");
+
+        // sort_then_filter + included_indexes is also contradictory: rejected.
+        assertInvalidThrowMessage(SelectOptions.CONFLICTING_OPTIMIZER_OPTIONS_AND_INDEX_HINTS_ERROR,
+                                  InvalidRequestException.class,
+                                  "SELECT c FROM %s WHERE n = 0 ORDER BY s ASC LIMIT 5 " +
+                                  "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'} " +
+                                  "AND included_indexes = { " + idxS + " }");
+
+        // auto + included_indexes is fine: no contradiction.
+        execute("SELECT c FROM %s WHERE n >= 0 ORDER BY s ASC LIMIT 5 " +
+                "WITH optimizer_options = {'hybrid_sort_order': 'auto'} " +
+                "AND included_indexes = { " + idxS + " }");
     }
 }

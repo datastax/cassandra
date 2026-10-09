@@ -48,6 +48,15 @@ public class SelectOptions extends PropertyDefinitions
     private static final Set<String> keywords = ImmutableSet.of(ANN_OPTIONS, INCLUDED_INDEXES, EXCLUDED_INDEXES, OPTIMIZER_OPTIONS);
 
     /**
+     * Error message thrown when {@code included_indexes} and a non-{@code auto} {@code hybrid_sort_order}
+     * optimizer option are specified together on the same query. The index hint forces a specific index to
+     * be used for sorting, which directly contradicts telling the optimizer to flip the sort order.
+     */
+    public static final String CONFLICTING_OPTIMIZER_OPTIONS_AND_INDEX_HINTS_ERROR =
+            "Cannot combine 'included_indexes' with a non-'auto' 'hybrid_sort_order' optimizer option: " +
+            "the index hint forces a specific sort index, but the optimizer option overrides the sort order.";
+
+    /**
      * Validates all the {@code SELECT} options.
      *
      * @param state the query state
@@ -64,8 +73,15 @@ public class SelectOptions extends PropertyDefinitions
     {
         validate(keywords, Collections.emptySet());
         parseANNOptions().validate(state, table.keyspace, limit);
-        parseIndexHints(table, indexRegistry).validate(indexQueryPlan);
-        parseOptimizerOptions().validate(table.keyspace);
+        IndexHints indexHints = parseIndexHints(table, indexRegistry);
+        indexHints.validate(indexQueryPlan);
+        OptimizerOptions optimizerOptions = parseOptimizerOptions();
+        optimizerOptions.validate(table.keyspace);
+        if (!indexHints.included.isEmpty()
+            && optimizerOptions.hybridSortOrder() != OptimizerOptions.HybridSortOrder.AUTO)
+        {
+            throw new InvalidRequestException(CONFLICTING_OPTIMIZER_OPTIONS_AND_INDEX_HINTS_ERROR);
+        }
     }
 
     /**

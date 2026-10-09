@@ -492,11 +492,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             {
                 // Replace the ordered scan (a ScoredIndexScan for ANN/BM25, or an ordered IndexScan for generic
                 // ORDER BY) with a KeysSort wrapping the WHERE-clause plan.
-                Plan.Leaf orderedScan = plan.nodesOfType(Plan.Leaf.class)
-                                            .stream()
-                                            .filter(QueryController::isOrderedScan)
-                                            .findFirst()
-                                            .orElse(null);
+                Plan.Leaf orderedScan = null;
+                for (Plan.Leaf leaf : plan.nodesOfType(Plan.Leaf.class))
+                {
+                    if (isOrderedScan(leaf))
+                    {
+                        orderedScan = leaf;
+                        break;
+                    }
+                }
                 if (orderedScan == null)
                     return plan; // already filter-then-sort; nothing to do
                 Plan.KeysSort keysSort = planFactory.sortForced(whereKeysPlan, orderer);
