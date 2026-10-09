@@ -28,6 +28,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -110,9 +111,10 @@ public class ReadTrieMemoryIndexBench extends AbstractTrieMemoryIndexBench
     public long stringEqualityBenchmark()
     {
         long size = 0;
+        QueryContext queryContext = new QueryContext();
         for (int i = 0; i < NUMBER_OF_SEARCHES; i++)
         {
-            stringIndex.search(stringEqualityExpressions[i], ALL_DATA_RANGE);
+            stringIndex.search(queryContext, stringEqualityExpressions[i], ALL_DATA_RANGE);
         }
         return size;
     }
@@ -121,9 +123,10 @@ public class ReadTrieMemoryIndexBench extends AbstractTrieMemoryIndexBench
     public long integerEqualityBenchmark()
     {
         long size = 0;
+        QueryContext queryContext = new QueryContext();
         for (int i = 0; i < NUMBER_OF_SEARCHES; i++)
         {
-            integerIndex.search(integerEqualityExpressions[i], ALL_DATA_RANGE);
+            integerIndex.search(queryContext, integerEqualityExpressions[i], ALL_DATA_RANGE);
         }
         return size;
     }
@@ -132,9 +135,10 @@ public class ReadTrieMemoryIndexBench extends AbstractTrieMemoryIndexBench
     public long integerRangeBenchmark()
     {
         long size = 0;
+        QueryContext queryContext = new QueryContext();
         for (int i = 0; i < NUMBER_OF_SEARCHES; i++)
         {
-            integerIndex.search(integerRangeExpressions[i], ALL_DATA_RANGE);
+            integerIndex.search(queryContext, integerRangeExpressions[i], ALL_DATA_RANGE);
         }
         return size;
     }

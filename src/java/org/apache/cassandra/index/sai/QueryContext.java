@@ -29,6 +29,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.utils.MonotonicClock;
 
 import static java.lang.Math.max;
@@ -123,6 +124,9 @@ public class QueryContext
     // Determines the order of using indexes for filtering and sorting.
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
+
+    // The per-query automaton expansions budget, created lazily on the first automaton intersection of the query.
+    private AutomatonQueries.ExpansionsBudget automatonExpansionsBudget;
 
     /** Metrics about the query plan. */
     private PlanInfo queryPlanInfo;
@@ -263,6 +267,21 @@ public class QueryContext
     {
         checkThreadOwnership();
         postFilteringReadLatency += val;
+    }
+
+    /**
+     * The PER-QUERY budget of dictionary/trie terms all automaton (non-prefix LIKE) intersections of this query
+     * may visit in total, across every sstable index segment and memtable index shard they touch. It is
+     * initialized lazily from {@link AutomatonQueries#maxAutomatonExpansions()} on the first automaton
+     * intersection of the query, so the cap does not scale with the number of segments and the guardrail outcome
+     * does not depend on compaction state. Multiple automaton predicates in one query share the budget.
+     */
+    public AutomatonQueries.ExpansionsBudget automatonExpansionsBudget()
+    {
+        checkThreadOwnership();
+        if (automatonExpansionsBudget == null)
+            automatonExpansionsBudget = new AutomatonQueries.ExpansionsBudget(AutomatonQueries.maxAutomatonExpansions());
+        return automatonExpansionsBudget;
     }
 
     /**
