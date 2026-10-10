@@ -213,6 +213,15 @@ public abstract class AbstractTrieMemtable extends AbstractShardedMemtable
     }
 
     @Override
+    public void writeComplete()
+    {
+        super.writeComplete();
+
+        for (AbstractMemtableShard<?, ?> shard : getShards())
+            shard.data.stopRecycling();
+    }
+
+    @Override
     public void discard()
     {
         super.discard();
