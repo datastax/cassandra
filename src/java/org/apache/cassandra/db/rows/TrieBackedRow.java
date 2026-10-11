@@ -1066,6 +1066,64 @@ public class TrieBackedRow extends AbstractRow
         return new TrieBackedRow(columns, columnIds, cloner.clone(clustering), livenessInfo, deletion, minLocalDeletionTime, newTrie);
     }
 
+    /// Materializes the given row branch of a trie (e.g. a memtable row) directly as a [BTreeRow], cloning every cell
+    /// with the given cloner.
+    ///
+    /// The result has the same content as `BTreeRow.asBTreeRow(TrieBackedRow.create(metadata, clustering, data).clone(cloner))`,
+    /// but is made with a single walk over the trie and without building an intermediate trie. It is meant for the
+    /// memtable read path, where the returned row must not reference memtable memory and is usually converted to a
+    /// [BTreeRow] anyway. Unlike `clone`, the clustering is used as given: it must not reference memory that may be
+    /// recycled.
+    public static BTreeRow toBTreeRow(TableMetadata metadata,
+                                      Clustering<?> clustering,
+                                      DeletionAwareTrie<Object, TrieTombstoneMarker> data,
+                                      Cloner cloner)
+    {
+        // Same row deletion as computed by create(), as a plain DeletionTime rather than the trie's marker state.
+        TrieTombstoneMarker deletionRoot = data.deletionAtRoot();
+        TrieTombstoneMarker.Covering rowDeletionTime = deletionRoot != null ? deletionRoot.applicableToPointForward() : null;
+        Deletion deletion = rowDeletionTime != null
+                            ? Deletion.regular(DeletionTime.build(rowDeletionTime.markedForDeleteAt(), rowDeletionTime.localDeletionTime()))
+                            : Deletion.LIVE;
+        return toBTreeRow(metadata, clustering, data, getLivenessInfo(data), deletion, cloner);
+    }
+
+    /// Version of [#toBTreeRow(TableMetadata, Clustering, DeletionAwareTrie, Cloner)] for callers that already know the
+    /// row's liveness info and deletion.
+    public static BTreeRow toBTreeRow(TableMetadata metadata,
+                                      Clustering<?> clustering,
+                                      DeletionAwareTrie<Object, TrieTombstoneMarker> data,
+                                      LivenessInfo livenessInfo,
+                                      Deletion deletion,
+                                      Cloner cloner)
+    {
+        Columns columns = metadata.regularAndStaticColumns().columns(clustering == Clustering.STATIC_CLUSTERING);
+        BTreeRow.Builder builder = BTreeRow.sortedBuilder();
+        builder.newRow(clustering);
+        builder.addPrimaryKeyLivenessInfo(livenessInfo);
+        if (!deletion.isLive())
+            builder.addRowDeletion(deletion);
+
+        for (Iterator<ColumnData> it = new ColumnDataIterator(columns, data, Direction.FORWARD); it.hasNext(); )
+        {
+            ColumnData cd = it.next();
+            if (cd instanceof Cell<?>)
+            {
+                builder.addCell(((Cell<?>) cd).clone(cloner));
+            }
+            else
+            {
+                ComplexColumnData ccd = (ComplexColumnData) cd;
+                DeletionTime complexDeletion = ccd.complexDeletion();
+                if (!complexDeletion.isLive())
+                    builder.addComplexDeletion(ccd.column, complexDeletion);
+                for (Cell<?> cell : ccd)
+                    builder.addCell(cell.clone(cloner));
+            }
+        }
+        return builder.build();
+    }
+
     // TODO: Redo size collection to be more direct.
 
     @Override

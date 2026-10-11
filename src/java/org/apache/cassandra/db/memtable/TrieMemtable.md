@@ -227,6 +227,12 @@ and then walking the combination of the live and deletion trie to find:
   take the tail trie and wrap it into a `TrieBackedRow`, or
 - deletion boundaries, which we map into the corresponding `RangeTombstoneBound(ary)`.
 
+When the bounds select individual rows (e.g. a read by full primary key, which is how SAI fetches the rows
+it matched) and the partition has no deletion branch, the partition contains no deletions at all, because
+in the memtable trie all deletion branches split at the partition root (see the example below). The
+intersection could then only return rows, so we skip it and look up each requested row directly. Code that
+writes to the memtable trie must preserve this property, as this shortcut relies on it.
+
 [^4]: Inclusivity does not matter for this because clustering bounds do not match row clustering keys; they
 include a component that adjusts them to be just before or just after a row key.
 
@@ -642,8 +648,10 @@ replicas and it has to wait for responses from other nodes. As it is not a good 
 long periods that such responses can require, we need a different way to ensure that such data is alive.
 
 The latter problem is solved by copying data to on-heap objects for temporary storage before it is given
-to the coordination layer to keep. This has a pretty high overhead and will likely be replaced with trie
-serialization in later stages of the work on trie-based interfaces.
+to the coordination layer to keep. Reads copy every row they return directly into an on-heap `BTreeRow`,
+which is also the row type the read path converts memtable rows to (e.g. in `ImmutableBTreePartition`).
+This copy will likely be replaced with trie serialization in later stages of the work on trie-based
+interfaces.
 
 ### Unfiltered and filtered row iterators
 
