@@ -37,13 +37,18 @@ public class GossipShutdown
         this.state = state;
     }
 
+    /**
+     * The {@link EndpointState} payload exists only on 5.0-family messaging versions. Older peers, including HCD 1.x nodes
+     * that negotiate the DS 4.0 versions ({@link MessagingService#VERSION_DS_10} .. {@link MessagingService#VERSION_DS_12}),
+     * neither send nor expect it.
+     */
     public static final class Serializer implements IVersionedSerializer<Object>
     {
 
         @Override
         public void serialize(Object t, DataOutputPlus out, int version) throws IOException
         {
-            if (version < MessagingService.VERSION_50) return;
+            if (!MessagingService.isVersion50OrLater(version)) return;
             GossipShutdown shutdown = (GossipShutdown) t;
             EndpointState.serializer.serialize(shutdown.state, out, version);
         }
@@ -52,14 +57,14 @@ public class GossipShutdown
         @Override
         public Object deserialize(DataInputPlus in, int version) throws IOException
         {
-            if (version < MessagingService.VERSION_50) return null;
+            if (!MessagingService.isVersion50OrLater(version)) return null;
             return new GossipShutdown(EndpointState.serializer.deserialize(in, version));
         }
 
         @Override
         public long serializedSize(Object t, int version)
         {
-            if (version < MessagingService.VERSION_50) return 0;
+            if (!MessagingService.isVersion50OrLater(version)) return 0;
             GossipShutdown shutdown = (GossipShutdown) t;
             return EndpointState.serializer.serializedSize(shutdown.state, version);
         }

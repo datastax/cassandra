@@ -55,6 +55,45 @@ public class GossipShutdownTest
         Assertions.assertThat(serde(Message.out(Verb.GOSSIP_SHUTDOWN, NoPayload.noPayload), BEFORE_CHANGE)).isNull();
     }
 
+    /**
+     * HCD-621: the DS 4.0 versions (100..102) are numerically above {@link MessagingService#VERSION_50} but are spoken by
+     * HCD 1.x nodes, which never write the {@link EndpointState} payload.
+     */
+    @Test
+    public void mixedModeWithDataStaxVersions() throws IOException
+    {
+        Message<GossipShutdown> message = Message.out(Verb.GOSSIP_SHUTDOWN, new GossipShutdown(new EndpointState(HeartBeatState.empty())));
+
+        for (int version : new int[]{ MessagingService.VERSION_DS_10, MessagingService.VERSION_DS_11, MessagingService.VERSION_DS_12 })
+        {
+            Assertions.assertThat(GossipShutdown.serializer.serializedSize(message.payload, version)).as("version %d", version).isZero();
+            Assertions.assertThat(serde(message, version)).as("version %d", version).isNull();
+            // got from an HCD 1.x peer: no payload at all
+            Assertions.assertThat(serde(Message.out(Verb.GOSSIP_SHUTDOWN, NoPayload.noPayload), version)).as("version %d", version).isNull();
+        }
+
+        Assertions.assertThat(serde(message, MessagingService.VERSION_DS_20)).isInstanceOf(GossipShutdown.class);
+    }
+
+    @Test
+    public void isVersion50OrLater()
+    {
+        for (MessagingService.Version version : MessagingService.Version.values())
+        {
+            boolean expected;
+            switch (version)
+            {
+                case VERSION_50:
+                case VERSION_DS_20:
+                    expected = true;
+                    break;
+                default:
+                    expected = false;
+            }
+            Assertions.assertThat(MessagingService.isVersion50OrLater(version.value)).as(version.name()).isEqualTo(expected);
+        }
+    }
+
     private Object serde(Message<?> message, int version) throws IOException
     {
         try (DataOutputBuffer out = DataOutputBuffer.scratchBuffer.get())
