@@ -239,6 +239,65 @@ public abstract class CommitLogTest
         testKiller.reset();
     }
 
+
+    /**
+     * Regression test for HCD-619: when TDE is enabled, commitlog_disk_access_mode=legacy must resolve to
+     * standard (not mmap). This requires initializeCommitLogDiskAccessMode() to run after the encryption
+     * context has been initialised.
+     */
+    @Test
+    public void testCommitLogDiskAccessModeResolvesStandardWithLegacyAndTDE() throws Exception
+    {
+        // Save the raw configured value (not the resolved one) so that restore leaves conf in a
+        // consistent state for subsequent parameterized constructor invocations.
+        Config.DiskAccessMode savedRawMode = DatabaseDescriptor.getRawConfig().commitlog_disk_access_mode;
+        EncryptionContext savedContext = DatabaseDescriptor.getEncryptionContext();
+        try
+        {
+            DatabaseDescriptor.setCommitLogWriteDiskAccessMode(Config.DiskAccessMode.legacy);
+            DatabaseDescriptor.setEncryptionContext(newEncryptionContext());
+            DatabaseDescriptor.initializeCommitLogDiskAccessMode();
+            assertEquals("legacy + TDE must resolve to standard",
+                         Config.DiskAccessMode.standard,
+                         DatabaseDescriptor.getCommitLogWriteDiskAccessMode());
+        }
+        finally
+        {
+            // Restore encryption context first, then the raw configured mode.
+            DatabaseDescriptor.setEncryptionContext(savedContext);
+            DatabaseDescriptor.setCommitLogWriteDiskAccessMode(savedRawMode);
+        }
+    }
+
+    /**
+     * Regression test for HCD-619: when TDE is enabled, commitlog_disk_access_mode=auto must also resolve
+     * to standard (not mmap). Same root cause as the legacy case.
+     */
+    @Test
+    public void testCommitLogDiskAccessModeResolvesStandardWithAutoAndTDE() throws Exception
+    {
+        // Save the raw configured value (not the resolved one) so that restore leaves conf in a
+        // consistent state for subsequent parameterized constructor invocations.
+        Config.DiskAccessMode savedRawMode = DatabaseDescriptor.getRawConfig().commitlog_disk_access_mode;
+        EncryptionContext savedContext = DatabaseDescriptor.getEncryptionContext();
+        try
+        {
+            DatabaseDescriptor.setCommitLogWriteDiskAccessMode(Config.DiskAccessMode.auto);
+            DatabaseDescriptor.setEncryptionContext(newEncryptionContext());
+            DatabaseDescriptor.initializeCommitLogDiskAccessMode();
+            assertEquals("auto + TDE must resolve to standard",
+                         Config.DiskAccessMode.standard,
+                         DatabaseDescriptor.getCommitLogWriteDiskAccessMode());
+        }
+        finally
+        {
+            // Restore encryption context first, then the raw configured mode.
+            DatabaseDescriptor.setEncryptionContext(savedContext);
+            DatabaseDescriptor.setCommitLogWriteDiskAccessMode(savedRawMode);
+        }
+    }
+
+
     @Test
     public void testRecoveryWithEmptyLog() throws Exception
     {
