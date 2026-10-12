@@ -44,11 +44,9 @@ import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
-import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JsonUtils;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 
@@ -161,7 +159,7 @@ public class IndexStatusManager
             if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
                 return;
 
-            Map<String, Index.Status> indexStatusMap = statusMapFromString(versionedValue);
+            Map<String, Index.Status> indexStatusMap = IndexStatusFormat.fromSerializedFormat(versionedValue.value);
 
             Map<String, Index.Status> oldStatus = peerIndexStatus.put(endpoint, indexStatusMap);
             Map<String, Index.Status> updated = updatedIndexStatuses(oldStatus, indexStatusMap);
@@ -174,42 +172,6 @@ public class IndexStatusManager
         {
             logger.error("Unable to parse index status: {}", e.getMessage());
         }
-    }
-
-    private Map<String, Index.Status> statusMapFromString(VersionedValue versionedValue)
-    {
-        Map<String, Object> peerStatus = JsonUtils.fromJsonMap(versionedValue.value);
-        Map<String, Index.Status> indexStatusMap = new HashMap<>();
-
-        for (Map.Entry<String, Object> endpointStatus : peerStatus.entrySet())
-        {
-            String keyspaceOrIndex = endpointStatus.getKey();
-            Object keyspaceOrIndexStatus = endpointStatus.getValue();
-
-            if (keyspaceOrIndexStatus instanceof String)
-            {
-                // This is the legacy format: (fully qualified index name -> enum string)
-                Index.Status status = Index.Status.valueOf(keyspaceOrIndexStatus.toString());
-                indexStatusMap.put(keyspaceOrIndex, status);
-            }
-            else if (keyspaceOrIndexStatus instanceof Map)
-            {
-                // This is the new format. (keyspace -> (index -> numeric enum code)) 
-                @SuppressWarnings("unchecked") 
-                Map<String, Integer> keyspaceIndexStatusMap = (Map<String, Integer>) keyspaceOrIndexStatus;
-
-                for (Map.Entry<String, Integer> indexStatus : keyspaceIndexStatusMap.entrySet())
-                {
-                    Index.Status status = Index.Status.fromCode(indexStatus.getValue());
-                    indexStatusMap.put(identifier(keyspaceOrIndex, indexStatus.getKey()), status);
-                }
-            }
-            else
-            {
-                throw new MarshalException("Invalid index status format: " + endpointStatus);
-            }
-        }
-        return indexStatusMap;
     }
 
     /**
@@ -242,8 +204,8 @@ public class IndexStatusManager
                 // and writes full status names instead of their numeric codes. If the minimum cluster version is
                 // unknown or one of those 3 versions, continue to propagate the old format.
                 CassandraVersion minVersion = Gossiper.instance.getMinVersion();
-                String newSerializedStatusMap = shouldWriteLegacyStatusFormat(minVersion) ? JsonUtils.writeAsJsonString(statusMap) 
-                                                                                          : toSerializedFormat(statusMap);
+                String newSerializedStatusMap = shouldWriteLegacyStatusFormat(minVersion) ? IndexStatusFormat.toLegacySerializedFormat(statusMap)
+                                                                                          : IndexStatusFormat.toSerializedFormat(statusMap);
 
                 statusPropagationExecutor.submit(() -> {
                     // schedule gossiper update asynchronously to avoid potential deadlock when another thread is holding
@@ -265,39 +227,6 @@ public class IndexStatusManager
             return false;
 
         return minVersion == null || (minVersion.major == 5 && minVersion.minor == 0 && minVersion.patch < 3);
-    }
-
-    /**
-     * Serializes as a JSON string the status of the indexes in the provided map.
-     * <p> 
-     * For example, the map...
-     * <pre>
-     * {
-     *     ks1.cf1_idx1=FULL_REBUILD_STARTED,
-     *     ks1.cf1_idx2=FULL_REBUILD_STARTED,
-     *     system.PaxosUncommittedIndex=BUILD_SUCCEEDED
-     * }
-     * </pre>
-     * ...will be converted to the string...
-     * <pre>
-     * {
-     *     "system": {"PaxosUncommittedIndex": 3},
-     *     "ks1": {"cf1_idx1": 1, "cf1_idx2": 1}
-     * }
-     * </pre>
-     */
-    public static String toSerializedFormat(Map<String, Index.Status> indexStatusMap)
-    {
-        Map<String, Map<String, Integer>> serialized = new HashMap<>();
-
-        for (Map.Entry<String, Index.Status> e : indexStatusMap.entrySet())
-        {
-            String[] keyspaceAndIndex = e.getKey().split("\\.");
-            serialized.computeIfAbsent(keyspaceAndIndex[0], ignore -> new HashMap<>())
-                      .put(keyspaceAndIndex[1], e.getValue().code);
-        }
-
-        return JsonUtils.writeAsJsonString(serialized);
     }
 
     @VisibleForTesting
