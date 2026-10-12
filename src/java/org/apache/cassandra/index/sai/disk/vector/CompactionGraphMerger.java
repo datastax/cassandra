@@ -23,7 +23,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -196,45 +195,56 @@ public class CompactionGraphMerger
         boolean hasFusedPQ = validateFeatureSets(sources.stream().map(SourceSegment::graph).collect(toList()));
 
         // --- Step 1: ordinal remapping from the surviving bitsets — pure CPU, no vector I/O.
-        // Output ordinals are packed source-major in ascending node order, matching the
-        // ingest-time handle space. The pre-scan this replaces read every source node's
-        // full-precision vector; it no longer exists, so the ProgressLimiter is live from the
-        // compactor's first phase.
+        // Output ordinals are assigned in ascending node-id order across all sources in parallel,
+        // so that the output ordinal sequence mirrors the natural row order of the output SSTable.
+        // For each node-id value (from 0 up to the largest id upper-bound), we visit every source
+        // in turn and assign the next output ordinal to whichever source has that bit set. This
+        // produces a ONE_TO_ONE-compatible ordering: a source node with local id N gets a lower
+        // output ordinal than any source node with local id M > N, regardless of which source it
+        // came from. The pre-scan this replaces read every source node's full-precision vector;
+        // it no longer exists, so the ProgressLimiter is live from the compactor's first phase.
         var liveNodes = new ArrayList<FixedBitSet>(sources.size());
         var remappers = new ArrayList<OrdinalMapper>(sources.size());
 
-        // Parallel arrays: output global ordinal g → source index and local node ID.
-        var globalSrcIdxList = new ArrayList<Integer>();
-        var globalNodeIdList = new ArrayList<Integer>();
         int totalGlobalOrdinals;
-        int[] globalToSrcIdx;
-        int[] globalToNodeId;
 
         try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
                 VectorCompactionMetrics.Phase.ORDINAL_REMAP, perIndexComponents.context()))
         {
+            // Pre-build the FixedBitSets and per-source oldToNew maps; fill them in a single
+            // node-id-major pass so output ordinals respect the natural ascending node-id order.
+            var oldToNewMaps = new ArrayList<HashMap<Integer, Integer>>(sources.size());
+            int maxIdBound = 0;
             for (int s = 0; s < sources.size(); s++)
             {
                 int idBound = sources.get(s).graph().getIdUpperBound();
-                var bs = new FixedBitSet(idBound);
-                var oldToNew = new HashMap<Integer, Integer>();
-                for (int nid = surviving[s].nextSetBit(0); nid >= 0; nid = surviving[s].nextSetBit(nid + 1))
-                {
-                    bs.set(nid);
-                    oldToNew.put(nid, globalSrcIdxList.size());
-                    globalSrcIdxList.add(s);
-                    globalNodeIdList.add(nid);
-                }
-                liveNodes.add(bs);
-                remappers.add(new OrdinalMapper.MapMapper(oldToNew));
+                liveNodes.add(new FixedBitSet(idBound));
+                oldToNewMaps.add(new HashMap<>());
+                maxIdBound = Math.max(maxIdBound, idBound);
             }
 
-            totalGlobalOrdinals = globalSrcIdxList.size();
+            int nextOrdinal = 0;
+            for (int nodeId = 0; nodeId < maxIdBound; nodeId++)
+            {
+                for (int s = 0; s < sources.size(); s++)
+                {
+                    if (surviving[s].get(nodeId))
+                    {
+                        liveNodes.get(s).set(nodeId);
+                        oldToNewMaps.get(s).put(nodeId, nextOrdinal++);
+                    }
+                }
+            }
+
+            for (int s = 0; s < sources.size(); s++)
+                remappers.add(new OrdinalMapper.MapMapper(oldToNewMaps.get(s)));
+
+            totalGlobalOrdinals = nextOrdinal;
             if (totalGlobalOrdinals == 0)
                 throw new IllegalStateException("CompactionGraphMerger: no surviving nodes found across all source segments; all rows may have been deleted");
 
-            globalToSrcIdx = globalSrcIdxList.stream().mapToInt(Integer::intValue).toArray();
-            globalToNodeId = globalNodeIdList.stream().mapToInt(Integer::intValue).toArray();
+            for (int s = 0; s < sources.size(); s++)
+                logger.info("**** Ordinal mapping source {}: {}", s, oldToNewMaps.get(s));
         }
 
         // --- Step 2: jvector writes the compacted graph body directly into the SAI TERMS_DATA
@@ -340,71 +350,31 @@ public class CompactionGraphMerger
             throw new IllegalStateException("CompactionGraphMerger: jvector returned without committing the " +
                                             "reserved TERMS_DATA region; refusing to publish an unattested body");
 
-        // --- Step 2b: adopt the ordinal mapping jvector ACTUALLY used.
+        // --- Step 2b: use the ordinal mapping jvector ACTUALLY used.
         //
-        // The remappers passed to the constructor are a PROPOSAL. When the compactor assigns
-        // ordinals itself -- setSimilarityOrdinals(true), i.e. numbering nodes in vector
-        // similarity order -- it "ignores the ordinal values of the caller-supplied remappers
-        // (their source/oldOrdinal structure is still used to enumerate nodes)". The mapping on
-        // disk is then whatever effectiveRemappers() reports.
-        //
-        // globalToSrcIdx/globalToNodeId are indexed BY MERGED ORDINAL and are what the postings
-        // writer below resolves through, so they must be rebuilt from the effective mapping or
-        // every row binds to the wrong vector. That failure is silent: the "could not be joined
-        // to a source graph ordinal" guard in SegmentBuilder catches rows with NO source ordinal,
-        // not rows mapped to the WRONG one, so the only symptom would be bad recall.
-        //
-        // When the compactor keeps the caller's ordinals, effectiveRemappers() returns exactly
-        // those, and this rebuild reproduces the arrays byte-for-byte -- so it is unconditional
-        // rather than gated on a flag that would then have to be kept in sync.
-        final int[] effGlobalToSrcIdx;
-        final int[] effGlobalToNodeId;
+        // The remappers passed to the constructor are a PROPOSAL. A compactor that assigns ordinals
+        // itself (e.g. numbering nodes in vector similarity order) ignores their new-ordinal values,
+        // and the mapping on disk is then whatever effectiveRemappers() reports. The postings below
+        // are resolved through these effective mappers, so rows bind to the right vectors either way.
+        // Binding to the wrong vector is silent -- the "could not be joined to a source graph
+        // ordinal" guard in SegmentBuilder only catches rows with NO source ordinal.
+        List<OrdinalMapper> effective = compactor.effectiveRemappers();
+        if (effective == null)
+            effective = remappers;
+        if (effective.size() != sources.size())
+            throw new IllegalStateException("CompactionGraphMerger: effectiveRemappers() returned " +
+                                            effective.size() + " mappers for " + sources.size() + " sources");
+        // A compactor that keeps the caller's ordinals returns the very same mapper instances, so a
+        // reference comparison is enough. ONE_TO_ONE / ONE_TO_MANY postings require the proposed
+        // ordinals; when reordered they must stay ZERO_OR_ONE_TO_MANY.
+        boolean reordered = !sameMappers(effective, remappers);
+        logger.info("Vector graph merge: {} ordinals ({})",
+                    totalGlobalOrdinals, reordered ? "REORDERED by the compactor" : "unchanged from caller proposal");
+        try (var rs = ReaderSupplierFactory.open(termsFile);
+             var outputGraph = OnDiskGraphIndex.load(rs, termsOffset))
         {
-            List<OrdinalMapper> effective = compactor.effectiveRemappers();
-            if (effective == null)
-                effective = remappers;
-            if (effective.size() != sources.size())
-                throw new IllegalStateException("CompactionGraphMerger: effectiveRemappers() returned " +
-                                                effective.size() + " mappers for " + sources.size() + " sources");
-
-            int[] newSrcIdx = new int[totalGlobalOrdinals];
-            int[] newNodeId = new int[totalGlobalOrdinals];
-            // Sentinel so an unfilled slot is detectable; -1 is not a valid source index.
-            Arrays.fill(newSrcIdx, -1);
-
-            for (int s = 0; s < sources.size(); s++)
-            {
-                OrdinalMapper mapper = effective.get(s);
-                for (int nid = surviving[s].nextSetBit(0); nid >= 0; nid = surviving[s].nextSetBit(nid + 1))
-                {
-                    int merged = mapper.oldToNew(nid);
-                    if (merged < 0 || merged >= totalGlobalOrdinals)
-                        throw new IllegalStateException(String.format(
-                                "CompactionGraphMerger: effective mapping put source %d node %d at merged ordinal %d, " +
-                                "outside [0,%d)", s, nid, merged, totalGlobalOrdinals));
-                    if (newSrcIdx[merged] != -1)
-                        throw new IllegalStateException(String.format(
-                                "CompactionGraphMerger: merged ordinal %d claimed twice (source %d node %d and source %d node %d)",
-                                merged, newSrcIdx[merged], newNodeId[merged], s, nid));
-                    newSrcIdx[merged] = s;
-                    newNodeId[merged] = nid;
-                }
-            }
-            // A gap means some merged ordinal has no row behind it, which would publish an index
-            // with unattributed vectors. Fail the compaction rather than the query.
-            for (int g = 0; g < totalGlobalOrdinals; g++)
-            {
-                if (newSrcIdx[g] == -1)
-                    throw new IllegalStateException("CompactionGraphMerger: merged ordinal " + g +
-                                                    " of " + totalGlobalOrdinals + " was never assigned by the " +
-                                                    "effective mapping; refusing to publish");
-            }
-
-            boolean reordered = !Arrays.equals(newSrcIdx, globalToSrcIdx) || !Arrays.equals(newNodeId, globalToNodeId);
-            effGlobalToSrcIdx = newSrcIdx;
-            effGlobalToNodeId = newNodeId;
-            logger.info("Vector graph merge: adopted effective ordinal mapping for {} ordinals ({})",
-                        totalGlobalOrdinals, reordered ? "REORDERED by the compactor" : "unchanged from caller proposal");
+            logger.info("**** Output graph size at level 0: {} nodes (idUpperBound {}), expected {} surviving ordinals",
+                        outputGraph.size(0), outputGraph.getIdUpperBound(), totalGlobalOrdinals);
         }
 
         // When FUSED_PQ is in use, the compactor retrains the PQ codebook and embeds it in the
@@ -495,8 +465,9 @@ public class CompactionGraphMerger
                                               null, null,
                                               ordinalMapper);
 
+                final List<OrdinalMapper> effectiveMappers = effective;
                 java.util.function.IntFunction<CompactionVectorPostings> postingsByNewOrdinal =
-                        g -> postingsMap.get(ordinalBase[effGlobalToSrcIdx[g]] + (long) effGlobalToNodeId[g]);
+                        g -> postingsMap.get(handleForMergedOrdinal(effectiveMappers, ordinalBase, g));
                 if (V5OnDiskFormat.writeV5VectorPostings(version))
                 {
                     new V5VectorPostingsWriter<Integer>(rp)
@@ -515,6 +486,53 @@ public class CompactionGraphMerger
                                                               pqOffset, pqLength);
             }
         }
+    }
+
+    /**
+     * Returns the postings-map key (global ordinal handle, {@code ordinalBase[source] + nodeId}) of
+     * the source node that ended up at merged ordinal {@code mergedOrdinal}.
+     *
+     * <p>Merged ordinals are unique across sources, so exactly one source's mapper owns each one;
+     * the others return {@link OrdinalMapper#OMITTED} from {@code newToOld}. O(sources) per call.
+     *
+     * @throws IllegalStateException if no source, or more than one source, claims the ordinal;
+     *                               publishing either would bind the row to a missing or wrong vector
+     */
+    static long handleForMergedOrdinal(List<OrdinalMapper> effective, long[] ordinalBase, int mergedOrdinal)
+    {
+        int owner = -1;
+        int nodeId = OrdinalMapper.OMITTED;
+        for (int s = 0; s < effective.size(); s++)
+        {
+            int old = effective.get(s).newToOld(mergedOrdinal);
+            if (old == OrdinalMapper.OMITTED)
+                continue;
+            if (owner != -1)
+                throw new IllegalStateException(String.format(
+                        "CompactionGraphMerger: merged ordinal %d claimed twice (source %d node %d and source %d node %d)",
+                        mergedOrdinal, owner, nodeId, s, old));
+            owner = s;
+            nodeId = old;
+        }
+        if (owner == -1)
+            throw new IllegalStateException("CompactionGraphMerger: merged ordinal " + mergedOrdinal +
+                                            " was never assigned by the effective mapping; refusing to publish");
+        return ordinalBase[owner] + nodeId;
+    }
+
+    /** True when both lists hold the same mapper instances in the same order. Reference comparison only. */
+    private static boolean sameMappers(List<OrdinalMapper> a, List<OrdinalMapper> b)
+    {
+        if (a == b)
+            return true;
+        if (a.size() != b.size())
+            return false;
+        for (int i = 0; i < a.size(); i++)
+        {
+            if (a.get(i) != b.get(i))
+                return false;
+        }
+        return true;
     }
 
     /**
