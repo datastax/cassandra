@@ -18,6 +18,7 @@
 package org.apache.cassandra.exceptions;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -61,7 +62,14 @@ public class RequestFailureException extends RequestExecutionException
         StringBuilder sb = new StringBuilder("Operation failed - ");
         sb.append(msg);
         if (failures != null && !failures.isEmpty())
+        {
             sb.append(": ").append(buildFailureString(failures));
+            failures.values().stream()
+                    .distinct()
+                    .map(RequestFailureReason::hint)
+                    .filter(Objects::nonNull)
+                    .forEach(hint -> sb.append(" (").append(hint).append(')'));
+        }
         return sb.toString();
     }
 }
