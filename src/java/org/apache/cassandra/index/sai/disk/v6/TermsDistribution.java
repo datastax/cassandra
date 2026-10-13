@@ -258,10 +258,29 @@ public class TermsDistribution
     }
 
     /**
+     * The number of leading bytes of the byte-comparable representation of a non-number term that
+     * {@link #toBigDecimal(ByteComparable, AbstractType, Version, ByteComparable.Version)} takes into account: terms
+     * differing only after them convert to the same value.
+     */
+    public static final int NON_NUMBER_RESOLUTION_BYTES = 20;
+
+    /**
+     * Returns the given term prefix truncated to the first {@link #NON_NUMBER_RESOLUTION_BYTES} bytes, or the prefix
+     * itself if it is not longer. The range of the terms starting with a longer prefix converts to a single
+     * {@link BigDecimal} value, so it can't be interpolated, while the range of the terms starting with its truncation
+     * is a superset of it that can.
+     */
+    public static byte[] resolvablePrefix(byte[] prefix)
+    {
+        return prefix.length <= NON_NUMBER_RESOLUTION_BYTES ? prefix : Arrays.copyOf(prefix, NON_NUMBER_RESOLUTION_BYTES);
+    }
+
+    /**
      * Converts the term value stored in the index to a big decimal value. Preserves order.
      * If the type represents a number, the correspondence is linear.
      * For non-number types, it reinterprets a bytecomparable serialization as a number,
-     * so it is not necessarily linear, but still preserves the order.
+     * so it is not necessarily linear, but still preserves the order; only the first
+     * {@link #NON_NUMBER_RESOLUTION_BYTES} bytes are taken into account.
      */
     public static BigDecimal toBigDecimal(ByteComparable value,
                                           AbstractType<?> termType,
@@ -279,7 +298,7 @@ public class TermsDistribution
 
         // For non numbers we just reinterpret the bytecomparable representation as decimal of fixed width.
         // Therefore, we don't need to decode anything.
-        byte[] fixedLengthBytes = Arrays.copyOf(ByteSourceInverse.readBytes(value.asComparableBytes(byteComparableVersion)), 20);
+        byte[] fixedLengthBytes = Arrays.copyOf(ByteSourceInverse.readBytes(value.asComparableBytes(byteComparableVersion)), NON_NUMBER_RESOLUTION_BYTES);
         // Flip the first bit to get a correct order for negative values,
         // because the first bit is interpreted by BigInteger as a sign bit, but bytecomparable interpret all byts as unsigned.
         // By flipping it, we correctly get values starting with 0 bit smaller than the ones starting with 1.

@@ -68,8 +68,57 @@ using the provided 'sstableupgrade' tool.
 5.0.9
 =====
 
+New features
+------------
+    - Storage-attached indexes (SAI) on non-tokenized string columns now serve every CQL LIKE variant:
+      LIKE '<prefix>%' as a bounded scan of the sorted terms dictionary, and LIKE '%<term>', LIKE '%<term>%',
+      patterns with an inner '%' such as LIKE '<a>%<b>' and the wildcard-free LIKE '<term>' by intersecting a
+      compiled pattern automaton with the terms dictionaries. This includes string clustering columns in
+      descending order. A LIKE restriction on the column a query is ordered by (ORDER BY) restricts the ordering
+      scans of the index to the terms the pattern can match. No index rebuild or on-disk format change is
+      required. LIKE values whose characters other than '%' are larger than the maximum size of the terms of the
+      index (cassandra.sai.max_string_term_size_kb, or cassandra.sai.max_analyzed_size_kb for case-insensitive,
+      normalized or ASCII-folding indexes) are rejected.
+    - The number of indexed terms visited to match the patterns served by an automaton (every LIKE variant but
+      LIKE '<prefix>%' and the wildcard-free LIKE '<term>', an exact match, which are not capped) is capped by the
+      cassandra.sai.max_automaton_expansions system property (a positive integer, default 8192). The cap applies
+      to each read command executed on a replica (each page of a paged query and each token-range subrequest of a
+      range read has its own allowance), and a term counts once for each sstable index segment and memtable it is
+      visited in. Ordering scans restricted by such a pattern (see above) count every term they visit in the range
+      of the terms starting with the pattern's literal prefix (the whole dictionary without one), in order and
+      until the query has enough rows; when the query planner instead orders the whole index and filters the rows
+      afterwards, no terms are matched against the pattern and the cap doesn't apply. Reads exceeding the cap fail
+      with the SAI_AUTOMATON_EXPANSIONS_EXCEEDED failure reason (code 505), whose message suggests a more
+      selective pattern; the replica logs the details as a rate-limited warning.
+
 Upgrading
 ---------
+    - LIKE restrictions on SAI-indexed columns must not be used until every node of the cluster runs this version.
+      Coordinators running a previous version keep rejecting them. A coordinator running this version accepts them
+      and ships the read to the replicas as a read on the SAI index, but replicas running a previous version don't
+      support LIKE on their SAI indexes: they execute it without using the index for the LIKE restriction. When
+      the LIKE restriction is the only indexed restriction of the query, such a replica scans all its data in the
+      queried token ranges (possibly timing out the read), and in any case it evaluates the LIKE restriction with
+      the previous filtering semantics: patterns with an inner '%' match only values containing that '%' literally
+      (see below), and a wildcard-free LIKE '<term>' matches every value containing the term. The results of such
+      reads may therefore miss matching rows or include non-matching ones until the whole cluster is upgraded.
+    - Every '%' of a CQL LIKE pattern is now an any-string wildcard, wherever it appears. Previously only the
+      leading and trailing '%' of a pattern were wildcards when the pattern started or ended with one, so that
+      e.g. LIKE 'a%b%', LIKE '%a%b', LIKE '%a%b%' and LIKE '%%a' matched their inner '%' (and all but one of the
+      leading/trailing ones) as a literal character. Any pattern with an inner '%' is now a generic pattern
+      (the LIKE '<term>' operator, applied to the whole pattern, whose runs of '%' are collapsed into one), and
+      runs of leading/trailing '%' of the other patterns are trimmed; a pattern made only of '%' is rejected as
+      empty, like '%' and '%%' already were. There is still no escape mechanism, and '_' is still a literal
+      character. Custom (non-SAI) index implementations serving LIKE receive such patterns with the generic
+      operator and the whole pattern accordingly.
+    - Filtering (including replica filtering protection) now evaluates the generic LIKE '<term>' operator
+      with proper pattern semantics: every '%' in the pattern is an any-string wildcard, and a pattern without
+      wildcards (a wildcard-free LIKE '<term>') only matches values equal to it. It previously performed a plain
+      'contains' comparison, which treated '%' as a literal character, so that patterns with wildcards could never
+      match during post-filtering, and matched every value containing a wildcard-free pattern. The negated form of
+      the operator (not reachable from CQL) flips accordingly. Custom (non-SAI) index implementations whose
+      results are post-filtered with this operator see the corrected semantics as well; a pattern too complex to
+      be compiled into an automaton then fails the read on the replica with an invalid pattern error.
     - memtable_offheap_space: 0 is now rejected at startup when memtable_allocation_type is
     offheap_buffers or offheap_objects. Set a positive memtable_offheap_space, or an allocation
     type that does not allocate off-heap. See CASSANDRA-21019.

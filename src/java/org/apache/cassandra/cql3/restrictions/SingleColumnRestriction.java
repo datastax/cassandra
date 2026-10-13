@@ -26,6 +26,8 @@ import java.util.Map;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.cql3.MarkerOrTerms;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -39,10 +41,13 @@ import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -972,7 +977,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
     public static final class LikeRestriction extends SingleColumnRestriction
     {
-        private static final ByteBuffer LIKE_WILDCARD = ByteBufferUtil.bytes("%");
+        private static final byte LIKE_WILDCARD = '%';
         private final Operator operator;
         private final Term value;
 
@@ -1018,9 +1023,53 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
             // there must be a suitable INDEX for LIKE_XXX expressions
             RowFilter.SimpleExpression expression = filter.add(columnDef, operation.left, operation.right);
-            indexRegistry.getBestIndexFor(expression, indexHints)
-                         .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
-                                                           expression));
+            Index index = indexRegistry.getBestIndexFor(expression, indexHints)
+                                       .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
+                                                                         expression));
+
+            if (!(index instanceof StorageAttachedIndex))
+                return;
+
+            // SAI doesn't index terms larger than its maximum term size, so it bounds the patterns too: this keeps
+            // oversized patterns away from the replicas and the automaton compile caches. A term matching a pattern
+            // contains at least its non-wildcard characters, which are what the size is checked on (makeSpecific
+            // collapsed the runs of '%', so a pattern is at most about twice that size).
+            int maxTermSize = ((StorageAttachedIndex) index).getIndexContext().getMaxTermSize();
+            int literalSize = sizeWithoutWildcards(operation.right);
+            if (literalSize > maxTermSize)
+                throw invalidRequest("LIKE value on column %s is %s long without its wildcards, which exceeds the maximum size of %s for indexed terms",
+                                     columnDef.name,
+                                     FBUtilities.prettyPrintMemory(literalSize),
+                                     FBUtilities.prettyPrintMemory(maxTermSize));
+
+            // SAI serves the suffix/contains/matches LIKE variants through a compiled automaton (LIKE_PREFIX
+            // keeps its dedicated bounded range scan). Compile (and cache) the automaton eagerly, so a pattern
+            // that is too complex to determinize fails here, at the coordinator, with a clear
+            // InvalidRequestException instead of first compiling on the replicas and surfacing as a request
+            // failure. Gated on the selected index being SAI: a custom index implementation may serve LIKE with
+            // its own pattern semantics, and only meets the automaton engine if its results are post-filtered.
+            if (isAutomatonServedLike(operation.left))
+                AutomatonQueries.forPatternOperator(operation.left, operation.right, columnDef.name);
+        }
+
+        /** The number of bytes of the given pattern that are not {@code '%'} wildcards. */
+        private static int sizeWithoutWildcards(ByteBuffer pattern)
+        {
+            int size = 0;
+            for (int i = pattern.position(); i < pattern.limit(); i++)
+            {
+                if (pattern.get(i) != LIKE_WILDCARD)
+                    size++;
+            }
+            return size;
+        }
+
+        /** The LIKE variants the SAI automaton engine serves (see {@code Expression.Op#valueOf}). */
+        private static boolean isAutomatonServedLike(Operator operator)
+        {
+            return operator == Operator.LIKE_SUFFIX
+                   || operator == Operator.LIKE_CONTAINS
+                   || operator == Operator.LIKE_MATCHES;
         }
 
         @Override
@@ -1053,47 +1102,102 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         /**
          * As the specific subtype of LIKE (LIKE_PREFIX, LIKE_SUFFIX, LIKE_CONTAINS, LIKE_MATCHES) can only be
          * determined by examining the value, which in turn can only be known after binding, all LIKE restrictions
-         * are initially created with the generic LIKE operator. This function takes the bound value, trims the
-         * wildcard '%' chars from it and returns a tuple of the inferred operator subtype and the final value
+         * are initially created with the generic LIKE operator. This function takes the bound value and returns a
+         * tuple of the inferred operator subtype and the value it applies to.
+         * <p>
+         * Every {@code '%'} of a LIKE pattern is a wildcard matching any (possibly empty) character sequence; there
+         * is no escape mechanism and {@code '_'} is a literal character. Runs of leading and trailing wildcards are
+         * trimmed, and the remaining value selects the operator:
+         * <ul>
+         *   <li>a value that still contains a {@code '%'} (an inner wildcard, e.g. {@code 'a%b'}, {@code 'a%b%'},
+         *   {@code '%a%b'} or {@code '%a%b%'}) is a generic pattern: {@link Operator#LIKE_MATCHES} with the whole,
+         *   untrimmed pattern, every {@code '%'} of which is a wildcard, and whose runs of {@code '%'} are collapsed
+         *   into one (a run matches what a single wildcard does);</li>
+         *   <li>otherwise the trimmed value is a literal and leading/trailing wildcards select
+         *   {@link Operator#LIKE_CONTAINS} ({@code '%a%'}), {@link Operator#LIKE_PREFIX} ({@code 'a%'}),
+         *   {@link Operator#LIKE_SUFFIX} ({@code '%a'}) or, without wildcards, the exact match
+         *   {@link Operator#LIKE_MATCHES} ({@code 'a'}).</li>
+         * </ul>
+         * A pattern made only of wildcards (or empty) is rejected.
+         *
          * @param value the bound value for the LIKE operation
-         * @return  Pair containing the inferred LIKE subtype and the value with wildcards removed
+         * @return Pair containing the inferred LIKE subtype and the value it applies to
          */
-        private static Pair<Operator, ByteBuffer> makeSpecific(ByteBuffer value)
+        @VisibleForTesting
+        public static Pair<Operator, ByteBuffer> makeSpecific(ByteBuffer value)
         {
+            int start = value.position();
+            int end = value.limit();
+            int beginIndex = start;
+            while (beginIndex < end && value.get(beginIndex) == LIKE_WILDCARD)
+                beginIndex++;
+            if (beginIndex == end)
+                throw invalidRequest("LIKE value can't be empty.");
+            int endIndex = end;
+            while (value.get(endIndex - 1) == LIKE_WILDCARD)
+                endIndex--;
+
+            boolean leadingWildcard = beginIndex > start;
+            boolean trailingWildcard = endIndex < end;
+            boolean innerWildcard = false;
+            for (int i = beginIndex; i < endIndex && !innerWildcard; i++)
+                innerWildcard = value.get(i) == LIKE_WILDCARD;
+
             Operator operator;
-            int beginIndex = value.position();
-            int endIndex = value.limit() - 1;
-            if (ByteBufferUtil.endsWith(value, LIKE_WILDCARD))
+            ByteBuffer newValue = value.duplicate();
+            if (innerWildcard)
             {
-                if (ByteBufferUtil.startsWith(value, LIKE_WILDCARD))
-                {
-                    operator = Operator.LIKE_CONTAINS;
-                    beginIndex =+ 1;
-                }
-                else
-                {
-                    operator = Operator.LIKE_PREFIX;
-                }
+                // a generic pattern: the operator applies to the whole pattern, every '%' of which is a wildcard
+                return Pair.create(Operator.LIKE_MATCHES, collapseWildcardRuns(newValue));
             }
-            else if (ByteBufferUtil.startsWith(value, LIKE_WILDCARD))
+            else if (leadingWildcard && trailingWildcard)
+            {
+                operator = Operator.LIKE_CONTAINS;
+            }
+            else if (trailingWildcard)
+            {
+                operator = Operator.LIKE_PREFIX;
+            }
+            else if (leadingWildcard)
             {
                 operator = Operator.LIKE_SUFFIX;
-                beginIndex += 1;
-                endIndex += 1;
             }
             else
             {
                 operator = Operator.LIKE_MATCHES;
-                endIndex += 1;
             }
 
-            if (endIndex == 0 || beginIndex == endIndex)
-                throw invalidRequest("LIKE value can't be empty.");
-
-            ByteBuffer newValue = value.duplicate();
             newValue.position(beginIndex);
             newValue.limit(endIndex);
             return Pair.create(operator, newValue);
+        }
+
+        /**
+         * Returns the given pattern with every run of consecutive {@code '%'} replaced by a single one, or the
+         * pattern itself if it has no such run.
+         */
+        private static ByteBuffer collapseWildcardRuns(ByteBuffer pattern)
+        {
+            int start = pattern.position();
+            int end = pattern.limit();
+            int runs = 0;
+            for (int i = start + 1; i < end; i++)
+            {
+                if (pattern.get(i) == LIKE_WILDCARD && pattern.get(i - 1) == LIKE_WILDCARD)
+                    runs++;
+            }
+            if (runs == 0)
+                return pattern;
+
+            ByteBuffer collapsed = ByteBuffer.allocate(end - start - runs);
+            for (int i = start; i < end; i++)
+            {
+                byte b = pattern.get(i);
+                if (b != LIKE_WILDCARD || i == start || pattern.get(i - 1) != LIKE_WILDCARD)
+                    collapsed.put(b);
+            }
+            collapsed.flip();
+            return collapsed;
         }
     }
 
