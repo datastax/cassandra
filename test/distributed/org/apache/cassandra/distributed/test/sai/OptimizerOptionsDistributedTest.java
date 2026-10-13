@@ -16,7 +16,6 @@
 
 package org.apache.cassandra.distributed.test.sai;
 
-import org.junit.After;
 import org.junit.Test;
 
 import net.bytebuddy.ByteBuddy;
@@ -26,6 +25,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICoordinator;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.net.MessagingService;
 import org.assertj.core.api.Assertions;
@@ -47,21 +47,15 @@ public class OptimizerOptionsDistributedTest extends TestBaseImpl
     private static final int RF = 2;
     private static final String UNSUPPORTED_MESSAGE = "SAI optimizer options are not supported in clusters below DS 20.";
 
-    @After
-    public void restoreMessagingVersion()
-    {
-        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.clearValue();
-    }
-
     /**
      * Test that optimizer options are accepted in clusters with all nodes in DS 20.
      */
     @Test
     public void testOptimizerOptionsWithAllDS20() throws Throwable
     {
-        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_20);
-
-        try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
+        try (WithProperties ignored = new WithProperties().set(CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION,
+                                                               MessagingService.VERSION_DS_20);
+             Cluster cluster = init(Cluster.build(NUM_REPLICAS)
                                            .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                                            .start(),
                                     RF))
@@ -77,9 +71,9 @@ public class OptimizerOptionsDistributedTest extends TestBaseImpl
     @Test
     public void testOptimizerOptionsWithAllDS12() throws Throwable
     {
-        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
-
-        try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
+        try (WithProperties ignored = new WithProperties().set(CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION,
+                                                               MessagingService.VERSION_DS_12);
+             Cluster cluster = init(Cluster.build(NUM_REPLICAS)
                                            .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                                            .start(),
                                     RF))
