@@ -172,6 +172,15 @@ public class TrieBackedRowTest
         builder.addComplexDeletion(m, DeletionTime.build(501, now));
         rows.add(builder.build());
 
+        // Row deletion with a newer complex column deletion and newer cells.
+        builder = TrieBackedRow.builder(table.regularColumns());
+        builder.newRow(Util.clustering(table.comparator, 6));
+        builder.addRowDeletion(Row.Deletion.regular(DeletionTime.build(600, now)));
+        builder.addCell(BufferCell.live(a, 601, ByteBufferUtil.bytes(6)));
+        builder.addComplexDeletion(m, DeletionTime.build(602, now));
+        builder.addCell(BufferCell.live(m, 603, ByteBufferUtil.bytes("w"), CellPath.create(ByteBufferUtil.bytes(6))));
+        rows.add(builder.build());
+
         // Static row.
         builder = TrieBackedRow.builder(table.staticColumns());
         builder.newRow(Clustering.STATIC_CLUSTERING);

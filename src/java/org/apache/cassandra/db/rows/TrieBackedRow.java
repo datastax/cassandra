@@ -54,6 +54,7 @@ import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.RangeTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieEntriesIterator;
+import org.apache.cassandra.db.tries.TrieEntriesWalker;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.db.tries.TrieTailsIterator;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -1070,58 +1071,73 @@ public class TrieBackedRow extends AbstractRow
     /// with the given cloner.
     ///
     /// The result has the same content as `BTreeRow.asBTreeRow(TrieBackedRow.create(metadata, clustering, data).clone(cloner))`,
-    /// but is made with a single walk over the trie and without building an intermediate trie. It is meant for the
-    /// memtable read path, where the returned row must not reference memtable memory and is usually converted to a
-    /// [BTreeRow] anyway. Unlike `clone`, the clustering is used as given: it must not reference memory that may be
-    /// recycled.
+    /// but is made with a single walk over the cells and complex column deletions of the trie, without building an
+    /// intermediate trie. It is meant for the memtable read path, where the returned row must not reference memtable
+    /// memory and is usually converted to a [BTreeRow] anyway. Unlike `clone`, the clustering is used as given: it
+    /// must not reference memory that may be recycled.
     public static BTreeRow toBTreeRow(TableMetadata metadata,
                                       Clustering<?> clustering,
                                       DeletionAwareTrie<Object, TrieTombstoneMarker> data,
                                       Cloner cloner)
     {
+        BTreeRow.Builder builder = BTreeRow.sortedBuilder();
+        builder.newRow(clustering);
+        builder.addPrimaryKeyLivenessInfo(getLivenessInfo(data));
         // Same row deletion as computed by create(), as a plain DeletionTime rather than the trie's marker state.
         TrieTombstoneMarker deletionRoot = data.deletionAtRoot();
         TrieTombstoneMarker.Covering rowDeletionTime = deletionRoot != null ? deletionRoot.applicableToPointForward() : null;
-        Deletion deletion = rowDeletionTime != null
-                            ? Deletion.regular(DeletionTime.build(rowDeletionTime.markedForDeleteAt(), rowDeletionTime.localDeletionTime()))
-                            : Deletion.LIVE;
-        return toBTreeRow(metadata, clustering, data, getLivenessInfo(data), deletion, cloner);
+        if (rowDeletionTime != null)
+            builder.addRowDeletion(Deletion.regular(DeletionTime.build(rowDeletionTime.markedForDeleteAt(), rowDeletionTime.localDeletionTime())));
+
+        Columns columns = metadata.regularAndStaticColumns().columns(clustering == Clustering.STATIC_CLUSTERING);
+        return data.mergedTrie(TrieBackedRow::cellOrComplexDeletion)
+                   .process(Direction.FORWARD, new BTreeRowCopier(columns, builder, cloner));
     }
 
-    /// Version of [#toBTreeRow(TableMetadata, Clustering, DeletionAwareTrie, Cloner)] for callers that already know the
-    /// row's liveness info and deletion.
-    public static BTreeRow toBTreeRow(TableMetadata metadata,
-                                      Clustering<?> clustering,
-                                      DeletionAwareTrie<Object, TrieTombstoneMarker> data,
-                                      LivenessInfo livenessInfo,
-                                      Deletion deletion,
-                                      Cloner cloner)
+    /// Combine data in the live and deletion branches to find the cells and the complex column deletions of a row.
+    private static Object cellOrComplexDeletion(Object content, TrieTombstoneMarker marker)
     {
-        Columns columns = metadata.regularAndStaticColumns().columns(clustering == Clustering.STATIC_CLUSTERING);
-        BTreeRow.Builder builder = BTreeRow.sortedBuilder();
-        builder.newRow(clustering);
-        builder.addPrimaryKeyLivenessInfo(livenessInfo);
-        if (!deletion.isLive())
-            builder.addRowDeletion(deletion);
+        if (content instanceof CellData)
+            return content;
+        if (marker == null)
+            return null;
+        // A complex column deletion is introduced by a marker at the column's root. Other markers (row deletion at
+        // the row root, ends of deletion ranges) are not needed: the row deletion is given separately.
+        TrieTombstoneMarker.Covering introducedDeletion = marker.succedingState(Direction.FORWARD);
+        if (introducedDeletion != null && introducedDeletion.deletionKind() == TrieTombstoneMarker.Kind.COLUMN)
+            return introducedDeletion;
+        return null;
+    }
 
-        for (Iterator<ColumnData> it = new ColumnDataIterator(columns, data, Direction.FORWARD); it.hasNext(); )
+    /// Walker over the result of [#cellOrComplexDeletion], adding every cell (cloned) and complex column deletion to a
+    /// [BTreeRow.Builder].
+    private static class BTreeRowCopier extends TrieEntriesWalker<Object, BTreeRow>
+    {
+        private final Columns columns;
+        private final BTreeRow.Builder builder;
+        private final Cloner cloner;
+
+        BTreeRowCopier(Columns columns, BTreeRow.Builder builder, Cloner cloner)
         {
-            ColumnData cd = it.next();
-            if (cd instanceof Cell<?>)
-            {
-                builder.addCell(((Cell<?>) cd).clone(cloner));
-            }
-            else
-            {
-                ComplexColumnData ccd = (ComplexColumnData) cd;
-                DeletionTime complexDeletion = ccd.complexDeletion();
-                if (!complexDeletion.isLive())
-                    builder.addComplexDeletion(ccd.column, complexDeletion);
-                for (Cell<?> cell : ccd)
-                    builder.addCell(cell.clone(cloner));
-            }
+            this.columns = columns;
+            this.builder = builder;
+            this.cloner = cloner;
         }
-        return builder.build();
+
+        @Override
+        protected void content(Object content, byte[] bytes, int byteLength)
+        {
+            if (content instanceof CellData)
+                builder.addCell(cellFromCellData((CellData<?, ?>) content, bytes, byteLength, columns).clone(cloner));
+            else
+                builder.addComplexDeletion(columnMetadataFromPath(bytes, byteLength, columns), (DeletionTime) content);
+        }
+
+        @Override
+        public BTreeRow complete()
+        {
+            return builder.build();
+        }
     }
 
     // TODO: Redo size collection to be more direct.
