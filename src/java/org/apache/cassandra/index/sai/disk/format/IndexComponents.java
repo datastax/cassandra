@@ -61,10 +61,12 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  *
  * <h2>Immutable components</h2>
  *
- * As mentioned above, when {@link CassandraRelevantProperties#IMMUTABLE_SAI_COMPONENTS} is enabled, existing components
- * are not overwritten by new builds (the underlying intent is to allow rebuilding without stopping reads (to the
- * rebuilt indexes). But unless a rebuild uses a different version than the existing components, the new components
- * need "something" to distinguish them from the old ones, and it is what the generation provides.
+ * As mentioned above, when {@link CassandraRelevantProperties#IMMUTABLE_SAI_COMPONENTS} is enabled (or, more precisely,
+ * when {@link Version#useImmutableComponentFiles(String)} returns {@code true} for the keyspace, which can be customized
+ * per keyspace through {@link ImmutableSAIComponentsConfigProvider}), existing components are not overwritten
+ * by new builds (the underlying intent is to allow rebuilding without stopping reads (to the rebuilt indexes). But
+ * unless a rebuild uses a different version than the existing components, the new components need "something" to
+ * distinguish them from the old ones, and it is what the generation provides.
  * <p>
  * The generation is specific to a component group, meaning that all the components of a group share the same
  * generation (or to put it another way, if 2 components only differ by their generation, then they belong to different

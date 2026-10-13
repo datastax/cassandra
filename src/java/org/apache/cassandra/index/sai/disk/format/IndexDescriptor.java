@@ -320,7 +320,7 @@ public class IndexDescriptor
     {
         Version version = versionForNewComponents();
         var currentBuildId = currentComponents == null ? null : currentComponents.buildId;
-        return new IndexComponentsImpl(context, ComponentsBuildId.forNewBuild(version, currentBuildId, candidateId -> {
+        return new IndexComponentsImpl(context, ComponentsBuildId.forNewBuild(descriptor.ksname, version, currentBuildId, candidateId -> {
             // This checks that there is no existing files on disk we would overwrite by using `candidateId` for our
             // new build.
             IndexComponentsImpl candidate = new IndexComponentsImpl(context, candidateId);
@@ -518,7 +518,7 @@ public class IndexDescriptor
                 marker.delete();
 
             // Keeping legacy behavior if immutable components is disabled.
-            if (!buildId.version().useImmutableComponentFiles() && CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+            if (!buildId.version().useImmutableComponentFiles(descriptor.ksname) && CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
                 forceDeleteAllComponents();
 
             // We replace ourselves by an explicitly empty group in the parent.
