@@ -21,10 +21,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -38,11 +35,11 @@ import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
-import io.github.jbellis.jvector.util.FixedBitSet;
+import io.github.jbellis.jvector.util.AtomicFixedBitSet;
+import io.github.jbellis.jvector.util.BitSet;
 import io.github.jbellis.jvector.util.work.ProgressLimiter;
 import io.github.jbellis.jvector.util.work.ProgressTracker;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import net.openhft.chronicle.map.ChronicleMap;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
@@ -69,8 +66,9 @@ import static java.util.stream.Collectors.toList;
  * <p>Each source is represented by a {@link SourceSegment} containing the on-disk graph and its
  * associated {@link CassandraDiskAnn} (for PQ, unit-vectors flag, and the ordinals map).
  *
- * <p>Node identity — dead-node detection AND postings — is the MANAGED GLOBAL ORDINAL
- * ({@code ordinalBase[source] + localOrdinal}), never the full-precision vector value: the
+ * <p>Node identity — dead-node detection AND postings — is the source node's
+ * {@linkplain VectorHandle (source index, local ordinal)} pair, never the
+ * full-precision vector value: the
  * segment builder joins each output row to the source node whose cell won its merge (via the
  * compaction row-source tags + the source's primary-key and ordinals maps) and hands this class
  * the resulting surviving-ordinal bitsets and an ordinal-keyed postings map. No source vector is
@@ -171,80 +169,38 @@ public class CompactionGraphMerger
      *
      * <p>Dead-node detection and postings identity are ORDINAL-KEYED (see
      * doc/vector_merge_ordinal_identity.md): the caller ingested output rows against the
-     * global ordinal handle {@code ordinalBase[s] + localOrdinal} of the source node whose
-     * cell won each row's merge, building {@code surviving} incrementally. No source vector
-     * is read here outside jvector's own compactor.
+     * {@link VectorHandle} of the source node whose cell won each row's merge. The surviving
+     * source nodes and their postings are both held by {@code postings}, which keeps them consistent
+     * by construction. No source vector is read here outside jvector's own compactor.
      *
-     * @param postingsMap     global ordinal handle → output postings, built during the
-     *                        row-by-row compaction pass
-     * @param maxSegmentRowId highest output segment rowid ingested
+     * @param postings        output postings per surviving source node, the surviving nodes themselves
+     *                        and the highest output rowid; ingest must be complete (drained)
      * @param progressLimiter host control surface installed on the jvector compactor; pass
      *                        {@link ProgressLimiter#UNLIMITED} for none
-     * @param ordinalBase     per-source global ordinal bases (aligned with the constructor's
-     *                        source list)
-     * @param surviving       per-source surviving-ordinal bitsets (same alignment)
      */
     public SegmentMetadata.ComponentMetadataMap merge(
-            ChronicleMap<Long, CompactionVectorPostings> postingsMap,
-            int maxSegmentRowId,
-            ProgressLimiter progressLimiter,
-            long[] ordinalBase,
-            java.util.BitSet[] surviving) throws IOException
+            VectorMergePostings postings,
+            ProgressLimiter progressLimiter) throws IOException
     {
         // --- Validate source feature sets ---
         boolean hasFusedPQ = validateFeatureSets(sources.stream().map(SourceSegment::graph).collect(toList()));
 
-        // --- Step 1: ordinal remapping from the surviving bitsets — pure CPU, no vector I/O.
-        // Output ordinals are assigned in ascending node-id order across all sources in parallel,
-        // so that the output ordinal sequence mirrors the natural row order of the output SSTable.
-        // For each node-id value (from 0 up to the largest id upper-bound), we visit every source
-        // in turn and assign the next output ordinal to whichever source has that bit set. This
-        // produces a ONE_TO_ONE-compatible ordering: a source node with local id N gets a lower
-        // output ordinal than any source node with local id M > N, regardless of which source it
-        // came from. The pre-scan this replaces read every source node's full-precision vector;
-        // it no longer exists, so the ProgressLimiter is live from the compactor's first phase.
-        var liveNodes = new ArrayList<FixedBitSet>(sources.size());
-        var remappers = new ArrayList<OrdinalMapper>(sources.size());
+        List<? extends BitSet> surviving = postings.liveNodes();
 
+        // --- Step 1: ordinal remapping from the surviving bitsets — pure CPU, no vector I/O.
+        // The postings own the ordering (ascending node id across all sources, which mirrors the
+        // natural row order of the output SSTable). No source vector is read, so the ProgressLimiter
+        // is live from the compactor's first phase.
+        List<OrdinalMapper> remappers;
         int totalGlobalOrdinals;
 
         try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
                 VectorCompactionMetrics.Phase.ORDINAL_REMAP, perIndexComponents.context()))
         {
-            // Pre-build the FixedBitSets and per-source oldToNew maps; fill them in a single
-            // node-id-major pass so output ordinals respect the natural ascending node-id order.
-            var oldToNewMaps = new ArrayList<HashMap<Integer, Integer>>(sources.size());
-            int maxIdBound = 0;
-            for (int s = 0; s < sources.size(); s++)
-            {
-                int idBound = sources.get(s).graph().getIdUpperBound();
-                liveNodes.add(new FixedBitSet(idBound));
-                oldToNewMaps.add(new HashMap<>());
-                maxIdBound = Math.max(maxIdBound, idBound);
-            }
-
-            int nextOrdinal = 0;
-            for (int nodeId = 0; nodeId < maxIdBound; nodeId++)
-            {
-                for (int s = 0; s < sources.size(); s++)
-                {
-                    if (surviving[s].get(nodeId))
-                    {
-                        liveNodes.get(s).set(nodeId);
-                        oldToNewMaps.get(s).put(nodeId, nextOrdinal++);
-                    }
-                }
-            }
-
-            for (int s = 0; s < sources.size(); s++)
-                remappers.add(new OrdinalMapper.MapMapper(oldToNewMaps.get(s)));
-
-            totalGlobalOrdinals = nextOrdinal;
+            remappers = postings.ordinalMappers();
+            totalGlobalOrdinals = postings.size();
             if (totalGlobalOrdinals == 0)
                 throw new IllegalStateException("CompactionGraphMerger: no surviving nodes found across all source segments; all rows may have been deleted");
-
-            for (int s = 0; s < sources.size(); s++)
-                logger.info("**** Ordinal mapping source {}: {}", s, oldToNewMaps.get(s));
         }
 
         // --- Step 2: jvector writes the compacted graph body directly into the SAI TERMS_DATA
@@ -255,7 +211,7 @@ public class CompactionGraphMerger
 
         var compactor = new OnDiskGraphIndexCompactor(
                 sources.stream().map(SourceSegment::graph).collect(toList()),
-                liveNodes,
+                surviving,
                 remappers,
                 similarityFunction,
                 // All jvector fan-out work runs on the shared Cassandra-managed build pool,
@@ -454,20 +410,22 @@ public class CompactionGraphMerger
                 }
                 long pqLength = pqOutput.getFilePointer() - pqOffset;
 
-                // Write postings using ZERO_OR_ONE_TO_MANY. Each output global ordinal resolves its
-                // postings by GLOBAL ORDINAL HANDLE — an 8-byte map lookup, no vector reads. Every
-                // ordinal here has postings (only attributed ordinals entered the surviving bitsets).
+                // Write postings using ZERO_OR_ONE_TO_MANY. Each merged ordinal resolves its postings
+                // through the key of the source node the compactor placed there — an 8-byte map
+                // lookup, no vector reads. Every ordinal here has postings (only attributed ordinals
+                // entered the surviving bitsets). The postings are written directly in merged-ordinal
+                // space, so the RemappedPostings mapper has nothing left to translate: identity.
                 long postingsOffset = postingsOutput.getFilePointer();
                 var ordinalMapper = new OrdinalMapper.IdentityMapper(totalGlobalOrdinals - 1);
                 var rp = new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
                                               totalGlobalOrdinals - 1,
-                                              maxSegmentRowId,
+                                              postings.maxRowId(),
                                               null, null,
                                               ordinalMapper);
 
-                final List<OrdinalMapper> effectiveMappers = effective;
+                final long[] handleByMergedOrdinal = packedHandlesByMergedOrdinal(effective, surviving, totalGlobalOrdinals);
                 java.util.function.IntFunction<CompactionVectorPostings> postingsByNewOrdinal =
-                        g -> postingsMap.get(handleForMergedOrdinal(effectiveMappers, ordinalBase, g));
+                        g -> postings.get(VectorHandle.unpack(handleByMergedOrdinal[g]));
                 if (V5OnDiskFormat.writeV5VectorPostings(version))
                 {
                     new V5VectorPostingsWriter<Integer>(rp)
@@ -489,35 +447,50 @@ public class CompactionGraphMerger
     }
 
     /**
-     * Returns the postings-map key (global ordinal handle, {@code ordinalBase[source] + nodeId}) of
-     * the source node that ended up at merged ordinal {@code mergedOrdinal}.
+     * Returns, for every merged ordinal {@code [0, totalGlobalOrdinals)}, the
+     * {@linkplain VectorHandle#pack() packed} {@link VectorHandle} of the source node the compactor
+     * placed there. Built from the
+     * compactor's {@code effective} per-source mappers by visiting each surviving source node once and
+     * reading its merged ordinal from its own source's {@code oldToNew}, so it is correct for ANY
+     * ordering the compactor produced. O(surviving nodes) to build, O(1) per lookup.
      *
-     * <p>Merged ordinals are unique across sources, so exactly one source's mapper owns each one;
-     * the others return {@link OrdinalMapper#OMITTED} from {@code newToOld}. O(sources) per call.
-     *
-     * @throws IllegalStateException if no source, or more than one source, claims the ordinal;
-     *                               publishing either would bind the row to a missing or wrong vector
+     * @throws IllegalStateException if a merged ordinal is outside {@code [0, totalGlobalOrdinals)} or
+     *                               is claimed by more than one surviving node; publishing either would
+     *                               bind a row to a missing or wrong vector. Because the number of
+     *                               surviving nodes equals {@code totalGlobalOrdinals}, no ordinal can
+     *                               be left unassigned once these checks pass.
      */
-    static long handleForMergedOrdinal(List<OrdinalMapper> effective, long[] ordinalBase, int mergedOrdinal)
+    static long[] packedHandlesByMergedOrdinal(List<OrdinalMapper> effective,
+                                               List<? extends BitSet> surviving,
+                                               int totalGlobalOrdinals)
     {
-        int owner = -1;
-        int nodeId = OrdinalMapper.OMITTED;
+        long[] handles = new long[totalGlobalOrdinals];
+        var claimed = new java.util.BitSet(totalGlobalOrdinals);
+        int mapped = 0;
         for (int s = 0; s < effective.size(); s++)
         {
-            int old = effective.get(s).newToOld(mergedOrdinal);
-            if (old == OrdinalMapper.OMITTED)
-                continue;
-            if (owner != -1)
-                throw new IllegalStateException(String.format(
-                        "CompactionGraphMerger: merged ordinal %d claimed twice (source %d node %d and source %d node %d)",
-                        mergedOrdinal, owner, nodeId, s, old));
-            owner = s;
-            nodeId = old;
+            OrdinalMapper mapper = effective.get(s);
+            BitSet survivingS = surviving.get(s);
+            for (int nodeId = survivingS.nextSetBit(0); nodeId >= 0 && nodeId != io.github.jbellis.jvector.util.DocIdSetIterator.NO_MORE_DOCS; nodeId = survivingS.nextSetBit(nodeId + 1))
+            {
+                int merged = mapper.oldToNew(nodeId);
+                if (merged < 0 || merged >= totalGlobalOrdinals)
+                    throw new IllegalStateException(String.format(
+                            "CompactionGraphMerger: source %d node %d mapped to merged ordinal %d, outside [0, %d)",
+                            s, nodeId, merged, totalGlobalOrdinals));
+                if (claimed.get(merged))
+                    throw new IllegalStateException(String.format(
+                            "CompactionGraphMerger: merged ordinal %d claimed twice (second claimant source %d node %d)",
+                            merged, s, nodeId));
+                claimed.set(merged);
+                handles[merged] = new VectorHandle(s, nodeId).pack();
+                mapped++;
+            }
         }
-        if (owner == -1)
-            throw new IllegalStateException("CompactionGraphMerger: merged ordinal " + mergedOrdinal +
-                                            " was never assigned by the effective mapping; refusing to publish");
-        return ordinalBase[owner] + nodeId;
+        if (mapped != totalGlobalOrdinals)
+            throw new IllegalStateException("CompactionGraphMerger: mapped " + mapped +
+                                            " surviving nodes but expected " + totalGlobalOrdinals);
+        return handles;
     }
 
     /** True when both lists hold the same mapper instances in the same order. Reference comparison only. */
@@ -558,7 +531,7 @@ public class CompactionGraphMerger
     }
 
     /**
-     * Builds a {@link FixedBitSet} marking all jvector-live nodes in {@code graph} (i.e. all
+     * Builds a {@link AtomicFixedBitSet} marking all jvector-live nodes in {@code graph} (i.e. all
      * non-tombstoned slots), without consulting the postings map.
      *
      * <p>When the on-disk graph has no tombstoned slots ({@code idUpperBound == size(0)}), all
@@ -570,14 +543,15 @@ public class CompactionGraphMerger
      * <p>Used by tests to verify the tombstone-gap fix in isolation. Production code inlines
      * equivalent logic inside {@link #merge} with the additional postings-map check.
      */
-    static FixedBitSet buildLiveBitset(OnDiskGraphIndex graph)
+    static BitSet buildLiveBitset(OnDiskGraphIndex graph)
     {
         int liveCount = graph.size(0);
         int idBound = graph.getIdUpperBound();
-        var bs = new FixedBitSet(idBound);
+        var bs = new AtomicFixedBitSet(idBound);
         if (idBound == liveCount)
         {
-            bs.set(0, liveCount);
+            for (int i = 0; i < liveCount; i++)
+                bs.set(i);
         }
         else
         {
