@@ -227,12 +227,6 @@ and then walking the combination of the live and deletion trie to find:
   take the tail trie and wrap it into a `TrieBackedRow`, or
 - deletion boundaries, which we map into the corresponding `RangeTombstoneBound(ary)`.
 
-When the bounds select individual rows (e.g. a read by full primary key, which is how SAI fetches the rows
-it matched) and the partition has no deletion branch, the partition contains no deletions at all, because
-in the memtable trie all deletion branches split at the partition root (see the example below). The
-intersection could then only return rows, so we skip it and look up each requested row directly. Code that
-writes to the memtable trie must preserve this property, as this shortcut relies on it.
-
 [^4]: Inclusivity does not matter for this because clustering bounds do not match row clustering keys; they
 include a component that adjusts them to be just before or just after a row key.
 

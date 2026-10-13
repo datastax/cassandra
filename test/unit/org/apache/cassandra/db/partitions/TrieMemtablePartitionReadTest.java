@@ -58,12 +58,11 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertTrue;
 
-/// Tests the read path of [TrieMemtable] partitions: rows are copied to the heap as [BTreeRow]s, and reads that
-/// select single rows of a partition without deletions use direct lookups instead of a trie intersection.
+/// Tests the read path of [TrieMemtable] partitions, whose rows are copied to the heap as [BTreeRow]s.
 ///
-/// Every read is compared with the same read on an [ImmutableBTreePartition] built from the whole memtable partition
-/// (which checks the direct lookups against the trie intersection), and with the same read on the sstable that the
-/// memtable is flushed to (which checks the copied and filtered rows against an independent implementation).
+/// Every read is compared with the same read on an [ImmutableBTreePartition] built from the whole memtable partition,
+/// and with the same read on the sstable that the memtable is flushed to (which checks the copied and filtered rows
+/// against an independent implementation).
 public class TrieMemtablePartitionReadTest extends CQLTester
 {
     private static final String CLUSTERED_TABLE = "CREATE TABLE %s (pk int, ck1 int, ck2 text, s int static, v1 int, v2 text, m map<int, text>, " +
@@ -80,7 +79,7 @@ public class TrieMemtablePartitionReadTest extends CQLTester
     private static final int OLDER_CELL_ROW = 101;
 
     @Test
-    public void testRowsWithoutDeletionsUseDirectLookups() throws Throwable
+    public void testRowsWithoutDeletions() throws Throwable
     {
         testRowsWithoutDeletions(CLUSTERED_TABLE);
     }
@@ -95,20 +94,17 @@ public class TrieMemtablePartitionReadTest extends CQLTester
     {
         createTable(table);
         insertRows(0);
-        // Rows without primary key liveness, expiring cells, cell tombstones and complex cells added without a
-        // complex deletion do not introduce a deletion branch.
         // This row has no primary key liveness and only a v2 cell: selecting only v1 filters it out completely.
         execute("UPDATE %s SET v2 = 'only v2' WHERE pk = 0 AND ck1 = 100 AND ck2 = 'x'");
         execute("UPDATE %s USING TTL 1000 SET v2 = 'ttl' WHERE pk = 0 AND ck1 = 1 AND ck2 = 'b'");
         execute("UPDATE %s SET v1 = null WHERE pk = 0 AND ck1 = 2 AND ck2 = 'c'");
         execute("UPDATE %s SET m = m + {7: 'seven'} WHERE pk = 0 AND ck1 = 3 AND ck2 = 'd'");
 
-        assertTrue(memtablePartition(0).canUseDirectLookups());
-        assertMatchesReferences(0, true);
+        assertMatchesReferences(0);
     }
 
     @Test
-    public void testRowsWithDeletionsUseIntersection() throws Throwable
+    public void testRowsWithDeletions() throws Throwable
     {
         testRowsWithDeletions(CLUSTERED_TABLE);
     }
@@ -130,8 +126,7 @@ public class TrieMemtablePartitionReadTest extends CQLTester
         execute("UPDATE %s SET m = {9: 'nine'} WHERE pk = 0 AND ck1 = 3 AND ck2 = 'd'");
         execute("INSERT INTO %s (pk, ck1, ck2, v1) VALUES (0, 1, 'b', 11)");
 
-        assertFalse(memtablePartition(0).canUseDirectLookups());
-        assertMatchesReferences(0, false);
+        assertMatchesReferences(0);
     }
 
     @Test
@@ -142,8 +137,7 @@ public class TrieMemtablePartitionReadTest extends CQLTester
         // Overwriting a collection deletes the previous content with a complex column deletion.
         execute("UPDATE %s SET m = {9: 'nine'} WHERE pk = 0 AND ck1 = 3 AND ck2 = 'd'");
 
-        assertFalse(memtablePartition(0).canUseDirectLookups());
-        assertMatchesReferences(0, false);
+        assertMatchesReferences(0);
     }
 
     @Test
@@ -152,8 +146,7 @@ public class TrieMemtablePartitionReadTest extends CQLTester
         createTable(CLUSTERED_TABLE);
         execute("INSERT INTO %s (pk, s) VALUES (0, 1000)");
 
-        assertTrue(memtablePartition(0).canUseDirectLookups());
-        assertMatchesReferences(0, true);
+        assertMatchesReferences(0);
     }
 
     @Test
@@ -172,13 +165,12 @@ public class TrieMemtablePartitionReadTest extends CQLTester
         assertFalse(getCurrentColumnFamilyStore().metadata().droppedColumns.isEmpty());
 
         TrieBackedPartition partition = memtablePartition(0);
-        assertTrue(partition.canUseDirectLookups());
         for (Iterator<Row> it = partition.rowIterator(); it.hasNext(); )
             assertTrue(it.next() instanceof BTreeRow);
         // The write older than the drop is discarded by the write path, so the read returns no v2.
         assertRows(execute("SELECT v1, v2 FROM %s WHERE pk = 0 AND ck1 = 100 AND ck2 = 'x'"), row(100, null));
         assertRows(execute("SELECT v1, v2 FROM %s WHERE pk = 0 AND ck1 = 3 AND ck2 = 'd'"), row(3, "v3"));
-        assertMatchesReferences(0, true);
+        assertMatchesReferences(0);
     }
 
     @Test
@@ -198,8 +190,6 @@ public class TrieMemtablePartitionReadTest extends CQLTester
         for (int pk = 0; pk < 3; ++pk)
         {
             TrieBackedPartition partition = memtablePartition(pk);
-            boolean expectDirectLookups = pk != 2;
-            assertEquals(expectDirectLookups, partition.canUseDirectLookups());
             ImmutableBTreePartition reference = ImmutableBTreePartition.create(partition.unfilteredIterator());
             assertEquals(1, reference.rowCount());
 
@@ -210,7 +200,6 @@ public class TrieMemtablePartitionReadTest extends CQLTester
                     try (UnfilteredRowIterator actual = partition.unfilteredIterator(columnFilter, Slices.ALL, reversed);
                          UnfilteredRowIterator expected = reference.unfilteredIterator(columnFilter, Slices.ALL, reversed))
                     {
-                        assertEquals(expectDirectLookups, !(actual instanceof TrieBackedPartition.UnfilteredIterator));
                         memtableContent.add(assertSameContent(metadata, expected, actual));
                     }
 
@@ -219,7 +208,6 @@ public class TrieMemtablePartitionReadTest extends CQLTester
                     try (UnfilteredRowIterator actual = partition.unfilteredIterator(columnFilter, names, reversed);
                          UnfilteredRowIterator expected = reference.unfilteredIterator(columnFilter, names, reversed))
                     {
-                        assertEquals(expectDirectLookups, !(actual instanceof TrieBackedPartition.UnfilteredIterator));
                         assertSameContent(metadata, expected, actual);
                     }
                 }
@@ -251,7 +239,6 @@ public class TrieMemtablePartitionReadTest extends CQLTester
         createTable("CREATE TABLE %s (pk int, ck decimal, v int, PRIMARY KEY (pk, ck)) WITH memtable = 'trie'");
         execute("INSERT INTO %s (pk, ck, v) VALUES (0, 1.0, 1)");
         execute("INSERT INTO %s (pk, ck, v) VALUES (0, 2.50, 2)");
-        assertTrue(memtablePartition(0).canUseDirectLookups());
 
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT v FROM %s WHERE pk = 0 AND ck = 1.00"), row(1));
@@ -273,13 +260,11 @@ public class TrieMemtablePartitionReadTest extends CQLTester
         }
 
         TrieBackedPartition partition = memtablePartition(0);
-        assertTrue(partition.canUseDirectLookups());
         TableMetadata metadata = partition.metadata();
         NavigableSet<Clustering<?>> names = new TreeSet<>(metadata.comparator);
         names.add(Clustering.make(Int32Type.instance.decompose(1)));
         try (UnfilteredRowIterator iter = partition.unfilteredIterator(ColumnFilter.all(metadata), names, false))
         {
-            assertFalse(iter instanceof TrieBackedPartition.UnfilteredIterator);
             assertTrue(iter.next() instanceof BTreeRow);
             assertFalse(iter.hasNext());
         }
@@ -344,7 +329,7 @@ public class TrieMemtablePartitionReadTest extends CQLTester
         createIndex("CREATE INDEX ON %s(v1) USING 'sai'");
         for (int pk = 0; pk < 3; ++pk)
             insertRows(pk);
-        // Partition 1 has deletions, partition 0 and 2 have none.
+        // Partition 1 has deletions.
         execute("DELETE FROM %s WHERE pk = 1 AND ck1 = 1 AND ck2 = 'b'");
         execute("DELETE FROM %s WHERE pk = 1 AND ck1 >= 4 AND ck1 <= 5");
         execute("DELETE v2 FROM %s WHERE pk = 1 AND ck1 = 2 AND ck2 = 'c'");
@@ -380,8 +365,7 @@ public class TrieMemtablePartitionReadTest extends CQLTester
         {
             execute("INSERT INTO %s (pk, ck1, ck2, v1, v2) VALUES (?, ?, ?, ?, ?)",
                     pk, i, ck2(i), i, i == 2 ? "v2" : "v" + i);
-            // Inserting a collection value would also delete the previous content of the collection; appending
-            // does not, so the partition has no deletions.
+            // Appending to a collection, unlike inserting it, does not delete its previous content.
             execute("UPDATE %s SET m = m + ? WHERE pk = ? AND ck1 = ? AND ck2 = ?",
                     map(i, "three", i * 10, "thirty"), pk, i, ck2(i));
         }
@@ -480,7 +464,6 @@ public class TrieMemtablePartitionReadTest extends CQLTester
                     reads.add(new Read(columnFilter, slicesBuilder.build(), reversed ? names.descendingSet() : names, reversed));
                 }
 
-                // Slices that do not select single rows always use the intersection.
                 Slices range = Slices.with(metadata.comparator, metadata.comparator.compare(clustering(1), clustering(5)) < 0
                                                                 ? Slice.make(clustering(1), clustering(5))
                                                                 : Slice.make(clustering(5), clustering(1)));
@@ -493,8 +476,7 @@ public class TrieMemtablePartitionReadTest extends CQLTester
 
     /// Compares all the read shapes on the given memtable partition with the same reads on a [ImmutableBTreePartition]
     /// built from it, then flushes the memtable and compares them with the same reads on the sstable.
-    /// `expectDirectLookups` tells whether single-row reads must avoid the trie intersection.
-    private void assertMatchesReferences(int pk, boolean expectDirectLookups) throws Throwable
+    private void assertMatchesReferences(int pk) throws Throwable
     {
         TrieBackedPartition partition = memtablePartition(pk);
         TableMetadata metadata = getCurrentColumnFamilyStore().metadata();
@@ -508,7 +490,6 @@ public class TrieMemtablePartitionReadTest extends CQLTester
             try (UnfilteredRowIterator actual = partition.unfilteredIterator(read.columnFilter, read.slices, read.reversed);
                  UnfilteredRowIterator expected = reference.unfilteredIterator(read.columnFilter, read.slices, read.reversed))
             {
-                assertEquals(singleRows && expectDirectLookups, !(actual instanceof TrieBackedPartition.UnfilteredIterator));
                 memtableContent.add(assertSameContent(metadata, expected, actual));
             }
 
@@ -517,7 +498,6 @@ public class TrieMemtablePartitionReadTest extends CQLTester
                 try (UnfilteredRowIterator actual = partition.unfilteredIterator(read.columnFilter, read.namesInQueryOrder, read.reversed);
                      UnfilteredRowIterator expected = reference.unfilteredIterator(read.columnFilter, read.slices, read.reversed))
                 {
-                    assertEquals(expectDirectLookups, !(actual instanceof TrieBackedPartition.UnfilteredIterator));
                     assertSameContent(metadata, expected, actual);
                 }
             }

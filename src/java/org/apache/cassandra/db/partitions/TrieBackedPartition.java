@@ -27,7 +27,6 @@ import com.google.common.base.Predicates;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DecoratedKey;
@@ -38,7 +37,6 @@ import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
-import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
@@ -160,11 +158,8 @@ public class TrieBackedPartition implements Partition
         return builder.complete();
     }
 
-    /// Create a partition with the given properties and content, making sure to copy all off-heap data to keep it
-    /// alive when the given access mode requires it.
-    ///
-    /// The trie must be a partition tail trie of a `TrieMemtable`: the returned partitions rely on all its deletion
-    /// branches being rooted at the partition root (see [#deletionBranchesAtPartitionRoot]).
+    /// Create a row with the given properties and content, making sure to copy all off-heap data to keep it alive when
+    /// the given access mode requires it.
     public static TrieBackedPartition create(DecoratedKey partitionKey,
                                              RegularAndStaticColumns columnMetadata,
                                              EncodingStats encodingStats,
@@ -213,15 +208,6 @@ public class TrieBackedPartition implements Partition
     Row toRow(DeletionAwareTrie<Object, TrieTombstoneMarker> rowContent, Clustering<?> clustering)
     {
         return rowContent != null ? TrieBackedRow.create(metadata, clustering, rowContent) : null;
-    }
-
-    /// Conversion from a non-null row branch without deletions, whose liveness info has already been read, to [Row].
-    /// Used by [#singleRowsIterator] to avoid looking up again what it already knows.
-    Row toRowWithoutDeletions(DeletionAwareTrie<Object, TrieTombstoneMarker> rowContent,
-                              Clustering<?> clustering,
-                              LivenessInfo livenessInfo)
-    {
-        return toRow(rowContent, clustering);
     }
 
     /// Put the given row in the trie, used by methods to build stand-alone partitions.
@@ -447,12 +433,10 @@ public class TrieBackedPartition implements Partition
 
     private Clustering<?> getClustering(byte[] bytes, int byteLength)
     {
-        return getClustering(ByteComparable.preencoded(BYTE_COMPARABLE_VERSION, bytes, 0, byteLength));
-    }
-
-    private Clustering<?> getClustering(ByteComparable path)
-    {
-        return metadata.comparator.clusteringFromByteComparable(ByteBufferAccessor.instance, path, BYTE_COMPARABLE_VERSION);
+        return metadata.comparator.clusteringFromByteComparable(ByteBufferAccessor.instance,
+                                                                ByteComparable.preencoded(BYTE_COMPARABLE_VERSION,
+                                                                                          bytes, 0, byteLength),
+                                                                BYTE_COMPARABLE_VERSION);
     }
 
     /// Combine live and deletion branch markers to identify row roots in the trie. Must return non-null when a row
@@ -491,12 +475,11 @@ public class TrieBackedPartition implements Partition
 
     /// Implementation of [UnfilteredRowIterator] for this partition.
     ///
-    /// Looks for row and tombstone markers in the trie and presents each branch as a [Row] (made by [#toRow]: a
-    /// [TrieBackedRow], or a `BTreeRow` copied to the heap for memtable reads) or a [RangeTombstoneMarker]. Because
-    /// the legacy convention is that the static row and partition-level deletion are given separately by methods of
-    /// the iterator, they are filtered out from the returned content -- the former by excluding the static key from
-    /// the translation of [Slice#ALL], and the latter by excluding covering deletions in the returned trie and
-    /// filtering out the non-range sides of all tombstone boundaries.
+    /// Looks for row and tombstone markers in the trie and presents each branch as a [TrieBackedRow] or
+    /// [RangeTombstoneMarker]. Because the legacy convention is that the static row and partition-level deletion are
+    /// given separately by methods of the iterator, they are filtered out from the returned content -- the former by
+    /// excluding the static key from the translation of [Slice#ALL], and the latter by excluding covering deletions
+    /// in the returned trie and filtering out the non-range sides of all tombstone boundaries.
     class UnfilteredIterator
     extends TrieTailsIterator.DeletionAware<Object, TrieTombstoneMarker, Object, Unfiltered>
     implements UnfilteredRowIterator
@@ -511,13 +494,19 @@ public class TrieBackedPartition implements Partition
             super(trie, Direction.fromBoolean(reversed), TrieBackedPartition::combineDataAndDeletionForUnfilteredIterator, false);
             this.selection = selection;
             this.reversed = reversed;
-            this.mayFilterColumns = mayFilterColumns(selection);
-            this.staticRow = filteredStaticRow(selection, mayFilterColumns);
+            this.mayFilterColumns = !droppedColumnsSource().droppedColumns.isEmpty() ||
+                                    selection != null && (!selection.fetchesAllColumns(false) ||
+                                                          !selection.fetchesAllColumns(true) ||
+                                                          !selection.allFetchedColumnsAreQueried());
+            Row staticRow = filter(TrieBackedPartition.this.staticRow());
+            this.staticRow = staticRow != null ? staticRow : Rows.EMPTY_STATIC_ROW;
         }
 
         Row filter(Row row)
         {
-            return TrieBackedPartition.this.filter(row, selection, mayFilterColumns);
+            if (!mayFilterColumns || row == null)
+                return row;
+            return row.filter(selection, droppedColumnsSource());
         }
 
         @Override
@@ -596,135 +585,6 @@ public class TrieBackedPartition implements Partition
         }
     }
 
-    /// Whether rows returned for the given selection may need to be filtered (by [#filter]).
-    private boolean mayFilterColumns(ColumnFilter selection)
-    {
-        return !droppedColumnsSource().droppedColumns.isEmpty() ||
-               selection != null && (!selection.fetchesAllColumns(false) ||
-                                     !selection.fetchesAllColumns(true) ||
-                                     !selection.allFetchedColumnsAreQueried());
-    }
-
-    private Row filter(Row row, ColumnFilter selection, boolean mayFilterColumns)
-    {
-        if (!mayFilterColumns || row == null)
-            return row;
-        return row.filter(selection, droppedColumnsSource());
-    }
-
-    private Row filteredStaticRow(ColumnFilter selection, boolean mayFilterColumns)
-    {
-        Row staticRow = filter(staticRow(), selection, mayFilterColumns);
-        return staticRow != null ? staticRow : Rows.EMPTY_STATIC_ROW;
-    }
-
-    /// Returns true if all deletion branches of the trie are rooted at the partition root. This is the case for
-    /// partitions in a `TrieMemtable` (see `TrieMemtable.md`). When it is true and the partition root has no deletion
-    /// branch, the partition contains no deletions at all, and single rows can be read with direct lookups instead
-    /// of a trie intersection (see [#singleRowsIterator]).
-    protected boolean deletionBranchesAtPartitionRoot()
-    {
-        return false;
-    }
-
-    /// Returns true if single rows of this partition can be read with direct lookups, i.e. if the partition is known
-    /// to contain no deletions of any kind (partition, range, row, complex column), cell tombstones excepted.
-    boolean canUseDirectLookups()
-    {
-        return deletionBranchesAtPartitionRoot() && trie.cursor(Direction.FORWARD).deletionBranchCursor(Direction.FORWARD) == null;
-    }
-
-    /// Returns true if there is at least one slice and every slice selects exactly one row, i.e. both bounds are
-    /// inclusive and carry all the components of the same clustering.
-    ///
-    /// For tables without clustering columns this recognizes [Slice#ALL], which selects the only possible row.
-    private boolean selectsSingleRows(Slices slices)
-    {
-        if (slices.isEmpty())
-            return false;
-
-        ClusteringComparator comparator = metadata.comparator;
-        int size = comparator.size();
-        for (Slice slice : slices)
-        {
-            ClusteringBound<?> start = slice.start();
-            ClusteringBound<?> end = slice.end();
-            if (start.kind() != ClusteringPrefix.Kind.INCL_START_BOUND || start.size() != size ||
-                end.kind() != ClusteringPrefix.Kind.INCL_END_BOUND || end.size() != size)
-                return false;
-            for (int i = 0; i < size; ++i)
-            {
-                if (comparator.compareComponent(i, start, end) != 0)
-                    return false;
-            }
-        }
-        return true;
-    }
-
-    /// Returns the paths in the trie of the rows selected by the given slices, in slice order. The slices must pass
-    /// [#selectsSingleRows].
-    private ByteComparable.Preencoded[] singleRowPaths(Slices slices)
-    {
-        ByteComparable.Preencoded[] paths = new ByteComparable.Preencoded[slices.size()];
-        int index = 0;
-        for (Slice slice : slices)
-            paths[index++] = path(clusteringOf(slice.start())).preencode(BYTE_COMPARABLE_VERSION);
-        return paths;
-    }
-
-    /// Returns the clustering with the values of the given bound. The values are only read (to encode the path), so
-    /// sharing the array of raw values with the bound is safe.
-    private static <V> Clustering<V> clusteringOf(ClusteringBound<V> bound)
-    {
-        return bound.accessor().factory().clustering(bound.getRawValues());
-    }
-
-    /// Iterator over the rows at the given paths of a partition that has no deletions. This is equivalent to
-    /// intersecting the trie with the single-row slices that the paths came from, but replaces the intersection and
-    /// the walk over its result with a direct lookup for each row.
-    ///
-    /// Because the partition has no deletions, the intersection could only contain rows, i.e. branches marked with
-    /// a [LivenessInfo] (see [#combineDataAndDeletionForUnfilteredIterator]); every one of them is found by the lookup.
-    private UnfilteredRowIterator singleRowsIterator(ColumnFilter selection, ByteComparable.Preencoded[] paths, boolean reversed)
-    {
-        boolean mayFilterColumns = mayFilterColumns(selection);
-        return new AbstractUnfilteredRowIterator(metadata,
-                                                 partitionKey,
-                                                 partitionLevelDeletion,
-                                                 selection != null ? selection.fetchedColumns() : columns,
-                                                 filteredStaticRow(selection, mayFilterColumns),
-                                                 reversed,
-                                                 stats)
-        {
-            int index = reversed ? paths.length - 1 : 0;
-
-            @Override
-            protected Unfiltered computeNext()
-            {
-                while (reversed ? index >= 0 : index < paths.length)
-                {
-                    ByteComparable.Preencoded path = paths[index];
-                    index += reversed ? -1 : 1;
-                    DeletionAwareTrie<Object, TrieTombstoneMarker> tail = trie.tailTrie(path, false);
-                    if (tail == null)
-                        continue;
-                    Object rowMarker = tail.get(ByteComparable.EMPTY);
-                    if (!(rowMarker instanceof LivenessInfo))
-                        continue;
-                    // canUseDirectLookups checked that there are no deletions anywhere in the partition.
-                    assert tail.deletionAtRoot() == null : "Unexpected deletion branch below the partition root";
-                    // Decode the clustering from the path, as the walk over the intersection would do.
-                    Clustering<?> clustering = getClustering(path);
-                    Row row = filter(toRowWithoutDeletions(tail, clustering, (LivenessInfo) rowMarker), selection, mayFilterColumns);
-                    // Like the intersection walk, skip rows left empty by the filter.
-                    if (row != null)
-                        return row;
-                }
-                return endOfData();
-            }
-        };
-    }
-
     private UnfilteredRowIterator unfilteredIterator(ColumnFilter selection, ByteComparable[] bounds, boolean reversed)
     {
         if (bounds.length == 0)
@@ -738,10 +598,6 @@ public class TrieBackedPartition implements Partition
     @Override
     public UnfilteredRowIterator unfilteredIterator(ColumnFilter selection, Slices slices, boolean reversed)
     {
-        // Single-partition reads by full primary key (e.g. SAI fetching the rows it matched) select single rows.
-        if (selectsSingleRows(slices) && canUseDirectLookups())
-            return singleRowsIterator(selection, singleRowPaths(slices), reversed);
-
         ByteComparable[] bounds = new ByteComparable[slices.size() * 2];
         int index = 0;
         for (Slice slice : slices)
@@ -755,19 +611,6 @@ public class TrieBackedPartition implements Partition
     @Override
     public UnfilteredRowIterator unfilteredIterator(ColumnFilter selection, NavigableSet<Clustering<?>> clusteringsInQueryOrder, boolean reversed)
     {
-        if (!clusteringsInQueryOrder.isEmpty() && canUseDirectLookups())
-        {
-            // singleRowsIterator takes the paths in forward order, like the intersection bounds below.
-            ByteComparable.Preencoded[] paths = new ByteComparable.Preencoded[clusteringsInQueryOrder.size()];
-            int index = reversed ? paths.length - 1 : 0;
-            for (Clustering<?> clustering : clusteringsInQueryOrder)
-            {
-                paths[index] = path(clustering).preencode(BYTE_COMPARABLE_VERSION);
-                index += reversed ? -1 : 1;
-            }
-            return singleRowsIterator(selection, paths, reversed);
-        }
-
         ByteComparable[] bounds = new ByteComparable[clusteringsInQueryOrder.size() * 2];
         // Trie intersection requires the boundaries to be given in forward order. Our clusterings are given in query
         // order, which is why we have to reverse them if we are making a reversed iterator.
@@ -803,14 +646,6 @@ public class TrieBackedPartition implements Partition
         {
             return droppedColumnsSource;
         }
-
-        /// Instances are only created over `TrieMemtable` tail tries, where all deletion branches split at the
-        /// partition root.
-        @Override
-        protected boolean deletionBranchesAtPartitionRoot()
-        {
-            return true;
-        }
     }
 
     /// A snapshot of the current [TrieBackedPartition] data, copied on heap when retrieved.
@@ -841,14 +676,6 @@ public class TrieBackedPartition implements Partition
             if (data == null)
                 return null;
             return TrieBackedRow.toBTreeRow(metadata, clustering, data, HeapCloner.instance);
-        }
-
-        @Override
-        Row toRowWithoutDeletions(DeletionAwareTrie<Object, TrieTombstoneMarker> data,
-                                  Clustering<?> clustering,
-                                  LivenessInfo livenessInfo)
-        {
-            return TrieBackedRow.toBTreeRow(metadata, clustering, data, livenessInfo, Row.Deletion.LIVE, HeapCloner.instance);
         }
     }
 
