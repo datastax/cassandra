@@ -875,6 +875,16 @@ public enum CassandraRelevantProperties
     SAI_LATEST_VERSION("cassandra.sai.latest_version", "dc"),
 
     SAI_MAX_ANALYZED_SIZE("cassandra.sai.max_analyzed_size_kb", "8"),
+
+    /**
+     * Maximum number of terms an automaton-driven SAI query (LIKE with non-prefix wildcards) may visit in the
+     * terms dictionaries and memtable index shards it touches, in total per read command executed on a replica
+     * (each page and each token-range subrequest has its own allowance; a term is counted once per sstable index
+     * segment or memtable shard visited), before the query is failed with the
+     * {@link org.apache.cassandra.exceptions.RequestFailureReason#SAI_AUTOMATON_EXPANSIONS_EXCEEDED} failure
+     * reason, whose client message suggests a more selective pattern. Must be a positive integer.
+     */
+    SAI_MAX_AUTOMATON_EXPANSIONS("cassandra.sai.max_automaton_expansions", "8192"),
     SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "8"),
     SAI_MAX_STRING_TERM_SIZE("cassandra.sai.max_string_term_size_kb", "8"),
     SAI_MAX_VECTOR_TERM_SIZE("cassandra.sai.max_vector_term_size_kb", "16"),

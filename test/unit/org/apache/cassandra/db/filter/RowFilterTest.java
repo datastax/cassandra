@@ -42,11 +42,14 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.index.sai.utils.InvalidPatternException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.btree.BTree;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -164,5 +167,38 @@ public class RowFilterTest
         builder.add(t, Operator.EQ, ByteBufferUtil.EMPTY_BYTE_BUFFER);
         filter = builder.build();
         assertTrue(filter.isMutableIntersection());
+    }
+
+    /**
+     * A LIKE pattern that can't be compiled into an automaton fails the filtering with an invalid pattern error naming
+     * the restricted column, which the operator evaluating the pattern doesn't know.
+     */
+    @Test
+    public void testInvalidLikePatternNamesColumn()
+    {
+        TableMetadata metadata = TableMetadata.builder("testks", "testcf")
+                                              .addPartitionKeyColumn("pk", Int32Type.instance)
+                                              .addRegularColumn("v", UTF8Type.instance)
+                                              .build();
+        ColumnMetadata v = metadata.getColumn(new ColumnIdentifier("v", true));
+
+        // a generic pattern too complex to determinize
+        StringBuilder pattern = new StringBuilder();
+        for (int i = 0; i < 1000; i++)
+            pattern.append("a%");
+        pattern.append('a');
+
+        RowFilter.Builder builder = RowFilter.builder(false);
+        builder.add(v, Operator.LIKE_MATCHES, UTF8Type.instance.decompose(pattern.toString()));
+        RowFilter filter = builder.build();
+        Row row = BTreeRow.create(Clustering.EMPTY,
+                                  LivenessInfo.EMPTY,
+                                  Row.Deletion.LIVE,
+                                  BTree.singleton(new BufferCell(v, 1, Cell.NO_TTL, Cell.NO_DELETION_TIME, UTF8Type.instance.decompose("abc"), null)));
+        DecoratedKey key = Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(1));
+
+        assertThatThrownBy(() -> filter.isSatisfiedBy(metadata, key, row, 1))
+            .isInstanceOf(InvalidPatternException.class)
+            .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
     }
 }

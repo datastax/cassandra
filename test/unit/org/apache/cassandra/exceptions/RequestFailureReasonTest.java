@@ -15,11 +15,19 @@
  */
 
 package org.apache.cassandra.exceptions;
+
+import java.util.Map;
+
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.TableId;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -40,7 +48,8 @@ public class RequestFailureReasonTest
     { 501, "UNKNOWN_TABLE" },
     { 502, "REMOTE_STORAGE_FAILURE" },
     { 503, "INDEX_BUILD_IN_PROGRESS" },
-    { 504, "FEATURE_NEEDS_INDEX_REBUILD" }
+    { 504, "FEATURE_NEEDS_INDEX_REBUILD" },
+    { 505, "SAI_AUTOMATON_EXPANSIONS_EXCEEDED" }
     };
     @Test
     public void testEnumCodesAndNames()
@@ -105,5 +114,26 @@ public class RequestFailureReasonTest
         // Test unmapped exception returns UNKNOWN
         assertEquals(RequestFailureReason.UNKNOWN, 
                      RequestFailureReason.forException(new RuntimeException("test")));
+    }
+
+    @Test
+    public void testAutomatonExpansionsExceeded() throws Exception
+    {
+        assertEquals(RequestFailureReason.SAI_AUTOMATON_EXPANSIONS_EXCEEDED,
+                     RequestFailureReason.forException(new AutomatonTermsExceededException(10)));
+
+        // the failure protocol only carries the reason code: its hint reaches the client in the failure message
+        InetAddressAndPort replica = InetAddressAndPort.getByName("127.0.0.1");
+        ReadFailureException failure = new ReadFailureException(ConsistencyLevel.ONE, 0, 1, false,
+                                                                Map.of(replica, RequestFailureReason.SAI_AUTOMATON_EXPANSIONS_EXCEEDED));
+        assertTrue(failure.getMessage(), failure.getMessage().contains("SAI_AUTOMATON_EXPANSIONS_EXCEEDED from " + replica));
+        assertTrue(failure.getMessage(), failure.getMessage().contains("use a more selective pattern"));
+        assertTrue(failure.getMessage(), failure.getMessage().contains(CassandraRelevantProperties.SAI_MAX_AUTOMATON_EXPANSIONS.getKey()));
+
+        // reasons without a hint keep their message
+        ReadFailureException other = new ReadFailureException(ConsistencyLevel.ONE, 0, 1, false,
+                                                              Map.of(replica, RequestFailureReason.UNKNOWN));
+        assertTrue(other.getMessage(), other.getMessage().endsWith("UNKNOWN from " + replica));
+        assertNull(RequestFailureReason.UNKNOWN.hint());
     }
 }

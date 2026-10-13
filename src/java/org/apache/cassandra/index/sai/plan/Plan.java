@@ -927,8 +927,11 @@ abstract public class Plan
                                         || predicate.getIndexName().equals(ordering.getIndexName()),
                                         "Ordering must use the same index as the predicate");
             this.predicate = predicate;
-            // If we match by equality, ordering makes no sense because all term values would be the same.
-            this.ordering = (predicate == null || predicate.getOp() != Expression.Op.EQ) ? ordering : null;
+            // If we match by equality, ordering makes no sense because all term values would be the same. This
+            // includes wildcard-free LIKE patterns: an ordering scan would read the whole range of the terms
+            // starting with the pattern, while the non-ordered scan is a term lookup.
+            this.ordering = (predicate == null || (predicate.getOp() != Expression.Op.EQ && !predicate.isExactPatternMatch()))
+                            ? ordering : null;
             this.matchingKeysCount = matchingKeysCount;
         }
 
@@ -1011,8 +1014,13 @@ abstract public class Plan
             double postingsCountExponent;
             double skipDistanceFactor;
             double skipDistanceExponent;
-            if (predicate == null || predicate.getOp() == Expression.Op.RANGE)
+            if (predicate == null
+                || predicate.getOp() == Expression.Op.RANGE
+                || predicate.getOp() == Expression.Op.PREFIX
+                || predicate.getOp() == Expression.Op.AUTOMATON)
             {
+                // prefix and pattern (automaton) predicates scan a range of terms and merge their posting lists,
+                // like range predicates
                 skipCostFactor = RANGE_SCAN_SKIP_COST;
                 postingsCountFactor = RANGE_SCAN_SKIP_COST_POSTINGS_COUNT_FACTOR;
                 postingsCountExponent = RANGE_SCAN_SKIP_COST_POSTINGS_COUNT_EXPONENT;

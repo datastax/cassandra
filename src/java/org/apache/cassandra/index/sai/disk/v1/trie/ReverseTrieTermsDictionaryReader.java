@@ -38,6 +38,15 @@ public class ReverseTrieTermsDictionaryReader extends ReverseValueIterator<Rever
         super(rebufferer, root, true, TypeUtil.BYTE_COMPARABLE_VERSION);
     }
 
+    /**
+     * Creates a reader for a trie terms dictionary range, iterated in reverse order: the terms between {@code start}
+     * (included if present) and {@code end} (always included if present). See {@link ReverseValueIterator} for details.
+     */
+    public ReverseTrieTermsDictionaryReader(Rebufferer rebufferer, long root, ByteComparable start, ByteComparable end)
+    {
+        super(rebufferer, root, start, end, LeftBoundTreatment.ADMIT_EXACT, true, TypeUtil.BYTE_COMPARABLE_VERSION);
+    }
+
     @Override
     public boolean hasNext()
     {
