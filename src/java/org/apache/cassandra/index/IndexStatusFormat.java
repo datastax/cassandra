@@ -19,11 +19,14 @@ package org.apache.cassandra.index;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -43,6 +46,33 @@ public final class IndexStatusFormat
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1L, TimeUnit.MINUTES);
 
     private IndexStatusFormat() {}
+
+    /**
+     * Serializes as a JSON string the status of the indexes in the provided map, in the format understood by all the
+     * nodes of a cluster whose minimum version is the given one.
+     * <p>
+     * Versions 5.0.0 through 5.0.2 use a much more bloated format that duplicates keyspace names and writes full
+     * status names instead of their numeric codes. If the minimum cluster version is unknown or one of those 3
+     * versions, the legacy format is used, unless the compact one is forced with
+     * {@link DatabaseDescriptor#getForceOptimizedIndexStatusFormat()}. Peers that need the legacy format whatever
+     * the minimum cluster version (HCD 1.2) get it from the gossip serializer, see
+     * {@link #toLegacySerializedFormat(String)}.
+     *
+     * @param minVersion the minimum version of the cluster, or {@code null} if unknown
+     */
+    public static String toSerializedFormat(@Nullable CassandraVersion minVersion, Map<String, Index.Status> indexStatusMap)
+    {
+        return shouldWriteLegacyStatusFormat(minVersion) ? toLegacySerializedFormat(indexStatusMap)
+                                                         : toSerializedFormat(indexStatusMap);
+    }
+
+    private static boolean shouldWriteLegacyStatusFormat(@Nullable CassandraVersion minVersion)
+    {
+        if (DatabaseDescriptor.getForceOptimizedIndexStatusFormat())
+            return false;
+
+        return minVersion == null || (minVersion.major == 5 && minVersion.minor == 0 && minVersion.patch < 3);
+    }
 
     /**
      * Serializes as a JSON string the status of the indexes in the provided map, using the compact format.

@@ -32,6 +32,7 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.json.simple.JSONValue;
 
 import static org.junit.Assert.assertEquals;
@@ -82,6 +83,32 @@ public class EndpointStateIndexStatusTest
         // a code this version does not know: passed through, the peer will fail to parse it in any format
         String unknownCode = "{\"ks1\": {\"idx1\": 99}}";
         assertSame(unknownCode, IndexStatusFormat.toLegacySerializedFormat(unknownCode));
+    }
+
+    @Test
+    public void testFormatChosenByMinVersion()
+    {
+        String legacy = IndexStatusFormat.toLegacySerializedFormat(STATUSES);
+        String compact = IndexStatusFormat.toSerializedFormat(STATUSES);
+
+        assertEquals(legacy, IndexStatusFormat.toSerializedFormat(null, STATUSES));
+        assertEquals(legacy, IndexStatusFormat.toSerializedFormat(new CassandraVersion("5.0.2"), STATUSES));
+        assertEquals(compact, IndexStatusFormat.toSerializedFormat(new CassandraVersion("5.0.3"), STATUSES));
+        assertEquals(compact, IndexStatusFormat.toSerializedFormat(new CassandraVersion("5.0.7.0"), STATUSES));
+        // HCD 1.2 gets the legacy format from the gossip serializer, whatever the minimum version
+        assertEquals(compact, IndexStatusFormat.toSerializedFormat(new CassandraVersion("4.0.11.0"), STATUSES));
+
+        boolean forced = DatabaseDescriptor.getForceOptimizedIndexStatusFormat();
+        try
+        {
+            DatabaseDescriptor.setForceOptimizedIndexStatusFormat(true);
+            assertEquals(compact, IndexStatusFormat.toSerializedFormat(null, STATUSES));
+            assertEquals(compact, IndexStatusFormat.toSerializedFormat(new CassandraVersion("5.0.2"), STATUSES));
+        }
+        finally
+        {
+            DatabaseDescriptor.setForceOptimizedIndexStatusFormat(forced);
+        }
     }
 
     @Test

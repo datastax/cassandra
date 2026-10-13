@@ -33,7 +33,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorPlus;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ReadFailureException;
@@ -200,12 +199,8 @@ public class IndexStatusManager
             // logged and this causes a number of dtests to fail.
             if (Gossiper.instance.isEnabled())
             {
-                // Versions 5.0.0 through 5.0.2 use a much more bloated format that duplicates keyspace names
-                // and writes full status names instead of their numeric codes. If the minimum cluster version is
-                // unknown or one of those 3 versions, continue to propagate the old format.
                 CassandraVersion minVersion = Gossiper.instance.getMinVersion();
-                String newSerializedStatusMap = shouldWriteLegacyStatusFormat(minVersion) ? IndexStatusFormat.toLegacySerializedFormat(statusMap)
-                                                                                          : IndexStatusFormat.toSerializedFormat(statusMap);
+                String newSerializedStatusMap = IndexStatusFormat.toSerializedFormat(minVersion, statusMap);
 
                 statusPropagationExecutor.submit(() -> {
                     // schedule gossiper update asynchronously to avoid potential deadlock when another thread is holding
@@ -219,14 +214,6 @@ public class IndexStatusManager
         {
             logger.warn("Unable to propagate index status: {}", e.getMessage());
         }
-    }
-
-    private static boolean shouldWriteLegacyStatusFormat(CassandraVersion minVersion)
-    {
-        if (DatabaseDescriptor.getForceOptimizedIndexStatusFormat())
-            return false;
-
-        return minVersion == null || (minVersion.major == 5 && minVersion.minor == 0 && minVersion.patch < 3);
     }
 
     @VisibleForTesting
