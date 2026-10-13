@@ -36,9 +36,12 @@ public class TableStatsHolderTest
     {
         assertThat(TableStatsHolder.getMetricMean(null)).isNaN();
 
-        // timers report their mean in microseconds
-        assertThat(TableStatsHolder.getMetricMean(mbean(JmxTimerMBean.class, 2500.0))).isEqualTo(2.5);
+        // JMX timers report their mean in microseconds, and tablestats prints the SAI latencies in milliseconds
+        double timerMeanMicros = 2500.0;
+        double expectedTimerMeanMillis = 2.5;
+        assertThat(TableStatsHolder.getMetricMean(mbean(JmxTimerMBean.class, timerMeanMicros))).isEqualTo(expectedTimerMeanMillis);
 
+        // histograms have no unit, their mean is only rounded to two decimals
         assertThat(TableStatsHolder.getMetricMean(mbean(JmxHistogramMBean.class, 1.0 / 3))).isEqualTo(0.33);
         // the mean of an empty histogram
         assertThat(TableStatsHolder.getMetricMean(mbean(JmxHistogramMBean.class, Double.NaN))).isZero();
