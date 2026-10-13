@@ -120,6 +120,24 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
         return nextAsLong();
     }
 
+    /**
+     * Repositions the iteration at the least term greater than or equal to the given key, without consuming it:
+     * the entry is returned by the following {@link #next()}/{@link #nextAsLong()} call (or {@link #hasNext()}
+     * returns false when no such term exists within the reader's bounds), using the
+     * forward-only {@link ValueIterator#skipForwardTo}: the trie walk restarts from the deepest node shared by the
+     * key and the current position (comparing bytes as unsigned, unlike {@link #ceiling}), skipping to a key strictly
+     * before the current position is a no-op, and a key exactly equal to the just-consumed term re-prepares that
+     * term, which the following {@code next()} yields a second time. Callers must therefore only pass keys
+     * strictly greater than the last consumed term (the automaton-guided intersection provably does:
+     * {@code AutomatonSeeker#nextSeekTerm} always returns a strictly greater string). Requires a collecting
+     * reader. Used by the automaton-guided intersection ({@code TermsReader}) to skip runs of non-matching
+     * terms.
+     */
+    public void skipForwardTo(ByteComparable key)
+    {
+        skipForwardTo(key, LeftBoundTreatment.ADMIT_EXACT);
+    }
+
     public long nextAsLong()
     {
         return nextValueAsLong(this::getCurrentPayload, NOT_FOUND);
