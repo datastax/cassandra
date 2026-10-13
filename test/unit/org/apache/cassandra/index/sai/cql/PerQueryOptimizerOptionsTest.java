@@ -25,6 +25,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * End-to-end integration tests for per-query SAI optimizer options ({@code WITH optimizer_options = {...}}).
  *
+ * <p>This class checks how the options change the query plan and results. Parsing, validation and
+ * {@code RowFilter} wiring are covered by {@link OptimizerOptionsTest}.
+ *
  * <p>Covers all four option keys across real query execution:
  * <ul>
  *   <li>{@code query_optimization_level} — disables/enables the optimizer for a single query.</li>
@@ -365,5 +368,58 @@ public class PerQueryOptimizerOptionsTest extends VectorTester
                 "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'}",
                 Plan.NumericIndexScan.class,
                 row(0), row(1), row(2), row(3), row(4));
+    }
+
+    // -----------------------------------------------------------------------
+    // hybrid_sort_order on non-hybrid queries must behave as if it were absent
+    // -----------------------------------------------------------------------
+
+    /**
+     * A query with {@code ORDER BY} but no WHERE predicates is not hybrid, so every {@code hybrid_sort_order}
+     * value must be accepted and produce the same plan and results as no option at all.
+     */
+    @Test
+    public void testHybridSortOrderIsNoOpForOrderByOnlyQuery()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+
+        for (int i = 0; i < 10; i++)
+            execute("INSERT INTO %s (k, c, s, n) VALUES (0, ?, ?, ?)",
+                    i, String.valueOf((char) ('a' + i)), i);
+
+        String query = "SELECT c FROM %s ORDER BY s ASC LIMIT 5";
+        assertQueryHasSubplan(query, Plan.LiteralIndexScan.class, row(0), row(1), row(2), row(3), row(4));
+
+        for (String order : new String[]{ "auto", "sort_then_filter", "filter_then_sort" })
+        {
+            assertQueryHasSubplan(query + " WITH optimizer_options = {'hybrid_sort_order': '" + order + "'}",
+                                  Plan.LiteralIndexScan.class,
+                                  row(0), row(1), row(2), row(3), row(4));
+        }
+    }
+
+    /**
+     * A query with a WHERE predicate but no {@code ORDER BY} is not hybrid, so every {@code hybrid_sort_order}
+     * value must be accepted and return the same rows as no option at all.
+     */
+    @Test
+    public void testHybridSortOrderIsNoOpForFilterOnlyQuery()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+        for (int i = 0; i < 5; i++)
+            execute("INSERT INTO %s (k, c, s, n) VALUES (0, ?, ?, ?)", i, "x", 1);
+
+        String query = "SELECT c FROM %s WHERE n >= 0";
+        assertQueryHasSubplan(query, Plan.NumericIndexScan.class, row(0), row(1), row(2), row(3), row(4));
+
+        for (String order : new String[]{ "auto", "sort_then_filter", "filter_then_sort" })
+        {
+            assertQueryHasSubplan(query + " WITH optimizer_options = {'hybrid_sort_order': '" + order + "'}",
+                                  Plan.NumericIndexScan.class,
+                                  row(0), row(1), row(2), row(3), row(4));
+        }
     }
 }

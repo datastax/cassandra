@@ -472,7 +472,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     private Plan.RowsIteration applyHybridSortOrderOverrideToRows(Plan.RowsIteration plan)
     {
-        if (orderer == null)
+        // Not a hybrid query: either there is no ORDER BY, or there are no WHERE predicates to filter on.
+        // In that case the option has no effect.
+        if (orderer == null || whereKeysPlan == planFactory.everything)
             return plan;
 
         switch (optimizerOptions.hybridSortOrder())

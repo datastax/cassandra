@@ -31,6 +31,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Integration tests for per-query SAI optimizer options via {@code WITH optimizer_options = {...}}.
  *
+ * <p>This class covers parsing, validation and how the options are carried on the {@code RowFilter}.
+ * Tests that check how the options change the query plan live in {@link PerQueryOptimizerOptionsTest}.
+ *
  * <p>Verifies:
  * <ul>
  *   <li>Valid options parse and are stored in the {@link OptimizerOptions} on the {@code RowFilter}.</li>
@@ -147,7 +150,6 @@ public class OptimizerOptionsTest extends SAITester
 
             // With per-query opt_level=0, the optimizer is disabled for this query only.
             // Query must still return the right results.
-            disablePreparedReuseForTest();
             int rowsReturned = execute("SELECT * FROM %s WHERE v1='rare' AND v2='rare' " +
                                        "WITH optimizer_options = {'query_optimization_level': '0'}").size();
             assertThat(rowsReturned).isEqualTo(2);
@@ -167,7 +169,6 @@ public class OptimizerOptionsTest extends SAITester
 
         beforeAndAfterFlush(() -> {
             // Explicit opt_level=1 should behave the same as the default.
-            disablePreparedReuseForTest();
             assertThatPlanFor("SELECT * FROM %s WHERE v1='x' WITH optimizer_options = {'query_optimization_level': '1'}", 1).uses(idx1);
         });
     }
@@ -300,7 +301,7 @@ public class OptimizerOptionsTest extends SAITester
     {
         createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
         String idxS = createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+        String idxN = createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
 
         for (int i = 0; i < 10; i++)
             execute("INSERT INTO %s (k, c, s, n) VALUES (0, ?, ?, ?)",
@@ -324,5 +325,46 @@ public class OptimizerOptionsTest extends SAITester
         execute("SELECT c FROM %s WHERE n >= 0 ORDER BY s ASC LIMIT 5 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'auto'} " +
                 "AND included_indexes = { " + idxS + " }");
+
+        // Without ORDER BY the query is not hybrid, so the hint does not contradict the sort order.
+        execute("SELECT c FROM %s WHERE n >= 0 " +
+                "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'} " +
+                "AND included_indexes = { " + idxN + " }");
+        execute("SELECT c FROM %s WHERE n >= 0 " +
+                "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'} " +
+                "AND included_indexes = { " + idxN + " }");
+    }
+
+    /**
+     * Verify that {@code hybrid_sort_order} can be combined with {@code excluded_indexes}.
+     */
+    @Test
+    public void testExcludedIndexesWithHybridSortOrder()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text, n int, PRIMARY KEY(k, c))");
+        String idxS = createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex'");
+        String idxN = createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+
+        for (int i = 0; i < 10; i++)
+            execute("INSERT INTO %s (k, c, s, n) VALUES (0, ?, ?, ?)",
+                    i, String.valueOf((char) ('a' + i)), i < 2 ? 0 : 1);
+
+        // Filter only: the excluded index forces filtering, and the option is a no-op.
+        for (String order : new String[]{ "auto", "filter_then_sort", "sort_then_filter" })
+        {
+            execute("SELECT c FROM %s WHERE n >= 0 ALLOW FILTERING " +
+                    "WITH optimizer_options = {'hybrid_sort_order': '" + order + "'} " +
+                    "AND excluded_indexes = { " + idxN + " }");
+        }
+
+        // Order only: excluding the only usable index makes the query invalid regardless of the option.
+        for (String order : new String[]{ "auto", "filter_then_sort", "sort_then_filter" })
+        {
+            assertInvalidThrowMessage("requires the column to be indexed with a non-analyzed index",
+                                      InvalidRequestException.class,
+                                      "SELECT c FROM %s ORDER BY s ASC LIMIT 5 " +
+                                      "WITH optimizer_options = {'hybrid_sort_order': '" + order + "'} " +
+                                      "AND excluded_indexes = { " + idxS + " }");
+        }
     }
 }

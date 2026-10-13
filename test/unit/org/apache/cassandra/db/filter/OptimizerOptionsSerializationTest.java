@@ -31,8 +31,8 @@ import static org.apache.cassandra.db.filter.OptimizerOptions.USE_TERM_STATISTIC
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Verifies that {@link OptimizerOptions.Serializer} round-trips correctly at VERSION_DS_20
- * and degrades gracefully (returns NONE) for older messaging versions.
+ * Verifies that {@link OptimizerOptions.Serializer} round-trips correctly at {@link MessagingService#VERSION_DS_20}
+ * and degrades gracefully (returns {@link OptimizerOptions#NONE}) for older messaging versions.
  */
 public class OptimizerOptionsSerializationTest
 {

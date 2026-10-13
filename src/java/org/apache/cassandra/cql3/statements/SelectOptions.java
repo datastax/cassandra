@@ -78,6 +78,9 @@ public class SelectOptions extends PropertyDefinitions
         OptimizerOptions optimizerOptions = parseOptimizerOptions();
         optimizerOptions.validate(table.keyspace);
         if (!indexHints.included.isEmpty()
+            && indexQueryPlan != null
+            && indexQueryPlan.isTopK()
+            && indexQueryPlan.usesIndexFiltering()
             && optimizerOptions.hybridSortOrder() != OptimizerOptions.HybridSortOrder.AUTO)
         {
             throw new InvalidRequestException(CONFLICTING_OPTIMIZER_OPTIONS_AND_INDEX_HINTS_ERROR);
