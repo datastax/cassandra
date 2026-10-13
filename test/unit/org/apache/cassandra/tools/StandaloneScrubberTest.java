@@ -61,12 +61,16 @@ public class StandaloneScrubberTest extends OfflineToolUtils
                        "                                - off: don't perform the serialization-header checks.\n" + 
                        " -h,--help                      display this help message\n" + 
                        " -m,--manifest-check            only check and repair the leveled manifest, without actually scrubbing the sstables\n" + 
-                       " -n,--no-validate               do not validate columns using column validator\n" + 
+                       " -n,--no-validate               do not validate columns using column validator\n" +
+                       " -o,--overwrite-ttl <arg>       Overwrite TTL info. Possible argument values:\n" +
+                       "                                - NONE: does nothing\n" +
+                       "                                - NO_TTL: removes TTL\n" +
+                       "                                - REINSERT_OVERFLOWED_TTL: same as reinsert_overflowed_ttl option\n" +
                        " -r,--reinsert-overflowed-ttl   Rewrites rows with overflowed expiration date affected by CASSANDRA-14092 with the\n" +
                        "                                maximum supported expiration date of 2038-01-19T03:14:06+00:00. The rows are rewritten\n" +
                        "                                with the original timestamp incremented by one millisecond to override/supersede any\n" +
                        "                                potential tombstone that may have been generated during compaction of the affected rows.\n" +
-                       " -s,--skip-corrupted            skip corrupt rows in counter tables\n" + 
+                       " -s,--skip-corrupted            skip corrupt rows in counter tables\n" +
                        " -v,--verbose                   verbose output\n";
         Assertions.assertThat(tool.getStdout()).isEqualTo(help);
     }

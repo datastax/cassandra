@@ -80,6 +80,7 @@ import org.apache.cassandra.batchlog.BatchlogManagerMBean;
 import org.apache.cassandra.db.ColumnFamilyStoreMBean;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionManagerMBean;
+import org.apache.cassandra.io.sstable.IScrubber;
 import org.apache.cassandra.db.virtual.CIDRFilteringMetricsTable;
 import org.apache.cassandra.db.virtual.CIDRFilteringMetricsTableMBean;
 import org.apache.cassandra.db.guardrails.Guardrails;
@@ -368,6 +369,11 @@ public class NodeProbe implements AutoCloseable
         return ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, reinsertOverflowedTTL, jobs, keyspaceName, tables);
     }
 
+    public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, IScrubber.OverwriteTTLMode overwriteTTLMode, int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
+    {
+        return ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode, jobs, keyspaceName, tables);
+    }
+
     public int verify(boolean extendedVerify, boolean validateAllRows, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
     {
         return ssProxy.verify(extendedVerify, validateAllRows, checkVersion, diskFailurePolicy, mutateRepairStatus, checkOwnsTokens, quick, keyspaceName, tableNames);
@@ -405,9 +411,16 @@ public class NodeProbe implements AutoCloseable
 
     public void scrub(PrintStream out, boolean disableSnapshot, boolean skipCorrupted, boolean checkData, boolean reinsertOverflowedTTL, int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
     {
+        scrub(out, disableSnapshot, skipCorrupted, checkData,
+              reinsertOverflowedTTL ? IScrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL : IScrubber.OverwriteTTLMode.NONE,
+              jobs, keyspaceName, tables);
+    }
+
+    public void scrub(PrintStream out, boolean disableSnapshot, boolean skipCorrupted, boolean checkData, IScrubber.OverwriteTTLMode overwriteTTLMode, int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
+    {
         checkJobs(out, jobs);
         perform(out, keyspaceName,
-                () -> scrub(disableSnapshot, skipCorrupted, checkData, reinsertOverflowedTTL, jobs, keyspaceName, tables),
+                () -> scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode, jobs, keyspaceName, tables),
                 "scrubbing");
     }
 

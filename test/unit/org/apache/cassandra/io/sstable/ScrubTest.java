@@ -60,7 +60,9 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringPrefix;
+import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.CounterMutation;
@@ -78,7 +80,12 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
@@ -100,13 +107,18 @@ import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.sstable.format.SortedTableScrubber;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Throwables;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.SchemaLoader.compressionParams;
 import static org.apache.cassandra.SchemaLoader.counterCFMD;
 import static org.apache.cassandra.SchemaLoader.createKeyspace;
@@ -1043,5 +1055,121 @@ public class ScrubTest
                                              .reinsertOverflowedTTLRows(reinsertOverflowedTTL)
                                              .build();
         return CompactionManager.instance.performScrub(cfs, options, jobs);
+    }
+
+    /**
+     * Verifies that noTTLOverwrittenRows in ScrubResult counts only rows with TTL,
+     * leaving permanent rows uncounted.
+     */
+    @Test
+    public void testScrubNoTTLMetricsCountsStrippedRows() throws Exception
+    {
+        QueryProcessor.process(String.format(
+            "CREATE TABLE \"%s\".strip_ttl_metrics (k int PRIMARY KEY, v text)", ksName),
+            ConsistencyLevel.ONE);
+
+        // 3 rows with TTL, 2 without
+        for (int i = 0; i < 3; i++)
+            QueryProcessor.executeInternal(String.format(
+                "INSERT INTO \"%s\".strip_ttl_metrics (k, v) VALUES (%d, 'expiring') USING TTL 3600", ksName, i));
+        for (int i = 3; i < 5; i++)
+            QueryProcessor.executeInternal(String.format(
+                "INSERT INTO \"%s\".strip_ttl_metrics (k, v) VALUES (%d, 'permanent')", ksName, i));
+
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("strip_ttl_metrics");
+        cfs.forceBlockingFlush(UNIT_TESTS);
+
+        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        IScrubber.ScrubResult result;
+        IScrubber.Options options = IScrubber.options()
+                                             .skipCorrupted(false)
+                                             .checkData(true)
+                                             .overwriteTTLMode(IScrubber.OverwriteTTLMode.NO_TTL)
+                                             .build();
+        try (LifecycleTransaction txn = cfs.getTracker().tryModify(Collections.singletonList(sstable), OperationType.SCRUB);
+             IScrubber scrubber = sstable.descriptor.getFormat().getScrubber(cfs, txn, new OutputHandler.LogOutput(), options))
+        {
+            result = scrubber.scrubWithResult();
+        }
+
+        assertEquals("Only the 3 TTL rows should be counted", 3, result.noTTLOverwrittenRows);
+        assertEquals(5, result.goodPartitions);
+        assertEquals(0, result.badPartitions);
+    }
+
+    @Test
+    public void testHasAnyTTL() throws Exception
+    {
+        QueryProcessor.process(String.format(
+            "CREATE TABLE \"%s\".has_any_ttl_test (k int PRIMARY KEY, v text, m map<text, text>)", ksName),
+            ConsistencyLevel.ONE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("has_any_ttl_test");
+        TableMetadata metadata = cfs.metadata();
+
+        ColumnMetadata valCol = metadata.getColumn(ByteBufferUtil.bytes("v"));
+        ColumnMetadata mapCol = metadata.getColumn(ByteBufferUtil.bytes("m"));
+
+        long timestamp = FBUtilities.timestampMicros();
+        int ttl = 3600;
+        long nowInSec = FBUtilities.nowInSeconds();
+
+        // Case 1: Row with NO TTL, empty primary key liveness (no liveness info, no columns)
+        Row rowEmpty = BTreeRow.emptyRow(Clustering.EMPTY);
+        org.junit.Assert.assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowEmpty));
+
+        // Case 2: Row with non-expiring liveness info, no other columns
+        Row.Builder builder = BTreeRow.sortedBuilder();
+        builder.newRow(Clustering.EMPTY);
+        builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, nowInSec));
+        Row rowNonExpiringLiveness = builder.build();
+        org.junit.Assert.assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowNonExpiringLiveness));
+
+        // Case 3: Row with expiring liveness info, no other columns
+        builder = BTreeRow.sortedBuilder();
+        builder.newRow(Clustering.EMPTY);
+        builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, ttl, nowInSec));
+        Row rowExpiringLiveness = builder.build();
+        org.junit.Assert.assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowExpiringLiveness));
+
+        // Case 4: Row with non-expiring liveness and simple column cell that is non-expiring
+        builder = BTreeRow.sortedBuilder();
+        builder.newRow(Clustering.EMPTY);
+        builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, nowInSec));
+        builder.addCell(BufferCell.live(valCol, timestamp, ByteBufferUtil.bytes("val")));
+        Row rowWithLiveSimpleCell = builder.build();
+        org.junit.Assert.assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithLiveSimpleCell));
+
+        // Case 5: Row with non-expiring liveness and simple column cell that is expiring
+        builder = BTreeRow.sortedBuilder();
+        builder.newRow(Clustering.EMPTY);
+        builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, nowInSec));
+        builder.addCell(BufferCell.expiring(valCol, timestamp, ttl, nowInSec, ByteBufferUtil.bytes("val")));
+        Row rowWithExpiringSimpleCell = builder.build();
+        org.junit.Assert.assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithExpiringSimpleCell));
+
+        // Case 6: Row with non-expiring liveness and complex column (map) with non-expiring cell
+        builder = BTreeRow.sortedBuilder();
+        builder.newRow(Clustering.EMPTY);
+        builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, nowInSec));
+        builder.addCell(BufferCell.live(mapCol, timestamp, ByteBufferUtil.bytes("val"), CellPath.create(ByteBufferUtil.bytes("key"))));
+        Row rowWithLiveComplexCell = builder.build();
+        org.junit.Assert.assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithLiveComplexCell));
+
+        // Case 7: Row with non-expiring liveness and complex column (map) with expiring cell
+        builder = BTreeRow.sortedBuilder();
+        builder.newRow(Clustering.EMPTY);
+        builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, nowInSec));
+        builder.addCell(BufferCell.expiring(mapCol, timestamp, ttl, nowInSec, ByteBufferUtil.bytes("val"), CellPath.create(ByteBufferUtil.bytes("key"))));
+        Row rowWithExpiringComplexCell = builder.build();
+        org.junit.Assert.assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithExpiringComplexCell));
+
+        // Case 8: Complex column with multiple cells, one live and one expiring
+        builder = BTreeRow.sortedBuilder();
+        builder.newRow(Clustering.EMPTY);
+        builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, nowInSec));
+        builder.addCell(BufferCell.live(mapCol, timestamp, ByteBufferUtil.bytes("val1"), CellPath.create(ByteBufferUtil.bytes("key1"))));
+        builder.addCell(BufferCell.expiring(mapCol, timestamp, ttl, nowInSec, ByteBufferUtil.bytes("val2"), CellPath.create(ByteBufferUtil.bytes("key2"))));
+        Row rowWithMixedComplexCells = builder.build();
+        org.junit.Assert.assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithMixedComplexCells));
     }
 }

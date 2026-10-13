@@ -2021,6 +2021,27 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return scrub(disableSnapshot, false, options, jobs);
     }
 
+    public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted, IScrubber.OverwriteTTLMode overwriteTTLMode, boolean checkData, int jobs) throws ExecutionException, InterruptedException
+    {
+        IScrubber.Options options = IScrubber.options()
+                                             .skipCorrupted(skipCorrupted)
+                                             .checkData(checkData)
+                                             .overwriteTTLMode(overwriteTTLMode)
+                                             .build();
+        return scrub(disableSnapshot, false, options, jobs);
+    }
+
+    @VisibleForTesting
+    public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted, IScrubber.OverwriteTTLMode overwriteTTLMode, boolean alwaysFail, boolean checkData, int jobs) throws ExecutionException, InterruptedException
+    {
+        IScrubber.Options options = IScrubber.options()
+                                             .skipCorrupted(skipCorrupted)
+                                             .checkData(checkData)
+                                             .overwriteTTLMode(overwriteTTLMode)
+                                             .build();
+        return scrub(disableSnapshot, alwaysFail, options, jobs);
+    }
+
     @VisibleForTesting
     public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean alwaysFail, IScrubber.Options options, int jobs) throws ExecutionException, InterruptedException
     {
