@@ -333,6 +333,14 @@ public class OptimizerOptionsTest extends SAITester
         execute("SELECT c FROM %s WHERE n >= 0 " +
                 "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'} " +
                 "AND included_indexes = { " + idxN + " }");
+
+        // Without WHERE the query is not hybrid, so the hint does not contradict the sort order.
+        execute("SELECT c FROM %s ORDER BY s ASC LIMIT 5 " +
+                "WITH optimizer_options = {'hybrid_sort_order': 'filter_then_sort'} " +
+                "AND included_indexes = { " + idxS + " }");
+        execute("SELECT c FROM %s ORDER BY s ASC LIMIT 5 " +
+                "WITH optimizer_options = {'hybrid_sort_order': 'sort_then_filter'} " +
+                "AND included_indexes = { " + idxS + " }");
     }
 
     /**
@@ -346,11 +354,13 @@ public class OptimizerOptionsTest extends SAITester
         String idxN = createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
 
         for (int i = 0; i < 10; i++)
+        {
             execute("INSERT INTO %s (k, c, s, n) VALUES (0, ?, ?, ?)",
                     i, String.valueOf((char) ('a' + i)), i < 2 ? 0 : 1);
+        }
 
         // Filter only: the excluded index forces filtering, and the option is a no-op.
-        for (String order : new String[]{ "auto", "filter_then_sort", "sort_then_filter" })
+        for (OptimizerOptions.HybridSortOrder order : OptimizerOptions.HybridSortOrder.values())
         {
             execute("SELECT c FROM %s WHERE n >= 0 ALLOW FILTERING " +
                     "WITH optimizer_options = {'hybrid_sort_order': '" + order + "'} " +
@@ -358,7 +368,7 @@ public class OptimizerOptionsTest extends SAITester
         }
 
         // Order only: excluding the only usable index makes the query invalid regardless of the option.
-        for (String order : new String[]{ "auto", "filter_then_sort", "sort_then_filter" })
+        for (OptimizerOptions.HybridSortOrder order : OptimizerOptions.HybridSortOrder.values())
         {
             assertInvalidThrowMessage("requires the column to be indexed with a non-analyzed index",
                                       InvalidRequestException.class,
