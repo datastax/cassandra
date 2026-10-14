@@ -539,6 +539,10 @@ public enum CassandraRelevantProperties
      * files untouched, and create new files (with a different file name) instead.
      */
     IMMUTABLE_SAI_COMPONENTS("cassandra.sai.immutable_components", "false"),
+    /** The class to use for deciding whether to use immutable SAI components on a per-keyspace basis. If unset,
+     * {@link #IMMUTABLE_SAI_COMPONENTS} is used for all keyspaces.
+     */
+    IMMUTABLE_SAI_COMPONENTS_CONFIG_PROVIDER_CLASS("cassandra.sai.immutable_components.config_provider.class", ""),
     /** Minimum SAI index version to which immutable components can apply. If the SAI version used is strictly lower
      * that the version configured here, then immutable components will _not_ be used even if the previous flag is set
      * to `true`. You can set this to `aa` to enable immutable components on every version.
