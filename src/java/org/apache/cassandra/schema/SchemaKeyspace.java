@@ -184,6 +184,7 @@ public final class SchemaKeyspace
               + "additional_write_policy text,"
               + "cdc boolean,"
               + "read_repair text,"
+              + "storage_attached_indexing frozen<map<text, text>>,"
               + "PRIMARY KEY ((keyspace_name), table_name))");
 
     private static final TableMetadata Columns =
@@ -716,6 +717,12 @@ public final class SchemaKeyspace
                .add("read_repair", params.readRepair.toString())
                .add("extensions", params.extensions);
 
+        // Only write storage_attached_indexing when non-default, to avoid writing the column into
+        // tables that don't have it (system tables, older schemas) and to stay backward-compatible
+        // with nodes that don't know about this column yet.
+        if (!params.storageAttachedIndexingParams.asMap().isEmpty())
+            builder.add("storage_attached_indexing", params.storageAttachedIndexingParams.asMap());
+
         // Only add CDC-enabled flag to schema if it's enabled on the node. This is to work around RTE's post-8099 if a 3.8+
         // node sends table schema to a < 3.8 versioned node with an unknown column.
         if (DatabaseDescriptor.isCDCEnabled())
@@ -1210,6 +1217,9 @@ public final class SchemaKeyspace
         // incremental_backups column was introduced in 4.2
         if (row.has("incremental_backups"))
             builder.incrementalBackups(row.getBoolean("incremental_backups"));
+
+        if (row.has("storage_attached_indexing"))
+            builder.storageAttachedIndexing(StorageAttachedIndexingParams.fromMap(row.getFrozenTextMap("storage_attached_indexing")));
 
         return builder.build();
     }

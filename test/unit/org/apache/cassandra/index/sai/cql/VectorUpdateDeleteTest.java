@@ -24,7 +24,6 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
-import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
@@ -870,7 +869,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     @Test
     public void testVectorIndexWithAllOrdinalsDeletedViaRangeDeletion()
     {
-        QueryController.QUERY_OPT_LEVEL = 0;
+        disableQueryOptimization();
         setMaxBruteForceRows(0);
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, a))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
@@ -893,7 +892,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     @Test
     public void testVectorIndexWithAllOrdinalsDeletedAndSomeViaRangeDeletion()
     {
-        QueryController.QUERY_OPT_LEVEL = 0;
+        disableQueryOptimization();
         setMaxBruteForceRows(0);
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, a))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");

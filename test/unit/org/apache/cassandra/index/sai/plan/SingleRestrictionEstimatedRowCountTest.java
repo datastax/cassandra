@@ -29,6 +29,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -108,7 +109,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
                 useTermStatsTestedValues = new boolean[]{ true, false };
             for (boolean useTermStats : useTermStatsTestedValues)
             {
-                QueryController.QUERY_OPT_USE_TERM_STATS = useTermStats;
+                CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.setBoolean(useTermStats);
 
                 RowCountTest test = new RowCountTest(Operator.NEQ, 25);
                 test.doTest(version, INT, 95, 100);

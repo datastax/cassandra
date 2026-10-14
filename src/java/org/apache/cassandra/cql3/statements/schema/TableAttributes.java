@@ -26,6 +26,9 @@ import java.util.stream.Collectors;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.functions.types.utils.Bytes;
@@ -38,6 +41,7 @@ import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.MemtableParams;
+import org.apache.cassandra.schema.StorageAttachedIndexingParams;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.TableParams.Option;
@@ -259,6 +263,17 @@ public final class TableAttributes extends PropertyDefinitions
 
         if (hasOption(READ_REPAIR))
             builder.readRepair(ReadRepairStrategy.fromString(getString(READ_REPAIR)));
+
+        if (hasOption(Option.STORAGE_ATTACHED_INDEXING))
+        {
+            if (!CassandraRelevantProperties.SAI_TABLE_PARAMS_ENABLED.getBoolean())
+                throw new InvalidRequestException("The storage_attached_indexing table option is not enabled. " +
+                                                  "Set the system property cassandra.sai.table_params.enabled=true to enable it.");
+            if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+                throw new InvalidRequestException("The storage_attached_indexing table option is not supported in the current " +
+                                                  "storage compatibility mode. It requires storage_compatibility_mode=NONE.");
+            builder.storageAttachedIndexing(StorageAttachedIndexingParams.fromMap(getMap(Option.STORAGE_ATTACHED_INDEXING)));
+        }
 
         return builder.build();
     }
