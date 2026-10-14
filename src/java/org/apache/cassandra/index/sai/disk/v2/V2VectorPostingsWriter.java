@@ -33,6 +33,7 @@ import com.google.common.collect.HashBiMap;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.agrona.collections.Int2IntHashMap;
+import org.apache.cassandra.index.sai.disk.v5.RemappedPostings;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -203,21 +204,20 @@ public class V2VectorPostingsWriter<T>
         return Pair.create(ordinalMap, maxRow);
     }
 
-    public static <T> V5VectorPostingsWriter.RemappedPostings remapForMemtable(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap,
-                                                                               boolean containsDeletes)
+    public static <T> RemappedPostings remapForMemtable(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap,
+                                                        boolean containsDeletes)
     {
         var p = buildOrdinalMap(postingsMap);
         int maxNewOrdinal = postingsMap.size() - 1; // no in-graph deletes in v2
         if (p == null || containsDeletes)
-            return V5VectorPostingsWriter.createGenericIdentityMapping(postingsMap);
+            return RemappedPostings.createGenericIdentityMapping(postingsMap);
 
         var ordinalMap = p.left;
         var maxRow = p.right;
-        return new V5VectorPostingsWriter.RemappedPostings(V5VectorPostingsWriter.Structure.ONE_TO_ONE,
-                                                           maxNewOrdinal,
-                                                           maxRow,
-                                                           ordinalMap,
-                                                           new Int2IntHashMap(Integer.MIN_VALUE),
-                                                           new V5VectorPostingsWriter.BiMapMapper(maxNewOrdinal, ordinalMap));
+        return new RemappedPostings(V5VectorPostingsWriter.Structure.ONE_TO_ONE,
+                                    maxNewOrdinal,
+                                    maxRow,
+                                    new Int2IntHashMap(Integer.MIN_VALUE),
+                                    new RemappedPostings.BiMapMapper(maxNewOrdinal, ordinalMap));
     }
 }

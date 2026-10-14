@@ -253,7 +253,7 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
     private <T> void validate(Structure structure, Map<VectorFloat<?>, VectorPostings<T>> postingsMap, RamAwareVectorValues vectorValues) throws IOException
     {
         // build the remapping and write the postings
-        var remapped = V5VectorPostingsWriter.remapForMemtable(postingsMap, Version.current(KEYSPACE));
+        var remapped = RemappedPostings.remapForMemtable(postingsMap, Version.current(KEYSPACE));
         assert remapped.structure == structure : remapped.structure + " != " + structure;
         File tempFile = createTempFile("testfile");
         PostingsMetadata postingsMd = writePostings(tempFile, vectorValues, postingsMap, remapped);
@@ -325,14 +325,13 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
 
     private static <T> PostingsMetadata writePostings(File tempFile,
                                                   RandomAccessVectorValues vectorValues,
-                                                  Map<VectorFloat<?>, VectorPostings<T>> postingsMap, V5VectorPostingsWriter.RemappedPostings remapped) throws IOException
+                                                  Map<VectorFloat<?>, VectorPostings<T>> postingsMap, RemappedPostings remapped) throws IOException
     {
         SequentialWriter writer = new SequentialWriter(tempFile,
                                                        SequentialWriterOption.newBuilder().finishOnClose(true).build());
 
         long postingsOffset = writer.position();
-        long postingsPosition = new V5VectorPostingsWriter<T>(remapped)
-                                    .writePostings(writer, vectorValues, postingsMap);
+        long postingsPosition = remapped.writer(vectorValues, postingsMap).write(writer);
         long postingsLength = postingsPosition - postingsOffset;
 
         writer.close();
