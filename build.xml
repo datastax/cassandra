@@ -2209,6 +2209,10 @@
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
       <jvmarg value="-Dcassandra.debugrefcount=false"/>
+      <!-- Ref debug sampling draws from ThreadLocalRandom, which strict determinism checking polices, and a leak
+           fails the simulation through Failures.onLeak, which records no stack anyway -->
+      <jvmarg value="-Dcassandra.debugrefcount.copy_sample_interval=0"/>
+      <jvmarg value="-Dcassandra.debugrefcount.primary_sample_interval=0"/>
       <jvmarg value="-Dcassandra.test.simulator.determinismcheck=strict"/>
       <jvmarg value="-Dcassandra.test.simulator.print_asm=${simulator.asm.print}" />
       <!-- Support Simulator Tests -->
