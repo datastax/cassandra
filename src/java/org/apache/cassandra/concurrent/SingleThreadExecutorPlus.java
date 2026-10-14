@@ -23,7 +23,7 @@ import org.apache.cassandra.utils.concurrent.Future;
 
 public class SingleThreadExecutorPlus extends ThreadPoolExecutorPlus implements SequentialExecutorPlus
 {
-    public static class AtLeastOnce extends AtomicBoolean implements AtLeastOnceTrigger, Runnable
+    public static class AtLeastOnce extends AtomicBoolean implements AtLeastOnceTrigger, Runnable, WrappedTask
     {
         protected final SequentialExecutorPlus executor;
         protected final Runnable run;
@@ -64,6 +64,12 @@ public class SingleThreadExecutorPlus extends ThreadPoolExecutorPlus implements 
         public String toString()
         {
             return run.toString();
+        }
+
+        @Override
+        public Class<?> taskClass()
+        {
+            return WrappedTask.classOf(run);
         }
     }
 

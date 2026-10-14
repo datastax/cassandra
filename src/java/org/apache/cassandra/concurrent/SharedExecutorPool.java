@@ -84,7 +84,7 @@ public class SharedExecutorPool
     // the collection of threads that have been asked to stop/deschedule - new workers are scheduled from here last
     final ConcurrentSkipListMap<Long, SEPWorker> descheduled = new ConcurrentSkipListMap<>();
     // All SEPWorkers that are currently running
-    private final Set<SEPWorker> allWorkers = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    final Set<SEPWorker> allWorkers = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     volatile boolean shuttingDown = false;
 
