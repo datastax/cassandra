@@ -774,6 +774,10 @@ public class TrieMemoryIndex extends MemoryIndex
                                      ? toBigDecimal(expression.getEncodedUpperBoundByteComparable(version))
                                      : indexUpperBound;
 
+        // An inverted range (e.g. v > 5 AND v < 3) matches nothing.
+        if (queryLowerBound.compareTo(queryUpperBound) > 0)
+            return 0;
+
         if (queryLowerBound.compareTo(indexUpperBound) > 0 || queryUpperBound.compareTo(indexLowerBound) < 0)
             return 0;
         if (queryLowerBound.compareTo(indexUpperBound) == 0 && expression.lower != null && !expression.lower.inclusive)
@@ -833,6 +837,16 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             upperBound = null;
             upperInclusive = false;
+        }
+
+        // The slice rejects bounds that are out of order, which an inverted range (e.g. v > 5 AND v < 3) and equal
+        // bounds with both sides exclusive produce. Equal bounds with one exclusive side make a valid empty slice and
+        // are returned early only because they are empty.
+        if (lowerBound != null && upperBound != null)
+        {
+            int cmp = ByteComparable.compare(lowerBound, upperBound, data.byteComparableVersion());
+            if (cmp > 0 || (cmp == 0 && !(lowerInclusive && upperInclusive)))
+                return Trie.empty(data.byteComparableVersion());
         }
 
         return data.slice(lowerBound, lowerInclusive, upperBound, upperInclusive);
