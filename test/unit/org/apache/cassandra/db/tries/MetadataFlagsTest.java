@@ -478,6 +478,7 @@ public class MetadataFlagsTest
         @Override public long advance() { return position; }
         @Override public long skipTo(long p) { return position; }
         @Override public Cursor<T> tailCursor(Direction d) { return this; }
+        @Override public void close() { /* nothing to release */ }
     }
 
     private static class MockTrieSetCursor extends MockCursor<TrieSetCursor.RangeState> implements TrieSetCursor

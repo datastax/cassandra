@@ -146,8 +146,11 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
         @Override
         protected V getContent(T v)
         {
-            // Fix the location of the tail trie source.
+            // Fix the location of the tail trie source. The trie we hand out keeps this cursor as the position to
+            // make its cursors from and has no close of its own, so release it here; [Cursor#close] leaves
+            // `tailCursor` callable precisely for this.
             Cursor<T> tailCursor = cursor.tailCursor(cursor.direction());
+            tailCursor.close();
             return mapContent(v, tailCursor::tailCursor, keyBytes, keyPos);
         }
 
@@ -176,8 +179,11 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
         @Override
         protected V getContent(S v)
         {
-            // Fix the location of the tail trie source.
+            // Fix the location of the tail trie source. The trie we hand out keeps this cursor as the position to
+            // make its cursors from and has no close of its own, so release it here; [Cursor#close] leaves
+            // `tailCursor` callable precisely for this.
             RangeCursor<S> tailCursor = cursor.tailCursor(cursor.direction());
+            tailCursor.close();
             return mapContent(v, tailCursor::tailCursor, keyBytes, keyPos);
         }
 
@@ -204,8 +210,11 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
         @Override
         protected V getContent(T v)
         {
-            // Fix the location of the tail trie source.
+            // Fix the location of the tail trie source. The trie we hand out keeps this cursor as the position to
+            // make its cursors from and has no close of its own, so release it here; [Cursor#close] leaves
+            // `tailCursor` callable precisely for this.
             DeletionAwareCursor<T, D> tailCursor = cursor.tailCursor(cursor.direction());
+            tailCursor.close();
             return mapContent(v, tailCursor::tailCursor, keyBytes, keyPos);
         }
 

@@ -310,6 +310,12 @@ class RangesCursor implements TrieSetCursor
         return tailCopyOf(this, direction);
     }
 
+    @Override
+    public void close()
+    {
+        // nothing to release
+    }
+
     ByteSource.Duplicatable duplicateSource(int index)
     {
         ByteSource.Peekable src = sources[index];
