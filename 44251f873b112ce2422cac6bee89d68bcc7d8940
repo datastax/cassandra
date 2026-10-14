@@ -1,0 +1,1 @@
+{"id":"bf73be0d-8df0-429a-976b-6059b6af2cf9","fileUri":"file:///Users/piotr/Projects/cassandra-ds/src/java/org/apache/cassandra/schema/DefaultCompressionSelector.java","repoName":"datastax/cassandra","branchName":"c18110-per-tenant-adaptive-compression","toolName":"apply_diff","startLine":23,"endLine":48,"taskId":null,"createdAt":1785941100210}
