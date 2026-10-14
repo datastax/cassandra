@@ -42,6 +42,8 @@ public class TriePartitionUpdater
     private final TrieMemtable.MemtableShard owner;
     protected final InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>.Mutator<Object, TrieTombstoneMarker> mutator;
 
+    /// The change made by the last update to the summed weight of the content stored in the trie. Content that the trie
+    /// may release without calling [#dropLevelMarker] must weigh 0 (see [#dataSizeOfMarker]).
     public long dataSize;
     public long colUpdateTimeDelta;
     public int partitionsAdded;
@@ -97,13 +99,17 @@ public class TriePartitionUpdater
             throw new AssertionError("Unexpected update type: " + update.getClass());
     }
 
-    long dataSizeOfMarker(TrieTombstoneMarker marker)
+    long dataSizeOfMarker(@Nullable TrieTombstoneMarker marker)
     {
-        if (!marker.isBoundary())
+        if (marker == null || !marker.isBoundary())
             return 0;
         // We will only count one of the sides.
         TrieTombstoneMarker.Covering rightSide = marker.rightDeletion();
-        if (rightSide == null)
+        // A level marker under a covering deletion has the same deletion on both sides and adds no data. It may be
+        // dropped without a call to dropLevelMarker, so it must not be counted. DeletionTime.equals ignores the
+        // deletion kind, so this also covers some markers the trie preserves; it must cover every marker that
+        // TrieMemtable.TrieSerializer.shouldPreserveWithoutChildren does not preserve.
+        if (rightSide == null || rightSide.equals(marker.leftDeletion()))
             return 0;
         else
             return rightSide.dataSize();
@@ -132,7 +138,7 @@ public class TriePartitionUpdater
             int hasTombstone = merged != null && merged.isBoundary() && TriePartitionUpdate.startsRowDeletion(merged) ? 1 : 0;
             currentPartition.markAddedTombstones(hasTombstone - hadTombstone);
             dataSize -= dataSizeOfMarker(existing);
-            dataSize += dataSizeOfMarker(update);
+            dataSize += dataSizeOfMarker(merged);
             return merged;
         }
     }
@@ -174,7 +180,7 @@ public class TriePartitionUpdater
     {
         if (existing != LivenessInfo.EMPTY && deletion.deletes(existing))
         {
-            dataSize -= existing.dataSize();
+            dataSize -= existing.dataSize() - LivenessInfo.EMPTY.dataSize();
             return LivenessInfo.EMPTY;
             // TODO: Does strict row liveness apply here? How do we drop tail trie if it does?
         }
@@ -185,10 +191,14 @@ public class TriePartitionUpdater
     private void dropLevelMarker(Object o)
     {
         if (o == LivenessInfo.EMPTY)
+        {
             currentPartition.markInsertedRows(-1);
+            dataSize -= LivenessInfo.EMPTY.dataSize();
+        }
         if (o instanceof TrieTombstoneMarker && ((TrieTombstoneMarker) o).rightDeletion() != null)
         {
             currentPartition.markAddedTombstones(-1);
+            // Only markers with the same deletion on both sides are dropped, so this subtracts 0.
             dataSize -= dataSizeOfMarker((TrieTombstoneMarker) o);
         }
     }

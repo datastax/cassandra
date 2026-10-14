@@ -756,16 +756,17 @@ public class TrieMemtable extends AbstractShardedMemtable
                                                       opGroup,
                                                       updater);
                     partitionCount += partitionsAdded;
-                }
-                finally
-                {
-                    indexer.commit();
-                    updateMinTimestamp(update.stats().minTimestamp);
+                    // A failed merge leaves the trie unchanged, so the update's effects must not be applied.
                     updateLiveDataSize(updater.dataSize);
+                    updateMinTimestamp(update.stats().minTimestamp);
                     updateCurrentOperations(update.operationCount());
 
                     columns = columns.mergeTo(update.columns());
                     stats = stats.mergeWith(update.stats());
+                }
+                finally
+                {
+                    indexer.commit();
                 }
             }
             finally
