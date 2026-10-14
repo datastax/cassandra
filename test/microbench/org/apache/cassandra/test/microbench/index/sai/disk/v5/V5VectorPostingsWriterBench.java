@@ -29,6 +29,7 @@ import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import net.openhft.chronicle.hash.serialization.SizeMarshaller;
 import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
+import org.apache.cassandra.index.sai.disk.v5.RemappedPostings;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
@@ -107,13 +108,13 @@ public class V5VectorPostingsWriterBench
     @Benchmark
     public void createGenericIdentityMapping()
     {
-        V5VectorPostingsWriter.createGenericIdentityMapping(postingsMap, maxRowId.get(), numVectors - 1);
+        RemappedPostings.createGenericIdentityMapping(postingsMap, maxRowId.get(), numVectors - 1);
     }
 
     @Benchmark
     public void describeForCompactionOneToMany()
     {
-        V5VectorPostingsWriter.describeForCompaction(V5VectorPostingsWriter.Structure.ONE_TO_MANY, numVectors, maxRowId.get(), numVectors - 1, postingsMap);
+        RemappedPostings.describeForCompaction(V5VectorPostingsWriter.Structure.ONE_TO_MANY, numVectors, maxRowId.get(), numVectors - 1, postingsMap);
     }
 
     @TearDown

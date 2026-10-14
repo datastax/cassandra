@@ -87,6 +87,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.v5.RemappedPostings;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
@@ -546,11 +547,11 @@ public class CompactionGraph implements Closeable, Accountable
                 {
                     postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
                 }
-                var rp = V5VectorPostingsWriter.describeForCompaction(postingsStructure,
-                                                                      builder.getGraph().size(),
-                                                                      lastRowId,
-                                                                      maxOrdinal,
-                                                                      postingsMap);
+                var rp = RemappedPostings.describeForCompaction(postingsStructure,
+                                                                builder.getGraph().size(),
+                                                                lastRowId,
+                                                                maxOrdinal,
+                                                                postingsMap);
                 ordinalMapper.set(rp.ordinalMapper);
                 try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
                 {
@@ -638,12 +639,16 @@ public class CompactionGraph implements Closeable, Accountable
         return NVQuantization.create(globalMean, JVectorVersionUtil.NUM_SUB_VECTORS);
     }
 
-    private long writePostings(Version version, V5VectorPostingsWriter.RemappedPostings rp, IndexOutputWriter postingsOutput,
+    private long writePostings(Version version, RemappedPostings rp, IndexOutputWriter postingsOutput,
                               RandomAccessVectorValues vectorValues) throws IOException
     {
         if (V5OnDiskFormat.writeV5VectorPostings(version))
         {
-            return new V5VectorPostingsWriter<Integer>(rp).writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap);
+            // rows are added serially in ascending segment rowId order (see maybeAddVector), so each
+            // vector's rowIds are already ascending
+            return rp.writer(vectorValues, postingsMap)
+                     .skipRowIdSorting()
+                     .write(postingsOutput.asSequentialWriter());
         }
         else
         {

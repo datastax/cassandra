@@ -46,10 +46,8 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
-import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.RemappedPostings;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
-import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.metrics.VectorCompactionMetrics;
 
@@ -412,24 +410,20 @@ public class CompactionGraphMerger
 
                 // Write postings using ZERO_OR_ONE_TO_MANY. Each merged ordinal resolves its postings
                 // through the key of the source node the compactor placed there — an 8-byte map
-                // lookup, no vector reads. Every ordinal here has postings (only attributed ordinals
-                // entered the surviving bitsets). The postings are written directly in merged-ordinal
-                // space, so the RemappedPostings mapper has nothing left to translate: identity.
+                // lookup, no vector reads. Row ids are not assumed sorted: parallel ingest can add a
+                // duplicate vector's row ids out of order.
                 long postingsOffset = postingsOutput.getFilePointer();
-                var ordinalMapper = new OrdinalMapper.IdentityMapper(totalGlobalOrdinals - 1);
-                var rp = new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
-                                              totalGlobalOrdinals - 1,
-                                              postings.maxRowId(),
-                                              null, null,
-                                              ordinalMapper);
-
                 final long[] handleByMergedOrdinal = packedHandlesByMergedOrdinal(effective, surviving, totalGlobalOrdinals);
-                java.util.function.IntFunction<CompactionVectorPostings> postingsByNewOrdinal =
-                        g -> postings.get(VectorHandle.unpack(handleByMergedOrdinal[g]));
                 if (V5OnDiskFormat.writeV5VectorPostings(version))
                 {
-                    new V5VectorPostingsWriter<Integer>(rp)
-                            .writePostings(postingsOutput.asSequentialWriter(), postingsByNewOrdinal);
+                    // postings.get may return null; the writer treats that as an empty list
+                    V5VectorPostingsWriter.create(totalGlobalOrdinals - 1, g -> {
+                                              var p = postings.get(VectorHandle.unpack(handleByMergedOrdinal[g]));
+                                              return p == null ? null : p.getRowIds();
+                                          })
+                                          .structure(Structure.ZERO_OR_ONE_TO_MANY)
+                                          .maxRowId(postings.maxRowId())
+                                          .write(postingsOutput.asSequentialWriter());
                 }
                 // else: V2 format doesn't support ZERO_OR_ONE_TO_MANY — fall back is handled at
                 // the builder-selection level (merge path is only used for V5+)
