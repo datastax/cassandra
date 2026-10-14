@@ -418,7 +418,7 @@ public class IndexStatusManagerTest
         testcase.indexStatus.forEach((endpoint, indexStatusMap) ->
         {
             String serialized = legacyStatusFormat ? JsonUtils.writeAsJsonString(indexStatusMap) 
-                                                   : IndexStatusManager.toSerializedFormat(indexStatusMap);
+                                                   : IndexStatusFormat.toSerializedFormat(indexStatusMap);
             IndexStatusManager.instance.receivePeerIndexStatus(endpoint, VersionedValue.unsafeMakeVersionedValue(serialized, 1));
         });
 
