@@ -88,6 +88,7 @@
     <property name="test.simulator-asm.src" value="${test.dir}/simulator/asm"/>
     <property name="test.simulator-bootstrap.src" value="${test.dir}/simulator/bootstrap"/>
     <property name="test.simulator-test.src" value="${test.dir}/simulator/test"/>
+    <property name="test.harry.src" value="${test.dir}/harry/main"/>
     <property name="test.driver.connection_timeout_ms" value="10000"/>
     <property name="test.driver.read_timeout_ms" value="24000"/>
     <property name="test.jvm.args" value="" />
@@ -1273,6 +1274,7 @@
      <src path="${test.simulator-asm.src}"/>
      <src path="${test.simulator-bootstrap.src}"/>
      <src path="${test.simulator-test.src}"/>
+     <src path="${test.harry.src}"/>
      <compilerarg line="${jdk11plus-javac-exports}"/>
     </javac>
 
@@ -2179,6 +2181,36 @@
     <delete dir="${build.dir}/dtest" quiet="true"/>
   </target>
 
+  <target name="harry-soak-jar" depends="build-test"
+          description="Assemble build/harry-soak/, to run the Harry soak runner against an external cluster: java -jar build/harry-soak/harry-soak.jar --help">
+    <property name="harry.soak.dir" value="${build.dir}/harry-soak"/>
+    <delete dir="${harry.soak.dir}" quiet="true"/>
+    <!-- Both library directories have some artifacts in different versions: keep the order of cassandra.classpath.test -->
+    <copy todir="${harry.soak.dir}/lib/main" flatten="true">
+      <fileset file="${build.dir}/${final.name}.jar"/>
+      <fileset dir="${build.dir.lib}" includes="**/*.jar"/>
+    </copy>
+    <copy todir="${harry.soak.dir}/lib/test" flatten="true">
+      <fileset dir="${test.lib}/jars" includes="**/*.jar" excludes="**/ant-*.jar"/>
+    </copy>
+    <jar jarfile="${harry.soak.dir}/lib/${final.name}-tests.jar" basedir="${test.classes}"/>
+    <manifestclasspath property="harry.soak.classpath" jarfile="${harry.soak.dir}/harry-soak.jar" maxParentLevels="0">
+      <classpath>
+        <pathelement location="${harry.soak.dir}/lib/main/${final.name}.jar"/>
+        <fileset dir="${harry.soak.dir}/lib/main" includes="*.jar" excludes="${final.name}.jar"/>
+        <pathelement location="${harry.soak.dir}/lib/${final.name}-tests.jar"/>
+        <fileset dir="${harry.soak.dir}/lib/test" includes="*.jar"/>
+      </classpath>
+    </manifestclasspath>
+    <jar jarfile="${harry.soak.dir}/harry-soak.jar">
+      <zipfileset file="${test.conf}/logback-harry-soak.xml" fullpath="logback.xml"/>
+      <manifest>
+        <attribute name="Main-Class" value="org.apache.cassandra.harry.soak.SoakRunner"/>
+        <attribute name="Class-Path" value="${harry.soak.classpath}"/>
+      </manifest>
+    </jar>
+  </target>
+
   <target name="test-jvm-dtest" depends="maybe-build-test" description="Execute in-jvm dtests">
     <testmacro inputdir="${test.distributed.src}" timeout="${test.distributed.timeout}" forkmode="once" showoutput="true" filter="**/test/${test.name}.java">
       <jvmarg value="-Dlogback.configurationFile=test/conf/logback-dtest.xml"/>
@@ -2419,6 +2451,7 @@
   <classpathentry kind="src" output="${test.classes}" path="test/distributed"/>
   <classpathentry kind="src" output="${test.classes}" path="test/simulator/asm"/>
   <classpathentry kind="src" output="${test.classes}" path="test/simulator/main"/>
+  <classpathentry kind="src" output="${test.classes}" path="test/harry/main"/>
   <classpathentry kind="src" output="${test.classes}" path="test/resources" />
   <classpathentry kind="src" path="tools/stress/src"/>
   <classpathentry kind="src" path="tools/fqltool/src"/>
