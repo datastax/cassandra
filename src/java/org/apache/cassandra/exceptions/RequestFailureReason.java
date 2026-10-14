@@ -20,12 +20,15 @@ package org.apache.cassandra.exceptions;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import javax.annotation.Nullable;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -54,7 +57,8 @@ public enum RequestFailureReason
      * The problematic old index version can be being used by either the entire index or only some sstables.
      * Enabling the feature requires setting the right index version and running a sstable upgrade.
      */
-    FEATURE_NEEDS_INDEX_REBUILD(504);
+    FEATURE_NEEDS_INDEX_REBUILD(504),
+    SAI_AUTOMATON_EXPANSIONS_EXCEEDED(505); // A SAI LIKE pattern matched too many indexed terms (see cassandra.sai.max_automaton_expansions)
 
     public static final Serializer serializer = new Serializer();
 
@@ -63,6 +67,21 @@ public enum RequestFailureReason
     RequestFailureReason(int code)
     {
         this.code = code;
+    }
+
+    /**
+     * @return an explanation of this failure reason for the client, appended to the message of the request failures
+     * it causes because the failure protocol only carries the reason code, or {@code null} if the reason name is
+     * self-explanatory
+     */
+    @Nullable
+    public String hint()
+    {
+        if (this == SAI_AUTOMATON_EXPANSIONS_EXCEEDED)
+            return "a LIKE pattern visited more indexed terms than allowed by the " +
+                   CassandraRelevantProperties.SAI_MAX_AUTOMATON_EXPANSIONS.getKey() +
+                   " system property; use a more selective pattern";
+        return null;
     }
 
     public int codeForNativeProtocol()
@@ -93,6 +112,7 @@ public enum RequestFailureReason
         exceptionToReasonMap.put(UnknownTableException.class, UNKNOWN_TABLE);
         exceptionToReasonMap.put(IndexBuildInProgressException.class, INDEX_BUILD_IN_PROGRESS);
         exceptionToReasonMap.put(FeatureNeedsIndexRebuildException.class, FEATURE_NEEDS_INDEX_REBUILD);
+        exceptionToReasonMap.put(AutomatonTermsExceededException.class, SAI_AUTOMATON_EXPANSIONS_EXCEEDED);
 
         if (exceptionToReasonMap.size() != reasons.length-5)
             throw new RuntimeException("A new RequestFailureReasons was probably added and you may need to update the exceptionToReasonMap");

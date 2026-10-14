@@ -30,6 +30,8 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException;
+import org.apache.cassandra.index.sai.utils.InvalidPatternException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -112,6 +114,12 @@ public class InboundSink implements InboundMessageHandlers.MessageConsumer
                 t instanceof IndexBuildInProgressException)
             {
                 noSpamLogger.error(t.getMessage());
+            }
+            else if (t instanceof AutomatonTermsExceededException || t instanceof InvalidPatternException)
+            {
+                // a guardrail rejecting the query or an invalid LIKE pattern (reported to the coordinator by
+                // fail() above), not a node failure
+                noSpamLogger.warn(t.getMessage());
             }
             else if (t instanceof RuntimeException)
             {

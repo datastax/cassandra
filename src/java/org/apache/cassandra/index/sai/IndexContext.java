@@ -64,6 +64,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
@@ -317,6 +318,14 @@ public class IndexContext
         }
         indexMetrics.flatMap(metrics -> metrics.memtableIndexWriteLatency).ifPresent(timer ->
                 timer.update(nanoTime() - start, TimeUnit.NANOSECONDS));
+    }
+
+    /**
+     * @return the maximum size in bytes of the terms this index indexes; larger values are not indexed
+     */
+    public int getMaxTermSize()
+    {
+        return maxTermSize;
     }
 
     /**
@@ -731,9 +740,47 @@ public class IndexContext
         return null;
     }
 
+    /**
+     * Returns whether this index supports the CQL {@code LIKE} restrictions: prefix ({@code LIKE '<term>%'}),
+     * suffix, contains and generic patterns.
+     * <p>
+     * These are supported for plain string types when the index is not tokenized: the terms dictionary then
+     * contains whole (though possibly normalized, e.g. lowercased) terms in sorted order, so prefixes map to
+     * contiguous scans of it and the other patterns to automaton intersections with it. Tokenizing (Lucene)
+     * analyzers break the 1:1 mapping between column values and indexed terms, making pattern semantics over
+     * the indexed terms undefined.
+     */
+    public boolean supportsLikeQueries()
+    {
+        // Reversed (DESC clustering) string columns are supported too: their terms are stored as the raw,
+        // un-reversed value bytes like any other string term (see OnDiskFormat#encodeForTrie), and the LIKE bounds
+        // and automata are built from the raw pattern bytes (Expression#add only swaps the bounds of LT/LTE/GT/GTE).
+        return TypeUtil.isUTF8OrAscii(validator)
+               && !isNonFrozenCollection()
+               && indexType != IndexTarget.Type.FULL
+               && !hasCustomAnalyzer();
+    }
+
+    /**
+     * @return whether this index uses a custom (Lucene) index or query analyzer, i.e. one that may tokenize
+     * a value into multiple terms. Indexes with only the non-tokenizing options (case_sensitive, normalize,
+     * ascii) are not considered custom-analyzed.
+     */
+    private boolean hasCustomAnalyzer()
+    {
+        return config != null && (config.options.containsKey(LuceneAnalyzer.INDEX_ANALYZER)
+                                  || config.options.containsKey(LuceneAnalyzer.QUERY_ANALYZER));
+    }
+
     public boolean supports(Operator op)
     {
-        if (op.isLike() || op == Operator.LIKE) return false;
+        // LIKE restrictions are parsed as the generic LIKE operator and are only refined to
+        // LIKE_PREFIX/LIKE_SUFFIX/LIKE_CONTAINS/LIKE_MATCHES once the queried value is bound and its wildcards
+        // are examined. Non-tokenizing indexes over string types serve prefix queries (LIKE '<term>%') as a
+        // bounded scan over the sorted terms dictionary, and the remaining variants (LIKE '%<term>',
+        // LIKE '%<term>%', LIKE '<a>%<b>') by automaton intersection with the terms dictionary.
+        if (op == Operator.LIKE || op.isLike())
+            return supportsLikeQueries();
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
         // The only supported operators are ANALYZER_MATCHES and BM25.
         if (op == Operator.ANALYZER_MATCHES) return isAnalyzed;

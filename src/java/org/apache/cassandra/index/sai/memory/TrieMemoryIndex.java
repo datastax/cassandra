@@ -29,6 +29,7 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -59,12 +60,16 @@ import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.AutomatonQueries;
+import org.apache.cassandra.index.sai.utils.AutomatonSeeker;
+import org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
@@ -73,11 +78,14 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.BinaryHeap;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
+import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 public class TrieMemoryIndex extends MemoryIndex
 {
@@ -96,6 +104,14 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
+
+    /** The maximum number of terms whose rows are counted when estimating a prefix (see {@link #estimateNumRowsWithPrefix}). */
+    private static final int MAX_COUNTED_PREFIX_TERMS = 256;
+    /**
+     * The maximum number of rows counted when estimating a prefix (see {@link #estimateNumRowsWithPrefix}): the keys
+     * of a term are a skip list whose size is linear to compute, so counting stops after this many keys.
+     */
+    private static final int MAX_COUNTED_PREFIX_ROWS = 4096;
 
     private ByteBuffer minTerm;
     private ByteBuffer maxTerm;
@@ -306,7 +322,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         if (logger.isTraceEnabled())
             logger.trace("Searching memtable index on expression '{}'...", expression);
@@ -320,6 +336,23 @@ public class TrieMemoryIndex extends MemoryIndex
                 return exactMatch(expression, keyRange);
             case RANGE:
                 return rangeMatch(expression, keyRange);
+            case PREFIX:
+                return prefixMatch(expression, keyRange);
+            case AUTOMATON:
+                // Automaton-served pattern matching (the non-prefix LIKE variants). The visited-terms budget is
+                // the one of the query context, shared by all the memtable shards and sstable segments the read
+                // visits: the configured expansions cap is not a per-shard allowance.
+                try
+                {
+                    return automatonMatch(expression.getAutomaton(), expression.getAutomatonCommonPrefix(),
+                                          queryContext.automatonExpansionsBudget(), keyRange);
+                }
+                catch (AutomatonTermsExceededException e)
+                {
+                    // re-throw with full query context; clients see the SAI_AUTOMATON_EXPANSIONS_EXCEEDED failure
+                    // reason, this detailed message lands in the logs
+                    throw e.forRestriction(expression.getPatternOperator(), indexContext.getColumnName());
+                }
             default:
                 throw new IllegalArgumentException("Unsupported expression: " + expression);
         }
@@ -357,19 +390,72 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, @Nullable Expression slice)
+    public CloseableIterator<PrimaryKeyWithSortKey> orderBy(QueryContext queryContext, Orderer orderer, @Nullable Expression slice)
     {
         if (data.isEmpty())
             return CloseableIterator.emptyIterator();
 
         Trie<PrimaryKeys> subtrie = getSubtrie(slice);
         var iter = subtrie.entrySet(orderer.isAscending() ? Direction.FORWARD : Direction.REVERSE).iterator();
+        if (slice != null && slice.getOp() == Expression.Op.AUTOMATON)
+            iter = automatonFilteredEntries(iter, slice, queryContext.automatonExpansionsBudget());
         return new AllTermsIterator(iter);
+    }
+
+    /**
+     * Filters the entries of an ordering scan restricted by an automaton pattern (the subtrie of the terms starting
+     * with the automaton's common prefix, see {@link #getSubtrie}) by the automaton, consuming the expansions budget
+     * of the query for every visited term, like the non-ordered {@link #automatonMatch} does (but without
+     * seek-skipping, as the scan visits the terms lazily, in order, until the query has enough rows), except for
+     * single-term automata (exact matches), which are not capped.
+     */
+    private Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> automatonFilteredEntries(Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> entries,
+                                                                                                 Expression slice,
+                                                                                                 AutomatonQueries.ExpansionsBudget budget)
+    {
+        CompiledAutomaton automaton = slice.getAutomaton();
+        if (automaton.type == CompiledAutomaton.AUTOMATON_TYPE.NONE)
+            return Collections.emptyIterator();
+        // a single-term automaton (a wildcard-free pattern) is an exact match, which the non-ordered path serves
+        // with a term lookup that doesn't consume the budget either (the query plan doesn't order the index scans
+        // of such patterns, like those of equalities, see Plan.IndexScan)
+        boolean charged = automaton.type != CompiledAutomaton.AUTOMATON_TYPE.SINGLE;
+
+        return new AbstractGuavaIterator<>()
+        {
+            @Override
+            protected Map.Entry<ByteComparable.Preencoded, PrimaryKeys> computeNext()
+            {
+                try
+                {
+                    while (entries.hasNext())
+                    {
+                        Map.Entry<ByteComparable.Preencoded, PrimaryKeys> entry = entries.next();
+                        if (charged)
+                            budget.consumeVisitedTerm();
+                        // for non-composite literal types the pre-encoded trie key bytes are the raw term bytes
+                        if (AutomatonQueries.accepts(automaton, ByteSourceInverse.readBytes(entry.getKey().getPreencodedBytes())))
+                            return entry;
+                    }
+                    return endOfData();
+                }
+                catch (AutomatonTermsExceededException e)
+                {
+                    throw e.forRestriction(slice.getPatternOperator(), indexContext.getColumnName());
+                }
+            }
+        };
     }
 
     private ByteComparable asByteComparable(ByteBuffer input)
     {
         return version.onDiskFormat().encodeForTrie(input, indexContext.getValidator());
+    }
+
+    /** The term of a {@code SINGLE} automaton, wrapped without copying (the automaton is shared and read-only). */
+    private static ByteBuffer singleTerm(CompiledAutomaton automaton)
+    {
+        return ByteBuffer.wrap(automaton.term.bytes, automaton.term.offset, automaton.term.length);
     }
 
     public KeyRangeIterator exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
@@ -699,8 +785,203 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private KeyRangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
-        Trie<PrimaryKeys> subtrie = getSubtrie(expression);
+        return iterateSubtrie(getSubtrie(expression), expression, keyRange);
+    }
 
+    private KeyRangeIterator prefixMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return iterateSubtrie(prefixSubtrie(expression), expression, keyRange);
+    }
+
+    /**
+     * The terms starting with the prefix of a {@link Expression.Op#PREFIX} expression are exactly those in
+     * {@code [enc(prefix), nextOf(enc(prefix)))}, computed on the unterminated byte-comparable. This is only valid
+     * for non-composite literal types, for which encodeForTrie preserves the raw byte order of the terms.
+     */
+    private Trie<PrimaryKeys> prefixSubtrie(Expression expression)
+    {
+        ByteComparable lowerBound = asByteComparable(expression.lower.value.encoded);
+        ByteComparable upperBound = expression.getPrefixUpperBoundByteComparable(version);
+        return data.slice(lowerBound, true, upperBound, false);
+    }
+
+    /**
+     * The terms accepted by the automaton of a {@link Expression.Op#AUTOMATON} expression all start with its common
+     * byte prefix, i.e. are in {@code [prefix, nextOf(prefix))} (the whole trie when there is no common prefix).
+     * This is a superset of the matching terms, only valid for non-composite literal types (see
+     * {@link #prefixSubtrie}).
+     */
+    private Trie<PrimaryKeys> automatonCommonPrefixSubtrie(Expression expression)
+    {
+        byte[] commonPrefix = expression.getAutomatonCommonPrefix();
+        if (commonPrefix.length == 0)
+            return data;
+        byte[] upperBytes = AutomatonQueries.prefixUpperBound(commonPrefix);
+        ByteComparable upperBound = upperBytes == null ? null : asByteComparable(ByteBuffer.wrap(upperBytes));
+        return data.slice(asByteComparable(ByteBuffer.wrap(commonPrefix)), true, upperBound, false);
+    }
+
+    /**
+     * Automaton-driven term matching over the in-memory trie (the non-prefix LIKE matching engine, see
+     * {@link org.apache.cassandra.index.sai.utils.AutomatonQueries}): returns the primary keys of all terms
+     * accepted by the given byte-level automaton, using the default
+     * {@link AutomatonQueries#DEFAULT_MAX_VISITED_TERMS} cap on visited terms.
+     * <p>
+     * This is only correct for indexes over non-composite literal types, whose terms are stored in the trie as
+     * their raw unterminated bytes (see {@code OnDiskFormat#encodeForTrie}), so a byte-level automaton can be run
+     * directly over the stored bytes and the automaton's common prefix delimits a contiguous subtrie.
+     * <p>
+     * The CQL surface (the non-prefix LIKE variants) reaches this engine through the
+     * {@code Expression.Op.AUTOMATON} branch of {@link #search}, which instead consumes the budget shared
+     * by the whole read ({@code QueryContext#automatonExpansionsBudget()}, initialized from the configurable
+     * {@link AutomatonQueries#maxAutomatonExpansions()} cap).
+     * <p>
+     * Like the on-disk dictionaries (whose {@code TermsReader} intersection is automaton-guided and
+     * seek-skipping), the walk is driven by an {@link AutomatonSeeker}: on a {@code *_AND_SEEK} acceptance the
+     * scan re-derives the {@code subtrie} view from the next seek target — a root-down descent per <em>skip</em>
+     * (not per rejected term), which is cheap relative to the terms it elides. This keeps the expansions budget
+     * consumption of a memtable shard comparable to that of the sstable segment it is flushed to.
+     *
+     * @throws AutomatonTermsExceededException if the walk exhausts the visited-terms budget
+     */
+    @VisibleForTesting
+    public KeyRangeIterator automatonMatch(CompiledAutomaton automaton, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return automatonMatch(automaton, AutomatonQueries.DEFAULT_MAX_VISITED_TERMS, keyRange);
+    }
+
+    /**
+     * Same as {@link #automatonMatch(CompiledAutomaton, AbstractBounds)} with an explicit per-call cap on the
+     * number of trie terms the scan may visit.
+     */
+    @VisibleForTesting
+    public KeyRangeIterator automatonMatch(CompiledAutomaton automaton, int maxVisitedTerms, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return automatonMatch(automaton, new AutomatonQueries.ExpansionsBudget(maxVisitedTerms), keyRange);
+    }
+
+    /**
+     * Same as {@link #automatonMatch(CompiledAutomaton, AbstractBounds)}, consuming the given visited-terms
+     * budget (the query path passes the budget of its query context, making the expansions cap a bound on the
+     * whole read).
+     */
+    @VisibleForTesting
+    public KeyRangeIterator automatonMatch(CompiledAutomaton automaton, AutomatonQueries.ExpansionsBudget budget, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return automatonMatch(automaton, AutomatonQueries.commonPrefixBytes(automaton), budget, keyRange);
+    }
+
+    /**
+     * Same as {@link #automatonMatch(CompiledAutomaton, AutomatonQueries.ExpansionsBudget, AbstractBounds)}, with the
+     * automaton's common byte prefix ({@link AutomatonQueries#commonPrefixBytes}) computed by the caller, so that
+     * it isn't recomputed for every memtable shard a query visits (see {@code Expression#getAutomatonCommonPrefix()}).
+     */
+    private KeyRangeIterator automatonMatch(CompiledAutomaton automaton,
+                                            byte[] commonPrefix,
+                                            AutomatonQueries.ExpansionsBudget budget,
+                                            AbstractBounds<PartitionPosition> keyRange)
+    {
+        if (!TypeUtil.isLiteral(indexContext.getValidator()) || TypeUtil.isComposite(indexContext.getValidator()))
+            throw new IllegalStateException("Automaton matching is only supported on non-composite literal indexes");
+
+        switch (automaton.type)
+        {
+            case NONE:
+                return KeyRangeIterator.empty();
+            case SINGLE:
+            {
+                PrimaryKeys primaryKeys = data.get(asByteComparable(singleTerm(automaton)));
+                if (primaryKeys == null || primaryKeys.keys().isEmpty())
+                    return KeyRangeIterator.empty();
+                return new FilteringKeyRangeIterator(new SortedSetKeyRangeIterator(primaryKeys.keys()), keyRange);
+            }
+            case ALL:
+            case NORMAL:
+                break;
+            default:
+                throw new AssertionError("Unknown automaton type: " + automaton.type);
+        }
+
+        // A match-all automaton has no run automaton; every term in the trie is accepted.
+        boolean matchAll = automaton.type == CompiledAutomaton.AUTOMATON_TYPE.ALL;
+
+        // Bound the scan to the subtrie of terms starting with the automaton's common byte prefix,
+        // [commonPrefix, nextOf(commonPrefix)), mirroring prefixMatch above.
+        byte[] upperBytes = AutomatonQueries.prefixUpperBound(commonPrefix);
+        ByteComparable upperBound = upperBytes == null ? null : asByteComparable(ByteBuffer.wrap(upperBytes));
+
+        // Automaton-guided seek-skipping, mirroring the sstable walk: the seeker computes the least acceptable
+        // string after each rejected run, and the scan re-derives the subtrie view from it.
+        AutomatonSeeker seeker = matchAll ? null : new AutomatonSeeker(automaton);
+        byte[] start = commonPrefix;
+        if (seeker != null)
+        {
+            byte[] initialTarget = seeker.nextSeekTerm(null);
+            if (initialTarget == null)
+                return KeyRangeIterator.empty();
+            // The initial target shares the common prefix with every acceptable string (or is a prefix of it):
+            // start from whichever bound is tighter.
+            if (FastByteOperations.compareUnsigned(initialTarget, 0, initialTarget.length,
+                                                   commonPrefix, 0, commonPrefix.length) > 0)
+                start = initialTarget;
+        }
+        ByteComparable lowerBound = start.length == 0 ? null : asByteComparable(ByteBuffer.wrap(start));
+
+        var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
+        var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
+        lastQueueSize.set(mergingIteratorBuilder.size());
+
+        Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> entries =
+            data.slice(lowerBound, true, upperBound, false).entrySet().iterator();
+        while (entries.hasNext())
+        {
+            Map.Entry<ByteComparable.Preencoded, PrimaryKeys> entry = entries.next();
+            budget.consumeVisitedTerm();
+
+            boolean accepted = true;
+            boolean seek = false;
+            if (seeker != null)
+            {
+                // For non-composite literal types the pre-encoded trie key bytes are the raw term bytes.
+                byte[] termBytes = ByteSourceInverse.readBytes(entry.getKey().getPreencodedBytes());
+                switch (seeker.accept(termBytes))
+                {
+                    case YES:
+                        break;
+                    case YES_AND_SEEK:
+                        seek = true;
+                        break;
+                    case NO_AND_SEEK:
+                        accepted = false;
+                        seek = true;
+                        break;
+                    case NO:
+                    default:
+                        accepted = false;
+                        break;
+                }
+                if (seek)
+                {
+                    byte[] target = seeker.nextSeekTerm(termBytes);
+                    if (target == null)
+                        entries = Collections.emptyIterator(); // no string after this term can possibly match
+                    else
+                        // strictly-increasing target: one root-down descent per skipped run of terms
+                        entries = data.slice(asByteComparable(ByteBuffer.wrap(target)), true, upperBound, false)
+                                      .entrySet().iterator();
+                }
+            }
+            if (accepted)
+                mergingIteratorBuilder.add(entry.getValue());
+        }
+
+        return mergingIteratorBuilder.isEmpty()
+               ? KeyRangeIterator.empty()
+               : new FilteringKeyRangeIterator(mergingIteratorBuilder.build(), keyRange);
+    }
+
+    private KeyRangeIterator iterateSubtrie(Trie<PrimaryKeys> subtrie, Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
         var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
         var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
         lastQueueSize.set(mergingIteratorBuilder.size());
@@ -743,6 +1024,10 @@ public class TrieMemoryIndex extends MemoryIndex
                     return Math.max(0, Memtable.estimateRowCount(memtable) - estimateNumRowsMatchingExact(expression));
             case RANGE:
                 return estimateNumRowsMatchingRange(expression);
+            case PREFIX:
+                return estimateNumRowsMatchingPrefix(expression);
+            case AUTOMATON:
+                return estimateNumRowsMatchingAutomaton(expression);
             default:
                 throw new IllegalArgumentException("Unsupported expression: " + expression);
         }
@@ -758,31 +1043,137 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private long estimateNumRowsMatchingRange(Expression expression)
     {
+        ByteComparable queryLower = expression.lower != null ? expression.getEncodedLowerBoundByteComparable(version) : null;
+        ByteComparable queryUpper = expression.upper != null ? expression.getEncodedUpperBoundByteComparable(version) : null;
+        boolean lowerExclusive = expression.lower != null && !expression.lower.inclusive;
+        boolean upperExclusive = expression.upper != null && !expression.upper.inclusive;
+        return estimateNumRowsInTermRange(queryLower, lowerExclusive, queryUpper, upperExclusive);
+    }
+
+    /**
+     * Conservatively estimates the number of rows matching a prefix expression by interpolating over the
+     * term range {@code [enc(prefix), nextOf(enc(prefix)))} covered by the prefix.
+     */
+    private long estimateNumRowsMatchingPrefix(Expression expression)
+    {
+        return estimateNumRowsWithPrefix(ByteBufferUtil.getArray(expression.lower.value.encoded));
+    }
+
+    /**
+     * Estimates the number of rows whose term starts with the given raw term bytes.
+     * <p>
+     * The rows of the first {@link #MAX_COUNTED_PREFIX_TERMS} terms of the range {@code [prefix, nextOf(prefix))} are
+     * counted, up to {@link #MAX_COUNTED_PREFIX_ROWS} rows, which gives the exact count when the range doesn't have
+     * more terms or rows. Otherwise, the estimate is the
+     * greatest of that partial count and of the interpolation over the range: the linear interpolation in the byte
+     * space is very coarse for prefixes that are long (it resolves only the first
+     * {@link TermsDistribution#NON_NUMBER_RESOLUTION_BYTES} bytes of a term, so a longer prefix is truncated to them)
+     * or that share their first bytes with all the other terms, and alone would estimate such ranges as empty.
+     */
+    private long estimateNumRowsWithPrefix(byte[] prefix)
+    {
+        byte[] upperBytes = AutomatonQueries.prefixUpperBound(prefix);
+        ByteComparable upperBound = upperBytes == null ? null : asByteComparable(ByteBuffer.wrap(upperBytes));
+        long countedRows = 0;
+        int countedTerms = 0;
+        boolean complete = true;
+        for (PrimaryKeys primaryKeys : data.slice(asByteComparable(ByteBuffer.wrap(prefix)), true, upperBound, false).values())
+        {
+            if (++countedTerms > MAX_COUNTED_PREFIX_TERMS || countedRows >= MAX_COUNTED_PREFIX_ROWS)
+            {
+                complete = false;
+                break;
+            }
+            // PrimaryKeys#size() walks the whole skip list: count at most the remaining row budget
+            Iterator<PrimaryKey> keys = primaryKeys.keys().iterator();
+            while (keys.hasNext() && countedRows < MAX_COUNTED_PREFIX_ROWS)
+            {
+                keys.next();
+                countedRows++;
+            }
+            if (keys.hasNext())
+            {
+                complete = false;
+                break;
+            }
+        }
+        if (complete)
+            return countedRows;
+
+        byte[] resolvablePrefix = TermsDistribution.resolvablePrefix(prefix);
+        byte[] resolvableUpperBytes = AutomatonQueries.prefixUpperBound(resolvablePrefix);
+        ByteComparable queryLower = asByteComparable(ByteBuffer.wrap(resolvablePrefix));
+        ByteComparable queryUpper = resolvableUpperBytes == null ? null : asByteComparable(ByteBuffer.wrap(resolvableUpperBytes));
+        return Math.max(countedRows, estimateNumRowsInTermRange(queryLower, false, queryUpper, true));
+    }
+
+    /**
+     * Conservatively estimates the number of rows matching an automaton pattern expression: when the automaton
+     * has a non-empty common byte prefix, all matching terms live in {@code [prefix, nextOf(prefix))} and the
+     * estimate interpolates over that range exactly like a prefix expression; without a common prefix the
+     * automaton may match terms anywhere in the dictionary, so the whole index size is returned as a (very)
+     * conservative upper bound.
+     */
+    private long estimateNumRowsMatchingAutomaton(Expression expression)
+    {
+        CompiledAutomaton automaton = expression.getAutomaton();
+        switch (automaton.type)
+        {
+            case NONE:
+                // An empty-language automaton matches nothing and automatonMatch short-circuits to an empty
+                // iterator; without this it would fall through to the no-common-prefix maximum below.
+                return 0;
+            case SINGLE:
+            {
+                // A single-term automaton matches exactly one term; mirror automatonMatch's exact lookup.
+                PrimaryKeys primaryKeys = data.get(asByteComparable(singleTerm(automaton)));
+                return primaryKeys == null ? 0 : primaryKeys.size();
+            }
+            default:
+                break;
+        }
+
+        byte[] commonPrefix = expression.getAutomatonCommonPrefix();
+        if (commonPrefix.length == 0)
+            return indexedRows;
+        return estimateNumRowsWithPrefix(commonPrefix);
+    }
+
+    private long estimateNumRowsInTermRange(ByteComparable queryLower, boolean lowerExclusive,
+                                            ByteComparable queryUpper, boolean upperExclusive)
+    {
         if (minTerm == null || maxTerm == null)
             return 0;
 
         AbstractType<?> termType = indexContext.getValidator();
         ByteComparable minTermComparable = version.onDiskFormat().encodeForTrie(minTerm, termType);
         ByteComparable maxTermComparable = version.onDiskFormat().encodeForTrie(maxTerm, termType);
-        BigDecimal indexLowerBound = toBigDecimal(minTermComparable);
-        BigDecimal indexUpperBound = toBigDecimal(maxTermComparable);
+        // The min/max terms are tracked with the comparator of the column type, which for a reversed (DESC
+        // clustering) column is the reverse of the byte order of the trie and of the query bounds: order them.
+        BigDecimal minTermValue = toBigDecimal(minTermComparable);
+        BigDecimal maxTermValue = toBigDecimal(maxTermComparable);
+        BigDecimal indexLowerBound = minTermValue.min(maxTermValue);
+        BigDecimal indexUpperBound = minTermValue.max(maxTermValue);
 
-        BigDecimal queryLowerBound = expression.lower != null
-                                     ? toBigDecimal(expression.getEncodedLowerBoundByteComparable(version))
-                                     : indexLowerBound;
-        BigDecimal queryUpperBound = expression.upper != null
-                                     ? toBigDecimal(expression.getEncodedUpperBoundByteComparable(version))
-                                     : indexUpperBound;
+        BigDecimal queryLowerBound = queryLower != null ? toBigDecimal(queryLower) : indexLowerBound;
+        BigDecimal queryUpperBound = queryUpper != null ? toBigDecimal(queryUpper) : indexUpperBound;
 
         if (queryLowerBound.compareTo(indexUpperBound) > 0 || queryUpperBound.compareTo(indexLowerBound) < 0)
             return 0;
-        if (queryLowerBound.compareTo(indexUpperBound) == 0 && expression.lower != null && !expression.lower.inclusive)
+        if (queryLowerBound.compareTo(indexUpperBound) == 0 && lowerExclusive)
             return 0;
-        if (queryUpperBound.compareTo(indexLowerBound) == 0 && expression.upper != null && !expression.upper.inclusive)
+        if (queryUpperBound.compareTo(indexLowerBound) == 0 && upperExclusive)
             return 0;
         if (queryLowerBound.compareTo(indexLowerBound) <= 0 && queryUpperBound.compareTo(indexUpperBound) >= 0)
             return indexedRows;
 
+        // A contradictory range (lower bound sorting after the upper bound) cannot always be rejected at
+        // prepare time because the bounds may be bind markers, and none of the early-outs above fires when both
+        // bounds lie inside [minTerm, maxTerm]. Such a range provably matches nothing.
+        if (queryLowerBound.compareTo(queryUpperBound) > 0)
+            return 0;
+
+        // Clamping into [indexLowerBound, indexUpperBound] is monotonic, so it keeps lower <= upper.
         queryUpperBound = queryUpperBound.min(indexUpperBound).max(indexLowerBound);
         queryLowerBound = queryLowerBound.max(indexLowerBound).min(indexUpperBound);
         assert queryLowerBound.compareTo(queryUpperBound) <= 0
@@ -810,6 +1201,14 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         if (expression == null)
             return data;
+
+        // The bounds of pattern expressions are the pattern itself, not a term range: slice by the range of terms
+        // they can match instead. For automaton patterns this is the range of the terms starting with the
+        // automaton's common prefix, a superset of the matching terms (filtered by the callers that need to).
+        if (expression.getOp() == Expression.Op.PREFIX)
+            return prefixSubtrie(expression);
+        if (expression.getOp() == Expression.Op.AUTOMATON)
+            return automatonCommonPrefixSubtrie(expression);
 
         ByteComparable lowerBound, upperBound;
         boolean lowerInclusive, upperInclusive;
