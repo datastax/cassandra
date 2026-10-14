@@ -25,6 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.JsonUtils;
@@ -45,6 +46,11 @@ public final class IndexStatusFormat
     private static final Logger logger = LoggerFactory.getLogger(IndexStatusFormat.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1L, TimeUnit.MINUTES);
 
+    /**
+     * The longest gossiped value, in modified UTF-8 bytes, that {@link java.io.DataOutput#writeUTF(String)} can write.
+     */
+    private static final int MAX_GOSSIP_VALUE_LENGTH = 0xFFFF;
+
     private IndexStatusFormat() {}
 
     /**
@@ -58,7 +64,8 @@ public final class IndexStatusFormat
      * the minimum cluster version (HCD 1.2) get it from the gossip serializer, see
      * {@link #toLegacySerializedFormat(String)}.
      *
-     * @param minVersion the minimum version of the cluster, or {@code null} if unknown
+     * @param minVersion the minimum version of the cluster, or {@code null} or {@link CassandraVersion#NULL_VERSION}
+     *                   if unknown
      */
     public static String toSerializedFormat(@Nullable CassandraVersion minVersion, Map<String, Index.Status> indexStatusMap)
     {
@@ -71,7 +78,11 @@ public final class IndexStatusFormat
         if (DatabaseDescriptor.getForceOptimizedIndexStatusFormat())
             return false;
 
-        return minVersion == null || (minVersion.major == 5 && minVersion.minor == 0 && minVersion.patch < 3);
+        // Gossiper.getMinVersion() returns NULL_VERSION while upgrading, until the versions of the peers are known
+        if (minVersion == null || CassandraVersion.NULL_VERSION.equals(minVersion))
+            return true;
+
+        return (minVersion.major == 5 && minVersion.minor == 0 && minVersion.patch < 3);
     }
 
     /**
@@ -137,6 +148,10 @@ public final class IndexStatusFormat
      * Rewrites a gossiped index status value in the legacy format, for peers that cannot parse the compact one.
      * A value already in the legacy format is returned unchanged, and so is a value that cannot be parsed: the peer
      * would not be able to read it in any format.
+     * <p>
+     * The compact format exists because the legacy one may not fit in a gossiped value: if the legacy rewrite is longer
+     * than {@link #MAX_GOSSIP_VALUE_LENGTH} the value is also returned unchanged, so that gossip with the peer keeps
+     * working even if the peer cannot read the index status.
      */
     public static String toLegacySerializedFormat(String serialized)
     {
@@ -151,7 +166,15 @@ public final class IndexStatusFormat
             if (parsed.values().stream().noneMatch(v -> v instanceof Map))
                 return serialized;
 
-            return toLegacySerializedFormat(fromParsedFormat(parsed));
+            String legacy = toLegacySerializedFormat(fromParsedFormat(parsed));
+            if (TypeSizes.encodedUTF8Length(legacy) > MAX_GOSSIP_VALUE_LENGTH)
+            {
+                noSpamLogger.warn("The index status in the legacy format is too long to be gossiped ({} characters), " +
+                                  "peers older than HCD 2.0 will receive it in the compact format they cannot parse",
+                                  legacy.length());
+                return serialized;
+            }
+            return legacy;
         }
         catch (RuntimeException e)
         {

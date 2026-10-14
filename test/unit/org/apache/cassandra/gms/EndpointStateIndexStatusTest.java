@@ -38,6 +38,7 @@ import org.json.simple.JSONValue;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
 /**
  * HCD-623: HCD 1.2 nodes (messaging version up to {@link MessagingService#VERSION_DS_12}) can only parse the legacy
@@ -91,6 +92,8 @@ public class EndpointStateIndexStatusTest
         String legacy = IndexStatusFormat.toLegacySerializedFormat(STATUSES);
         String compact = IndexStatusFormat.toSerializedFormat(STATUSES);
 
+        // Gossiper.getMinVersion() returns NULL_VERSION while upgrading, until the versions of the peers are known
+        assertEquals(legacy, IndexStatusFormat.toSerializedFormat(CassandraVersion.NULL_VERSION, STATUSES));
         assertEquals(legacy, IndexStatusFormat.toSerializedFormat(null, STATUSES));
         assertEquals(legacy, IndexStatusFormat.toSerializedFormat(new CassandraVersion("5.0.2"), STATUSES));
         assertEquals(compact, IndexStatusFormat.toSerializedFormat(new CassandraVersion("5.0.3"), STATUSES));
@@ -102,7 +105,7 @@ public class EndpointStateIndexStatusTest
         try
         {
             DatabaseDescriptor.setForceOptimizedIndexStatusFormat(true);
-            assertEquals(compact, IndexStatusFormat.toSerializedFormat(null, STATUSES));
+            assertEquals(compact, IndexStatusFormat.toSerializedFormat(CassandraVersion.NULL_VERSION, STATUSES));
             assertEquals(compact, IndexStatusFormat.toSerializedFormat(new CassandraVersion("5.0.2"), STATUSES));
         }
         finally
@@ -155,6 +158,25 @@ public class EndpointStateIndexStatusTest
             assertEquals(42, status.version);
             assertEquals("other", received.getApplicationState(ApplicationState.HOST_ID).value);
         }
+    }
+
+    @Test
+    public void testIndexStatusTooLongInLegacyFormatNotRewritten() throws Exception
+    {
+        // enough indexes for the legacy format to exceed the 64KiB limit of a gossiped value, but not the compact one
+        Map<String, Index.Status> statuses = new HashMap<>();
+        for (int i = 0; i < 2000; i++)
+            statuses.put("a_rather_long_keyspace_name.idx" + i, Index.Status.FULL_REBUILD_STARTED);
+        String compact = IndexStatusFormat.toSerializedFormat(statuses);
+        assertTrue(IndexStatusFormat.toLegacySerializedFormat(statuses).length() > 0xFFFF);
+        assertTrue(compact.length() <= 0xFFFF);
+
+        assertSame(compact, IndexStatusFormat.toLegacySerializedFormat(compact));
+
+        // gossip with HCD 1.2 peers keeps working, even if they cannot parse the index status
+        EndpointState received = roundTrip(compact, MessagingService.VERSION_DS_12);
+        assertEquals(compact, received.getApplicationState(ApplicationState.INDEX_STATUS).value);
+        assertEquals("other", received.getApplicationState(ApplicationState.HOST_ID).value);
     }
 
     @Test

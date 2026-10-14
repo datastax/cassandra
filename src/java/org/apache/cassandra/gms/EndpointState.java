@@ -560,6 +560,12 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
      * Peers older than {@link MessagingService#VERSION_DS_20} (HCD 1.2) can only parse the legacy index status
      * format ("keyspace.index" -> status name), so the compact format is rewritten for them. The version of the
      * value is kept: both formats carry the same statuses, so whichever reaches a node first is equally valid.
+     * <p>
+     * This includes {@link MessagingService#VERSION_40} and {@link MessagingService#VERSION_50}: the latter is also
+     * used by Apache Cassandra 5.0.3+, which parses the compact format, but it has the same value as the HCD 1.2
+     * VERSION_41, which HCD 1.2 nodes use when their current messaging version is lowered with
+     * {@code -Dds.current_messaging_version}. The legacy format is
+     * understood by every version that knows INDEX_STATUS, so it is the safe choice when the peer is ambiguous.
      */
     private static Set<Map.Entry<ApplicationState, VersionedValue>> withLegacyIndexStatus(Set<Map.Entry<ApplicationState, VersionedValue>> states)
     {
