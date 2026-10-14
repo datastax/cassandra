@@ -44,7 +44,7 @@ import static org.apache.cassandra.utils.Clock.Global.nanoTime;
  *  - For fire and forget tasks (like ref tidy) we can safely ignore the exceptions.
  *  - For any callers that care to know their task was rejected we cancel passed task.
  */
-public class ScheduledThreadPoolExecutorPlus extends ScheduledThreadPoolExecutor implements ScheduledExecutorPlus
+public class ScheduledThreadPoolExecutorPlus extends ScheduledThreadPoolExecutor implements ScheduledExecutorPlus, RunningTaskSource
 {
     private static final Logger logger = LoggerFactory.getLogger(ScheduledThreadPoolExecutorPlus.class);
     private static final TaskFactory taskFactory = TaskFactory.standard();
@@ -142,6 +142,14 @@ public class ScheduledThreadPoolExecutorPlus extends ScheduledThreadPoolExecutor
     {
         WorkerSlots.Running oldest = workerSlots.oldestRunning();
         return oldest == null ? null : oldest.taskClassName;
+    }
+
+    @Override
+    public RunningTaskSnapshot longestRunningTask()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? null : new RunningTaskSnapshot(TimedTask.ageNanos(oldest.capturedStartNanos),
+                                                               oldest.taskClassName, oldest.threadName);
     }
 
     @Override

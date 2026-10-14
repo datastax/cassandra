@@ -185,6 +185,32 @@ public class WorkerSlotsTest
     }
 
     @Test
+    public void testThreadNameOfOldest() throws Exception
+    {
+        WorkerSlots slots = new WorkerSlots();
+        Worker w1 = newWorker();
+        Worker w2 = newWorker();
+        w1.thread.setName("WorkerSlotsTest-worker-1");
+        w2.thread.setName("WorkerSlotsTest-worker-2");
+
+        startTask(slots, w2, TaskA.class);
+        startTask(slots, w1, TaskB.class);
+        WorkerSlots.Running oldest = slots.oldestRunning();
+        Assert.assertNotNull(oldest);
+        Assert.assertEquals(TaskA.class.getName(), oldest.taskClassName);
+        Assert.assertEquals("WorkerSlotsTest-worker-2", oldest.threadName);
+
+        w2.run(WorkerSlots::markIdle);
+        oldest = slots.oldestRunning();
+        Assert.assertNotNull(oldest);
+        Assert.assertEquals(TaskB.class.getName(), oldest.taskClassName);
+        Assert.assertEquals("WorkerSlotsTest-worker-1", oldest.threadName);
+
+        w1.run(WorkerSlots::markIdle);
+        Assert.assertNull(slots.oldestRunning());
+    }
+
+    @Test
     public void testThreadDiedStamped() throws Exception
     {
         WorkerSlots slots = new WorkerSlots();
