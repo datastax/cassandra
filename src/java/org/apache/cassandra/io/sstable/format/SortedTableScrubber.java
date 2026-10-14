@@ -71,6 +71,8 @@ import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.ReadPattern;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -240,9 +242,14 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         {
             if (badPartitions > 0)
                 outputHandler.warn("No valid partitions found while scrubbing %s; it is marked for deletion now. If you want to attempt manual recovery, you can find a copy in the pre-scrub snapshot", sstable);
+            else if (negativeLocalDeletionInfoMetrics.droppedRows > 0)
+                outputHandler.output("Scrub of %s complete; all %d partitions were empty (tombstoned, or only holding rows with overflowed local expiration time)", sstable, emptyPartitions);
             else
                 outputHandler.output("Scrub of %s complete; looks like all %d partitions were tombstoned", sstable, emptyPartitions);
         }
+
+        if (negativeLocalDeletionInfoMetrics.droppedRows > 0)
+            outputHandler.warn("Dropped %d rows with overflowed local expiration time (CASSANDRA-14092); restore the original sstables (e.g. from the pre-scrub snapshot, if one was taken) and re-run scrub with --reinsert-overflowed-ttl to keep them", negativeLocalDeletionInfoMetrics.droppedRows);
     }
 
     private SSTableReader writeOutOfOrderPartitions(StatsMetadata metadata)
@@ -282,12 +289,17 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 
     protected String keyString(DecoratedKey key)
     {
+        return keyString(realm.metadata(), key);
+    }
+
+    private static String keyString(TableMetadata metadata, DecoratedKey key)
+    {
         if (key == null)
             return "(unknown)";
 
         try
         {
-            return realm.metadata().partitionKeyType.getString(key.getKey());
+            return metadata.partitionKeyType.getString(key.getKey());
         }
         catch (Exception e)
         {
@@ -300,12 +312,14 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         // OrderCheckerIterator will check, at iteration time, that the rows are in the proper order. If it detects
         // that one row is out of order, it will stop returning them. The remaining rows will be sorted and added
         // to the outOfOrder set that will be later written to a new SSTable.
-        try (OrderCheckerIterator sstableIterator = new OrderCheckerIterator(getIterator(key), realm.metadata().comparator);
+        RowMergingSSTableIterator rowMergingIterator = getRowMergingIterator(key);
+        try (OrderCheckerIterator sstableIterator = new OrderCheckerIterator(getIterator(rowMergingIterator), realm.metadata().comparator);
              UnfilteredRowIterator iterator = withValidation(sstableIterator, dataFile.getFile()))
         {
             if (prevKey != null && prevKey.compareTo(key) > 0)
             {
                 saveOutOfOrderPartition(prevKey, key, iterator);
+                negativeLocalDeletionInfoMetrics.droppedRows += rowMergingIterator.droppedRows();
                 return false;
             }
 
@@ -313,6 +327,8 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
                 emptyPartitions++;
             else
                 goodPartitions++;
+            // only count the rows of the partitions that were written, as a partition can fail and be retried
+            negativeLocalDeletionInfoMetrics.droppedRows += rowMergingIterator.droppedRows();
 
             if (sstableIterator.hasRowsOutOfOrder())
             {
@@ -324,18 +340,20 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         return true;
     }
 
+    private RowMergingSSTableIterator getRowMergingIterator(DecoratedKey key)
+    {
+        return new RowMergingSSTableIterator(SSTableIdentityIterator.create(sstable, dataFile, key),
+                                             outputHandler,
+                                             sstable.descriptor.version,
+                                             options.reinsertOverflowedTTLRows);
+    }
+
     /**
      * Only wrap with {@link FixNegativeLocalDeletionTimeIterator} if {@link IScrubber.Options#reinsertOverflowedTTLRows} option
      * is specified
      */
-    private UnfilteredRowIterator getIterator(DecoratedKey key)
+    private UnfilteredRowIterator getIterator(RowMergingSSTableIterator rowMergingIterator)
     {
-        RowMergingSSTableIterator rowMergingIterator = new RowMergingSSTableIterator(SSTableIdentityIterator.create(sstable,
-                                                                                                                    dataFile,
-                                                                                                                    key),
-                                                                                     outputHandler,
-                                                                                     sstable.descriptor.version,
-                                                                                     options.reinsertOverflowedTTLRows);
         if (options.reinsertOverflowedTTLRows)
             return new FixNegativeLocalDeletionTimeIterator(rowMergingIterator, outputHandler, negativeLocalDeletionInfoMetrics);
         else
@@ -477,14 +495,21 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
      * Merging iterator merges rows with same clustering.
      * <p>
      * For more details, refer to CASSANDRA-12144.
+     * <p>
+     * Non-row unfiltereds (range tombstone markers) are returned unchanged. Rows with an overflowed local expiration
+     * time are rebuilt or dropped (see {@link #computeFinalRow(Row)}); a dropped row is skipped, so this iterator never
+     * returns {@code null}.
      */
-    private static class RowMergingSSTableIterator implements WrappingUnfilteredRowIterator
+    @VisibleForTesting
+    static class RowMergingSSTableIterator extends AbstractIterator<Unfiltered> implements WrappingUnfilteredRowIterator
     {
-        Unfiltered nextToOffer = null;
+        private Unfiltered nextToOffer = null;
         private final OutputHandler output;
         private final UnfilteredRowIterator wrapped;
         private final Version sstableVersion;
         private final boolean reinsertOverflowedTTLRows;
+        private final boolean sstableSupportsExtendedDeletionTime;
+        private int droppedRows = 0;
 
         RowMergingSSTableIterator(UnfilteredRowIterator source, OutputHandler output, Version sstableVersion, boolean reinsertOverflowedTTLRows)
         {
@@ -492,6 +517,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             this.output = output;
             this.sstableVersion = sstableVersion;
             this.reinsertOverflowedTTLRows = reinsertOverflowedTTLRows;
+            this.sstableSupportsExtendedDeletionTime = MessagingService.Version.supportsExtendedDeletionTime(sstableVersion.correspondingMessagingVersion());
         }
 
         @Override
@@ -501,49 +527,67 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         }
 
         @Override
-        public boolean hasNext()
+        public void close()
         {
-            return nextToOffer != null || wrapped.hasNext();
+            wrapped.close();
         }
 
         @Override
-        public Unfiltered next()
+        protected Unfiltered computeNext()
         {
-            Unfiltered next = nextToOffer != null ? nextToOffer : wrapped.next();
-
-            if (next.isRow())
+            while (nextToOffer != null || wrapped.hasNext())
             {
-                boolean logged = false;
-                while (wrapped.hasNext())
+                Unfiltered next = nextToOffer != null ? nextToOffer : wrapped.next();
+                nextToOffer = null;
+
+                if (!next.isRow())
+                    return next;
+
+                Row row = computeFinalRow(mergeDuplicates((Row) next));
+                if (row != null)
+                    return row;
+            }
+            return endOfData();
+        }
+
+        /**
+         * Merges into {@code row} the rows that follow it with the same clustering; the first unfiltered that is not
+         * such a duplicate is kept in {@link #nextToOffer}.
+         */
+        private Row mergeDuplicates(Row row)
+        {
+            boolean logged = false;
+            while (wrapped.hasNext())
+            {
+                Unfiltered peek = wrapped.next();
+                if (!peek.isRow() || !row.clustering().equals(peek.clustering()))
                 {
-                    Unfiltered peek = wrapped.next();
-                    if (!peek.isRow() || !next.clustering().equals(peek.clustering()))
-                    {
-                        nextToOffer = peek; // Offer peek in next call
-                        return computeFinalRow((Row) next);
-                    }
+                    nextToOffer = peek; // Offer peek in next call
+                    return row;
+                }
 
-                    // Duplicate row, merge it.
-                    next = Rows.merge((Row) next, (Row) peek);
+                // Duplicate row, merge it.
+                row = Rows.merge(row, (Row) peek);
 
-                    if (!logged)
-                    {
-                        String partitionKey = metadata().partitionKeyType.getString(partitionKey().getKey());
-                        output.warn("Duplicate row detected in %s.%s: %s %s", metadata().keyspace, metadata().name, partitionKey, next.clustering().toString(metadata()));
-                        logged = true;
-                    }
+                if (!logged)
+                {
+                    output.warn("Duplicate row detected in %s.%s: %s %s", metadata().keyspace, metadata().name, keyString(metadata(), partitionKey()), row.clustering().toString(metadata()));
+                    logged = true;
                 }
             }
-
-            nextToOffer = null;
-            return computeFinalRow((Row) next);
-         }
+            return row;
+        }
 
          private Row computeFinalRow(Row next)
          {
              // If the row has overflowed let rows skip them unless we need to keep them for the overflow policy
              if (hasOverflowedLocalExpirationTimeRow(next) && !reinsertOverflowedTTLRows)
+             {
+                 output.debug("Dropping row with overflowed local expiration time in %s.%s: %s %s",
+                              metadata().keyspace, metadata().name, keyString(metadata(), partitionKey()), next.clustering().toString(metadata()));
+                 droppedRows++;
                  return null;
+             }
              else if (reinsertOverflowedTTLRows)
                  return rebuildTimestamptsForOverflowedRows(next);
              else
@@ -560,21 +604,21 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
              if (sstableVersion.hasUIntDeletionTime())
                  return row;
 
-             return row.transformAndFilter(RowMergingSSTableIterator::rebuildTimestampsForOverflowedLivenessInfo,
-                                           RowMergingSSTableIterator::rebuildTimestampsForOverflowedCells)
+             return row.transformAndFilter(this::rebuildTimestampsForOverflowedLivenessInfo,
+                                           this::rebuildTimestampsForOverflowedCells)
                        .clone(HeapCloner.instance);
          }
 
-        private static LivenessInfo rebuildTimestampsForOverflowedLivenessInfo(LivenessInfo livenessInfo)
+        private LivenessInfo rebuildTimestampsForOverflowedLivenessInfo(LivenessInfo livenessInfo)
         {
-            return (livenessInfo.isExpiring() && livenessInfo.localExpirationTime() >= 0)
+            return (livenessInfo.isExpiring() && isOverflowed(livenessInfo.localExpirationTime()))
                    ? livenessInfo.withUpdatedTimestampAndLocalDeletionTime(livenessInfo.timestamp(), livenessInfo.localExpirationTime(), false)
                    : livenessInfo;
         }
 
-        private static <C extends CellData<?, C>> C rebuildTimestampsForOverflowedCells(C cell)
+        private <C extends CellData<?, C>> C rebuildTimestampsForOverflowedCells(C cell)
          {
-             return cell.isExpiring() && cell.localDeletionTime() >= 0
+             return cell.isExpiring() && isOverflowed(cell.localDeletionTime())
                     ? cell.withUpdatedTimestampAndLocalDeletionTime(cell.timestamp(), cell.localDeletionTime())
                     : cell;
          }
@@ -585,7 +629,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
              if (sstableVersion.hasUIntDeletionTime())
                  return false;
 
-             if (next.primaryKeyLivenessInfo().isExpiring() && next.primaryKeyLivenessInfo().localExpirationTime() >= 0)
+             if (next.primaryKeyLivenessInfo().isExpiring() && isOverflowed(next.primaryKeyLivenessInfo().localExpirationTime()))
              {
                  return true;
              }
@@ -595,7 +639,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
                  if (cd.column().isSimple())
                  {
                      Cell<?> cell = (Cell<?>)cd;
-                     if (cell.isExpiring() && cell.localDeletionTime() >= 0)
+                     if (cell.isExpiring() && isOverflowed(cell.localDeletionTime()))
                          return true;
                  }
                  else
@@ -603,7 +647,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
                      ComplexColumnData complexData = (ComplexColumnData)cd;
                      for (Cell<?> cell : complexData)
                      {
-                         if (cell.isExpiring() && cell.localDeletionTime() >= 0)
+                         if (cell.isExpiring() && isOverflowed(cell.localDeletionTime()))
                              return true;
                      }
                  }
@@ -611,6 +655,31 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 
              return false;
          }
+
+        /**
+         * Whether a local expiration time read from an sstable without unsigned int deletion times has overflowed
+         * (CASSANDRA-14092), see {@link Cell#decodeLocalDeletionTime}. This only depends on the sstable version:
+         * <ul>
+         * <li>{@link CellData#INVALID_DELETION_TIME} has always overflowed;</li>
+         * <li>sstables written with a messaging version without extended deletion times (BIG versions before
+         * {@code oa}) were always written with the 2038 cap, so a value above
+         * {@link CellData#MAX_DELETION_TIME_2038_LEGACY_CAP} has overflowed;</li>
+         * <li>sstables written with a messaging version with extended deletion times (legacy BTI versions such as
+         * {@code bb} and {@code cc}) can legitimately hold an expiration time after 2038, so any other value is
+         * valid. A pre-CASSANDRA-14092 overflow read back from such an sstable is kept, with the expiration time
+         * that was intended when the row was written.</li>
+         * </ul>
+         */
+        private boolean isOverflowed(long localExpirationTime)
+        {
+            return localExpirationTime == CellData.INVALID_DELETION_TIME
+                   || (!sstableSupportsExtendedDeletionTime && localExpirationTime > CellData.MAX_DELETION_TIME_2038_LEGACY_CAP);
+        }
+
+        int droppedRows()
+        {
+            return droppedRows;
+        }
      }
 
     /**
@@ -714,8 +783,10 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         }
     }
 
-    private static class NegativeLocalDeletionInfoMetrics
+    @VisibleForTesting
+    static class NegativeLocalDeletionInfoMetrics
     {
         public volatile int fixedRows = 0;
+        public volatile int droppedRows = 0;
     }
 }
