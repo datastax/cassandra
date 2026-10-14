@@ -90,6 +90,7 @@ public class StatsTable
     public double saiIndexSegmentsHit;
     public double saiRowsFiltered;
     public long saiTotalQueryTimeouts;
+    public boolean hasSaiIndexes;
     public int saiTotalIndexCount;
     public String saiTotalQueryableIndexRatio;
 }

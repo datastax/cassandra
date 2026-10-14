@@ -165,7 +165,7 @@ public class TableStatsPrinter<T extends StatsHolder>
                     out.printf(indent + "  %-" + maxWidth + "s %s%n", tombstonecnt.getKey(), tombstonecnt.getValue());
             }
 
-            if (!SchemaConstants.isSystemKeyspace(table.keyspaceName) && table.saiTotalIndexCount > 0)
+            if (!SchemaConstants.isSystemKeyspace(table.keyspaceName) && table.hasSaiIndexes)
             {
                 out.println(indent + "SAI local query latency (mean): " + String.format("%.3f ms", table.saiQueryLatencyMs));
                 out.println(indent + "SAI post-filtering latency (mean): " + String.format("%.3f ms",table.saiPostFilteringReadLatencyMs));
