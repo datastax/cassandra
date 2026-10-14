@@ -528,10 +528,12 @@ public abstract class ReadCommand extends AbstractReadQuery
             }
 
             Context context = Context.from(this);
-            var storageTarget = (null == searcher) ? queryStorage(cfs, executionController)
-                                                   : searchStorage(searcher, executionController);
+
             // Prepare the monitorable execution info, which will be null if it's deferred to the index
             ReadCommandExecutionInfo executionInfo = setupExecutionInfo(searcher);
+
+            var storageTarget = (null == searcher) ? queryStorage(cfs, executionController)
+                                                   : searchStorage(searcher, executionController);
 
             UnfilteredPartitionIterator iterator = Transformation.apply(storageTarget, new TrackingRowIterator(context));
             iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
