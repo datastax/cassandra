@@ -111,6 +111,53 @@ public class MemtableCleanerThreadTest
         stopThread();
     }
 
+    /**
+     * When a cleaning task fails the future completes with a null result and an error. If the pool still needs
+     * cleaning, the cleaner thread must be woken up to try again, without anybody calling {@code trigger()}.
+     */
+    @Test
+    public void testCleanerRetriedAfterErrorWhenPoolStillNeedsCleaning() throws Exception
+    {
+        // each invocation of the cleaner returns its own future and counts down its own latch
+        AsyncPromise<Boolean> firstCleaning = new AsyncPromise<>();
+        AsyncPromise<Boolean> secondCleaning = new AsyncPromise<>();
+        CountDownLatch firstInvocation = new CountDownLatch(1);
+        CountDownLatch secondInvocation = new CountDownLatch(1);
+        AtomicInteger numTimeCleanerInvoked = new AtomicInteger(0);
+        AtomicBoolean needsCleaning = new AtomicBoolean(true);
+
+        when(pool.needsCleaning()).thenAnswer(invocation -> needsCleaning.get());
+
+        cleaner = () -> {
+            needsCleaning.set(false); // as a real cleaner would, the first call starts a flush that frees memory
+            if (numTimeCleanerInvoked.incrementAndGet() == 1)
+            {
+                firstInvocation.countDown();
+                return firstCleaning;
+            }
+            secondInvocation.countDown();
+            return secondCleaning;
+        };
+
+        // the pool needs cleaning, so the cleaner is invoked as soon as the thread starts
+        startThread(cleaner);
+        assertTrue(firstInvocation.await(TIMEOUT_SECONDS, TimeUnit.SECONDS));
+
+        // give the cleaner thread time to park, as needsCleaning() is now false; from here on only an explicit
+        // signal can wake it up and the cleaner must not be invoked again by itself
+        FBUtilities.sleepQuietly(500);
+        assertEquals(1, numTimeCleanerInvoked.get());
+
+        // the first cleaning fails, while the pool needs cleaning again: the cleaner thread must be woken up
+        needsCleaning.set(true);
+        firstCleaning.setFailure(new RuntimeException("Test"));
+        assertTrue(secondInvocation.await(TIMEOUT_SECONDS, TimeUnit.SECONDS));
+        assertEquals(2, numTimeCleanerInvoked.get());
+
+        secondCleaning.setSuccess(false);
+        stopThread();
+    }
+
     @Test
     public void testCleanerError() throws Exception
     {
