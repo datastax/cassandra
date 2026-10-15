@@ -187,7 +187,7 @@ public class CompactionGraphMerger
         // --- Validate source feature sets ---
         boolean hasFusedPQ = validateFeatureSets(sources.stream().map(SourceSegment::graph).collect(toList()));
 
-        List<? extends BitSet> surviving = postings.liveNodes();
+        List<? extends BitSet> surviving = postings.liveNodesBySource();
 
         // --- Step 1: ordinal remapping from the surviving bitsets — pure CPU, no vector I/O.
         // The postings own the ordering (ascending node id across all sources, which mirrors the
