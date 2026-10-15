@@ -19,10 +19,13 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.IntFunction;
+
+import org.agrona.collections.IntArrayList;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +37,7 @@ import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexCompactor;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
+import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.util.AtomicFixedBitSet;
 import io.github.jbellis.jvector.util.BitSet;
@@ -207,8 +211,15 @@ public class CompactionGraphMerger
         var termsComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
         Path termsFile = termsComponent.file().toJavaIOFile().toPath();
 
+        // Non-fused PQ: the codes live in the Cassandra PQ component (PQVectors), not in the graph.
+        // jvector then needs the sources' PQVectors to retrain the codebook, and a second
+        // destination to write the merged PQVectors into.
+        List<CompressedVectors> sourceCompressed = hasFusedPQ ? null : sourceCompressedVectors();
+        boolean pqSidecar = sourceCompressed != null;
+
         var compactor = new OnDiskGraphIndexCompactor(
                 sources.stream().map(SourceSegment::graph).collect(toList()),
+                sourceCompressed,
                 surviving,
                 remappers,
                 similarityFunction,
@@ -259,6 +270,55 @@ public class CompactionGraphMerger
         }
         long termsOffset = SAICodecUtils.headerSize();
 
+        // For the non-fused PQ sidecar, reserve the PQ component the same way: SAI header + Cassandra
+        // PQ header now, jvector appends the merged PQVectors right after them, and the footer is
+        // written over the finished file below.
+        var pqComponent = perIndexComponents.addOrGet(IndexComponentType.PQ);
+        Path pqFile = pqComponent.file().toJavaIOFile().toPath();
+        long pqOffset = -1;
+        long pqLength = -1;
+        long pqSidecarStart = -1;
+        if (pqSidecar)
+        {
+            try (var pqOutput = pqComponent.openOutput(true))
+            {
+                SAICodecUtils.writeHeader(pqOutput);
+                pqOffset = pqOutput.getFilePointer();
+                CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(),
+                                                   sources.get(0).diskAnn().isPqUnitVectors(),
+                                                   CompressionType.PRODUCT_QUANTIZATION,
+                                                   perIndexComponents.context().version());
+                pqSidecarStart = pqOutput.getFilePointer();
+            }
+        }
+        final long pqSidecarStartOffset = pqSidecarStart;
+        var committedPqBodyLength = new java.util.concurrent.atomic.AtomicLong(-1);
+        CompactionDestination pqDestination = () -> new CompactionDestination.OutputReservation()
+        {
+            @Override
+            public Path file()
+            {
+                return pqFile;
+            }
+
+            @Override
+            public long startOffset()
+            {
+                return pqSidecarStartOffset;
+            }
+
+            @Override
+            public void commit(long bodyLength)
+            {
+                committedPqBodyLength.set(bodyLength);
+            }
+
+            @Override
+            public void close()
+            {
+            }
+        };
+
         // The graph body is written straight into TERMS_DATA after the SAI header above: the
         // destination reserves the region [termsOffset, EOF) and jvector writes into it, so there
         // is no temp file and no second copy of a graph that can run to many GB. commit() reports
@@ -296,7 +356,10 @@ public class CompactionGraphMerger
         try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
                 VectorCompactionMetrics.Phase.JVECTOR_COMPACT, perIndexComponents.context()))
         {
-            compactor.compact(destination);
+            if (pqSidecar)
+                compactor.compact(destination, pqDestination);
+            else
+                compactor.compact(destination);
         }
         long compactMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - compactStart);
         long termsLength = committedBodyLength.get();
@@ -365,6 +428,15 @@ public class CompactionGraphMerger
                                                          bytes -> epilogue.onProgress(bytes, epilogueTotal));
                 epilogue.onProgress(crcSpan, epilogueTotal);
             }
+            if (pqSidecar)
+            {
+                long pqBodyLength = committedPqBodyLength.get();
+                if (pqBodyLength < 0)
+                    throw new IllegalStateException("CompactionGraphMerger: jvector returned without committing the " +
+                                                    "reserved PQ region; refusing to publish an unattested body");
+                pqLength = pqSidecarStartOffset + pqBodyLength - pqOffset;
+                SAICodecUtils.writeFooterForExternalBody(pqFile, pqSidecarStartOffset + pqBodyLength);
+            }
             logger.info("CompactionGraphMerger: TERMS_DATA written in place ({} source segments, {} surviving ordinals, {} bytes body at offset {}) in {}ms",
                         sources.size(), totalGlobalOrdinals, termsLength, termsOffset, compactMs);
 
@@ -380,56 +452,59 @@ public class CompactionGraphMerger
             // --- Step 3: Write postings and PQ ---
             try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
                          VectorCompactionMetrics.Phase.POSTINGS_PQ_WRITE, perIndexComponents.context());
-                 var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
-                 var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true))
+                 var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true))
             {
                 SAICodecUtils.writeHeader(postingsOutput);
-                SAICodecUtils.writeHeader(pqOutput);
 
                 var firstDiskAnn = sources.get(0).diskAnn();
-                long pqOffset = pqOutput.getFilePointer();
                 var version = perIndexComponents.context().version();
 
-                if (hasFusedPQ)
+                // The non-fused PQ component was already written in place by jvector (see above).
+                // Otherwise write it here: codebook only for FUSED_PQ, or just a NONE header.
+                if (!pqSidecar)
                 {
-                    CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(),
-                                                       firstDiskAnn.isPqUnitVectors(),
-                                                       CompressionType.PRODUCT_QUANTIZATION,
-                                                       version);
-                    retrainedPQ.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
-
+                    try (var pqOutput = pqComponent.openOutput(true))
+                    {
+                        SAICodecUtils.writeHeader(pqOutput);
+                        pqOffset = pqOutput.getFilePointer();
+                        if (hasFusedPQ)
+                        {
+                            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(),
+                                                               firstDiskAnn.isPqUnitVectors(),
+                                                               CompressionType.PRODUCT_QUANTIZATION,
+                                                               version);
+                            retrainedPQ.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
+                        }
+                        else
+                        {
+                            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(),
+                                                               false,
+                                                               CompressionType.NONE,
+                                                               version);
+                        }
+                        pqLength = pqOutput.getFilePointer() - pqOffset;
+                        SAICodecUtils.writeFooter(pqOutput);
+                    }
                 }
-                else
-                {
-                    CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(),
-                                                       false,
-                                                       CompressionType.NONE,
-                                                       version);
-                }
-                long pqLength = pqOutput.getFilePointer() - pqOffset;
 
-                // Write postings using ZERO_OR_ONE_TO_MANY. Each merged ordinal resolves its postings
-                // through the key of the source node the compactor placed there — an 8-byte map
-                // lookup, no vector reads. Row ids are not assumed sorted: parallel ingest can add a
-                // duplicate vector's row ids out of order.
+                // Write postings. Each merged ordinal resolves its postings through the key of the
+                // source node the compactor placed there — an 8-byte map lookup, no vector reads.
+                // Row ids are not assumed sorted: parallel ingest can add a duplicate vector's row
+                // ids out of order.
                 long postingsOffset = postingsOutput.getFilePointer();
-                final long[] handleByMergedOrdinal = packedHandlesByMergedOrdinal(effective, surviving, totalGlobalOrdinals);
                 if (V5OnDiskFormat.writeV5VectorPostings(version))
                 {
-                    // postings.get may return null; the writer treats that as an empty list
-                    V5VectorPostingsWriter.create(totalGlobalOrdinals - 1, g -> {
-                                              var p = postings.get(VectorHandle.unpack(handleByMergedOrdinal[g]));
-                                              return p == null ? null : p.getRowIds();
-                                          })
-                                          .structure(Structure.ZERO_OR_ONE_TO_MANY)
+                    IntFunction<IntArrayList> rowIdsOf = postings.rowIdsOf(effective);
+                    Structure structure = postings.detectStructure(effective, reordered);
+                    V5VectorPostingsWriter.create(totalGlobalOrdinals - 1, rowIdsOf)
+                                          .structure(structure)
                                           .maxRowId(postings.maxRowId())
-                                          .write(postingsOutput.asSequentialWriter());
+                                          .writeTo(postingsOutput.asSequentialWriter());
                 }
                 // else: V2 format doesn't support ZERO_OR_ONE_TO_MANY — fall back is handled at
                 // the builder-selection level (merge path is only used for V5+)
                 long postingsLength = postingsOutput.getFilePointer() - postingsOffset;
 
-                SAICodecUtils.writeFooter(pqOutput);
                 SAICodecUtils.writeFooter(postingsOutput);
                 epilogue.onProgress(epilogueTotal, epilogueTotal);
 
@@ -441,50 +516,28 @@ public class CompactionGraphMerger
     }
 
     /**
-     * Returns, for every merged ordinal {@code [0, totalGlobalOrdinals)}, the
-     * {@linkplain VectorHandle#pack() packed} {@link VectorHandle} of the source node the compactor
-     * placed there. Built from the
-     * compactor's {@code effective} per-source mappers by visiting each surviving source node once and
-     * reading its merged ordinal from its own source's {@code oldToNew}, so it is correct for ANY
-     * ordering the compactor produced. O(surviving nodes) to build, O(1) per lookup.
-     *
-     * @throws IllegalStateException if a merged ordinal is outside {@code [0, totalGlobalOrdinals)} or
-     *                               is claimed by more than one surviving node; publishing either would
-     *                               bind a row to a missing or wrong vector. Because the number of
-     *                               surviving nodes equals {@code totalGlobalOrdinals}, no ordinal can
-     *                               be left unassigned once these checks pass.
+     * The sources' non-fused {@link CompressedVectors} (PQVectors), in source order, or null when the
+     * merged PQ component should carry no vectors. Null if no source has any; also null (with a log
+     * line) if only some do, since jvector cannot retrain a codebook from a mix.
      */
-    static long[] packedHandlesByMergedOrdinal(List<OrdinalMapper> effective,
-                                               List<? extends BitSet> surviving,
-                                               int totalGlobalOrdinals)
+    private List<CompressedVectors> sourceCompressedVectors()
     {
-        long[] handles = new long[totalGlobalOrdinals];
-        var claimed = new java.util.BitSet(totalGlobalOrdinals);
-        int mapped = 0;
-        for (int s = 0; s < effective.size(); s++)
+        List<CompressedVectors> result = new ArrayList<>(sources.size());
+        for (SourceSegment source : sources)
         {
-            OrdinalMapper mapper = effective.get(s);
-            BitSet survivingS = surviving.get(s);
-            for (int nodeId = survivingS.nextSetBit(0); nodeId >= 0 && nodeId != io.github.jbellis.jvector.util.DocIdSetIterator.NO_MORE_DOCS; nodeId = survivingS.nextSetBit(nodeId + 1))
-            {
-                int merged = mapper.oldToNew(nodeId);
-                if (merged < 0 || merged >= totalGlobalOrdinals)
-                    throw new IllegalStateException(String.format(
-                            "CompactionGraphMerger: source %d node %d mapped to merged ordinal %d, outside [0, %d)",
-                            s, nodeId, merged, totalGlobalOrdinals));
-                if (claimed.get(merged))
-                    throw new IllegalStateException(String.format(
-                            "CompactionGraphMerger: merged ordinal %d claimed twice (second claimant source %d node %d)",
-                            merged, s, nodeId));
-                claimed.set(merged);
-                handles[merged] = new VectorHandle(s, nodeId).pack();
-                mapped++;
-            }
+            CompressedVectors cv = source.diskAnn().getCompressedVectors();
+            if (cv != null)
+                result.add(cv);
         }
-        if (mapped != totalGlobalOrdinals)
-            throw new IllegalStateException("CompactionGraphMerger: mapped " + mapped +
-                                            " surviving nodes but expected " + totalGlobalOrdinals);
-        return handles;
+        if (result.isEmpty())
+            return null;
+        if (result.size() != sources.size())
+        {
+            logger.info("Vector graph merge: only {} of {} sources carry PQ vectors; writing the merged segment without PQ",
+                        result.size(), sources.size());
+            return null;
+        }
+        return result;
     }
 
     /** True when both lists hold the same mapper instances in the same order. Reference comparison only. */
