@@ -488,16 +488,18 @@ public class BatchStatement implements CQLStatement
     private void updatePerBatchMetrics(Collection<? extends IMutation> mutations)
     {
         int nrUpdatedPartitions = mutations.size();
+        int nrUpdatedRows = 0;
         int nrUpdatedColumns = 0;
         for (IMutation mutation : mutations)
         {
             for (PartitionUpdate update : mutation.getPartitionUpdates())
             {
+                nrUpdatedRows += update.rowCount();
                 for (Row row : update.rows())
                     nrUpdatedColumns += row.columnCount();
             }
         }
-        metrics.update(type, nrUpdatedPartitions, nrUpdatedColumns);
+        metrics.update(type, nrUpdatedPartitions, nrUpdatedRows, nrUpdatedColumns);
     }
 
     private ResultMessage executeWithConditions(BatchQueryOptions options, QueryState state, Dispatcher.RequestTime requestTime)
