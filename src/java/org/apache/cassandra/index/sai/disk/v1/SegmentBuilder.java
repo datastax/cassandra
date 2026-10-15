@@ -441,8 +441,7 @@ public abstract class SegmentBuilder
             try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
                     VectorCompactionMetrics.Phase.POSTINGS_MAP_SETUP, components.context()))
             {
-                postings = new org.apache.cassandra.index.sai.disk.vector.VectorMergePostings(
-                components.tmpFileFor("merge_postings_chronicle_map"), idUpperBound, estimatedRows);
+                postings = new org.apache.cassandra.index.sai.disk.vector.VectorMergePostings(idUpperBound, estimatedRows);
             }
 
             totalBytesAllocated = 0;

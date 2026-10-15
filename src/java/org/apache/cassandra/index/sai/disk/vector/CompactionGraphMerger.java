@@ -381,12 +381,7 @@ public class CompactionGraphMerger
         if (effective.size() != sources.size())
             throw new IllegalStateException("CompactionGraphMerger: effectiveRemappers() returned " +
                                             effective.size() + " mappers for " + sources.size() + " sources");
-        // A compactor that keeps the caller's ordinals returns the very same mapper instances, so a
-        // reference comparison is enough. ONE_TO_ONE / ONE_TO_MANY postings require the proposed
-        // ordinals; when reordered they must stay ZERO_OR_ONE_TO_MANY.
-        boolean reordered = !sameMappers(effective, remappers);
-        logger.info("Vector graph merge: {} ordinals ({})",
-                    totalGlobalOrdinals, reordered ? "REORDERED by the compactor" : "unchanged from caller proposal");
+        logger.info("Vector graph merge: {} ordinals", totalGlobalOrdinals);
         try (var rs = ReaderSupplierFactory.open(termsFile);
              var outputGraph = OnDiskGraphIndex.load(rs, termsOffset))
         {
@@ -494,9 +489,9 @@ public class CompactionGraphMerger
                 long postingsOffset = postingsOutput.getFilePointer();
                 if (V5OnDiskFormat.writeV5VectorPostings(version))
                 {
-                    IntFunction<IntArrayList> rowIdsOf = postings.rowIdsOf(effective);
-                    Structure structure = postings.detectStructure(effective, reordered);
-                    V5VectorPostingsWriter.create(totalGlobalOrdinals - 1, rowIdsOf)
+                    IntFunction<IntArrayList> rowIdsByMergedOrdinal = postings.rowIdsByMergedOrdinal(effective);
+                    Structure structure = postings.discoverStructure(effective);
+                    V5VectorPostingsWriter.create(totalGlobalOrdinals - 1, rowIdsByMergedOrdinal)
                                           .structure(structure)
                                           .maxRowId(postings.maxRowId())
                                           .writeTo(postingsOutput.asSequentialWriter());
@@ -538,21 +533,6 @@ public class CompactionGraphMerger
             return null;
         }
         return result;
-    }
-
-    /** True when both lists hold the same mapper instances in the same order. Reference comparison only. */
-    private static boolean sameMappers(List<OrdinalMapper> a, List<OrdinalMapper> b)
-    {
-        if (a == b)
-            return true;
-        if (a.size() != b.size())
-            return false;
-        for (int i = 0; i < a.size(); i++)
-        {
-            if (a.get(i) != b.get(i))
-                return false;
-        }
-        return true;
     }
 
     /**

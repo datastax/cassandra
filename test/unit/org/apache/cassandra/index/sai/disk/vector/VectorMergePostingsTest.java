@@ -17,8 +17,6 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -37,7 +35,6 @@ import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.util.BitSet;
 import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
-import org.apache.cassandra.io.util.File;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -50,16 +47,12 @@ public class VectorMergePostingsTest
 {
     private static final int[] ID_UPPER_BOUNDS = { 100, 40, 200 };
 
-    private Path dir;
-    private File mapFile;
     private VectorMergePostings postings;
 
     @Before
     public void setUp() throws IOException
     {
-        dir = Files.createTempDirectory("vector-merge-postings");
-        mapFile = new File(dir.resolve("postings.map").toString());
-        postings = new VectorMergePostings(mapFile, ID_UPPER_BOUNDS, 1000);
+        postings = new VectorMergePostings(ID_UPPER_BOUNDS, 1000);
     }
 
     @After
@@ -67,7 +60,6 @@ public class VectorMergePostingsTest
     {
         if (postings != null)
             postings.close();
-        Files.deleteIfExists(dir);
     }
 
     @Test
@@ -211,12 +203,15 @@ public class VectorMergePostingsTest
     public void closeDeletesBackingFile() throws IOException
     {
         postings.put(new VectorHandle(0, 0), 0);
-        assertTrue(mapFile.exists());
+        java.io.File[] files = postings.backingFiles();
+        for (java.io.File f : files)
+            assertTrue(f.exists());
 
         postings.close();
         postings = null;
 
-        assertFalse(mapFile.exists());
+        for (java.io.File f : files)
+            assertFalse(f.exists());
     }
 
     @Test
@@ -230,28 +225,29 @@ public class VectorMergePostingsTest
     }
 
     @Test
-    public void ordinalMappersAssignOrdinalsInAscendingNodeIdThenSourceOrder()
+    public void ordinalMappersAssignOrdinalsInAscendingRowIdOrder()
     {
-        postings.put(new VectorHandle(1, 20), 0);
-        postings.put(new VectorHandle(0, 9), 1);
-        postings.put(new VectorHandle(2, 5), 2);
-        postings.put(new VectorHandle(1, 5), 3);
-        postings.put(new VectorHandle(0, 5), 4);
-        postings.put(new VectorHandle(2, 3), 5);
+        // ordinals are assigned in the order each (source, nodeId) pair is first seen by rowId
+        postings.put(new VectorHandle(1, 20), 0);  // (1,20) → ordinal 0
+        postings.put(new VectorHandle(0, 9), 1);   // (0,9)  → ordinal 1
+        postings.put(new VectorHandle(2, 5), 2);   // (2,5)  → ordinal 2
+        postings.put(new VectorHandle(1, 5), 3);   // (1,5)  → ordinal 3
+        postings.put(new VectorHandle(0, 5), 4);   // (0,5)  → ordinal 4
+        postings.put(new VectorHandle(2, 3), 5);   // (2,3)  → ordinal 5
 
         List<OrdinalMapper> mappers = postings.ordinalMapping();
 
         assertEquals(3, mappers.size());
-        assertEquals(0, mappers.get(2).oldToNew(3));
-        assertEquals(1, mappers.get(0).oldToNew(5));
-        assertEquals(2, mappers.get(1).oldToNew(5));
-        assertEquals(3, mappers.get(2).oldToNew(5));
-        assertEquals(4, mappers.get(0).oldToNew(9));
-        assertEquals(5, mappers.get(1).oldToNew(20));
+        assertEquals(0, mappers.get(1).oldToNew(20));
+        assertEquals(1, mappers.get(0).oldToNew(9));
+        assertEquals(2, mappers.get(2).oldToNew(5));
+        assertEquals(3, mappers.get(1).oldToNew(5));
+        assertEquals(4, mappers.get(0).oldToNew(5));
+        assertEquals(5, mappers.get(2).oldToNew(3));
         // maxOrdinal is the highest ordinal assigned within each source
         assertEquals(4, mappers.get(0).maxOrdinal());
-        assertEquals(5, mappers.get(1).maxOrdinal());
-        assertEquals(3, mappers.get(2).maxOrdinal());
+        assertEquals(3, mappers.get(1).maxOrdinal());
+        assertEquals(5, mappers.get(2).maxOrdinal());
     }
 
     @Test
@@ -288,17 +284,17 @@ public class VectorMergePostingsTest
     }
 
     @Test
-    public void ordinalMappersOrderAcrossSourcesByNodeId()
+    public void ordinalMappersOrderByRowId()
     {
-        // node id order dominates source order: a lower node id from a later source precedes a higher one from an earlier source
-        postings.put(new VectorHandle(0, 30), 0);
-        postings.put(new VectorHandle(1, 10), 1);
-        postings.put(new VectorHandle(2, 150), 2);
+        // ordinals follow the rowId order of each vector's first appearance, regardless of source or node id
+        postings.put(new VectorHandle(0, 30), 0);   // (0,30)  → ordinal 0
+        postings.put(new VectorHandle(1, 10), 1);   // (1,10)  → ordinal 1
+        postings.put(new VectorHandle(2, 150), 2);  // (2,150) → ordinal 2
 
         List<OrdinalMapper> mappers = postings.ordinalMapping();
 
-        assertEquals(0, mappers.get(1).oldToNew(10));
-        assertEquals(1, mappers.get(0).oldToNew(30));
+        assertEquals(0, mappers.get(0).oldToNew(30));
+        assertEquals(1, mappers.get(1).oldToNew(10));
         assertEquals(2, mappers.get(2).oldToNew(150));
     }
 
@@ -334,10 +330,10 @@ public class VectorMergePostingsTest
         assertEquals(1, mappers.get(1).maxOrdinal());
     }
 
-    // ---- rowIdsOf tests ----
+    // ---- rowIdsByMergedOrdinal tests ----
 
     @Test
-    public void rowIdsOfReturnsCorrectListForEachOrdinal() throws IOException
+    public void rowIdsByMergedOrdinalReturnsCorrectListForEachOrdinal() throws IOException
     {
         // Two sources: source 0 node 0 → ordinal 0, source 1 node 5 → ordinal 1, source 0 node 7 → ordinal 2
         postings.put(new VectorHandle(0, 0), 10);
@@ -347,7 +343,7 @@ public class VectorMergePostingsTest
         // Build mappers matching ordinalMappers() ordering: node-id ascending across sources
         // node 0 from s0 → ordinal 0, node 5 from s1 → ordinal 1, node 7 from s0 → ordinal 2
         List<OrdinalMapper> mappers = postings.ordinalMapping();
-        IntFunction<IntArrayList> fn = postings.rowIdsOf(mappers);
+        IntFunction<IntArrayList> fn = postings.rowIdsByMergedOrdinal(mappers);
 
         assertNotNull(fn.apply(0));
         assertEquals(1, fn.apply(0).size());
@@ -363,7 +359,7 @@ public class VectorMergePostingsTest
     }
 
     @Test
-    public void rowIdsOfMultipleRowsForOneOrdinal() throws IOException
+    public void rowIdsByMergedOrdinalMultipleRowsForOneOrdinal() throws IOException
     {
         VectorHandle h = new VectorHandle(0, 3);
         postings.put(h, 0);
@@ -371,7 +367,7 @@ public class VectorMergePostingsTest
         postings.put(h, 2);
 
         List<OrdinalMapper> mappers = postings.ordinalMapping();
-        IntFunction<IntArrayList> fn = postings.rowIdsOf(mappers);
+        IntFunction<IntArrayList> fn = postings.rowIdsByMergedOrdinal(mappers);
 
         IntArrayList ids = fn.apply(0);
         assertNotNull(ids);
@@ -382,100 +378,79 @@ public class VectorMergePostingsTest
         assertTrue(ids.contains(2));
     }
 
-    @Test
-    public void rowIdsOfThrowsOnWrongMapperCount() throws IOException
+    @Test(expected = IllegalStateException.class)
+    public void rowIdsByMergedOrdinalThrowsOnWrongMapperCount() throws IOException
     {
         postings.put(new VectorHandle(0, 0), 0);
         // sourceCount() == 3, so passing 2 mappers must throw
-        List<OrdinalMapper> twoMappers = List.of(identityMapper(5), identityMapper(5));
-        try
-        {
-            postings.rowIdsOf(twoMappers);
-            fail("expected IllegalStateException for wrong mapper count");
-        }
-        catch (IllegalStateException _) {}
+        List<OrdinalMapper> twoMappers = List.of(identityMapper(), identityMapper());
+        postings.rowIdsByMergedOrdinal(twoMappers);
     }
 
     @Test
-    public void rowIdsOfThrowsOnOutOfRangeOrdinal() throws IOException
+    public void rowIdsByMergedOrdinalReturnsNullForUnmappedOrdinal() throws IOException
     {
         postings.put(new VectorHandle(0, 0), 0);
-        // source 0 node 0 is live; size() == 1, so valid merged ordinal is only 0.
-        // Map it to ordinal 99 (out of range).
-        List<OrdinalMapper> mappers = List.of(fixedMapper(0, 99), identityMapper(0), identityMapper(0));
-        try
-        {
-            postings.rowIdsOf(mappers);
-            fail("expected IllegalStateException for out-of-range ordinal");
-        }
-        catch (IllegalStateException _) {}
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
+        IntFunction<IntArrayList> fn = postings.rowIdsByMergedOrdinal(mappers);
+        assertNotNull(fn.apply(0));
+        assertNull(fn.apply(99));
     }
 
-    @Test
-    public void rowIdsOfThrowsOnDuplicateOrdinalClaim() throws IOException
-    {
-        postings.put(new VectorHandle(0, 0), 0);
-        postings.put(new VectorHandle(1, 0), 1);
-        // size() == 2, valid ordinals are 0 and 1.  Map both nodes to ordinal 0.
-        List<OrdinalMapper> mappers = List.of(fixedMapper(0, 0), fixedMapper(0, 0), identityMapper(0));
-        try
-        {
-            postings.rowIdsOf(mappers);
-            fail("expected IllegalStateException for duplicate ordinal claim");
-        }
-        catch (IllegalStateException _) {}
-    }
-
-    // ---- detectStructure tests ----
+    // ---- discoverStructure tests ----
 
     @Test
-    public void detectStructureAlwaysReturnsZeroOrOneToMany()
+    public void discoverStructureOneToOneWhenRowIdEqualsOrdinal()
     {
-        // detectStructure always returns ZERO_OR_ONE_TO_MANY: merged ordinals are assigned in
-        // source-node-id order which does not in general match the output segment rowId order,
-        // so ONE_TO_ONE / ONE_TO_MANY cannot be assumed without additional alignment guarantees.
+        // Each row has a unique vector and the effective mapper assigns ordinal == rowId → ONE_TO_ONE.
         postings.put(new VectorHandle(0, 0), 0);
         postings.put(new VectorHandle(0, 1), 1);
         List<OrdinalMapper> mappers = postings.ordinalMapping();
-        assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.detectStructure(mappers, false));
-        assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.detectStructure(mappers, true));
+        assertEquals(Structure.ONE_TO_ONE, postings.discoverStructure(mappers));
     }
 
     @Test
-    public void hasMultiRowVectorsFalseWithSingleRowPuts()
+    public void discoverStructureZeroOrOneToManyWhenReordered()
     {
-        // hasMultiRowVectors tracking: two distinct handles each receiving one put() call → flag stays false.
-        // detectStructure still returns ZERO_OR_ONE_TO_MANY regardless.
+        // The effective mapper swaps the two ordinals: rowId 0 → ordinal 1 and rowId 1 → ordinal 0.
+        // discoverStructure must see that rowId != ordinal and return ZERO_OR_ONE_TO_MANY.
         postings.put(new VectorHandle(0, 0), 0);
         postings.put(new VectorHandle(0, 1), 1);
-        List<OrdinalMapper> mappers = postings.ordinalMapping();
-        assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.detectStructure(mappers, false));
+        // Build a mapper that inverts the natural assignment: nodeId 0 → ordinal 1, nodeId 1 → ordinal 0.
+        Map<Integer, Integer> swapped = new HashMap<>();
+        swapped.put(0, 1);
+        swapped.put(1, 0);
+        List<OrdinalMapper> reorderedMappers = List.of(
+                new OrdinalMapper.MapMapper(swapped),
+                new OrdinalMapper.MapMapper(new HashMap<>()),
+                new OrdinalMapper.MapMapper(new HashMap<>()));
+        assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.discoverStructure(reorderedMappers));
     }
 
     @Test
-    public void hasMultiRowVectorsTrueAfterSecondPutToSameHandle()
+    public void discoverStructureZeroOrOneToManyWhenGapInRowIds()
     {
-        // hasMultiRowVectors tracking: second put() to the same handle sets the flag.
-        // detectStructure still returns ZERO_OR_ONE_TO_MANY.
+        // Row 1 is missing (no vector); maxRowId=2 but totalRows=2 → gap detected → ZERO_OR_ONE_TO_MANY.
+        postings.put(new VectorHandle(0, 0), 0);
+        postings.put(new VectorHandle(0, 1), 2);
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
+        assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.discoverStructure(mappers));
+    }
+
+    @Test
+    public void discoverStructureZeroOrOneToManyWhenDuplicateVector()
+    {
+        // hasMultiRowVectors tracking: second put() to the same handle sets the flag → ZERO_OR_ONE_TO_MANY.
         VectorHandle h = new VectorHandle(0, 0);
         postings.put(h, 0);
         postings.put(h, 5);
         List<OrdinalMapper> mappers = postings.ordinalMapping();
-        assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.detectStructure(mappers, false));
+        assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.discoverStructure(mappers));
     }
 
     // ---- helper factories ----
-
-    /** Returns an OrdinalMapper that maps nodeId {@code from} to ordinal {@code to}; all others to -1. */
-    private static OrdinalMapper fixedMapper(int from, int to)
-    {
-        Map<Integer, Integer> m = new HashMap<>();
-        m.put(from, to);
-        return new OrdinalMapper.MapMapper(m);
-    }
-
     /** Returns an OrdinalMapper that maps nothing (empty). */
-    private static OrdinalMapper identityMapper(int ignored)
+    private static OrdinalMapper identityMapper()
     {
         return new OrdinalMapper.MapMapper(new HashMap<>());
     }
