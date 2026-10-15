@@ -43,18 +43,46 @@ public interface IScrubber extends Closeable
         return new Options.Builder();
     }
 
+    /**
+     * Controls how the scrubber handles TTL during scrubbing.
+     *
+     * <ul>
+     *   <li>{@link #NONE} — default behaviour; TTL values are left as-is.</li>
+     *   <li>{@link #REINSERT_OVERFLOWED_TTL} — fixes cells whose local deletion time overflowed a 32-bit
+     *       integer (see CASSANDRA-14092).</li>
+     *   <li>{@link #NO_TTL} — strips all TTL information from every cell, useful when TTL data is
+     *       corrupt or must be removed entirely.</li>
+     * </ul>
+     */
+    enum OverwriteTTLMode
+    {
+        // Do nothing
+        NONE,
+        // Reinserts overflowed TTLs. See CASSANDRA-14092
+        REINSERT_OVERFLOWED_TTL,
+        // Remove any TTL from data
+        NO_TTL
+    }
+
     final class ScrubResult
     {
         public final int goodPartitions;
         public final int badPartitions;
         public final int emptyPartitions;
+        public final int noTTLOverwrittenRows;
         public final List<SSTableReader> scrubbed;
 
         public ScrubResult(int goodPartitions, int badPartitions, int emptyPartitions, List<SSTableReader> scrubbed)
         {
+            this(goodPartitions, badPartitions, emptyPartitions, 0, scrubbed);
+        }
+
+        public ScrubResult(int goodPartitions, int badPartitions, int emptyPartitions, int noTTLOverwrittenRows, List<SSTableReader> scrubbed)
+        {
             this.goodPartitions = goodPartitions;
             this.badPartitions = badPartitions;
             this.emptyPartitions = emptyPartitions;
+            this.noTTLOverwrittenRows = noTTLOverwrittenRows;
             this.scrubbed = scrubbed;
         }
     }
@@ -65,13 +93,15 @@ public interface IScrubber extends Closeable
         public final boolean reinsertOverflowedTTLRows;
         public final boolean skipCorrupted;
         public final boolean overrideTxnIsOffline;
+        public final OverwriteTTLMode overwriteTTLMode;
 
-        private Options(boolean checkData, boolean reinsertOverflowedTTLRows, boolean skipCorrupted, boolean overrideTxnIsOffline)
+        private Options(boolean checkData, boolean reinsertOverflowedTTLRows, boolean skipCorrupted, boolean overrideTxnIsOffline, OverwriteTTLMode overwriteTTLMode)
         {
             this.checkData = checkData;
             this.reinsertOverflowedTTLRows = reinsertOverflowedTTLRows;
             this.skipCorrupted = skipCorrupted;
             this.overrideTxnIsOffline = overrideTxnIsOffline;
+            this.overwriteTTLMode = overwriteTTLMode;
         }
 
         @Override
@@ -81,6 +111,7 @@ public interface IScrubber extends Closeable
                    .add("checkData=" + checkData)
                    .add("reinsertOverflowedTTLRows=" + reinsertOverflowedTTLRows)
                    .add("skipCorrupted=" + skipCorrupted)
+                   .add("overwriteTTLMode=" + overwriteTTLMode)
                    .toString();
         }
 
@@ -90,6 +121,7 @@ public interface IScrubber extends Closeable
             private boolean reinsertOverflowedTTLRows = false;
             private boolean skipCorrupted = false;
             private boolean overrideTxnIsOffline = false;
+            private OverwriteTTLMode overwriteTTLMode = OverwriteTTLMode.NONE;
 
             public Builder checkData()
             {
@@ -139,9 +171,19 @@ public interface IScrubber extends Closeable
                 return this;
             }
 
+            public Builder overwriteTTLMode(OverwriteTTLMode overwriteTTLMode)
+            {
+                this.overwriteTTLMode = overwriteTTLMode;
+                return this;
+            }
+
             public Options build()
             {
-                return new Options(checkData, reinsertOverflowedTTLRows, skipCorrupted, overrideTxnIsOffline);
+                // reinsertOverflowedTTLRows takes precedence when overwriteTTLMode is NONE (for backward compat)
+                OverwriteTTLMode effectiveMode = (overwriteTTLMode == OverwriteTTLMode.NONE && reinsertOverflowedTTLRows)
+                                                 ? OverwriteTTLMode.REINSERT_OVERFLOWED_TTL
+                                                 : overwriteTTLMode;
+                return new Options(checkData, reinsertOverflowedTTLRows, skipCorrupted, overrideTxnIsOffline, effectiveMode);
             }
         }
     }

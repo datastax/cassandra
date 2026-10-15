@@ -4145,6 +4145,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return scrub(disableSnapshot, options, jobs, keyspaceName, tableNames);
     }
 
+    public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, IScrubber.OverwriteTTLMode overwriteTTLMode, int jobs, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
+    {
+        IScrubber.Options options = IScrubber.options()
+                                             .skipCorrupted(skipCorrupted)
+                                             .checkData(checkData)
+                                             .overwriteTTLMode(overwriteTTLMode)
+                                             .build();
+        return scrub(disableSnapshot, options, jobs, keyspaceName, tableNames);
+    }
+
     public int scrub(boolean disableSnapshot, IScrubber.Options options, int jobs, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
     {
         CompactionManager.AllSSTableOpStatus status = CompactionManager.AllSSTableOpStatus.SUCCESSFUL;
