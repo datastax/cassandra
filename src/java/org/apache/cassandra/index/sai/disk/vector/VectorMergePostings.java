@@ -24,6 +24,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntFunction;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -67,29 +69,29 @@ import org.apache.cassandra.io.util.FileUtils;
  */
 public final class VectorMergePostings implements AutoCloseable
 {
-    /** Maps each surviving vector handle to the output rowIds that use it (the postings per node). */
-    private final ChronicleMap<VectorHandle, CompactionVectorPostings> rowIdsByVector;
+    /** Maps each surviving source vector (by handle) to the merged rowIds that use it (the postings per node). */
+    private final ChronicleMap<VectorHandle, CompactionVectorPostings> mergedRowIdsBySourceVector;
     /** Retained solely to delete the temp file on {@link #close()}; ChronicleMap does not delete its own backing file. */
-    private final org.apache.cassandra.io.util.File rowIdsByVectorFile;
+    private final org.apache.cassandra.io.util.File mergedRowIdsBySourceVectorFile;
 
-    /** Maps each output rowId to the packed vector handle that supplies its vector (-1L if none). */
-    private final MappedLongArray vectorByRowId;
+    /** Maps each merged rowId to the packed source vector handle that supplies its vector (-1L if none). */
+    private final MappedLongArray sourceVectorByMergedRowId;
     /** Retained solely to delete the temp file on {@link #close()}; {@link MappedLongArray} does not delete its own backing file. */
-    private final org.apache.cassandra.io.util.File vectorByRowIdFile;
+    private final org.apache.cassandra.io.util.File sourceVectorByMergedRowIdFile;
 
     /** Per-source exclusive upper bound on node ids; fixes source count and validates handles. */
     private final int[] idUpperBounds;
-    /** Per-source live sets: bit {@code n} is set once node {@code n} has been assigned at least one output row. */
-    private final AtomicFixedBitSet[] live;
+    /** Per-source live-node sets: bit {@code n} is set once node {@code n} has been assigned at least one output row. */
+    private final AtomicFixedBitSet[] liveNodesBySource;
 
-    /** Number of distinct surviving source nodes, i.e. the number of bits set across {@link #live}. */
-    private final AtomicInteger survivors = new AtomicInteger();
+    /** Number of distinct surviving source nodes, i.e. the number of bits set across {@link #liveNodesBySource}. */
+    private final AtomicInteger survivorsCount = new AtomicInteger();
     /** Highest output rowid passed to {@link #put}, or -1 if none. */
     private final AtomicInteger maxRowId = new AtomicInteger(-1);
     /** Total number of {@link #put} calls, i.e. total rows attributed to any vector. */
     private final AtomicInteger totalRows = new AtomicInteger(0);
-    /** True once any handle has received more than one row (i.e. the {@code absent==null} branch of {@link #put} fires). */
-    private final AtomicBoolean hasMultiRowVectors = new AtomicBoolean(false);
+    /** True once any source vector is shared by more than one merged row (i.e. the {@code absent==null} branch of {@link #put} fires). */
+    private final AtomicBoolean hasDuplicateVectors = new AtomicBoolean(false);
 
 
     /**
@@ -98,16 +100,16 @@ public final class VectorMergePostings implements AutoCloseable
      */
     public VectorMergePostings(int[] idUpperBounds, long estimatedRows) throws IOException
     {
-        this.rowIdsByVectorFile = FileUtils.createTempFile("merge_postings_chronicle_map", ".map");
-        this.vectorByRowIdFile = FileUtils.createTempFile("merge_postings_vector_by_row_id", ".map");
+        this.mergedRowIdsBySourceVectorFile = FileUtils.createTempFile("merge_postings_chronicle_map", ".map");
+        this.sourceVectorByMergedRowIdFile = FileUtils.createTempFile("merge_postings_source_vector_by_merged_row_id", ".map");
         this.idUpperBounds = idUpperBounds.clone();
-        this.live = new AtomicFixedBitSet[idUpperBounds.length];
-        for (int s = 0; s < idUpperBounds.length; s++)
-            live[s] = new AtomicFixedBitSet(idUpperBounds[s]);
+        this.liveNodesBySource = IntStream.of(idUpperBounds)
+                                          .mapToObj(AtomicFixedBitSet::new)
+                                          .toArray(AtomicFixedBitSet[]::new);
 
         int entries = (int) Math.clamp((long) (1.1 * estimatedRows), 1000L, (long) Integer.MAX_VALUE - 100_000);
-        this.vectorByRowId = new MappedLongArray(vectorByRowIdFile.toJavaIOFile(), entries);
-        this.rowIdsByVector = ChronicleMapBuilder.of(VectorHandle.class, CompactionVectorPostings.class)
+        this.sourceVectorByMergedRowId = new MappedLongArray(sourceVectorByMergedRowIdFile.toJavaIOFile(), entries);
+        this.mergedRowIdsBySourceVector = ChronicleMapBuilder.of(VectorHandle.class, CompactionVectorPostings.class)
                                       .averageKeySize(VectorHandle.BYTES)
                                       .keySizeMarshaller(SizeMarshaller.constant(VectorHandle.BYTES))
                                       .keyMarshaller(new VectorHandle.Marshaller())
@@ -116,7 +118,7 @@ public final class VectorMergePostings implements AutoCloseable
                                                         + 2 * Integer.BYTES)
                                       .valueMarshaller(new VectorPostings.Marshaller())
                                       .entries(entries)
-                                      .createPersistedTo(rowIdsByVectorFile.toJavaIOFile());
+                                      .createPersistedTo(mergedRowIdsBySourceVectorFile.toJavaIOFile());
     }
 
     /**
@@ -132,7 +134,7 @@ public final class VectorMergePostings implements AutoCloseable
         if (handle.nodeId() < 0 || handle.nodeId() >= idUpperBounds[handle.source()])
             throw new IllegalArgumentException(String.format("%s names a node outside [0, %d)", handle, idUpperBounds[handle.source()]));
 
-        try (ExternalMapQueryContext<VectorHandle, CompactionVectorPostings, ?> ctx = rowIdsByVector.queryContext(handle))
+        try (ExternalMapQueryContext<VectorHandle, CompactionVectorPostings, ?> ctx = mergedRowIdsBySourceVector.queryContext(handle))
         {
             InterProcessLock lock = ctx.writeLock();
             lock.lock();
@@ -146,7 +148,7 @@ public final class VectorMergePostings implements AutoCloseable
                 }
                 else
                 {
-                    hasMultiRowVectors.set(true);
+                    hasDuplicateVectors.set(true);
                     MapEntry<VectorHandle, CompactionVectorPostings> entry = ctx.entry();
                     assert entry != null;
                     CompactionVectorPostings postings = entry.value().get();
@@ -156,7 +158,7 @@ public final class VectorMergePostings implements AutoCloseable
                 }
                 // still under the entry's write lock, so the bit and the entry become visible together
                 markLive(handle);
-                vectorByRowId.put(segmentRowId, handle.pack());
+                sourceVectorByMergedRowId.put(segmentRowId, handle.pack());
                 maxRowId.accumulateAndGet(segmentRowId, Math::max);
                 totalRows.incrementAndGet();
             }
@@ -172,26 +174,26 @@ public final class VectorMergePostings implements AutoCloseable
      */
     private void markLive(VectorHandle handle)
     {
-        AtomicFixedBitSet bits = live[handle.source()];
+        AtomicFixedBitSet bits = liveNodesBySource[handle.source()];
         if (!bits.getAndSet(handle.nodeId()))
-            survivors.incrementAndGet();
+            survivorsCount.incrementAndGet();
     }
 
     /** The output rowids attributed to {@code handle}'s node, or null if no row was. */
     public CompactionVectorPostings get(VectorHandle handle)
     {
-        return rowIdsByVector.get(handle);
+        return mergedRowIdsBySourceVector.get(handle);
     }
 
     /** Number of distinct surviving source nodes. */
     public int size()
     {
-        return survivors.get();
+        return survivorsCount.get();
     }
 
     public boolean isEmpty()
     {
-        return survivors.get() == 0;
+        return survivorsCount.get() == 0;
     }
 
     /** The highest output rowid ingested, or -1 if none. */
@@ -208,20 +210,20 @@ public final class VectorMergePostings implements AutoCloseable
 
     /**
      * The surviving nodes of source {@code source}, sized exactly to that source's id upper bound. This is the
-     * live set itself, not a copy: call after ingest is drained, and do not mutate it.
+     * liveNodes set itself, not a copy: call after ingest is drained, and do not mutate it.
      */
     public BitSet liveNodes(int source)
     {
-        return live[source];
+        return liveNodesBySource[source];
     }
 
     /**
-     * The surviving nodes of every source, indexed by source. The sets are the live sets themselves, not
+     * The surviving nodes of every source, indexed by source. The sets are the liveNodes sets themselves, not
      * copies: call after ingest is drained, and do not mutate them.
      */
-    public List<? extends BitSet> liveNodes()
+    public List<? extends BitSet> liveNodesBySource()
     {
-        return List.of(live);
+        return List.of(liveNodesBySource);
     }
 
     /**
@@ -229,7 +231,7 @@ public final class VectorMergePostings implements AutoCloseable
      * output ordinals {@code [0, size())}. Call after ingest is drained.
      *
      * <p>Ordinals are assigned in ascending output-rowId order and currently no holes in numbering are produced.
-     * Therefore only ONE_TO_ONE and ZERO_OR_ONE_TO_MANY structures are supported.</p>
+     * Therefore, only ONE_TO_ONE and ZERO_OR_ONE_TO_MANY structures are supported.</p>
      *
      * <p>One ChronicleMap lookup per surviving node populates two parallel {@code rowId}-indexed arrays
      * ({@code sourceByRowId}, {@code nodeIdByRowId}); those are then walked once in rowId order to assign
@@ -241,14 +243,14 @@ public final class VectorMergePostings implements AutoCloseable
     {
         int maxRow = maxRowId();
 
-        List<Map<Integer, Integer>> oldToNew = new ArrayList<>(live.length);
-        for (int s = 0; s < live.length; s++)
-            oldToNew.add(new HashMap<>(Math.max(16, (int) (live[s].cardinality() / 0.75f) + 1)));
+        List<Map<Integer, Integer>> oldToNew = new ArrayList<>(liveNodesBySource.length);
+        for (AtomicFixedBitSet liveNodes : liveNodesBySource)
+            oldToNew.add(new HashMap<>(Math.max(16, (int) (liveNodes.cardinality() / 0.75f) + 1)));
 
         int nextOrdinal = 0;
         for (int rowId = 0; rowId <= maxRow; rowId++)
         {
-            long packed = vectorByRowId.get(rowId);
+            long packed = sourceVectorByMergedRowId.get(rowId);
             if (packed == -1L)
                 continue; // no vector for this rowId
             VectorHandle handle = VectorHandle.unpack(packed);
@@ -257,10 +259,9 @@ public final class VectorMergePostings implements AutoCloseable
                 map.put(handle.nodeId(), nextOrdinal++);
         }
 
-        List<OrdinalMapper> mappers = new ArrayList<>(live.length);
-        for (Map<Integer, Integer> m : oldToNew)
-            mappers.add(new OrdinalMapper.MapMapper(m));
-        return mappers;
+        return oldToNew.stream()
+                       .map(OrdinalMapper.MapMapper::new)
+                       .collect(Collectors.toList());
     }
 
     /** The number of source graphs, i.e. the valid range of {@code source} is {@code [0, sourceCount())}. */
@@ -273,7 +274,7 @@ public final class VectorMergePostings implements AutoCloseable
     @VisibleForTesting
     java.io.File[] backingFiles()
     {
-        return new java.io.File[]{ rowIdsByVectorFile.toJavaIOFile(), vectorByRowIdFile.toJavaIOFile() };
+        return new java.io.File[]{ mergedRowIdsBySourceVectorFile.toJavaIOFile(), sourceVectorByMergedRowIdFile.toJavaIOFile() };
     }
 
     /**
@@ -288,10 +289,10 @@ public final class VectorMergePostings implements AutoCloseable
         if (effective.size() != sourceCount())
             throw new IllegalStateException("rowIdsByMergedOrdinal: expected " + sourceCount() + " mappers but got " + effective.size());
 
-        return g -> {
+        return rowId -> {
             for (int s = 0; s < effective.size(); s++)
             {
-                int nodeId = effective.get(s).newToOld(g);
+                int nodeId = effective.get(s).newToOld(rowId);
                 if (nodeId != OrdinalMapper.OMITTED)
                 {
                     CompactionVectorPostings p = get(new VectorHandle(s, nodeId));
@@ -310,7 +311,7 @@ public final class VectorMergePostings implements AutoCloseable
      * <ul>
      *   <li>No vector has more than one row (no duplicate-vector rows).</li>
      *   <li>There are no gaps: every rowId in {@code [0, maxRowId]} has a vector ({@code maxRowId + 1 == totalRows}).</li>
-     *   <li>For every rowId {@code g}, the effective mapper maps the owning node to ordinal {@code g}
+     *   <li>For every {@code rowId}, the effective mapper maps the owning node to ordinal {@code rowId}
      *       (i.e., {@code rowId == vectorOrdinal} for all rows).</li>
      * </ul>
      * Otherwise returns {@link Structure#ZERO_OR_ONE_TO_MANY}.
@@ -320,7 +321,7 @@ public final class VectorMergePostings implements AutoCloseable
     public Structure discoverStructure(List<OrdinalMapper> effective)
     {
         // Quick exits: duplicates or gaps mean ONE_TO_ONE is impossible regardless of the mapping.
-        if (hasMultiRowVectors.get())
+        if (hasDuplicateVectors.get())
             return Structure.ZERO_OR_ONE_TO_MANY;
 
         int maxRow = maxRowId();
@@ -328,16 +329,16 @@ public final class VectorMergePostings implements AutoCloseable
             return Structure.ZERO_OR_ONE_TO_MANY;
 
         // Verify that the effective mapping sends each row's vector to the ordinal equal to that rowId.
-        // vectorByRowId.get(g) == -1 means no vector for that rowId (gap already ruled out above, but
+        // sourceVectorByMergedRowId.get(rowId) == -1 means no vector for that rowId (gap already ruled out above, but
         // the array may be longer than maxRow + 1, so we only iterate up to maxRow inclusive).
-        for (int g = 0; g <= maxRow; g++)
+        for (int rowId = 0; rowId <= maxRow; rowId++)
         {
-            long packed = vectorByRowId.get(g);
+            long packed = sourceVectorByMergedRowId.get(rowId);
             if (packed == -1L)
                 return Structure.ZERO_OR_ONE_TO_MANY;
             VectorHandle h = VectorHandle.unpack(packed);
             int ordinal = effective.get(h.source()).oldToNew(h.nodeId());
-            if (ordinal != g)
+            if (ordinal != rowId)
                 return Structure.ZERO_OR_ONE_TO_MANY;
         }
         return Structure.ONE_TO_ONE;
@@ -346,8 +347,8 @@ public final class VectorMergePostings implements AutoCloseable
     @Override
     public void close() throws IOException
     {
-        FileUtils.closeQuietly(vectorByRowId, rowIdsByVector);
-        vectorByRowIdFile.delete();
-        rowIdsByVectorFile.delete();
+        FileUtils.closeQuietly(sourceVectorByMergedRowId, mergedRowIdsBySourceVector);
+        sourceVectorByMergedRowIdFile.delete();
+        mergedRowIdsBySourceVectorFile.delete();
     }
 }
