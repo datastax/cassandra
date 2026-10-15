@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.utils.memory.MemoryUtil;
@@ -51,6 +52,8 @@ public class MemoryInputStream extends RebufferingInputStream implements DataInp
     @Override
     protected void reBuffer() throws IOException
     {
+        Preconditions.checkState(!buffer.hasRemaining(), "Current buffer not exhausted, remaining bytes: %s", buffer.remaining());
+
         if (offset - mem.peer >= mem.size())
             return;
 
