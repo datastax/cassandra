@@ -121,6 +121,50 @@ public class StandaloneScrubberTest extends OfflineToolUtils
     }
 
     @Test
+    public void testOverwriteTTLArg()
+    {
+        // Valid values: NO_TTL, NONE, REINSERT_OVERFLOWED_TTL
+        Arrays.asList("NO_TTL", "NONE", "REINSERT_OVERFLOWED_TTL").forEach(value -> {
+            ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class,
+                                                     "-o", value,
+                                                     "system_schema", "tables");
+            Assertions.assertThat(tool.getCleanedStderr()).as("-o %s stderr", value).isEmpty();
+            assertEquals("Exit code for -o " + value, 0, tool.getExitCode());
+            assertCorrectEnvPostTest();
+        });
+
+        // Long form --overwrite-ttl
+        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class,
+                                                 "--overwrite-ttl", "NO_TTL",
+                                                 "system_schema", "tables");
+        Assertions.assertThat(tool.getCleanedStderr()).isEmpty();
+        assertEquals(0, tool.getExitCode());
+        assertCorrectEnvPostTest();
+    }
+
+    @Test
+    public void testOverwriteTTLInvalidValueFails()
+    {
+        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class,
+                                                 "-o", "INVALID_VALUE",
+                                                 "system_schema", "tables");
+        assertThat(tool.getStdout(), CoreMatchers.containsStringIgnoringCase("usage:"));
+        assertThat(tool.getCleanedStderr(), CoreMatchers.containsStringIgnoringCase("Invalid argument value"));
+        assertEquals(1, tool.getExitCode());
+    }
+
+    @Test
+    public void testOverwriteTTLAndReinsertConflictFails()
+    {
+        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class,
+                                                 "-r", "-o", "NO_TTL",
+                                                 "system_schema", "tables");
+        assertThat(tool.getStdout(), CoreMatchers.containsStringIgnoringCase("usage:"));
+        assertThat(tool.getCleanedStderr(), CoreMatchers.containsStringIgnoringCase("Only one of"));
+        assertEquals(1, tool.getExitCode());
+    }
+
+    @Test
     public void testHelpArg()
     {
         Arrays.asList("-h", "--help").forEach(arg -> {
