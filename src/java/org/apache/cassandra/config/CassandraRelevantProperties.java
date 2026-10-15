@@ -692,6 +692,18 @@ public enum CassandraRelevantProperties
      */
     CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000"),
 
+    /**
+     * MiB withheld from Caffeine {@code maximumWeight} but still part of the chunk-cache buffer pool.
+     * Headroom for in-flight cache loads under eviction pressure (not a separate allocator).
+     */
+    CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB("cassandra.chunk_cache_reserved_pool_space_in_mb", "32"),
+
+    /**
+     * After tryGet + sync reclaim + tryGet still fails, how long a miss loader may wait for pool
+     * pages freed by other readers. On timeout the read fails with BufferPoolExhaustedException.
+     */
+    CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS("cassandra.chunk_cache_pool_wait_timeout_ms", "5"),
+
     /** Class used to discover/load the proper SAI index components file for a given sstable. */
     CUSTOM_SAI_INDEX_COMPONENTS_DISCOVERY("cassandra.sai.custom_components_discovery_class"),
 

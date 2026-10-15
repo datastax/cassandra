@@ -20,6 +20,7 @@ package org.apache.cassandra.metrics;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 
+import com.codahale.metrics.Meter;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.google.common.annotations.VisibleForTesting;
 
@@ -39,6 +40,13 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     /** Latency of misses */
     public final Timer missLatency;
 
+    private final Meter syncReclaims;
+    private final Meter reclaimRetrySuccesses;
+    private final Meter poolExhausted;
+    private final Meter blockedOnPoolAllocation;
+    private final Meter poolWaitSuccesses;
+    private final Timer reclaimLatency;
+
     /**
      * Create metrics for the provided chunk cache.
      *
@@ -48,6 +56,12 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     {
         metrics = new CodahaleCacheMetrics("ChunkCache", cache);
         missLatency = metrics.registerTimer("MissLatency");
+        syncReclaims = metrics.registerMeter("SyncReclaims");
+        reclaimRetrySuccesses = metrics.registerMeter("ReclaimRetrySuccesses");
+        poolExhausted = metrics.registerMeter("PoolExhausted");
+        blockedOnPoolAllocation = metrics.registerMeter("BlockedOnPoolAllocation");
+        poolWaitSuccesses = metrics.registerMeter("PoolWaitSuccesses");
+        reclaimLatency = metrics.registerTimer("ReclaimLatency");
     }
 
     @Override
@@ -151,11 +165,84 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
         return metrics.entries();
     }
 
+    @Override
+    public void recordSyncReclaim()
+    {
+        syncReclaims.mark();
+    }
+
+    @Override
+    public void recordReclaimRetrySuccess()
+    {
+        reclaimRetrySuccesses.mark();
+    }
+
+    @Override
+    public void recordPoolExhausted()
+    {
+        poolExhausted.mark();
+    }
+
+    @Override
+    public void recordReclaimLatency(long nanos)
+    {
+        reclaimLatency.update(nanos, TimeUnit.NANOSECONDS);
+    }
+
+    @Override
+    public long syncReclaims()
+    {
+        return syncReclaims.getCount();
+    }
+
+    @Override
+    public long reclaimRetrySuccesses()
+    {
+        return reclaimRetrySuccesses.getCount();
+    }
+
+    @Override
+    public long poolExhausted()
+    {
+        return poolExhausted.getCount();
+    }
+
+    @Override
+    public void recordBlockedOnPoolAllocation()
+    {
+        blockedOnPoolAllocation.mark();
+    }
+
+    @Override
+    public void recordPoolWaitSuccess()
+    {
+        poolWaitSuccesses.mark();
+    }
+
+    @Override
+    public long blockedOnPoolAllocation()
+    {
+        return blockedOnPoolAllocation.getCount();
+    }
+
+    @Override
+    public long poolWaitSuccesses()
+    {
+        return poolWaitSuccesses.getCount();
+    }
+
     @Nonnull
     @Override
     public CacheStats snapshot()
     {
         return CacheStats.of(metrics.hits.getCount(), metrics.misses.getCount(), missLatency.getCount(), 0L, missLatency.getCount(), 0L, 0L);
+    }
+
+    @Override
+    public void close()
+    {
+        // MissLatency / SyncReclaims / … were registered through metrics.register* and are removed with it.
+        metrics.close();
     }
 
     @Override
@@ -176,6 +263,10 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
                "Moving hit rate: " + hitRate() + System.lineSeparator() +
                "Num entries: " + entries() + System.lineSeparator() +
                "Size in memory: " + FBUtilities.prettyPrintMemory(size()) + System.lineSeparator() +
-               "Capacity: " + FBUtilities.prettyPrintMemory(capacity());
+               "Capacity: " + FBUtilities.prettyPrintMemory(capacity()) + System.lineSeparator() +
+               "Sync reclaims: " + syncReclaims() + System.lineSeparator() +
+               "Blocked on pool: " + blockedOnPoolAllocation() + System.lineSeparator() +
+               "Pool wait successes: " + poolWaitSuccesses() + System.lineSeparator() +
+               "Pool exhausted: " + poolExhausted();
     }
 }
