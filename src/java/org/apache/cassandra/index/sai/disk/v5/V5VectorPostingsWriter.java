@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.function.IntFunction;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 
 import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.IntArrayList;
@@ -168,12 +169,13 @@ public class V5VectorPostingsWriter
     /**
      * Largest rowId in the segment.
      * <p>Required for {@link Structure#ZERO_OR_ONE_TO_MANY} — omitting it throws from {@link #writeTo}.
-     * <p>For {@link Structure#ONE_TO_ONE} and {@link Structure#ONE_TO_MANY} it must equal
-     * {@code maxVectorOrdinal}; may be omitted, in which case {@code maxVectorOrdinal} is used.
+     * <p>For {@link Structure#ONE_TO_ONE} and {@link Structure#ONE_TO_MANY} it may be omitted,
+     * in which case {@code maxVectorOrdinal} is used.
      * Returns {@code this}.
      */
     public V5VectorPostingsWriter maxRowId(int maxRowId)
     {
+        Preconditions.checkArgument(maxRowId >= 0, "maxRowId must be >= 0");
         this.maxRowId = maxRowId;
         return this;
     }
@@ -205,8 +207,8 @@ public class V5VectorPostingsWriter
         }
 
         // ---- validate maxRowId
-        if ((structure == Structure.ONE_TO_ONE || structure == Structure.ONE_TO_MANY) && maxRowId != -1 && maxRowId != maxVectorOrdinal)
-            throw new IllegalStateException("maxRowId = " + maxRowId + " must be unset or equal to maxVectorOrdinal = " + maxVectorOrdinal + " for " + structure.name());
+        if (maxRowId >= 0 && maxRowId < maxVectorOrdinal)
+            throw new IllegalStateException("maxRowId = " + maxRowId + " must not exceed maxVectorOrdinal = " + maxVectorOrdinal + " for " + structure.name());
 
         if (structure == Structure.ZERO_OR_ONE_TO_MANY && maxRowId == -1)
             throw new IllegalStateException(
