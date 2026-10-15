@@ -17,10 +17,12 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -448,7 +450,281 @@ public class VectorMergePostingsTest
         assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.discoverStructure(mappers));
     }
 
+    // ---- Canonical handle deduplication & multi-row mapping tests ----
+
+    @Test
+    public void multipleRowsRoutedToSameCanonicalHandleCollapseInLiveNodesAndMaintainPostings() throws IOException
+    {
+        // Simulate multiple rows (row 0, 5, 8, 12) all routed to the same canonical handle (0, 7)
+        VectorHandle canonical = new VectorHandle(0, 7);
+        postings.put(canonical, 0);
+        postings.put(canonical, 5);
+        postings.put(canonical, 8);
+        postings.put(canonical, 12);
+
+        // 1. Must collapse into a single entry in liveNodesBySource
+        assertEquals("only one surviving node in postings", 1, postings.size());
+        assertEquals("max rowId must reflect the highest row inserted", 12, postings.maxRowId());
+        assertTrue("canonical node must be marked live in source 0", postings.liveNodes(0).get(7));
+        assertEquals("only node 7 should be live in source 0", 1, postings.liveNodes(0).cardinality());
+        assertEquals("source 1 has no live nodes", 0, postings.liveNodes(1).cardinality());
+        assertEquals("source 2 has no live nodes", 0, postings.liveNodes(2).cardinality());
+
+        // 2. Maintain correct postings list with all referencing row IDs
+        assertNotNull(postings.get(canonical));
+        assertEquals(List.of(0, 5, 8, 12), postings.get(canonical).getPostings());
+
+        // 3. Produce correct ordinal mapping and discover ZERO_OR_ONE_TO_MANY structure
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
+        assertEquals(ID_UPPER_BOUNDS.length, mappers.size());
+        assertEquals(0, mappers.get(0).oldToNew(7));
+        assertEquals(0, mappers.get(0).maxOrdinal());
+        assertEquals(-1, mappers.get(1).maxOrdinal());
+        assertEquals(-1, mappers.get(2).maxOrdinal());
+
+        IntFunction<IntArrayList> rowIdsFn = postings.rowIdsByMergedOrdinal(mappers);
+        IntArrayList rowIds = rowIdsFn.apply(0);
+        assertNotNull(rowIds);
+        assertEquals(4, rowIds.size());
+        assertEquals(0, rowIds.getInt(0));
+        assertEquals(5, rowIds.getInt(1));
+        assertEquals(8, rowIds.getInt(2));
+        assertEquals(12, rowIds.getInt(3));
+
+        assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.discoverStructure(mappers));
+    }
+
+    @Test
+    public void multipleCanonicalHandlesWithDuplicateRowsMaintainPostingsAndOrdinalMapping() throws IOException
+    {
+        // 4 distinct canonical handles across sources, each receiving multiple row IDs
+        VectorHandle canonicalA = new VectorHandle(0, 3);
+        VectorHandle canonicalB = new VectorHandle(1, 15);
+        VectorHandle canonicalC = new VectorHandle(2, 22);
+        VectorHandle canonicalD = new VectorHandle(0, 50);
+
+        // Interleaved ingestion across rows 0..9
+        postings.put(canonicalA, 0); // (0,3)  -> ordinal 0
+        postings.put(canonicalB, 1); // (1,15) -> ordinal 1
+        postings.put(canonicalC, 2); // (2,22) -> ordinal 2
+        postings.put(canonicalD, 3); // (0,50) -> ordinal 3
+        postings.put(canonicalA, 4);
+        postings.put(canonicalD, 5);
+        postings.put(canonicalB, 6);
+        postings.put(canonicalC, 7);
+        postings.put(canonicalC, 8);
+        postings.put(canonicalA, 9);
+
+        // 1. Collapse into exact live nodes in liveNodesBySource
+        assertEquals(4, postings.size());
+        assertEquals(9, postings.maxRowId());
+        assertEquals(2, postings.liveNodes(0).cardinality());
+        assertTrue(postings.liveNodes(0).get(3));
+        assertTrue(postings.liveNodes(0).get(50));
+
+        assertEquals(1, postings.liveNodes(1).cardinality());
+        assertTrue(postings.liveNodes(1).get(15));
+
+        assertEquals(1, postings.liveNodes(2).cardinality());
+        assertTrue(postings.liveNodes(2).get(22));
+
+        // 2. Maintain correct postings list with all referencing row IDs
+        assertEquals(List.of(0, 4, 9), postings.get(canonicalA).getPostings());
+        assertEquals(List.of(1, 6), postings.get(canonicalB).getPostings());
+        assertEquals(List.of(2, 7, 8), postings.get(canonicalC).getPostings());
+        assertEquals(List.of(3, 5), postings.get(canonicalD).getPostings());
+
+        // 3. Ordinal mappings follow rowId first-seen order
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
+        assertEquals(0, mappers.get(0).oldToNew(3));
+        assertEquals(1, mappers.get(1).oldToNew(15));
+        assertEquals(2, mappers.get(2).oldToNew(22));
+        assertEquals(3, mappers.get(0).oldToNew(50));
+
+        // 4. RowIds by merged ordinal
+        IntFunction<IntArrayList> rowIdsFn = postings.rowIdsByMergedOrdinal(mappers);
+
+        IntArrayList ids0 = rowIdsFn.apply(0);
+        assertNotNull(ids0);
+        assertEquals(List.of(0, 4, 9), toList(ids0));
+
+        IntArrayList ids1 = rowIdsFn.apply(1);
+        assertNotNull(ids1);
+        assertEquals(List.of(1, 6), toList(ids1));
+
+        IntArrayList ids2 = rowIdsFn.apply(2);
+        assertNotNull(ids2);
+        assertEquals(List.of(2, 7, 8), toList(ids2));
+
+        IntArrayList ids3 = rowIdsFn.apply(3);
+        assertNotNull(ids3);
+        assertEquals(List.of(3, 5), toList(ids3));
+
+        // 5. Structure discovery
+        assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.discoverStructure(mappers));
+    }
+
+    @Test
+    public void deduplicatorFeedingVectorMergePostingsProducesCorrectStructureAndPostings() throws IOException
+    {
+        ByteBuffer vecA = vectorOf(1.0f, 0.0f, 0.0f);
+        ByteBuffer vecB = vectorOf(0.0f, 1.0f, 0.0f);
+        ByteBuffer vecC = vectorOf(0.0f, 0.0f, 1.0f);
+
+        try (VectorDeduplicator deduplicator = new VectorDeduplicator(100))
+        {
+            // Simulate 10 rows from various candidate handles across sources
+            // Row 0: vecA, candidate (0, 1)  -> canonical (0, 1)
+            // Row 1: vecB, candidate (1, 2)  -> canonical (1, 2)
+            // Row 2: vecA, candidate (2, 3)  -> deduplicated to (0, 1)
+            // Row 3: vecC, candidate (0, 4)  -> canonical (0, 4)
+            // Row 4: vecB, candidate (0, 5)  -> deduplicated to (1, 2)
+            // Row 5: vecA, candidate (1, 6)  -> deduplicated to (0, 1)
+            // Row 6: vecC, candidate (2, 7)  -> deduplicated to (0, 4)
+            // Row 7: vecA, candidate (2, 8)  -> deduplicated to (0, 1)
+            // Row 8: vecB, candidate (1, 9)  -> deduplicated to (1, 2)
+            // Row 9: vecC, candidate (1, 10) -> deduplicated to (0, 4)
+
+            Object[][] ingestPlan = new Object[][]{
+                    { vecA, new VectorHandle(0, 1), 0 },
+                    { vecB, new VectorHandle(1, 2), 1 },
+                    { vecA, new VectorHandle(2, 3), 2 },
+                    { vecC, new VectorHandle(0, 4), 3 },
+                    { vecB, new VectorHandle(0, 5), 4 },
+                    { vecA, new VectorHandle(1, 6), 5 },
+                    { vecC, new VectorHandle(2, 7), 6 },
+                    { vecA, new VectorHandle(2, 8), 7 },
+                    { vecB, new VectorHandle(1, 9), 8 },
+                    { vecC, new VectorHandle(1, 10), 9 }
+            };
+
+            for (Object[] row : ingestPlan)
+            {
+                ByteBuffer vec = (ByteBuffer) row[0];
+                VectorHandle candidate = (VectorHandle) row[1];
+                int segmentRowId = (Integer) row[2];
+
+                VectorHandle canonical = deduplicator.deduplicate(vec, candidate);
+                postings.put(canonical, segmentRowId);
+            }
+
+            // Only 3 unique vectors -> exactly 3 surviving nodes in postings
+            assertEquals(3, postings.size());
+            assertEquals(9, postings.maxRowId());
+
+            // Source 0 has nodes 1 and 4
+            assertEquals(2, postings.liveNodes(0).cardinality());
+            assertTrue(postings.liveNodes(0).get(1));
+            assertTrue(postings.liveNodes(0).get(4));
+            assertFalse("candidate node 5 was deduplicated and must NOT be live", postings.liveNodes(0).get(5));
+
+            // Source 1 has node 2
+            assertEquals(1, postings.liveNodes(1).cardinality());
+            assertTrue(postings.liveNodes(1).get(2));
+            assertFalse("candidate node 6 was deduplicated and must NOT be live", postings.liveNodes(1).get(6));
+            assertFalse("candidate node 9 was deduplicated and must NOT be live", postings.liveNodes(1).get(9));
+            assertFalse("candidate node 10 was deduplicated and must NOT be live", postings.liveNodes(1).get(10));
+
+            // Source 2 has NO surviving nodes because all its vectors were deduplicated to earlier handles
+            assertEquals(0, postings.liveNodes(2).cardinality());
+            assertFalse("candidate node 3 was deduplicated and must NOT be live", postings.liveNodes(2).get(3));
+            assertFalse("candidate node 7 was deduplicated and must NOT be live", postings.liveNodes(2).get(7));
+            assertFalse("candidate node 8 was deduplicated and must NOT be live", postings.liveNodes(2).get(8));
+
+            // Check postings lists
+            VectorHandle canonA = new VectorHandle(0, 1);
+            VectorHandle canonB = new VectorHandle(1, 2);
+            VectorHandle canonC = new VectorHandle(0, 4);
+
+            assertEquals(List.of(0, 2, 5, 7), postings.get(canonA).getPostings());
+            assertEquals(List.of(1, 4, 8), postings.get(canonB).getPostings());
+            assertEquals(List.of(3, 6, 9), postings.get(canonC).getPostings());
+
+            // Check ordinal mapping
+            List<OrdinalMapper> mappers = postings.ordinalMapping();
+            assertEquals(0, mappers.get(0).oldToNew(1));
+            assertEquals(1, mappers.get(1).oldToNew(2));
+            assertEquals(2, mappers.get(0).oldToNew(4));
+            assertEquals(-1, mappers.get(2).maxOrdinal());
+
+            // Check rowIdsByMergedOrdinal
+            IntFunction<IntArrayList> fn = postings.rowIdsByMergedOrdinal(mappers);
+            assertEquals(List.of(0, 2, 5, 7), toList(fn.apply(0)));
+            assertEquals(List.of(1, 4, 8), toList(fn.apply(1)));
+            assertEquals(List.of(3, 6, 9), toList(fn.apply(2)));
+            assertNull(fn.apply(3));
+
+            // Check structure
+            assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.discoverStructure(mappers));
+        }
+    }
+
+    @Test
+    public void concurrentPutsWithDeduplicatedHandlesMaintainConsistency() throws Exception
+    {
+        int threads = 8;
+        int canonicalCount = 5;
+        int rowsPerThread = 500;
+        CyclicBarrier barrier = new CyclicBarrier(threads);
+
+        VectorHandle[] canonicals = new VectorHandle[canonicalCount];
+        for (int i = 0; i < canonicalCount; i++)
+            canonicals[i] = new VectorHandle(i % ID_UPPER_BOUNDS.length, i);
+
+        try (ExecutorService pool = Executors.newFixedThreadPool(threads))
+        {
+            List<Future<?>> futures = new ArrayList<>();
+            for (int t = 0; t < threads; t++)
+            {
+                final int threadIdx = t;
+                futures.add(pool.submit(() -> {
+                    barrier.await();
+                    for (int r = 0; r < rowsPerThread; r++)
+                    {
+                        VectorHandle canonical = canonicals[r % canonicalCount];
+                        int rowId = threadIdx * rowsPerThread + r;
+                        postings.put(canonical, rowId);
+                    }
+                    return null;
+                }));
+            }
+            for (Future<?> f : futures)
+                f.get(30, TimeUnit.SECONDS);
+        }
+
+        assertEquals(canonicalCount, postings.size());
+        int bits = 0;
+        for (int s = 0; s < postings.sourceCount(); s++)
+            bits += postings.liveNodes(s).cardinality();
+        assertEquals(canonicalCount, bits);
+
+        for (int i = 0; i < canonicalCount; i++)
+        {
+            VectorHandle h = canonicals[i];
+            assertEquals(threads * (rowsPerThread / canonicalCount), postings.get(h).size());
+        }
+
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
+        assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.discoverStructure(mappers));
+    }
+
     // ---- helper factories ----
+    private static ByteBuffer vectorOf(float... values)
+    {
+        ByteBuffer buf = ByteBuffer.allocate(values.length * Float.BYTES);
+        for (float v : values)
+            buf.putFloat(v);
+        buf.flip();
+        return buf;
+    }
+
+    private static List<Integer> toList(IntArrayList list)
+    {
+        List<Integer> res = new ArrayList<>(list.size());
+        for (int i = 0; i < list.size(); i++)
+            res.add(list.getInt(i));
+        return res;
+    }
     /** Returns an OrdinalMapper that maps nothing (empty). */
     private static OrdinalMapper identityMapper()
     {
@@ -462,7 +738,7 @@ public class VectorMergePostingsTest
             postings.put(handle, 0);
             fail("expected " + handle + " to be rejected");
         }
-        catch (IllegalArgumentException _)
+        catch (IllegalArgumentException e)
         {
             // expected
         }
