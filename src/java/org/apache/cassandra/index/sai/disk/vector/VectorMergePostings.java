@@ -18,6 +18,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,7 +40,6 @@ import io.github.jbellis.jvector.util.DocIdSetIterator;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.agrona.collections.IntArrayList;
 
-import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
 import org.apache.cassandra.io.util.File;
@@ -54,7 +54,7 @@ import org.apache.cassandra.io.util.File;
  *     <li>the postings of each surviving node, i.e. the output rowids that use its vector ({@link #get});</li>
  *     <li>the set of surviving nodes of each source graph ({@link #liveNodes(int)}), which the graph
  *         compactor uses to decide what to carry over;</li>
- *     <li>the ordinal mappings from source nodes to nodes of the merged graph ({@link #ordinalMappers()}).</li>
+ *     <li>the ordinal mappings from source nodes to nodes of the merged graph ({@link #ordinalMapping()}).</li>
  * </ul>
  * The postings and the surviving-node sets are always consistent with each other: a node is live if and
  * only if at least one output row refers to it.
@@ -79,6 +79,8 @@ public final class VectorMergePostings implements AutoCloseable
     private final AtomicInteger totalRows = new AtomicInteger(0);
     /** True once any handle has received more than one row (i.e. the {@code absent==null} branch of {@link #put} fires). */
     private final AtomicBoolean hasMultiRowVectors = new AtomicBoolean(false);
+    /** Mapping from output rowId to packed VectorHandle (-1L if unassigned/no vector). */
+    private long[] handleByRowId;
 
     /**
      * @param mapFile       temp file backing the map; deleted by {@link #close()}
@@ -92,6 +94,9 @@ public final class VectorMergePostings implements AutoCloseable
         this.live = new AtomicFixedBitSet[idUpperBounds.length];
         for (int s = 0; s < idUpperBounds.length; s++)
             live[s] = new AtomicFixedBitSet(idUpperBounds[s]);
+
+        this.handleByRowId = new long[(int) Math.max(1024, estimatedRows)];
+        Arrays.fill(this.handleByRowId, -1L);
 
         int entries = (int) Math.clamp((long) (1.1 * estimatedRows), 1000L, (long) Integer.MAX_VALUE - 100_000);
         this.map = ChronicleMapBuilder.of(VectorHandle.class, CompactionVectorPostings.class)
@@ -141,9 +146,23 @@ public final class VectorMergePostings implements AutoCloseable
             }
             // still under the entry's write lock, so the bit and the entry become visible together
             markLive(handle);
+            setHandleForRowId(segmentRowId, handle.pack());
             maxRowId.accumulateAndGet(segmentRowId, Math::max);
             totalRows.incrementAndGet();
         }
+    }
+
+    private synchronized void setHandleForRowId(int segmentRowId, long packedHandle)
+    {
+        if (segmentRowId >= handleByRowId.length)
+        {
+            int newLength = Math.max(segmentRowId + 1, (int) (handleByRowId.length * 1.5));
+            long[] newArray = new long[newLength];
+            Arrays.fill(newArray, handleByRowId.length, newLength, -1L);
+            System.arraycopy(handleByRowId, 0, newArray, 0, handleByRowId.length);
+            handleByRowId = newArray;
+        }
+        handleByRowId[segmentRowId] = packedHandle;
     }
 
     /**
@@ -207,10 +226,8 @@ public final class VectorMergePostings implements AutoCloseable
      * Builds the per-source {@link OrdinalMapper}s jvector's compactor needs, assigning the surviving nodes
      * output ordinals {@code [0, size())}. Call after ingest is drained.
      *
-     * <p>Ordinals are assigned in ascending output-rowId order: for each rowId in {@code [0, maxRowId]},
-     * the first (lowest) rowId belonging to a surviving node determines that node's ordinal. This ordering
-     * guarantees that {@code min(rowIds(ordinal)) == ordinal} for every non-empty ordinal, which is the
-     * invariant required by {@link Structure#ONE_TO_ONE} and {@link Structure#ONE_TO_MANY}.
+     * <p>Ordinals are assigned in ascending output-rowId order and currently no holes in numbering are produced.
+     * Therefore only ONE_TO_ONE and ZERO_OR_ONE_TO_MANY structures are supported.</p>
      *
      * <p>One ChronicleMap lookup per surviving node populates two parallel {@code rowId}-indexed arrays
      * ({@code sourceByRowId}, {@code nodeIdByRowId}); those are then walked once in rowId order to assign
@@ -218,7 +235,7 @@ public final class VectorMergePostings implements AutoCloseable
      *
      * @return one mapper per source, indexed by source
      */
-    public List<OrdinalMapper> ordinalMappers()
+    public List<OrdinalMapper> ordinalMapping()
     {
         int maxRow = maxRowId();
 
@@ -328,20 +345,14 @@ public final class VectorMergePostings implements AutoCloseable
     }
 
     /**
-     * Determines the best {@link Structure} for writing the postings of this merge output.
+     * Determines the {@link Structure} for writing the postings of this merge output.
      *
-     * <p>Because {@link #ordinalMappers()} assigns ordinals in ascending output-rowId order, the invariant
-     * {@code min(rowIds(ordinal)) == ordinal} holds by construction — provided the compactor preserved
-     * the proposed ordinal assignment ({@code !reordered}) and every row in {@code [0, maxRowId]} has a
-     * vector ({@code totalRows == maxRowId + 1}).  Structure is then determined by:
-     *
-     * <ol>
-     *   <li>{@code reordered} → {@link Structure#ZERO_OR_ONE_TO_MANY}: compactor renumbered ordinals.</li>
-     *   <li>{@code maxRowId + 1 > totalRows} → {@link Structure#ZERO_OR_ONE_TO_MANY}: some rows have no vector.</li>
-     *   <li>{@code !hasMultiRowVectors} → {@link Structure#ONE_TO_ONE}: bijection between ordinals and rows.</li>
-     *   <li>{@code !tooManyOrdinalMappingHoles} → {@link Structure#ONE_TO_MANY}: within the hole-density threshold.</li>
-     *   <li>otherwise → {@link Structure#ZERO_OR_ONE_TO_MANY}.</li>
-     * </ol>
+     * <p>Because {@link #ordinalMapping()} assigns ordinals contiguously {@code [0, size())},
+     * the only supported structures from compaction are:
+     * <ul>
+     *   <li>{@link Structure#ONE_TO_ONE}: when every row has a unique vector (bijection between ordinals and rows).</li>
+     *   <li>{@link Structure#ZERO_OR_ONE_TO_MANY}: when there are duplicate vectors, missing/null vectors, or reordering.</li>
+     * </ul>
      *
      * @param effective per-source ordinal mappers returned by the compactor; used only to check {@code reordered}
      * @param reordered {@code true} when the compactor changed the proposed ordinal assignment
@@ -352,16 +363,12 @@ public final class VectorMergePostings implements AutoCloseable
             return Structure.ZERO_OR_ONE_TO_MANY;
 
         int maxRow = maxRowId();
-        if (maxRow + 1 > totalRows.get())
+        if (maxRow + 1 != totalRows.get())
             return Structure.ZERO_OR_ONE_TO_MANY;
 
-        if (!hasMultiRowVectors.get())
-            return Structure.ONE_TO_ONE;
-
-        if (!V5VectorPostingsWriter.tooManyOrdinalMappingHoles(size(), maxRow + 1))
-            return Structure.ONE_TO_MANY;
-
-        return Structure.ZERO_OR_ONE_TO_MANY;
+        return hasMultiRowVectors.get()
+            ? Structure.ZERO_OR_ONE_TO_MANY
+            : Structure.ONE_TO_ONE;
     }
 
     @Override

@@ -469,6 +469,11 @@ abstract public class VectorCompactionTest extends VectorTester
                     assertTrue(postingsStructure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY
                                || postingsStructure == V5VectorPostingsWriter.Structure.ONE_TO_MANY);
                 }
+                // direct graph merge does not support ONE_TO_MANY
+                else if (mergeEnabled && expectedStructure == V5VectorPostingsWriter.Structure.ONE_TO_MANY)
+                {
+                    assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, postingsStructure);
+                }
                 else
                 {
                     assertEquals(expectedStructure, postingsStructure);
