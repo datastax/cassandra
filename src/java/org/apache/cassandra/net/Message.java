@@ -199,6 +199,11 @@ public class Message<T>
         return outWithParam(nextId(), verb, payload, null, null);
     }
 
+    public static <T> Message<T> synthetic(InetAddressAndPort from, Verb verb, T payload)
+    {
+        return new Message<>(new Header(-1, verb, from, -1, -1, 0, NO_PARAMS), payload);
+    }
+
     public static <T> Message<T> out(Verb verb, T payload, long expiresAtNanos)
     {
         return outWithParam(nextId(), verb, expiresAtNanos, payload, 0, null, null).build();
