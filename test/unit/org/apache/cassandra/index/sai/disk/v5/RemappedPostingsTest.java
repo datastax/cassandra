@@ -206,7 +206,7 @@ public class RemappedPostingsTest extends VectorTester
         f.deleteOnExit();
         SequentialWriter sw = new SequentialWriter(f, SequentialWriterOption.newBuilder().finishOnClose(true).build());
         long start = sw.position();
-        long end = writer.write(sw);
+        long end = writer.writeTo(sw);
         sw.close();
         FileHandle fh = new FileHandle.Builder(f).withCompressionMetadata(null).complete();
         return new V5OnDiskOrdinalsMap(fh, start, end - start);

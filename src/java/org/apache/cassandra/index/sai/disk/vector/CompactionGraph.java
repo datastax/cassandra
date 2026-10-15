@@ -648,7 +648,7 @@ public class CompactionGraph implements Closeable, Accountable
             // vector's rowIds are already ascending
             return rp.writer(vectorValues, postingsMap)
                      .skipRowIdSorting()
-                     .write(postingsOutput.asSequentialWriter());
+                     .writeTo(postingsOutput.asSequentialWriter());
         }
         else
         {

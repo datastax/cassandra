@@ -21,7 +21,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntFunction;
 
 import net.openhft.chronicle.hash.Data;
 import net.openhft.chronicle.hash.serialization.SizeMarshaller;
@@ -33,7 +35,12 @@ import net.openhft.chronicle.map.MapEntry;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.util.AtomicFixedBitSet;
 import io.github.jbellis.jvector.util.BitSet;
+import io.github.jbellis.jvector.util.DocIdSetIterator;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
+import org.agrona.collections.IntArrayList;
+
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
 import org.apache.cassandra.io.util.File;
 
@@ -68,6 +75,10 @@ public final class VectorMergePostings implements AutoCloseable
     private final AtomicInteger survivors = new AtomicInteger();
     /** Highest output rowid passed to {@link #put}, or -1 if none. */
     private final AtomicInteger maxRowId = new AtomicInteger(-1);
+    /** Total number of {@link #put} calls, i.e. total rows attributed to any vector. */
+    private final AtomicInteger totalRows = new AtomicInteger(0);
+    /** True once any handle has received more than one row (i.e. the {@code absent==null} branch of {@link #put} fires). */
+    private final AtomicBoolean hasMultiRowVectors = new AtomicBoolean(false);
 
     /**
      * @param mapFile       temp file backing the map; deleted by {@link #close()}
@@ -120,6 +131,7 @@ public final class VectorMergePostings implements AutoCloseable
             }
             else
             {
+                hasMultiRowVectors.set(true);
                 MapEntry<VectorHandle, CompactionVectorPostings> entry = ctx.entry();
                 assert entry != null;
                 CompactionVectorPostings postings = entry.value().get();
@@ -130,6 +142,7 @@ public final class VectorMergePostings implements AutoCloseable
             // still under the entry's write lock, so the bit and the entry become visible together
             markLive(handle);
             maxRowId.accumulateAndGet(segmentRowId, Math::max);
+            totalRows.incrementAndGet();
         }
     }
 
@@ -192,34 +205,64 @@ public final class VectorMergePostings implements AutoCloseable
 
     /**
      * Builds the per-source {@link OrdinalMapper}s jvector's compactor needs, assigning the surviving nodes
-     * output ordinals {@code [0, size())}. Pure CPU over the live sets, no vector I/O. Call after ingest is
-     * drained.
+     * output ordinals {@code [0, size())}. Call after ingest is drained.
      *
-     * <p>Ordinals are assigned in ascending node-id order across all sources in parallel: for each node id,
-     * every source is visited in turn and the next output ordinal goes to whichever source has that node
-     * live. A node with local id N therefore gets a lower output ordinal than any node with local id
-     * M &gt; N, whichever source either came from, which is the ordering a ONE_TO_ONE-compatible output needs.
+     * <p>Ordinals are assigned in ascending output-rowId order: for each rowId in {@code [0, maxRowId]},
+     * the first (lowest) rowId belonging to a surviving node determines that node's ordinal. This ordering
+     * guarantees that {@code min(rowIds(ordinal)) == ordinal} for every non-empty ordinal, which is the
+     * invariant required by {@link Structure#ONE_TO_ONE} and {@link Structure#ONE_TO_MANY}.
+     *
+     * <p>One ChronicleMap lookup per surviving node populates two parallel {@code rowId}-indexed arrays
+     * ({@code sourceByRowId}, {@code nodeIdByRowId}); those are then walked once in rowId order to assign
+     * ordinals.
      *
      * @return one mapper per source, indexed by source
      */
     public List<OrdinalMapper> ordinalMappers()
     {
-        List<Map<Integer, Integer>> oldToNew = new ArrayList<>(live.length);
-        int maxIdBound = 0;
-        for (AtomicFixedBitSet bits : live)
+        int maxRow = maxRowId();
+
+        // Step 1: build parallel rowId → (source, nodeId) arrays.
+        int[] sourceByRowId = new int[maxRow + 1];
+        int[] nodeIdByRowId = new int[maxRow + 1];
+        java.util.Arrays.fill(sourceByRowId, -1);
+
+        for (int s = 0; s < live.length; s++)
         {
-            oldToNew.add(new HashMap<>(Math.max(16, (int) (bits.cardinality() / 0.75f) + 1)));
-            maxIdBound = Math.max(maxIdBound, bits.length());
+            BitSet survivingS = live[s];
+            for (int nodeId = survivingS.nextSetBit(0);
+                 nodeId >= 0 && nodeId != DocIdSetIterator.NO_MORE_DOCS;
+                 nodeId = survivingS.nextSetBit(nodeId + 1))
+            {
+                CompactionVectorPostings p = get(new VectorHandle(s, nodeId));
+                if (p == null) continue;
+                IntArrayList ids = p.getRowIds();
+                for (int i = 0; i < ids.size(); i++)
+                {
+                    int rowId = ids.getInt(i);
+                    if (rowId >= 0 && rowId <= maxRow)
+                    {
+                        sourceByRowId[rowId] = s;
+                        nodeIdByRowId[rowId] = nodeId;
+                    }
+                }
+            }
         }
 
+        // Step 2: walk rowIds in order; on first encounter of each (source, nodeId) assign next ordinal.
+        List<Map<Integer, Integer>> oldToNew = new ArrayList<>(live.length);
+        for (int s = 0; s < live.length; s++)
+            oldToNew.add(new HashMap<>(Math.max(16, (int) (live[s].cardinality() / 0.75f) + 1)));
+
         int nextOrdinal = 0;
-        for (int nodeId = 0; nodeId < maxIdBound; nodeId++)
+        for (int rowId = 0; rowId <= maxRow; rowId++)
         {
-            for (int s = 0; s < live.length; s++)
-            {
-                if (nodeId < live[s].length() && live[s].get(nodeId))
-                    oldToNew.get(s).put(nodeId, nextOrdinal++);
-            }
+            int s = sourceByRowId[rowId];
+            if (s < 0) continue; // no vector for this rowId
+            Map<Integer, Integer> map = oldToNew.get(s);
+            int nodeId = nodeIdByRowId[rowId];
+            if (!map.containsKey(nodeId))
+                map.put(nodeId, nextOrdinal++);
         }
 
         List<OrdinalMapper> mappers = new ArrayList<>(live.length);
@@ -232,6 +275,93 @@ public final class VectorMergePostings implements AutoCloseable
     public int sourceCount()
     {
         return idUpperBounds.length;
+    }
+
+    /**
+     * Builds the function from merged ordinal to its rowId list, using the compactor's {@code effective} mappers.
+     * Validates that {@code effective.size() == sourceCount()}, that every mapped ordinal falls in
+     * {@code [0, size())}, and that no merged ordinal is claimed twice. Because the number of surviving nodes
+     * equals {@code size()}, all ordinals are guaranteed to be filled once these checks pass.
+     *
+     * @param effective per-source ordinal mappers as returned by the compactor's {@code effectiveRemappers()}
+     * @return a function from merged ordinal to rowId list; returns {@code null} for an empty (hole) ordinal
+     * @throws IllegalStateException if validation fails
+     */
+    public IntFunction<IntArrayList> rowIdsOf(List<OrdinalMapper> effective)
+    {
+        if (effective.size() != sourceCount())
+            throw new IllegalStateException("rowIdsOf: expected " + sourceCount() + " mappers but got " + effective.size());
+
+        int totalOrdinals = size();
+        long[] handles = new long[totalOrdinals];
+        var claimed = new java.util.BitSet(totalOrdinals);
+        int mapped = 0;
+        for (int s = 0; s < effective.size(); s++)
+        {
+            OrdinalMapper mapper = effective.get(s);
+            BitSet survivingS = live[s];
+            for (int nodeId = survivingS.nextSetBit(0);
+                 nodeId >= 0 && nodeId != DocIdSetIterator.NO_MORE_DOCS;
+                 nodeId = survivingS.nextSetBit(nodeId + 1))
+            {
+                int merged = mapper.oldToNew(nodeId);
+                if (merged < 0 || merged >= totalOrdinals)
+                    throw new IllegalStateException(String.format(
+                            "rowIdsOf: source %d node %d mapped to merged ordinal %d, outside [0, %d)",
+                            s, nodeId, merged, totalOrdinals));
+                if (claimed.get(merged))
+                    throw new IllegalStateException(String.format(
+                            "rowIdsOf: merged ordinal %d claimed twice (second claimant: source %d node %d)",
+                            merged, s, nodeId));
+                claimed.set(merged);
+                handles[merged] = new VectorHandle(s, nodeId).pack();
+                mapped++;
+            }
+        }
+        if (mapped != totalOrdinals)
+            throw new IllegalStateException("rowIdsOf: mapped " + mapped + " nodes but expected " + totalOrdinals);
+
+        return g -> {
+            var p = get(VectorHandle.unpack(handles[g]));
+            return p == null ? null : p.getRowIds();
+        };
+    }
+
+    /**
+     * Determines the best {@link Structure} for writing the postings of this merge output.
+     *
+     * <p>Because {@link #ordinalMappers()} assigns ordinals in ascending output-rowId order, the invariant
+     * {@code min(rowIds(ordinal)) == ordinal} holds by construction — provided the compactor preserved
+     * the proposed ordinal assignment ({@code !reordered}) and every row in {@code [0, maxRowId]} has a
+     * vector ({@code totalRows == maxRowId + 1}).  Structure is then determined by:
+     *
+     * <ol>
+     *   <li>{@code reordered} → {@link Structure#ZERO_OR_ONE_TO_MANY}: compactor renumbered ordinals.</li>
+     *   <li>{@code maxRowId + 1 > totalRows} → {@link Structure#ZERO_OR_ONE_TO_MANY}: some rows have no vector.</li>
+     *   <li>{@code !hasMultiRowVectors} → {@link Structure#ONE_TO_ONE}: bijection between ordinals and rows.</li>
+     *   <li>{@code !tooManyOrdinalMappingHoles} → {@link Structure#ONE_TO_MANY}: within the hole-density threshold.</li>
+     *   <li>otherwise → {@link Structure#ZERO_OR_ONE_TO_MANY}.</li>
+     * </ol>
+     *
+     * @param effective per-source ordinal mappers returned by the compactor; used only to check {@code reordered}
+     * @param reordered {@code true} when the compactor changed the proposed ordinal assignment
+     */
+    public Structure detectStructure(List<OrdinalMapper> effective, boolean reordered)
+    {
+        if (reordered)
+            return Structure.ZERO_OR_ONE_TO_MANY;
+
+        int maxRow = maxRowId();
+        if (maxRow + 1 > totalRows.get())
+            return Structure.ZERO_OR_ONE_TO_MANY;
+
+        if (!hasMultiRowVectors.get())
+            return Structure.ONE_TO_ONE;
+
+        if (!V5VectorPostingsWriter.tooManyOrdinalMappingHoles(size(), maxRow + 1))
+            return Structure.ONE_TO_MANY;
+
+        return Structure.ZERO_OR_ONE_TO_MANY;
     }
 
     @Override

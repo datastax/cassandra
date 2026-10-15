@@ -331,7 +331,7 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
                                                        SequentialWriterOption.newBuilder().finishOnClose(true).build());
 
         long postingsOffset = writer.position();
-        long postingsPosition = remapped.writer(vectorValues, postingsMap).write(writer);
+        long postingsPosition = remapped.writer(vectorValues, postingsMap).writeTo(writer);
         long postingsLength = postingsPosition - postingsOffset;
 
         writer.close();

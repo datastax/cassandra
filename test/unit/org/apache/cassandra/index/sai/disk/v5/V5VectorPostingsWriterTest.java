@@ -47,7 +47,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 
 /**
- * Tests for {@link V5VectorPostingsWriter#create} / {@link V5VectorPostingsWriter#write}.
+ * Tests for {@link V5VectorPostingsWriter#create} / {@link V5VectorPostingsWriter#writeTo}.
  * Covers: round-trips for all three posting structures and the empty case, structure validation,
  * header checks, and sort/skipSort behavior.
  */
@@ -420,7 +420,7 @@ public class V5VectorPostingsWriterTest extends VectorTester
         V5VectorPostingsWriter.create(4, postings)
                               .structure(Structure.ONE_TO_MANY)
                               .maxRowId(5)
-                              .write(null); // throws before any I/O
+                              .writeTo(null); // throws before any I/O
     }
 
     // =========================================================================
@@ -494,7 +494,7 @@ public class V5VectorPostingsWriterTest extends VectorTester
         File f = createTempFile();
         SequentialWriter sw = new SequentialWriter(f, SequentialWriterOption.newBuilder().finishOnClose(true).build());
         long start = sw.position();
-        long end = w.write(sw);
+        long end = w.writeTo(sw);
         sw.close();
         FileHandle fh = new FileHandle.Builder(f).withCompressionMetadata(null).complete();
         return new V5OnDiskOrdinalsMap(fh, start, end - start);

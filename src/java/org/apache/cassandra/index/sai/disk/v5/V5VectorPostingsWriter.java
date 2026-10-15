@@ -90,7 +90,7 @@ public class V5VectorPostingsWriter
      * <ul>
      *   <li>{@link Structure#ZERO_OR_ONE_TO_MANY}: <b>required</b>. Cannot be derived safely because
      *       gap rows (rows with no vector) never appear in any {@link #rowIdsOf} list, yet the reader's
-     *       dense rowId→ordinal table must cover them. Omitting it throws from {@link #write}.</li>
+     *       dense rowId→ordinal table must cover them. Omitting it throws from {@link #writeTo}.</li>
      *   <li>{@link Structure#ONE_TO_ONE} and {@link Structure#ONE_TO_MANY}: must equal
      *       {@code maxVectorOrdinal} (every row has a vector, so there are no gaps or tail rows).
      *       Defaults to {@code maxVectorOrdinal} if not supplied; throws if supplied with a different value.</li>
@@ -106,7 +106,7 @@ public class V5VectorPostingsWriter
      * {@code rowIdsOf(i)} returns the rowIds for ordinal {@code i}; an empty list means a hole.
      * A {@code null} result is treated the same as an empty list (a hole), so callers whose lookup
      * returns null for an absent ordinal need not map it themselves.
-     * Chain optional setters before calling {@link #write}.
+     * Chain optional setters before calling {@link #writeTo}.
      *
      * @param maxVectorOrdinal largest ordinal (inclusive); negative means the relation is empty
      * @param rowIdsOf         function from ordinal to rowId list; may return null, meaning empty,
@@ -167,7 +167,7 @@ public class V5VectorPostingsWriter
 
     /**
      * Largest rowId in the segment.
-     * <p>Required for {@link Structure#ZERO_OR_ONE_TO_MANY} — omitting it throws from {@link #write}.
+     * <p>Required for {@link Structure#ZERO_OR_ONE_TO_MANY} — omitting it throws from {@link #writeTo}.
      * <p>For {@link Structure#ONE_TO_ONE} and {@link Structure#ONE_TO_MANY} it must equal
      * {@code maxVectorOrdinal}; may be omitted, in which case {@code maxVectorOrdinal} is used.
      * Returns {@code this}.
@@ -192,7 +192,7 @@ public class V5VectorPostingsWriter
      * Encode the ordinal→rowIds relation to {@code writer} and return the writer position after
      * the last byte written.
      */
-    public long write(SequentialWriter writer) throws IOException
+    public long writeTo(SequentialWriter writer) throws IOException
     {
         // ---- empty case ----
         if (maxVectorOrdinal < 0)

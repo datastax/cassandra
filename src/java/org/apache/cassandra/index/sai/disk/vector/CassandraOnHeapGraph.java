@@ -87,7 +87,6 @@ import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
  import org.apache.cassandra.index.sai.disk.v5.RemappedPostings;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
-import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
@@ -482,7 +481,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 assert deletedOrdinals.isEmpty(); // V5 format does not support recording deleted ordinals
                 // memtable row ids are in insertion order (not ascending per vector), so the writer sorts them
                 postingsPosition = remappedPostings.writer(vectorValues, postingsMap)
-                                                   .write(postingsOutput.asSequentialWriter());
+                                                   .writeTo(postingsOutput.asSequentialWriter());
             }
             else
             {
