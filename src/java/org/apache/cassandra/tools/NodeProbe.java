@@ -23,6 +23,7 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
 import java.lang.management.RuntimeMXBean;
+import java.lang.reflect.UndeclaredThrowableException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.rmi.ConnectException;
@@ -43,6 +44,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import javax.annotation.Nullable;
+import javax.management.InstanceNotFoundException;
 import javax.management.JMX;
 import javax.management.MBeanServerConnection;
 import javax.management.MalformedObjectNameException;
@@ -1899,19 +1901,62 @@ public class NodeProbe implements AutoCloseable
       }
     }
 
+    /**
+     * Returns whether the table has SAI indexes, that is whether the server exposes the metrics of its SAI index group.
+     */
+    public boolean hasSaiIndexes(String ks, String cf)
+    {
+        return findSaiMBean(ks, cf, IndexGroupMetrics.INDEX_GROUP_METRICS_TYPE, "OpenIndexFiles") != null;
+    }
+
+    /**
+     * Returns the SAI metric of a table that nodetool knows as {@code metricName}, or {@code null} if the server does
+     * not expose it, e.g. because the table has no SAI index or the metric is disabled. Gauges and counters are
+     * returned as their value, while timers and histograms are returned as MBean proxies, which read their attributes
+     * from the server on every call, and fail with an {@link UndeclaredThrowableException} caused by an
+     * {@link InstanceNotFoundException} if the metric has been unregistered since, e.g. because the index was dropped.
+     */
     public Object getSaiMetric(String ks, String cf, String metricName)
     {
         try
         {
-            String scope = getSaiMetricScope(metricName);
-            String objectNameStr = String.format("org.apache.cassandra.metrics:type=StorageAttachedIndex,keyspace=%s,table=%s,scope=%s,name=%s",ks, cf, scope, metricName);
+            for (String scope : getSaiMetricScopes(metricName))
+            {
+                for (String name : getSaiMBeanNames(metricName))
+                {
+                    ObjectName oName = findSaiMBean(ks, cf, scope, name);
+                    if (oName == null)
+                        continue;
+
+                    try
+                    {
+                        return getSaiMetricValue(metricName, oName);
+                    }
+                    catch (UndeclaredThrowableException e)
+                    {
+                        // the metric has been unregistered after we found it
+                        if (e.getCause() instanceof InstanceNotFoundException)
+                            return null;
+                        throw e;
+                    }
+                }
+            }
+            return null;
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Error accessing MBean server: " + e.getMessage(), e);
+        }
+    }
+
+    @Nullable
+    private ObjectName findSaiMBean(String ks, String cf, String scope, String name)
+    {
+        try
+        {
+            String objectNameStr = String.format("org.apache.cassandra.metrics:type=StorageAttachedIndex,keyspace=%s,table=%s,scope=%s,name=%s", ks, cf, scope, name);
             ObjectName oName = new ObjectName(objectNameStr);
-
-            Set<ObjectName> matchingMBeans = mbeanServerConn.queryNames(oName, null);
-            if (matchingMBeans.isEmpty())
-                return null;
-
-            return getSaiMetricValue(metricName, oName);
+            return mbeanServerConn.isRegistered(oName) ? oName : null;
         }
         catch (MalformedObjectNameException e)
         {
@@ -1928,8 +1973,8 @@ public class NodeProbe implements AutoCloseable
         switch (metricName)
         {
             case "QueryLatency":
-                return JMX.newMBeanProxy(mbeanServerConn, oName, CassandraMetricsRegistry.JmxTimerMBean.class);
             case "PostFilteringReadLatency":
+                return JMX.newMBeanProxy(mbeanServerConn, oName, CassandraMetricsRegistry.JmxTimerMBean.class);
             case "SSTableIndexesHit":
             case "IndexSegmentsHit":
             case "RowsFiltered":
@@ -1945,7 +1990,22 @@ public class NodeProbe implements AutoCloseable
         }
     }
 
-    private String getSaiMetricScope(String metricName)
+    /**
+     * Returns the names the server may register the SAI metric that nodetool knows as {@code metricName} under, in
+     * order of preference. The per query histogram of the rows read from the storage engine before post-filtering is
+     * registered as {@code RowsFetched}, while older servers, like upstream 5.0, HCD 1.2 and builds of this branch
+     * before CNDB-15946, register it as {@code RowsFiltered}.
+     */
+    private static List<String> getSaiMBeanNames(String metricName)
+    {
+        return "RowsFiltered".equals(metricName) ? List.of("RowsFetched", "RowsFiltered") : List.of(metricName);
+    }
+
+    /**
+     * Returns the scopes the server may register the SAI metric that nodetool knows as {@code metricName} in, in
+     * order of preference.
+     */
+    private static List<String> getSaiMetricScopes(String metricName)
     {
         switch (metricName)
         {
@@ -1953,15 +2013,20 @@ public class NodeProbe implements AutoCloseable
             case "SSTableIndexesHit":
             case "IndexSegmentsHit":
             case "RowsFiltered":
-                return TableQueryMetrics.PerQuery.METRIC_TYPE;
+                return List.of(TableQueryMetrics.PerQuery.METRIC_TYPE);
             case "PostFilteringReadLatency":
+                // older servers, like upstream 5.0 and builds of this branch before CNDB-15432, register it with the
+                // per table metrics, and record it once per partition read instead of once per query
+                return List.of(TableQueryMetrics.PerQuery.METRIC_TYPE, TableQueryMetrics.PerTable.METRIC_TYPE);
             case "TotalQueryTimeouts":
-                return TableQueryMetrics.PerTable.METRIC_TYPE;
+                return List.of(TableQueryMetrics.PerTable.METRIC_TYPE);
             case "DiskUsedBytes":
-                return IndexGroupMetrics.INDEX_GROUP_METRICS_TYPE;
+                // the table state metrics count both the per-sstable and the per-column index components, but they
+                // can be disabled, while the index group metrics only count the per-sstable components
+                return List.of(TableStateMetrics.TABLE_STATE_METRIC_TYPE, IndexGroupMetrics.INDEX_GROUP_METRICS_TYPE);
             case "TotalIndexCount":
             case "TotalQueryableIndexCount":
-                return TableStateMetrics.TABLE_STATE_METRIC_TYPE;
+                return List.of(TableStateMetrics.TABLE_STATE_METRIC_TYPE);
             default:
                 throw new IllegalArgumentException("Unknown metric name: " + metricName);
         }
