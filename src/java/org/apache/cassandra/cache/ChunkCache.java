@@ -59,6 +59,7 @@ import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.FastByteOperations;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.apache.cassandra.utils.memory.BufferPool;
@@ -70,6 +71,7 @@ public class ChunkCache
         implements RemovalListener<ChunkCache.Key, ChunkCache.Chunk>, CacheSize
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
+    private final static NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 30, TimeUnit.SECONDS);
 
     /**
      * MiB withheld from Caffeine {@code maximumWeight} but still part of the chunk-cache {@link BufferPool}.
@@ -92,12 +94,12 @@ public class ChunkCache
     private static final int CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS = CassandraRelevantProperties.CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS.getInt();
 
     /** When true on the current thread, Caffeine PerformCleanupTask runs inline instead of on cleanupExecutor. */
-    private static final FastThreadLocal<Boolean> FORCE_INLINE_CLEANUP = new FastThreadLocal<Boolean>()
+    private static final FastThreadLocal<Boolean> FORCE_INLINE_CLEANUP = new FastThreadLocal<>()
     {
         @Override
         protected Boolean initialValue()
         {
-            return Boolean.FALSE;
+            return null; // absent == false
         }
     };
 
@@ -185,7 +187,7 @@ public class ChunkCache
      */
     private void executeCleanup(Runnable r)
     {
-        if (ASYNC_CLEANUP && r.getClass() == PERFORM_CLEANUP_TASK_CLASS && !FORCE_INLINE_CLEANUP.get())
+        if (ASYNC_CLEANUP && r.getClass() == PERFORM_CLEANUP_TASK_CLASS && FORCE_INLINE_CLEANUP.get() == null)
             cleanupExecutor.execute(r);
         else
             r.run();
@@ -244,6 +246,7 @@ public class ChunkCache
     private Chunk awaitAllocateChunk(int chunkSize, long position)
     {
         int waitMs = poolWaitTimeoutMs();
+        noSpamLogger.warn("Pool exhausted after reclaim, waiting up to {}ms for pages to be returned", waitMs);
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMs);
         metrics.recordBlockedOnPoolAllocation();
 
@@ -324,7 +327,7 @@ public class ChunkCache
         }
         finally
         {
-            FORCE_INLINE_CLEANUP.set(Boolean.FALSE);
+            FORCE_INLINE_CLEANUP.set(null); // reset back to "false"
         }
 
         bufferPool.recycleFreeLocalChunks();
