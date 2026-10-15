@@ -18,7 +18,6 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +25,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntFunction;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import net.openhft.chronicle.hash.Data;
+import net.openhft.chronicle.hash.locks.InterProcessLock;
 import net.openhft.chronicle.hash.serialization.SizeMarshaller;
 import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
@@ -36,13 +38,12 @@ import net.openhft.chronicle.map.MapEntry;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.util.AtomicFixedBitSet;
 import io.github.jbellis.jvector.util.BitSet;
-import io.github.jbellis.jvector.util.DocIdSetIterator;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.agrona.collections.IntArrayList;
 
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
-import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileUtils;
 
 /**
  * Tracks which vectors from the source graphs survive a compaction, and which rows of the compacted segment
@@ -66,11 +67,21 @@ import org.apache.cassandra.io.util.File;
  */
 public final class VectorMergePostings implements AutoCloseable
 {
-    private final ChronicleMap<VectorHandle, CompactionVectorPostings> map;
-    private final File mapFile;
+    /** Maps each surviving vector handle to the output rowIds that use it (the postings per node). */
+    private final ChronicleMap<VectorHandle, CompactionVectorPostings> rowIdsByVector;
+    /** Retained solely to delete the temp file on {@link #close()}; ChronicleMap does not delete its own backing file. */
+    private final org.apache.cassandra.io.util.File rowIdsByVectorFile;
+
+    /** Maps each output rowId to the packed vector handle that supplies its vector (-1L if none). */
+    private final MappedLongArray vectorByRowId;
+    /** Retained solely to delete the temp file on {@link #close()}; {@link MappedLongArray} does not delete its own backing file. */
+    private final org.apache.cassandra.io.util.File vectorByRowIdFile;
+
+    /** Per-source exclusive upper bound on node ids; fixes source count and validates handles. */
     private final int[] idUpperBounds;
-    /** Per-source live sets. */
+    /** Per-source live sets: bit {@code n} is set once node {@code n} has been assigned at least one output row. */
     private final AtomicFixedBitSet[] live;
+
     /** Number of distinct surviving source nodes, i.e. the number of bits set across {@link #live}. */
     private final AtomicInteger survivors = new AtomicInteger();
     /** Highest output rowid passed to {@link #put}, or -1 if none. */
@@ -79,27 +90,24 @@ public final class VectorMergePostings implements AutoCloseable
     private final AtomicInteger totalRows = new AtomicInteger(0);
     /** True once any handle has received more than one row (i.e. the {@code absent==null} branch of {@link #put} fires). */
     private final AtomicBoolean hasMultiRowVectors = new AtomicBoolean(false);
-    /** Mapping from output rowId to packed VectorHandle (-1L if unassigned/no vector). */
-    private long[] handleByRowId;
+
 
     /**
-     * @param mapFile       temp file backing the map; deleted by {@link #close()}
-     * @param idUpperBounds per-source graph id upper bound, indexed by source; fixes the number of sources
-     * @param estimatedRows expected number of output rows, used to size the map
+     * @param idUpperBounds  per-source graph id upper bound, indexed by source; fixes the number of sources
+     * @param estimatedRows  expected number of output rows, used to size the map
      */
-    public VectorMergePostings(File mapFile, int[] idUpperBounds, long estimatedRows) throws IOException
+    public VectorMergePostings(int[] idUpperBounds, long estimatedRows) throws IOException
     {
-        this.mapFile = mapFile;
+        this.rowIdsByVectorFile = FileUtils.createTempFile("merge_postings_chronicle_map", ".map");
+        this.vectorByRowIdFile = FileUtils.createTempFile("merge_postings_vector_by_row_id", ".map");
         this.idUpperBounds = idUpperBounds.clone();
         this.live = new AtomicFixedBitSet[idUpperBounds.length];
         for (int s = 0; s < idUpperBounds.length; s++)
             live[s] = new AtomicFixedBitSet(idUpperBounds[s]);
 
-        this.handleByRowId = new long[(int) Math.max(1024, estimatedRows)];
-        Arrays.fill(this.handleByRowId, -1L);
-
         int entries = (int) Math.clamp((long) (1.1 * estimatedRows), 1000L, (long) Integer.MAX_VALUE - 100_000);
-        this.map = ChronicleMapBuilder.of(VectorHandle.class, CompactionVectorPostings.class)
+        this.vectorByRowId = new MappedLongArray(vectorByRowIdFile.toJavaIOFile(), entries);
+        this.rowIdsByVector = ChronicleMapBuilder.of(VectorHandle.class, CompactionVectorPostings.class)
                                       .averageKeySize(VectorHandle.BYTES)
                                       .keySizeMarshaller(SizeMarshaller.constant(VectorHandle.BYTES))
                                       .keyMarshaller(new VectorHandle.Marshaller())
@@ -108,7 +116,7 @@ public final class VectorMergePostings implements AutoCloseable
                                                         + 2 * Integer.BYTES)
                                       .valueMarshaller(new VectorPostings.Marshaller())
                                       .entries(entries)
-                                      .createPersistedTo(mapFile.toJavaIOFile());
+                                      .createPersistedTo(rowIdsByVectorFile.toJavaIOFile());
     }
 
     /**
@@ -124,45 +132,39 @@ public final class VectorMergePostings implements AutoCloseable
         if (handle.nodeId() < 0 || handle.nodeId() >= idUpperBounds[handle.source()])
             throw new IllegalArgumentException(String.format("%s names a node outside [0, %d)", handle, idUpperBounds[handle.source()]));
 
-        try (ExternalMapQueryContext<VectorHandle, CompactionVectorPostings, ?> ctx = map.queryContext(handle))
+        try (ExternalMapQueryContext<VectorHandle, CompactionVectorPostings, ?> ctx = rowIdsByVector.queryContext(handle))
         {
-            //noinspection LockAcquiredButNotSafelyReleased
-            ctx.writeLock().lock();
-            MapAbsentEntry<VectorHandle, CompactionVectorPostings> absent = ctx.absentEntry();
-            if (absent != null)
+            InterProcessLock lock = ctx.writeLock();
+            lock.lock();
+            try
             {
-                CompactionVectorPostings postings = new CompactionVectorPostings(0, segmentRowId);
-                absent.doInsert(ctx.wrapValueAsData(postings));
+                MapAbsentEntry<VectorHandle, CompactionVectorPostings> absent = ctx.absentEntry();
+                if (absent != null)
+                {
+                    CompactionVectorPostings postings = new CompactionVectorPostings(0, segmentRowId);
+                    absent.doInsert(ctx.wrapValueAsData(postings));
+                }
+                else
+                {
+                    hasMultiRowVectors.set(true);
+                    MapEntry<VectorHandle, CompactionVectorPostings> entry = ctx.entry();
+                    assert entry != null;
+                    CompactionVectorPostings postings = entry.value().get();
+                    postings.add(segmentRowId);
+                    Data<CompactionVectorPostings> updated = ctx.wrapValueAsData(postings);
+                    entry.doReplaceValue(updated);
+                }
+                // still under the entry's write lock, so the bit and the entry become visible together
+                markLive(handle);
+                vectorByRowId.put(segmentRowId, handle.pack());
+                maxRowId.accumulateAndGet(segmentRowId, Math::max);
+                totalRows.incrementAndGet();
             }
-            else
+            finally
             {
-                hasMultiRowVectors.set(true);
-                MapEntry<VectorHandle, CompactionVectorPostings> entry = ctx.entry();
-                assert entry != null;
-                CompactionVectorPostings postings = entry.value().get();
-                postings.add(segmentRowId);
-                Data<CompactionVectorPostings> updated = ctx.wrapValueAsData(postings);
-                entry.doReplaceValue(updated);
+                lock.unlock();
             }
-            // still under the entry's write lock, so the bit and the entry become visible together
-            markLive(handle);
-            setHandleForRowId(segmentRowId, handle.pack());
-            maxRowId.accumulateAndGet(segmentRowId, Math::max);
-            totalRows.incrementAndGet();
         }
-    }
-
-    private synchronized void setHandleForRowId(int segmentRowId, long packedHandle)
-    {
-        if (segmentRowId >= handleByRowId.length)
-        {
-            int newLength = Math.max(segmentRowId + 1, (int) (handleByRowId.length * 1.5));
-            long[] newArray = new long[newLength];
-            Arrays.fill(newArray, handleByRowId.length, newLength, -1L);
-            System.arraycopy(handleByRowId, 0, newArray, 0, handleByRowId.length);
-            handleByRowId = newArray;
-        }
-        handleByRowId[segmentRowId] = packedHandle;
     }
 
     /**
@@ -178,7 +180,7 @@ public final class VectorMergePostings implements AutoCloseable
     /** The output rowids attributed to {@code handle}'s node, or null if no row was. */
     public CompactionVectorPostings get(VectorHandle handle)
     {
-        return map.get(handle);
+        return rowIdsByVector.get(handle);
     }
 
     /** Number of distinct surviving source nodes. */
@@ -239,34 +241,6 @@ public final class VectorMergePostings implements AutoCloseable
     {
         int maxRow = maxRowId();
 
-        // Step 1: build parallel rowId → (source, nodeId) arrays.
-        int[] sourceByRowId = new int[maxRow + 1];
-        int[] nodeIdByRowId = new int[maxRow + 1];
-        java.util.Arrays.fill(sourceByRowId, -1);
-
-        for (int s = 0; s < live.length; s++)
-        {
-            BitSet survivingS = live[s];
-            for (int nodeId = survivingS.nextSetBit(0);
-                 nodeId >= 0 && nodeId != DocIdSetIterator.NO_MORE_DOCS;
-                 nodeId = survivingS.nextSetBit(nodeId + 1))
-            {
-                CompactionVectorPostings p = get(new VectorHandle(s, nodeId));
-                if (p == null) continue;
-                IntArrayList ids = p.getRowIds();
-                for (int i = 0; i < ids.size(); i++)
-                {
-                    int rowId = ids.getInt(i);
-                    if (rowId >= 0 && rowId <= maxRow)
-                    {
-                        sourceByRowId[rowId] = s;
-                        nodeIdByRowId[rowId] = nodeId;
-                    }
-                }
-            }
-        }
-
-        // Step 2: walk rowIds in order; on first encounter of each (source, nodeId) assign next ordinal.
         List<Map<Integer, Integer>> oldToNew = new ArrayList<>(live.length);
         for (int s = 0; s < live.length; s++)
             oldToNew.add(new HashMap<>(Math.max(16, (int) (live[s].cardinality() / 0.75f) + 1)));
@@ -274,12 +248,13 @@ public final class VectorMergePostings implements AutoCloseable
         int nextOrdinal = 0;
         for (int rowId = 0; rowId <= maxRow; rowId++)
         {
-            int s = sourceByRowId[rowId];
-            if (s < 0) continue; // no vector for this rowId
-            Map<Integer, Integer> map = oldToNew.get(s);
-            int nodeId = nodeIdByRowId[rowId];
-            if (!map.containsKey(nodeId))
-                map.put(nodeId, nextOrdinal++);
+            long packed = vectorByRowId.get(rowId);
+            if (packed == -1L)
+                continue; // no vector for this rowId
+            VectorHandle handle = VectorHandle.unpack(packed);
+            Map<Integer, Integer> map = oldToNew.get(handle.source());
+            if (!map.containsKey(handle.nodeId()))
+                map.put(handle.nodeId(), nextOrdinal++);
         }
 
         List<OrdinalMapper> mappers = new ArrayList<>(live.length);
@@ -294,87 +269,85 @@ public final class VectorMergePostings implements AutoCloseable
         return idUpperBounds.length;
     }
 
+    /** Returns the temporary backing files owned by this instance; exposed for testing only. */
+    @VisibleForTesting
+    java.io.File[] backingFiles()
+    {
+        return new java.io.File[]{ rowIdsByVectorFile.toJavaIOFile(), vectorByRowIdFile.toJavaIOFile() };
+    }
+
     /**
      * Builds the function from merged ordinal to its rowId list, using the compactor's {@code effective} mappers.
-     * Validates that {@code effective.size() == sourceCount()}, that every mapped ordinal falls in
-     * {@code [0, size())}, and that no merged ordinal is claimed twice. Because the number of surviving nodes
-     * equals {@code size()}, all ordinals are guaranteed to be filled once these checks pass.
      *
      * @param effective per-source ordinal mappers as returned by the compactor's {@code effectiveRemappers()}
      * @return a function from merged ordinal to rowId list; returns {@code null} for an empty (hole) ordinal
-     * @throws IllegalStateException if validation fails
+     * @throws IllegalStateException if mapper count does not match {@link #sourceCount()}
      */
-    public IntFunction<IntArrayList> rowIdsOf(List<OrdinalMapper> effective)
+    public IntFunction<IntArrayList> rowIdsByMergedOrdinal(List<OrdinalMapper> effective)
     {
         if (effective.size() != sourceCount())
-            throw new IllegalStateException("rowIdsOf: expected " + sourceCount() + " mappers but got " + effective.size());
-
-        int totalOrdinals = size();
-        long[] handles = new long[totalOrdinals];
-        var claimed = new java.util.BitSet(totalOrdinals);
-        int mapped = 0;
-        for (int s = 0; s < effective.size(); s++)
-        {
-            OrdinalMapper mapper = effective.get(s);
-            BitSet survivingS = live[s];
-            for (int nodeId = survivingS.nextSetBit(0);
-                 nodeId >= 0 && nodeId != DocIdSetIterator.NO_MORE_DOCS;
-                 nodeId = survivingS.nextSetBit(nodeId + 1))
-            {
-                int merged = mapper.oldToNew(nodeId);
-                if (merged < 0 || merged >= totalOrdinals)
-                    throw new IllegalStateException(String.format(
-                            "rowIdsOf: source %d node %d mapped to merged ordinal %d, outside [0, %d)",
-                            s, nodeId, merged, totalOrdinals));
-                if (claimed.get(merged))
-                    throw new IllegalStateException(String.format(
-                            "rowIdsOf: merged ordinal %d claimed twice (second claimant: source %d node %d)",
-                            merged, s, nodeId));
-                claimed.set(merged);
-                handles[merged] = new VectorHandle(s, nodeId).pack();
-                mapped++;
-            }
-        }
-        if (mapped != totalOrdinals)
-            throw new IllegalStateException("rowIdsOf: mapped " + mapped + " nodes but expected " + totalOrdinals);
+            throw new IllegalStateException("rowIdsByMergedOrdinal: expected " + sourceCount() + " mappers but got " + effective.size());
 
         return g -> {
-            var p = get(VectorHandle.unpack(handles[g]));
-            return p == null ? null : p.getRowIds();
+            for (int s = 0; s < effective.size(); s++)
+            {
+                int nodeId = effective.get(s).newToOld(g);
+                if (nodeId != OrdinalMapper.OMITTED)
+                {
+                    CompactionVectorPostings p = get(new VectorHandle(s, nodeId));
+                    return p == null ? null : p.getRowIds();
+                }
+            }
+            return null;
         };
     }
 
     /**
-     * Determines the {@link Structure} for writing the postings of this merge output.
+     * Determines the {@link Structure} for writing the postings of this merge output by inspecting
+     * the effective ordinal mapping directly.
      *
-     * <p>Because {@link #ordinalMapping()} assigns ordinals contiguously {@code [0, size())},
-     * the only supported structures from compaction are:
+     * <p>Returns {@link Structure#ONE_TO_ONE} only when every condition holds:
      * <ul>
-     *   <li>{@link Structure#ONE_TO_ONE}: when every row has a unique vector (bijection between ordinals and rows).</li>
-     *   <li>{@link Structure#ZERO_OR_ONE_TO_MANY}: when there are duplicate vectors, missing/null vectors, or reordering.</li>
+     *   <li>No vector has more than one row (no duplicate-vector rows).</li>
+     *   <li>There are no gaps: every rowId in {@code [0, maxRowId]} has a vector ({@code maxRowId + 1 == totalRows}).</li>
+     *   <li>For every rowId {@code g}, the effective mapper maps the owning node to ordinal {@code g}
+     *       (i.e., {@code rowId == vectorOrdinal} for all rows).</li>
      * </ul>
+     * Otherwise returns {@link Structure#ZERO_OR_ONE_TO_MANY}.
      *
-     * @param effective per-source ordinal mappers returned by the compactor; used only to check {@code reordered}
-     * @param reordered {@code true} when the compactor changed the proposed ordinal assignment
+     * @param effective per-source ordinal mappers as returned by the compactor's {@code effectiveRemappers()}
      */
-    public Structure detectStructure(List<OrdinalMapper> effective, boolean reordered)
+    public Structure discoverStructure(List<OrdinalMapper> effective)
     {
-        if (reordered)
+        // Quick exits: duplicates or gaps mean ONE_TO_ONE is impossible regardless of the mapping.
+        if (hasMultiRowVectors.get())
             return Structure.ZERO_OR_ONE_TO_MANY;
 
         int maxRow = maxRowId();
         if (maxRow + 1 != totalRows.get())
             return Structure.ZERO_OR_ONE_TO_MANY;
 
-        return hasMultiRowVectors.get()
-            ? Structure.ZERO_OR_ONE_TO_MANY
-            : Structure.ONE_TO_ONE;
+        // Verify that the effective mapping sends each row's vector to the ordinal equal to that rowId.
+        // vectorByRowId.get(g) == -1 means no vector for that rowId (gap already ruled out above, but
+        // the array may be longer than maxRow + 1, so we only iterate up to maxRow inclusive).
+        for (int g = 0; g <= maxRow; g++)
+        {
+            long packed = vectorByRowId.get(g);
+            if (packed == -1L)
+                return Structure.ZERO_OR_ONE_TO_MANY;
+            VectorHandle h = VectorHandle.unpack(packed);
+            int ordinal = effective.get(h.source()).oldToNew(h.nodeId());
+            if (ordinal != g)
+                return Structure.ZERO_OR_ONE_TO_MANY;
+        }
+        return Structure.ONE_TO_ONE;
     }
 
     @Override
     public void close() throws IOException
     {
-        map.close();
-        mapFile.delete();
+        FileUtils.closeQuietly(vectorByRowId, rowIdsByVector);
+        vectorByRowIdFile.delete();
+        rowIdsByVectorFile.delete();
     }
 }

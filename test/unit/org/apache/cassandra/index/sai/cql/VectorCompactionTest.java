@@ -73,10 +73,11 @@ abstract public class VectorCompactionTest extends VectorTester
     @Parameterized.Parameter(1)
     public boolean enableNVQ;
 
+    // When graph merge is enabled, vector indexes are compacted through a direct merge of JVector graphs
     @Parameterized.Parameter(2)
-    public boolean mergeEnabled;
+    public boolean enableGraphMerge;
 
-    @Parameterized.Parameters(name = "version={0} enableNVQ={1} mergeEnabled={2}")
+    @Parameterized.Parameters(name = "version={0} enableNVQ={1} enableGraphMerge={2}")
     public static Collection<Object[]> data()
     {
         return data(v -> true);
@@ -116,7 +117,7 @@ abstract public class VectorCompactionTest extends VectorTester
     @Before
     public void setMergeEnabledParam()
     {
-        setMergeEnabled(mergeEnabled);
+        setMergeEnabled(enableGraphMerge);
     }
 
     @After
@@ -470,7 +471,7 @@ abstract public class VectorCompactionTest extends VectorTester
                                || postingsStructure == V5VectorPostingsWriter.Structure.ONE_TO_MANY);
                 }
                 // direct graph merge does not support ONE_TO_MANY
-                else if (mergeEnabled && expectedStructure == V5VectorPostingsWriter.Structure.ONE_TO_MANY)
+                else if (enableGraphMerge && expectedStructure == V5VectorPostingsWriter.Structure.ONE_TO_MANY)
                 {
                     assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, postingsStructure);
                 }
