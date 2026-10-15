@@ -374,6 +374,7 @@ public abstract class SegmentBuilder
          * source nodes.
          */
         private final org.apache.cassandra.index.sai.disk.vector.VectorMergePostings postings;
+        private final org.apache.cassandra.index.sai.disk.vector.VectorDeduplicator deduplicator;
         // Non-null only when ingest_parallel is on.
         private final InsertFanout mergeInsertFanout;
 
@@ -442,6 +443,8 @@ public abstract class SegmentBuilder
                     VectorCompactionMetrics.Phase.POSTINGS_MAP_SETUP, components.context()))
             {
                 postings = new org.apache.cassandra.index.sai.disk.vector.VectorMergePostings(idUpperBound, estimatedRows);
+                deduplicator = new org.apache.cassandra.index.sai.disk.vector.VectorDeduplicator(
+                        (int) Math.clamp(estimatedRows, 1000L, Integer.MAX_VALUE - 100_000));
             }
 
             totalBytesAllocated = 0;
@@ -479,9 +482,12 @@ public abstract class SegmentBuilder
             rowsWithVector.incrementAndGet();
 
             // Resolution runs SYNCHRONOUSLY on the compaction thread.
-            org.apache.cassandra.index.sai.disk.vector.VectorHandle handle = resolveHandle(key);
-            if (handle == null)
+            org.apache.cassandra.index.sai.disk.vector.VectorHandle candidate = resolveHandle(key);
+            if (candidate == null)
                 return 0; // anomaly recorded; flush will fail loudly
+
+            org.apache.cassandra.index.sai.disk.vector.VectorHandle handle =
+                    deduplicator.deduplicate(vectorBuf, candidate);
 
             if (mergeInsertFanout != null)
             {
@@ -711,6 +717,14 @@ public abstract class SegmentBuilder
                 {
                     try { view.close(); }
                     catch (Exception e) { logger.warn("Error closing source ordinals view after graph merge", e); }
+                }
+                try
+                {
+                    deduplicator.close();
+                }
+                catch (Exception e)
+                {
+                    logger.warn("Error closing vector deduplicator after graph merge", e);
                 }
                 try
                 {
