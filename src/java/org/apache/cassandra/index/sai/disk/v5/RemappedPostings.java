@@ -96,12 +96,9 @@ public class RemappedPostings
     public V5VectorPostingsWriter writer(RandomAccessVectorValues vectorValues,
                                          Map<? extends VectorFloat<?>, ? extends VectorPostings<?>> postingsMap)
     {
-        // For an empty postings map remapForMemtable leaves both maxima at Integer.MIN_VALUE, whereas
-        // the writer expects -1. The reader treats every negative maxOrdinal as empty.
-        boolean empty = maxNewOrdinal < 0;
-        return V5VectorPostingsWriter.create(empty ? -1 : maxNewOrdinal, rowIdsOf(vectorValues, postingsMap))
+        return V5VectorPostingsWriter.create(maxNewOrdinal, rowIdsOf(vectorValues, postingsMap))
                                      .structure(structure)
-                                     .maxRowId(empty ? -1 : maxRowId);
+                                     .maxRowId(maxRowId);
     }
 
     private IntFunction<IntArrayList> rowIdsOf(RandomAccessVectorValues vectorValues,
@@ -223,7 +220,7 @@ public class RemappedPostings
         // For ONE_TO_MANY, maxVectorOrdinal must equal maxRowId (all rows including extras fit within
         // [0, maxRow]), so use maxRow as both maxNewOrdinal and maxRowId.
         OrdinalMapper ordinalMapper = new BiMapMapper(maxRow, ordinalMap);
-        return new RemappedPostings(structure, maxRow, maxRow, extraPostings, ordinalMapper);
+        return new RemappedPostings(structure, maxNewOrdinal, maxRow, extraPostings, ordinalMapper);
     }
 
     /**
