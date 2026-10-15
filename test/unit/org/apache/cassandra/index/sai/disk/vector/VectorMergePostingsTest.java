@@ -222,7 +222,7 @@ public class VectorMergePostingsTest
     @Test
     public void ordinalMappersOfEmptyPostingsMapNothing()
     {
-        List<OrdinalMapper> mappers = postings.ordinalMappers();
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
 
         assertEquals(ID_UPPER_BOUNDS.length, mappers.size());
         for (OrdinalMapper mapper : mappers)
@@ -239,7 +239,7 @@ public class VectorMergePostingsTest
         postings.put(new VectorHandle(0, 5), 4);
         postings.put(new VectorHandle(2, 3), 5);
 
-        List<OrdinalMapper> mappers = postings.ordinalMappers();
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
 
         assertEquals(3, mappers.size());
         assertEquals(0, mappers.get(2).oldToNew(3));
@@ -262,7 +262,7 @@ public class VectorMergePostingsTest
             for (int n = s; n < ID_UPPER_BOUNDS[s]; n += 3 + s)
                 postings.put(new VectorHandle(s, n), row++);
 
-        List<OrdinalMapper> mappers = postings.ordinalMappers();
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
 
         boolean[] ordinalUsed = new boolean[postings.size()];
         for (int s = 0; s < ID_UPPER_BOUNDS.length; s++)
@@ -295,7 +295,7 @@ public class VectorMergePostingsTest
         postings.put(new VectorHandle(1, 10), 1);
         postings.put(new VectorHandle(2, 150), 2);
 
-        List<OrdinalMapper> mappers = postings.ordinalMappers();
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
 
         assertEquals(0, mappers.get(1).oldToNew(10));
         assertEquals(1, mappers.get(0).oldToNew(30));
@@ -308,7 +308,7 @@ public class VectorMergePostingsTest
         postings.put(new VectorHandle(0, 5), 0);
         postings.put(new VectorHandle(1, 5), 1);
 
-        List<OrdinalMapper> mappers = postings.ordinalMappers();
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
 
         assertEquals(0, mappers.get(0).oldToNew(5));
         assertEquals(1, mappers.get(1).oldToNew(5));
@@ -326,7 +326,7 @@ public class VectorMergePostingsTest
         postings.put(shared, 2);
         postings.put(new VectorHandle(1, 4), 3);
 
-        List<OrdinalMapper> mappers = postings.ordinalMappers();
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
 
         assertEquals("a node shared by many rows takes a single ordinal", 0, mappers.get(0).oldToNew(4));
         assertEquals(1, mappers.get(1).oldToNew(4));
@@ -346,7 +346,7 @@ public class VectorMergePostingsTest
 
         // Build mappers matching ordinalMappers() ordering: node-id ascending across sources
         // node 0 from s0 → ordinal 0, node 5 from s1 → ordinal 1, node 7 from s0 → ordinal 2
-        List<OrdinalMapper> mappers = postings.ordinalMappers();
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
         IntFunction<IntArrayList> fn = postings.rowIdsOf(mappers);
 
         assertNotNull(fn.apply(0));
@@ -370,7 +370,7 @@ public class VectorMergePostingsTest
         postings.put(h, 1);
         postings.put(h, 2);
 
-        List<OrdinalMapper> mappers = postings.ordinalMappers();
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
         IntFunction<IntArrayList> fn = postings.rowIdsOf(mappers);
 
         IntArrayList ids = fn.apply(0);
@@ -436,7 +436,7 @@ public class VectorMergePostingsTest
         // so ONE_TO_ONE / ONE_TO_MANY cannot be assumed without additional alignment guarantees.
         postings.put(new VectorHandle(0, 0), 0);
         postings.put(new VectorHandle(0, 1), 1);
-        List<OrdinalMapper> mappers = postings.ordinalMappers();
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
         assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.detectStructure(mappers, false));
         assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.detectStructure(mappers, true));
     }
@@ -448,7 +448,7 @@ public class VectorMergePostingsTest
         // detectStructure still returns ZERO_OR_ONE_TO_MANY regardless.
         postings.put(new VectorHandle(0, 0), 0);
         postings.put(new VectorHandle(0, 1), 1);
-        List<OrdinalMapper> mappers = postings.ordinalMappers();
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
         assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.detectStructure(mappers, false));
     }
 
@@ -460,7 +460,7 @@ public class VectorMergePostingsTest
         VectorHandle h = new VectorHandle(0, 0);
         postings.put(h, 0);
         postings.put(h, 5);
-        List<OrdinalMapper> mappers = postings.ordinalMappers();
+        List<OrdinalMapper> mappers = postings.ordinalMapping();
         assertEquals(Structure.ZERO_OR_ONE_TO_MANY, postings.detectStructure(mappers, false));
     }
 

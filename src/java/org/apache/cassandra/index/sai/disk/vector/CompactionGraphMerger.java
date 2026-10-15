@@ -199,7 +199,7 @@ public class CompactionGraphMerger
         try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
                 VectorCompactionMetrics.Phase.ORDINAL_REMAP, perIndexComponents.context()))
         {
-            remappers = postings.ordinalMappers();
+            remappers = postings.ordinalMapping();
             totalGlobalOrdinals = postings.size();
             if (totalGlobalOrdinals == 0)
                 throw new IllegalStateException("CompactionGraphMerger: no surviving nodes found across all source segments; all rows may have been deleted");
