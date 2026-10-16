@@ -201,6 +201,33 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         Assert.assertTrue(coordinator.sentMessages.isEmpty());
     }
 
+    @Test
+    public void sessionSubmissionIsOffloadedFromPrepareResponse()
+    {
+        InstrumentedCoordinatorSession coordinator = createInstrumentedSession();
+        List<Runnable> queued = new ArrayList<>();
+        AtomicBoolean submitted = new AtomicBoolean();
+        SettableFuture<List<RepairSessionResult>> repairFuture = SettableFuture.create();
+        coordinator.execute(() ->
+        {
+            submitted.set(true);
+            return repairFuture;
+        }, new AtomicBoolean(), queued::add);
+
+        coordinator.handlePrepareResponse(PARTICIPANT1, true);
+        coordinator.handlePrepareResponse(PARTICIPANT2, true);
+        Assert.assertTrue(queued.isEmpty());
+        coordinator.handlePrepareResponse(PARTICIPANT3, true);
+
+        // The final response must return without running potentially blocking session startup.
+        Assert.assertFalse(submitted.get());
+        Assert.assertEquals(PREPARED, coordinator.getState());
+        Assert.assertEquals(1, queued.size());
+        queued.remove(0).run();
+        Assert.assertTrue(submitted.get());
+        Assert.assertEquals(REPAIRING, coordinator.getState());
+    }
+
     /**
      * Tests the complete coordinator side consistent repair cycle
      */
@@ -220,7 +247,7 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         AtomicBoolean hasFailures = new AtomicBoolean(false);
         Assert.assertFalse(repairSubmitted.get());
         Assert.assertTrue(coordinator.sentMessages.isEmpty());
-        ListenableFuture sessionResult = coordinator.execute(sessionSupplier, hasFailures);
+        ListenableFuture sessionResult = coordinator.execute(sessionSupplier, hasFailures, Runnable::run);
 
         for (InetAddressAndPort participant : PARTICIPANTS)
         {
@@ -304,7 +331,7 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         AtomicBoolean hasFailures = new AtomicBoolean(false);
         Assert.assertFalse(repairSubmitted.get());
         Assert.assertTrue(coordinator.sentMessages.isEmpty());
-        ListenableFuture sessionResult = coordinator.execute(sessionSupplier, hasFailures);
+        ListenableFuture sessionResult = coordinator.execute(sessionSupplier, hasFailures, Runnable::run);
         for (InetAddressAndPort participant : PARTICIPANTS)
         {
             PrepareConsistentRequest expected = new PrepareConsistentRequest(coordinator.sessionID, COORDINATOR, new HashSet<>(PARTICIPANTS));
@@ -366,7 +393,7 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         AtomicBoolean hasFailures = new AtomicBoolean(false);
         Assert.assertFalse(repairSubmitted.get());
         Assert.assertTrue(coordinator.sentMessages.isEmpty());
-        ListenableFuture sessionResult = coordinator.execute(sessionSupplier, hasFailures);
+        ListenableFuture sessionResult = coordinator.execute(sessionSupplier, hasFailures, Runnable::run);
         for (InetAddressAndPort participant : PARTICIPANTS)
         {
             PrepareConsistentRequest expected = new PrepareConsistentRequest(coordinator.sessionID, COORDINATOR, new HashSet<>(PARTICIPANTS));
@@ -432,7 +459,7 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         AtomicBoolean hasFailures = new AtomicBoolean(false);
         Assert.assertFalse(repairSubmitted.get());
         Assert.assertTrue(coordinator.sentMessages.isEmpty());
-        ListenableFuture sessionResult = coordinator.execute(sessionSupplier, hasFailures);
+        ListenableFuture sessionResult = coordinator.execute(sessionSupplier, hasFailures, Runnable::run);
 
         for (InetAddressAndPort participant : PARTICIPANTS)
         {
