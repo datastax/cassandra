@@ -113,6 +113,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.repair.consistent.CoordinatorSession;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaKeyspace;
@@ -846,8 +847,9 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                                 () -> AbstractAllocatorMemtable.MEMORY_POOL.shutdownAndWait(1L, MINUTES),
                                 () -> DiagnosticSnapshotService.instance.shutdownAndWait(1L, MINUTES),
                                 () -> SSTableReader.shutdownBlocking(1L, MINUTES),
-                                () -> shutdownAndWait(Collections.singletonList(ActiveRepairService.repairCommandExecutor()))
-            );
+                                () -> shutdownAndWait(Collections.singletonList(ActiveRepairService.repairCommandExecutor())),
+                                () -> shutdownAndWait(Collections.singletonList(CoordinatorSession.getCoordinatorExecutor()))
+        );
 
             internodeMessagingStarted = false;
             error = parallelRun(error, executor,
