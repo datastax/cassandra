@@ -22,6 +22,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -35,8 +40,8 @@ import com.google.common.util.concurrent.AsyncFunction;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,6 +67,7 @@ import org.apache.cassandra.service.ActiveRepairService;
 public class CoordinatorSession extends ConsistentSession
 {
     private static final Logger logger = LoggerFactory.getLogger(CoordinatorSession.class);
+    private static final ExecutorService coordinatorExecutor = createCoordinatorExecutor();
 
     private final Map<InetAddressAndPort, State> participantStates = new HashMap<>();
     private final SettableFuture<Boolean> prepareFuture = SettableFuture.create();
@@ -78,6 +84,11 @@ public class CoordinatorSession extends ConsistentSession
         {
             participantStates.put(participant, State.PREPARING);
         }
+    }
+
+    public static ExecutorService getCoordinatorExecutor()
+    {
+        return coordinatorExecutor;
     }
 
     public static class Builder extends AbstractBuilder
@@ -324,7 +335,7 @@ public class CoordinatorSession extends ConsistentSession
                 }
 
             }
-        }, MoreExecutors.directExecutor());
+        }, coordinatorExecutor);
 
         // mark propose finalization
         ListenableFuture<Boolean> proposeFuture = Futures.transformAsync(repairSessionResults, new AsyncFunction<List<RepairSessionResult>, Boolean>()
@@ -346,7 +357,7 @@ public class CoordinatorSession extends ConsistentSession
                     return finalizePropose();
                 }
             }
-        }, MoreExecutors.directExecutor());
+        }, coordinatorExecutor);
 
         // return execution result as set by following callback
         SettableFuture<Boolean> resultFuture = SettableFuture.create();
@@ -399,8 +410,22 @@ public class CoordinatorSession extends ConsistentSession
                     resultFuture.setException(t);
                 }
             }
-        }, MoreExecutors.directExecutor());
+        }, coordinatorExecutor);
 
         return resultFuture;
+    }
+
+    private static ExecutorService createCoordinatorExecutor()
+    {
+        ThreadFactory factory = new ThreadFactoryBuilder().setNameFormat("repair-coordinator-%d").build();
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(4,
+                                                             4,
+                                                             60L,
+                                                             TimeUnit.SECONDS,
+                                                             new LinkedBlockingQueue<Runnable>(),
+                                                             factory);
+
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
     }
 }
