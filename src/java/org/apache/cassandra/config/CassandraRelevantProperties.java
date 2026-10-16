@@ -944,8 +944,6 @@ public enum CassandraRelevantProperties
     SAI_VECTOR_COMPACTION_INSERT_INFLIGHT_MB("cassandra.sai.vector.compaction_insert_inflight_mb", "128"),
     // Estimated on-heap working-set bytes per surviving ordinal for a vector graph merge.
     SAI_VECTOR_COMPACTION_MERGE_BYTES_PER_ORDINAL("cassandra.sai.vector.compaction_merge_bytes_per_ordinal", "128"),
-    // Whether vector graph merges use the experimental retain-largest strategy. REQUIRED-EXPLICIT (no default).
-    SAI_VECTOR_COMPACTION_RETAIN_LARGEST("cassandra.sai.vector.compaction_retain_largest"),
     // Node-wide cap on concurrent vector-index segment builds. 0 disables the bound.
     SAI_VECTOR_CONCURRENT_BUILDS("cassandra.sai.vector.concurrent_builds", "0"),
 

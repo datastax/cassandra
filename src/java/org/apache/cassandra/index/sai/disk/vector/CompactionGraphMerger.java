@@ -47,6 +47,7 @@ import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
@@ -210,12 +211,26 @@ public class CompactionGraphMerger
         // header+body. No temp file, one write of the (potentially large) graph.
         var termsComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
         Path termsFile = termsComponent.file().toJavaIOFile().toPath();
+        var pqComponent = perIndexComponents.addOrGet(IndexComponentType.PQ);
+        Path pqFile = pqComponent.file().toJavaIOFile().toPath();
 
         // Non-fused PQ: the codes live in the Cassandra PQ component (PQVectors), not in the graph.
         // jvector then needs the sources' PQVectors to retrain the codebook, and a second
         // destination to write the merged PQVectors into.
         List<CompressedVectors> sourceCompressed = hasFusedPQ ? null : sourceCompressedVectors();
         boolean pqSidecar = sourceCompressed != null;
+
+        // Open both channels up front so they live for the full compaction + epilogue window.
+        // Headers are written directly through the channel — no separate SequentialWriter open.
+        try (java.nio.channels.FileChannel termsChannel = java.nio.channels.FileChannel.open(termsFile,
+                     java.nio.file.StandardOpenOption.READ,
+                     java.nio.file.StandardOpenOption.WRITE,
+                     java.nio.file.StandardOpenOption.CREATE);
+             java.nio.channels.FileChannel pqChannel = java.nio.channels.FileChannel.open(pqFile,
+                     java.nio.file.StandardOpenOption.READ,
+                     java.nio.file.StandardOpenOption.WRITE,
+                     java.nio.file.StandardOpenOption.CREATE))
+        {
 
         var compactor = new OnDiskGraphIndexCompactor(
                 sources.stream().map(SourceSegment::graph).collect(toList()),
@@ -229,128 +244,39 @@ public class CompactionGraphMerger
         // Install the host control surface: forwards jvector's per-phase progress to the merge
         // operation and admits its write bandwidth against the shared compaction throughput budget.
         compactor.setProgressLimiter(progressLimiter);
-        // EXPERIMENTAL retain-largest merge, REQUIRED-EXPLICIT like every other
-        // cassandra.sai.vector.* switch. Asking for it does not force it: jvector
-        // measures the retained source's share of surviving nodes per merge and
-        // falls back to the symmetric path when no source dominates, because below
-        // that point the shortcut costs recall instead of time.
-        //
-        // Resolved BY CAPABILITY, not at compile time: the control exists only when
-        // the deployed jvector is the `jvector-experiments` branch. The
-        // `integration-infrastructure` jar (authentic upstream compaction + our
-        // embedding/measurement surface) has no such method, and both jars install
-        // under the same artifact coordinates — opting in or out of the experiment
-        // is a jar swap, and this ONE fork build must run against either. Absent
-        // control + flag=true is announced per merge rather than failed: the flag
-        // states intent, the jar decides capability.
-        boolean retainLargest = VectorFeatureFlags.compactionRetainLargest();
-        try
-        {
-            compactor.getClass().getMethod("setRetainLargest", boolean.class)
-                     .invoke(compactor, retainLargest);
-        }
-        catch (NoSuchMethodException e)
-        {
-            logger.info("deployed jvector has no retain-largest control (infrastructure/upstream jar); " +
-                        "compaction_retain_largest={} is inert for this merge", retainLargest);
-        }
-        catch (ReflectiveOperationException e)
-        {
-            throw new RuntimeException("failed to apply the retain-largest control", e);
-        }
-
         // Upstream jvector exposes no codebook-policy, code-cache, decoder-sharing or canonical-code
         // controls: the merge always retrains the codebook and re-encodes. Nothing to configure here.
 
-        // Reserve the SAI header, then have jvector write its body directly after it (compact
-        // preserves [0, startOffset)); finally wrap with a footer whose CRC covers header+body.
-        try (var termsOutput = termsComponent.openOutput(true))
-        {
-            SAICodecUtils.writeHeader(termsOutput);
-        }
-        long termsOffset = SAICodecUtils.headerSize();
+        // Write the SAI header for TERMS_DATA directly through the channel. The channel is left
+        // positioned immediately after the header; that position becomes the compaction startOffset.
+        Version version = perIndexComponents.context().version();
+        java.io.OutputStream termsStream = java.nio.channels.Channels.newOutputStream(termsChannel);
+        SAICodecUtils.writeHeader(new org.apache.lucene.store.OutputStreamDataOutput(termsStream), version);
+        termsStream.flush();
+        long termsOffset = termsChannel.position();
 
-        // For the non-fused PQ sidecar, reserve the PQ component the same way: SAI header + Cassandra
-        // PQ header now, jvector appends the merged PQVectors right after them, and the footer is
-        // written over the finished file below.
-        var pqComponent = perIndexComponents.addOrGet(IndexComponentType.PQ);
-        Path pqFile = pqComponent.file().toJavaIOFile().toPath();
+        // For the non-fused PQ sidecar, write SAI header + Cassandra PQ header directly through
+        // pqChannel. The channel is left positioned immediately after both headers.
         long pqOffset = -1;
         long pqLength = -1;
-        long pqSidecarStart = -1;
         if (pqSidecar)
         {
-            try (var pqOutput = pqComponent.openOutput(true))
-            {
-                SAICodecUtils.writeHeader(pqOutput);
-                pqOffset = pqOutput.getFilePointer();
-                CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(),
-                                                   sources.get(0).diskAnn().isPqUnitVectors(),
-                                                   CompressionType.PRODUCT_QUANTIZATION,
-                                                   perIndexComponents.context().version());
-                pqSidecarStart = pqOutput.getFilePointer();
-            }
+            java.io.DataOutputStream pqStream = new java.io.DataOutputStream(java.nio.channels.Channels.newOutputStream(pqChannel));
+            SAICodecUtils.writeHeader(new org.apache.lucene.store.OutputStreamDataOutput(pqStream), version);
+            pqStream.flush();
+            pqOffset = pqChannel.position();
+            CassandraOnHeapGraph.writePqHeader(pqStream,
+                                               sources.get(0).diskAnn().isPqUnitVectors(),
+                                               CompressionType.PRODUCT_QUANTIZATION,
+                                               version);
+            pqStream.flush();
         }
-        final long pqSidecarStartOffset = pqSidecarStart;
-        var committedPqBodyLength = new java.util.concurrent.atomic.AtomicLong(-1);
-        CompactionDestination pqDestination = () -> new CompactionDestination.OutputReservation()
-        {
-            @Override
-            public Path file()
-            {
-                return pqFile;
-            }
+        long pqSidecarStartOffset = pqChannel.position();
+        CompactionDestination pqDestination = CompactionDestination.channel(pqChannel);
 
-            @Override
-            public long startOffset()
-            {
-                return pqSidecarStartOffset;
-            }
-
-            @Override
-            public void commit(long bodyLength)
-            {
-                committedPqBodyLength.set(bodyLength);
-            }
-
-            @Override
-            public void close()
-            {
-            }
-        };
-
-        // The graph body is written straight into TERMS_DATA after the SAI header above: the
-        // destination reserves the region [termsOffset, EOF) and jvector writes into it, so there
-        // is no temp file and no second copy of a graph that can run to many GB. commit() reports
-        // the body length jvector actually wrote and durably flushed; a merge that fails never
-        // commits, and the half-written component is discarded by SAI's own component lifecycle
-        // rather than unlinked here (the file is Cassandra's, not jvector's, to delete).
-        var committedBodyLength = new java.util.concurrent.atomic.AtomicLong(-1);
-        CompactionDestination destination = () -> new CompactionDestination.OutputReservation()
-        {
-            @Override
-            public Path file()
-            {
-                return termsFile;
-            }
-
-            @Override
-            public long startOffset()
-            {
-                return termsOffset;
-            }
-
-            @Override
-            public void commit(long bodyLength)
-            {
-                committedBodyLength.set(bodyLength);
-            }
-
-            @Override
-            public void close()
-            {
-            }
-        };
+        // The graph body is written straight into TERMS_DATA after the SAI header above.
+        // After compact() returns the body length is channel.size() - termsOffset.
+        CompactionDestination destination = CompactionDestination.channel(termsChannel);
 
         long compactStart = System.nanoTime();
         try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
@@ -362,10 +288,7 @@ public class CompactionGraphMerger
                 compactor.compact(destination);
         }
         long compactMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - compactStart);
-        long termsLength = committedBodyLength.get();
-        if (termsLength < 0)
-            throw new IllegalStateException("CompactionGraphMerger: jvector returned without committing the " +
-                                            "reserved TERMS_DATA region; refusing to publish an unattested body");
+        long termsLength = termsChannel.size() - termsOffset;
 
         // --- Step 2b: use the ordinal mapping jvector ACTUALLY used.
         //
@@ -425,10 +348,7 @@ public class CompactionGraphMerger
             }
             if (pqSidecar)
             {
-                long pqBodyLength = committedPqBodyLength.get();
-                if (pqBodyLength < 0)
-                    throw new IllegalStateException("CompactionGraphMerger: jvector returned without committing the " +
-                                                    "reserved PQ region; refusing to publish an unattested body");
+                long pqBodyLength = pqChannel.size() - pqSidecarStartOffset;
                 pqLength = pqSidecarStartOffset + pqBodyLength - pqOffset;
                 SAICodecUtils.writeFooterForExternalBody(pqFile, pqSidecarStartOffset + pqBodyLength);
             }
@@ -452,7 +372,6 @@ public class CompactionGraphMerger
                 SAICodecUtils.writeHeader(postingsOutput);
 
                 var firstDiskAnn = sources.get(0).diskAnn();
-                var version = perIndexComponents.context().version();
 
                 // The non-fused PQ component was already written in place by jvector (see above).
                 // Otherwise write it here: codebook only for FUSED_PQ, or just a NONE header.
@@ -508,6 +427,7 @@ public class CompactionGraphMerger
                                                               pqOffset, pqLength);
             }
         }
+        } // end try-with-resources: termsChannel + pqChannel
     }
 
     /**
