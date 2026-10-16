@@ -111,6 +111,9 @@ public class LoadOldYAMLBackwardCompatibilityTest
         assertFalse(config.transient_replication_enabled);
         assertTrue(config.sasi_indexes_enabled);
         assertTrue(config.drop_compact_storage_enabled);
+        assertFalse(config.uuid_sstable_identifiers_enabled); // default is true
+        assertEquals(new DurationSpec.LongMillisecondsBound(3000), config.hints_request_timeout);
+        assertEquals(new DurationSpec.LongMillisecondsBound(5000), config.repair_prepare_message_timeout_in_ms);
         assertTrue(config.user_defined_functions_threads_enabled);
         assertEquals(new DurationSpec.IntMillisecondsBound(2000), config.permissions_validity);
         assertNull(config.permissions_update_interval);

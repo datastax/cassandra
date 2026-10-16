@@ -52,6 +52,9 @@ stream_throughput_outbound_megabits_per_sec: 200000000
 enable_sasi_indexes: true
 enable_materialized_views: true
 enable_drop_compact_storage: true
+enable_uuid_sstable_identifiers: false
+hints_request_timeout_in_ms: 3000
+repair_prepare_message_timeout_in_ms: 5000
 file_cache_enabled: true
 internode_send_buff_size_in_bytes: 5
 internode_recv_buff_size_in_bytes: 5

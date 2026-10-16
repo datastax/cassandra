@@ -212,6 +212,15 @@ public class DurationSpecTest
         assertEquals(10L, new DurationSpec.IntSecondsBound("10s").toSeconds());
         assertEquals(new DurationSpec.IntSecondsBound("10s"), DurationSpec.IntSecondsBound.inSecondsString("10"));
         assertEquals(new DurationSpec.IntSecondsBound("10s"), DurationSpec.IntSecondsBound.inSecondsString("10s"));
+        assertEquals(new DurationSpec.LongMillisecondsBound("10ms"), DurationSpec.LongMillisecondsBound.inMillisecondsString("10"));
+        assertEquals(new DurationSpec.LongMillisecondsBound("10ms"), DurationSpec.LongMillisecondsBound.inMillisecondsString("10ms"));
+        assertEquals(new DurationSpec.LongMillisecondsBound("10s"), DurationSpec.LongMillisecondsBound.inMillisecondsString("10s"));
+        assertThatThrownBy(() -> DurationSpec.LongMillisecondsBound.inMillisecondsString("")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> DurationSpec.LongMillisecondsBound.inMillisecondsString("-1")).isInstanceOf(IllegalArgumentException.class)
+                                                                                           .hasMessageContaining("Invalid duration: -1");
+        assertThatThrownBy(() -> DurationSpec.LongMillisecondsBound.inMillisecondsString("10us")).isInstanceOf(IllegalArgumentException.class)
+                                                                                             .hasMessageContaining("Invalid duration: 10us");
+        assertThatThrownBy(() -> DurationSpec.LongMillisecondsBound.inMillisecondsString("99999999999999999999")).isInstanceOf(IllegalArgumentException.class);
 
         assertEquals(10L, new DurationSpec.LongMicrosecondsBound("10us").toMicroseconds());
         assertEquals(10L, new DurationSpec.LongMillisecondsBound("10ms").toMilliseconds());
