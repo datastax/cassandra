@@ -276,13 +276,7 @@ public class PaxosPropose<OnDone extends Consumer<? super PaxosPropose.Status>> 
 
     private void executeOnSelf(Proposal proposal)
     {
-        Context context = Context.from(proposal.update.metadata());
-        executeOnSelf(proposal, (p, from) -> {
-            long startNanos = nanoTime();
-            Response response = RequestHandler.execute(p, from);
-            accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, nanoTime() - startNanos);
-            return response;
-        });
+        executeOnSelf(proposal, RequestHandler::execute);
     }
 
     public void onResponse(Response response, InetAddressAndPort from)
@@ -464,9 +458,9 @@ public class PaxosPropose<OnDone extends Consumer<? super PaxosPropose.Status>> 
             sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
             RequestTracker.instance.set(sensors);
 
-            long proposeStartNanos = Clock.Global.nanoTime();
+            // WRITE_EXECUTION_TIME is tracked in SystemKeyspace.savePaxosProposal, so that it
+            // only covers the system.paxos write and not the preceding loadPaxosState read.
             Response response = execute(message.payload.proposal, message.from());
-            sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, Clock.Global.nanoTime() - proposeStartNanos);
 
             // calculate outbound internode bytes before adding the sensor to the response
             if (response != null)

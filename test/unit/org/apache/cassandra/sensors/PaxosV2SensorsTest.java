@@ -47,7 +47,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>Message construction and dispatch use {@link PaxosV2TestHelper}, which lives in the
  * {@code org.apache.cassandra.service.paxos} package to access package-private constructors.
  *
- * @see ReplicaWriteSensorsTest for the CAS v1 counterpart
+ * <p>Complements {@link ReplicaWriteSensorsTest} (which covers byte and execution-time sensors
+ * parametrized over v1 and v2) with additional assertions: sensor propagation into the outbound
+ * response message including a serialization round-trip, and the v2-specific distinction that
+ * {@link Type#READ_EXECUTION_TIME} is non-zero on the first prepare (because {@code request.read}
+ * is always present) but zero on the first propose (cache hit, no disk read).
+ *
+ * @see ReplicaWriteSensorsTest for the parametrized v1/v2 counterpart
  */
 public class PaxosV2SensorsTest
 {

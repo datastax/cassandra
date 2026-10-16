@@ -30,8 +30,6 @@ import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
-import org.apache.cassandra.utils.Clock;
-
 public class ProposeVerbHandler extends AbstractPaxosVerbHandler implements IVerbHandler<Commit>
 {
     public static final ProposeVerbHandler instance = new ProposeVerbHandler();
@@ -61,9 +59,9 @@ public class ProposeVerbHandler extends AbstractPaxosVerbHandler implements IVer
 
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
 
-        long proposeStartNanos = Clock.Global.nanoTime();
+        // WRITE_EXECUTION_TIME is tracked in SystemKeyspace.savePaxosProposal, so that it
+        // only covers the system.paxos write and not the preceding loadPaxosState read.
         Message.Builder<Boolean> reply = message.responseWithBuilder(doPropose(message.payload));
-        sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, Clock.Global.nanoTime() - proposeStartNanos);
 
         int size = reply.currentPayloadSize(MessagingService.current_version);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);

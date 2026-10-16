@@ -425,8 +425,9 @@ public class ReplicaWriteSensorsTest
     // -------------------------------------------------------------------------
 
     /**
-     * LWT Prepare: WRITE_BYTES and WRITE_EXECUTION_TIME must be non-zero; READ_BYTES is zero on the
-     * first call and non-zero after the Paxos cache is evicted. Parametrized over v1 and v2.
+     * LWT Prepare: WRITE_BYTES and WRITE_EXECUTION_TIME must be non-zero; READ_BYTES and
+     * READ_EXECUTION_TIME are zero on the first call (cache hit) and non-zero after the Paxos
+     * cache is evicted (loadPaxosState reads from disk). Parametrized over v1 and v2.
      */
     @Test
     public void testLWTPrepare()
@@ -453,19 +454,25 @@ public class ReplicaWriteSensorsTest
         assertThat(readSensor.getValue()).isZero();
 
         // Evict the in-memory Paxos cache so that the second prepare is forced to read from system.paxos,
-        // which now has state written by the first call — producing non-zero READ_BYTES.
+        // which now has state written by the first call — producing non-zero READ_BYTES and READ_EXECUTION_TIME.
         PaxosState.unsafeReset();
         handlePaxosPrepare(store, update);
         readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isGreaterThan(0);
         Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
         assertThat(registryReadSensor).isEqualTo(readSensor);
-        assertResponseSensors(Pair.create(readSensor, registryReadSensor));
+        Sensor readExecSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecSensor.getValue()).as("READ_EXECUTION_TIME must be > 0 after cache eviction (loadPaxosState reads from disk)").isGreaterThan(0);
+        Sensor readExecRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecRegistrySensor).isEqualTo(readExecSensor);
+        assertResponseSensors(Pair.create(readSensor, registryReadSensor),
+                              Pair.create(readExecSensor, readExecRegistrySensor));
     }
 
     /**
-     * LWT Propose: WRITE_BYTES and WRITE_EXECUTION_TIME must be non-zero; READ_BYTES is zero on the
-     * first call and non-zero after the Paxos cache is evicted. Parametrized over v1 and v2.
+     * LWT Propose: WRITE_BYTES and WRITE_EXECUTION_TIME must be non-zero; READ_BYTES and
+     * READ_EXECUTION_TIME are zero on the first call (cache hit) and non-zero after the Paxos
+     * cache is evicted (loadPaxosState reads from disk). Parametrized over v1 and v2.
      */
     @Test
     public void testLWTPropose()
@@ -492,14 +499,19 @@ public class ReplicaWriteSensorsTest
         assertThat(readSensor.getValue()).isZero();
 
         // Evict the in-memory Paxos cache so that the second propose is forced to read from system.paxos,
-        // which now has state written by the first call — producing non-zero READ_BYTES.
+        // which now has state written by the first call — producing non-zero READ_BYTES and READ_EXECUTION_TIME.
         PaxosState.unsafeReset();
         handlePaxosPropose(store, update);
         readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isGreaterThan(0);
         Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
         assertThat(registryReadSensor).isEqualTo(readSensor);
-        assertResponseSensors(Pair.create(readSensor, registryReadSensor));
+        Sensor readExecSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecSensor.getValue()).as("READ_EXECUTION_TIME must be > 0 after cache eviction (loadPaxosState reads from disk)").isGreaterThan(0);
+        Sensor readExecRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecRegistrySensor).isEqualTo(readExecSensor);
+        assertResponseSensors(Pair.create(readSensor, registryReadSensor),
+                              Pair.create(readExecSensor, readExecRegistrySensor));
     }
 
     /**

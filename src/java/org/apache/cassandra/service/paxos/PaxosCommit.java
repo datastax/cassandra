@@ -50,7 +50,6 @@ import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Paxos.Participants;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.concurrent.ConditionAsConsumer;
 
 import static java.util.Collections.emptyMap;
@@ -281,13 +280,7 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
      */
     public void executeOnSelf()
     {
-        Context context = Context.from(commit.update.metadata());
-        executeOnSelf(commit, (c, from) -> {
-            long startNanos = Clock.Global.nanoTime();
-            NoPayload response = RequestHandler.execute(c, from);
-            accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, Clock.Global.nanoTime() - startNanos);
-            return response;
-        });
+        executeOnSelf(commit, RequestHandler::execute);
     }
 
     @Override
@@ -358,9 +351,9 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
             sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
             RequestTracker.instance.set(sensors);
 
-            long commitStartNanos = Clock.Global.nanoTime();
+            // WRITE_EXECUTION_TIME is tracked in PaxosState.applyCommit (user-table apply) and
+            // SystemKeyspace.savePaxosCommit (system.paxos write) separately, covering the full commit work.
             NoPayload response = execute(message.payload, message.from());
-            sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, Clock.Global.nanoTime() - commitStartNanos);
 
             // calculate outbound internode bytes before adding the sensor to the response
             if (response != null)

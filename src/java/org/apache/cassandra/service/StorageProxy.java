@@ -1072,13 +1072,11 @@ public class StorageProxy implements StorageProxyMBean
                 if (replica.isSelf())
                 {
                     hasLocalRequest = true;
-                    Context context = Context.from(toPrepare.update.metadata());
                     PAXOS_PREPARE_REQ.stage.execute(() -> {
                         try
                         {
-                            long prepareStartNanos = nanoTime();
+                            // WRITE_EXECUTION_TIME is tracked in SystemKeyspace.savePaxosWritePromise
                             PrepareResponse response = doPrepare(toPrepare);
-                            callback.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, nanoTime() - prepareStartNanos);
                             callback.onResponse(message.responseWith(response));
                         }
                         catch (Exception ex)
@@ -1126,13 +1124,11 @@ public class StorageProxy implements StorageProxyMBean
             {
                 if (replica.isSelf())
                 {
-                    Context context = Context.from(proposal.update.metadata());
                     PAXOS_PROPOSE_REQ.stage.execute(() -> {
                         try
                         {
-                            long proposeStartNanos = nanoTime();
+                            // WRITE_EXECUTION_TIME is tracked in SystemKeyspace.savePaxosProposal
                             Boolean response = doPropose(proposal);
-                            callback.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, nanoTime() - proposeStartNanos);
                             callback.onResponse(message.responseWith(response));
                         }
                         catch (Exception ex)
@@ -1248,15 +1244,10 @@ public class StorageProxy implements StorageProxyMBean
             {
                 try
                 {
-                    long commitStartNanos = nanoTime();
+                    // WRITE_EXECUTION_TIME is tracked in PaxosState.applyCommit and SystemKeyspace.savePaxosCommit
                     PaxosState.commitDirect(message.payload, p -> mutator.onAppliedProposal(p));
-                    long commitElapsedNanos = nanoTime() - commitStartNanos;
                     if (responseHandler != null)
-                    {
-                        Context context = Context.from(message.payload.update.metadata());
-                        responseHandler.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, commitElapsedNanos);
                         responseHandler.onResponse(null);
-                    }
                 }
                 catch (Exception ex)
                 {

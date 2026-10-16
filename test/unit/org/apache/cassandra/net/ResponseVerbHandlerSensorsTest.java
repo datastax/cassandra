@@ -114,8 +114,8 @@ public class ResponseVerbHandlerSensorsTest
         Mockito.when(mockReadCallback.getRequestSensors()).thenReturn(requestSensors);
 
         InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.1");
-        Mutation requestMutation = new RowUpdateBuilder(metadata, 0, "key0").build();
-        Message<Mutation> requestMessage = Message.builder(Verb.READ_REQ, requestMutation).build();
+        SinglePartitionReadCommand readCommand = SinglePartitionReadCommand.fullPartitionRead(metadata, 0, ByteBufferUtil.bytes("key0"));
+        Message<SinglePartitionReadCommand> requestMessage = Message.builder(Verb.READ_REQ, readCommand).build();
         RequestCallbacks.CallbackInfo callbackInfo = new RequestCallbacks.CallbackInfo(requestMessage, peer, mockReadCallback);
 
         Message<?> responseMessage = createResponseMessageWithSensors(300.0, 400.0);

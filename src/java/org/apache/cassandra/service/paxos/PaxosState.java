@@ -51,6 +51,10 @@ import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.metrics.PaxosMetrics;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.uncommitted.PaxosBallotTracker;
 import org.apache.cassandra.service.paxos.uncommitted.PaxosStateTracker;
 import org.apache.cassandra.service.paxos.uncommitted.PaxosUncommittedTracker;
@@ -741,7 +745,17 @@ public class PaxosState implements PaxosOperationLock
                 // as a Mutation, so MutationVerbHandler's stamping cannot have covered it. The origin is
                 // threaded down from the verb handler instead (never serialized; see WriteOrigin).
                 Mutation mutation = commit.makeMutation().withOrigin(origin);
+                // Track the user-table write execution time directly on the user-table context.
+                // savePaxosCommit (below) separately tracks the system.paxos write time via trackPaxosBytes,
+                // so together they cover the full commit work without double-counting.
+                Context commitContext = Context.from(commit.update.metadata());
+                RequestSensors commitSensors = RequestTracker.instance.get();
+                if (commitSensors != null)
+                    commitSensors.registerSensor(commitContext, Type.WRITE_EXECUTION_TIME);
+                long userTableWriteStart = nanoTime();
                 Keyspace.open(mutation.getKeyspaceName()).apply(mutation, WriteOptions.FOR_PAXOS_COMMIT);
+                if (commitSensors != null)
+                    commitSensors.incrementSensor(commitContext, Type.WRITE_EXECUTION_TIME, nanoTime() - userTableWriteStart);
                 callback.accept(commit);
             }
             else

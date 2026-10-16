@@ -247,18 +247,20 @@ public class CoordinatorWriteSensorsTest
 
     /**
      * CAS write: a row is pre-inserted so that the CAS condition check ({@code readOne}) finds an
-     * existing row and produces non-zero {@link Type#READ_BYTES}. The commit execution time is accumulated via
-     * {@link org.apache.cassandra.net.ResponseVerbHandler} into the coordinator's {@link Type#WRITE_EXECUTION_TIME} sensor.
-     * Byteman sleeps 50 ms inside {@code PaxosState.commitDirect} for the execution-time assertion.
+     * existing row and produces non-zero {@link Type#READ_BYTES}. The commit execution time is tracked inside
+     * {@code PaxosState.applyCommit} around the {@code Keyspace.apply} call (user-table write), and accumulated
+     * via {@link org.apache.cassandra.net.ResponseVerbHandler} into the coordinator's
+     * {@link Type#WRITE_EXECUTION_TIME} sensor.
+     * Byteman sleeps 50 ms inside {@code Keyspace.apply} so the sleep falls within the timed window.
      * <p>
      * Additionally, the CAS precondition read (executed at QUORUM/LOCAL_QUORUM after the Paxos rounds)
      * contributes to {@link Type#READ_EXECUTION_TIME}, which is also registered on the coordinator
      * so that the data-fetch replica time is not silently dropped.
      */
     @Test
-    @BMRule(name = "sleep 50ms in PaxosState.commitDirect to force write execution time >= 50ms (CAS)",
-            targetClass = "org.apache.cassandra.service.paxos.PaxosState",
-            targetMethod = "commitDirect",
+    @BMRule(name = "sleep 50ms in Keyspace.apply to force write execution time >= 50ms (CAS)",
+            targetClass = "org.apache.cassandra.db.Keyspace",
+            targetMethod = "apply",
             targetLocation = "AT ENTRY",
             action = "Thread.sleep(50L)")
     public void testCas()

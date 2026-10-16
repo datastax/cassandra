@@ -63,7 +63,6 @@ import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.paxos.PaxosPrepare.Status.Outcome;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.util.Collections.emptyMap;
@@ -309,7 +308,7 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
     private PaxosPrepareRefresh refreshStaleParticipants;
     private boolean linearizabilityViolationDetected = false;
 
-    /** Coordinator-side sensors captured at construction; used to accumulate WRITE_EXECUTION_TIME from replica responses. */
+    /** Coordinator-side sensors captured at construction; used to accumulate WRITE_EXECUTION_TIME and READ_EXECUTION_TIME from replica responses. */
     private final RequestSensors requestSensors;
     private final ExecutionTimeSensorAccumulator execTimeAccumulator;
 
@@ -414,18 +413,7 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
         }
 
         if (executeOnSelf)
-        {
-            // Wrap the self-handler to measure local execution time and feed it into the coordinator's
-            // WRITE_EXECUTION_TIME accumulator, mirroring what ResponseVerbHandler does for remote replicas.
-            Context context = Context.from(send.payload.table);
-            BiFunction<R, InetAddressAndPort, Response> timedHandler = (payload, from) -> {
-                long startNanos = Clock.Global.nanoTime();
-                Response response = selfHandler.apply(payload, from);
-                prepare.accumulateExecutionTimeSensor(context, Type.WRITE_EXECUTION_TIME, Clock.Global.nanoTime() - startNanos);
-                return response;
-            };
-            send.verb().stage.execute(() -> prepare.executeOnSelf(send.payload, timedHandler));
-        }
+            send.verb().stage.execute(() -> prepare.executeOnSelf(send.payload, selfHandler));
     }
 
     // TODO: extend Sync?
@@ -1082,9 +1070,9 @@ public class PaxosPrepare extends PaxosRequestCallback<PaxosPrepare.Response> im
             sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
             RequestTracker.instance.set(sensors);
 
-            long prepareStartNanos = Clock.Global.nanoTime();
+            // WRITE_EXECUTION_TIME is tracked in SystemKeyspace.savePaxosWritePromise/savePaxosReadPromise, so that it
+            // only covers the system.paxos write and not the precondition read performed by execute().
             Response response = execute(message.payload, message.from());
-            sensors.incrementSensor(context, Type.WRITE_EXECUTION_TIME, Clock.Global.nanoTime() - prepareStartNanos);
 
             // calculate outbound internode bytes before adding the sensor to the response
             if (response != null)
