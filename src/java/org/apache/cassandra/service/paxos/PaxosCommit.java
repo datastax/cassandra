@@ -355,12 +355,10 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
             // SystemKeyspace.savePaxosCommit (system.paxos write) separately, covering the full commit work.
             NoPayload response = execute(message.payload, message.from());
 
-            // calculate outbound internode bytes before adding the sensor to the response
             if (response != null)
             {
                 Message.Builder<NoPayload> reply = message.responseWithBuilder(response);
-                int size = reply.currentPayloadSize(MessagingService.current_version);
-                sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+                // no need to calculate outbound internode bytes because the response is NoPayload
                 sensors.syncAllSensors();
                 SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
                 MessagingService.instance().send(reply.build(), message.from());

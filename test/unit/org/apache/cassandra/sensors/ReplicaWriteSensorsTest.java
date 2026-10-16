@@ -611,6 +611,121 @@ public class ReplicaWriteSensorsTest
         assertResponseSensors(Pair.create(saiIndexWriteSensor, saiIndexWriteRegistrySensor));
     }
 
+    /**
+     * v2 CommitAndPrepare: the fused commit+prepare message used in the v2 fast path.
+     * The commit writes to the user table (WRITE_BYTES, WRITE_EXECUTION_TIME, INDEX_WRITE_BYTES);
+     * the prepare reads and writes system.paxos (READ_BYTES, READ_EXECUTION_TIME, WRITE_BYTES).
+     * INTERNODE_BYTES must be non-zero. This is v2-only — CommitAndPrepare does not exist in v1.
+     * INDEX_WRITE_BYTES is verified for both a plain table (zero) and an SAI-indexed table (non-zero).
+     */
+    @Test
+    public void testV2CommitAndPrepare()
+    {
+        // Plain table: INDEX_WRITE_BYTES is registered but zero (no indexes).
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+
+        PaxosV2TestHelper.dispatchV2CommitAndPrepare(store);
+
+        Sensor bytesSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(bytesSensor.getValue()).as("WRITE_BYTES must be > 0 for CommitAndPrepare").isGreaterThan(0);
+        Sensor bytesRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
+        assertThat(bytesRegistrySensor).isEqualTo(bytesSensor);
+
+        Sensor executionSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_EXECUTION_TIME);
+        assertThat(executionSensor.getValue()).as("WRITE_EXECUTION_TIME must be > 0 for CommitAndPrepare").isGreaterThan(0);
+        Sensor executionRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_EXECUTION_TIME);
+        assertThat(executionRegistrySensor).isEqualTo(executionSensor);
+
+        // INDEX_WRITE_BYTES is registered; value is 0 for a plain table (no secondary indexes)
+        Sensor indexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_WRITE_BYTES);
+        assertThat(indexWriteSensor).as("INDEX_WRITE_BYTES sensor must be registered for CommitAndPrepare").isNotNull();
+        assertThat(indexWriteSensor.getValue()).as("INDEX_WRITE_BYTES must be 0 for plain table CommitAndPrepare").isZero();
+
+        Sensor readExecSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecSensor.getValue()).as("READ_EXECUTION_TIME must be > 0 for CommitAndPrepare (loadPaxosState always times the read)").isGreaterThan(0);
+        Sensor readExecRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecRegistrySensor).isEqualTo(readExecSensor);
+
+        Sensor internodeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeSensor.getValue()).as("INTERNODE_BYTES must be > 0 after CommitAndPrepare").isGreaterThan(0);
+        Sensor internodeRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeRegistrySensor).isEqualTo(internodeSensor);
+
+        assertResponseSensors(Pair.create(bytesSensor, bytesRegistrySensor),
+                              Pair.create(executionSensor, executionRegistrySensor),
+                              Pair.create(internodeSensor, internodeRegistrySensor));
+
+        // SAI-indexed table: INDEX_WRITE_BYTES must be non-zero (SAI index writes triggered by the commit phase).
+        ColumnFamilyStore saiStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SAI);
+        Context saiContext = new Context(KEYSPACE1, CF_STANDARD_SAI, saiStore.metadata.id.toString());
+
+        PaxosV2TestHelper.dispatchV2CommitAndPrepare(saiStore);
+
+        Sensor saiIndexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(saiContext, Type.INDEX_WRITE_BYTES);
+        assertThat(saiIndexWriteSensor.getValue()).as("INDEX_WRITE_BYTES must be > 0 for SAI-indexed table CommitAndPrepare").isGreaterThan(0);
+        Sensor saiIndexWriteRegistrySensor = SensorsTestUtil.getRegistrySensor(saiContext, Type.INDEX_WRITE_BYTES);
+        assertThat(saiIndexWriteRegistrySensor).isEqualTo(saiIndexWriteSensor);
+        assertResponseSensors(Pair.create(saiIndexWriteSensor, saiIndexWriteRegistrySensor));
+    }
+
+    /**
+     * v2 PrepareRefresh: commits a missing user-table write (WRITE_BYTES, WRITE_EXECUTION_TIME,
+     * INDEX_WRITE_BYTES) then reads system.paxos state to confirm the promise (READ_EXECUTION_TIME).
+     * INTERNODE_BYTES must be non-zero. This is v2-only.
+     * INDEX_WRITE_BYTES is verified for both a plain table (zero) and an SAI-indexed table (non-zero).
+     */
+    @Test
+    public void testV2PrepareRefresh()
+    {
+        // Plain table: INDEX_WRITE_BYTES is registered but zero (no indexes).
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+
+        PaxosV2TestHelper.dispatchV2PrepareRefresh(store);
+
+        Sensor bytesSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(bytesSensor.getValue()).as("WRITE_BYTES must be > 0 for PrepareRefresh").isGreaterThan(0);
+        Sensor bytesRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
+        assertThat(bytesRegistrySensor).isEqualTo(bytesSensor);
+
+        Sensor executionSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_EXECUTION_TIME);
+        assertThat(executionSensor.getValue()).as("WRITE_EXECUTION_TIME must be > 0 for PrepareRefresh").isGreaterThan(0);
+        Sensor executionRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_EXECUTION_TIME);
+        assertThat(executionRegistrySensor).isEqualTo(executionSensor);
+
+        // INDEX_WRITE_BYTES is registered; value is 0 for a plain table (no secondary indexes)
+        Sensor indexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_WRITE_BYTES);
+        assertThat(indexWriteSensor).as("INDEX_WRITE_BYTES sensor must be registered for PrepareRefresh").isNotNull();
+        assertThat(indexWriteSensor.getValue()).as("INDEX_WRITE_BYTES must be 0 for plain table PrepareRefresh").isZero();
+
+        Sensor readExecSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecSensor.getValue()).as("READ_EXECUTION_TIME must be > 0 for PrepareRefresh (loadPaxosState always times the read)").isGreaterThan(0);
+        Sensor readExecRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_EXECUTION_TIME);
+        assertThat(readExecRegistrySensor).isEqualTo(readExecSensor);
+
+        Sensor internodeSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeSensor.getValue()).as("INTERNODE_BYTES must be > 0 after PrepareRefresh").isGreaterThan(0);
+        Sensor internodeRegistrySensor = SensorsTestUtil.getRegistrySensor(context, Type.INTERNODE_BYTES);
+        assertThat(internodeRegistrySensor).isEqualTo(internodeSensor);
+
+        assertResponseSensors(Pair.create(bytesSensor, bytesRegistrySensor),
+                              Pair.create(executionSensor, executionRegistrySensor),
+                              Pair.create(internodeSensor, internodeRegistrySensor));
+
+        // SAI-indexed table: INDEX_WRITE_BYTES must be non-zero (SAI index writes triggered by the commit phase).
+        ColumnFamilyStore saiStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SAI);
+        Context saiContext = new Context(KEYSPACE1, CF_STANDARD_SAI, saiStore.metadata.id.toString());
+
+        PaxosV2TestHelper.dispatchV2PrepareRefresh(saiStore);
+
+        Sensor saiIndexWriteSensor = SensorsTestUtil.getThreadLocalRequestSensor(saiContext, Type.INDEX_WRITE_BYTES);
+        assertThat(saiIndexWriteSensor.getValue()).as("INDEX_WRITE_BYTES must be > 0 for SAI-indexed table PrepareRefresh").isGreaterThan(0);
+        Sensor saiIndexWriteRegistrySensor = SensorsTestUtil.getRegistrySensor(saiContext, Type.INDEX_WRITE_BYTES);
+        assertThat(saiIndexWriteRegistrySensor).isEqualTo(saiIndexWriteSensor);
+        assertResponseSensors(Pair.create(saiIndexWriteSensor, saiIndexWriteRegistrySensor));
+    }
+
     // -------------------------------------------------------------------------
     // Index write paths (SAI and secondary index)
     // -------------------------------------------------------------------------

@@ -98,6 +98,40 @@ public class PaxosV2TestHelper
         PaxosCommit.requestHandler.doVerb(Message.builder(Verb.PAXOS_COMMIT_REQ, agreed).build());
     }
 
+    /**
+     * Builds a v2 PrepareRefresh request (commit a missing user-table write then confirm the promise)
+     * and dispatches it via {@link PaxosPrepareRefresh#requestHandler}.
+     */
+    public static void dispatchV2PrepareRefresh(ColumnFamilyStore cfs)
+    {
+        PartitionUpdate update = new RowUpdateBuilder(cfs.metadata(), 0, "0")
+                                 .add("val", "0")
+                                 .buildUpdate();
+        Commit.Committed missingCommit = new Commit.Committed(nextBallot(NONE), update);
+        Ballot promised = nextBallot(NONE);
+        PaxosPrepareRefresh.requestHandler.doVerb(
+                Message.builder(Verb.PAXOS2_PREPARE_REFRESH_REQ,
+                                new PaxosPrepareRefresh.Request(promised, missingCommit)).build());
+    }
+
+    /**
+     * Builds a v2 CommitAndPrepare request (fused commit + prepare used in the v2 fast path) and
+     * dispatches it via {@link PaxosCommitAndPrepare#requestHandler}.
+     */
+    public static void dispatchV2CommitAndPrepare(ColumnFamilyStore cfs)
+    {
+        PartitionUpdate update = new RowUpdateBuilder(cfs.metadata(), 0, "0")
+                                 .add("val", "0")
+                                 .buildUpdate();
+        Commit.Agreed agreed = new Commit.Agreed(nextBallot(NONE), update);
+        SinglePartitionReadCommand read = SinglePartitionReadCommand.fullPartitionRead(
+                cfs.metadata(), FBUtilities.nowInSeconds(), update.partitionKey());
+        PaxosCommitAndPrepare.Request request = new PaxosCommitAndPrepare.Request(
+                agreed, nextBallot(NONE), localElectorate(), read, true);
+        PaxosCommitAndPrepare.requestHandler.doVerb(
+                Message.builder(Verb.PAXOS2_COMMIT_AND_PREPARE_REQ, request).build());
+    }
+
     /** Builds a trivial Electorate containing only localhost (RF=1 single-node tests). */
     public static Paxos.Electorate localElectorate()
     {
