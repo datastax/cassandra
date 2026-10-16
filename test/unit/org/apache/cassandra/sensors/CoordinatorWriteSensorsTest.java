@@ -26,6 +26,7 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.BatchStatement;
@@ -36,9 +37,11 @@ import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.paxos.Paxos;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMRules;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,7 +65,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * the local memtable apply. Each test injects a Byteman sleep inside the actual apply method to assert
  * the execution-time sensor gains at least that much time, and also asserts byte sensors are non-zero.
  * <p>
- * Five paths are covered:
+ * Six paths are covered:
  * <ul>
  *   <li><b>Single-statement INSERT</b> — {@code performMutationLocally} wraps {@code Keyspace.apply}
  *       and accumulates the elapsed time. Verifies {@link Type#WRITE_EXECUTION_TIME} and
@@ -71,9 +74,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       Verifies {@link Type#WRITE_EXECUTION_TIME} and {@link Type#WRITE_BYTES}.</li>
  *   <li><b>Logged batch</b> — same path via {@code StorageProxy.mutateAtomically()}.
  *       Verifies {@link Type#WRITE_EXECUTION_TIME} and {@link Type#WRITE_BYTES}.</li>
- *   <li><b>CAS (conditional UPDATE)</b> — a row is pre-inserted so {@code readOne} finds it and
- *       produces non-zero {@link Type#READ_BYTES}; {@code commitDirect} is timed for
- *       {@link Type#WRITE_EXECUTION_TIME}. Verifies all three sensor types.</li>
+ *   <li><b>CAS (conditional UPDATE), v1</b> — exercises the v1 Paxos path ({@code paxos_variant=v1}).
+ *       Byteman sleeps in the Prepare/Propose {@code system.paxos} writes, the precondition read,
+ *       and the commit apply. All four sensor types must be >= 50ms / non-zero.</li>
+ *   <li><b>CAS (conditional UPDATE), v2</b> — same assertions over the v2 Paxos path.</li>
  *   <li><b>Counter update</b> — {@code counterWriteTask} wraps {@code CounterMutation.applyCounterMutation}
  *       and writes the leader apply time directly into the sensor via {@code incrementSensor}.
  *       Since coordinator == leader == only replica, there are no sub-replica ACKs.
@@ -242,28 +246,92 @@ public class CoordinatorWriteSensorsTest
     }
 
     // -------------------------------------------------------------------------
-    // CAS (UPDATE IF condition)  (UpdateStatement path → StorageProxy.cas)
+    // CAS (UPDATE IF condition)  (UpdateStatement path → StorageProxy.cas) — v1 and v2
     // -------------------------------------------------------------------------
 
     /**
-     * CAS write: a row is pre-inserted so that the CAS condition check ({@code readOne}) finds an
-     * existing row and produces non-zero {@link Type#READ_BYTES}. The commit execution time is tracked inside
-     * {@code PaxosState.applyCommit} around the {@code Keyspace.apply} call (user-table write), and accumulated
-     * via {@link org.apache.cassandra.net.ResponseVerbHandler} into the coordinator's
-     * {@link Type#WRITE_EXECUTION_TIME} sensor.
-     * Byteman sleeps 50 ms inside {@code Keyspace.apply} so the sleep falls within the timed window.
-     * <p>
-     * Additionally, the CAS precondition read (executed at QUORUM/LOCAL_QUORUM after the Paxos rounds)
-     * contributes to {@link Type#READ_EXECUTION_TIME}, which is also registered on the coordinator
-     * so that the data-fetch replica time is not silently dropped.
+     * CAS write over the v1 Paxos path ({@code paxos_variant=v1}).
+     * See {@link #assertCas()} for the full assertion contract.
      */
     @Test
-    @BMRule(name = "sleep 50ms in Keyspace.apply to force write execution time >= 50ms (CAS)",
-            targetClass = "org.apache.cassandra.db.Keyspace",
-            targetMethod = "apply",
-            targetLocation = "AT ENTRY",
-            action = "Thread.sleep(50L)")
-    public void testCas()
+    @BMRules(rules = {
+        @BMRule(name = "sleep 50ms at Runnable.run in trackPaxosBytes(TableMetadata) to delay Prepare write (v1 CAS)",
+                targetClass = "org.apache.cassandra.db.SystemKeyspace",
+                targetMethod = "trackPaxosBytes(org.apache.cassandra.schema.TableMetadata,java.lang.Runnable)",
+                targetLocation = "AT INVOKE Runnable.run",
+                action = "Thread.sleep(50L)"),
+        @BMRule(name = "sleep 50ms at Runnable.run in trackPaxosBytes(Commit) to delay Propose write (v1 CAS)",
+                targetClass = "org.apache.cassandra.db.SystemKeyspace",
+                targetMethod = "trackPaxosBytes(org.apache.cassandra.service.paxos.Commit,java.lang.Runnable)",
+                targetLocation = "AT INVOKE Runnable.run",
+                action = "Thread.sleep(50L)"),
+        @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to delay precondition read (v1 CAS)",
+                targetClass = "org.apache.cassandra.db.ReadCommand",
+                targetMethod = "executeLocally",
+                targetLocation = "AT ENTRY",
+                action = "Thread.sleep(50L)"),
+        @BMRule(name = "sleep 50ms in Keyspace.apply to delay commit write (v1 CAS)",
+                targetClass = "org.apache.cassandra.db.Keyspace",
+                targetMethod = "apply",
+                targetLocation = "AT ENTRY",
+                action = "Thread.sleep(50L)")
+    })
+    public void testCasV1()
+    {
+        Paxos.setPaxosVariant(Config.PaxosVariant.v1);
+        assertCas();
+    }
+
+    /**
+     * CAS write over the v2 Paxos path ({@code paxos_variant=v2}).
+     * See {@link #assertCas()} for the full assertion contract.
+     */
+    @Test
+    @BMRules(rules = {
+        @BMRule(name = "sleep 50ms at Runnable.run in trackPaxosBytes(TableMetadata) to delay Prepare write (v2 CAS)",
+                targetClass = "org.apache.cassandra.db.SystemKeyspace",
+                targetMethod = "trackPaxosBytes(org.apache.cassandra.schema.TableMetadata,java.lang.Runnable)",
+                targetLocation = "AT INVOKE Runnable.run",
+                action = "Thread.sleep(50L)"),
+        @BMRule(name = "sleep 50ms at Runnable.run in trackPaxosBytes(Commit) to delay Propose write (v2 CAS)",
+                targetClass = "org.apache.cassandra.db.SystemKeyspace",
+                targetMethod = "trackPaxosBytes(org.apache.cassandra.service.paxos.Commit,java.lang.Runnable)",
+                targetLocation = "AT INVOKE Runnable.run",
+                action = "Thread.sleep(50L)"),
+        @BMRule(name = "sleep 50ms in ReadCommand.executeLocally to delay precondition read (v2 CAS)",
+                targetClass = "org.apache.cassandra.db.ReadCommand",
+                targetMethod = "executeLocally",
+                targetLocation = "AT ENTRY",
+                action = "Thread.sleep(50L)"),
+        @BMRule(name = "sleep 50ms in Keyspace.apply to delay commit write (v2 CAS)",
+                targetClass = "org.apache.cassandra.db.Keyspace",
+                targetMethod = "apply",
+                targetLocation = "AT ENTRY",
+                action = "Thread.sleep(50L)")
+    })
+    public void testCasV2()
+    {
+        Paxos.setPaxosVariant(Config.PaxosVariant.v2);
+        assertCas();
+    }
+
+    /**
+     * Shared assertion body for {@link #testCasV1()} and {@link #testCasV2()}.
+     * <p>
+     * A row is pre-inserted so {@code readOne} in the CAS condition check finds it, giving non-zero
+     * {@link Type#READ_BYTES}. Four Byteman sleeps fire inside their respective timing windows:
+     * <ol>
+     *   <li>AT INVOKE {@code Runnable.run} in {@code trackPaxosBytes(TableMetadata, Runnable)} —
+     *       inside the Prepare {@code system.paxos} write window → {@link Type#WRITE_EXECUTION_TIME} >= 50ms</li>
+     *   <li>AT INVOKE {@code Runnable.run} in {@code trackPaxosBytes(Commit, Runnable)} —
+     *       inside the Propose {@code system.paxos} write window → adds to {@link Type#WRITE_EXECUTION_TIME}</li>
+     *   <li>AT ENTRY {@code ReadCommand.executeLocally} — inside the precondition-read window →
+     *       {@link Type#READ_EXECUTION_TIME} >= 50ms</li>
+     *   <li>AT ENTRY {@code Keyspace.apply} — inside the commit write window →
+     *       adds to {@link Type#WRITE_EXECUTION_TIME}</li>
+     * </ol>
+     */
+    private void assertCas()
     {
         // Pre-insert a row so that readOne in the CAS condition check finds it, giving non-zero READ_BYTES
         QueryProcessor.executeInternal(
@@ -280,18 +348,19 @@ public class CoordinatorWriteSensorsTest
         assertThat(sensors).isNotNull();
         Context context = Context.from(Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE).metadata());
 
+        // Prepare+Propose system.paxos writes and the commit Keyspace.apply each sleep 50ms inside
+        // their respective timing windows, so WRITE_EXECUTION_TIME >= 50ms.
         double writeExecTime = sensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get().getValue();
-        assertThat(writeExecTime).as("WRITE_EXECUTION_TIME must be >= 50ms for CAS").isGreaterThanOrEqualTo(50_000_000.0);
+        assertThat(writeExecTime).as("WRITE_EXECUTION_TIME must be >= 50ms for CAS (Prepare/Propose writes and commit each slept 50ms)").isGreaterThanOrEqualTo(50_000_000.0);
         Sensor registryWriteExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_EXECUTION_TIME).get();
         assertThat(registryWriteExecTime.getValue()).as("registry WRITE_EXECUTION_TIME must equal request sensor").isEqualTo(writeExecTime);
 
-        // The CAS precondition read (readOne at QUORUM after Paxos rounds) must also populate READ_EXECUTION_TIME.
+        // The precondition read (executeLocally) sleeps 50ms, so READ_EXECUTION_TIME >= 50ms.
         double readExecTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).get().getValue();
-        assertThat(readExecTime).as("READ_EXECUTION_TIME must be > 0 for CAS (precondition read executed locally)").isGreaterThan(0.0);
+        assertThat(readExecTime).as("READ_EXECUTION_TIME must be >= 50ms for CAS (precondition read slept 50ms)").isGreaterThanOrEqualTo(50_000_000.0);
         Sensor registryReadExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_EXECUTION_TIME).get();
         assertThat(registryReadExecTime.getValue()).as("registry READ_EXECUTION_TIME must equal request sensor").isEqualTo(readExecTime);
 
-        // CAS writes include a Paxos read, so WRITE_BYTES tracks the committed data and READ_BYTES tracks the read phase
         double writeBytes = sensors.getSensor(context, Type.WRITE_BYTES).get().getValue();
         assertThat(writeBytes).as("WRITE_BYTES must be > 0 for CAS (data was written)").isGreaterThan(0.0);
         Sensor registryWriteBytes = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_BYTES).get();
