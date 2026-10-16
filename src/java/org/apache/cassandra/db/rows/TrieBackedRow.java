@@ -801,7 +801,11 @@ public class TrieBackedRow extends AbstractRow
 
         try
         {
-            TrieColumnFilter tcf = new TrieColumnFilter(columns, columnIds, filter, isStatic(), mayFilterColumns);
+            // As in BTreeRow.filter, the cells of fetched but not queried columns that are older than the row's
+            // liveness are skipped, using the liveness left after applying an active deletion that shadows the row's.
+            boolean livenessShadowed = !activeDeletion.isLive() && !deletion.time().supersedes(activeDeletion) && activeDeletion.deletes(livenessInfo.timestamp());
+            long rowLivenessTimestamp = livenessShadowed ? LivenessInfo.NO_TIMESTAMP : livenessInfo.timestamp();
+            TrieColumnFilter tcf = new TrieColumnFilter(columns, columnIds, filter, isStatic(), mayFilterColumns, rowLivenessTimestamp);
 
             if (!droppedColumns.isEmpty())
             {

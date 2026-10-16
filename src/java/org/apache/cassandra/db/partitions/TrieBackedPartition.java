@@ -666,10 +666,6 @@ public class TrieBackedPartition implements Partition
         /// Copies the row to the heap as a `BTreeRow`, built directly from the trie cells. Readers of memtable data
         /// convert rows to `BTreeRow` anyway (e.g. `ImmutableBTreePartition` via `BTreeRow.asBTreeRow`), so this
         /// does the one copy that is needed instead of rebuilding the row as a new on-heap trie.
-        ///
-        /// Column filtering of the returned rows is thus done by `BTreeRow.filter`, which, like sstable reads and
-        /// the BTree-based memtables, drops the cells of fetched but not queried columns that are older than the
-        /// row's primary key liveness (`TrieBackedRow.filter` keeps them with a skipped value).
         @Override
         Row toRow(DeletionAwareTrie<Object, TrieTombstoneMarker> data, Clustering<?> clustering)
         {
