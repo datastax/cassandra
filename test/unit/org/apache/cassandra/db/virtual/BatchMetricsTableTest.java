@@ -62,6 +62,9 @@ public class BatchMetricsTableTest extends CQLTester
             metrics.partitionsPerLoggedBatch.update(i);
             metrics.partitionsPerUnloggedBatch.update(i + 10);
             metrics.partitionsPerCounterBatch.update(i * 10);
+            metrics.rowsPerLoggedBatch.update(i);
+            metrics.rowsPerUnloggedBatch.update(i + 10);
+            metrics.rowsPerCounterBatch.update(i * 10);
         }
 
         ResultSet result = executeNet(format("SELECT * FROM %s.batch_metrics", KS_NAME));
@@ -74,7 +77,7 @@ public class BatchMetricsTableTest extends CQLTester
             rowCount.addAndGet(1);
         });
 
-        assertEquals(3, rowCount.get());
+        assertEquals(6, rowCount.get());
     }
 
     private Histogram getExpectedHistogram(BatchMetrics metrics, String name)
@@ -85,6 +88,15 @@ public class BatchMetricsTableTest extends CQLTester
         if ("partitions_per_unlogged_batch".equals(name))
             return metrics.partitionsPerUnloggedBatch;
 
-        return metrics.partitionsPerCounterBatch;
+        if ("partitions_per_counter_batch".equals(name))
+            return metrics.partitionsPerCounterBatch;
+
+        if ("rows_per_logged_batch".equals(name))
+            return metrics.rowsPerLoggedBatch;
+
+        if ("rows_per_unlogged_batch".equals(name))
+            return metrics.rowsPerUnloggedBatch;
+
+        return metrics.rowsPerCounterBatch;
     }
 }
