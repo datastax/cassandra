@@ -88,8 +88,6 @@ public class VectorTester extends SAITester
             CassandraRelevantProperties.SAI_VECTOR_SERIALIZE_FLUSH_PQ.setBoolean(false);
         if (CassandraRelevantProperties.SAI_VECTOR_FLUSH_REFINE_FINAL_GRAPH.getString() == null)
             CassandraRelevantProperties.SAI_VECTOR_FLUSH_REFINE_FINAL_GRAPH.setBoolean(false);
-        if (CassandraRelevantProperties.SAI_VECTOR_COMPACTION_RETAIN_LARGEST.getString() == null)
-            CassandraRelevantProperties.SAI_VECTOR_COMPACTION_RETAIN_LARGEST.setBoolean(false);
     }
 
     @After
@@ -98,7 +96,6 @@ public class VectorTester extends SAITester
         CassandraRelevantProperties.SAI_VECTOR_AMORTIZE_PQ_ENCODING.reset();
         CassandraRelevantProperties.SAI_VECTOR_SERIALIZE_FLUSH_PQ.reset();
         CassandraRelevantProperties.SAI_VECTOR_FLUSH_REFINE_FINAL_GRAPH.reset();
-        CassandraRelevantProperties.SAI_VECTOR_COMPACTION_RETAIN_LARGEST.reset();
         // Clear the memoization so the next test's flag values take effect.
         java.lang.reflect.Field f = VectorFeatureFlags.class.getDeclaredField("validated");
         f.setAccessible(true);

@@ -63,19 +63,6 @@ public final class VectorFeatureFlags
     }
 
     /** Whether residual flush-time PQ work is serialized node-wide. */
-    /**
-     * Whether vector graph merges use the experimental retain-largest strategy
-     * (jvector {@code OnDiskGraphIndexCompactor#setRetainLargest}).
-     *
-     * <p>jvector still refuses the shortcut per-merge when the retained source does
-     * not dominate the surviving nodes, falling back to the symmetric merge — so
-     * enabling this asks for the strategy where it applies, it does not force it.
-     */
-    public static boolean compactionRetainLargest()
-    {
-        return requiredBoolean(CassandraRelevantProperties.SAI_VECTOR_COMPACTION_RETAIN_LARGEST);
-    }
-
     public static boolean serializeFlushPq()
     {
         return requiredBoolean(CassandraRelevantProperties.SAI_VECTOR_SERIALIZE_FLUSH_PQ);
@@ -122,11 +109,9 @@ public final class VectorFeatureFlags
         boolean amortize = amortizePqEncoding();
         boolean serialize = serializeFlushPq();
         boolean refineFlush = flushRefineFinalGraph();
-        boolean retainLargest = compactionRetainLargest();
 
-        logger.info("Vector feature flags (all explicit): amortize_pq_encoding={}, serialize_flush_pq={}, "
-                    + "flush_refine_final_graph={}, compaction_retain_largest={}",
-                    amortize, serialize, refineFlush, retainLargest);
+        logger.info("Vector feature flags (all explicit): amortize_pq_encoding={}, serialize_flush_pq={}, flush_refine_final_graph={}",
+                    amortize, serialize, refineFlush);
         validated = true;
     }
 
