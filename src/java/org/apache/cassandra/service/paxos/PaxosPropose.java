@@ -47,7 +47,6 @@ import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit.Proposal;
-import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.concurrent.ConditionAsConsumer;
 
 import static java.util.Collections.emptyMap;
