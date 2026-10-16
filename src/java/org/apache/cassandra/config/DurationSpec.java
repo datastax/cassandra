@@ -337,6 +337,8 @@ public abstract class DurationSpec
      */
     public final static class LongMillisecondsBound extends DurationSpec
     {
+        private static final Pattern VALUES_PATTERN = Pattern.compile(("\\d+"));
+
         /**
          * Creates a {@code DurationSpec.LongMillisecondsBound} of the specified amount.
          * The bound is [0, Long.MAX_VALUE) in milliseconds.
@@ -369,6 +371,27 @@ public abstract class DurationSpec
         public LongMillisecondsBound(long milliseconds)
         {
             this(milliseconds, MILLISECONDS);
+        }
+
+        /**
+         * Creates a {@code DurationSpec.LongMillisecondsBound} of the specified amount in milliseconds, expressed either
+         * as the number of milliseconds without unit, or as a regular quantity with unit.
+         * Used in the Converters for parameters which changed only type, but not names
+         * The bound is [0, Long.MAX_VALUE) in milliseconds.
+         *
+         * @param value where value shouldn't be bigger than Long.MAX_VALUE-1 in milliseconds
+         */
+        public static LongMillisecondsBound inMillisecondsString(String value)
+        {
+            //parse the string field value
+            Matcher matcher = VALUES_PATTERN.matcher(value);
+
+            //if the provided string value is just a number, then we create a LongMillisecondsBound value in milliseconds
+            if (matcher.matches())
+                return new LongMillisecondsBound(Long.parseLong(value), MILLISECONDS);
+
+            //otherwise we just use the standard constructors
+            return new LongMillisecondsBound(value);
         }
 
         /**

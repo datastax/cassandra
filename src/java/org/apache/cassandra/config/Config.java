@@ -156,7 +156,9 @@ public class Config
 
     @Replaces(oldName = "write_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
     public volatile DurationSpec.LongMillisecondsBound write_request_timeout = new DurationSpec.LongMillisecondsBound("2000ms");
-    
+
+    // HCD-632: HCD 1.2 name
+    @Replaces(oldName = "hints_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
     public volatile DurationSpec.LongMillisecondsBound hints_request_timeout = new DurationSpec.LongMillisecondsBound("2000ms");
 
     @Replaces(oldName = "counter_write_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
@@ -171,6 +173,8 @@ public class Config
     @Replaces(oldName = "repair_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
     public volatile DurationSpec.LongMillisecondsBound repair_request_timeout = new DurationSpec.LongMillisecondsBound("120000ms");
 
+    // HCD-632: HCD 1.2 sets it as a number of milliseconds
+    @Replaces(oldName = "repair_prepare_message_timeout_in_ms", converter = Converters.MILLIS_STRING_DURATION_LONG)
     public volatile DurationSpec.LongMillisecondsBound repair_prepare_message_timeout_in_ms = new DurationSpec.LongMillisecondsBound("10000ms");
 
     public Integer streaming_connections_per_host = 1;
@@ -857,6 +861,8 @@ public class Config
     public volatile boolean auto_optimise_preview_repair_streams = false;
 
     // see CASSANDRA-17048 and the comment in cassandra.yaml
+    // HCD-632: HCD 1.2 still uses the 4.1-alpha1 name
+    @Replaces(oldName = "enable_uuid_sstable_identifiers", converter = Converters.IDENTITY, deprecated = true)
     public boolean uuid_sstable_identifiers_enabled = true;
 
     /**

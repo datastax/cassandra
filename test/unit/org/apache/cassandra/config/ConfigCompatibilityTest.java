@@ -118,7 +118,7 @@ public class ConfigCompatibilityTest
      * Not all converts make sense as backwards compatible as they use things like String to handle the conversion more
      * generically.
      */
-    private static final Set<Converters> IGNORED_CONVERTERS = EnumSet.of(Converters.SECONDS_CUSTOM_DURATION);
+    private static final Set<Converters> IGNORED_CONVERTERS = EnumSet.of(Converters.SECONDS_CUSTOM_DURATION, Converters.MILLIS_STRING_DURATION_LONG);
 
     @Test
     public void diff_3_0() throws IOException
@@ -155,6 +155,30 @@ public class ConfigCompatibilityTest
     {
         diff(TEST_DIR + "/version=5.0-alpha1.yml", ImmutableSet.<String>builder()
                                                                .build(), ImmutableSet.of());
+    }
+
+    /**
+     * HCD-632: an HCD 1.2 (branch main) node restarted on this version keeps its cassandra.yaml.
+     */
+    @Test
+    public void diff_hcd_1_2() throws IOException
+    {
+        diff(TEST_DIR + "/version=hcd-1.2.yml", ImmutableSet.<String>builder()
+                                                         .addAll(REMOVED_IN_50)
+                                                         // HCD 1.2 nested guardrails block, commented out in its
+                                                         // cassandra.yaml; 5.0 guardrails are top-level properties
+                                                         .add("guardrails")
+                                                         // limit on all the hints of the node; 5.0 has the per-host
+                                                         // max_hints_size_per_host, which is a different limit
+                                                         .add("max_total_hints_size_in_mb")
+                                                         .build(),
+             ImmutableSet.<String>builder()
+                         // HCD 1.2 default memtable options (e.g. class: TrieMemtable), not set in its cassandra.yaml;
+                         // 5.0 has the named memtable configurations instead
+                         .add("Property memtable changed to nested type but is missing from SettingsTable.BACKWARDS_COMPATIBLE_NAMES. Add mapping for 'memtable' to its new nested property path.")
+                         .add("Property memtable used to be a value-type, but now is nested type class org.apache.cassandra.config.Config$MemtableOptions")
+                         .add("memtable types do not match; org.apache.cassandra.config.Config.MemtableOptions != java.util.Map")
+                         .build());
     }
 
     private void diff(String original, Set<String> ignore, Set<String> expectedErrors) throws IOException

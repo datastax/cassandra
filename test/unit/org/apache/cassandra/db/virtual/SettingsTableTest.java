@@ -177,6 +177,13 @@ public class SettingsTableTest extends CQLTester
         q = "SELECT * FROM vts.settings WHERE name = 'credentials_update_interval_in_ms';";
         assertRowsNet(executeNet(q), new Object[] {"credentials_update_interval_in_ms", "-1"});
 
+        // HCD-632: HCD 1.2 names
+        check("enable_uuid_sstable_identifiers", "true");
+        check("hints_request_timeout", "2000ms");
+        check("hints_request_timeout_in_ms", "2000");
+        // test MILLIS_STRING_DURATION_LONG converter
+        check("repair_prepare_message_timeout_in_ms", "10000");
+
         // test non matching auth related properties
         q = "SELECT * FROM vts.settings WHERE name = 'authenticator';";
         assertRowsNet(executeNet(q), new Object[] {"authenticator", null});
