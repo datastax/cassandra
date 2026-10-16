@@ -63,6 +63,9 @@ public class BatchMetricsTest
     private static PreparedStatement psCounter;
     private static PreparedStatement psClustering;
     private static PreparedStatement psClusteringCounter;
+    private static PreparedStatement psDeleteRow;           // DELETE ... WHERE pk=? AND ck=?  (row tombstone)
+    private static PreparedStatement psDeleteRange;         // DELETE ... WHERE pk=? AND ck>?  (range tombstone)
+    private static PreparedStatement psDeletePartition;     // DELETE ... WHERE pk=?           (partition tombstone)
 
     @BeforeClass()
     public static void setup() throws ConfigurationException, IOException
@@ -86,6 +89,9 @@ public class BatchMetricsTest
         psCounter = session.prepare("UPDATE " + KEYSPACE + '.' + COUNTER_TABLE + " SET val = val + 1 WHERE id = ?;");
         psClustering = session.prepare("INSERT INTO " + KEYSPACE + '.' + CLUSTERING_TABLE + " (id, ck, val) VALUES (?, ?, ?);");
         psClusteringCounter = session.prepare("UPDATE " + KEYSPACE + '.' + CLUSTERING_COUNTER_TABLE + " SET val = val + 1 WHERE id = ? AND ck = ?;");
+        psDeleteRow = session.prepare("DELETE FROM " + KEYSPACE + '.' + CLUSTERING_TABLE + " WHERE id = ? AND ck = ?;");
+        psDeleteRange = session.prepare("DELETE FROM " + KEYSPACE + '.' + CLUSTERING_TABLE + " WHERE id = ? AND ck > ?;");
+        psDeletePartition = session.prepare("DELETE FROM " + KEYSPACE + '.' + CLUSTERING_TABLE + " WHERE id = ?;");
     }
 
     @AfterClass
@@ -253,6 +259,102 @@ public class BatchMetricsTest
 
         assertEquals(1L, partitionsSnapshot.getMax());
         assertEquals(rowsPerPartition, rowsSnapshot.getMax());
+    }
+
+    /**
+     * Row tombstone: DELETE FROM t WHERE id=? AND ck=?
+     * Each delete targets a specific clustering row. In BTreePartitionUpdate, a row tombstone is a BTree
+     * entry and IS counted by rowCount(). In TrieBackedPartition, only rows with live data are counted,
+     * so row tombstones are NOT counted. Either way, partitions = numDeletes and rows <= numDeletes.
+     * A batch of 3 row deletes each on a distinct partition → partitions=3.
+     */
+    @Test
+    public void testRowTombstonesPartitionCountCorrect()
+    {
+        clearHistogram();
+
+        int numDeletes = 3;
+        BatchStatement batch = new BatchStatement(BatchStatement.Type.UNLOGGED);
+        for (int i = 0; i < numDeletes; i++)
+            batch.add(psDeleteRow.bind(i, 0));  // distinct partition key per delete
+
+        session.execute(batch);
+
+        assertEquals(1, metrics.partitionsPerUnloggedBatch.getCount());
+        assertEquals(1, metrics.rowsPerUnloggedBatch.getCount());
+
+        EstimatedHistogramReservoirSnapshot partitionsSnapshot =
+            (EstimatedHistogramReservoirSnapshot) metrics.partitionsPerUnloggedBatch.getSnapshot();
+
+        // partitions = numDeletes (one distinct partition key per statement)
+        assertEquals(partitionsSnapshot.getBucketingRangeForValue(numDeletes),
+                     new Range(partitionsSnapshot.getMin(), partitionsSnapshot.getMax()));
+    }
+
+    /**
+     * Range tombstone: DELETE FROM t WHERE id=? AND ck>?
+     * Stored in deletionInfo, NOT in the row BTree, so rowCount()=0.
+     * A batch of 3 range deletes each on a distinct partition → partitions=3, rows=0.
+     */
+    @Test
+    public void testRangeTombstonesNotCountedInRowMetric()
+    {
+        clearHistogram();
+
+        int numDeletes = 3;
+        BatchStatement batch = new BatchStatement(BatchStatement.Type.UNLOGGED);
+        for (int i = 0; i < numDeletes; i++)
+            batch.add(psDeleteRange.bind(i, 0));  // distinct partition key per delete
+
+        session.execute(batch);
+
+        assertEquals(1, metrics.partitionsPerUnloggedBatch.getCount());
+        assertEquals(1, metrics.rowsPerUnloggedBatch.getCount());
+
+        EstimatedHistogramReservoirSnapshot partitionsSnapshot =
+            (EstimatedHistogramReservoirSnapshot) metrics.partitionsPerUnloggedBatch.getSnapshot();
+        EstimatedHistogramReservoirSnapshot rowsSnapshot =
+            (EstimatedHistogramReservoirSnapshot) metrics.rowsPerUnloggedBatch.getSnapshot();
+
+        // partitions = numDeletes (one distinct partition key per statement)
+        assertEquals(partitionsSnapshot.getBucketingRangeForValue(numDeletes),
+                     new Range(partitionsSnapshot.getMin(), partitionsSnapshot.getMax()));
+        // rows = 0 (range tombstones go into deletionInfo, not the row BTree)
+        assertEquals(rowsSnapshot.getBucketingRangeForValue(0),
+                     new Range(rowsSnapshot.getMin(), rowsSnapshot.getMax()));
+    }
+
+    /**
+     * Partition tombstone: DELETE FROM t WHERE id=?
+     * Stored as a partition-level deletion in deletionInfo, NOT in the row BTree, so rowCount()=0.
+     * A batch of 3 partition deletes → partitions=3, rows=0.
+     */
+    @Test
+    public void testPartitionTombstonesNotCountedInRowMetric()
+    {
+        clearHistogram();
+
+        int numDeletes = 3;
+        BatchStatement batch = new BatchStatement(BatchStatement.Type.UNLOGGED);
+        for (int i = 0; i < numDeletes; i++)
+            batch.add(psDeletePartition.bind(i));  // distinct partition key per delete
+
+        session.execute(batch);
+
+        assertEquals(1, metrics.partitionsPerUnloggedBatch.getCount());
+        assertEquals(1, metrics.rowsPerUnloggedBatch.getCount());
+
+        EstimatedHistogramReservoirSnapshot partitionsSnapshot =
+            (EstimatedHistogramReservoirSnapshot) metrics.partitionsPerUnloggedBatch.getSnapshot();
+        EstimatedHistogramReservoirSnapshot rowsSnapshot =
+            (EstimatedHistogramReservoirSnapshot) metrics.rowsPerUnloggedBatch.getSnapshot();
+
+        // partitions = numDeletes (one distinct partition key per statement)
+        assertEquals(partitionsSnapshot.getBucketingRangeForValue(numDeletes),
+                     new Range(partitionsSnapshot.getMin(), partitionsSnapshot.getMax()));
+        // rows = 0 (partition tombstones go into deletionInfo, not the row BTree)
+        assertEquals(rowsSnapshot.getBucketingRangeForValue(0),
+                     new Range(rowsSnapshot.getMin(), rowsSnapshot.getMax()));
     }
 
     private void assertMetrics(BatchStatement.Type batchTypeTested, int[] rounds, int distinctPartitions)
