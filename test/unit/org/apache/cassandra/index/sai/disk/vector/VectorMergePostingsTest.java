@@ -453,7 +453,7 @@ public class VectorMergePostingsTest
     // ---- Canonical handle deduplication & multi-row mapping tests ----
 
     @Test
-    public void multipleRowsRoutedToSameCanonicalHandleCollapseInLiveNodesAndMaintainPostings() throws IOException
+    public void multipleRowsRoutedToSameCanonicalHandleCollapseInLiveNodesAndMaintainPostings()
     {
         // Simulate multiple rows (row 0, 5, 8, 12) all routed to the same canonical handle (0, 7)
         VectorHandle canonical = new VectorHandle(0, 7);
@@ -495,7 +495,7 @@ public class VectorMergePostingsTest
     }
 
     @Test
-    public void multipleCanonicalHandlesWithDuplicateRowsMaintainPostingsAndOrdinalMapping() throws IOException
+    public void multipleCanonicalHandlesWithDuplicateRowsMaintainPostingsAndOrdinalMapping()
     {
         // 4 distinct canonical handles across sources, each receiving multiple row IDs
         VectorHandle canonicalA = new VectorHandle(0, 3);
@@ -604,7 +604,7 @@ public class VectorMergePostingsTest
                 VectorHandle candidate = (VectorHandle) row[1];
                 int segmentRowId = (Integer) row[2];
 
-                VectorHandle canonical = deduplicator.deduplicate(vec, candidate);
+                VectorHandle canonical = deduplicator.deduplicate(vec, () -> candidate);
                 postings.put(canonical, segmentRowId);
             }
 

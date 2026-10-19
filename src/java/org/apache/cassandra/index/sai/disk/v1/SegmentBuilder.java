@@ -474,13 +474,11 @@ public abstract class SegmentBuilder
             }
             rowsWithVector.incrementAndGet();
 
-            // Resolution runs SYNCHRONOUSLY on the compaction thread.
-            org.apache.cassandra.index.sai.disk.vector.VectorHandle candidate = resolveHandle(key);
-            if (candidate == null)
-                return 0; // anomaly recorded; flush will fail loudly
-
+            // Resolution runs SYNCHRONOUSLY on the compaction thread, but only for vectors not seen before.
             org.apache.cassandra.index.sai.disk.vector.VectorHandle handle =
-                    deduplicator.deduplicate(vectorBuf, candidate);
+                    deduplicator.deduplicate(vectorBuf, () -> resolveHandle(key));
+            if (handle == null)
+                return 0; // anomaly recorded inside resolveHandle; flush will fail loudly
 
             if (mergeInsertFanout != null)
             {

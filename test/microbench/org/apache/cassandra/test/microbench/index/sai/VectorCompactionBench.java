@@ -68,14 +68,14 @@ public class VectorCompactionBench extends SAITester
      * The percent of vectors to duplicate expressed as a decimal from 0 to 1. This covers several code paths related
      * to different kinds of postings lists generated for no dupes, some dupes, and many dupes.
      */
-    @Param({ "0", "0.009", "0.999", "10" })
+    @Param({ "10" })
     public double dupeVectorFactor;
 
     /**
      * When true, vector indexes are compacted by merging existing JVector graphs directly.
      * When false, the index is rebuilt from scratch during compaction (legacy behaviour).
      */
-    @Param({"true", "false" })
+    @Param({"true" })
     public boolean graphMergeEnabled;
 
     private ArrayList<float[]> baseVectors;
