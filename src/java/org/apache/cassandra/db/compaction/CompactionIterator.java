@@ -280,31 +280,19 @@ public class CompactionIterator implements UnfilteredPartitionIterator
      */
     private final CompactionRowSourceTagging.SourceResolver sourceResolver = this::resolveSource;
 
-    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(CompactionIterator.class);
-
     @javax.annotation.Nullable
     private SSTableReader resolveSource(int versionIdx, DecoratedKey key)
     {
         if (versionIdx < 0 || versionIdx >= scanners.size())
-        {
-            logger.info("DEBUG resolveSource: versionIdx={} out of bounds (scanners.size={}) for key={}", versionIdx, scanners.size(), key);
             return null;
-        }
         Collection<SSTableReader> backing = scanners.get(versionIdx).getBackingSSTables();
-        logger.info("DEBUG resolveSource: versionIdx={}, key={}, backing.size={}", versionIdx, key, backing.size());
         if (backing.size() == 1)
-        {
-            SSTableReader r = backing.iterator().next();
-            logger.info("DEBUG resolveSource: single backing sstable={} for versionIdx={}, key={}", r.descriptor.id, versionIdx, key);
-            return r;
-        }
+            return backing.iterator().next();
         for (SSTableReader reader : backing)
         {
-            logger.info("DEBUG resolveSource: checking reader={}, first={}, last={}, key={}", reader.descriptor.id, reader.first, reader.last, key);
             if (reader.first.compareTo(key) <= 0 && reader.last.compareTo(key) >= 0)
                 return reader;
         }
-        logger.info("DEBUG resolveSource: NO matching sstable found for versionIdx={}, key={}", versionIdx, key);
         return null;
     }
 
