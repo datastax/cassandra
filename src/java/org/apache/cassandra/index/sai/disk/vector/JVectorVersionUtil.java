@@ -16,12 +16,14 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ExecutorFactory;
+import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -29,7 +31,6 @@ import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.BoundedFanout;
 import org.apache.cassandra.index.sai.utils.InsertFanout;
-import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.ResizableSemaphore;
 import org.apache.cassandra.index.sai.utils.UnboundedFanout;
 
@@ -59,12 +60,15 @@ public class JVectorVersionUtil
     private static final class BuildPool
     {
         final int threads;
-        final ForkJoinPool pool;
+        final ExecutorPlus pool;
 
         BuildPool(int threads)
         {
             this.threads = Math.max(1, threads);
-            this.pool = new ForkJoinPool(this.threads, new LowPriorityThreadFactory(), null, false);
+            this.pool = ExecutorFactory.Global.executorFactory()
+                                              .configurePooled("JVectorBuild", this.threads)
+                                              .withThreadPriority(Thread.MIN_PRIORITY)
+                                              .build();
             logger.info("jvector build pool created: {} low-priority threads.", this.threads);
         }
     }
@@ -87,8 +91,8 @@ public class JVectorVersionUtil
         }
     }
 
-    /** The shared jvector build/compaction {@link ForkJoinPool}. */
-    public static ForkJoinPool compactionBuildPool()
+    /** The shared jvector build/compaction {@link ExecutorService}. */
+    public static ExecutorService compactionBuildPool()
     {
         return currentBuildPool().pool;
     }
@@ -138,7 +142,7 @@ public class JVectorVersionUtil
      */
     public static InsertFanout newInsertFanout()
     {
-        ForkJoinPool pool = currentBuildPool().pool;
+        ExecutorService pool = currentBuildPool().pool;
         int permits = desiredInflightPermits;
         if (permits <= 0)
             return new UnboundedFanout(pool);
