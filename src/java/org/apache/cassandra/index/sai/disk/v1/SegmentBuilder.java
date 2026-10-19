@@ -367,7 +367,6 @@ public abstract class SegmentBuilder
     public static class VectorMergeSegmentBuilder extends SegmentBuilder
     {
         private final List<org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger.SourceSegment> sourceSegments;
-        private final org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger merger;
         /**
          * Output postings keyed by the {@link org.apache.cassandra.index.sai.disk.vector.VectorHandle} of the
          * source graph node that owns the row's winning vector cell, together with the set of surviving
@@ -411,11 +410,6 @@ public abstract class SegmentBuilder
             this.sourceSegments = sourceSegments;
             this.column = components.context().getDefinition();
 
-            this.merger = new org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger(
-                    sourceSegments,
-                    components.context().getIndexWriterConfig().getSimilarityFunction(),
-                    components);
-
             // Id bounds for the postings' live sets, and the sstable → segments routing table.
             int[] idUpperBound = new int[sourceSegments.size()];
             var groups = new java.util.HashMap<org.apache.cassandra.io.sstable.SSTableId<?>, java.util.List<Integer>>();
@@ -443,8 +437,7 @@ public abstract class SegmentBuilder
                     VectorCompactionMetrics.Phase.POSTINGS_MAP_SETUP, components.context()))
             {
                 postings = new org.apache.cassandra.index.sai.disk.vector.VectorMergePostings(idUpperBound, estimatedRows);
-                deduplicator = new org.apache.cassandra.index.sai.disk.vector.VectorDeduplicator(
-                        (int) Math.clamp(estimatedRows, 1000L, Integer.MAX_VALUE - 100_000));
+                deduplicator = new org.apache.cassandra.index.sai.disk.vector.VectorDeduplicator(estimatedRows);
             }
 
             totalBytesAllocated = 0;
@@ -670,8 +663,14 @@ public abstract class SegmentBuilder
                      ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
                              VectorCompactionMetrics.Phase.TOTAL_MERGE, components.context()))
                 {
-                    var componentsMetadata = merger.merge(postings,
-                            new org.apache.cassandra.index.sai.disk.vector.CompactionProgressLimiter(op, components.context()));
+                    org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger merger =
+                            new org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger(
+                                    sourceSegments,
+                                    postings,
+                                    components.context().getIndexWriterConfig().getSimilarityFunction(),
+                                    components,
+                                    new org.apache.cassandra.index.sai.disk.vector.CompactionProgressLimiter(op, components.context()));
+                    var componentsMetadata = merger.merge();
                     op.setCompleted(total);
                     metadataBuilder.setComponentsMetadata(componentsMetadata);
                 }

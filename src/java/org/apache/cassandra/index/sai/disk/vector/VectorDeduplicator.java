@@ -67,12 +67,12 @@ public final class VectorDeduplicator implements AutoCloseable
      * @param estimatedEntries approximate number of distinct vectors expected; used to size the map
      * @throws IOException if the temporary backing file cannot be created
      */
-    public VectorDeduplicator(int estimatedEntries) throws IOException
+    public VectorDeduplicator(long estimatedEntries) throws IOException
     {
         this.salt = new byte[32];
         new SecureRandom().nextBytes(this.salt);
 
-        int entries = Math.max(estimatedEntries, 1);
+        long entries = Math.max(estimatedEntries, 1);
         this.backingFile = FileUtils.createTempFile("deduplicator_chronicle_map", ".map");
         this.map = ChronicleMapBuilder.of(VectorHash.class, VectorHandle.class)
                                       .averageKeySize(VectorHash.BYTES)
