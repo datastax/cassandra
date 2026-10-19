@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.IntFunction;
 
@@ -37,6 +38,7 @@ import org.agrona.collections.IntArrayList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.disk.ReaderSupplier;
 import io.github.jbellis.jvector.disk.ReaderSupplierFactory;
 import io.github.jbellis.jvector.graph.disk.CompactionDestination;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
@@ -46,16 +48,16 @@ import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
-import io.github.jbellis.jvector.util.AtomicFixedBitSet;
-import io.github.jbellis.jvector.util.BitSet;
 import io.github.jbellis.jvector.util.work.ProgressLimiter;
 import io.github.jbellis.jvector.util.work.ProgressTracker;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.index.sai.SSTableIndex;
+import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
@@ -104,59 +106,19 @@ public class CompactionGraphMerger
     public static volatile boolean ENABLED = CassandraRelevantProperties.SAI_VECTOR_GRAPH_COMPACTION_MERGE_ENABLED.getBoolean();
 
     /**
-     * The merger's own post-compact work stage, reported in BYTES (vs jvector's ordinal-unit
-     * stages): the footer CRC re-read over the whole terms body. Routed by {@link CompactionProgressLimiter} to
-     * {@link VectorMergeOperation#reportBytes} so the epilogue shows byte progress instead of
-     * sitting at ratio 1.0 with no unit flow.
-     */
-    public enum EpilogueStage implements io.github.jbellis.jvector.util.work.WorkStage
-    {
-        EPILOGUE
-    }
-
-    /**
      * One input segment for the merge. The {@link CassandraDiskAnn} provides the on-disk graph
      * (via {@link CassandraDiskAnn#getOnDiskGraph()}), PQ, and other metadata.
+     *
+     * @param sstableIndex The SAI index owning this segment's on-disk graph, referenced for the merge's full duration
+     *                     so a concurrent DROP / index teardown cannot unmap the source files out from under
+     *                     the compactor's reads. Null only on the test path, where the caller manages source lifetime
+     *                     directly.
      */
-    public static final class SourceSegment
+    public record SourceSegment(CassandraDiskAnn diskAnn, long segmentRowIdOffset, SSTableIndex sstableIndex)
     {
-        private final CassandraDiskAnn diskAnn;
-        private final long segmentRowIdOffset;
-        // The SAI index owning this segment's on-disk graph, referenced for the merge's full duration so a
-        // concurrent DROP / index teardown cannot unmap the source files out from under the compactor's
-        // reads. Null only on the test path, where the caller manages source lifetime directly.
-        private final SSTableIndex sstableIndex;
-
-        public SourceSegment(CassandraDiskAnn diskAnn, long segmentRowIdOffset)
-        {
-            this(diskAnn, segmentRowIdOffset, null);
-        }
-
-        public SourceSegment(CassandraDiskAnn diskAnn, long segmentRowIdOffset, SSTableIndex sstableIndex)
-        {
-            this.diskAnn = diskAnn;
-            this.segmentRowIdOffset = segmentRowIdOffset;
-            this.sstableIndex = sstableIndex;
-        }
-
-        public CassandraDiskAnn diskAnn()
-        {
-            return diskAnn;
-        }
-
-        public long segmentRowIdOffset()
-        {
-            return segmentRowIdOffset;
-        }
-
         public OnDiskGraphIndex graph()
         {
-            return diskAnn.getOnDiskGraph();
-        }
-
-        public SSTableIndex sstableIndex()
-        {
-            return sstableIndex;
+                return diskAnn.getOnDiskGraph();
         }
     }
 
@@ -205,8 +167,7 @@ public class CompactionGraphMerger
         List<OrdinalMapper> remappers;
         int totalGlobalOrdinals;
 
-        try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
-                VectorCompactionMetrics.Phase.ORDINAL_REMAP, context))
+        try (var _ = progressLimiter.startPhase(VectorCompactionMetrics.Phase.ORDINAL_REMAP))
         {
             remappers = postings.ordinalMapping();
             totalGlobalOrdinals = postings.size();
@@ -253,100 +214,88 @@ public class CompactionGraphMerger
                 pqStream.flush();
                 pqOffset = pqChannel.position();
                 CassandraOnHeapGraph.writePqHeader(pqStream,
-                                                   sources.get(0).diskAnn().isPqUnitVectors(),
+                                                   sources.getFirst().diskAnn().isPqUnitVectors(),
                                                    CompressionType.PRODUCT_QUANTIZATION,
                                                    version);
                 pqStream.flush();
             }
             long pqSidecarStartOffset = pqChannel.position();
-            CompactionDestination pqDestination = CompactionDestination.channel(pqChannel);
-            CompactionDestination termsDestination = CompactionDestination.channel(termsChannel);
 
             // The graph body is written straight into TERMS_DATA after the SAI header above.
-            CompactionResult compactionResult = compactTermsAndPq(sourceCompressed, remappers, termsDestination, pqSidecar ? pqDestination : null);
+            CompactionResult compactionResult = compactTermsAndPq(sourceCompressed, remappers, termsChannel, pqSidecar ? pqChannel : null);
             long compactMs = compactionResult.compactMs();
             long termsLength = compactionResult.termsLength();
             long termsOffset = compactionResult.termsOffset();
             List<OrdinalMapper> effective = compactionResult.ordinalMapping();
-            logger.info("Vector graph merge: {} ordinals", totalGlobalOrdinals);
+            logger.info("CompactionGraphMerger: TERMS_DATA graph body written in place ({} source segments, {} surviving ordinals, {} bytes body at offset {}) in {}ms",
+                        sources.size(), totalGlobalOrdinals, termsLength, termsOffset, compactMs);
 
             // When FUSED_PQ is in use, the compactor retrains the PQ codebook and embeds it in the
             // output graph. Read it back (from the in-place body offset) so the Cassandra PQ component
             // holds the same codebook used for in-graph compressed neighbor scoring.
             ProductQuantization retrainedPQ = loadRetrainedPQ(termsFile, termsOffset);
 
-            // Epilogue byte progress: the CRC re-read spans the whole terms file (header+body+8) and
-            // the codes tail is a known size; report both cumulatively in BYTES so the post-merge
-            // window advances instead of sitting at the saturated ordinal ratio.
+            // The footer CRC re-read spans the whole terms file (header+body+8). The limiter reports
+            // it in BYTES to the merge operation, so the post-compact window advances instead of
+            // sitting at the saturated ordinal ratio.
             long crcSpan = termsOffset + termsLength + 8;
-            long epilogueTotal = crcSpan;
-            // One phase for the whole epilogue, opened here and closed when merge() returns. jvector's
-            // PhaseScope contract is one scope per phase with non-decreasing counters inside it, so the
-            // footer CRC and the postings/PQ write report into the same scope rather than opening the
-            // stage twice and restarting its count.
-            try (ProgressTracker.PhaseScope epilogue = progressLimiter.startPhase(EpilogueStage.EPILOGUE))
+            try (ProgressTracker.PhaseScope crc = progressLimiter.startPhase(VectorCompactionMetrics.Phase.FOOTER_CRC))
             {
-                try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
-                        VectorCompactionMetrics.Phase.FOOTER_CRC, context))
-                {
-                    epilogue.onProgress(0, epilogueTotal);
-                    SAICodecUtils.writeFooterForExternalBody(termsFile, termsOffset + termsLength,
-                                                             bytes -> epilogue.onProgress(bytes, epilogueTotal));
-                    epilogue.onProgress(crcSpan, epilogueTotal);
-                }
-                if (pqSidecar)
-                {
-                    long pqBodyLength = pqChannel.size() - pqSidecarStartOffset;
-                    pqLength = pqSidecarStartOffset + pqBodyLength - pqOffset;
-                    SAICodecUtils.writeFooterForExternalBody(pqFile, pqSidecarStartOffset + pqBodyLength);
-                }
-                logger.info("CompactionGraphMerger: TERMS_DATA written in place ({} source segments, {} surviving ordinals, {} bytes body at offset {}) in {}ms",
-                            sources.size(), totalGlobalOrdinals, termsLength, termsOffset, compactMs);
-
-                context.getIndexMetrics().ifPresent(m -> {
-                    m.vectorMergeCount.inc();
-                    m.vectorMergeMillis.update(compactMs);
-                    m.vectorMergeBytesWritten.update(termsLength);
-                    m.vectorMergeSurvivingOrdinals.update(totalGlobalOrdinals);
-                });
-                logger.debug("CompactionGraphMerger measurement: vectorMergeCount+=1, vectorMergeMillis={}, vectorMergeBytesWritten={}, vectorMergeSurvivingOrdinals={}",
-                             compactMs, termsLength, totalGlobalOrdinals);
-
-                // --- Step 3: Write postings and PQ ---
-                // The non-fused PQ sidecar was already written in place by jvector.
-                // For FUSED_PQ or INLINE_VECTORS-only, write the PQ component now.
-                if (!pqSidecar)
-                {
-                    PqResult pqResult = writePqComponent(retrainedPQ);
-                    pqOffset = pqResult.pqOffset();
-                    pqLength = pqResult.pqLength();
-                }
-
-                PostingsResult postingsResult = writePostings(effective, totalGlobalOrdinals);
-                epilogue.onProgress(epilogueTotal, epilogueTotal);
-
-                return CassandraOnHeapGraph.createMetadataMap(termsOffset, termsLength,
-                                                              postingsResult.postingsOffset(), postingsResult.postingsLength(),
-                                                              pqOffset, pqLength);
+                crc.onProgress(0, crcSpan);
+                SAICodecUtils.writeFooterForExternalBody(termsFile, termsOffset + termsLength,
+                                                         bytes -> crc.onProgress(bytes, crcSpan));
+                crc.onProgress(crcSpan, crcSpan);
             }
+            if (pqSidecar)
+            {
+                long pqBodyLength = pqChannel.size() - pqSidecarStartOffset;
+                pqLength = pqSidecarStartOffset + pqBodyLength - pqOffset;
+                SAICodecUtils.writeFooterForExternalBody(pqFile, pqSidecarStartOffset + pqBodyLength);
+            }
+            context.getIndexMetrics().ifPresent(m -> {
+                m.vectorMergeCount.inc();
+                m.vectorMergeMillis.update(compactMs);
+                m.vectorMergeBytesWritten.update(termsLength);
+                m.vectorMergeSurvivingOrdinals.update(totalGlobalOrdinals);
+            });
+            logger.debug("CompactionGraphMerger measurement: vectorMergeCount+=1, vectorMergeMillis={}, vectorMergeBytesWritten={}, vectorMergeSurvivingOrdinals={}",
+                         compactMs, termsLength, totalGlobalOrdinals);
+
+            // --- Step 3: Write postings and PQ ---
+            // The non-fused PQ sidecar was already written in place by jvector.
+            // For FUSED_PQ or INLINE_VECTORS-only, write the PQ component now.
+            if (!pqSidecar)
+            {
+                PqResult pqResult = writePqComponent(retrainedPQ);
+                pqOffset = pqResult.pqOffset();
+                pqLength = pqResult.pqLength();
+            }
+
+            PostingsResult postingsResult = writePostings(effective, totalGlobalOrdinals);
+
+            return CassandraOnHeapGraph.createMetadataMap(termsOffset, termsLength,
+                                                          postingsResult.postingsOffset(), postingsResult.postingsLength(),
+                                                          pqOffset, pqLength);
         } // end try-with-resources: termsChannel + pqChannel
     }
 
     private record CompactionResult(long termsOffset, long termsLength, List<OrdinalMapper> ordinalMapping, long compactMs) {}
 
     /**
-     * Builds and runs the jvector compactor, writing the graph body into {@code termsDestination}
-     * (and optionally {@code pqDestination} for the non-fused PQ sidecar).
-     * Reads {@code termsOffset} directly from the channel position, which is already positioned
-     * immediately after the SAI header written by the caller.
+     * Builds and runs the jvector compactor, writing the graph body into a {@link CompactionDestination}
+     * wrapping {@code termsChannel} (and optionally one wrapping {@code pqChannel} for the non-fused
+     * PQ sidecar). Reads {@code termsOffset} directly from the channel position, which is already
+     * positioned immediately after the SAI header written by the caller.
      *
-     * @param pqDestination null when the PQ sidecar is not in use
+     * @param pqChannel null when the PQ sidecar is not in use
      */
     private CompactionResult compactTermsAndPq(List<CompressedVectors> sourceCompressed,
                                                List<OrdinalMapper> remappers,
-                                               CompactionDestination termsDestination,
-                                               CompactionDestination pqDestination) throws IOException
+                                               FileChannel termsChannel,
+                                               FileChannel pqChannel) throws IOException
     {
+        CompactionDestination termsDestination = CompactionDestination.channel(termsChannel);
+        CompactionDestination pqDestination = pqChannel != null ? CompactionDestination.channel(pqChannel) : null;
         OnDiskGraphIndexCompactor compactor = new OnDiskGraphIndexCompactor(
                 sources.stream().map(SourceSegment::graph).collect(toList()),
                 sourceCompressed,
@@ -362,10 +311,9 @@ public class CompactionGraphMerger
         // Upstream jvector exposes no codebook-policy, code-cache, decoder-sharing or canonical-code
         // controls: the merge always retrains the codebook and re-encodes. Nothing to configure here.
 
-        long termsOffset = termsDestination.channel().position();
+        long termsOffset = termsChannel.position();
         long compactStart = System.nanoTime();
-        try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
-                VectorCompactionMetrics.Phase.JVECTOR_COMPACT, context))
+        try (var _ = progressLimiter.startPhase(VectorCompactionMetrics.Phase.JVECTOR_COMPACT))
         {
             if (pqDestination != null)
                 compactor.compact(termsDestination, pqDestination);
@@ -373,7 +321,7 @@ public class CompactionGraphMerger
                 compactor.compact(termsDestination);
         }
         long compactMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - compactStart);
-        long termsLength = termsDestination.channel().size() - termsOffset;
+        long termsLength = termsChannel.size() - termsOffset;
 
         // --- Step 2b: use the ordinal mapping jvector ACTUALLY used.
         //
@@ -400,11 +348,10 @@ public class CompactionGraphMerger
     {
         if (!hasFusedPQ)
             return null;
-        try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
-                     VectorCompactionMetrics.Phase.LOAD_RETRAINED_PQ, context);
-             var rs = ReaderSupplierFactory.open(termsFile))
+        try (var _ = progressLimiter.startPhase(VectorCompactionMetrics.Phase.LOAD_RETRAINED_PQ);
+             ReaderSupplier rs = ReaderSupplierFactory.open(termsFile))
         {
-            var compactedGraph = OnDiskGraphIndex.load(rs, termsOffset);
+            OnDiskGraphIndex compactedGraph = OnDiskGraphIndex.load(rs, termsOffset);
             return ((FusedPQ) compactedGraph.getFeatures().get(FeatureId.FUSED_PQ)).getPQ();
         }
     }
@@ -418,15 +365,15 @@ public class CompactionGraphMerger
     private PqResult writePqComponent(ProductQuantization retrainedPQ) throws IOException
     {
         Version version = context.version();
-        var pqComponent = perIndexComponents.addOrGet(IndexComponentType.PQ);
-        try (var pqOutput = pqComponent.openOutput(true))
+        IndexComponent.ForWrite pqComponent = perIndexComponents.addOrGet(IndexComponentType.PQ);
+        try (IndexOutputWriter pqOutput = pqComponent.openOutput(true))
         {
             SAICodecUtils.writeHeader(pqOutput);
             long pqOffset = pqOutput.getFilePointer();
             if (hasFusedPQ)
             {
                 CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(),
-                                                   sources.get(0).diskAnn().isPqUnitVectors(),
+                                                   sources.getFirst().diskAnn().isPqUnitVectors(),
                                                    CompressionType.PRODUCT_QUANTIZATION,
                                                    version);
                 retrainedPQ.write(pqOutput.asSequentialWriter(), version.onDiskFormat().jvectorFileFormatVersion());
@@ -454,9 +401,8 @@ public class CompactionGraphMerger
                                          int totalGlobalOrdinals) throws IOException
     {
         Version version = context.version();
-        try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
-                     VectorCompactionMetrics.Phase.POSTINGS_PQ_WRITE, context);
-             var postingsOutput =
+        try (var _ = progressLimiter.startPhase(VectorCompactionMetrics.Phase.POSTINGS_PQ_WRITE);
+             IndexOutputWriter postingsOutput =
                      perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true))
         {
             SAICodecUtils.writeHeader(postingsOutput);
@@ -517,10 +463,10 @@ public class CompactionGraphMerger
      */
     static boolean validateFeatureSets(List<OnDiskGraphIndex> graphs)
     {
-        boolean hasFusedPQ = graphs.get(0).getFeatureSet().contains(FeatureId.FUSED_PQ);
-        for (var graph : graphs)
+        boolean hasFusedPQ = graphs.getFirst().getFeatureSet().contains(FeatureId.FUSED_PQ);
+        for (OnDiskGraphIndex graph : graphs)
         {
-            var features = graph.getFeatureSet();
+            Set<FeatureId> features = graph.getFeatureSet();
             if (!features.contains(FeatureId.INLINE_VECTORS))
                 throw new IllegalStateException("CompactionGraphMerger requires INLINE_VECTORS; got " + features);
             if (features.contains(FeatureId.FUSED_PQ) != hasFusedPQ)
@@ -528,36 +474,4 @@ public class CompactionGraphMerger
         }
         return hasFusedPQ;
     }
-
-    /**
-     * Builds a {@link AtomicFixedBitSet} marking all jvector-live nodes in {@code graph} (i.e. all
-     * non-tombstoned slots), without consulting the postings map.
-     *
-     * <p>When the on-disk graph has no tombstoned slots ({@code idUpperBound == size(0)}), all
-     * node IDs fall in [0, liveCount) and a simple bulk-set suffices.  When tombstoned slots
-     * exist ({@code idUpperBound > size(0)}), some stored node IDs equal or exceed
-     * {@code size(0)}, so the bitset must be sized to {@code idUpperBound} and populated by
-     * iterating the actual live-node IDs returned by {@link OnDiskGraphIndex#getNodes(int)}.
-     *
-     * <p>Used by tests to verify the tombstone-gap fix in isolation. Production code inlines
-     * equivalent logic inside {@link #merge} with the additional postings-map check.
-     */
-    static BitSet buildLiveBitset(OnDiskGraphIndex graph)
-    {
-        int liveCount = graph.size(0);
-        int idBound = graph.getIdUpperBound();
-        var bs = new AtomicFixedBitSet(idBound);
-        if (idBound == liveCount)
-        {
-            for (int i = 0; i < liveCount; i++)
-                bs.set(i);
-        }
-        else
-        {
-            var nodeIt = graph.getNodes(0);
-            while (nodeIt.hasNext()) bs.set(nodeIt.nextInt());
-        }
-        return bs;
-    }
-
 }

@@ -18,12 +18,14 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.cassandra.io.util.FileUtils;
@@ -37,7 +39,6 @@ import org.apache.cassandra.io.util.FileUtils;
  */
 class MappedLongArray implements Closeable
 {
-    private final RandomAccessFile raf;
     private final FileChannel channel;
     private final Arena arena = Arena.ofShared();
     private final AtomicReference<MemorySegment> segment = new AtomicReference<>();
@@ -50,8 +51,11 @@ class MappedLongArray implements Closeable
      */
     MappedLongArray(java.io.File file, int initialCapacity) throws IOException
     {
-        this.raf = new RandomAccessFile(file, "rw");
-        this.channel = raf.getChannel();
+        this.channel = FileChannel.open(file.toPath(),
+                                        StandardOpenOption.READ,
+                                        StandardOpenOption.WRITE,
+                                        StandardOpenOption.CREATE,
+                                        StandardOpenOption.TRUNCATE_EXISTING);
         remap(0, initialCapacity);
     }
 
@@ -90,7 +94,10 @@ class MappedLongArray implements Closeable
             assert oldCapacity <= newCapacity;
 
             long newByteSize = (long) newCapacity * Long.BYTES;
-            raf.setLength(newByteSize);
+            // Extend the file to newByteSize by writing a zero byte at the last position.
+            // FileChannel.truncate() only shrinks; a positional write is the standard way to grow.
+            if (channel.size() < newByteSize)
+                channel.write(ByteBuffer.allocate(1), newByteSize - 1);
 
             MemorySegment newSegment = channel.map(FileChannel.MapMode.READ_WRITE, 0, newByteSize, arena);
             // Initialize the newly added region to the sentinel -1L (all bits set to 1).
@@ -109,7 +116,7 @@ class MappedLongArray implements Closeable
     @Override
     public void close() throws IOException
     {
-        FileUtils.closeQuietly(raf, channel);
+        FileUtils.closeQuietly(channel);
         arena.close();
     }
 }

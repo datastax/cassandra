@@ -18,16 +18,16 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.concurrent.Semaphore;
+import org.apache.cassandra.utils.concurrent.Semaphore;
 
 /**
  * A {@link Semaphore} whose total permit count can be changed at runtime. Growing adds permits
- * ({@link Semaphore#release(int)}); shrinking removes them ({@link Semaphore#reducePermits(int)}),
- * which may leave the available count temporarily negative until in-flight holders release — a safe
- * way to lower a budget without disturbing work already admitted. Resizing is atomic with respect to
- * other resizes.
+ * ({@link Semaphore#release(int)}); shrinking removes them (via {@code reducePermits} on the
+ * underlying {@link Semaphore.Standard}), which may leave the available count temporarily negative
+ * until in-flight holders release — a safe way to lower a budget without disturbing work already
+ * admitted. Resizing is atomic with respect to other resizes.
  */
-public final class ResizableSemaphore extends Semaphore
+public final class ResizableSemaphore extends Semaphore.Standard
 {
     private int totalPermits;
 
