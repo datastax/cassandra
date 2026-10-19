@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.metrics;
 
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,11 +79,14 @@ public final class VectorCompactionMetrics extends MicrometerMetrics
     {
         try
         {
+            String keyspace = tag(context == null ? null : context.getKeyspace());
+            String table = tag(context == null ? null : context.getTable());
+            String index = tag(context == null ? null : context.getIndexName());
             Tags phaseTags = Tags.of("owner", owner,
                                      "phase", phase.name().toLowerCase(Locale.ROOT),
-                                     "keyspace", tag(context == null ? null : context.getKeyspace()),
-                                     "table", tag(context == null ? null : context.getTable()),
-                                     "index", tag(context == null ? null : context.getIndexName()));
+                                     "keyspace", keyspace,
+                                     "table", table,
+                                     "index", index);
             Timer.Sample sample = Timer.start();
             Timer timer = timer(METRIC_NAME, false, phaseTags);
             return new ProgressTracker.PhaseScope()
@@ -97,7 +101,21 @@ public final class VectorCompactionMetrics extends MicrometerMetrics
                 {
                     try
                     {
-                        sample.stop(timer);
+                        long elapsedNanos = sample.stop(timer);
+                        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(elapsedNanos);
+                        if (phase == Phase.THROTTLE_WAIT)
+                        {
+                            if (logger.isTraceEnabled())
+                                logger.trace("Vector compaction phase {}:{} completed in {} ms for [{}.{}.{}]",
+                                             owner, phase.name().toLowerCase(Locale.ROOT), elapsedMs,
+                                             keyspace, table, index);
+                        }
+                        else
+                        {
+                            logger.info("Vector compaction phase {}:{} completed in {} ms for [{}.{}.{}]",
+                                        owner, phase.name().toLowerCase(Locale.ROOT), elapsedMs,
+                                        keyspace, table, index);
+                        }
                     }
                     catch (Throwable t)
                     {

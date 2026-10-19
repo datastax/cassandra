@@ -613,7 +613,7 @@ public class CompactionGraph implements Closeable, Accountable
                 }
 
                 SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
-                logger.info("Writing graph took {}ms", (nanoTime() - start) / 1_000_000);
+                logger.info("Writing graph took {} ms", (nanoTime() - start) / 1_000_000);
                 termsLength = writer.getOutput().position() - termsOffset;
             }
             // write remaining footers/checksums

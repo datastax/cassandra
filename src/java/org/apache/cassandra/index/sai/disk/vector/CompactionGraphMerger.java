@@ -228,7 +228,7 @@ public class CompactionGraphMerger
             long termsLength = compactionResult.termsLength();
             long termsOffset = compactionResult.termsOffset();
             List<OrdinalMapper> effective = compactionResult.ordinalMapping();
-            logger.info("CompactionGraphMerger: TERMS_DATA graph body written in place ({} source segments, {} surviving ordinals, {} bytes body at offset {}) in {}ms",
+            logger.info("CompactionGraphMerger: TERMS_DATA graph body written in place ({} source segments, {} surviving ordinals, {} bytes body at offset {}) in {} ms",
                         sources.size(), totalGlobalOrdinals, termsLength, termsOffset, compactMs);
 
             // When FUSED_PQ is in use, the compactor retrains the PQ codebook and embeds it in the
@@ -265,14 +265,18 @@ public class CompactionGraphMerger
             // --- Step 3: Write postings and PQ ---
             // The non-fused PQ sidecar was already written in place by jvector.
             // For FUSED_PQ or INLINE_VECTORS-only, write the PQ component now.
-            if (!pqSidecar)
+            PostingsResult postingsResult;
+            try (var _ = progressLimiter.startPhase(VectorCompactionMetrics.Phase.POSTINGS_PQ_WRITE))
             {
-                PqResult pqResult = writePqComponent(retrainedPQ);
-                pqOffset = pqResult.pqOffset();
-                pqLength = pqResult.pqLength();
-            }
+                if (!pqSidecar)
+                {
+                    PqResult pqResult = writePqComponent(retrainedPQ);
+                    pqOffset = pqResult.pqOffset();
+                    pqLength = pqResult.pqLength();
+                }
 
-            PostingsResult postingsResult = writePostings(effective, totalGlobalOrdinals);
+                postingsResult = writePostings(effective, totalGlobalOrdinals);
+            }
 
             return CassandraOnHeapGraph.createMetadataMap(termsOffset, termsLength,
                                                           postingsResult.postingsOffset(), postingsResult.postingsLength(),
@@ -403,8 +407,7 @@ public class CompactionGraphMerger
                                          int totalGlobalOrdinals) throws IOException
     {
         Version version = context.version();
-        try (var _ = progressLimiter.startPhase(VectorCompactionMetrics.Phase.POSTINGS_PQ_WRITE);
-             IndexOutputWriter postingsOutput =
+        try (IndexOutputWriter postingsOutput =
                      perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true))
         {
             SAICodecUtils.writeHeader(postingsOutput);
