@@ -26,6 +26,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
@@ -44,7 +45,7 @@ public class CoordinatorReadLatencyMetricTest extends TestBaseImpl
         try (Cluster cluster = init(builder().withNodes(1).start()))
         {
             // CC only supports paging in bytes. Set the smallest page size allowed.
-            cluster.get(1).callOnInstance(() -> DatabaseDescriptor.getRawConfig().aggregation_subpage_size_in_kb = 1);
+            cluster.get(1).callOnInstance(() -> DatabaseDescriptor.getRawConfig().aggregation_subpage_size = new DataStorageSpec.IntKibibytesBound(1));
 
             // Create rows greater than the 1kb subpage size
             String payload = StringUtils.repeat('1', 1024 * 2);

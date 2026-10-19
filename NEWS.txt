@@ -73,6 +73,9 @@ An HCD 1.2 cassandra.yaml is accepted with these differences:
     - `hints_request_timeout_in_ms` is a deprecated alias of `hints_request_timeout`.
     - `repair_prepare_message_timeout_in_ms` is a deprecated alias of `repair_prepare_message_timeout`. The alias
       accepts a number of milliseconds (HCD 1.2) as well as a duration such as `10000ms` (earlier HCD 2.0 builds).
+    - `aggregation_subpage_size_in_kb` is a deprecated alias of `aggregation_subpage_size` (e.g. `2048KiB`).
+    - `sai_options.segment_write_buffer_space_mb` is a deprecated alias of `sai_options.segment_write_buffer_size`
+      (e.g. `1024MiB`), the name used by Apache Cassandra 5.0 and by the cassandra.yaml comments.
 The following HCD 1.2 properties are not accepted and must be removed or translated before the upgrade,
 otherwise the node does not start ("Invalid yaml. Please remove properties [...]"):
     - the `guardrails:` block (commented out in the HCD 1.2 cassandra.yaml): guardrails are top-level

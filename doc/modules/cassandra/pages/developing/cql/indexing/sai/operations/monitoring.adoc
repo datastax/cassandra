@@ -70,12 +70,12 @@ The global indexing metrics for this node are:
 +
 [TIP]
 ====
-In cassandra.yaml, `segment_write_buffer_space_mb` limits the amount of heap used to build on-disk column indexes during compaction and initial builds.
-The default is 1024 MB.
+In cassandra.yaml, `segment_write_buffer_size` limits the amount of heap used to build on-disk column indexes during compaction and initial builds.
+The default is 1024MiB.
 ====
 
-For example, if there is only one column index building, SAI can buffer up to `segment_write_buffer_space_mb`.
-If there is one column index building per table across 8 compactors, each index will be eligible to flush once it reaches (`segment_write_buffer_space_mb / 8`) MBs.
+For example, if there is only one column index building, SAI can buffer up to `segment_write_buffer_size`.
+If there is one column index building per table across 8 compactors, each index will be eligible to flush once it reaches (`segment_write_buffer_size / 8`) MBs.
 
 * `SegmentBufferSpaceUsedBytes` -- The heap currently being used to buffer SSTable index segments during compaction and index builds.
 

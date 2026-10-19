@@ -24,6 +24,7 @@ import org.junit.runner.RunWith;
 import java.lang.reflect.Field;
 
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 
@@ -43,13 +44,13 @@ public class TinySegmentFlushingFailureTest extends CQLTester
             Field confField = DatabaseDescriptor.class.getDeclaredField("conf");
             confField.setAccessible(true);
             Config conf = (Config) confField.get(null);
-            conf.sai_options.segment_write_buffer_space_mb = 0;
+            conf.sai_options.segment_write_buffer_size = new DataStorageSpec.IntMebibytesBound(0);
 
-            System.out.println("Configuration set: segment_write_buffer_space_mb = " + 0);
+            System.out.println("Configuration set: segment_write_buffer_size = " + 0);
         }
         catch (NoSuchFieldException | IllegalAccessException e)
         {
-            throw new RuntimeException("Failed to set configuration segment_write_buffer_space_mb = 0", e);
+            throw new RuntimeException("Failed to set configuration segment_write_buffer_size = 0", e);
         }
         
         CQLTester.setUpClass();
@@ -57,7 +58,7 @@ public class TinySegmentFlushingFailureTest extends CQLTester
 
     /**
      * These tests will run only after the outer class has completed its setup. Otherwise, SAITester assigns default
-     * value to segment_write_buffer_space_mb, and we cannot override it without reflection or using Unsafe.
+     * value to segment_write_buffer_size, and we cannot override it without reflection or using Unsafe.
      */
     public static class TinySegmentFlushingFailureInnerClassTest extends SegmentFlushingFailureTest
     {

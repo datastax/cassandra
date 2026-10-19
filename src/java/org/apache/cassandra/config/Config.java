@@ -824,7 +824,9 @@ public class Config
 
     public StorageAttachedIndexOptions sai_options = new StorageAttachedIndexOptions();
 
-    public volatile int aggregation_subpage_size_in_kb = 2048;
+    // HCD-632: renamed following the 4.1 convention, HCD 1.2 sets the old name
+    @Replaces(oldName = "aggregation_subpage_size_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
+    public volatile DataStorageSpec.IntKibibytesBound aggregation_subpage_size = new DataStorageSpec.IntKibibytesBound("2048KiB");
 
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()} See CASSANDRA-12550

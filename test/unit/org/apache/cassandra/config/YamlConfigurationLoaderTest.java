@@ -315,6 +315,12 @@ public class YamlConfigurationLoaderTest
         assertThat(from("enable_uuid_sstable_identifiers", false).uuid_sstable_identifiers_enabled).isFalse();
         assertThat(from("enable_uuid_sstable_identifiers", true).uuid_sstable_identifiers_enabled).isTrue();
         assertThat(from("hints_request_timeout_in_ms", 3000).hints_request_timeout).isEqualTo(new DurationSpec.LongMillisecondsBound("3000ms"));
+        assertThat(from("aggregation_subpage_size_in_kb", 512).aggregation_subpage_size).isEqualTo(new DataStorageSpec.IntKibibytesBound("512KiB"));
+        assertThat(from("aggregation_subpage_size", "1MiB").aggregation_subpage_size).isEqualTo(new DataStorageSpec.IntKibibytesBound("1024KiB"));
+        assertThat(from("sai_options", ImmutableMap.of("segment_write_buffer_space_mb", 512)).sai_options.segment_write_buffer_size)
+        .isEqualTo(new DataStorageSpec.IntMebibytesBound("512MiB"));
+        assertThat(from("sai_options", ImmutableMap.of("segment_write_buffer_size", "1GiB")).sai_options.segment_write_buffer_size)
+        .isEqualTo(new DataStorageSpec.IntMebibytesBound("1024MiB"));
 
         // MILLIS_STRING_DURATION_LONG: under the old name HCD 1.2 sets a number of milliseconds, HCD 2.0 a duration
         assertThat(from("repair_prepare_message_timeout_in_ms", 5000).repair_prepare_message_timeout)
@@ -335,6 +341,9 @@ public class YamlConfigurationLoaderTest
         assertThatThrownBy(() -> from("repair_prepare_message_timeout_in_ms", 5000, "repair_prepare_message_timeout", "5s"))
         .isInstanceOf(ConfigurationException.class)
         .hasMessageContaining("[repair_prepare_message_timeout_in_ms -> repair_prepare_message_timeout]");
+        assertThatThrownBy(() -> from("aggregation_subpage_size_in_kb", 512, "aggregation_subpage_size", "512KiB"))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessageContaining("[aggregation_subpage_size_in_kb -> aggregation_subpage_size]");
     }
 
     @Test
