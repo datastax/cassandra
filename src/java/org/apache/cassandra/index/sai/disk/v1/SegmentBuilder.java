@@ -507,7 +507,8 @@ public abstract class SegmentBuilder
                 return recordAnomaly("no row-source tag ring registered (non-compaction path?)", key);
             org.apache.cassandra.io.sstable.SSTableId<?> winner =
                     tagRing.consume(key.partitionKey(), key.clustering(), column);
-            logger.info("DEBUG resolvePostingsKey: key={} winner={} available_sourceGroups={}", key, winner, sourceGroups.keySet());
+            if (logger.isTraceEnabled())
+                logger.trace("resolvePostingsKey: key={} winner={} available_sourceGroups={}", key, winner, sourceGroups.keySet());
             if (winner == null)
                 return recordAnomaly("no source tag for row (ring wrap or untagged merge)", key);
             int[] group = sourceGroups.get(winner);
@@ -526,8 +527,9 @@ public abstract class SegmentBuilder
                     pkMaps.put(winner, pkMap);
                 }
                 rowId = pkMap.exactRowIdOrInvertedCeiling(key);
-                logger.info("DEBUG resolvePostingsKey: looked up key={} in pkMap for winner={}, got rowId={}, pkMap class={}",
-                            key, winner, rowId, pkMap.getClass().getName());
+                if (logger.isTraceEnabled())
+                    logger.trace("resolvePostingsKey: looked up key={} in pkMap for winner={}, got rowId={}, pkMap class={}",
+                                key, winner, rowId, pkMap.getClass().getName());
             }
             catch (Exception e)
             {

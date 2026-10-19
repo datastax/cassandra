@@ -22,6 +22,9 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.annotation.Nullable;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.CompactionRowSourceTagging;
@@ -54,6 +57,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
  */
 public final class VectorSourceTagRing implements CompactionRowSourceTagging.Sink
 {
+    private static final Logger logger = LoggerFactory.getLogger(VectorSourceTagRing.class);
     private static final int CAPACITY = 64; // power of two
 
     /** One ring slot: a row's identity plus per-column winning source. */
@@ -141,17 +145,18 @@ public final class VectorSourceTagRing implements CompactionRowSourceTagging.Sin
                     SSTableReader source = resolver.sourceOf(i, partitionKey);
                     if (source != null)
                         winner = source.descriptor.id;
-                    org.slf4j.LoggerFactory.getLogger(VectorSourceTagRing.class).info(
-                            "DEBUG onMergedRow: key={}, col={}, match at versionIdx={}, source={}, winner={}",
-                            partitionKey, column.name, i, source != null ? source.descriptor.id : "null", winner);
+                    if (logger.isTraceEnabled())
+                    {
+                        logger.trace("onMergedRow: key={}, col={}, match at versionIdx={}, source={}, winner={}",
+                                     partitionKey, column.name, i, source != null ? source.descriptor.id : "null", winner);
+                    }
                     break;
                 }
             }
-            if (winner == null)
+            if (winner == null && logger.isTraceEnabled())
             {
-                org.slf4j.LoggerFactory.getLogger(VectorSourceTagRing.class).info(
-                        "DEBUG onMergedRow: NO version matched mergedCell for key={}, col={}, versions.length={}",
-                        partitionKey, column.name, versions.length);
+                logger.trace("onMergedRow: NO version matched mergedCell for key={}, col={}, versions.length={}",
+                             partitionKey, column.name, versions.length);
             }
             e.columns[slot] = column;
             e.winners[slot] = winner;
