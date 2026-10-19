@@ -21,7 +21,11 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
@@ -36,12 +40,17 @@ import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.work.ProgressTracker;
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.CompactionRowSourceTagging;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.ByteLimitedMaterializer;
 import org.apache.cassandra.index.sai.analyzer.NoOpAnalyzer;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -53,14 +62,27 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger;
+import org.apache.cassandra.index.sai.disk.vector.CompactionProgressLimiter;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
+import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
+import org.apache.cassandra.index.sai.disk.vector.VectorDeduplicator;
+import org.apache.cassandra.index.sai.disk.vector.VectorHandle;
+import org.apache.cassandra.index.sai.disk.vector.VectorIndexIntegrity;
+import org.apache.cassandra.index.sai.disk.vector.VectorMergeOperation;
+import org.apache.cassandra.index.sai.disk.vector.VectorMergePostings;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceTagRing;
 import org.apache.cassandra.index.sai.utils.InsertFanout;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.metrics.VectorCompactionMetrics;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.utils.NonThrowingCloseable;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
@@ -359,52 +381,52 @@ public abstract class SegmentBuilder
      * Segment builder for the jvector on-disk graph merge path. Instead of rebuilding the graph
      * from individual vectors, it records each incoming vector and its output row ID into a
      * ChronicleMap during the row-by-row pass, then delegates the actual graph construction to
-     * {@link org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger} at flush time.
+     * {@link CompactionGraphMerger} at flush time.
      *
      * <p>This path is active when all input SSTables already have graph indexes and at least
      * two source segments are available. The merger writes one output segment per compaction.
      */
     public static class VectorMergeSegmentBuilder extends SegmentBuilder
     {
-        private final List<org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger.SourceSegment> sourceSegments;
+        private final List<CompactionGraphMerger.SourceSegment> sourceSegments;
         /**
-         * Output postings keyed by the {@link org.apache.cassandra.index.sai.disk.vector.VectorHandle} of the
+         * Output postings keyed by the {@link VectorHandle} of the
          * source graph node that owns the row's winning vector cell, together with the set of surviving
          * source nodes.
          */
-        private final org.apache.cassandra.index.sai.disk.vector.VectorMergePostings postings;
-        private final org.apache.cassandra.index.sai.disk.vector.VectorDeduplicator deduplicator;
+        private final VectorMergePostings postings;
+        private final VectorDeduplicator deduplicator;
         // Non-null only when ingest_parallel is on.
         private final InsertFanout mergeInsertFanout;
 
         /** Source sstable id → indexes into {@code sourceSegments}, ascending by rowid offset. */
-        private final java.util.Map<org.apache.cassandra.io.sstable.SSTableId<?>, int[]> sourceGroups;
+        private final Map<SSTableId<?>, int[]> sourceGroups;
         /** Row-source tag ring registered by SSTableIndexWriter; null on the direct-construction test path. */
-        private final org.apache.cassandra.index.sai.disk.vector.VectorSourceTagRing tagRing;
-        private final org.apache.cassandra.schema.ColumnMetadata column;
+        private final VectorSourceTagRing tagRing;
+        private final ColumnMetadata column;
 
         /** Long task spanning the row-attribution and ChronicleMap population window. */
         private ProgressTracker.PhaseScope ingestPhase = ProgressTracker.PhaseScope.NOOP;
 
         // Thread-confined resolution resources (all resolution runs on the compaction thread), closed at release().
-        private final java.util.Map<org.apache.cassandra.io.sstable.SSTableId<?>, org.apache.cassandra.index.sai.disk.PrimaryKeyMap> pkMaps = new java.util.HashMap<>();
-        private final java.util.Map<Integer, org.apache.cassandra.index.sai.disk.vector.OrdinalsView> ordinalViews = new java.util.HashMap<>();
+        private final Map<SSTableId<?>, PrimaryKeyMap> pkMaps = new HashMap<>();
+        private final Map<Integer, OrdinalsView> ordinalViews = new HashMap<>();
 
         /** Rows whose winning source ordinal could not be resolved. Any > 0 fails the flush loudly. */
         private long anomalies;
         private String firstAnomaly;
         /** Rows that carried an indexable vector, i.e. reached resolution. */
-        private final java.util.concurrent.atomic.AtomicLong rowsWithVector = new java.util.concurrent.atomic.AtomicLong();
+        private final AtomicLong rowsWithVector = new AtomicLong();
         /** Rows skipped before resolution because the vector cell was null or empty. */
-        private final java.util.concurrent.atomic.AtomicLong rowsWithoutVector = new java.util.concurrent.atomic.AtomicLong();
+        private final AtomicLong rowsWithoutVector = new AtomicLong();
 
         @SuppressWarnings("unchecked")
         public VectorMergeSegmentBuilder(
                 IndexComponents.ForWrite components,
                 long rowIdOffset,
                 long estimatedRows,
-                List<org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger.SourceSegment> sourceSegments,
-                NamedMemoryLimiter limiter) throws java.io.IOException
+                List<CompactionGraphMerger.SourceSegment> sourceSegments,
+                NamedMemoryLimiter limiter) throws IOException
         {
             super(components, rowIdOffset, limiter);
             this.sourceSegments = sourceSegments;
@@ -412,32 +434,32 @@ public abstract class SegmentBuilder
 
             // Id bounds for the postings' live sets, and the sstable → segments routing table.
             int[] idUpperBound = new int[sourceSegments.size()];
-            var groups = new java.util.HashMap<org.apache.cassandra.io.sstable.SSTableId<?>, java.util.List<Integer>>();
+            var groups = new HashMap<SSTableId<?>, List<Integer>>();
             for (int i = 0; i < sourceSegments.size(); i++)
             {
                 var src = sourceSegments.get(i);
                 idUpperBound[i] = src.graph().getIdUpperBound();
                 if (src.sstableIndex() != null)
-                    groups.computeIfAbsent(src.sstableIndex().getSSTable().descriptor.id, k -> new java.util.ArrayList<>()).add(i);
+                    groups.computeIfAbsent(src.sstableIndex().getSSTable().descriptor.id, k -> new ArrayList<>()).add(i);
             }
-            this.sourceGroups = new java.util.HashMap<>();
+            this.sourceGroups = new HashMap<>();
             for (var e : groups.entrySet())
             {
                 int[] idxs = e.getValue().stream()
-                        .sorted(java.util.Comparator.comparingLong(i -> sourceSegments.get((int) i).segmentRowIdOffset()))
+                        .sorted(Comparator.comparingLong(i -> sourceSegments.get((int) i).segmentRowIdOffset()))
                         .mapToInt(Integer::intValue).toArray();
                 sourceGroups.put(e.getKey(), idxs);
             }
 
             // Re-acquire the tag ring (idempotent, same thread).
-            this.tagRing = org.apache.cassandra.db.compaction.CompactionRowSourceTagging.current()
-                           instanceof org.apache.cassandra.index.sai.disk.vector.VectorSourceTagRing ring ? ring : null;
+            this.tagRing = CompactionRowSourceTagging.current()
+                           instanceof VectorSourceTagRing ring ? ring : null;
 
             try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
                     VectorCompactionMetrics.Phase.POSTINGS_MAP_SETUP, components.context()))
             {
-                postings = new org.apache.cassandra.index.sai.disk.vector.VectorMergePostings(idUpperBound, estimatedRows);
-                deduplicator = new org.apache.cassandra.index.sai.disk.vector.VectorDeduplicator(estimatedRows);
+                postings = new VectorMergePostings(idUpperBound, estimatedRows);
+                deduplicator = new VectorDeduplicator(estimatedRows);
             }
 
             totalBytesAllocated = 0;
@@ -475,14 +497,13 @@ public abstract class SegmentBuilder
             rowsWithVector.incrementAndGet();
 
             // Resolution runs SYNCHRONOUSLY on the compaction thread, but only for vectors not seen before.
-            org.apache.cassandra.index.sai.disk.vector.VectorHandle handle =
-                    deduplicator.deduplicate(vectorBuf, () -> resolveHandle(key));
+            VectorHandle handle = deduplicator.deduplicate(vectorBuf, () -> resolveHandle(key));
             if (handle == null)
                 return 0; // anomaly recorded inside resolveHandle; flush will fail loudly
 
             if (mergeInsertFanout != null)
             {
-                mergeInsertFanout.submit(org.apache.cassandra.index.sai.disk.vector.VectorHandle.BYTES + Integer.BYTES,
+                mergeInsertFanout.submit(VectorHandle.BYTES + Integer.BYTES,
                                          () -> postings.put(handle, segmentRowId));
                 Throwable async = mergeInsertFanout.error();
                 if (async != null)
@@ -499,12 +520,11 @@ public abstract class SegmentBuilder
          * Join this output row to the source graph node whose cell won its merge; returns that node's
          * handle, or null after recording an anomaly.
          */
-        private org.apache.cassandra.index.sai.disk.vector.VectorHandle resolveHandle(PrimaryKey key)
+        private VectorHandle resolveHandle(PrimaryKey key)
         {
             if (tagRing == null)
                 return recordAnomaly("no row-source tag ring registered (non-compaction path?)", key);
-            org.apache.cassandra.io.sstable.SSTableId<?> winner =
-                    tagRing.consume(key.partitionKey(), key.clustering(), column);
+            SSTableId<?> winner = tagRing.consume(key.partitionKey(), key.clustering(), column);
             if (logger.isTraceEnabled())
                 logger.trace("resolvePostingsKey: key={} winner={} available_sourceGroups={}", key, winner, sourceGroups.keySet());
             if (winner == null)
@@ -568,10 +588,10 @@ public abstract class SegmentBuilder
             if (ordinal < 0 || ordinal >= postings.idUpperBound(segIdx))
                 return recordAnomaly("no ordinal for source rowid " + rowId + " in segment " + segIdx + " of " + winner, key);
 
-            return new org.apache.cassandra.index.sai.disk.vector.VectorHandle(segIdx, ordinal);
+            return new VectorHandle(segIdx, ordinal);
         }
 
-        private org.apache.cassandra.index.sai.disk.vector.VectorHandle recordAnomaly(String what, PrimaryKey key)
+        private VectorHandle recordAnomaly(String what, PrimaryKey key)
         {
             anomalies++;
             if (firstAnomaly == null)
@@ -580,14 +600,14 @@ public abstract class SegmentBuilder
         }
 
         /** Test hook: ingest a pre-resolved (source node, output rowid) pair, bypassing tag/PK resolution. */
-        @com.google.common.annotations.VisibleForTesting
+        @VisibleForTesting
         public void addResolved(int sourceSegmentIdx, int sourceOrdinal, int segmentRowId)
         {
-            postings.put(new org.apache.cassandra.index.sai.disk.vector.VectorHandle(sourceSegmentIdx, sourceOrdinal), segmentRowId);
+            postings.put(new VectorHandle(sourceSegmentIdx, sourceOrdinal), segmentRowId);
         }
 
         @Override
-        protected void flushInternal(SegmentMetadataBuilder metadataBuilder) throws java.io.IOException
+        protected void flushInternal(SegmentMetadataBuilder metadataBuilder) throws IOException
         {
             finishIngestPhase();
 
@@ -609,13 +629,13 @@ public abstract class SegmentBuilder
                         "Vector graph merge: %d row(s) could not be joined to a source graph ordinal (first: %s). " +
                         "Set -D%s=false to fall back to the graph-rebuild path.",
                         anomalies, firstAnomaly,
-                        org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR_GRAPH_COMPACTION_MERGE_ENABLED.getKey()));
+                        CassandraRelevantProperties.SAI_VECTOR_GRAPH_COMPACTION_MERGE_ENABLED.getKey()));
 
             if (postings.isEmpty())
             {
                 long withVector = rowsWithVector.get();
                 if (withVector > 0)
-                    throw org.apache.cassandra.index.sai.disk.vector.VectorIndexIntegrity.abort(String.format(
+                    throw VectorIndexIntegrity.abort(String.format(
                             "vector graph merge for %s would produce an EMPTY index: %d row(s) resolved to a "
                             + "source graph ordinal but no postings were recorded (%d row(s) had no vector)",
                             components.descriptor(), withVector, rowsWithoutVector.get()));
@@ -627,16 +647,15 @@ public abstract class SegmentBuilder
             }
 
             long total = Math.max(1L, postings.size());
-            org.apache.cassandra.index.sai.disk.vector.VectorMergeOperation op =
-                    new org.apache.cassandra.index.sai.disk.vector.VectorMergeOperation(
+            VectorMergeOperation op =
+                    new VectorMergeOperation(
                             components.context().columnFamilyStore().metadata(),
-                            org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID(),
-                            java.util.Collections.emptyList(),
+                            TimeUUID.Generator.nextTimeUUID(),
+                            Collections.emptyList(),
                             total);
 
             long memoryEstimate = total * JVectorVersionUtil.getMergeBytesPerOrdinal();
-            org.apache.cassandra.index.sai.utils.NamedMemoryLimiter memLimiter =
-                    org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER;
+            NamedMemoryLimiter memLimiter = V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER;
             memLimiter.increment(memoryEstimate);
             logger.debug("Vector graph merge measurement: charged {} bytes to SAI segment-build limiter ({} of {} bytes used)",
                          memoryEstimate, memLimiter.currentBytesUsed(), memLimiter.limitBytes());
@@ -645,12 +664,12 @@ public abstract class SegmentBuilder
                             memoryEstimate, memLimiter.currentBytesUsed(), memLimiter.limitBytes());
 
             // Pin every source SAI index for the merge's full lifetime.
-            List<org.apache.cassandra.index.sai.SSTableIndex> pinnedSources = new ArrayList<>();
+            List<SSTableIndex> pinnedSources = new ArrayList<>();
             try
             {
                 for (var src : sourceSegments)
                 {
-                    org.apache.cassandra.index.sai.SSTableIndex idx = src.sstableIndex();
+                    SSTableIndex idx = src.sstableIndex();
                     if (idx == null)
                         continue; // test path manages source lifetime directly
                     if (!idx.reference())
@@ -658,18 +677,18 @@ public abstract class SegmentBuilder
                     pinnedSources.add(idx);
                 }
 
-                try (org.apache.cassandra.utils.NonThrowingCloseable c =
-                             org.apache.cassandra.db.compaction.CompactionManager.instance.active.onOperationStart(op);
+                try (NonThrowingCloseable c =
+                             CompactionManager.instance.active.onOperationStart(op);
                      ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
                              VectorCompactionMetrics.Phase.TOTAL_MERGE, components.context()))
                 {
-                    org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger merger =
-                            new org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger(
+                    CompactionGraphMerger merger =
+                            new CompactionGraphMerger(
                                     sourceSegments,
                                     postings,
                                     components.context().getIndexWriterConfig().getSimilarityFunction(),
                                     components,
-                                    new org.apache.cassandra.index.sai.disk.vector.CompactionProgressLimiter(op, components.context()));
+                                    new CompactionProgressLimiter(op, components.context()));
                     var componentsMetadata = merger.merge();
                     op.setCompleted(total);
                     metadataBuilder.setComponentsMetadata(componentsMetadata);
@@ -677,7 +696,7 @@ public abstract class SegmentBuilder
             }
             finally
             {
-                for (org.apache.cassandra.index.sai.SSTableIndex idx : pinnedSources)
+                for (SSTableIndex idx : pinnedSources)
                 {
                     try { idx.release(); }
                     catch (Throwable t) { logger.warn("Error releasing pinned source SAI index after graph merge", t); }
@@ -731,7 +750,7 @@ public abstract class SegmentBuilder
                 }
                 catch (Exception e)
                 {
-                    throw new java.io.UncheckedIOException(new java.io.IOException("Error closing merge postings map", e));
+                    throw new UncheckedIOException(new IOException("Error closing merge postings map", e));
                 }
             }
             return super.release(indexContext);
