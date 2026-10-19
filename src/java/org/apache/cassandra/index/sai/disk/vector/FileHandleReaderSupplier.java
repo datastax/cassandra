@@ -21,7 +21,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.file.Paths;
+import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
 import org.slf4j.Logger;
@@ -117,7 +117,7 @@ public class FileHandleReaderSupplier implements ReaderSupplier
         int fd = -1;
         try
         {
-            ch = FileChannel.open(Paths.get(path), StandardOpenOption.READ);
+            ch = FileChannel.open(Path.of(path), StandardOpenOption.READ);
             fd = INativeLibrary.instance.getfd(ch);
         }
         catch (Throwable t)

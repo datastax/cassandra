@@ -92,11 +92,13 @@ public class CompactionProgressLimiter implements ProgressLimiter
     @Override
     public ProgressTracker.PhaseScope startPhase(WorkStage stage)
     {
-        ProgressTracker.PhaseScope timer = VectorCompactionMetrics.INSTANCE.start("jvector", stage, indexContext);
-        // The merger's own epilogue stage reports bytes (footer CRC re-read, codes tail); jvector's
-        // stages report ordinals. Decided once per phase now that the scope carries the stage,
-        // instead of re-testing it on every counter.
-        boolean inBytes = stage instanceof CompactionGraphMerger.EpilogueStage;
+        // Stages that are VectorCompactionMetrics.Phase values are Cassandra's own (the merger's
+        // footer CRC); everything else is jvector's. Tag the timer accordingly.
+        String owner = stage instanceof VectorCompactionMetrics.Phase ? "cassandra" : "jvector";
+        ProgressTracker.PhaseScope timer = VectorCompactionMetrics.INSTANCE.start(owner, stage, indexContext);
+        // The merger's footer CRC re-read reports bytes; jvector's stages report ordinals. Decided
+        // once per phase now that the scope carries the stage, instead of re-testing it on every counter.
+        boolean inBytes = stage == VectorCompactionMetrics.Phase.FOOTER_CRC;
         return new ProgressTracker.PhaseScope()
         {
             @Override

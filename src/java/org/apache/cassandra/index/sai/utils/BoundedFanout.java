@@ -19,7 +19,8 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.util.concurrent.Executor;
-import java.util.concurrent.Semaphore;
+
+import org.apache.cassandra.utils.concurrent.Semaphore;
 
 /**
  * An {@link InsertFanout} whose in-flight weight is bounded by a weighted {@link Semaphore}: at most
