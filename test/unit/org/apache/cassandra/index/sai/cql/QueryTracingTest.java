@@ -108,6 +108,71 @@ public class QueryTracingTest extends SAITester
                            "v ANN OF [1.2, 3.4] DESC");
     }
 
+    @Test
+    public void testMetricsTracing()
+    {
+        createTable("CREATE TABLE %s(k int PRIMARY KEY, a int, b text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+        execute("INSERT INTO %s(k, a, b) VALUES (0, 0, 'hello')");
+        execute("INSERT INTO %s(k, a, b) VALUES (1, 1, 'world')");
+        flush();
+
+        assertTraceHasMetrics("SELECT * FROM %s WHERE a = 0",
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
+                              "keysFetched: 1",
+                              "partitionsFetched: 1",
+                              "partitionsReturned: 1",
+                              "partitionTombstonesFetched: 0",
+                              "rowsFetched: 1",
+                              "rowsReturned: 1",
+                              "rowTombstonesFetched: 0",
+                              "cellsFetched: 2",
+                              "cellsReturned: 2",
+                              "trieSegmentsHit: 0",
+                              "triePostingsSkips: 0",
+                              "triePostingsDecodes: 0",
+                              "bkdSegmentsHit: 1",
+                              "bkdPostingListsHit: 1",
+                              "bkdPostingsSkips: 0",
+                              "bkdPostingsDecodes: 0",
+                              "annGraphSearchLatencyNanos: 0");
+
+        assertTraceHasMetrics("SELECT * FROM %s WHERE b = 'world'",
+                              "sstablesHit: 1",
+                              "segmentsHit: 1",
+                              "keysFetched: 1",
+                              "partitionsFetched: 1",
+                              "partitionsReturned: 1",
+                              "rowsFetched: 1",
+                              "rowsReturned: 1",
+                              "trieSegmentsHit: 1",
+                              "triePostingsDecodes: 0",
+                              "bkdSegmentsHit: 0");
+    }
+
+    private void assertTraceHasMetrics(String query, String... expected)
+    {
+        TracingTestImpl tracing = (TracingTestImpl) Tracing.instance;
+        tracing.getTraces().clear();
+
+        execute(query);
+
+        for (String trace : tracing.getTraces())
+        {
+            if (!trace.startsWith("SAI query metrics:"))
+                continue;
+
+            for (String s : expected)
+            {
+                Assertions.assertThat(trace).as("Trace should contain {} but found: {}", expected, trace).contains(s);
+            }
+            return;
+        }
+        Assert.fail("Query metrics not found in traces");
+    }
+
     private void assertTraceHasPlan(String query, String... expected)
     {
         TracingTestImpl tracing = (TracingTestImpl) Tracing.instance;

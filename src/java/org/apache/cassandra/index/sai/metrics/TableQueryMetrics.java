@@ -125,6 +125,8 @@ public class TableQueryMetrics
 
         if (Tracing.isTracing())
         {
+            Tracing.trace("SAI query metrics:\n{}", snapshot.toLogString("  "));
+
             final long queryLatencyMicros = TimeUnit.NANOSECONDS.toMicros(snapshot.totalQueryTimeNs);
 
             if (snapshot.queryPlanInfo != null && snapshot.queryPlanInfo.searchExecutedBeforeOrder)
