@@ -19,10 +19,9 @@
 package org.apache.cassandra.streaming;
 
 import java.io.IOException;
-import java.util.UUID;
 
-import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * Some subset of data to be streamed. Implementations handle writing out their data via the write method.
@@ -36,7 +35,7 @@ public interface OutgoingStream
     /**
      * Write the streams data into the socket
      */
-    void write(StreamSession session, DataOutputStreamPlus output, int version) throws IOException;
+    void write(StreamSession session, StreamingDataOutputPlus output, int version) throws IOException;
 
     /**
      * Release any resources held by the stream
@@ -44,7 +43,7 @@ public interface OutgoingStream
     void finish();
 
     long getRepairedAt();
-    UUID getPendingRepair();
+    TimeUUID getPendingRepair();
 
     String getName();
 

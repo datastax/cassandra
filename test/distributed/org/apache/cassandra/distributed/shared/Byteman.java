@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.distributed.shared;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Method;
@@ -42,16 +41,19 @@ import java.util.stream.Stream;
 import com.google.common.base.StandardSystemProperty;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
+import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.jboss.byteman.agent.Transformer;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_BYTEMAN_TRANSFORMATIONS_DEBUG;
+
 public final class Byteman
 {
     private static final Logger logger = LoggerFactory.getLogger(Byteman.class);
 
-    private static final boolean DEBUG_TRANSFORMATIONS = Boolean.getBoolean("cassandra.test.byteman.transformations.debug");
+    private static final boolean DEBUG_TRANSFORMATIONS = TEST_BYTEMAN_TRANSFORMATIONS_DEBUG.getBoolean();
     private static final Method METHOD;
     private static final URL BYTEMAN;
 
@@ -96,7 +98,7 @@ public final class Byteman
         List<String> texts = Stream.of(scripts).map(p -> {
             try
             {
-                return Files.toString(new File(p), StandardCharsets.UTF_8);
+                return Files.toString(new File(p).toJavaIOFile(), StandardCharsets.UTF_8);
             }
             catch (IOException e)
             {
@@ -155,11 +157,11 @@ public final class Byteman
                 if (DEBUG_TRANSFORMATIONS)
                 {
                     File f = new File(StandardSystemProperty.JAVA_IO_TMPDIR.value(), "byteman/" + details.klassPath + ".class");
-                    f.getParentFile().mkdirs();
-                    File original = new File(f.getParentFile(), "original-" + f.getName());
-                    logger.info("Writing class file for {} to {}", details.klassPath, f.getAbsolutePath());
-                    Files.asByteSink(f).write(newBytes);
-                    Files.asByteSink(original).write(details.bytes);
+                    f.parent().tryCreateDirectories();
+                    File original = new File(f.parent(), "original-" + f.name());
+                    logger.info("Writing class file for {} to {}", details.klassPath, f.absolutePath());
+                    Files.asByteSink(f.toJavaIOFile()).write(newBytes);
+                    Files.asByteSink(original.toJavaIOFile()).write(details.bytes);
                 }
             }
         }

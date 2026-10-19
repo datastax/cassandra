@@ -19,8 +19,10 @@
 # regex in-pattern flags. Any of those can break correct operation of Scanner.
 
 import re
-import six
-from sre_constants import BRANCH, SUBPATTERN, GROUPREF, GROUPREF_IGNORE, GROUPREF_EXISTS
+try:
+    from sre_constants import BRANCH, SUBPATTERN, GROUPREF, GROUPREF_IGNORE, GROUPREF_EXISTS
+except ImportError:
+    from re._constants import BRANCH, SUBPATTERN, GROUPREF, GROUPREF_IGNORE, GROUPREF_EXISTS
 from sys import version_info
 
 
@@ -48,23 +50,6 @@ class SaferScannerBase(re.Scanner):
         if sub.pattern.flags ^ flags:
             raise ValueError("RE flag setting not allowed in SaferScanner lexicon (%s)" % (bin(sub.pattern.flags),))
         return re.sre_parse.SubPattern(sub.pattern, scrubbedsub)
-
-
-class Py2SaferScanner(SaferScannerBase):
-
-    def __init__(self, lexicon, flags=0):
-        self.lexicon = lexicon
-        p = []
-        s = re.sre_parse.Pattern()
-        s.flags = flags
-        for phrase, action in lexicon:
-            p.append(re.sre_parse.SubPattern(s, [
-                (SUBPATTERN, (len(p) + 1, self.subpat(phrase, flags))),
-            ]))
-        s.groups = len(p) + 1
-        p = re.sre_parse.SubPattern(s, [(BRANCH, (None, p))])
-        self.p = p
-        self.scanner = re.sre_compile.compile(p)
 
 
 class Py36SaferScanner(SaferScannerBase):
@@ -99,5 +84,24 @@ class Py38SaferScanner(SaferScannerBase):
         self.scanner = re.sre_compile.compile(p)
 
 
-SaferScanner = Py36SaferScanner if six.PY3 else Py2SaferScanner
-SaferScanner = Py38SaferScanner if version_info >= (3, 8) else SaferScanner
+class Py311SaferScanner(SaferScannerBase):
+
+    def __init__(self, lexicon, flags=0):
+        self.lexicon = lexicon
+        p = []
+        s = re._parser.State()
+        s.flags = flags
+        for phrase, action in lexicon:
+            gid = s.opengroup()
+            p.append(re._parser.SubPattern(s, [(SUBPATTERN, (gid, 0, 0, re._parser.parse(phrase, flags))), ]))
+            s.closegroup(gid, p[-1])
+        p = re._parser.SubPattern(s, [(BRANCH, (None, p))])
+        self.p = p
+        self.scanner = re._compiler.compile(p)
+
+
+SaferScanner = Py36SaferScanner
+if version_info >= (3, 11):
+    SaferScanner = Py311SaferScanner
+elif version_info >= (3, 8):
+    SaferScanner = Py38SaferScanner

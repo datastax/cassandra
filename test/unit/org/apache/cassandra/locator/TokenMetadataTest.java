@@ -19,25 +19,29 @@ package org.apache.cassandra.locator;
 
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Multimap;
 
 import org.junit.BeforeClass;
+import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.StorageService;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertFalse;
@@ -45,8 +49,6 @@ import static org.junit.Assert.assertTrue;
 
 import static org.apache.cassandra.Util.token;
 
-
-@RunWith(OrderedJUnit4ClassRunner.class)
 public class TokenMetadataTest
 {
     public final static String ONE = "1";
@@ -58,7 +60,12 @@ public class TokenMetadataTest
     public static void beforeClass() throws Throwable
     {
         DatabaseDescriptor.daemonInitialization();
-        tmd = StorageService.instance.getTokenMetadata();
+    }
+
+    @Before
+    public void before() throws Throwable
+    {
+        tmd = new TokenMetadata();
         tmd.updateNormalToken(token(ONE), InetAddressAndPort.getByName("127.0.0.1"));
         tmd.updateNormalToken(token(SIX), InetAddressAndPort.getByName("127.0.0.6"));
     }
@@ -82,7 +89,7 @@ public class TokenMetadataTest
 
         ExecutorService pool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() + 1);
         
-        int invalidations = 1024;
+        int invalidations = 2048;
         
         for (int i = 0; i < invalidations; i++)
             pool.execute(() -> tmd.invalidateCachedRings());
@@ -350,5 +357,92 @@ public class TokenMetadataTest
         assertEquals(0, tokenMetadata.getSizeOfAllEndpoints());
         assertEquals(0, tokenMetadata.getSizeOfLeavingEndpoints());
         assertEquals(0, tokenMetadata.getSizeOfMovingEndpoints());
+    }
+
+    @Test
+    public void testRemoveEndpointTokenChange() throws Exception
+    {
+        TokenMetadata metadata = StorageService.instance.getTokenMetadata();
+        metadata.clearUnsafe();
+
+        Collection<Token> tokens = new HashSet<>();
+        tokens.add(DatabaseDescriptor.getPartitioner().getRandomToken());
+        tokens.add(DatabaseDescriptor.getPartitioner().getRandomToken());
+
+        InetAddressAndPort ep1 = InetAddressAndPort.getByName("127.0.0.1");
+        InetAddressAndPort ep2 = InetAddressAndPort.getByName("127.0.0.2");
+
+        Multimap<InetAddressAndPort, Token> endpointTokens = HashMultimap.create();
+        for (Token token : tokens)
+            endpointTokens.put(ep1, token);
+
+        endpointTokens.put(ep2, DatabaseDescriptor.getPartitioner().getRandomToken());
+
+        long ver = metadata.getRingVersion();
+        metadata.updateNormalTokens(endpointTokens);
+        assertTrue(metadata.getRingVersion() > ver);
+
+        // Remove a normal endpoint
+        assertTrue(metadata.isMember(ep2));
+        ver = metadata.getRingVersion();
+        metadata.removeEndpoint(ep2);
+        assertFalse(metadata.isMember(ep2));
+        assertTrue(metadata.getRingVersion() > ver);
+
+        // Remove a non-exist endpoint (e.g. proxy node is not part of token metadata)
+        InetAddressAndPort ep3 = InetAddressAndPort.getByName("127.0.0.3");
+        assertFalse(metadata.isMember(ep3));
+        ver = metadata.getRingVersion();
+        metadata.removeEndpoint(ep3);
+        assertEquals(ver, metadata.getRingVersion());
+    }
+
+    @Test
+    public void testUpdateAddressForNormalTokens() throws UnknownHostException
+    {
+        final InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
+        final InetAddressAndPort second = InetAddressAndPort.getByName("127.0.0.6");
+
+        tmd.updateNormalToken(token(ONE), first);
+        tmd.updateNormalToken(token(SIX), second);
+
+        assertEquals(tmd.getTokens(first).size(), 1);
+        assertEquals(tmd.getTokens(first).iterator().next(), token(ONE));
+
+        assertEquals(tmd.getTokens(second).size(), 1);
+        assertEquals(tmd.getTokens(second).iterator().next(), token(SIX));
+
+        InetAddressAndPort updatedNode = InetAddressAndPort.getByName("127.0.0.10");
+        assertThatThrownBy(() -> tmd.updateAddressForNormalTokens(Collections.singleton(token(SIX)), first, updatedNode))
+                          .hasMessageContaining("different set of tokens");
+        tmd.updateAddressForNormalTokens(Collections.singleton(token(ONE)), first, updatedNode);
+
+        assertEquals(tmd.getTokens(updatedNode).size(), 1);
+        assertEquals(tmd.getTokens(updatedNode).iterator().next(), token(ONE));
+
+        assertEquals(tmd.getTokens(second).size(), 1);
+        assertEquals(tmd.getTokens(second).iterator().next(), token(SIX));
+    }
+
+    @Test
+    public void testUpdateAddressForHostId() throws UnknownHostException
+    {
+        final InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
+        UUID firstId = UUID.randomUUID();
+
+        final InetAddressAndPort second = InetAddressAndPort.getByName("127.0.0.6");
+        UUID secondId = UUID.randomUUID();
+
+        tmd.updateHostId(firstId, first);
+        tmd.updateHostId(secondId, second);
+
+        assertEquals(tmd.getHostId(first), firstId);
+        assertEquals(tmd.getHostId(second), secondId);
+
+        InetAddressAndPort updatedNode = InetAddressAndPort.getByName("127.0.0.10");
+        tmd.updateAddressForHostId(secondId, second, updatedNode);
+
+        assertEquals(tmd.getHostId(first), firstId);
+        assertEquals(tmd.getHostId(updatedNode), secondId);
     }
 }

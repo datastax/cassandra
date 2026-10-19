@@ -45,6 +45,7 @@ public class CassandraMetricsRegistry extends MetricRegistry
     private final Map<String, ThreadPoolMetrics> threadPoolMetrics = new ConcurrentHashMap<>();
 
     private final MBeanWrapper mBeanServer = MBeanWrapper.instance;
+    public final static TimeUnit DEFAULT_TIMER_UNIT = TimeUnit.MICROSECONDS;
 
     private CassandraMetricsRegistry()
     {
@@ -98,17 +99,47 @@ public class CassandraMetricsRegistry extends MetricRegistry
 
     public Timer timer(MetricName name)
     {
-        Timer timer = register(name, new Timer(new DecayingEstimatedHistogramReservoir()));
-        registerMBean(timer, name.getMBeanName());
+        return timer(name, DEFAULT_TIMER_UNIT);
+    }
 
+    public SnapshottingTimer timer(MetricName name, MetricName alias)
+    {
+        return timer(name, alias, DEFAULT_TIMER_UNIT);
+    }
+
+    public SnapshottingTimer timer(MetricName name, TimeUnit durationUnit)
+    {
+        SnapshottingTimer timer = register(name, new SnapshottingTimer(CassandraMetricsRegistry.createReservoir(durationUnit)));
+        registerMBean(timer, name.getMBeanName());
         return timer;
     }
 
-    public Timer timer(MetricName name, MetricName alias)
+    public SnapshottingTimer timer(MetricName name, MetricName alias, TimeUnit durationUnit)
     {
-        Timer timer = timer(name);
+        SnapshottingTimer timer = timer(name, durationUnit);
         registerAlias(name, alias);
         return timer;
+    }
+
+    public static SnapshottingReservoir createReservoir(TimeUnit durationUnit)
+    {
+        SnapshottingReservoir reservoir;
+        if (durationUnit != TimeUnit.NANOSECONDS)
+        {
+            SnapshottingReservoir underlying = new DecayingEstimatedHistogramReservoir(DecayingEstimatedHistogramReservoir.DEFAULT_ZERO_CONSIDERATION,
+                                                                           DecayingEstimatedHistogramReservoir.LOW_BUCKET_COUNT,
+                                                                           DecayingEstimatedHistogramReservoir.DEFAULT_STRIPE_COUNT);
+            // fewer buckets should suffice if timer is not based on nanos
+            reservoir = new ScalingReservoir(underlying,
+                                             // timer update values in nanos.
+                                             v -> durationUnit.convert(v, TimeUnit.NANOSECONDS));
+        }
+        else
+        {
+            // Use more buckets if timer is created with nanos resolution.
+            reservoir = new DecayingEstimatedHistogramReservoir();
+        }
+        return reservoir;
     }
 
     public <T extends Metric> T register(MetricName name, T metric)
@@ -196,7 +227,7 @@ public class CassandraMetricsRegistry extends MetricRegistry
         else if (metric instanceof Histogram)
             mbean = new JmxHistogram((Histogram) metric, name);
         else if (metric instanceof Timer)
-            mbean = new JmxTimer((Timer) metric, name, TimeUnit.SECONDS, TimeUnit.MICROSECONDS);
+            mbean = new JmxTimer((Timer) metric, name, TimeUnit.SECONDS, DEFAULT_TIMER_UNIT);
         else if (metric instanceof Metered)
             mbean = new JmxMeter((Metered) metric, name, TimeUnit.SECONDS);
         else
@@ -303,6 +334,8 @@ public class CassandraMetricsRegistry extends MetricRegistry
         long[] values();
 
         long[] getRecentValues();
+
+        default void clear() {}
     }
 
     private static class JmxHistogram extends AbstractBean implements JmxHistogramMBean
@@ -388,13 +421,28 @@ public class CassandraMetricsRegistry extends MetricRegistry
             return metric.getSnapshot().getValues();
         }
 
+        /**
+         * Returns a histogram describing the values recorded since the last time this method was called.
+         *
+         * ex. If the counts are [0, 1, 2, 1] at the time the first caller arrives, but change to [1, 2, 3, 2] by the 
+         * time a second caller arrives, the second caller will receive [1, 1, 1, 1].
+         *
+         * @return a histogram whose bucket offsets are assumed to be in nanoseconds
+         */
         @Override
-        public long[] getRecentValues()
+        public synchronized long[] getRecentValues()
         {
             long[] now = metric.getSnapshot().getValues();
             long[] delta = delta(now, last);
             last = now;
             return delta;
+        }
+
+        @Override
+        public void clear()
+        {
+            if (metric instanceof ClearableHistogram)
+                ((ClearableHistogram) metric).clear();
         }
     }
 
@@ -524,7 +572,6 @@ public class CassandraMetricsRegistry extends MetricRegistry
     static class JmxTimer extends JmxMeter implements JmxTimerMBean
     {
         private final Timer metric;
-        private final double durationFactor;
         private final String durationUnit;
         private long[] last = null;
 
@@ -535,68 +582,67 @@ public class CassandraMetricsRegistry extends MetricRegistry
         {
             super(metric, objectName, rateUnit);
             this.metric = metric;
-            this.durationFactor = 1.0 / durationUnit.toNanos(1);
             this.durationUnit = durationUnit.toString().toLowerCase(Locale.US);
         }
 
         @Override
         public double get50thPercentile()
         {
-            return metric.getSnapshot().getMedian() * durationFactor;
+            return metric.getSnapshot().getMedian();
         }
 
         @Override
         public double getMin()
         {
-            return metric.getSnapshot().getMin() * durationFactor;
+            return metric.getSnapshot().getMin();
         }
 
         @Override
         public double getMax()
         {
-            return metric.getSnapshot().getMax() * durationFactor;
+            return metric.getSnapshot().getMax();
         }
 
         @Override
         public double getMean()
         {
-            return metric.getSnapshot().getMean() * durationFactor;
+            return metric.getSnapshot().getMean();
         }
 
         @Override
         public double getStdDev()
         {
-            return metric.getSnapshot().getStdDev() * durationFactor;
+            return metric.getSnapshot().getStdDev();
         }
 
         @Override
         public double get75thPercentile()
         {
-            return metric.getSnapshot().get75thPercentile() * durationFactor;
+            return metric.getSnapshot().get75thPercentile();
         }
 
         @Override
         public double get95thPercentile()
         {
-            return metric.getSnapshot().get95thPercentile() * durationFactor;
+            return metric.getSnapshot().get95thPercentile();
         }
 
         @Override
         public double get98thPercentile()
         {
-            return metric.getSnapshot().get98thPercentile() * durationFactor;
+            return metric.getSnapshot().get98thPercentile();
         }
 
         @Override
         public double get99thPercentile()
         {
-            return metric.getSnapshot().get99thPercentile() * durationFactor;
+            return metric.getSnapshot().get99thPercentile();
         }
 
         @Override
         public double get999thPercentile()
         {
-            return metric.getSnapshot().get999thPercentile() * durationFactor;
+            return metric.getSnapshot().get999thPercentile();
         }
 
         @Override
@@ -605,8 +651,16 @@ public class CassandraMetricsRegistry extends MetricRegistry
             return metric.getSnapshot().getValues();
         }
 
+        /**
+         * Returns a histogram describing the values recorded since the last time this method was called.
+         * 
+         * ex. If the counts are [0, 1, 2, 1] at the time the first caller arrives, but change to [1, 2, 3, 2] by the 
+         * time a second caller arrives, the second caller will receive [1, 1, 1, 1].
+         * 
+         * @return a histogram whose bucket offsets are assumed to be in nanoseconds
+         */
         @Override
-        public long[] getRecentValues()
+        public synchronized long[] getRecentValues()
         {
             long[] now = metric.getSnapshot().getValues();
             long[] delta = delta(now, last);
@@ -626,7 +680,7 @@ public class CassandraMetricsRegistry extends MetricRegistry
      *
      * @param now The current histogram
      * @param last The previous value of the histogram
-     * @return the difference between <i>now</> and <i>last</i>
+     * @return the difference between <i>now</i> and <i>last</i>
      */
     @VisibleForTesting
     static long[] delta(long[] now, long[] last)

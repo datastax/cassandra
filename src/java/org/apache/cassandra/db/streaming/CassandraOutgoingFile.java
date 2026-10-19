@@ -21,7 +21,6 @@ package org.apache.cassandra.db.streaming;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -30,12 +29,12 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.net.AsyncStreamingOutputPlus;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.streaming.OutgoingStream;
 import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.streaming.StreamSession;
+import org.apache.cassandra.streaming.StreamingDataOutputPlus;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 /**
@@ -43,7 +42,7 @@ import org.apache.cassandra.utils.concurrent.Ref;
  */
 public class CassandraOutgoingFile implements OutgoingStream
 {
-    private final Ref<SSTableReader> ref;
+    private final Ref<? extends SSTableReader> ref;
     private final long estimatedKeys;
     private final List<SSTableReader.PartitionPositionBounds> sections;
     private final String filename;
@@ -51,7 +50,7 @@ public class CassandraOutgoingFile implements OutgoingStream
     private final StreamOperation operation;
     private final CassandraStreamHeader header;
 
-    public CassandraOutgoingFile(StreamOperation operation, Ref<SSTableReader> ref,
+    public CassandraOutgoingFile(StreamOperation operation, Ref<? extends SSTableReader> ref,
                                  List<SSTableReader.PartitionPositionBounds> sections, List<Range<Token>> normalizedRanges,
                                  long estimatedKeys)
     {
@@ -66,7 +65,7 @@ public class CassandraOutgoingFile implements OutgoingStream
 
         this.filename = sstable.getFilename();
         this.shouldStreamEntireSSTable = computeShouldStreamEntireSSTables();
-        ComponentManifest manifest = ComponentManifest.create(sstable.descriptor);
+        ComponentManifest manifest = ComponentManifest.create(sstable);
         this.header = makeHeader(sstable, operation, sections, estimatedKeys, shouldStreamEntireSSTable, manifest);
     }
 
@@ -77,23 +76,20 @@ public class CassandraOutgoingFile implements OutgoingStream
                                                     boolean shouldStreamEntireSSTable,
                                                     ComponentManifest manifest)
     {
-        boolean keepSSTableLevel = operation == StreamOperation.BOOTSTRAP || operation == StreamOperation.REBUILD;
-
         CompressionInfo compressionInfo = sstable.compression
                 ? CompressionInfo.newLazyInstance(sstable.getCompressionMetadata(), sections)
                 : null;
 
         return CassandraStreamHeader.builder()
-                                    .withSSTableFormat(sstable.descriptor.formatType)
                                     .withSSTableVersion(sstable.descriptor.version)
-                                    .withSSTableLevel(keepSSTableLevel ? sstable.getSSTableLevel() : 0)
+                                    .withSSTableLevel(operation.keepSSTableLevel() ? sstable.getSSTableLevel() : 0)
                                     .withEstimatedKeys(estimatedKeys)
                                     .withSections(sections)
                                     .withCompressionInfo(compressionInfo)
                                     .withSerializationHeader(sstable.header.toComponent())
                                     .isEntireSSTable(shouldStreamEntireSSTable)
                                     .withComponentManifest(manifest)
-                                    .withFirstKey(sstable.first)
+                                    .withFirstKey(sstable.getFirst())
                                     .withTableId(sstable.metadata().id)
                                     .build();
     }
@@ -106,7 +102,7 @@ public class CassandraOutgoingFile implements OutgoingStream
     }
 
     @VisibleForTesting
-    public Ref<SSTableReader> getRef()
+    public Ref<? extends SSTableReader> getRef()
     {
         return ref;
     }
@@ -142,34 +138,30 @@ public class CassandraOutgoingFile implements OutgoingStream
     }
 
     @Override
-    public UUID getPendingRepair()
+    public TimeUUID getPendingRepair()
     {
         return ref.get().getPendingRepair();
     }
 
     @Override
-    public void write(StreamSession session, DataOutputStreamPlus out, int version) throws IOException
+    public void write(StreamSession session, StreamingDataOutputPlus out, int version) throws IOException
     {
-        // FileStreamTask uses AsyncStreamingOutputPlus for streaming.
-        assert out instanceof AsyncStreamingOutputPlus : "Unexpected DataOutputStreamPlus " + out.getClass();
-
         SSTableReader sstable = ref.get();
 
         if (shouldStreamEntireSSTable)
         {
             // Acquire lock to avoid concurrent sstable component mutation because of stats update or index summary
             // redistribution, otherwise file sizes recorded in component manifest will be different from actual
-            // file sizes. (Note: Windows doesn't support atomic replace and index summary redistribution deletes
-            // existing file first)
+            // file sizes.
             // Recreate the latest manifest and hard links for mutatable components in case they are modified.
-            try (ComponentContext context = sstable.runWithLock(ignored -> ComponentContext.create(sstable.descriptor)))
+            try (ComponentContext context = sstable.runWithLock(ignored -> ComponentContext.create(sstable)))
             {
                 CassandraStreamHeader current = makeHeader(sstable, operation, sections, estimatedKeys, true, context.manifest());
                 CassandraStreamHeader.serializer.serialize(current, out, version);
                 out.flush();
 
                 CassandraEntireSSTableStreamWriter writer = new CassandraEntireSSTableStreamWriter(sstable, session, context);
-                writer.write((AsyncStreamingOutputPlus) out);
+                writer.write(out);
             }
         }
         else
@@ -178,18 +170,27 @@ public class CassandraOutgoingFile implements OutgoingStream
             CassandraStreamHeader.serializer.serialize(header, out, version);
             out.flush();
 
-            CassandraStreamWriter writer = header.isCompressed() ?
-                                           new CassandraCompressedStreamWriter(sstable, header, session) :
-                                           new CassandraStreamWriter(sstable, header, session);
-            writer.write(out);
+            if (header.isCompressed())
+            {
+                CassandraCompressedStreamWriter writer = new CassandraCompressedStreamWriter(sstable, header, session);
+                writer.write(out);
+            }
+            else
+            {
+                CassandraStreamWriter writer = new CassandraStreamWriter(sstable, header, session);
+                writer.write(out, version);
+            }
         }
     }
 
     @VisibleForTesting
     public boolean computeShouldStreamEntireSSTables()
     {
-        // don't stream if full sstable transfers are disabled or legacy counter shards are present
-        if (!DatabaseDescriptor.streamEntireSSTables() || ref.get().getSSTableMetadata().hasLegacyCounterShards)
+        // don't stream if full sstable transfers are disabled, legacy counter shards are present,
+        // or sstable uses old bloom filter format (pre-4.0) which is incompatible with zero-copy streaming
+        if (!DatabaseDescriptor.streamEntireSSTables() ||
+            ref.get().getSSTableMetadata().hasLegacyCounterShards ||
+            ref.get().descriptor.version.hasOldBfFormat())
             return false;
 
         return contained(sections, ref.get());

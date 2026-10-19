@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements.schema;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
@@ -28,19 +29,20 @@ import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.IResource;
-import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.UDFunction;
+import org.apache.cassandra.cql3.functions.UserFunction;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.schema.Functions.FunctionsDiff;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.UserFunctions.FunctionsDiff;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -59,8 +61,12 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
     private final String body;
     private final boolean orReplace;
     private final boolean ifNotExists;
+    private final boolean deterministic;
+    private final boolean monotonic;
+    private final List<ColumnIdentifier> monotonicOn;
 
-    public CreateFunctionStatement(String keyspaceName,
+    public CreateFunctionStatement(String queryString,
+                                   String keyspaceName,
                                    String functionName,
                                    List<ColumnIdentifier> argumentNames,
                                    List<CQL3Type.Raw> rawArgumentTypes,
@@ -69,9 +75,12 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                                    String language,
                                    String body,
                                    boolean orReplace,
-                                   boolean ifNotExists)
+                                   boolean ifNotExists,
+                                   boolean deterministic,
+                                   boolean monotonic,
+                                   List<ColumnIdentifier> monotonicOn)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.functionName = functionName;
         this.argumentNames = argumentNames;
         this.rawArgumentTypes = rawArgumentTypes;
@@ -81,6 +90,10 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
         this.body = body;
         this.orReplace = orReplace;
         this.ifNotExists = ifNotExists;
+        this.deterministic = deterministic;
+        this.monotonic = monotonic;
+        this.monotonicOn = monotonicOn;
+
     }
 
     // TODO: replace affected aggregates !!
@@ -91,15 +104,23 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
 
         UDFunction.assertUdfsEnabled(language);
 
-        if (new HashSet<>(argumentNames).size() != argumentNames.size())
+        if (!FunctionName.isNameValid(functionName))
+            throw ire("Function name '%s' is invalid", functionName);
+
+        HashSet<ColumnIdentifier> argumentNamesSet = new HashSet<>(argumentNames);
+
+        if (argumentNamesSet.size() != argumentNames.size())
             throw ire("Duplicate argument names for given function %s with argument names %s", functionName, argumentNames);
 
+        if (!argumentNamesSet.containsAll(monotonicOn))
+            throw ire("Monotony should be declared on one of the arguments, '%s' is not an argument", monotonicOn.get(0));
+
         rawArgumentTypes.stream()
-                        .filter(raw -> !raw.isTuple() && raw.isFrozen())
+                        .filter(raw -> !raw.isImplicitlyFrozen() && raw.isFrozen())
                         .findFirst()
                         .ifPresent(t -> { throw ire("Argument '%s' cannot be frozen; remove frozen<> modifier from '%s'", t, t); });
 
-        if (!rawReturnType.isTuple() && rawReturnType.isFrozen())
+        if (!rawReturnType.isImplicitlyFrozen() && rawReturnType.isFrozen())
             throw ire("Return type '%s' cannot be frozen; remove frozen<> modifier from '%s'", rawReturnType, rawReturnType);
 
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
@@ -108,9 +129,9 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
 
         List<AbstractType<?>> argumentTypes =
             rawArgumentTypes.stream()
-                            .map(t -> t.prepare(keyspaceName, keyspace.types).getType())
+                            .map(t -> t.prepare(keyspaceName, keyspace.types).getType().udfType())
                             .collect(toList());
-        AbstractType<?> returnType = rawReturnType.prepare(keyspaceName, keyspace.types).getType();
+        AbstractType<?> returnType = rawReturnType.prepare(keyspaceName, keyspace.types).getType().udfType();
 
         UDFunction function =
             UDFunction.create(new FunctionName(keyspaceName, functionName),
@@ -119,9 +140,12 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                               returnType,
                               calledOnNullInput,
                               language,
-                              body);
+                              body,
+                              deterministic,
+                              monotonic,
+                              monotonicOn);
 
-        Function existingFunction = keyspace.functions.find(function.name(), argumentTypes).orElse(null);
+        UserFunction existingFunction = keyspace.userFunctions.find(function.name(), argumentTypes).orElse(null);
         if (null != existingFunction)
         {
             if (existingFunction.isAggregate())
@@ -151,7 +175,7 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
             // TODO: update dependent aggregates
         }
 
-        return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.functions.withAddedOrUpdated(function)));
+        return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.userFunctions.withAddedOrUpdated(function)));
     }
 
     SchemaChange schemaChangeEvent(KeyspacesDiff diff)
@@ -173,7 +197,7 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
     {
         FunctionName name = new FunctionName(keyspaceName, functionName);
 
-        if (Schema.instance.findFunction(name, Lists.transform(rawArgumentTypes, t -> t.prepare(keyspaceName).getType())).isPresent() && orReplace)
+        if (Schema.instance.findUserFunction(name, Lists.transform(rawArgumentTypes, t -> t.prepare(keyspaceName).getType().udfType())).isPresent() && orReplace)
             client.ensurePermission(Permission.ALTER, FunctionResource.functionFromCql(keyspaceName, functionName, rawArgumentTypes));
         else
             client.ensurePermission(Permission.CREATE, FunctionResource.keyspace(keyspaceName));
@@ -203,7 +227,7 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, functionName);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<CreateFunctionStatement>
     {
         private final FunctionName name;
         private final List<ColumnIdentifier> argumentNames;
@@ -214,6 +238,9 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
         private final String body;
         private final boolean orReplace;
         private final boolean ifNotExists;
+        private final boolean deterministic;
+        private final boolean monotonic;
+        private final List<ColumnIdentifier> monotonicOn;
 
         public Raw(FunctionName name,
                    List<ColumnIdentifier> argumentNames,
@@ -223,7 +250,10 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                    String language,
                    String body,
                    boolean orReplace,
-                   boolean ifNotExists)
+                   boolean ifNotExists,
+                   boolean deterministic,
+                   boolean monotonic,
+                   List<ColumnIdentifier> monotonicOn)
         {
             this.name = name;
             this.argumentNames = argumentNames;
@@ -234,13 +264,24 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
             this.body = body;
             this.orReplace = orReplace;
             this.ifNotExists = ifNotExists;
+            this.deterministic = deterministic;
+            this.monotonic = monotonic;
+            this.monotonicOn = monotonicOn;
         }
 
-        public CreateFunctionStatement prepare(ClientState state)
+        @Override
+        public CreateFunctionStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.keyspace : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.keyspace : state.getKeyspace());
 
-            return new CreateFunctionStatement(keyspaceName,
+            if (keyspaceMapper != Constants.IDENTITY_STRING_MAPPER)
+            {
+                rawArgumentTypes.forEach(t -> t.forEachUserType(name -> name.updateKeyspaceIfDefined(keyspaceMapper)));
+                rawReturnType.forEachUserType(name -> name.updateKeyspaceIfDefined(keyspaceMapper));
+            }
+
+            return new CreateFunctionStatement(rawCQLStatement,
+                                               keyspaceName,
                                                name.name,
                                                argumentNames,
                                                rawArgumentTypes,
@@ -249,7 +290,10 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
                                                language,
                                                body,
                                                orReplace,
-                                               ifNotExists);
+                                               ifNotExists,
+                                               deterministic,
+                                               monotonic,
+                                               monotonicOn);
         }
     }
 }

@@ -20,20 +20,22 @@ package org.apache.cassandra.transport;
 
 import java.net.InetAddress;
 import java.net.ServerSocket;
-import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
-import org.apache.commons.math.stat.descriptive.DescriptiveStatistics;
+import com.google.common.util.concurrent.RateLimiter;
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.auth.AllowAllAuthenticator;
@@ -41,20 +43,34 @@ import org.apache.cassandra.auth.AllowAllAuthorizer;
 import org.apache.cassandra.auth.AllowAllNetworkAuthorizer;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
+import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.QueryMessage;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.AssertUtil;
+import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import static org.apache.cassandra.transport.BurnTestUtil.SizeCaps;
 import static org.apache.cassandra.transport.BurnTestUtil.generateQueryMessage;
 import static org.apache.cassandra.transport.BurnTestUtil.generateRows;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
+@RunWith(Parameterized.class)
 public class SimpleClientPerfTest
 {
+    @Parameterized.Parameter
+    public ProtocolVersion version;
 
-    private static final Logger logger = LoggerFactory.getLogger(CQLConnectionTest.class);
+    @Parameterized.Parameters(name="{0}")
+    public static Collection<Object[]> versions()
+    {
+        return ProtocolVersion.SUPPORTED.stream()
+                                        .map(v -> new Object[]{v})
+                                        .collect(Collectors.toList());
+    }
 
     private InetAddress address;
     private int port;
@@ -82,102 +98,62 @@ public class SimpleClientPerfTest
     }
 
     @Test
-    public void measureSmallV5() throws Throwable
+    public void measureSmall() throws Throwable
     {
         perfTest(new SizeCaps(10, 20, 5, 10),
                  new SizeCaps(10, 20, 5, 10),
                  () -> new SimpleClient(address.getHostAddress(),
-                                        port, ProtocolVersion.V5, true,
+                                        port, version, true,
                                         new EncryptionOptions())
-                       .connect(false));
+                       .connect(false),
+                 version);
     }
 
-
     @Test
-    public void measureSmallV4() throws Throwable
+    public void measureSmallWithCompression() throws Throwable
     {
         perfTest(new SizeCaps(10, 20, 5, 10),
                  new SizeCaps(10, 20, 5, 10),
                  () -> new SimpleClient(address.getHostAddress(),
-                                  port, ProtocolVersion.V4, false,
-                                  new EncryptionOptions())
-                 .connect(false));
-    }
-
-    @Test
-    public void measureSmallV5WithCompression() throws Throwable
-    {
-        perfTest(new SizeCaps(10, 20, 5, 10),
-                 new SizeCaps(10, 20, 5, 10),
-                 () -> new SimpleClient(address.getHostAddress(),
-                                        port, ProtocolVersion.V5, true,
+                                        port, version, true,
                                         new EncryptionOptions())
-                       .connect(true));
+                       .connect(true),
+                 version);
     }
 
     @Test
-    public void measureSmallV4WithCompression() throws Throwable
-    {
-        perfTest(new SizeCaps(10, 20, 5, 10),
-                 new SizeCaps(10, 20, 5, 10),
-                 () -> new SimpleClient(address.getHostAddress(),
-                                        port, ProtocolVersion.V4, false,
-                                        new EncryptionOptions())
-                       .connect(true));
-    }
-
-    @Test
-    public void measureLargeV5() throws Throwable
+    public void measureLarge() throws Throwable
     {
         perfTest(new SizeCaps(1000, 2000, 5, 150),
                  new SizeCaps(1000, 2000, 5, 150),
                  () -> new SimpleClient(address.getHostAddress(),
-                                        port, ProtocolVersion.V5, true,
+                                        port, version, true,
                                         new EncryptionOptions())
-                       .connect(false));
+                       .connect(false),
+                 version);
     }
 
     @Test
-    public void measureLargeV4() throws Throwable
+    public void measureLargeWithCompression() throws Throwable
     {
         perfTest(new SizeCaps(1000, 2000, 5, 150),
                  new SizeCaps(1000, 2000, 5, 150),
                  () -> new SimpleClient(address.getHostAddress(),
-                                        port, ProtocolVersion.V4, false,
+                                        port, version, true,
                                         new EncryptionOptions())
-                       .connect(false));
+                       .connect(true),
+                 version);
     }
 
-    @Test
-    public void measureLargeV5WithCompression() throws Throwable
-    {
-        perfTest(new SizeCaps(1000, 2000, 5, 150),
-                 new SizeCaps(1000, 2000, 5, 150),
-                 () -> new SimpleClient(address.getHostAddress(),
-                                        port, ProtocolVersion.V5, true,
-                                        new EncryptionOptions())
-                       .connect(true));
-    }
-
-    @Test
-    public void measureLargeV4WithCompression() throws Throwable
-    {
-        perfTest(new SizeCaps(1000, 2000, 5, 150),
-                 new SizeCaps(1000, 2000, 5, 150),
-                 () -> new SimpleClient(address.getHostAddress(),
-                                        port, ProtocolVersion.V4, false,
-                                        new EncryptionOptions())
-                       .connect(true));
-    }
-
-    public void perfTest(SizeCaps requestCaps, SizeCaps responseCaps, AssertUtil.ThrowingSupplier<SimpleClient> clientSupplier) throws Throwable
+    @SuppressWarnings({"UnstableApiUsage", "UseOfSystemOutOrSystemErr", "ResultOfMethodCallIgnored"})
+    public void perfTest(SizeCaps requestCaps, SizeCaps responseCaps, AssertUtil.ThrowingSupplier<SimpleClient> clientSupplier, ProtocolVersion version) throws Throwable
     {
         ResultMessage.Rows response = generateRows(0, responseCaps);
-        QueryMessage requestMessage = generateQueryMessage(0, requestCaps);
-        Envelope message = requestMessage.encode(ProtocolVersion.V4);
+        QueryMessage requestMessage = generateQueryMessage(0, requestCaps, version);
+        Envelope message = requestMessage.encode(version);
         int requestSize = message.body.readableBytes();
         message.release();
-        message = response.encode(ProtocolVersion.V4);
+        message = response.encode(version);
         int responseSize = message.body.readableBytes();
         message.release();
 
@@ -195,10 +171,11 @@ public class SimpleClientPerfTest
                 QueryMessage queryMessage = QueryMessage.codec.decode(body, version);
                 return new QueryMessage(queryMessage.query, queryMessage.options)
                 {
-                    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+                    @Override
+                    public Future<Response> maybeExecuteAsync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
                     {
                         int idx = Integer.parseInt(queryMessage.query); // unused
-                        return generateRows(idx, responseCaps);
+                        return ImmediateFuture.success(generateRows(idx, responseCaps));
                     }
                 };
             }
@@ -222,7 +199,9 @@ public class SimpleClientPerfTest
         AtomicBoolean measure = new AtomicBoolean(false);
         DescriptiveStatistics stats = new DescriptiveStatistics();
         Lock lock = new ReentrantLock();
-
+        RateLimiter limiter = RateLimiter.create(2000);
+        AtomicLong overloadedExceptions = new AtomicLong(0);
+        
         // TODO: exercise client -> server large messages
         for (int t = 0; t < threads; t++)
         {
@@ -235,24 +214,53 @@ public class SimpleClientPerfTest
                         for (int j = 0; j < 1; j++)
                             messages.add(requestMessage);
 
-                        if (measure.get())
-                        {
-                            long nanoStart = System.nanoTime();
-                            client.execute(messages);
-                            long diff = System.nanoTime() - nanoStart;
+                            if (measure.get())
+                            {
+                                try
+                                {
+                                    limiter.acquire();
+                                    long nanoStart = nanoTime();
+                                    client.execute(messages);
+                                    long elapsed = nanoTime() - nanoStart;
 
-                            lock.lock();
-                            try
-                            {
-                                stats.addValue(TimeUnit.MICROSECONDS.toMillis(diff));
+                                    lock.lock();
+                                    try
+                                    {
+                                        stats.addValue(TimeUnit.NANOSECONDS.toMicros(elapsed));
+                                    }
+                                    finally
+                                    {
+                                        lock.unlock();
+                                    }
+                                }
+                                catch (RuntimeException e)
+                                {
+                                    if (Throwables.anyCauseMatches(e, cause -> cause instanceof OverloadedException))
+                                    {
+                                        overloadedExceptions.incrementAndGet();
+                                    }
+                                    else
+                                    {
+                                        throw e;
+                                    }
+                                }
                             }
-                            finally
+                            else
                             {
-                                lock.unlock();
+                                try
+                                {
+                                    limiter.acquire();
+                                    client.execute(messages); // warm-up
+                                }
+                                catch (RuntimeException e)
+                                {
+                                    // Ignore overloads during warmup...
+                                    if (!Throwables.anyCauseMatches(e, cause -> cause instanceof OverloadedException))
+                                    {
+                                        throw e;
+                                    }
+                                }
                             }
-                        }
-                        else
-                            client.execute(messages); // warm-up
                     }
                 }
                 catch (Throwable e)
@@ -272,14 +280,19 @@ public class SimpleClientPerfTest
 
         System.out.println("requestSize = " + requestSize);
         System.out.println("responseSize = " + responseSize);
+
+        System.out.println("Latencies (in microseconds)");
+        System.out.println("Elements: " + stats.getN());
         System.out.println("Mean:     " + stats.getMean());
         System.out.println("Variance: " + stats.getVariance());
         System.out.println("Median:   " + stats.getPercentile(0.5));
         System.out.println("90p:      " + stats.getPercentile(0.90));
         System.out.println("95p:      " + stats.getPercentile(0.95));
         System.out.println("99p:      " + stats.getPercentile(0.99));
+        System.out.println("Max:      " + stats.getMax());
+        
+        System.out.println("Failed due to overload: " + overloadedExceptions.get());
 
         server.stop();
     }
 }
-

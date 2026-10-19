@@ -21,12 +21,18 @@ import java.io.IOException;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.WritableByteChannel;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import io.netty.util.concurrent.FastThreadLocal;
-import org.apache.cassandra.config.Config;
+import org.apache.cassandra.utils.ByteBufferUtil;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.DATA_OUTPUT_BUFFER_ALLOCATE_TYPE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DOB_DOUBLING_THRESHOLD_MB;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DOB_MAX_RECYCLE_BYTES;
 
 /**
  * An implementation of the DataOutputStream interface using a FastByteArrayOutputStream and exposing
@@ -39,17 +45,19 @@ public class DataOutputBuffer extends BufferedDataOutputStreamPlus
     /*
      * Threshold at which resizing transitions from doubling to increasing by 50%
      */
-    static final long DOUBLING_THRESHOLD = Long.getLong(Config.PROPERTY_PREFIX + "DOB_DOUBLING_THRESHOLD_MB", 64);
+    static final long DOUBLING_THRESHOLD = DOB_DOUBLING_THRESHOLD_MB.getLong();
 
     /*
      * Only recycle OutputBuffers up to 1Mb. Larger buffers will be trimmed back to this size.
      */
-    private static final int MAX_RECYCLE_BUFFER_SIZE = Integer.getInteger(Config.PROPERTY_PREFIX + "dob_max_recycle_bytes", 1024 * 1024);
+    private static final int MAX_RECYCLE_BUFFER_SIZE = DOB_MAX_RECYCLE_BYTES.getInt();
+    private enum AllocationType { DIRECT, ONHEAP }
+    private static final AllocationType ALLOCATION_TYPE = DATA_OUTPUT_BUFFER_ALLOCATE_TYPE.getEnum(AllocationType.DIRECT);
 
     private static final int DEFAULT_INITIAL_BUFFER_SIZE = 128;
 
     /**
-     * Scratch buffers used mostly for serializing in memory. It's important to call #recycle() when finished
+     * Scratch buffers used mostly for serializing in memory. It's important to call #close() when finished
      * to keep the memory overhead from being too large in the system.
      */
     public static final FastThreadLocal<DataOutputBuffer> scratchBuffer = new FastThreadLocal<DataOutputBuffer>()
@@ -59,16 +67,25 @@ public class DataOutputBuffer extends BufferedDataOutputStreamPlus
         {
             return new DataOutputBuffer()
             {
+                @Override
                 public void close()
                 {
-                    if (buffer.capacity() <= MAX_RECYCLE_BUFFER_SIZE)
+                    if (buffer != null && buffer.capacity() <= MAX_RECYCLE_BUFFER_SIZE)
                     {
                         buffer.clear();
                     }
                     else
                     {
-                        buffer = ByteBuffer.allocate(DEFAULT_INITIAL_BUFFER_SIZE);
+                        setBuffer(allocate(DEFAULT_INITIAL_BUFFER_SIZE));
                     }
+                }
+
+                @Override
+                protected ByteBuffer allocate(int size)
+                {
+                    return ALLOCATION_TYPE == AllocationType.DIRECT ?
+                           ByteBuffer.allocateDirect(size) :
+                           ByteBuffer.allocate(size);
                 }
             };
         }
@@ -76,12 +93,12 @@ public class DataOutputBuffer extends BufferedDataOutputStreamPlus
 
     public DataOutputBuffer()
     {
-        this(DEFAULT_INITIAL_BUFFER_SIZE);
+        super(DEFAULT_INITIAL_BUFFER_SIZE);
     }
 
     public DataOutputBuffer(int size)
     {
-        super(ByteBuffer.allocate(size));
+        super(size);
     }
 
     public DataOutputBuffer(ByteBuffer buffer)
@@ -158,9 +175,15 @@ public class DataOutputBuffer extends BufferedDataOutputStreamPlus
     {
         if (count <= 0)
             return;
-        ByteBuffer newBuffer = ByteBuffer.allocate(checkedArraySizeCast(calculateNewSize(count)));
+        ByteBuffer newBuffer = allocate(checkedArraySizeCast(calculateNewSize(count)));
         buffer.flip();
         newBuffer.put(buffer);
+        setBuffer(newBuffer);
+    }
+
+    protected void setBuffer(ByteBuffer newBuffer)
+    {
+        FileUtils.clean(buffer); // free if direct
         buffer = newBuffer;
     }
 
@@ -221,6 +244,18 @@ public class DataOutputBuffer extends BufferedDataOutputStreamPlus
         return result;
     }
 
+    /**
+     * Gets the underlying ByteBuffer and calls {@link ByteBuffer#flip()}.  This method is "unsafe" in the sense that
+     * it returns the underlying buffer, which may be modified by other methods after calling this method (or cleared on
+     * {@link #close()}). If the calling logic knows that no new calls to this object will happen after calling this
+     * method, then this method can avoid the copying done in {@link #asNewBuffer()}, and {@link #buffer()}.
+     */
+    public ByteBuffer unsafeGetBufferAndFlip()
+    {
+        buffer.flip();
+        return buffer;
+    }
+
     public byte[] getData()
     {
         assert buffer.arrayOffset() == 0;
@@ -253,5 +288,17 @@ public class DataOutputBuffer extends BufferedDataOutputStreamPlus
         byte[] result = new byte[buffer.remaining()];
         buffer.get(result);
         return result;
+    }
+
+    public String asString()
+    {
+        try
+        {
+            return ByteBufferUtil.string(buffer(), StandardCharsets.UTF_8);
+        }
+        catch (CharacterCodingException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 }

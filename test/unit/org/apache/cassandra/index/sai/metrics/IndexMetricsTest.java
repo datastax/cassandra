@@ -1,0 +1,617 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.cassandra.index.sai.metrics;
+
+import java.util.Arrays;
+import java.util.concurrent.TimeUnit;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.junit.Test;
+
+import com.datastax.driver.core.ResultSet;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
+import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.utils.Throwables;
+import org.assertj.core.api.Assertions;
+
+import javax.management.ObjectName;
+
+import static org.apache.cassandra.index.sai.metrics.TableQueryMetrics.AbstractQueryMetrics.makeName;
+import static org.apache.cassandra.index.sai.metrics.TableQueryMetrics.QueryKind;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.*;
+
+import org.apache.cassandra.inject.Injection;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.index.sai.disk.v1.MemtableIndexWriter;
+
+public class IndexMetricsTest extends AbstractMetricsTest
+{
+
+    private static final String TABLE = "table_name";
+    private static final String INDEX = "table_name_index";
+
+    private static final String CREATE_TABLE_TEMPLATE = "CREATE TABLE %s." + TABLE + " (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                                        "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
+    private static final String CREATE_INDEX_TEMPLATE = "CREATE CUSTOM INDEX IF NOT EXISTS " + INDEX + " ON %s." + TABLE + "(%s) USING 'StorageAttachedIndex'";
+
+    @Test
+    public void testSameIndexNameAcrossKeyspaces()
+    {
+        String keyspace1 = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
+        String keyspace2 = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
+
+        createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace1));
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, keyspace1, "v1"));
+
+        createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace2));
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, keyspace2, "v1"));
+
+        execute("INSERT INTO " + keyspace1 + '.' + TABLE + " (id1, v1, v2) VALUES ('0', 0, '0')");
+
+        assertEquals(1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace1, TABLE, INDEX, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace2, TABLE, INDEX, "IndexMetrics")));
+
+        execute("INSERT INTO " + keyspace2 + '.' + TABLE + " (id1, v1, v2) VALUES ('0', 0, '0')");
+        execute("INSERT INTO " + keyspace2 + '.' + TABLE + " (id1, v1, v2) VALUES ('1', 1, '1')");
+
+        assertEquals(1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace1, TABLE, INDEX, "IndexMetrics")));
+        assertEquals(2L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace2, TABLE, INDEX, "IndexMetrics")));
+    }
+
+    @Test
+    public void testMetricRelease()
+    {
+        String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
+        assertEquals(1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        dropIndex("DROP INDEX %s." + index);
+
+        // once the index is dropped, make sure MBeans are no longer accessible
+        assertThatThrownBy(() -> getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")))
+                .hasCauseInstanceOf(javax.management.InstanceNotFoundException.class);
+    }
+
+
+    @Test
+    public void testMetricsAfterDeletions()
+    {
+        String table = createTable("CREATE TABLE %s (ID1 TEXT, ID2 INT, v1 INT, v2 TEXT, PRIMARY KEY (ID1, ID2)) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+        int rowCount = 10;
+        for (int i = 0; i < rowCount; i++)
+            execute("INSERT INTO %s (id1, id2, v1, v2) VALUES (?, ?, ?, '0')", Integer.toString(i), i, i);
+
+        assertEquals(rowCount + 0L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Deleting a row should count as a row update.
+        execute("INSERT INTO %s (id1, id2, v1, v2) VALUES (?, ?, ?, '0')", Integer.toString(rowCount), rowCount, rowCount);
+        execute("DELETE FROM %s WHERE id1 = ? AND id2 = ?", Integer.toString(rowCount), rowCount);
+        ++rowCount;
+        assertEquals(rowCount + 1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Deleting a row range should not count as row updates for the affected rows.
+        execute("INSERT INTO %s (id1, id2, v1, v2) VALUES (?, ?, ?, '0')", Integer.toString(rowCount), rowCount, rowCount);
+        execute("DELETE FROM %s WHERE id1 = ?", Integer.toString(rowCount));
+        ++rowCount;
+        assertEquals(rowCount + 1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Deleting a partition should not count as row updates for the contained rows.
+        execute("INSERT INTO %s (id1, id2, v1, v2) VALUES (?, ?, ?, '0')", Integer.toString(rowCount), rowCount, rowCount);
+        execute("DELETE FROM %s WHERE id1 = ? AND id2 > 0", Integer.toString(rowCount));
+        ++rowCount;
+        assertEquals(rowCount + 1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testMetricsThroughWriteLifecycle()
+    {
+        String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+        int rowCount = 10;
+        for (int i = 0; i < rowCount; i++)
+            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, ?, '0')", Integer.toString(i), i);
+
+        assertEquals(10L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertTrue((Long)getMetricValue(objectName("MemtableOnHeapIndexBytes", KEYSPACE, table, index, "IndexMetrics")) > 0);
+        assertEquals(0L, getMetricValue(objectName("MemtableIndexFlushCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        long bytes = (long) getMetricValue(objectName("MemtableOffHeapIndexBytes", KEYSPACE, table, index, "IndexMetrics"));
+        if (DatabaseDescriptor.getMemtableAllocationType().toBufferType() == BufferType.ON_HEAP)
+            Assertions.assertThat(bytes).isZero();
+        else
+            Assertions.assertThat(bytes).isPositive();
+
+        waitForAssert(() -> {
+            try
+            {
+                assertEquals(10L, getMBeanAttribute(objectName("MemtableIndexWriteLatency", KEYSPACE, table, index, "IndexMetrics"), "Count"));
+            }
+            catch (Throwable ex)
+            {
+                throw Throwables.unchecked(ex);
+            }
+        }, 60, TimeUnit.SECONDS);
+
+        assertEquals(0L, getMetricValue(objectName("SSTableCellCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("DiskUsedBytes", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        waitForHistogramCountEquals(objectName("MemtableIndexFlushCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 0);
+
+        flush(KEYSPACE, table);
+
+        assertEquals(0L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("MemtableOnHeapIndexBytes", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("MemtableOffHeapIndexBytes", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(1L, getMetricValue(objectName("MemtableIndexFlushCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(10L, getMetricValue(objectName("SSTableCellCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertTrue((Long)getMetricValue(objectName("DiskUsedBytes", KEYSPACE, table, index, "IndexMetrics")) > 0);
+        assertEquals(0L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        waitForHistogramCountEquals(objectName("MemtableIndexFlushCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1);
+        waitForHistogramMeanBetween(objectName("MemtableIndexFlushCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1.0, 1000000.0);
+
+        compact(KEYSPACE, table);
+
+        waitForIndexCompaction(KEYSPACE, table, index);
+
+        waitForTableIndexesQueryable(KEYSPACE, table);
+
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 0");
+        assertEquals(rowCount, rows.all().size());
+
+        assertEquals(0L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(1L, getMetricValue(objectName("MemtableIndexFlushCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(10L, getMetricValue(objectName("SSTableCellCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertTrue((Long)getMetricValue(objectName("DiskUsedBytes", KEYSPACE, table, index, "IndexMetrics")) > 0);
+        assertEquals(1L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        waitForHistogramCountEquals(objectName("CompactionSegmentCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1);
+        waitForHistogramMeanBetween(objectName("CompactionSegmentCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1.0, 1000000.0);
+    }
+
+    @Test
+    public void testIndexMetricsEnabledAndDisabled()
+    {
+        testIndexMetrics(true);
+        testIndexMetrics(false);
+    }
+
+    private void testIndexMetrics(boolean metricsEnabled)
+    {
+        // Set the property before creating any indexes
+        CassandraRelevantProperties.SAI_INDEX_METRICS_ENABLED.setBoolean(metricsEnabled);
+
+        try
+        {
+            String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                       "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+            String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+            // Test all Gauge metrics
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "SSTableCellCount", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "LiveMemtableIndexWriteCount", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "DiskUsedBytes", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableOnHeapIndexBytes", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableOffHeapIndexBytes", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "IndexFileCacheBytes", table, index);
+
+            // Test all Counter metrics
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableIndexFlushCount", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "CompactionCount", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "CompactionTermsProcessedCount", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableIndexFlushErrors", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "CompactionSegmentFlushErrors", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "QueriesCount", table, index);
+
+            // Test all Histogram metrics
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableIndexFlushCellsPerSecond", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "SegmentsPerCompaction", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "CompactionSegmentCellsPerSecond", table, index);
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "CompactionSegmentBytesPerSecond", table, index);
+
+            // Test Timer metrics
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableIndexWriteLatency", table, index);
+
+            // Test indexing operations to ensure null indexMetrics is handled gracefully
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '1')");
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('2', 2, '2')");
+
+            // Verify MemtableIndexWriteLatency metric behavior after indexing operations
+            assertIndexMetricsExistsIfEnabled(metricsEnabled, "MemtableIndexWriteLatency", table, index);
+        }
+        finally
+        {
+            // Reset property to default
+            CassandraRelevantProperties.SAI_INDEX_METRICS_ENABLED.setBoolean(true);
+        }
+    }
+
+    private void assertMetricExistsIfEnabled(boolean shouldExist, String metricName, String table, String index, String metricType)
+    {
+        ObjectName name = objectName(metricName, KEYSPACE, table, index, metricType);
+        assertMetricsExistsIfEnabled(shouldExist, name);
+    }
+
+    private void assertMetricsExistsIfEnabled(boolean shouldExist, ObjectName name)
+    {
+        if (shouldExist)
+            assertMetricExists(name);
+        else
+            assertMetricDoesNotExist(name);
+    }
+
+    private void assertIndexMetricsExistsIfEnabled(boolean shouldExist, String metricName, String table, String index)
+    {
+        assertMetricExistsIfEnabled(shouldExist, metricName, table, index, "IndexMetrics");
+    }
+
+    private void assertColumnQueryMetricsExistsIfEnabled(boolean shouldExist, String metricName, String table, String index)
+    {
+        assertMetricExistsIfEnabled(shouldExist, metricName, table, index, "ColumnQueryMetrics");
+    }
+
+    private void assertTableQueryMetricsExistsIfEnabled(boolean shouldExist, String metricName, String table)
+    {
+        ObjectName name = objectNameNoIndex(metricName, KEYSPACE, table, "PerQuery");
+        assertMetricsExistsIfEnabled(shouldExist, name);
+    }
+
+    private void assertPerQueryKindMetricExistsIfEnabled(boolean shouldExist, String metricName, String table, TableQueryMetrics.QueryKind kind)
+    {
+        String type = makeName(TableQueryMetrics.PerQuery.METRIC_TYPE, kind);
+        ObjectName name = objectNameNoIndex(metricName, KEYSPACE, table, type);
+        assertMetricsExistsIfEnabled(shouldExist, name);
+    }
+
+    private void assertIndexQueryCount(String index, long expectedCount)
+    {
+        assertEquals(expectedCount,
+                     getMetricValue(objectName("QueriesCount", KEYSPACE, currentTable(), index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testQueriesCount()
+    {
+        createTable("CREATE TABLE %s (id1 TEXT PRIMARY KEY, v1 INT, v2 TEXT, v3 VECTOR<FLOAT, 2>)");
+        String indexV1 = createIndex("CREATE CUSTOM INDEX ON %s (v1) USING 'StorageAttachedIndex'");
+
+        int rowCount = 10;
+        for (int i = 0; i < rowCount; i++)
+            execute("INSERT INTO %s (id1, v1, v2, v3) VALUES (?, ?, '0', ?)", Integer.toString(i), i, vectorOf(i, i));
+
+        assertIndexQueryCount(indexV1, 0L);
+
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 0");
+        assertEquals(rowCount, rows.all().size());
+        assertIndexQueryCount(indexV1, 1L);
+
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4) AND v2 = '2' ALLOW FILTERING");
+        assertIndexQueryCount(indexV1, 2L);
+
+        String indexV2 = createIndex("CREATE CUSTOM INDEX ON %s (v2) USING 'StorageAttachedIndex'");
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4)");
+        assertIndexQueryCount(indexV1, 3L);
+        assertIndexQueryCount(indexV2, 0L);
+
+        executeNet("SELECT id1 FROM %s WHERE v2 = '2'");
+        assertIndexQueryCount(indexV2, 1L);
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4) AND v2 = '2'");
+        assertIndexQueryCount(indexV1, 4L);
+        assertIndexQueryCount(indexV2, 1L);
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4) ORDER BY v2 LIMIT 10");
+        assertIndexQueryCount(indexV1, 4L);
+        assertIndexQueryCount(indexV2, 2L);
+
+        String indexV3 = createIndex("CREATE CUSTOM INDEX ON %s (v3) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function': 'euclidean'}");
+        assertIndexQueryCount(indexV3, 0L);
+        executeNet("SELECT id1 FROM %s WHERE v2 = '2' ORDER BY v3 ANN OF [5,0] LIMIT 10");
+        assertIndexQueryCount(indexV1, 4L);
+        assertIndexQueryCount(indexV2, 2L);
+        assertIndexQueryCount(indexV3, 1L);
+    }
+
+    @Test
+    public void testMemtableIndexFlushErrorIncrementsMetric() throws Throwable
+    {
+        String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+        // Write some data to ensure there is something to flush
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
+
+        assertEquals(0L, getMetricValue(objectName("MemtableIndexFlushErrors", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Inject a failure at the entry of MemtableIndexWriter#flush(...) to force a flush error
+        Injection failure = newFailureOnEntry("sai_memtable_flush_error", MemtableIndexWriter.class, "flush", RuntimeException.class);
+        Injections.inject(failure);
+
+        try
+        {
+            // Trigger a flush, which should hit the injected failure
+            flush(KEYSPACE, table);
+        }
+        catch (Throwable ignored)
+        {
+            // Expected due to injected failure
+        }
+        finally
+        {
+            failure.disable();
+        }
+
+        // Verify the memtable index flush error metric is incremented
+        assertEquals(1L, getMetricValue(objectName("MemtableIndexFlushErrors", KEYSPACE, table, index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testCompactionTermsProcessedCount()
+    {
+        String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+        // Initially, the counter should be 0
+        assertEquals(0L, getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Insert rows and flush to create an SSTable
+        int rowCount = 10;
+        for (int i = 0; i < rowCount; i++)
+            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, ?, '0')", Integer.toString(i), i);
+
+        flush(KEYSPACE, table);
+
+        // Counter should still be 0 after flush (no compaction yet)
+        assertEquals(0L, getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Insert more rows and flush to create another SSTable
+        for (int i = rowCount; i < rowCount * 2; i++)
+            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, ?, '0')", Integer.toString(i), i);
+
+        flush(KEYSPACE, table);
+
+        // Counter should still be 0 after the second flush (no compaction yet)
+        assertEquals(0L, getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Trigger compaction
+        compact(KEYSPACE, table);
+
+        // Wait for index compaction to complete
+        waitForIndexCompaction(KEYSPACE, table, index);
+
+        // After compaction, the counter should reflect the number of terms processed
+        // Each row has one term (v1 value), so we expect rowCount * 2 terms
+        long termsProcessed = (Long) getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics"));
+        assertEquals(rowCount * 2, termsProcessed);
+
+        // Verify compaction count was also incremented
+        assertEquals(1L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testCompactionTermsProcessedCountWithAnalyzer()
+    {
+        // Test with an analyzer that tokenizes text into multiple terms
+        String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 TEXT, v2 TEXT) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex' " +
+                                   "WITH OPTIONS = {'index_analyzer': 'standard'}");
+
+        // Initially, the counter should be 0
+        assertEquals(0L, getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Insert rows with text that will be tokenized into multiple terms
+        // "apple orange banana" -> 3 terms
+        // "hello world" -> 2 terms
+        // "test data" -> 2 terms
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 'apple orange banana', '0')");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('2', 'hello world', '0')");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('3', 'test data', '0')");
+
+        flush(KEYSPACE, table);
+
+        // Counter should still be 0 after flush (no compaction yet)
+        assertEquals(0L, getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        // Insert more rows and flush to create another SSTable
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('4', 'quick brown fox', '0')");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('5', 'lazy dog', '0')");
+
+        flush(KEYSPACE, table);
+
+        // Trigger compaction
+        compact(KEYSPACE, table);
+
+        // Wait for index compaction to complete
+        waitForIndexCompaction(KEYSPACE, table, index);
+
+        // After compaction, the counter should reflect all tokenized terms
+        // Expected: 3 + 2 + 2 + 3 + 2 = 12 terms
+        long termsProcessed = (Long) getMetricValue(objectName("CompactionTermsProcessedCount", KEYSPACE, table, index, "IndexMetrics"));
+        assertEquals("Expected terms processed to be 12 (tokenized terms) but was " + termsProcessed,
+                     12, termsProcessed);
+
+        // Verify compaction count was also incremented
+        assertEquals(1L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testIndexFileCacheBytesIncludesAllComponents() throws Throwable
+    {
+        // Create a table with a vector index to ensure we have pq and compressedVectors
+        String table = createTable("CREATE TABLE %s (id INT PRIMARY KEY, v1 VECTOR<FLOAT, 1536>)");
+        String index = createIndex("CREATE CUSTOM INDEX ON %s (v1) USING 'StorageAttachedIndex'");
+
+        // Disable compaction so we can manually control it
+        disableCompaction();
+
+        // Insert some data to populate the index
+        int rowCount = CassandraOnHeapGraph.MIN_PQ_ROWS + 1;
+
+        // Create 4 sstables that do not individually have enough vectors for a PQ, but will together
+        for (int i = 0; i < rowCount; i++)
+        {
+            if (i % (rowCount / 4) == 0)
+                flush();
+            execute("INSERT INTO %s (id, v1) VALUES (?, ?)", i, randomVectorBoxed(1536));
+        }
+
+        // Wait for the index to be queryable
+        waitForTableIndexesQueryable();
+
+        // Verify that IndexFileCacheBytes metric exists and is greater than zero
+        // This metric should now include graph.ramBytesUsed() + pq.ramBytesUsed() + compressedVectors.ramBytesUsed()
+        ObjectName metricName = objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics");
+
+        int bytesPerVector = VectorSourceModel.OTHER.compressionProvider.apply(1536).getCompressedSize();
+        long minPQBytesExpected = bytesPerVector * (long) rowCount;
+
+        // Because we flush half way, we don't have enough vectors for a PQ in either segment
+        long bytesAfterFlush = (long) getMetricValue(metricName);
+        assertTrue("Expected fewer than " + minPQBytesExpected + " bytes but got " + bytesAfterFlush,
+                   minPQBytesExpected >= bytesAfterFlush);
+
+        compact();
+        waitForIndexCompaction(KEYSPACE, table, index);
+
+        // Verify that the bytes contains the compression size. Note that the PQ vectors dominates the memory
+        // consumption significatly, which is what makes this test valid. The test fails if we remove the
+        // compressed vector accounting logic from the CassandraDiskAnn.ramBytesUsed() method.
+        long bytesAfterCompaction = (long) getMetricValue(objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics"));
+        assertTrue("Expected at least " + minPQBytesExpected + " bytes but got " + bytesAfterCompaction,
+                   bytesAfterCompaction >= minPQBytesExpected);
+
+        // Drop the index and confirm the metric is no longer reported.
+        dropIndex("DROP INDEX %s." + index);
+        assertFalse(isMetricPresent(objectName("IndexFileCacheBytes", KEYSPACE, currentTable(), index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testHistogramMetricsEnabledAndDisabled()
+    {
+        for (Boolean histogramsEnabled: Arrays.asList(true, false))
+        {
+            for (Boolean perQueryKindEnabled: Arrays.asList(true, false))
+            {
+                for (Boolean allQueriesLatencyEnabled : Arrays.asList(true, false))
+                {
+                    testHistogramMetrics(histogramsEnabled, perQueryKindEnabled, allQueriesLatencyEnabled);
+                }
+            }
+        }
+    }
+
+    private void testHistogramMetrics(boolean histogramsEnabled, boolean perQueryKindEnabled, boolean allQueriesLatencyEnabled)
+    {
+        logger.debug("Testing with {}={}, {}={}, {}={}",
+                     CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.getKey(), histogramsEnabled,
+                     CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.getKey(), perQueryKindEnabled,
+                     CassandraRelevantProperties.SAI_ALL_QUERIES_LATENCY_HISTOGRAM_ENABLED.getKey(), allQueriesLatencyEnabled);
+
+        // Set the properties before creating any indexes
+        CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.setBoolean(histogramsEnabled);
+        CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.setBoolean(perQueryKindEnabled);
+        CassandraRelevantProperties.SAI_ALL_QUERIES_LATENCY_HISTOGRAM_ENABLED.setBoolean(allQueriesLatencyEnabled);
+
+        try
+        {
+            String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                       "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+            String indexV1 = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+            String indexV2 = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v2) USING 'StorageAttachedIndex'");
+
+            // Test indexing operations to ensure Optional histograms are handled gracefully
+            for (int i = 0; i < 10; i++)
+                execute("INSERT INTO %s (id1, v1, v2) VALUES (?, ?, ?)", String.valueOf(i), i, String.valueOf(i));
+
+            // Verify MemtableIndexWriteLatency metric behavior after indexing operations
+            // This metric is created at index creation time in IndexMetrics
+            assertIndexMetricsExistsIfEnabled(histogramsEnabled, "MemtableIndexWriteLatency", table, indexV1);
+            assertIndexMetricsExistsIfEnabled(histogramsEnabled, "MemtableIndexWriteLatency", table, indexV2);
+
+            // Verify that histograms added before April 2026 release are always enabled
+            for (String index : new String[]{ indexV1, indexV2})
+            {
+                assertIndexMetricsExistsIfEnabled(true, "MemtableIndexFlushCellsPerSecond", table, index);
+                assertIndexMetricsExistsIfEnabled(true, "SegmentsPerCompaction", table, index);
+                assertIndexMetricsExistsIfEnabled(true, "CompactionSegmentCellsPerSecond", table, index);
+                assertIndexMetricsExistsIfEnabled(true, "CompactionSegmentBytesPerSecond", table, index);
+            }
+
+            // Flush to persist data
+            flush(KEYSPACE, table);
+
+            // Execute queries to trigger column query metrics
+            // v1 is INT, so it uses BKDIndexMetrics with KDTreeIntersectionLatency
+            ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 0 AND v1 < 5");
+            assertEquals(5, rows.all().size());
+
+            // v2 is TEXT, so it uses TrieIndexMetrics with TermsLookupLatency
+            rows = executeNet("SELECT id1 FROM %s WHERE v2 = '0'");
+            assertEquals(1, rows.all().size());
+
+            // Test KDTreeIntersectionLatency histogram (ColumnQueryMetrics - BKD for INT column)
+            assertColumnQueryMetricsExistsIfEnabled(histogramsEnabled, "KDTreeIntersectionLatency", table, indexV1);
+
+            // Test TermsLookupLatency histogram (ColumnQueryMetrics - Trie for TEXT column)
+            assertColumnQueryMetricsExistsIfEnabled(histogramsEnabled, "TermsLookupLatency", table, indexV2);
+
+            // Test QueryLatency timer (TableQueryMetrics.PerQuery - table-level metric, no index name)
+            for (QueryKind kind : QueryKind.values())
+            {
+                boolean shouldExist = (histogramsEnabled && perQueryKindEnabled) ||
+                                      (kind == QueryKind.ALL && (histogramsEnabled || allQueriesLatencyEnabled));
+                assertPerQueryKindMetricExistsIfEnabled(shouldExist, "QueryLatency", table, kind);
+            }
+
+            // Verify that other PerQuery histograms are always enabled (not affected by the flag)
+            assertTableQueryMetricsExistsIfEnabled(true, "SSTableIndexesHit", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "IndexSegmentsHit", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "KeysFetched", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "PartitionsFetched", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "PartitionsReturned", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "PartitionTombstonesFetched", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "RowsFetched", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "RowsReturned", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "RowTombstonesFetched", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "KDTreePostingsSkips", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "KDTreePostingsNumPostings", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "KDTreePostingsDecodes", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "PostingsSkips", table);
+            assertTableQueryMetricsExistsIfEnabled(true, "PostingsDecodes", table);
+        }
+        finally
+        {
+            // Reset property to default
+            CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.setBoolean(true);
+        }
+    }
+}

@@ -93,7 +93,6 @@ public class KeysSearcher extends CassandraIndexSearcher
                                                                                            command.clusteringIndexFilter(key),
                                                                                            null);
 
-                    @SuppressWarnings("resource") // filterIfStale closes it's iterator if either it materialize it or if it returns null.
                                                   // Otherwise, we close right away if empty, and if it's assigned to next it will be called either
                                                   // by the next caller of next, or through closing this iterator is this come before.
                     UnfilteredRowIterator dataIter = filterIfStale(dataCmd.queryMemtableAndDisk(index.baseCfs, executionController),
@@ -142,7 +141,7 @@ public class KeysSearcher extends CassandraIndexSearcher
                                                 Row indexHit,
                                                 ByteBuffer indexedValue,
                                                 WriteContext ctx,
-                                                int nowInSec)
+                                                long nowInSec)
     {
         Row data = iterator.staticRow();
         if (index.isStale(data, indexedValue, nowInSec))
@@ -150,7 +149,7 @@ public class KeysSearcher extends CassandraIndexSearcher
             // Index is stale, remove the index entry and ignore
             index.deleteStaleEntry(index.getIndexCfs().decorateKey(indexedValue),
                                    makeIndexClustering(iterator.partitionKey().getKey(), Clustering.EMPTY),
-                                   new DeletionTime(indexHit.primaryKeyLivenessInfo().timestamp(), nowInSec),
+                                   DeletionTime.build(indexHit.primaryKeyLivenessInfo().timestamp(), nowInSec),
                                    ctx);
             iterator.close();
             return null;

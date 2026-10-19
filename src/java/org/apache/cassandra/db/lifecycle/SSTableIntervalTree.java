@@ -20,16 +20,19 @@
  */
 package org.apache.cassandra.db.lifecycle;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 
-import com.google.common.collect.Iterables;
-
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Interval;
 import org.apache.cassandra.utils.IntervalTree;
+
+import static com.google.common.base.Preconditions.checkState;
 
 public class SSTableIntervalTree extends IntervalTree<PartitionPosition, SSTableReader, Interval<PartitionPosition, SSTableReader>>
 {
@@ -40,21 +43,69 @@ public class SSTableIntervalTree extends IntervalTree<PartitionPosition, SSTable
         super(intervals);
     }
 
+    private SSTableIntervalTree(Interval<PartitionPosition, SSTableReader>[] minOrder, Interval<PartitionPosition, SSTableReader>[] maxOrder)
+    {
+        super(minOrder, maxOrder);
+    }
+
+    @Override
+    protected SSTableIntervalTree create(Interval<PartitionPosition, SSTableReader>[] minOrder, Interval<PartitionPosition, SSTableReader>[] maxOrder)
+    {
+        return new SSTableIntervalTree(minOrder, maxOrder);
+    }
+
     public static SSTableIntervalTree empty()
     {
         return EMPTY;
     }
 
-    public static SSTableIntervalTree build(Iterable<SSTableReader> sstables)
+    public static SSTableIntervalTree buildSSTableIntervalTree(Collection<SSTableReader> sstables)
     {
+        if (sstables.isEmpty())
+            return EMPTY;
         return new SSTableIntervalTree(buildIntervals(sstables));
     }
 
-    public static List<Interval<PartitionPosition, SSTableReader>> buildIntervals(Iterable<SSTableReader> sstables)
+    public static <S extends CompactionSSTable> List<Interval<PartitionPosition, S>> buildIntervals(Collection<S> sstables)
     {
-        List<Interval<PartitionPosition, SSTableReader>> intervals = new ArrayList<>(Iterables.size(sstables));
-        for (SSTableReader sstable : sstables)
-            intervals.add(Interval.<PartitionPosition, SSTableReader>create(sstable.first, sstable.last, sstable));
+        if (sstables == null || sstables.isEmpty())
+            return Collections.emptyList();
+        return Arrays.asList(buildIntervalsArray(sstables));
+    }
+
+    public static <S extends CompactionSSTable> Interval<PartitionPosition, S>[] buildIntervalsArray(Collection<S> sstables)
+    {
+        if (sstables == null || sstables.isEmpty())
+            return IntervalTree.EMPTY_ARRAY;
+        Interval<PartitionPosition, S>[] intervals = new Interval[sstables.size()];
+        int i = 0;
+        int missingIntervals = 0;
+        for (S sstable : sstables)
+        {
+            Interval<PartitionPosition, S> interval = sstable.getInterval();
+            if (interval == null)
+            {
+                missingIntervals++;
+                continue;
+            }
+            intervals[i++] = interval;
+        }
+
+        // Offline (scrub) tools create SSTableReader without a first and last key and the old interval tree
+        // built a corrupt tree that couldn't be searched so continue to do that rather than complicate Tracker/View
+        if (missingIntervals > 0)
+        {
+            checkState(DatabaseDescriptor.isToolInitialized(), "Can only safely build an interval tree on sstables with missing first and last for offline tools");
+            Interval<PartitionPosition, S>[] replacementIntervals = new Interval[intervals.length - missingIntervals];
+            System.arraycopy(intervals, 0, replacementIntervals, 0, replacementIntervals.length);
+            return replacementIntervals;
+        }
+
         return intervals;
+    }
+
+    public static SSTableIntervalTree update(SSTableIntervalTree tree, Collection<SSTableReader> removals, Collection<SSTableReader> additions)
+    {
+        return (SSTableIntervalTree) tree.update(buildIntervalsArray(removals), buildIntervalsArray(additions));
     }
 }

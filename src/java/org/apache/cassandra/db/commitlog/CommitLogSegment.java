@@ -17,37 +17,45 @@
  */
 package org.apache.cassandra.db.commitlog;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.file.StandardOpenOption;
-import java.util.*;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.LockSupport;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 import com.codahale.metrics.Timer;
-import org.apache.cassandra.config.*;
+import net.openhft.chronicle.core.util.ThrowingFunction;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.commitlog.CommitLog.Configuration;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.FileWriter;
+import org.apache.cassandra.io.util.SimpleCachedBufferPool;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.IntegerInterval;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
+import static org.apache.cassandra.utils.concurrent.WaitQueue.newWaitQueue;
 
 /*
  * A single commit log file on disk. Manages creation of the file and writing mutations to disk,
@@ -56,8 +64,6 @@ import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
  */
 public abstract class CommitLogSegment
 {
-    private final static long idBase;
-
     private CDCState cdcState = CDCState.PERMITTED;
     public enum CDCState
     {
@@ -65,19 +71,17 @@ public abstract class CommitLogSegment
         FORBIDDEN,
         CONTAINS
     }
-    Object cdcStateLock = new Object();
+    final Object cdcStateLock = new Object();
 
     private final static AtomicInteger nextId = new AtomicInteger(1);
-    private static long replayLimitId;
     static
     {
         long maxId = Long.MIN_VALUE;
-        for (File file : new File(DatabaseDescriptor.getCommitLogLocation()).listFiles())
+        for (File file : DatabaseDescriptor.getCommitLogLocation().tryList())
         {
-            if (CommitLogDescriptor.isValid(file.getName()))
-                maxId = Math.max(CommitLogDescriptor.fromFileName(file.getName()).id, maxId);
+            if (CommitLogDescriptor.isValid(file.name()))
+                maxId = Math.max(CommitLogDescriptor.fromFileName(file.name()).id, maxId);
         }
-        replayLimitId = idBase = Math.max(System.currentTimeMillis(), maxId + 1);
     }
 
     // The commit log entry overhead in bytes (int: length + int: head checksum + int: tail checksum)
@@ -109,7 +113,7 @@ public abstract class CommitLogSegment
     private int endOfBuffer;
 
     // a signal for writers to wait on to confirm the log message they provided has been written to disk
-    private final WaitQueue syncComplete = new WaitQueue();
+    private final WaitQueue syncComplete = newWaitQueue();
 
     // a map of Cf->dirty interval in this segment; if interval is not covered by the clean set, the log contains unflushed data
     private final NonBlockingHashMap<TableId, IntegerInterval> tableDirty = new NonBlockingHashMap<>(1024);
@@ -121,7 +125,6 @@ public abstract class CommitLogSegment
 
     final File logFile;
     final FileChannel channel;
-    final int fd;
 
     protected final AbstractCommitLogSegmentManager manager;
 
@@ -130,57 +133,29 @@ public abstract class CommitLogSegment
 
     public final CommitLogDescriptor descriptor;
 
-    static CommitLogSegment createSegment(CommitLog commitLog, AbstractCommitLogSegmentManager manager)
-    {
-        Configuration config = commitLog.configuration;
-        CommitLogSegment segment = config.useEncryption() ? new EncryptedSegment(commitLog, manager)
-                                                          : config.useCompression() ? new CompressedSegment(commitLog, manager)
-                                                                                    : new MemoryMappedSegment(commitLog, manager);
-        segment.writeLogHeader();
-        return segment;
-    }
-
-    /**
-     * Checks if the segments use a buffer pool.
-     *
-     * @param commitLog the commit log
-     * @return <code>true</code> if the segments use a buffer pool, <code>false</code> otherwise.
-     */
-    static boolean usesBufferPool(CommitLog commitLog)
-    {
-        Configuration config = commitLog.configuration;
-        return config.useEncryption() || config.useCompression();
-    }
-
-    static long getNextId()
-    {
-        return idBase + nextId.getAndIncrement();
-    }
-
     /**
      * Constructs a new segment file.
      */
-    CommitLogSegment(CommitLog commitLog, AbstractCommitLogSegmentManager manager)
+    CommitLogSegment(AbstractCommitLogSegmentManager manager, ThrowingFunction<Path, FileChannel, IOException> channelFactory)
     {
         this.manager = manager;
 
-        id = getNextId();
+        id = manager.getNextId();
         descriptor = new CommitLogDescriptor(id,
-                                             commitLog.configuration.getCompressorClass(),
-                                             commitLog.configuration.getEncryptionContext());
+                                             manager.getConfiguration().getCompressorClass(),
+                                             manager.getConfiguration().getEncryptionContext());
         logFile = new File(manager.storageDirectory, descriptor.fileName());
 
         try
         {
-            channel = FileChannel.open(logFile.toPath(), StandardOpenOption.WRITE, StandardOpenOption.READ, StandardOpenOption.CREATE);
-            fd = NativeLibrary.getfd(channel);
+            channel = channelFactory.apply(logFile.toPath());
         }
         catch (IOException e)
         {
             throw new FSWriteError(e, logFile);
         }
 
-        buffer = createBuffer(commitLog);
+        this.buffer = createBuffer();
     }
 
     /**
@@ -204,13 +179,15 @@ public abstract class CommitLogSegment
         return Collections.<String, String>emptyMap();
     }
 
-    abstract ByteBuffer createBuffer(CommitLog commitLog);
+    protected ByteBuffer createBuffer()
+    {
+        return manager.getBufferPool().createBuffer();
+    }
 
     /**
      * Allocate space in this buffer for the provided mutation, and return the allocated Allocation object.
      * Returns null if there is not enough space in this segment, and a new segment is needed.
      */
-    @SuppressWarnings("resource") //we pass the op order around
     Allocation allocate(Mutation mutation, int size)
     {
         final OpOrder.Group opGroup = appendOrder.start();
@@ -235,19 +212,6 @@ public abstract class CommitLogSegment
         }
     }
 
-    static boolean shouldReplay(String name)
-    {
-        return CommitLogDescriptor.fromFileName(name).id < replayLimitId;
-    }
-
-    /**
-     * FOR TESTING PURPOSES.
-     */
-    static void resetReplayLimit()
-    {
-        replayLimitId = getNextId();
-    }
-
     // allocate bytes in the segment, or return -1 if not enough space
     private int allocate(int size)
     {
@@ -262,6 +226,7 @@ public abstract class CommitLogSegment
                 assert buffer != null;
                 return prev;
             }
+            LockSupport.parkNanos(1); // ConstantBackoffCAS Algorithm from https://arxiv.org/pdf/1305.5800.pdf
         }
     }
 
@@ -366,7 +331,11 @@ public abstract class CommitLogSegment
 
         if (flush || close)
         {
-            flush(startMarker, sectionEnd);
+            try (Timer.Context ignored = CommitLog.instance.metrics.waitingOnFlush.time())
+            {
+                flush(startMarker, sectionEnd);
+            }
+            
             if (cdcState == CDCState.CONTAINS)
                 writeCDCIndexFile(descriptor, sectionEnd, close);
             lastSyncedOffset = lastMarkerOffset = nextMarker;
@@ -455,7 +424,7 @@ public abstract class CommitLogSegment
      */
     public String getPath()
     {
-        return logFile.getPath();
+        return logFile.path();
     }
 
     /**
@@ -463,7 +432,7 @@ public abstract class CommitLogSegment
      */
     public String getName()
     {
-        return logFile.getName();
+        return logFile.name();
     }
 
     /**
@@ -471,7 +440,7 @@ public abstract class CommitLogSegment
      */
     public File getCDCFile()
     {
-        return new File(DatabaseDescriptor.getCDCLogLocation(), logFile.getName());
+        return new File(DatabaseDescriptor.getCDCLogLocation(), logFile.name());
     }
 
     /**
@@ -499,15 +468,13 @@ public abstract class CommitLogSegment
         }
     }
 
-    void waitForSync(int position, Timer waitingOnCommit)
+    void waitForSync(int position)
     {
         while (lastSyncedOffset < position)
         {
-            WaitQueue.Signal signal = waitingOnCommit != null ?
-                                      syncComplete.register(waitingOnCommit.time()) :
-                                      syncComplete.register();
+            WaitQueue.Signal signal = syncComplete.register();
             if (lastSyncedOffset < position)
-                signal.awaitUninterruptibly();
+                signal.awaitThrowUncheckedOnInterrupt();
             else
                 signal.cancel();
         }
@@ -671,9 +638,8 @@ public abstract class CommitLogSegment
     {
         public int compare(File f, File f2)
         {
-            CommitLogDescriptor desc = CommitLogDescriptor.fromFileName(f.getName());
-            CommitLogDescriptor desc2 = CommitLogDescriptor.fromFileName(f2.getName());
-            return Long.compare(desc.id, desc2.id);
+            return Long.compare(CommitLogDescriptor.idFromFileName(f.name()),
+                                CommitLogDescriptor.idFromFileName(f2.name()));
         }
     }
 
@@ -685,11 +651,13 @@ public abstract class CommitLogSegment
     /**
      * Change the current cdcState on this CommitLogSegment. There are some restrictions on state transitions and this
      * method is idempotent.
+     *
+     * @return the old cdc state
      */
-    public void setCDCState(CDCState newState)
+    public CDCState setCDCState(CDCState newState)
     {
         if (newState == cdcState)
-            return;
+            return cdcState;
 
         // Also synchronized in CDCSizeTracker.processNewSegment and .processDiscardedSegment
         synchronized(cdcStateLock)
@@ -701,7 +669,9 @@ public abstract class CommitLogSegment
             if (cdcState == CDCState.FORBIDDEN && newState != CDCState.PERMITTED)
                 throw new IllegalArgumentException("Only transition from FORBIDDEN to PERMITTED is allowed.");
 
+            CDCState oldState = cdcState;
             cdcState = newState;
+            return oldState;
         }
     }
 
@@ -742,7 +712,10 @@ public abstract class CommitLogSegment
 
         void awaitDiskSync(Timer waitingOnCommit)
         {
-            segment.waitForSync(position, waitingOnCommit);
+            try (Timer.Context ignored = waitingOnCommit.time())
+            {
+                segment.waitForSync(position);
+            }
         }
 
         /**
@@ -752,5 +725,19 @@ public abstract class CommitLogSegment
         {
             return new CommitLogPosition(segment.id, buffer.limit());
         }
+    }
+
+    protected abstract static class Builder
+    {
+        protected final AbstractCommitLogSegmentManager segmentManager;
+
+        public Builder(AbstractCommitLogSegmentManager segmentManager)
+        {
+            this.segmentManager = segmentManager;
+        }
+
+        public abstract CommitLogSegment build();
+
+        public abstract SimpleCachedBufferPool createBufferPool();
     }
 }

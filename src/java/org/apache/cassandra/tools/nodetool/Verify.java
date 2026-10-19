@@ -36,13 +36,23 @@ public class Verify extends NodeToolCmd
 
     @Option(title = "extended_verify",
             name = {"-e", "--extended-verify"},
-            description = "Verify each cell data, beyond simply checking sstable checksums")
+            description = "Verify each partition data, beyond simply checking sstable checksums")
     private boolean extendedVerify = false;
+
+    @Option(title = "validate_all_rows",
+    name = {"-v", "--validate-all-rows"},
+    description = "Verify each row and cell data in the partition, beyond checking partition key. Must be enabled with extended verification")
+    private boolean validateAllRows = false;
 
     @Option(title = "check_version",
             name = {"-c", "--check-version"},
             description = "Also check that all sstables are the latest version")
     private boolean checkVersion = false;
+
+    @Option(title = "override-disable",
+    name = {"-f", "--force"},
+    description = "Override disabling of verify tool - see CASSANDRA-9947 for caveats")
+    private boolean overrideDisable = false;
 
     @Option(title = "dfp",
             name = {"-d", "--dfp"},
@@ -68,6 +78,12 @@ public class Verify extends NodeToolCmd
     public void execute(NodeProbe probe)
     {
         PrintStream out = probe.output().out;
+        if (!overrideDisable)
+        {
+            out.println("verify is disabled unless a [-f|--force] override flag is provided. See CASSANDRA-9947 and CASSANDRA-17017 for details.");
+            System.exit(1);
+        }
+
         List<String> keyspaces = parseOptionalKeyspace(args, probe);
         String[] tableNames = parseOptionalTables(args);
 
@@ -82,7 +98,7 @@ public class Verify extends NodeToolCmd
         {
             try
             {
-                probe.verify(out, extendedVerify, checkVersion, diskFailurePolicy, mutateRepairStatus, checkOwnsTokens, quick, keyspace, tableNames);
+                probe.verify(out, extendedVerify, validateAllRows, checkVersion, diskFailurePolicy, mutateRepairStatus, checkOwnsTokens, quick, keyspace, tableNames);
             } catch (Exception e)
             {
                 throw new RuntimeException("Error occurred during verifying", e);

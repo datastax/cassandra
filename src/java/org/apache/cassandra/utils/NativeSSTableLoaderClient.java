@@ -17,27 +17,41 @@
  */
 package org.apache.cassandra.utils;
 
-import java.nio.ByteBuffer;
 import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
-import java.util.*;
+import java.nio.ByteBuffer;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
-import com.datastax.driver.core.*;
-
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.schema.*;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.ColumnMetadata.ClusteringOrder;
+import com.datastax.driver.core.AuthProvider;
+import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.Host;
+import com.datastax.driver.core.Metadata;
+import com.datastax.driver.core.PlainTextAuthProvider;
+import com.datastax.driver.core.Row;
+import com.datastax.driver.core.SSLOptions;
+import com.datastax.driver.core.Session;
+import com.datastax.driver.core.TokenRange;
 import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.dht.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.dht.Token.TokenFactory;
 import org.apache.cassandra.io.sstable.SSTableLoader;
-import org.apache.cassandra.schema.TableMetadata;
-
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.CQLTypeParser;
-import org.apache.cassandra.schema.SchemaKeyspace;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.ColumnMetadata.ClusteringOrder;
+import org.apache.cassandra.schema.DroppedColumn;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaKeyspaceTables;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.Types;
 
 public class NativeSSTableLoaderClient extends SSTableLoader.Client
@@ -102,9 +116,9 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
             // We only need the TableMetadata for the views, so we only load that.
             tables.putAll(fetchViews(keyspace, session, partitioner, types));
         }
-        catch (UnknownHostException e)
+        catch (Exception e)
         {
-            throw new RuntimeException(e);
+            throw new RuntimeException("Unable to initialise " + NativeSSTableLoaderClient.class.getName(), e);
         }
     }
 
@@ -121,7 +135,7 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
 
     private static Types fetchTypes(String keyspace, Session session)
     {
-        String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.TYPES);
+        String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TYPES);
 
         Types.RawBuilder types = Types.rawBuilder(keyspace);
         for (Row row : session.execute(query, keyspace))
@@ -146,7 +160,7 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
     private static Map<String, TableMetadataRef> fetchTables(String keyspace, Session session, IPartitioner partitioner, Types types)
     {
         Map<String, TableMetadataRef> tables = new HashMap<>();
-        String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.TABLES);
+        String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES);
 
         for (Row row : session.execute(query, keyspace))
         {
@@ -160,7 +174,7 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
     private static Map<String, TableMetadataRef> fetchViews(String keyspace, Session session, IPartitioner partitioner, Types types)
     {
         Map<String, TableMetadataRef> tables = new HashMap<>();
-        String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.VIEWS);
+        String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.VIEWS);
 
         for (Row row : session.execute(query, keyspace))
         {
@@ -187,14 +201,14 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
 
         String columnsQuery = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?",
                                             SchemaConstants.SCHEMA_KEYSPACE_NAME,
-                                            SchemaKeyspace.COLUMNS);
+                                            SchemaKeyspaceTables.COLUMNS);
 
         for (Row colRow : session.execute(columnsQuery, keyspace, name))
             builder.addColumn(createDefinitionFromRow(colRow, keyspace, name, types));
 
         String droppedColumnsQuery = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?",
                                                    SchemaConstants.SCHEMA_KEYSPACE_NAME,
-                                                   SchemaKeyspace.DROPPED_COLUMNS);
+                                                   SchemaKeyspaceTables.DROPPED_COLUMNS);
         Map<ByteBuffer, DroppedColumn> droppedColumns = new HashMap<>();
         for (Row colRow : session.execute(droppedColumnsQuery, keyspace, name))
         {
@@ -217,7 +231,7 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
 
         int position = row.getInt("position");
         org.apache.cassandra.schema.ColumnMetadata.Kind kind = ColumnMetadata.Kind.valueOf(row.getString("kind").toUpperCase());
-        return new ColumnMetadata(keyspace, table, name, type, position, kind);
+        return new ColumnMetadata(keyspace, table, name, type, position, kind, null);
     }
 
     private static DroppedColumn createDroppedColumnFromRow(Row row, String keyspace, String table)
@@ -225,7 +239,7 @@ public class NativeSSTableLoaderClient extends SSTableLoader.Client
         String name = row.getString("column_name");
         AbstractType<?> type = CQLTypeParser.parse(keyspace, row.getString("type"), Types.none());
         ColumnMetadata.Kind kind = ColumnMetadata.Kind.valueOf(row.getString("kind").toUpperCase());
-        ColumnMetadata column = new ColumnMetadata(keyspace, table, ColumnIdentifier.getInterned(name, true), type, ColumnMetadata.NO_POSITION, kind);
+        ColumnMetadata column = ColumnMetadata.droppedColumn(keyspace, table, ColumnIdentifier.getInterned(name, true), type, kind, null);
         long droppedTime = row.getTimestamp("dropped_time").getTime();
         return new DroppedColumn(column, droppedTime);
     }

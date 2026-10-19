@@ -17,24 +17,30 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -55,18 +61,21 @@ import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.rows.EncodingStats;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.assertj.core.api.Assertions;
 
+import static org.apache.cassandra.io.sstable.format.big.BigFormat.Components.*;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -76,6 +85,7 @@ import static org.junit.Assert.fail;
  * Test the functionality of {@link SSTableHeaderFix}.
  * It writes an 'big-m' version sstable(s) and executes against these.
  */
+@RunWith(Parameterized.class)
 public class SSTableHeaderFixTest
 {
     static
@@ -85,12 +95,23 @@ public class SSTableHeaderFixTest
 
     private File temporaryFolder;
 
+    @Parameterized.Parameter
+    public Supplier<? extends SSTableId> sstableIdGen;
+
+    @Parameterized.Parameters
+    public static Collection<Object[]> parameters()
+    {
+        return MockSchema.sstableIdGenerators();
+    }
+
     @Before
     public void setup()
     {
+        MockSchema.sstableIds.clear();
+        MockSchema.sstableIdGenerator = sstableIdGen;
         File f = FileUtils.createTempFile("SSTableUDTFixTest", "");
-        f.delete();
-        f.mkdirs();
+        f.tryDelete();
+        f.tryCreateDirectories();
         temporaryFolder = f;
     }
 
@@ -160,7 +181,7 @@ public class SSTableHeaderFixTest
         return new TupleType(Collections.singletonList(UTF8Type.instance));
     }
 
-    private static final Version version = BigFormat.instance.getVersion("mc");
+    private static final Version version = BigFormat.getInstance().getVersion("mc");
 
     private TableMetadata tableMetadata;
     private final Set<String> updatedColumns = new HashSet<>();
@@ -277,7 +298,7 @@ public class SSTableHeaderFixTest
         File sstable = buildFakeSSTable(dir, 1, cols, true);
 
         SerializationHeader.Component header = readHeader(sstable);
-        assertFrozenUdt(header, false, true);
+        assertFrozenUdt(header, false, false);
 
         ColumnMetadata cd = getColDef("solr_query");
         tableMetadata = tableMetadata.unbuild()
@@ -298,6 +319,7 @@ public class SSTableHeaderFixTest
     }
 
     @Test
+    @Ignore("CNDB-10180")
     public void complexTypeMatchTest() throws Exception
     {
         File dir = temporaryFolder;
@@ -320,7 +342,7 @@ public class SSTableHeaderFixTest
         File sstable = buildFakeSSTable(dir, 1, cols, true);
 
         SerializationHeader.Component header = readHeader(sstable);
-        assertFrozenUdt(header, false, true);
+        assertFrozenUdt(header, false, false);
 
         SSTableHeaderFix headerFix = builder().withPath(sstable.toPath())
                                               .build();
@@ -328,12 +350,12 @@ public class SSTableHeaderFixTest
 
         assertFalse(headerFix.hasError());
         assertTrue(headerFix.hasChanges());
-        assertEquals(Sets.newHashSet("pk", "ck", "regular_b", "static_b",
-                                     "udt_nested", "udt_in_composite", "udt_in_list", "udt_in_set", "udt_in_map"), updatedColumns);
+        assertEquals(Sets.newHashSet("pk", "ck", "regular_b", "static_b", "udt_nested", "udt_in_list", "udt_in_set", "udt_in_map"),
+                     updatedColumns);
 
         // must not have re-written the stats-component
         header = readHeader(sstable);
-        assertFrozenUdt(header, true, true);
+        assertFrozenUdt(header, true, false);
     }
 
     @Test
@@ -368,12 +390,12 @@ public class SSTableHeaderFixTest
             ColumnMetadata cd = getColDef(col);
             AbstractType<?> dropType = cd.type.expandUserTypes();
             cols.removeRegularOrStaticColumn(ci)
-                .recordColumnDrop(new ColumnMetadata(cd.ksName, cd.cfName, cd.name, dropType, cd.position(), cd.kind), FBUtilities.timestampMicros());
+                .recordColumnDrop(new ColumnMetadata(cd.ksName, cd.cfName, cd.name, dropType, cd.position(), cd.kind, null), FBUtilities.timestampMicros());
         }
         tableMetadata = cols.build();
 
         SerializationHeader.Component header = readHeader(sstable);
-        assertFrozenUdt(header, false, true);
+        assertFrozenUdt(header, false, false);
 
         SSTableHeaderFix headerFix = builder().withPath(sstable.toPath())
                                               .build();
@@ -414,14 +436,14 @@ public class SSTableHeaderFixTest
                                     true),
                         // 'frozen<udt>' / dropped
                         new ColSpec("frozen_udt_as_frozen_udt_dropped",
-                                    makeUDT2("frozen_udt_as_frozen_udt_dropped", true).freezeNestedMulticellTypes().freeze().expandUserTypes(),
+                                    makeUDT2("frozen_udt_as_frozen_udt_dropped", true).freeze().expandUserTypes(),
                                     makeUDT2("frozen_udt_as_frozen_udt_dropped", false),
                                     makeUDT2("frozen_udt_as_frozen_udt_dropped", false),
                                     true,
                                     false),
                         // 'frozen<udt>' / dropped / as 'udt'
                         new ColSpec("frozen_udt_as_unfrozen_udt_dropped",
-                                    makeUDT2("frozen_udt_as_unfrozen_udt_dropped", true).freezeNestedMulticellTypes().freeze().expandUserTypes(),
+                                    makeUDT2("frozen_udt_as_unfrozen_udt_dropped", true).freeze().expandUserTypes(),
                                     makeUDT2("frozen_udt_as_unfrozen_udt_dropped", true),
                                     makeUDT2("frozen_udt_as_unfrozen_udt_dropped", false),
                                     true,
@@ -481,7 +503,7 @@ public class SSTableHeaderFixTest
         for (ColSpec colSpec : colSpecs)
         {
             AbstractType<?> hdrType = header.getRegularColumns().get(ByteBufferUtil.bytes(colSpec.name));
-            assertEquals(colSpec.name, colSpec.preFix, hdrType);
+            Assertions.assertThat(hdrType).isEqualTo(colSpec.preFix).describedAs("Column %s (%s != %s)", colSpec.name, hdrType.asCQL3Type().toSchemaString(), colSpec.preFix.asCQL3Type().toSchemaString());
             assertEquals(colSpec.name, colSpec.preFix.isMultiCell(), hdrType.isMultiCell());
         }
 
@@ -495,7 +517,7 @@ public class SSTableHeaderFixTest
         Arrays.stream(colSpecs)
               .filter(c -> c.mustFix)
               .forEach(c -> assertTrue("expect " + c.name + " to be updated, but was not (" + updatedColumns + ")", updatedColumns.contains(c.name)));
-        // Verify that the number of updated columns maches the expected number of columns to fix
+        // Verify that the number of updated columns matches the expected number of columns to fix
         assertEquals(Arrays.stream(colSpecs).filter(c -> c.mustFix).count(), updatedColumns.size());
 
         header = readHeader(sstable);
@@ -505,6 +527,14 @@ public class SSTableHeaderFixTest
             assertEquals(colSpec.name, colSpec.expect, hdrType);
             assertEquals(colSpec.name, colSpec.expect.isMultiCell(), hdrType.isMultiCell());
         }
+    }
+
+    private AbstractType<?> freezeOnlyNested(AbstractType<?> type)
+    {
+        ImmutableList.Builder<AbstractType<?>> builder = ImmutableList.builder();
+        for (AbstractType<?> subType : type.subTypes())
+            builder.add(subType.freeze());
+        return type.with(builder.build(), true);
     }
 
     static class ColSpec
@@ -533,34 +563,6 @@ public class SSTableHeaderFixTest
     }
 
     @Test
-    public void verifyTypeMatchCompositeKeyTest() throws Exception
-    {
-        File dir = temporaryFolder;
-
-        TableMetadata.Builder cols = TableMetadata.builder("ks", "cf")
-                                                  .addPartitionKeyColumn("pk1", UTF8Type.instance)
-                                                  .addPartitionKeyColumn("pk2", udtPK)
-                                                  .addClusteringColumn("ck", udtCK);
-        commonColumns(cols);
-        File sstable = buildFakeSSTable(dir, 1, cols, false);
-
-        SerializationHeader.Component header = readHeader(sstable);
-        assertFrozenUdt(header, false, true);
-
-        SSTableHeaderFix headerFix = builder().withPath(sstable.toPath())
-                                              .build();
-        headerFix.execute();
-
-        assertFalse(headerFix.hasError());
-        assertFalse(headerFix.hasChanges());
-        assertTrue(updatedColumns.isEmpty());
-
-        // must not have re-written the stats-component
-        header = readHeader(sstable);
-        assertFrozenUdt(header, false, true);
-    }
-
-    @Test
     public void compositePartitionKey() throws Exception
     {
         TableMetadata.Builder cols = TableMetadata.builder("ks", "cf")
@@ -575,7 +577,7 @@ public class SSTableHeaderFixTest
         SerializationHeader.Component header = readHeader(sstable);
         assertTrue(header.getKeyType() instanceof CompositeType);
         CompositeType keyType = (CompositeType) header.getKeyType();
-        assertEquals(Arrays.asList(UTF8Type.instance, udtPK), keyType.getComponents());
+        assertEquals(Arrays.asList(UTF8Type.instance, udtPK.freeze()), keyType.subTypes());
 
         SSTableHeaderFix headerFix = builder().withPath(sstable.toPath())
                                               .build();
@@ -583,12 +585,12 @@ public class SSTableHeaderFixTest
 
         assertFalse(headerFix.hasError());
         assertTrue(headerFix.hasChanges());
-        assertEquals(Sets.newHashSet("pk2", "ck", "regular_b", "static_b"), updatedColumns);
+        assertEquals(Sets.newHashSet("ck", "regular_b", "static_b"), updatedColumns);
 
         header = readHeader(sstable);
         assertTrue(header.getKeyType() instanceof CompositeType);
         keyType = (CompositeType) header.getKeyType();
-        assertEquals(Arrays.asList(UTF8Type.instance, udtPK.freeze()), keyType.getComponents());
+        assertEquals(Arrays.asList(UTF8Type.instance, udtPK.freeze()), keyType.subTypes());
     }
 
     @Test
@@ -763,12 +765,18 @@ public class SSTableHeaderFixTest
 
     private void commonColumns(TableMetadata.Builder cols)
     {
+
         cols.addRegularColumn("regular_a", UTF8Type.instance)
             .addRegularColumn("regular_b", udtRegular)
             .addRegularColumn("regular_c", Int32Type.instance)
+            .addRegularColumn("to_be_dropped", udtRegular.freeze())
             .addStaticColumn("static_a", UTF8Type.instance)
             .addStaticColumn("static_b", udtStatic)
             .addStaticColumn("static_c", Int32Type.instance);
+
+        // drop a column for SSTableHeaderFix to execute
+        ColumnMetadata dropped = cols.getColumn(ByteBufferUtil.bytes("to_be_dropped"));
+        cols.removeRegularOrStaticColumn(dropped.name).recordColumnDrop(dropped, FBUtilities.timestampMicros());
     }
 
     private File buildFakeSSTable(File dir, int generation, TableMetadata.Builder cols, boolean freezeInSchema)
@@ -785,32 +793,33 @@ public class SSTableHeaderFixTest
         TableMetadata.Builder schemaCols = TableMetadata.builder("ks", "cf");
         for (ColumnMetadata cm : cols.columns())
             schemaCols.addColumn(freezer.apply(cm));
+        schemaCols.droppedColumns(headerMetadata.droppedColumns);
         tableMetadata = schemaCols.build();
 
         try
         {
 
-            Descriptor desc = new Descriptor(version, dir, "ks", "cf", generation, SSTableFormat.Type.BIG);
+            Descriptor desc = new Descriptor(version.version, dir, "ks", "cf", MockSchema.sstableId(generation), BigFormat.getInstance());
 
             // Just create the component files - we don't really need those.
             for (Component component : requiredComponents)
-                assertTrue(new File(desc.filenameFor(component)).createNewFile());
+                assertTrue(desc.fileFor(component).createFileIfNotExists());
 
             AbstractType<?> partitionKey = headerMetadata.partitionKeyType;
             List<AbstractType<?>> clusteringKey = headerMetadata.clusteringColumns()
                                                                 .stream()
                                                                 .map(cd -> cd.type)
                                                                 .collect(Collectors.toList());
-            Map<ByteBuffer, AbstractType<?>> staticColumns = headerMetadata.columns()
+            LinkedHashMap<ByteBuffer, AbstractType<?>> staticColumns = headerMetadata.columns()
                                                                            .stream()
                                                                            .filter(cd -> cd.kind == ColumnMetadata.Kind.STATIC)
-                                                                           .collect(Collectors.toMap(cd -> cd.name.bytes, cd -> cd.type, (a, b) -> a));
-            Map<ByteBuffer, AbstractType<?>> regularColumns = headerMetadata.columns()
-                                                                            .stream()
-                                                                            .filter(cd -> cd.kind == ColumnMetadata.Kind.REGULAR)
-                                                                            .collect(Collectors.toMap(cd -> cd.name.bytes, cd -> cd.type, (a, b) -> a));
+                                                                           .collect(Collectors.toMap(cd -> cd.name.bytes, cd -> cd.type, (a, b) -> a, LinkedHashMap::new));
+            LinkedHashMap<ByteBuffer, AbstractType<?>> regularColumns = headerMetadata.columns()
+                                                                                      .stream()
+                                                                                      .filter(cd -> cd.kind == ColumnMetadata.Kind.REGULAR)
+                                                                                      .collect(Collectors.toMap(cd -> cd.name.bytes, cd -> cd.type, (a, b) -> a, LinkedHashMap::new));
 
-            File statsFile = new File(desc.filenameFor(Component.STATS));
+            File statsFile = desc.fileFor(STATS);
             SerializationHeader.Component header = SerializationHeader.Component.buildComponentForTools(partitionKey,
                                                                                                         clusteringKey,
                                                                                                         staticColumns,
@@ -819,11 +828,11 @@ public class SSTableHeaderFixTest
 
             try (SequentialWriter out = new SequentialWriter(statsFile))
             {
-                desc.getMetadataSerializer().serialize(Collections.singletonMap(MetadataType.HEADER, header), out, version);
+                desc.getMetadataSerializer().serialize(Collections.singletonMap(MetadataType.HEADER, header), out, desc);
                 out.finish();
             }
 
-            return new File(desc.filenameFor(Component.DATA));
+            return desc.fileFor(DATA);
         }
         catch (Exception e)
         {
@@ -856,7 +865,7 @@ public class SSTableHeaderFixTest
             if (type.getClass() == CompositeType.class)
             {
                 CompositeType cHeader = (CompositeType) type;
-                return CompositeType.getInstance(cHeader.types.stream().map(this::freezeUdt).collect(Collectors.toList()));
+                return CompositeType.getInstance(cHeader.subTypes().stream().map(this::freezeUdt).collect(ImmutableList.toImmutableList()));
             }
         }
         else if (type instanceof TupleType)
@@ -866,7 +875,7 @@ public class SSTableHeaderFixTest
                 UserType cHeader = (UserType) type;
                 cHeader = cHeader.freeze();
                 return new UserType(cHeader.keyspace, cHeader.name, cHeader.fieldNames(),
-                                    cHeader.allTypes().stream().map(this::freezeUdt).collect(Collectors.toList()),
+                                    cHeader.subTypes().stream().map(this::freezeUdt).collect(ImmutableList.toImmutableList()),
                                     cHeader.isMultiCell());
             }
         }
@@ -878,7 +887,7 @@ public class SSTableHeaderFixTest
         AbstractType<?> keyType = header.getKeyType();
         if (keyType instanceof CompositeType)
         {
-            for (AbstractType<?> component : ((CompositeType) keyType).types)
+            for (AbstractType<?> component : keyType.subTypes())
                 assertFrozenUdt("partition-key-component", component, frozen, checkInner);
         }
         assertFrozenUdt("partition-key", keyType, frozen, checkInner);
@@ -896,7 +905,7 @@ public class SSTableHeaderFixTest
         if (type instanceof CompositeType)
         {
             if (checkInner)
-                for (AbstractType<?> component : ((CompositeType) type).types)
+                for (AbstractType<?> component : type.subTypes())
                     assertFrozenUdt(name, component, frozen, true);
         }
         else if (type instanceof CollectionType)
@@ -936,7 +945,7 @@ public class SSTableHeaderFixTest
                 TupleType tuple = (TupleType) type;
                 // only descend for non-frozen types (checking frozen in frozen is just stupid)
                 if (tuple.isMultiCell())
-                    for (AbstractType<?> component : tuple.allTypes())
+                    for (AbstractType<?> component : tuple.subTypes())
                         assertFrozenUdt(name + "<tuple>", component, frozen, true);
             }
         }
@@ -956,9 +965,9 @@ public class SSTableHeaderFixTest
 
     private SerializationHeader.Component readHeader(File sstable) throws Exception
     {
-        Descriptor desc = Descriptor.fromFilename(sstable);
+        Descriptor desc = Descriptor.fromFile(sstable);
         return (SerializationHeader.Component) desc.getMetadataSerializer().deserialize(desc, MetadataType.HEADER);
     }
 
-    private static final Component[] requiredComponents = new Component[]{ Component.DATA, Component.FILTER, Component.PRIMARY_INDEX, Component.TOC };
+    private static final Component[] requiredComponents = new Component[]{ DATA, FILTER, PRIMARY_INDEX, TOC };
 }

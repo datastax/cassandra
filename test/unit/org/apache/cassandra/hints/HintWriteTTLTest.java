@@ -18,15 +18,16 @@
 
 package org.apache.cassandra.hints;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.io.util.File;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -42,14 +43,15 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.UUIDGen;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.CASSANDRA_MAX_HINT_TTL;
 
 public class HintWriteTTLTest
 {
     private static int TTL = 500;
     private static int GC_GRACE = 84600;
 
-    private static Hint makeHint(TableMetadata tbm, int key, int creationTime, int gcgs)
+    private static Hint makeHint(TableMetadata tbm, int key, long creationTime, int gcgs)
     {
         PartitionUpdate update = PartitionUpdate.fullPartitionDelete(tbm,
                                                                      ByteBufferUtil.bytes(key),
@@ -61,7 +63,7 @@ public class HintWriteTTLTest
 
     private static DecoratedKey hintKey(Hint hint)
     {
-        return hint.mutation.key();
+        return hint.mutation().key();
     }
 
     private static Hint deserialize(ByteBuffer bb) throws IOException
@@ -84,18 +86,18 @@ public class HintWriteTTLTest
     @BeforeClass
     public static void setupClass() throws Exception
     {
-        System.setProperty("cassandra.maxHintTTL", Integer.toString(TTL));
+        CASSANDRA_MAX_HINT_TTL.setInt(TTL);
         SchemaLoader.prepareServer();
         TableMetadata tbm = CreateTableStatement.parse("CREATE TABLE tbl (k INT PRIMARY KEY, v INT)", "ks").gcGraceSeconds(GC_GRACE).build();
         SchemaLoader.createKeyspace("ks", KeyspaceParams.simple(1), tbm);
 
-        int nowInSeconds = FBUtilities.nowInSeconds();
+        long nowInSeconds = FBUtilities.nowInSeconds();
         liveHint = makeHint(tbm, 1, nowInSeconds, GC_GRACE);
         ttldHint = makeHint(tbm, 2, nowInSeconds - (TTL + 1), GC_GRACE);
 
 
-        File directory = Files.createTempDirectory(null).toFile();
-        HintsDescriptor descriptor = new HintsDescriptor(UUIDGen.getTimeUUID(), s2m(nowInSeconds));
+        File directory = new File(Files.createTempDirectory(null));
+        HintsDescriptor descriptor = new HintsDescriptor(UUID.randomUUID(), s2m(nowInSeconds));
 
         try (HintsWriter writer = HintsWriter.create(directory, descriptor);
              HintsWriter.Session session = writer.newSession(ByteBuffer.allocate(1024)))
@@ -106,7 +108,7 @@ public class HintWriteTTLTest
         }
     }
 
-    private static long s2m(int seconds)
+    private static long s2m(long seconds)
     {
         return TimeUnit.SECONDS.toMillis(seconds);
     }

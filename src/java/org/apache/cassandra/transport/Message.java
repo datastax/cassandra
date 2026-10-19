@@ -23,21 +23,34 @@ import java.nio.ByteBuffer;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 
+import org.apache.cassandra.utils.Closeable;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.exceptions.OverloadedException;
+import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.MonotonicClock;
+import org.apache.cassandra.utils.ReflectionUtils;
+import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.concurrent.Future;
+
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
 /**
  * A message from the CQL binary protocol.
@@ -126,12 +139,12 @@ public abstract class Message
         }
 
         @VisibleForTesting
-        Codec<?> unsafeSetCodec(Codec<?> codec) throws NoSuchFieldException, IllegalAccessException
+        public Codec<?> unsafeSetCodec(Codec<?> codec) throws NoSuchFieldException, IllegalAccessException
         {
             Codec<?> original = this.codec;
             Field field = Type.class.getDeclaredField("codec");
             field.setAccessible(true);
-            Field modifiers = Field.class.getDeclaredField("modifiers");
+            Field modifiers = ReflectionUtils.getModifiersField();
             modifiers.setAccessible(true);
             modifiers.setInt(field, field.getModifiers() & ~Modifier.FINAL);
             field.set(this, codec);
@@ -192,7 +205,8 @@ public abstract class Message
         this.customPayload = customPayload;
     }
 
-    public String debugString()
+    @Override
+    public String toString()
     {
         return String.format("(%s:%s:%s)", type, streamId, connection == null ? "null" :  connection.getVersion().asInt());
     }
@@ -200,60 +214,103 @@ public abstract class Message
     public static abstract class Request extends Message
     {
         private boolean tracingRequested;
-
+        public final long createdAtNanos;
         protected Request(Type type)
         {
             super(type);
+
+            createdAtNanos = MonotonicClock.Global.preciseTime.now();
 
             if (type.direction != Direction.REQUEST)
                 throw new IllegalArgumentException();
         }
 
+        /**
+         * @return true if the execution of this {@link Request} should be recorded in a tracing session
+         */
         protected boolean isTraceable()
         {
             return false;
         }
 
-        protected abstract Response execute(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
-
-        public final Response execute(QueryState queryState, long queryStartNanoTime)
+        /**
+         * @return true if warnings should be tracked and aborts enforced for resource limits on this {@link Request}
+         */
+        protected boolean isTrackable()
         {
+            return false;
+        }
+
+        protected abstract Future<Response> maybeExecuteAsync(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest);
+
+        /**
+         * Returns the time elapsed since this request was created. Note that this is the total lifetime of the request
+         * in the system, so we expect increasing returned values across multiple calls to elapsedTimeSinceCreation.
+         *
+         * @param timeUnit the time unit in which to return the elapsed time
+         * @return the time elapsed since this request was created
+         */
+        protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
+        {
+            return timeUnit.convert(MonotonicClock.Global.preciseTime.now() - createdAtNanos, TimeUnit.NANOSECONDS);
+        }
+
+
+        public final Future<Response> execute(QueryState queryState, Dispatcher.RequestTime requestTime)
+        {
+            // at the time of the check, this is approximately the time spent in the NTR stage's queue
+            long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+            ClientMetrics.instance.recordQueueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
+            if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+            {
+                ClientMetrics.instance.markTimedOutBeforeProcessing();
+                return ImmediateFuture.success(ErrorMessage.fromException(new OverloadedException("Query timed out before it could start")));
+            }
+
             boolean shouldTrace = false;
-            UUID tracingSessionId = null;
+            TimeUUID tracingSessionId = null;
 
             if (isTraceable())
             {
                 if (isTracingRequested())
                 {
                     shouldTrace = true;
-                    tracingSessionId = UUIDGen.getTimeUUID();
-                    Tracing.instance.newSession(tracingSessionId, getCustomPayload());
+                    tracingSessionId = nextTimeUUID();
+                    Tracing.instance.newSession(queryState.getClientState(), tracingSessionId, getCustomPayload());
                 }
                 else if (StorageService.instance.shouldTraceProbablistically())
                 {
                     shouldTrace = true;
-                    Tracing.instance.newSession(getCustomPayload());
+                    Tracing.instance.newSession(queryState.getClientState(), getCustomPayload());
                 }
             }
 
-            Response response;
-            try
-            {
-                response = execute(queryState, queryStartNanoTime, shouldTrace);
-            }
-            finally
-            {
-                if (shouldTrace)
-                    Tracing.instance.stopSession();
-            }
+            Tracing.trace("Initialized tracing in execute. Already elapsed {} ns", (Clock.Global.nanoTime() - requestTime.startedAtNanos()));
+            boolean finalShouldTrace = shouldTrace;
+            TimeUUID finalTracingSessionId = tracingSessionId;
 
-            if (isTraceable() && isTracingRequested())
-                response.setTracingId(tracingSessionId);
+            // Capture ExecutorLocals containing thread-local state (TraceState, ClientWarn, RequestSensors,
+            // OperationContext) before async execution and restore in the callback, which may be on a different thread.
+            ExecutorLocals executorLocals = ExecutorLocals.current();
+            return maybeExecuteAsync(queryState, requestTime, shouldTrace)
+                   .addCallback((result, ignored) -> {
+                       try (Closeable close = executorLocals.get())
+                       {
+                           if (finalShouldTrace)
+                               Tracing.instance.stopSession();
 
-            return response;
+                           if (result != null && isTraceable() && isTracingRequested())
+                               result.setTracingId(finalTracingSessionId);
+                       }
+                       catch (Throwable t)
+                       {
+                           JVMStabilityInspector.inspectThrowable(t);
+                           logger.error("Error in tracing cleanup", t);
+                       }
+                   });
         }
 
-        void setTracingRequested()
+        public void setTracingRequested()
         {
             tracingRequested = true;
         }
@@ -262,11 +319,20 @@ public abstract class Message
         {
             return tracingRequested;
         }
+
+        @Override
+        public String toString()
+        {
+            return "Request{" +
+                   "tracingRequested=" + tracingRequested +
+                   ", createdAtNanos=" + createdAtNanos +
+                   '}';
+        }
     }
 
     public static abstract class Response extends Message
     {
-        protected UUID tracingId;
+        protected TimeUUID tracingId;
         protected List<String> warnings;
 
         protected Response(Type type)
@@ -277,13 +343,13 @@ public abstract class Message
                 throw new IllegalArgumentException();
         }
 
-        Message setTracingId(UUID tracingId)
+        public Message setTracingId(TimeUUID tracingId)
         {
             this.tracingId = tracingId;
             return this;
         }
 
-        UUID getTracingId()
+        public TimeUUID getTracingId()
         {
             return tracingId;
         }
@@ -312,16 +378,23 @@ public abstract class Message
             if (this instanceof Response)
             {
                 Response message = (Response)this;
-                UUID tracingId = message.getTracingId();
+                TimeUUID tracingId = message.getTracingId();
                 Map<String, ByteBuffer> customPayload = message.getCustomPayload();
                 if (tracingId != null)
-                    messageSize += CBUtil.sizeOfUUID(tracingId);
+                    messageSize += TimeUUID.sizeInBytes();
                 List<String> warnings = message.getWarnings();
                 if (warnings != null)
                 {
+                    // if cassandra populates warnings for <= v3 protocol, this is a bug
                     if (version.isSmallerThan(ProtocolVersion.V4))
-                        throw new ProtocolException("Must not send frame with WARNING flag for native protocol version < 4");
-                    messageSize += CBUtil.sizeOfStringList(warnings);
+                    {
+                        logger.warn("Warnings present in message with version less than v4 (it is {}); warnings={}", version, warnings);
+                        warnings = null;
+                    }
+                    else
+                    {
+                        messageSize += CBUtil.sizeOfStringList(warnings);
+                    }
                 }
                 if (customPayload != null)
                 {
@@ -398,7 +471,7 @@ public abstract class Message
             boolean isCustomPayload = inbound.header.flags.contains(Envelope.Header.Flag.CUSTOM_PAYLOAD);
             boolean hasWarning = inbound.header.flags.contains(Envelope.Header.Flag.WARNING);
 
-            UUID tracingId = isRequest || !isTracing ? null : CBUtil.readUUID(inbound.body);
+            TimeUUID tracingId = isRequest || !isTracing ? null : CBUtil.readTimeUUID(inbound.body);
             List<String> warnings = isRequest || !hasWarning ? null : CBUtil.readStringList(inbound.body);
             Map<String, ByteBuffer> customPayload = !isCustomPayload ? null : CBUtil.readBytesMap(inbound.body);
 

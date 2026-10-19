@@ -20,6 +20,7 @@ package org.apache.cassandra.tools.nodetool.stats;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class StatsTable
 {
@@ -30,6 +31,7 @@ public class StatsTable
     public boolean isLeveledSstable = false;
     public Object sstableCount;
     public Object oldSSTableCount;
+    public Long maxSSTableSize;
     public String spaceUsedLive;
     public String spaceUsedTotal;
     public String spaceUsedBySnapshotsTotal;
@@ -42,6 +44,7 @@ public class StatsTable
     public boolean memtableOffHeapUsed = false;
     public String memtableOffHeapMemoryUsed;
     public Object memtableSwitchCount;
+    public Object speculativeRetries;
     public long localReadCount;
     public double localReadLatencyMs;
     public long localWriteCount;
@@ -67,7 +70,27 @@ public class StatsTable
     public long maximumLiveCellsPerSliceLastFiveMinutes;
     public double averageTombstonesPerSliceLastFiveMinutes;
     public long maximumTombstonesPerSliceLastFiveMinutes;
-    public String droppedMutations;
     public List<String> sstablesInEachLevel = new ArrayList<>();
+    public List<String> sstableBytesInEachLevel = new ArrayList<>();
+    public int[] sstableCountPerTWCSBucket = null;
     public Boolean isInCorrectLocation = null; // null: option not active
+    public double droppableTombstoneRatio;
+    public Map<String, String> topSizePartitions;
+    public Map<String, Long> topTombstonePartitions;
+    public String topSizePartitionsLastUpdate;
+    public String topTombstonePartitionsLastUpdate;
+    public double localReadWriteRatio;
+    public Long twcsDurationInMillis;
+    public String twcs;
+
+    public double saiQueryLatencyMs;
+    public double saiPostFilteringReadLatencyMs;
+    public String saiDiskUsedBytes;
+    public double saiSSTableIndexesHit;
+    public double saiIndexSegmentsHit;
+    public double saiRowsFiltered;
+    public long saiTotalQueryTimeouts;
+    public boolean hasSaiIndexes;
+    public int saiTotalIndexCount;
+    public String saiTotalQueryableIndexRatio;
 }

@@ -41,6 +41,8 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.*;
  */
 public abstract class ColumnCondition
 {
+    public static final String ANALYZER_MATCHES_ERROR = "LWT Conditions do not support the : operator";
+
     public final ColumnMetadata column;
     public final Operator operator;
     private final Terms terms;
@@ -255,7 +257,7 @@ public abstract class ColumnCondition
                 // the condition value is not null, so only NEQ can return true
                 return operator == Operator.NEQ;
             }
-            return operator.isSatisfiedBy(type, otherValue, value);
+            return operator.isSatisfiedBy(type, otherValue, value); // We don't use any analyzers in LWT, see CNDB-11658
         }
     }
 
@@ -461,15 +463,16 @@ public abstract class ColumnCondition
             this.values = values;
         }
 
+        @Override
         public boolean appliesTo(Row row)
         {
-            CollectionType<?> type = (CollectionType<?>)column.type;
+            CollectionType<?> type = (CollectionType<?>) column.type;
 
             // copy iterator contents so that we can properly reuse them for each comparison with an IN value
             for (Term.Terminal value : values)
             {
                 Iterator<Cell<?>> iter = getCells(row, column);
-                if (value == null)
+                if (value == null || ((!comparisonOperator.isContains() && !comparisonOperator.isContainsKey()) && isEmpty(type, value)))
                 {
                     if (comparisonOperator == Operator.EQ)
                     {
@@ -481,7 +484,10 @@ public abstract class ColumnCondition
                     if (comparisonOperator == Operator.NEQ)
                         return iter.hasNext();
 
-                    throw invalidRequest("Invalid comparison with null for operator \"%s\"", comparisonOperator);
+                    if (value == null)
+                        throw invalidRequest("Invalid comparison with null for operator \"%s\"", comparisonOperator);
+
+                    throw invalidRequest("Invalid comparison with an empty %s for operator \"%s\"", type.kind, comparisonOperator);
                 }
 
                 if (valueAppliesTo(type, iter, value, comparisonOperator))
@@ -490,10 +496,27 @@ public abstract class ColumnCondition
             return false;
         }
 
+        private boolean isEmpty(CollectionType<?> type, Terminal value)
+        {
+            switch (type.kind)
+            {
+                case LIST:
+                    return ((Lists.Value) value).elements.isEmpty();
+                case SET:
+                    return ((Sets.Value) value).elements.isEmpty();
+                case MAP:
+                    return ((Maps.Value) value).map.isEmpty();
+            }
+            throw new AssertionError();
+        }
+
         private static boolean valueAppliesTo(CollectionType<?> type, Iterator<Cell<?>> iter, Term.Terminal value, Operator operator)
         {
-            if (value == null)
-                return !iter.hasNext();
+            if (!iter.hasNext() && operator != Operator.NEQ)
+                return false;
+
+            if(operator.isContains() || operator.isContainsKey())
+                return containsAppliesTo(type, iter, value.get(ProtocolVersion.CURRENT), operator);
 
             switch (type.kind)
             {
@@ -573,6 +596,39 @@ public abstract class ColumnCondition
         }
     }
 
+    private static boolean containsAppliesTo(CollectionType<?> type, Iterator<Cell<?>> iter, ByteBuffer value, Operator operator)
+    {
+        AbstractType<?> compareType;
+        switch (type.kind)
+        {
+            case LIST:
+                compareType = ((ListType<?>)type).getElementsType();
+                break;
+            case SET:
+                compareType = ((SetType<?>)type).getElementsType();
+                break;
+            case MAP:
+                compareType = operator.isContainsKey() ? ((MapType<?, ?>)type).getKeysType() : ((MapType<?, ?>)type).getValuesType();
+                break;
+            default:
+                throw new AssertionError();
+        }
+        boolean appliesToSetOrMapKeys = (type.kind == CollectionType.Kind.SET || type.kind == CollectionType.Kind.MAP && operator.isContainsKey());
+        return containsAppliesTo(compareType, iter, value, appliesToSetOrMapKeys);
+    }
+
+    private static boolean containsAppliesTo(AbstractType<?> type, Iterator<Cell<?>> iter, ByteBuffer value, Boolean appliesToSetOrMapKeys)
+    {
+        while(iter.hasNext())
+        {
+            // for lists and map values we use the cell value; for sets and map keys we use the cell name
+            ByteBuffer cellValue = appliesToSetOrMapKeys ? iter.next().path().get(0) : iter.next().buffer();
+            if(type.compare(cellValue, value) == 0)
+                return true;
+        }
+        return false;
+    }
+
     /**
      * A condition on a UDT field
      */
@@ -612,10 +668,15 @@ public abstract class ColumnCondition
                 return cell == null ? null : cell.buffer();
             }
 
-            Cell<?> cell = getCell(row, column);
+            // getCell returns Cell<?>, which requires a method call to properly convert.
+            return getCellBuffer(getCell(row, column), userType);
+        }
+
+        private <V> ByteBuffer getCellBuffer(Cell<V> cell, UserType userType)
+        {
             return cell == null
-                      ? null
-                      : userType.split(cell.buffer())[userType.fieldPosition(field)];
+                   ? null
+                   : userType.split(ByteBufferAccessor.instance, cell.buffer())[userType.fieldPosition(field)];
         }
 
         private boolean isSatisfiedBy(ByteBuffer rowValue)
@@ -775,6 +836,10 @@ public abstract class ColumnCondition
             if (receiver.type instanceof CounterColumnType)
                 throw invalidRequest("Conditions on counters are not supported");
 
+            // Analyzer matches operator is only supported on SAI indexes for now
+            if (operator == Operator.ANALYZER_MATCHES)
+                throw invalidRequest(ANALYZER_MATCHES_ERROR);
+
             if (collectionElement != null)
             {
                 if (!(receiver.type.isCollection()))
@@ -819,11 +884,17 @@ public abstract class ColumnCondition
 
         private Terms prepareTerms(String keyspace, ColumnSpecification receiver)
         {
+            checkFalse(operator.isContainsKey() && !(receiver.type instanceof MapType), "Cannot use CONTAINS KEY on non-map column %s", receiver.name);
+            checkFalse(operator.isContains() && !(receiver.type.isCollection()), "Cannot use CONTAINS on non-collection column %s", receiver.name);
+
             if (operator.isIN())
             {
                 return inValues == null ? Terms.ofListMarker(inMarker.prepare(keyspace, receiver), receiver.type)
                                         : Terms.of(prepareTerms(keyspace, receiver, inValues));
             }
+
+            if (operator.isContains() || operator.isContainsKey())
+                receiver = ((CollectionType<?>) receiver.type).makeCollectionReceiver(receiver, operator.isContainsKey());
 
             return Terms.of(value.prepare(keyspace, receiver));
         }

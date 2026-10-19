@@ -771,6 +771,31 @@ class TestCqlParsing(TestCase):
                                   ('"/*MyTable*/"', 'quotedName'),
                                   (';', 'endtoken')])
 
+        parsed = parse_cqlsh_statements('''
+                                        INSERT into a (key,c1,c2) VALUES ('aKey','v1*/','/v2/*/v3');
+                                        ''')
+
+        self.assertSequenceEqual(tokens_with_types(parsed),
+                                 [('INSERT', 'reserved_identifier'),
+                                  ('into', 'reserved_identifier'),
+                                  ('a', 'identifier'),
+                                  ('(', 'op'),
+                                  ('key', 'identifier'),
+                                  (',', 'op'),
+                                  ('c1', 'identifier'),
+                                  (',', 'op'),
+                                  ('c2', 'identifier'),
+                                  (')', 'op'),
+                                  ('VALUES', 'identifier'),
+                                  ('(', 'op'),
+                                  ("'aKey'", 'quotedStringLiteral'),
+                                  (',', 'op'),
+                                  ("'v1*/'", 'quotedStringLiteral'),
+                                  (',', 'op'),
+                                  ("'/v2/*/v3'", 'quotedStringLiteral'),
+                                  (')', 'op'),
+                                  (';', 'endtoken')])
+
         parse_cqlsh_statements('''
                                */ SELECT FROM "MyTable";
                                ''')
@@ -778,12 +803,12 @@ class TestCqlParsing(TestCase):
 
 
 def parse_cqlsh_statements(text):
-    '''
+    """
     Runs its argument through the sequence of parsing steps that cqlsh takes its
     input through.
 
     Currently does not handle batch statements.
-    '''
+    """
     # based on onecmd
     statements, _ = CqlRuleSet.cql_split_statements(text)
     # stops here. For regular cql commands, onecmd just splits it and sends it
@@ -799,13 +824,13 @@ def tokens_with_types(lexed):
 
 
 def strip_final_empty_items(xs):
-    '''
+    """
     Returns its a copy of argument as a list, but with any terminating
     subsequence of falsey values removed.
 
     >>> strip_final_empty_items([[3, 4], [5, 6, 7], [], [], [1], []])
     [[3, 4], [5, 6, 7], [], [], [1]]
-    '''
+    """
     rv = list(xs)
 
     while rv and not rv[-1]:

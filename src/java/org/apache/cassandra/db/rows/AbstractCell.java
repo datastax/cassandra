@@ -20,17 +20,17 @@ package org.apache.cassandra.db.rows;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
-import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.DeletionPurger;
-import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.memory.AbstractAllocator;
+import org.apache.cassandra.utils.memory.ByteBufferCloner;
 
 /**
  * Base abstract class for {@code Cell} implementations.
@@ -50,21 +50,6 @@ public abstract class AbstractCell<V> extends Cell<V>
         return !isTombstone() && column.isCounterColumn();
     }
 
-    public boolean isLive(int nowInSec)
-    {
-        return localDeletionTime() == NO_DELETION_TIME || (ttl() != NO_TTL && nowInSec < localDeletionTime());
-    }
-
-    public boolean isTombstone()
-    {
-        return localDeletionTime() != NO_DELETION_TIME && ttl() == NO_TTL;
-    }
-
-    public boolean isExpiring()
-    {
-        return ttl() != NO_TTL;
-    }
-
     public Cell<?> markCounterLocalToBeCleared()
     {
         if (!isCounterCell())
@@ -75,7 +60,7 @@ public abstract class AbstractCell<V> extends Cell<V>
         return marked == value ? this : new BufferCell(column, timestamp(), ttl(), localDeletionTime(), marked, path());
     }
 
-    public Cell<?> purge(DeletionPurger purger, int nowInSec)
+    public Cell<?> purge(DeletionPurger purger, long nowInSec)
     {
         if (!isLive(nowInSec))
         {
@@ -98,10 +83,11 @@ public abstract class AbstractCell<V> extends Cell<V>
         return this;
     }
 
-    public Cell<?> copy(AbstractAllocator allocator)
+    @Override
+    public Cell<?> clone(ByteBufferCloner cloner)
     {
         CellPath path = path();
-        return new BufferCell(column, timestamp(), ttl(), localDeletionTime(), allocator.clone(buffer()), path == null ? null : path.copy(allocator));
+        return new BufferCell(column, timestamp(), ttl(), localDeletionTime(), cloner.clone(buffer()), path == null ? null : path.clone(cloner));
     }
 
     // note: while the cell returned may be different, the value is the same, so if the value is offheap it must be referenced inside a guarded context (or copied)
@@ -110,14 +96,17 @@ public abstract class AbstractCell<V> extends Cell<V>
         return new BufferCell(column, isTombstone() ? newTimestamp - 1 : newTimestamp, ttl(), localDeletionTime(), buffer(), path());
     }
 
+    @Override
     public int dataSize()
     {
         CellPath path = path();
-        return TypeSizes.sizeof(timestamp())
-               + TypeSizes.sizeof(ttl())
-               + TypeSizes.sizeof(localDeletionTime())
-               + valueSize()
-               + (path == null ? 0 : path.dataSize());
+        return dataSizeWithoutPath() + (path == null ? 0 : path.dataSize());
+    }
+
+    @Override
+    public int liveDataSize(long nowInSec)
+    {
+        return isLive(nowInSec) ? dataSize() : 0;
     }
 
     public void digest(Digest digest)
@@ -140,6 +129,8 @@ public abstract class AbstractCell<V> extends Cell<V>
             throw new MarshalException("A TTL should not be negative");
         if (localDeletionTime() < 0)
             throw new MarshalException("A local deletion time should not be negative");
+        if (localDeletionTime() == INVALID_DELETION_TIME)
+            throw new MarshalException("A local deletion time should not be a legacy overflowed value");
         if (isExpiring() && localDeletionTime() == NO_DELETION_TIME)
             throw new MarshalException("Shoud not have a TTL without an associated local deletion time");
 
@@ -152,12 +143,17 @@ public abstract class AbstractCell<V> extends Cell<V>
 
     public boolean hasInvalidDeletions()
     {
-        if (ttl() < 0 || localDeletionTime() < 0 || (isExpiring() && localDeletionTime() == NO_DELETION_TIME))
+        if (ttl() < 0 || localDeletionTime() == INVALID_DELETION_TIME || localDeletionTime() < 0 || (isExpiring() && localDeletionTime() == NO_DELETION_TIME))
             return true;
         return false;
     }
 
     public long maxTimestamp()
+    {
+        return timestamp();
+    }
+
+    public long minTimestamp()
     {
         return timestamp();
     }
@@ -170,7 +166,18 @@ public abstract class AbstractCell<V> extends Cell<V>
                && left.ttl() == right.ttl()
                && left.localDeletionTime() == right.localDeletionTime()
                && ValueAccessor.equals(left.value(), left.accessor(), right.value(), right.accessor())
-               && Objects.equals(left.path(), right.path());
+               && pathsEqual(left.column, left.path(), right.path());
+    }
+
+    private static boolean pathsEqual(ColumnMetadata column, CellPath path1, CellPath path2)
+    {
+        if (path1 == path2)
+            return true;
+        if (path1 == null || path2 == null)
+            return false; // already true if both null
+
+        assert column.isComplex();
+        return ((MultiCellCapableType<?>)column.type).nameComparator().compare(path1.get(0), path2.get(0)) == 0;
     }
 
     @Override
@@ -200,11 +207,11 @@ public abstract class AbstractCell<V> extends Cell<V>
         AbstractType<?> type = column().type;
         if (type instanceof CollectionType && type.isMultiCell())
         {
-            CollectionType ct = (CollectionType)type;
+            CollectionType<?> ct = (CollectionType<?>) type;
             return String.format("[%s[%s]=%s %s]",
                                  column().name,
-                                 ct.nameComparator().getString(path().get(0)),
-                                 ct.valueComparator().getString(value(), accessor()),
+                                 path() == null ? "?" : ct.nameComparator().getString(path().get(0)),
+                                 isTombstone() ? "<tombstone>" : ct.valueComparator().getString(value(), accessor()),
                                  livenessInfoString());
         }
         if (isTombstone())

@@ -19,10 +19,22 @@
 
 import traceback
 
-from cassandra.metadata import cql_keywords_reserved
+import cassandra
 from cqlshlib import pylexotron, util
 
 Hint = pylexotron.Hint
+
+cql_keywords_reserved = {'add', 'allow', 'alter', 'and', 'apply', 'asc', 'authorize', 'batch', 'begin', 'by',
+                         'columnfamily', 'create', 'delete', 'desc', 'describe', 'drop', 'entries', 'execute', 'from',
+                         'full', 'geo_distance', 'grant', 'if', 'in', 'index', 'infinity', 'insert', 'into', 'is', 'keyspace', 'limit',
+                         'materialized', 'modify', 'nan', 'norecursive', 'not', 'null', 'of', 'on', 'or', 'order',
+                         'primary', 'rename', 'revoke', 'schema', 'select', 'set', 'table', 'to', 'token', 'truncate',
+                         'unlogged', 'update', 'use', 'using', 'view', 'where', 'with'}
+"""
+Set of reserved keywords in CQL.
+
+Derived from .../cassandra/src/java/org/apache/cassandra/cql3/ReservedKeywords.java
+"""
 
 
 class CqlParsingRuleSet(pylexotron.ParsingRuleSet):
@@ -37,8 +49,8 @@ class CqlParsingRuleSet(pylexotron.ParsingRuleSet):
     available_compaction_classes = (
         'LeveledCompactionStrategy',
         'SizeTieredCompactionStrategy',
-        'DateTieredCompactionStrategy',
-        'TimeWindowCompactionStrategy'
+        'TimeWindowCompactionStrategy',
+        'UnifiedCompactionStrategy'
     )
 
     replication_strategies = (
@@ -47,18 +59,19 @@ class CqlParsingRuleSet(pylexotron.ParsingRuleSet):
     )
 
     def __init__(self, *args, **kwargs):
-        pylexotron.ParsingRuleSet.__init__(self, *args, **kwargs)
+        pylexotron.ParsingRuleSet.__init__(self)
 
         # note: commands_end_with_newline may be extended by callers.
         self.commands_end_with_newline = set()
-        self.set_reserved_keywords(cql_keywords_reserved)
+        self.set_reserved_keywords()
 
-    def set_reserved_keywords(self, keywords):
+    def set_reserved_keywords(self):
         """
-        We cannot let resreved cql keywords be simple 'identifier' since this caused
+        We cannot let reserved cql keywords be simple 'identifier' since this caused
         problems with completion, see CASSANDRA-10415
         """
-        syntax = '<reserved_identifier> ::= /(' + '|'.join(r'\b{}\b'.format(k) for k in keywords) + ')/ ;'
+        cassandra.metadata.cql_keywords_reserved = cql_keywords_reserved
+        syntax = '<reserved_identifier> ::= /(' + '|'.join(r'\b{}\b'.format(k) for k in cql_keywords_reserved) + ')/ ;'
         self.append_rules(syntax)
 
     def completer_for(self, rulename, symname):
@@ -96,12 +109,6 @@ class CqlParsingRuleSet(pylexotron.ParsingRuleSet):
                 else:
                     # don't put any 'endline' tokens in output
                     continue
-
-            # Convert all unicode tokens to ascii, where possible.  This
-            # helps avoid problems with performing unicode-incompatible
-            # operations on tokens (like .lower()).  See CASSANDRA-9083
-            # for one example of this.
-            str_token = t[1]
 
             curstmt.append(t)
             if t[0] == 'endtoken':
@@ -144,10 +151,10 @@ class CqlParsingRuleSet(pylexotron.ParsingRuleSet):
                     in_batch = True
         return output, in_batch or in_pg_string
 
-    def cql_complete_single(self, text, partial, init_bindings={}, ignore_case=True,
+    def cql_complete_single(self, text, partial, init_bindings=None, ignore_case=True,
                             startsymbol='Start'):
         tokens = (self.cql_split_statements(text)[0] or [[]])[-1]
-        bindings = init_bindings.copy()
+        bindings = {} if init_bindings is None else init_bindings.copy()
 
         # handle some different completion scenarios- in particular, completing
         # inside a string literal

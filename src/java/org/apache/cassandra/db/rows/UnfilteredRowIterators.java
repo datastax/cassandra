@@ -17,23 +17,30 @@
  */
 package org.apache.cassandra.db.rows;
 
-import java.util.*;
+import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Columns;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.Digest;
+import org.apache.cassandra.db.EmptyIterators;
+import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.transform.FilteredRows;
 import org.apache.cassandra.db.transform.MoreRows;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 
 /**
  * Static methods to work with atom iterators.
@@ -61,7 +68,7 @@ public abstract class UnfilteredRowIterators
          * @param versions the partition level deletion for the sources of the merge. Elements of the array will never
          * be null, but be "live".
          **/
-        public void onMergedPartitionLevelDeletion(DeletionTime mergedDeletion, DeletionTime[] versions);
+        void onMergedPartitionLevelDeletion(DeletionTime mergedDeletion, DeletionTime[] versions);
 
         /**
          * Called once for every row participating in the merge.
@@ -71,16 +78,12 @@ public abstract class UnfilteredRowIterators
          * that is shadowed by another source range tombstone or partition level deletion).
          *
          * @param merged the result of the merge. This cannot be {@code null} (so that listener can always access the
-         * clustering from this safely)but can be empty, in which case this is a placeholder for when at least one
+         * clustering from this safely) but can be empty, in which case this is a placeholder for when at least one
          * source has a row, but that row is shadowed in the merged output.
          * @param versions for each source, the row in that source corresponding to {@code merged}. This can be
          * {@code null} for some sources if the source has not such row.
-         * @return the row to use as result of the merge (can be {@code null}). Most implementations should simply
-         * return {@code merged}, but this allows some implementations to impact the merge result if necessary. If this
-         * returns either {@code null} or an empty row, then the row is skipped from the merge result. If this returns a
-         * non {@code null} result, then the returned row <b>must</b> have the same clustering than {@code merged}.
          */
-        public Row onMergedRows(Row merged, Row[] versions);
+        void onMergedRows(Row merged, Row[] versions);
 
         /**
          * Called once for every range tombstone marker participating in the merge.
@@ -103,7 +106,7 @@ public abstract class UnfilteredRowIterators
         {
             public void onMergedPartitionLevelDeletion(DeletionTime mergedDeletion, DeletionTime[] versions) {}
 
-            public Row onMergedRows(Row merged, Row[] versions) {return merged;}
+            public void onMergedRows(Row merged, Row[] versions) {}
 
             public void onMergedRangeTombstoneMarkers(RangeTombstoneMarker merged, RangeTombstoneMarker[] versions) {}
 
@@ -118,7 +121,7 @@ public abstract class UnfilteredRowIterators
      * infos (and since an UnfilteredRowIterator cannot shadow it's own data, we know everyting
      * returned isn't shadowed by a tombstone).
      */
-    public static RowIterator filter(UnfilteredRowIterator iter, int nowInSec)
+    public static RowIterator filter(UnfilteredRowIterator iter, long nowInSec)
     {
         return FilteredRows.filter(iter, nowInSec);
     }
@@ -263,16 +266,22 @@ public abstract class UnfilteredRowIterators
     /**
      * Returns an iterator that concatenate the specified atom with the iterator.
      */
-    public static UnfilteredRowIterator concat(final Unfiltered first, final UnfilteredRowIterator rest)
+    public static UnfilteredRowIterator concat(final Unfiltered first, final UnfilteredRowIterator wrapped)
     {
-        return new WrappingUnfilteredRowIterator(rest)
+        return new WrappingUnfilteredRowIterator()
         {
             private boolean hasReturnedFirst;
 
             @Override
+            public UnfilteredRowIterator wrapped()
+            {
+                return wrapped;
+            }
+
+            @Override
             public boolean hasNext()
             {
-                return hasReturnedFirst ? super.hasNext() : true;
+                return hasReturnedFirst ? wrapped.hasNext() : true;
             }
 
             @Override
@@ -283,7 +292,7 @@ public abstract class UnfilteredRowIterators
                     hasReturnedFirst = true;
                     return first;
                 }
-                return super.next();
+                return wrapped.next();
             }
         };
     }
@@ -296,12 +305,12 @@ public abstract class UnfilteredRowIterators
      * This is mainly used by scrubber to detect problems in sstables.
      *
      * @param iterator the partition to check.
-     * @param filename the name of the file the data is comming from.
+     * @param file the data is comming from.
      * @return an iterator that returns the same data than {@code iterator} but that
      * checks said data and throws a {@code CorruptedSSTableException} if it detects
      * invalid data.
      */
-    public static UnfilteredRowIterator withValidation(UnfilteredRowIterator iterator, final String filename)
+    public static UnfilteredRowIterator withValidation(UnfilteredRowIterator iterator, final File file)
     {
         class Validator extends Transformation
         {
@@ -334,7 +343,7 @@ public abstract class UnfilteredRowIterators
                 }
                 catch (MarshalException me)
                 {
-                    throw new CorruptSSTableException(me, filename);
+                    throw new CorruptSSTableException(me, file);
                 }
             }
         }
@@ -390,7 +399,7 @@ public abstract class UnfilteredRowIterators
      */
     private static class UnfilteredRowMergeIterator extends AbstractUnfilteredRowIterator
     {
-        private final IMergeIterator<Unfiltered, Unfiltered> mergeIterator;
+        private final CloseableIterator<Unfiltered> mergeIterator;
         private final MergeListener listener;
 
         private UnfilteredRowMergeIterator(TableMetadata metadata,
@@ -408,9 +417,21 @@ public abstract class UnfilteredRowIterators
                   reversed,
                   EncodingStats.merge(iterators, UnfilteredRowIterator::stats));
 
-            this.mergeIterator = MergeIterator.get(iterators,
-                                                   reversed ? metadata.comparator.reversed() : metadata.comparator,
-                                                   new MergeReducer(iterators.size(), reversed, listener));
+            // If merging more than 1 source, ask iterators to provide artificial lower bounds which will help to delay
+            // opening sstables until they are needed. The tomsbtone processing will throw these ineffective bounds away
+            // (they are in the form of range tombstone markers with DeletionTime.LIVE).
+            if (iterators.size() > 1)
+            {
+                for (UnfilteredRowIterator iter : iterators)
+                {
+                    if (iter instanceof UnfilteredRowIteratorWithLowerBound)
+                        ((UnfilteredRowIteratorWithLowerBound) iter).requestLowerBound();
+                }
+            }
+
+            this.mergeIterator = MergeIterator.getCloseable(iterators,
+                                                            reversed ? metadata.comparator.reversed() : metadata.comparator,
+                                                            new MergeReducer(iterators.size(), reversed, listener));
             this.listener = listener;
         }
 
@@ -440,7 +461,6 @@ public abstract class UnfilteredRowIterators
             }
         }
 
-        @SuppressWarnings("resource") // We're not really creating any resource here
         private static void checkForInvalidInput(List<UnfilteredRowIterator> iterators)
         {
             if (iterators.isEmpty())
@@ -456,7 +476,6 @@ public abstract class UnfilteredRowIterators
             }
         }
 
-        @SuppressWarnings("resource") // We're not really creating any resource here
         private static DeletionTime collectPartitionLevelDeletion(List<UnfilteredRowIterator> iterators, MergeListener listener)
         {
             DeletionTime[] versions = listener == null ? null : new DeletionTime[iterators.size()];
@@ -494,12 +513,9 @@ public abstract class UnfilteredRowIterators
             Row merged = merger.merge(partitionDeletion);
             if (merged == null)
                 merged = Rows.EMPTY_STATIC_ROW;
-            if (listener == null)
-                return merged;
-
-            merged = listener.onMergedRows(merged, merger.mergedRows());
-            // Note that onMergedRows can have returned null even though his input wasn't null
-            return merged == null ? Rows.EMPTY_STATIC_ROW : merged;
+            if (listener != null)
+                listener.onMergedRows(merged, merger.mergedRows());
+            return merged;
         }
 
         private static RegularAndStaticColumns collectColumns(List<UnfilteredRowIterator> iterators)
@@ -538,7 +554,7 @@ public abstract class UnfilteredRowIterators
                 listener.close();
         }
 
-        private class MergeReducer extends MergeIterator.Reducer<Unfiltered, Unfiltered>
+        private class MergeReducer extends Reducer<Unfiltered, Unfiltered>
         {
             private final MergeListener listener;
 
@@ -555,7 +571,7 @@ public abstract class UnfilteredRowIterators
             }
 
             @Override
-            public boolean trivialReduceIsTrivial()
+            public boolean singleSourceReduceIsTrivial()
             {
                 // If we have a listener, we must signal it even when we have a single version
                 return listener == null;
@@ -570,20 +586,14 @@ public abstract class UnfilteredRowIterators
                     markerMerger.add(idx, (RangeTombstoneMarker)current);
             }
 
-            protected Unfiltered getReduced()
+            public Unfiltered getReduced()
             {
                 if (nextKind == Unfiltered.Kind.ROW)
                 {
                     Row merged = rowMerger.merge(markerMerger.activeDeletion());
-                    if (listener == null)
-                        return merged;
-
-                    merged = listener.onMergedRows(merged == null
-                                                   ? BTreeRow.emptyRow(rowMerger.mergedClustering())
-                                                   : merged,
-                                                   rowMerger.mergedRows());
-
-                    return merged == null || merged.isEmpty() ? null : merged;
+                    if (listener != null)
+                        listener.onMergedRows(merged == null ? BTreeRow.emptyRow(rowMerger.mergedClustering()) : merged, rowMerger.mergedRows());
+                    return merged;
                 }
                 else
                 {
@@ -594,7 +604,7 @@ public abstract class UnfilteredRowIterators
                 }
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 if (nextKind == Unfiltered.Kind.ROW)
                     rowMerger.clear();

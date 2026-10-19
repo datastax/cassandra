@@ -68,16 +68,20 @@ public class TableMetricTables
     public static Collection<VirtualTable> getAll(String name)
     {
         return ImmutableList.of(
-            new LatencyTableMetric(name, "local_read_latency", t -> t.readLatency.latency),
-            new LatencyTableMetric(name, "local_scan_latency", t -> t.rangeLatency.latency),
-            new LatencyTableMetric(name, "coordinator_read_latency", t -> t.coordinatorReadLatency),
-            new LatencyTableMetric(name, "coordinator_scan_latency", t -> t.coordinatorScanLatency),
-            new LatencyTableMetric(name, "local_write_latency", t -> t.writeLatency.latency),
-            new LatencyTableMetric(name, "coordinator_write_latency", t -> t.coordinatorWriteLatency),
-            new HistogramTableMetric(name, "tombstones_per_read", t -> t.tombstoneScannedHistogram.cf),
-            new HistogramTableMetric(name, "rows_per_read", t -> t.liveScannedHistogram.cf),
+            new LatencyTableMetric(name, "local_read_latency", t -> t.readLatency.tableOrKeyspaceMetric().latency),
+            new LatencyTableMetric(name, "local_scan_latency", t -> t.rangeLatency.tableOrKeyspaceMetric().latency),
+            new LatencyTableMetric(name, "coordinator_read_latency", t -> t.coordinatorReadLatency.tableOrKeyspaceTimer()),
+            new LatencyTableMetric(name, "coordinator_cas_read_latency", t -> t.coordinatorCasReadLatency.tableOrKeyspaceTimer()),
+            new LatencyTableMetric(name, "coordinator_scan_latency", t -> t.coordinatorScanLatency.tableOrKeyspaceTimer()),
+            new LatencyTableMetric(name, "local_write_latency", t -> t.writeLatency.tableOrKeyspaceMetric().latency),
+            new LatencyTableMetric(name, "coordinator_write_latency", t -> t.coordinatorWriteLatency.tableOrKeyspaceTimer()),
+            new LatencyTableMetric(name, "coordinator_cas_write_latency", t -> t.coordinatorCasWriteLatency.tableOrKeyspaceTimer()),
+            new HistogramTableMetric(name, "tombstones_per_read", t -> t.tombstoneScannedHistogram.tableOrKeyspaceHistogram()),
+            new HistogramTableMetric(name, "rows_per_read", t -> t.liveScannedHistogram.tableOrKeyspaceHistogram()),
             new StorageTableMetric(name, "disk_usage", (TableMetrics t) -> t.totalDiskSpaceUsed),
-            new StorageTableMetric(name, "max_partition_size", (TableMetrics t) -> t.maxPartitionSize));
+            new StorageTableMetric(name, "max_partition_size", (TableMetrics t) -> t.maxPartitionSize),
+            new StorageTableMetric(name, "max_sstable_size", (TableMetrics t) -> t.maxSSTableSize),
+            new TableMetricTable(name, "max_sstable_duration", t -> t.maxSSTableDuration, "max_sstable_duration", LongType.instance, ""));
     }
 
     /**
@@ -193,7 +197,7 @@ public class TableMetricTables
                 Metric metric = func.apply(cfs.metric);
 
                 // set new partition for this table
-                result.row(cfs.keyspace.getName(), cfs.name);
+                result.row(cfs.getKeyspaceName(), cfs.name);
 
                 // extract information by metric type and put it in row based on implementation of `add`
                 if (metric instanceof Counting)

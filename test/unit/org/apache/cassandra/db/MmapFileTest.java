@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.db;
 
-import java.io.File;
-import java.io.RandomAccessFile;
 import java.lang.management.ManagementFactory;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
@@ -26,13 +24,25 @@ import java.nio.file.StandardOpenOption;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
+import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.util.File;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.io.util.FileUtils;
 
 public class MmapFileTest
 {
+    @BeforeClass
+    public static void setup()
+    {
+        // PathUtils touches StorageService which touches StreamManager which requires configs be setup
+        DatabaseDescriptor.daemonInitialization();
+    }
+
+
     /**
      * Verifies that {@link sun.misc.Cleaner} works and that mmap'd files can be deleted.
      */
@@ -56,20 +66,9 @@ public class MmapFileTest
         {
             int size = 1024 * 1024;
 
-            try (RandomAccessFile raf = new RandomAccessFile(f1, "rw"))
-            {
-                raf.setLength(size);
-            }
-
-            try (RandomAccessFile raf = new RandomAccessFile(f2, "rw"))
-            {
-                raf.setLength(size);
-            }
-
-            try (RandomAccessFile raf = new RandomAccessFile(f3, "rw"))
-            {
-                raf.setLength(size);
-            }
+            Util.setFileLength(f1, size);
+            Util.setFileLength(f2, size);
+            Util.setFileLength(f3,size);
 
             try (FileChannel channel = FileChannel.open(f1.toPath(), StandardOpenOption.WRITE, StandardOpenOption.READ))
             {
@@ -148,16 +147,16 @@ public class MmapFileTest
             Assert.assertEquals("# of mapped buffers should be 0", Long.valueOf(0L), mmapCount);
             Assert.assertEquals("amount of mapped memory should be 0", Long.valueOf(0L), mmapMemoryUsed);
 
-            Assert.assertTrue(f1.delete());
-            Assert.assertTrue(f2.delete());
-            Assert.assertTrue(f3.delete());
+            Assert.assertTrue(f1.tryDelete());
+            Assert.assertTrue(f2.tryDelete());
+            Assert.assertTrue(f3.tryDelete());
         }
         finally
         {
             Runtime.getRuntime().gc();
-            f1.delete();
-            f2.delete();
-            f3.delete();
+            f1.tryDelete();
+            f2.tryDelete();
+            f3.tryDelete();
         }
     }
 }

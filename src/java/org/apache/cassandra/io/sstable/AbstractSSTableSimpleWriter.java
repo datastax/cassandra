@@ -17,20 +17,29 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.File;
-import java.io.FileFilter;
-import java.io.IOException;
-import java.io.Closeable;
-import java.nio.ByteBuffer;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.cassandra.db.*;
+import java.io.Closeable;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.stream.Stream;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.ActiveRepairService;
 
@@ -42,20 +51,24 @@ abstract class AbstractSSTableSimpleWriter implements Closeable
     protected final File directory;
     protected final TableMetadataRef metadata;
     protected final RegularAndStaticColumns columns;
-    protected SSTableFormat.Type formatType = SSTableFormat.Type.current();
-    protected static AtomicInteger generation = new AtomicInteger(0);
+    protected SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
+    protected static final AtomicReference<SSTableId> id = new AtomicReference<>(SSTableIdFactory.instance.defaultBuilder().generator(Stream.empty()).get());
     protected boolean makeRangeAware = false;
+    protected final Collection<Index.Group> indexGroups;
+    protected Consumer<Collection<SSTableReader>> sstableProducedListener;
+    protected boolean openSSTableOnProduced = false;
 
     protected AbstractSSTableSimpleWriter(File directory, TableMetadataRef metadata, RegularAndStaticColumns columns)
     {
         this.metadata = metadata;
         this.directory = directory;
         this.columns = columns;
+        indexGroups = new ArrayList<>();
     }
 
-    protected void setSSTableFormatType(SSTableFormat.Type type)
+    protected void setSSTableFormatType(SSTableFormat<?, ?> type)
     {
-        this.formatType = type;
+        this.format = type;
     }
 
     protected void setRangeAwareWriting(boolean makeRangeAware)
@@ -63,57 +76,78 @@ abstract class AbstractSSTableSimpleWriter implements Closeable
         this.makeRangeAware = makeRangeAware;
     }
 
+    protected void addIndexGroup(Index.Group indexGroup)
+    {
+        this.indexGroups.add(indexGroup);
+    }
 
-    protected SSTableTxnWriter createWriter()
+    protected void setSSTableProducedListener(Consumer<Collection<SSTableReader>> listener)
+    {
+        this.sstableProducedListener = Objects.requireNonNull(listener);
+    }
+
+    protected void setShouldOpenProducedSSTable(boolean openSSTableOnProduced)
+    {
+        this.openSSTableOnProduced = openSSTableOnProduced;
+    }
+
+    /**
+     * Indicate whether the produced sstable should be opened or not.
+     */
+    protected boolean shouldOpenSSTables()
+    {
+        return openSSTableOnProduced;
+    }
+
+    protected void notifySSTableProduced(Collection<SSTableReader> sstables)
+    {
+        if (sstableProducedListener == null)
+            return;
+
+        sstableProducedListener.accept(sstables);
+    }
+
+    protected SSTableTxnWriter createWriter(SSTable.Owner owner) throws IOException
     {
         SerializationHeader header = new SerializationHeader(true, metadata.get(), columns, EncodingStats.NO_STATS);
 
         if (makeRangeAware)
-            return SSTableTxnWriter.createRangeAware(metadata, 0,  ActiveRepairService.UNREPAIRED_SSTABLE, ActiveRepairService.NO_PENDING_REPAIR, false, formatType, 0, header);
+            return SSTableTxnWriter.createRangeAware(metadata, 0, ActiveRepairService.UNREPAIRED_SSTABLE, ActiveRepairService.NO_PENDING_REPAIR, false, format, header);
 
         return SSTableTxnWriter.create(metadata,
-                                       createDescriptor(directory, metadata.keyspace, metadata.name, formatType),
+                                       createDescriptor(directory, metadata.keyspace, metadata.name, format),
                                        0,
                                        ActiveRepairService.UNREPAIRED_SSTABLE,
                                        ActiveRepairService.NO_PENDING_REPAIR,
                                        false,
-                                       0,
                                        header,
-                                       Collections.emptySet());
+                                       indexGroups,
+                                       owner);
     }
 
-    private static Descriptor createDescriptor(File directory, final String keyspace, final String columnFamily, final SSTableFormat.Type fmt)
+    private static Descriptor createDescriptor(File directory, final String keyspace, final String columnFamily, final SSTableFormat<?, ?> fmt) throws IOException
     {
-        int maxGen = getNextGeneration(directory, columnFamily);
-        return new Descriptor(directory, keyspace, columnFamily, maxGen + 1, fmt);
+        SSTableId nextGen = getNextId(directory, columnFamily);
+        return new Descriptor(directory, keyspace, columnFamily, nextGen, fmt);
     }
 
-    private static int getNextGeneration(File directory, final String columnFamily)
+    private static SSTableId getNextId(File directory, final String columnFamily) throws IOException
     {
-        final Set<Descriptor> existing = new HashSet<>();
-        directory.listFiles(new FileFilter()
+        while (true)
         {
-            public boolean accept(File file)
+            try (Stream<Path> existingPaths = Files.list(directory.toPath()))
             {
-                Descriptor desc = SSTable.tryDescriptorFromFilename(file);
-                if (desc == null)
-                    return false;
+                Stream<SSTableId> existingIds = existingPaths.map(File::new)
+                                                             .map(SSTable::tryDescriptorFromFile)
+                                                             .filter(d -> d != null && d.cfname.equals(columnFamily))
+                                                             .map(d -> d.id);
 
-                if (desc.cfname.equals(columnFamily))
-                    existing.add(desc);
-
-                return false;
-            }
-        });
-        int maxGen = generation.getAndIncrement();
-        for (Descriptor desc : existing)
-        {
-            while (desc.generation > maxGen)
-            {
-                maxGen = generation.getAndIncrement();
+                SSTableId lastId = id.get();
+                SSTableId newId = SSTableIdFactory.instance.defaultBuilder().generator(Stream.concat(existingIds, Stream.of(lastId))).get();
+                if (id.compareAndSet(lastId, newId))
+                    return newId;
             }
         }
-        return maxGen;
     }
 
     PartitionUpdate.Builder getUpdateFor(ByteBuffer key) throws IOException

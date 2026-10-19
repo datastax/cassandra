@@ -18,20 +18,19 @@
 */
 package org.apache.cassandra.db.marshal;
 
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.junit.Assert.assertEquals;
 
 import java.nio.ByteBuffer;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.JsonUtils;
+
 import org.junit.Test;
 
 public class JsonConversionTest
 {
-    private static final ObjectMapper JSON_OBJECT_MAPPER = new ObjectMapper();
-
     @Test
     public void testMap() throws Exception
     {
@@ -282,7 +281,7 @@ public class JsonConversionTest
     public void testTimeUUID() throws Exception
     {
         String type = "TimeUUIDType";
-        String json = "\"" + UUIDGen.getTimeUUID() + "\"";
+        String json = "\"" + nextTimeUUID() + "\"";
         assertBytebufferPositionAndOutput(json, type);
     }
 
@@ -310,7 +309,7 @@ public class JsonConversionTest
     private static void assertBytebufferPositionAndOutput(String json, String typeString) throws Exception
     {
         AbstractType<?> type = TypeParser.parse(typeString);
-        Object jsonObject = JSON_OBJECT_MAPPER.readValue(json, Object.class);
+        Object jsonObject = JsonUtils.JSON_OBJECT_MAPPER.readValue(json, Object.class);
         ByteBuffer bb = type.fromJSONObject(jsonObject).bindAndGet(QueryOptions.DEFAULT);
         int position = bb.position();
 

@@ -149,7 +149,7 @@ public class ErrorMessage extends Message.Response
                     String fKeyspace = CBUtil.readString(body);
                     String fName = CBUtil.readString(body);
                     List<String> argTypes = CBUtil.readStringList(body);
-                    te = new FunctionExecutionException(new FunctionName(fKeyspace, fName), argTypes, msg);
+                    te = FunctionExecutionException.create(new FunctionName(fKeyspace, fName), argTypes, msg);
                     break;
                 case UNPREPARED:
                     {
@@ -222,7 +222,7 @@ public class ErrorMessage extends Message.Response
                         {
                             for (Map.Entry<InetAddressAndPort, RequestFailureReason> entry : rfe.failureReasonByEndpoint.entrySet())
                             {
-                                CBUtil.writeInetAddr(entry.getKey().address, dest);
+                                CBUtil.writeInetAddr(entry.getKey().getAddress(), dest);
                                 dest.writeShort(entry.getValue().code);
                             }
                         }
@@ -302,7 +302,7 @@ public class ErrorMessage extends Message.Response
                         {
                             for (Map.Entry<InetAddressAndPort, RequestFailureReason> entry : rfe.failureReasonByEndpoint.entrySet())
                             {
-                                size += CBUtil.sizeOfInetAddr(entry.getKey().address);
+                                size += CBUtil.sizeOfInetAddr(entry.getKey().getAddress());
                                 size += 2; // RequestFailureReason code
                             }
                         }

@@ -17,10 +17,14 @@
  */
 package org.apache.cassandra.db;
 
+import java.nio.ByteBuffer;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.cache.CounterCacheKey;
+import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.rows.Row;
@@ -29,6 +33,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.CounterId;
 
 import static org.junit.Assert.assertEquals;
 
@@ -147,14 +152,14 @@ public class CounterMutationTest
         assertEquals(-2L, CounterContext.instance().total(row.getCell(c2cfs2)));
 
         // Check the caches, separately
-        CBuilder cb = CBuilder.create(cfsOne.metadata().comparator);
+        ClusteringBuilder cb = ClusteringBuilder.create(cfsOne.metadata().comparator);
         cb.add("cc");
 
-        assertEquals(1L, cfsOne.getCachedCounter(Util.dk("key1").getKey(), cb.build(), c1cfs1, null).count);
-        assertEquals(-1L, cfsOne.getCachedCounter(Util.dk("key1").getKey(), cb.build(), c2cfs1, null).count);
+        assertEquals(1L, cfsOne.getCachedCounter(key(cfsOne, Util.dk("key1").getKey(), cb.build(), c1cfs1, null)).count);
+        assertEquals(-1L, cfsOne.getCachedCounter(key(cfsOne, Util.dk("key1").getKey(), cb.build(), c2cfs1, null)).count);
 
-        assertEquals(2L, cfsTwo.getCachedCounter(Util.dk("key1").getKey(), cb.build(), c1cfs2, null).count);
-        assertEquals(-2L, cfsTwo.getCachedCounter(Util.dk("key1").getKey(), cb.build(), c2cfs2, null).count);
+        assertEquals(2L, cfsTwo.getCachedCounter(key(cfsTwo, Util.dk("key1").getKey(), cb.build(), c1cfs2, null)).count);
+        assertEquals(-2L, cfsTwo.getCachedCounter(key(cfsTwo, Util.dk("key1").getKey(), cb.build(), c2cfs2, null)).count);
     }
 
     @Test
@@ -214,5 +219,26 @@ public class CounterMutationTest
                 .build(),
             ConsistencyLevel.ONE).apply();
         Util.assertEmpty(Util.cmd(cfs).includeRow("cc").columns("val", "val2").build());
+    }
+
+    @Test
+    public void testAddingWithoutLocks() throws WriteTimeoutException
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF1);
+        cfs.truncateBlocking();
+        ColumnMetadata cDef = cfs.metadata().getColumn(ByteBufferUtil.bytes("val"));
+
+        // Do the initial update (+1)
+        long toAdd = 5;
+        Mutation m = new RowUpdateBuilder(cfs.metadata(), 5, "key1").clustering("cc").add("val", toAdd).build();
+        new CounterMutation(m, ConsistencyLevel.ONE).applyCounterMutationWithoutLocks(1234567, CounterId.getLocalId());
+
+        Row row = Util.getOnlyRow(Util.cmd(cfs).includeRow("cc").columns("val").build());
+        assertEquals(toAdd, CounterContext.instance().total(row.getCell(cDef)));
+    }
+
+    private CounterCacheKey key(ColumnFamilyStore cfs, ByteBuffer bytes, Clustering<?> c1, ColumnMetadata cd, CellPath path)
+    {
+        return CounterCacheKey.create(cfs.metadata(), bytes, c1, cd, path);
     }
 }

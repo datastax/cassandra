@@ -27,6 +27,8 @@ import java.util.*;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.db.CachedHashDecoratedKey;
+import org.apache.cassandra.db.marshal.ByteArrayAccessor;
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -34,6 +36,8 @@ import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.GuidGenerator;
 import org.apache.cassandra.utils.ObjectSizes;
@@ -75,7 +79,7 @@ public class RandomPartitioner implements IPartitioner
     private static final int HEAP_SIZE = (int) ObjectSizes.measureDeep(new BigIntegerToken(hashToBigInteger(ByteBuffer.allocate(1))));
 
     public static final RandomPartitioner instance = new RandomPartitioner();
-    public static final AbstractType<?> partitionOrdering = new PartitionerDefinedOrder(instance);
+    public static final PartitionerDefinedOrder partitionOrdering = new PartitionerDefinedOrder(instance);
 
     private final Splitter splitter = new Splitter(this)
     {
@@ -158,6 +162,11 @@ public class RandomPartitioner implements IPartitioner
 
     private final Token.TokenFactory tokenFactory = new Token.TokenFactory()
     {
+        public Token fromComparableBytes(ByteSource.Peekable comparableBytes, ByteComparable.Version version)
+        {
+            return fromByteArray(IntegerType.instance.fromComparableBytes(ByteBufferAccessor.instance, comparableBytes, version));
+        }
+
         public ByteBuffer toByteArray(Token token)
         {
             BigIntegerToken bigIntegerToken = (BigIntegerToken) token;
@@ -245,6 +254,12 @@ public class RandomPartitioner implements IPartitioner
         }
 
         @Override
+        public ByteSource asComparableBytes(ByteComparable.Version version)
+        {
+            return IntegerType.instance.asComparableBytes(ByteArrayAccessor.instance, token.toByteArray(), version);
+        }
+
+        @Override
         public IPartitioner getPartitioner()
         {
             return instance;
@@ -256,9 +271,35 @@ public class RandomPartitioner implements IPartitioner
             return HEAP_SIZE;
         }
 
-        public Token increaseSlightly()
+        public Token nextValidToken()
         {
-            return new BigIntegerToken(token.add(BigInteger.ONE));
+            BigInteger next = token.equals(MAXIMUM) ? ZERO
+                                                    : token.add(BigInteger.ONE);
+            return new BigIntegerToken(next);
+        }
+
+        @Override
+        public Token prevValidToken()
+        {
+            BigInteger prev;
+            if (token.compareTo(ZERO) == 0)
+            {
+                // For ZERO token, return MINIMUM as adjustment
+                // 1. Range semantics: Most range functions expect minimum as an upper bound, not maximum as a lowerbound
+                // 2. Wraparound risks: Functions designed for non-wraparound ranges might not handle maximum on the lower side correctly
+                // Note: this means MAXIMUM.nextValidToken().prevValidToken() != MAXIMUM
+                prev = MINIMUM.token;
+            }
+            else if (this.isMinimum())
+            {
+                // For MINIMUM, wrap around to MAXIMUM.
+                prev = MAXIMUM;
+            }
+            else
+            {
+                prev = token.subtract(BigInteger.ONE);
+            }
+            return new BigIntegerToken(prev);
         }
 
         public double size(Token next)
@@ -293,7 +334,7 @@ public class RandomPartitioner implements IPartitioner
         // 1-case
         if (sortedTokens.size() == 1)
         {
-            ownerships.put(i.next(), new Float(1.0));
+            ownerships.put(i.next(), 1.0F);
         }
         // n-case
         else
@@ -330,6 +371,11 @@ public class RandomPartitioner implements IPartitioner
     public AbstractType<?> partitionOrdering()
     {
         return partitionOrdering;
+    }
+
+    public AbstractType<?> partitionOrdering(AbstractType<?> partitionKeyType)
+    {
+        return partitionOrdering.withPartitionKeyType(partitionKeyType);
     }
 
     public Optional<Splitter> splitter()

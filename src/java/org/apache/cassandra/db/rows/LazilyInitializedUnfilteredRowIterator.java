@@ -17,23 +17,23 @@
  */
 package org.apache.cassandra.db.rows;
 
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 
-import org.apache.cassandra.db.*;
-
 /**
- * Abstract class to create UnfilteredRowIterator that lazily initialize themselves.
- *
+ * Abstract class to create UnfilteredRowIterator that lazily initializes itself.
+ * <p>
  * This is used during partition range queries when we know the partition key but want
- * to defer the initialization of the rest of the UnfilteredRowIterator until we need those informations.
- * See {@link org.apache.cassandra.io.sstable.format.big.BigTableScanner.KeyScanningIterator} for instance.
+ * to defer the initialization of the rest of the UnfilteredRowIterator until we need it.
  */
 public abstract class LazilyInitializedUnfilteredRowIterator extends AbstractIterator<Unfiltered> implements UnfilteredRowIterator
 {
     private final DecoratedKey partitionKey;
-
     private UnfilteredRowIterator iterator;
+    private boolean closed = false;
 
     public LazilyInitializedUnfilteredRowIterator(DecoratedKey partitionKey)
     {
@@ -46,11 +46,6 @@ public abstract class LazilyInitializedUnfilteredRowIterator extends AbstractIte
     {
         if (iterator == null)
             iterator = initializeIterator();
-    }
-
-    public boolean initialized()
-    {
-        return iterator != null;
     }
 
     public TableMetadata metadata()
@@ -102,7 +97,17 @@ public abstract class LazilyInitializedUnfilteredRowIterator extends AbstractIte
 
     public void close()
     {
+        // don't use iterator == null as indicator if this is closed since some methods are called after the iterator is
+        // closed and maybeInit would re-initialize the underlying iterator in that case
+        closed = true;
         if (iterator != null)
             iterator.close();
+    }
+
+    public boolean isOpen()
+    {
+        if (closed)
+            return false;
+        return iterator != null; // for backwards compatibility - if `maybeInit` has not been run on this class, consider it not open, for example SSTableExport seems to rely on this
     }
 }

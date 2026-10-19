@@ -17,8 +17,11 @@
  */
 package org.apache.cassandra.locator;
 
+import java.net.InetSocketAddress;
 import java.util.Set;
+import java.util.function.Predicate;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -55,6 +58,11 @@ public interface IEndpointSnitch
         return getDatacenter(FBUtilities.getBroadcastAddressAndPort());
     }
 
+    default String getDatacenter(InetSocketAddress endpoint)
+    {
+        return getDatacenter(InetAddressAndPort.getByAddress(endpoint));
+    }
+
     default public String getDatacenter(Replica replica)
     {
         return getDatacenter(replica.endpoint());
@@ -87,5 +95,46 @@ public interface IEndpointSnitch
     default boolean validate(Set<String> datacenters, Set<String> racks)
     {
         return true;
+    }
+
+    /**
+     * Get this endpoint address to advertise for connections to provided remote endpoint.
+     */
+    default InetAddressAndPort getPreferredAddress(InetAddressAndPort remoteEndpoint)
+    {
+        return FBUtilities.getBroadcastAddressAndPort();
+    }
+
+    /**
+     * Given the following {@code rf} and {@code rackCount}, returns true if nodes from the same rack should be accepted
+     * according to {@link AbstractReplicationStrategy#calculateNaturalReplicas(Token, TokenMetadata)}
+     * implementations, false otherwise.
+     * <br/><br/>
+     * Always returns true by default.
+     */
+    default boolean acceptsNodesFromSameRack(int rf, int rackCount)
+    {
+        return true;
+    }
+
+    /**
+     * Filters the given {@code addresses} by affinity to the given keyspace for read requests.
+     * <br/><br/>
+     * Always returns true by default.
+     */
+    default Predicate<Replica> filterByAffinityForReads(String keyspace)
+    {
+        return replica -> true;
+    }
+
+
+    /**
+     * Filters the given {@code addresses} by affinity to the given keyspace for write requests.
+     * <br/><br/>
+     * Always returns true by default.
+     */
+    default Predicate<InetAddressAndPort> filterByAffinityForWrites(String keyspace)
+    {
+        return replica -> true;
     }
 }

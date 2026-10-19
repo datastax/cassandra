@@ -39,6 +39,8 @@ import org.jctools.queues.SpscUnboundedArrayQueue;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+
 public class StressAction implements Runnable
 {
 
@@ -100,7 +102,6 @@ public class StressAction implements Runnable
     }
 
     // type provided separately to support recursive call for mixed command with each command type it is performing
-    @SuppressWarnings("resource") // warmupOutput doesn't need closing
     private void warmup(OpDistributionFactory operations)
     {
         // do 25% of iterations as warmup but no more than 50k (by default hotspot compiles methods after 10k invocations)
@@ -315,7 +316,7 @@ public class StressAction implements Runnable
 
         void start()
         {
-            start = System.nanoTime();
+            start = nanoTime();
         }
 
         /**
@@ -361,7 +362,7 @@ public class StressAction implements Runnable
                 long intendedTime = rateLimiter.acquire(partitionCount);
                 op.intendedStartNs(intendedTime);
                 long now;
-                while ((now = System.nanoTime()) < intendedTime)
+                while ((now = nanoTime()) < intendedTime)
                 {
                     LockSupport.parkNanos(intendedTime - now);
                 }

@@ -20,9 +20,7 @@ package org.apache.cassandra.cql3.functions;
 import java.nio.ByteBuffer;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
-import java.util.Collections;
 import java.util.Date;
-import java.util.List;
 
 import org.junit.Test;
 
@@ -32,9 +30,10 @@ import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.TimestampType;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.cql3.functions.TimeFcts.*;
+import static org.apache.cassandra.utils.TimeUUID.Generator.atUnixMillisAsBytes;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
@@ -56,7 +55,16 @@ public class TimeFctsTest
         long timeInMillis = DATE_TIME.toInstant().toEpochMilli();
         ByteBuffer input = TimestampType.instance.fromString(DATE_TIME_STRING + "+00");
         ByteBuffer output = executeFunction(TimeFcts.minTimeuuidFct, input);
-        assertEquals(UUIDGen.minTimeUUID(timeInMillis), TimeUUIDType.instance.compose(output));
+        assertEquals(TimeUUID.minAtUnixMillis(timeInMillis), TimeUUIDType.instance.compose(output));
+    }
+
+    @Test
+    public void testMinTimeUuidFromBigInt()
+    {
+        long timeInMillis = DATE_TIME.toInstant().toEpochMilli();
+        ByteBuffer input = LongType.instance.decompose(timeInMillis);
+        ByteBuffer output = executeFunction(TimeFcts.minTimeuuidFct, input);
+        assertEquals(TimeUUID.minAtUnixMillis(timeInMillis), TimeUUIDType.instance.compose(output));
     }
 
     @Test
@@ -65,42 +73,32 @@ public class TimeFctsTest
         long timeInMillis = DATE_TIME.toInstant().toEpochMilli();
         ByteBuffer input = TimestampType.instance.fromString(DATE_TIME_STRING + "+00");
         ByteBuffer output = executeFunction(TimeFcts.maxTimeuuidFct, input);
-        assertEquals(UUIDGen.maxTimeUUID(timeInMillis), TimeUUIDType.instance.compose(output));
+        assertEquals(TimeUUID.maxAtUnixMillis(timeInMillis), TimeUUIDType.instance.compose(output));
     }
 
     @Test
-    public void testDateOf()
+    public void testMaxTimeUuidFromBigInt()
     {
-
         long timeInMillis = DATE_TIME.toInstant().toEpochMilli();
-        ByteBuffer input = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes(timeInMillis, 0));
-        ByteBuffer output = executeFunction(TimeFcts.dateOfFct, input);
-        assertEquals(Date.from(DATE_TIME.toInstant()), TimestampType.instance.compose(output));
+        ByteBuffer input = LongType.instance.decompose(timeInMillis);
+        ByteBuffer output = executeFunction(TimeFcts.maxTimeuuidFct, input);
+        assertEquals(TimeUUID.maxAtUnixMillis(timeInMillis), TimeUUIDType.instance.compose(output));
     }
 
     @Test
     public void testTimeUuidToTimestamp()
     {
         long timeInMillis = DATE_TIME.toInstant().toEpochMilli();
-        ByteBuffer input = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes(timeInMillis, 0));
+        ByteBuffer input = ByteBuffer.wrap(atUnixMillisAsBytes(timeInMillis, 0));
         ByteBuffer output = executeFunction(toTimestamp(TimeUUIDType.instance), input);
         assertEquals(Date.from(DATE_TIME.toInstant()), TimestampType.instance.compose(output));
-    }
-
-    @Test
-    public void testUnixTimestampOfFct()
-    {
-        long timeInMillis = DATE_TIME.toInstant().toEpochMilli();
-        ByteBuffer input = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes(timeInMillis, 0));
-        ByteBuffer output = executeFunction(TimeFcts.unixTimestampOfFct, input);
-        assertEquals(timeInMillis, LongType.instance.compose(output).longValue());
     }
 
     @Test
     public void testTimeUuidToUnixTimestamp()
     {
         long timeInMillis = DATE_TIME.toInstant().toEpochMilli();
-        ByteBuffer input = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes(timeInMillis, 0));
+        ByteBuffer input = ByteBuffer.wrap(atUnixMillisAsBytes(timeInMillis, 0));
         ByteBuffer output = executeFunction(toUnixTimestamp(TimeUUIDType.instance), input);
         assertEquals(timeInMillis, LongType.instance.compose(output).longValue());
     }
@@ -109,7 +107,7 @@ public class TimeFctsTest
     public void testTimeUuidToDate()
     {
         long timeInMillis = DATE_TIME.toInstant().toEpochMilli();
-        ByteBuffer input = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes(timeInMillis, 0));
+        ByteBuffer input = ByteBuffer.wrap(atUnixMillisAsBytes(timeInMillis, 0));
         ByteBuffer output = executeFunction(toDate(TimeUUIDType.instance), input);
 
         long expectedTime = DATE.toInstant().toEpochMilli();
@@ -142,6 +140,16 @@ public class TimeFctsTest
     }
 
     @Test
+    public void testBigIntegerToDate()
+    {
+        long millis = DATE.toInstant().toEpochMilli();
+
+        ByteBuffer input = LongType.instance.decompose(millis);
+        ByteBuffer output = executeFunction(toDate(TimestampType.instance), input);
+        assertEquals(DATE.toInstant().toEpochMilli(), SimpleDateType.instance.toTimeInMillis(output));
+    }
+
+    @Test
     public void testTimestampToDateWithEmptyInput()
     {
         ByteBuffer output = executeFunction(toDate(TimestampType.instance), ByteBufferUtil.EMPTY_BYTE_BUFFER);
@@ -157,6 +165,16 @@ public class TimeFctsTest
     }
 
     @Test
+    public void testBigIntegerToTimestamp()
+    {
+        long millis = DATE_TIME.toInstant().toEpochMilli();
+
+        ByteBuffer input = LongType.instance.decompose(millis);
+        ByteBuffer output = executeFunction(toTimestamp(TimestampType.instance), input);
+        assertEquals(DATE_TIME.toInstant().toEpochMilli(), LongType.instance.compose(output).longValue());
+    }
+
+    @Test
     public void testTimestampToUnixTimestampWithEmptyInput()
     {
         ByteBuffer output = executeFunction(TimeFcts.toUnixTimestamp(TimestampType.instance), ByteBufferUtil.EMPTY_BYTE_BUFFER);
@@ -165,7 +183,8 @@ public class TimeFctsTest
 
     private static ByteBuffer executeFunction(Function function, ByteBuffer input)
     {
-        List<ByteBuffer> params = Collections.singletonList(input);
-        return ((ScalarFunction) function).execute(ProtocolVersion.CURRENT, params);
+        Arguments arguments = function.newArguments(ProtocolVersion.CURRENT);
+        arguments.set(0, input);
+        return ((ScalarFunction) function).execute(arguments);
     }
 }

@@ -21,7 +21,6 @@ package org.apache.cassandra.hints;
 import java.io.IOException;
 import java.util.UUID;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.TypeSizes;
@@ -46,7 +45,7 @@ public class DTestSerializer implements IVersionedAsymmetricSerializer<Serializa
         }
 
         UUIDSerializer.serializer.serialize(message.hostId, out, version);
-        out.writeUnsignedVInt(0);
+        out.writeUnsignedVInt32(0);
         message.unknownTableID.serialize(out);
     }
 

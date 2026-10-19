@@ -30,12 +30,16 @@ import org.junit.Test;
 
 import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.io.sstable.filter.BloomFilterMetrics;
+import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
 import org.apache.cassandra.metrics.CacheMetrics;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.schema.CachingParams;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
@@ -47,6 +51,7 @@ import static org.junit.Assert.assertTrue;
 
 public class KeyCacheCqlTest extends CQLTester
 {
+    private static boolean sstableImplCachesKeys;
 
     private static final String commonColumnsDef =
     "part_key_a     int," +
@@ -96,6 +101,7 @@ public class KeyCacheCqlTest extends CQLTester
     {
         CachingParams.DEFAULT = CachingParams.CACHE_NOTHING;
         CQLTester.setUpClass();
+        sstableImplCachesKeys = KeyCacheSupport.isSupportedBy(DatabaseDescriptor.getSelectedSSTableFormat());
     }
 
     /**
@@ -107,40 +113,40 @@ public class KeyCacheCqlTest extends CQLTester
      * that we can assert on the key cache size and metrics.
      */
     @Override
-    protected String createTable(String query)
+    public String createTable(String query)
     {
         return super.createTable(KEYSPACE_PER_TEST, query + " WITH caching = { 'keys' : 'ALL', 'rows_per_partition' : '0' }");
     }
 
     @Override
-    protected UntypedResultSet execute(String query, Object... values) throws Throwable
+    public UntypedResultSet execute(String query, Object... values)
     {
         return executeFormattedQuery(formatQuery(KEYSPACE_PER_TEST, query), values);
     }
 
     @Override
-    protected String createIndex(String query)
+    public String createIndex(String query)
     {
-        return createFormattedIndex(formatQuery(KEYSPACE_PER_TEST, query));
+        return createIndex(KEYSPACE_PER_TEST, query);
     }
 
     @Override
-    protected void dropTable(String query)
+    public void dropTable(String query)
     {
-        dropFormattedTable(String.format(query, KEYSPACE_PER_TEST + "." + currentTable()));
+        dropTable(KEYSPACE_PER_TEST, query);
     }
 
     @Test
     public void testSliceQueriesShallowIndexEntry() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         testSliceQueries();
     }
 
     @Test
     public void testSliceQueriesIndexInfoOnHeap() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         testSliceQueries();
     }
 
@@ -161,7 +167,7 @@ public class KeyCacheCqlTest extends CQLTester
             }
         }
 
-        StorageService.instance.forceKeyspaceFlush(KEYSPACE_PER_TEST);
+        StorageService.instance.forceKeyspaceFlush(KEYSPACE_PER_TEST, ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         for (int pkInt = 0; pkInt < 20; pkInt++)
         {
@@ -230,14 +236,14 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void test2iKeyCachePathsShallowIndexEntry() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         test2iKeyCachePaths();
     }
 
     @Test
     public void test2iKeyCachePathsIndexInfoOnHeap() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         test2iKeyCachePaths();
     }
 
@@ -252,16 +258,21 @@ public class KeyCacheCqlTest extends CQLTester
 
         CacheMetrics metrics = CacheService.instance.keyCache.getMetrics();
 
+        long expectedRequests = 0;
+
         for (int i = 0; i < 10; i++)
         {
             UntypedResultSet result = execute("SELECT part_key_a FROM %s WHERE col_int = ?", i);
             assertEquals(500, result.size());
+            // Index requests and table requests are both added to the same metric
+            // We expect 10 requests on the index SSTables and 10 IN requests on the table SSTables + BF false positives
+            expectedRequests += recentBloomFilterFalsePositives() + 20;
         }
 
-        long hits = metrics.hits.getCount();
-        long requests = metrics.requests.getCount();
+        long hits = metrics.hits();
+        long requests = metrics.requests();
         assertEquals(0, hits);
-        assertEquals(210, requests);
+        assertEquals(sstableImplCachesKeys ? expectedRequests : 0, requests);
 
         for (int i = 0; i < 10; i++)
         {
@@ -270,13 +281,16 @@ public class KeyCacheCqlTest extends CQLTester
             // indexed on part-key % 10 = 10 index partitions
             // (50 clust-keys  *  100-part-keys  /  10 possible index-values) = 500
             assertEquals(500, result.size());
+            // Index requests and table requests are both added to the same metric
+            // We expect 10 requests on the index SSTables and 10 IN requests on the table SSTables + BF false positives
+            expectedRequests += recentBloomFilterFalsePositives() + 20;
         }
 
         metrics = CacheService.instance.keyCache.getMetrics();
-        hits = metrics.hits.getCount();
-        requests = metrics.requests.getCount();
-        assertEquals(200, hits);
-        assertEquals(420, requests);
+        hits = metrics.hits();
+        requests = metrics.requests();
+        assertEquals(sstableImplCachesKeys ? 200 : 0, hits);
+        assertEquals(sstableImplCachesKeys ? expectedRequests : 0, requests);
 
         CacheService.instance.keyCache.submitWrite(Integer.MAX_VALUE).get();
 
@@ -301,7 +315,7 @@ public class KeyCacheCqlTest extends CQLTester
         }
 
         dropTable("DROP TABLE %s");
-        Schema.instance.updateVersion();
+        assert Schema.instance.isSameVersion(SchemaTestUtil.calculateSchemaDigest());
 
         //Test loading for a dropped 2i/table
         CacheService.instance.keyCache.clear();
@@ -315,14 +329,14 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void test2iKeyCachePathsSaveKeysForDroppedTableShallowIndexEntry() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         test2iKeyCachePathsSaveKeysForDroppedTable();
     }
 
     @Test
     public void test2iKeyCachePathsSaveKeysForDroppedTableIndexInfoOnHeap() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         test2iKeyCachePathsSaveKeysForDroppedTable();
     }
 
@@ -337,18 +351,22 @@ public class KeyCacheCqlTest extends CQLTester
 
         CacheMetrics metrics = CacheService.instance.keyCache.getMetrics();
 
+        long expectedNumberOfRequests = 0;
+
         for (int i = 0; i < 10; i++)
         {
             UntypedResultSet result = execute("SELECT part_key_a FROM %s WHERE col_int = ?", i);
             assertEquals(500, result.size());
+
+            // Index requests and table requests are both added to the same metric
+            // We expect 10 requests on the index SSTables and 10 IN requests on the table SSTables + BF false positives
+            expectedNumberOfRequests += recentBloomFilterFalsePositives() + 20;
         }
 
-        long hits = metrics.hits.getCount();
-        long requests = metrics.requests.getCount();
+        long hits = metrics.hits();
+        long requests = metrics.requests();
         assertEquals(0, hits);
-        assertEquals(210, requests);
-
-        //
+        assertEquals(sstableImplCachesKeys ? expectedNumberOfRequests : 0, requests);
 
         for (int i = 0; i < 10; i++)
         {
@@ -357,13 +375,17 @@ public class KeyCacheCqlTest extends CQLTester
             // indexed on part-key % 10 = 10 index partitions
             // (50 clust-keys  *  100-part-keys  /  10 possible index-values) = 500
             assertEquals(500, result.size());
+
+            // Index requests and table requests are both added to the same metric
+            // We expect 10 requests on the index SSTables and 10 IN requests on the table SSTables + BF false positives
+            expectedNumberOfRequests += recentBloomFilterFalsePositives() + 20;
         }
 
         metrics = CacheService.instance.keyCache.getMetrics();
-        hits = metrics.hits.getCount();
-        requests = metrics.requests.getCount();
-        assertEquals(200, hits);
-        assertEquals(420, requests);
+        hits = metrics.hits();
+        requests = metrics.requests();
+        assertEquals(sstableImplCachesKeys ? 200 : 0, hits);
+        assertEquals(sstableImplCachesKeys ? expectedNumberOfRequests : 0, requests);
 
         dropTable("DROP TABLE %s");
 
@@ -389,14 +411,14 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void testKeyCacheNonClusteredShallowIndexEntry() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         testKeyCacheNonClustered();
     }
 
     @Test
     public void testKeyCacheNonClusteredIndexInfoOnHeap() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         testKeyCacheNonClustered();
     }
 
@@ -408,41 +430,49 @@ public class KeyCacheCqlTest extends CQLTester
         insertData(table, null, false);
         clearCache();
 
+        long expectedNumberOfRequests = 0;
+
+        CacheMetrics metrics = CacheService.instance.keyCache.getMetrics();
         for (int i = 0; i < 10; i++)
         {
             assertRows(execute("SELECT col_text FROM %s WHERE part_key_a = ? AND part_key_b = ?", i, Integer.toOctalString(i)),
                        new Object[]{ String.valueOf(i) + '-' + String.valueOf(0) });
+
+            // the data for the key is in 1 SSTable but we have to take into account bloom filter false positive
+            expectedNumberOfRequests += recentBloomFilterFalsePositives() + 1;
         }
 
-        CacheMetrics metrics = CacheService.instance.keyCache.getMetrics();
-        long hits = metrics.hits.getCount();
-        long requests = metrics.requests.getCount();
+        long hits = metrics.hits();
+        long requests = metrics.requests();
         assertEquals(0, hits);
-        assertEquals(10, requests);
+        assertEquals(sstableImplCachesKeys ? 10 : 0, requests);
 
         for (int i = 0; i < 100; i++)
         {
             assertRows(execute("SELECT col_text FROM %s WHERE part_key_a = ? AND part_key_b = ?", i, Integer.toOctalString(i)),
                        new Object[]{ String.valueOf(i) + '-' + String.valueOf(0) });
+
+            // the data for the key is in 1 SSTable but we have to take into account bloom filter false positive
+            expectedNumberOfRequests += recentBloomFilterFalsePositives() + 1;
         }
 
-        hits = metrics.hits.getCount();
-        requests = metrics.requests.getCount();
-        assertEquals(10, hits);
-        assertEquals(120, requests);
+        hits = metrics.hits();
+        requests = metrics.requests();
+        assertEquals(sstableImplCachesKeys ? 10 : 0, hits);
+        assertEquals(sstableImplCachesKeys ? expectedNumberOfRequests : 0, requests);
     }
 
     @Test
     public void testKeyCacheClusteredShallowIndexEntry() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         testKeyCacheClustered();
     }
 
     @Test
     public void testKeyCacheClusteredIndexInfoOnHeap() throws Throwable
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         testKeyCacheClustered();
     }
 
@@ -463,10 +493,10 @@ public class KeyCacheCqlTest extends CQLTester
         }
 
         CacheMetrics metrics = CacheService.instance.keyCache.getMetrics();
-        long hits = metrics.hits.getCount();
-        long requests = metrics.requests.getCount();
+        long hits = metrics.hits();
+        long requests = metrics.requests();
         assertEquals(0, hits);
-        assertEquals(10, requests);
+        assertEquals(sstableImplCachesKeys ? 10 : 0, requests);
 
         // 10 queries, each 50 result rows
         for (int i = 0; i < 10; i++)
@@ -475,10 +505,10 @@ public class KeyCacheCqlTest extends CQLTester
         }
 
         metrics = CacheService.instance.keyCache.getMetrics();
-        hits = metrics.hits.getCount();
-        requests = metrics.requests.getCount();
-        assertEquals(10, hits);
-        assertEquals(10 + 10, requests);
+        hits = metrics.hits();
+        requests = metrics.requests();
+        assertEquals(sstableImplCachesKeys ? 10 : 0, hits);
+        assertEquals(sstableImplCachesKeys ? 20 : 0, requests);
 
         // 100 queries - must get a hit in key-cache
         for (int i = 0; i < 10; i++)
@@ -491,10 +521,10 @@ public class KeyCacheCqlTest extends CQLTester
         }
 
         metrics = CacheService.instance.keyCache.getMetrics();
-        hits = metrics.hits.getCount();
-        requests = metrics.requests.getCount();
-        assertEquals(10 + 100, hits);
-        assertEquals(20 + 100, requests);
+        hits = metrics.hits();
+        requests = metrics.requests();
+        assertEquals(sstableImplCachesKeys ? 10 + 100 : 0, hits);
+        assertEquals(sstableImplCachesKeys ? 20 + 100 : 0, requests);
 
         // 5000 queries - first 10 partitions already in key cache
         for (int i = 0; i < 100; i++)
@@ -506,10 +536,10 @@ public class KeyCacheCqlTest extends CQLTester
             }
         }
 
-        hits = metrics.hits.getCount();
-        requests = metrics.requests.getCount();
-        assertEquals(110 + 4910, hits);
-        assertEquals(120 + 5500, requests);
+        hits = metrics.hits();
+        requests = metrics.requests();
+        assertEquals(sstableImplCachesKeys ? 110 + 4910 : 0, hits);
+        assertEquals(sstableImplCachesKeys ? 120 + 5500 : 0, requests);
     }
 
     // Inserts 100 partitions split over 10 sstables (flush after 10 partitions).
@@ -543,7 +573,7 @@ public class KeyCacheCqlTest extends CQLTester
 
             if (i % 10 == 9)
             {
-                Keyspace.open(KEYSPACE_PER_TEST).getColumnFamilyStore(table).forceFlush().get();
+                Keyspace.open(KEYSPACE_PER_TEST).getColumnFamilyStore(table).forceFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS).get();
                 if (index != null)
                     triggerBlockingFlush(Keyspace.open(KEYSPACE_PER_TEST).getColumnFamilyStore(table).indexManager.getIndexByName(index));
             }
@@ -553,7 +583,7 @@ public class KeyCacheCqlTest extends CQLTester
     private static void prepareTable(String table) throws IOException, InterruptedException, java.util.concurrent.ExecutionException
     {
         StorageService.instance.disableAutoCompaction(KEYSPACE_PER_TEST, table);
-        Keyspace.open(KEYSPACE_PER_TEST).getColumnFamilyStore(table).forceFlush().get();
+        Keyspace.open(KEYSPACE_PER_TEST).getColumnFamilyStore(table).forceFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS).get();
         Keyspace.open(KEYSPACE_PER_TEST).getColumnFamilyStore(table).truncateBlocking();
     }
 
@@ -572,10 +602,10 @@ public class KeyCacheCqlTest extends CQLTester
         CassandraMetricsRegistry.Metrics.getNames().forEach(CassandraMetricsRegistry.Metrics::remove);
         CacheService.instance.keyCache.clear();
         CacheMetrics metrics = CacheService.instance.keyCache.getMetrics();
-        Assert.assertEquals(0, metrics.entries.getValue().intValue());
-        Assert.assertEquals(0L, metrics.hits.getCount());
-        Assert.assertEquals(0L, metrics.requests.getCount());
-        Assert.assertEquals(0L, metrics.size.getValue().longValue());
+        Assert.assertEquals(0, metrics.entries());
+        Assert.assertEquals(0L, metrics.hits());
+        Assert.assertEquals(0L, metrics.requests());
+        Assert.assertEquals(0L, metrics.size());
     }
 
     private static void triggerBlockingFlush(Index index) throws Exception
@@ -584,5 +614,13 @@ public class KeyCacheCqlTest extends CQLTester
         Callable<?> flushTask = index.getBlockingFlushTask();
         if (flushTask != null)
             flushTask.call();
+    }
+
+    private long recentBloomFilterFalsePositives()
+    {
+        return getCurrentColumnFamilyStore(KEYSPACE_PER_TEST).metric.formatSpecificGauges.get(DatabaseDescriptor.getSelectedSSTableFormat())
+                                                                                         .get(BloomFilterMetrics.instance.recentBloomFilterFalsePositives.name)
+                                                                                         .getValue()
+                                                                                         .longValue();
     }
 }

@@ -32,6 +32,7 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.Util.PartitionerSwitcher;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.Schema;
@@ -46,7 +47,9 @@ import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.*;
 
@@ -62,6 +65,7 @@ public class LeaveAndBootstrapTest
     @BeforeClass
     public static void defineSchema() throws Exception
     {
+        CassandraRelevantProperties.GOSSIPER_QUARANTINE_DELAY.setLong(10000);
         DatabaseDescriptor.daemonInitialization();
         partitionerSwitcher = Util.switchPartitioner(partitioner);
         SchemaLoader.loadSchema();
@@ -87,6 +91,7 @@ public class LeaveAndBootstrapTest
 
         TokenMetadata tmd = ss.getTokenMetadata();
         tmd.clearUnsafe();
+        Gossiper.instance.clearUnsafe();
         IPartitioner partitioner = RandomPartitioner.instance;
         VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
 
@@ -122,7 +127,7 @@ public class LeaveAndBootstrapTest
         PendingRangeCalculatorService.instance.blockUntilFinished();
 
         AbstractReplicationStrategy strategy;
-        for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
+        for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
         {
             strategy = getStrategy(keyspaceName, tmd);
             for (Token token : keyTokens)
@@ -158,6 +163,7 @@ public class LeaveAndBootstrapTest
         final int RING_SIZE = 10;
         TokenMetadata tmd = ss.getTokenMetadata();
         tmd.clearUnsafe();
+        Gossiper.instance.clearUnsafe();
         IPartitioner partitioner = RandomPartitioner.instance;
         VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
 
@@ -461,6 +467,7 @@ public class LeaveAndBootstrapTest
         StorageService ss = StorageService.instance;
         TokenMetadata tmd = ss.getTokenMetadata();
         tmd.clearUnsafe();
+        Gossiper.instance.clearUnsafe();
         IPartitioner partitioner = RandomPartitioner.instance;
         VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
 
@@ -524,10 +531,10 @@ public class LeaveAndBootstrapTest
 
         assertTrue(tmd.isMember(hosts.get(2)));
         assertFalse(tmd.isLeaving(hosts.get(2)));
-        assertEquals(keyTokens.get(3), tmd.getToken(hosts.get(2)));
+        assertEquals(keyTokens.get(3), tmd.getTokens(hosts.get(2)).iterator().next());
         assertTrue(tmd.isMember(hosts.get(3)));
         assertFalse(tmd.isLeaving(hosts.get(3)));
-        assertEquals(keyTokens.get(2), tmd.getToken(hosts.get(3)));
+        assertEquals(keyTokens.get(2), tmd.getTokens(hosts.get(3)).iterator().next());
 
         assertTrue(tmd.getBootstrapTokens().isEmpty());
     }
@@ -538,6 +545,7 @@ public class LeaveAndBootstrapTest
         StorageService ss = StorageService.instance;
         TokenMetadata tmd = ss.getTokenMetadata();
         tmd.clearUnsafe();
+        Gossiper.instance.clearUnsafe();
         IPartitioner partitioner = RandomPartitioner.instance;
         VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
 
@@ -553,14 +561,14 @@ public class LeaveAndBootstrapTest
         ss.onChange(hosts.get(2), ApplicationState.STATUS, valueFactory.leaving(Collections.singleton(endpointTokens.get(2))));
 
         assertTrue(tmd.isLeaving(hosts.get(2)));
-        assertEquals(endpointTokens.get(2), tmd.getToken(hosts.get(2)));
+        assertEquals(endpointTokens.get(2), tmd.getTokens(hosts.get(2)).iterator().next());
 
         // back to normal
         Gossiper.instance.injectApplicationState(hosts.get(2), ApplicationState.TOKENS, valueFactory.tokens(Collections.singleton(keyTokens.get(2))));
         ss.onChange(hosts.get(2), ApplicationState.STATUS, valueFactory.normal(Collections.singleton(keyTokens.get(2))));
 
         assertTrue(tmd.getSizeOfLeavingEndpoints() == 0);
-        assertEquals(keyTokens.get(2), tmd.getToken(hosts.get(2)));
+        assertEquals(keyTokens.get(2), tmd.getTokens(hosts.get(2)).iterator().next());
 
         // node 3 goes through leave and left and then jumps to normal at its new token
         ss.onChange(hosts.get(2), ApplicationState.STATUS, valueFactory.leaving(Collections.singleton(keyTokens.get(2))));
@@ -571,7 +579,7 @@ public class LeaveAndBootstrapTest
 
         assertTrue(tmd.getBootstrapTokens().isEmpty());
         assertTrue(tmd.getSizeOfLeavingEndpoints() == 0);
-        assertEquals(keyTokens.get(4), tmd.getToken(hosts.get(2)));
+        assertEquals(keyTokens.get(4), tmd.getTokens(hosts.get(2)).iterator().next());
     }
 
     @Test
@@ -580,6 +588,7 @@ public class LeaveAndBootstrapTest
         StorageService ss = StorageService.instance;
         TokenMetadata tmd = ss.getTokenMetadata();
         tmd.clearUnsafe();
+        Gossiper.instance.clearUnsafe();
         IPartitioner partitioner = RandomPartitioner.instance;
         VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
 
@@ -595,7 +604,7 @@ public class LeaveAndBootstrapTest
         Gossiper.instance.injectApplicationState(hosts.get(2), ApplicationState.TOKENS, valueFactory.tokens(Collections.singleton(keyTokens.get(0))));
         ss.onChange(hosts.get(2), ApplicationState.STATUS, valueFactory.leaving(Collections.singleton(keyTokens.get(0))));
 
-        assertEquals(keyTokens.get(0), tmd.getToken(hosts.get(2)));
+        assertEquals(keyTokens.get(0), tmd.getTokens(hosts.get(2)).iterator().next());
         assertTrue(tmd.isLeaving(hosts.get(2)));
         assertNull(tmd.getEndpoint(endpointTokens.get(2)));
 
@@ -630,6 +639,7 @@ public class LeaveAndBootstrapTest
         StorageService ss = StorageService.instance;
         TokenMetadata tmd = ss.getTokenMetadata();
         tmd.clearUnsafe();
+        Gossiper.instance.clearUnsafe();
         IPartitioner partitioner = RandomPartitioner.instance;
         VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
 
@@ -647,7 +657,7 @@ public class LeaveAndBootstrapTest
 
         assertFalse(tmd.isMember(hosts.get(2)));
 
-        // node hosts.get(4) goes to bootstrap
+        // node hosts.get(3) goes to bootstrap
         Gossiper.instance.injectApplicationState(hosts.get(3), ApplicationState.TOKENS, valueFactory.tokens(Collections.singleton(keyTokens.get(1))));
         ss.onChange(hosts.get(3), ApplicationState.STATUS, valueFactory.bootstrapping(Collections.<Token>singleton(keyTokens.get(1))));
 
@@ -660,7 +670,7 @@ public class LeaveAndBootstrapTest
         ss.onChange(hosts.get(2), ApplicationState.STATUS,
                 valueFactory.left(Collections.singleton(keyTokens.get(1)), Gossiper.computeExpireTime()));
 
-        assertTrue(tmd.getBootstrapTokens().size() == 0);
+        Assertions.assertThat(tmd.getBootstrapTokens()).isEmpty();
         assertFalse(tmd.isMember(hosts.get(2)));
         assertFalse(tmd.isLeaving(hosts.get(2)));
     }
@@ -680,8 +690,8 @@ public class LeaveAndBootstrapTest
         Util.createInitialRing(ss, partitioner, endpointTokens, new ArrayList<Token>(), hosts, new ArrayList<UUID>(), 2);
 
         InetAddressAndPort toRemove = hosts.get(1);
-        SystemKeyspace.updatePeerInfo(toRemove, "data_center", "dc42");
-        SystemKeyspace.updatePeerInfo(toRemove, "rack", "rack42");
+        Nodes.peers().update(toRemove, info -> info.setDataCenter("dc42"), false);
+        Nodes.peers().update(toRemove, info -> info.setRack("rack42"), false);
         assertEquals("rack42", SystemKeyspace.loadDcRackInfo().get(toRemove).get("rack"));
 
         // mark the node as removed
@@ -728,4 +738,26 @@ public class LeaveAndBootstrapTest
                 ksmd.params.replication.options);
     }
 
+    @Test
+    public void testRemoveExistingMember() throws UnknownHostException
+    {
+        // create a ring of 1 node
+        StorageService ss = StorageService.instance;
+        VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
+        List<UUID> hostIds = new ArrayList<>();
+        Util.createInitialRing(ss, partitioner, new ArrayList<Token>(), new ArrayList<Token>(), new ArrayList<InetAddressAndPort>(), hostIds, 1);
+
+        InetAddressAndPort removeNode = InetAddressAndPort.getByName("127.0.0.87");
+        UUID removeHostId = UUID.randomUUID();
+        Token token = ss.getTokenFactory().fromString("87");
+        Util.joinNodeToRing(removeNode, token, partitioner, removeHostId, 1);
+        UUID coordinatorHostID = hostIds.get(0);
+        Gossiper.instance.injectApplicationState(removeNode, ApplicationState.REMOVAL_COORDINATOR, valueFactory.removalCoordinator(coordinatorHostID));
+
+        TokenMetadata tmd = ss.getTokenMetadata();
+        assertEquals(removeNode, tmd.getEndpointForHostId(removeHostId));
+        ss.onChange(removeNode, ApplicationState.STATUS_WITH_PORT, valueFactory.removingNonlocal(UUID.randomUUID()));
+        assertTrue("Removed node should be marked as leaving", tmd.isLeaving(removeNode));
+        assertTrue("Removed node not in list of leaving nodes", ss.getLeavingNodes().contains(removeNode.getHostAddress(false)));
+    }
 }

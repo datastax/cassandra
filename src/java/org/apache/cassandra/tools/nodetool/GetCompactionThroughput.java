@@ -17,17 +17,40 @@
  */
 package org.apache.cassandra.tools.nodetool;
 
+import com.google.common.math.DoubleMath;
+import java.util.Map;
+
 import io.airlift.airline.Command;
 
+import io.airlift.airline.Option;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
 
-@Command(name = "getcompactionthroughput", description = "Print the MB/s throughput cap for compaction in the system")
+@Command(name = "getcompactionthroughput", description = "Print the MiB/s throughput cap for compaction in the system as a rounded number")
 public class GetCompactionThroughput extends NodeToolCmd
 {
+    @SuppressWarnings("UnusedDeclaration")
+    @Option(name = { "-d", "--precise-mib" }, description = "Print the MiB/s throughput cap for compaction in the system as a precise number (double)")
+    private boolean  compactionThroughputAsDouble;
+
     @Override
     public void execute(NodeProbe probe)
     {
-        probe.output().out.println("Current compaction throughput: " + probe.getCompactionThroughput() + " MB/s");
+        double throughput = probe.getCompactionThroughputMebibytesAsDouble();
+
+        if (compactionThroughputAsDouble)
+            probe.output().out.println("Current compaction throughput: " + throughput + " MiB/s");
+        else
+        {
+            if (!DoubleMath.isMathematicalInteger(throughput))
+                throw new RuntimeException("Use the -d flag to quiet this error and get the exact throughput in MiB/s");
+
+            probe.output().out.println("Current compaction throughput: " + probe.getCompactionThroughput() + " MB/s");
+
+            Map<String, String> currentCompactionThroughputMetricsMap = probe.getCurrentCompactionThroughputMiBPerSec();
+            probe.output().out.println("Current compaction throughput (1 minute): " + currentCompactionThroughputMetricsMap.get("1minute") + " MiB/s");
+            probe.output().out.println("Current compaction throughput (5 minute): " + currentCompactionThroughputMetricsMap.get("5minute") + " MiB/s");
+            probe.output().out.println("Current compaction throughput (15 minute): " + currentCompactionThroughputMetricsMap.get("15minute") + " MiB/s");
+        }
     }
 }

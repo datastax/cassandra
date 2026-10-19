@@ -17,18 +17,37 @@
  */
 package org.apache.cassandra.utils;
 
+import java.io.IOException;
+
 import com.google.common.annotations.VisibleForTesting;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import net.nicoulaj.compilecommand.annotations.Inline;
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.WrappedSharedCloseable;
 import org.apache.cassandra.utils.obs.IBitSet;
+import org.apache.cassandra.utils.obs.MemoryLimiter;
+
+import static org.apache.cassandra.metrics.RestorableMeter.AVAILABLE_WINDOWS;
 
 public class BloomFilter extends WrappedSharedCloseable implements IFilter
 {
+    private static final long maxMemory = CassandraRelevantProperties.BF_MAX_MEMORY_MB.getLong() << 20;
+
+    /**
+     * If true, Bloom filters ignore the memory limit during flush. CNDB uses this to avoid missing Bloom filters
+     * when reloading from remote storage.
+     */
+    public static final String IGNORE_MEMORY_LIMIT_ON_FLUSH_PROP = CassandraRelevantProperties.BF_IGNORE_MEMORY_LIMIT_ON_FLUSH.getKey();
+
+    public static final MemoryLimiter memoryLimiter = new MemoryLimiter(maxMemory != 0 ? maxMemory : Long.MAX_VALUE,
+                                                                        "Allocating %s for Bloom filter would reach max of %s (current %s)");
+
     private final static FastThreadLocal<long[]> reusableIndexes = new FastThreadLocal<long[]>()
     {
+        @Override
         protected long[] initialValue()
         {
             return new long[21];
@@ -52,9 +71,58 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
         this.bitset = copy.bitset;
     }
 
-    public long serializedSize()
+    /**
+     * @return true to ignore bloom filter memory limit during flush
+     */
+    public static boolean ignoreMemoryLimitOnFlush()
     {
-        return BloomFilterSerializer.serializedSize(this);
+        return CassandraRelevantProperties.BF_IGNORE_MEMORY_LIMIT_ON_FLUSH.getBoolean();
+    }
+
+    /**
+     * @return true if sstable's bloom filter should be deserialized on read instead of when opening sstable. This
+     *         doesn't affect flushed sstable because there is bloom filter deserialization
+     */
+    public static boolean lazyLoading()
+    {
+        return CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING.getBoolean();
+    }
+
+    /**
+     * @return sstable hits per second to determine if a sstable is hot. 0 means BF should be loaded immediately on read.
+     *
+     * Note that when WINDOW <= 0, this is used as absolute primary index access count.
+     */
+    public static long lazyLoadingThreshold()
+    {
+        return CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING_THRESHOLD.getInt();
+    }
+
+    /**
+     * @return Window of time by minute, available: 1 (default), 5, 15, 120.
+     *
+     * Note that if <= 0 then we use threshold as the absolute count
+     */
+    public static int lazyLoadingWindow()
+    {
+        int window = CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING_WINDOW.getInt();
+        if (window >= 1 && !AVAILABLE_WINDOWS.contains(window))
+            throw new IllegalArgumentException(String.format("Found invalid %s=%s, available windows: %s",
+                                                             CassandraRelevantProperties.BLOOM_FILTER_LAZY_LOADING_WINDOW.getKey(),
+                                                             window,
+                                                             AVAILABLE_WINDOWS));
+        return window;
+    }
+
+    public long serializedSize(boolean old)
+    {
+        return BloomFilterSerializer.forVersion(old).serializedSize(this);
+    }
+
+    @Override
+    public void serialize(DataOutputStreamPlus out, boolean old) throws IOException
+    {
+        BloomFilterSerializer.forVersion(old).serialize(this, out);
     }
 
     // Murmur is faster than an SHA-based approach and provides as-good collision
@@ -101,6 +169,7 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
         }
     }
 
+    @Override
     public void add(FilterKey key)
     {
         long[] indexes = indexes(key);
@@ -110,6 +179,7 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
         }
     }
 
+    @Override
     public final boolean isPresent(FilterKey key)
     {
         long[] indexes = indexes(key);
@@ -123,12 +193,14 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
         return true;
     }
 
+    @Override
     public void clear()
     {
         bitset.clear();
     }
 
-    public IFilter sharedCopy()
+    @Override
+    public BloomFilter sharedCopy()
     {
         return new BloomFilter(this);
     }
@@ -139,14 +211,29 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
         return bitset.offHeapSize();
     }
 
+    @Override
+    public boolean isInformative()
+    {
+        return bitset.offHeapSize() > 0;
+    }
+
+    @Override
+    public boolean isSerializable()
+    {
+        return true;
+    }
+
+    @Override
     public String toString()
     {
         return "BloomFilter[hashCount=" + hashCount + ";capacity=" + bitset.capacity() + ']';
     }
 
+    @Override
     public void addTo(Ref.IdentityCollection identities)
     {
         super.addTo(identities);
         bitset.addTo(identities);
     }
+
 }

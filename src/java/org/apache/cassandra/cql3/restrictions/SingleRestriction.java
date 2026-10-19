@@ -19,7 +19,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
-import org.apache.cassandra.db.MultiCBuilder;
+import org.apache.cassandra.db.MultiClusteringBuilder;
 
 /**
  * A single restriction/clause on one or multiple column.
@@ -32,6 +32,11 @@ public interface SingleRestriction extends Restriction
     }
 
     public default boolean isEQ()
+    {
+        return false;
+    }
+
+    public default boolean isAnalyzerMatches()
     {
         return false;
     }
@@ -51,12 +56,30 @@ public interface SingleRestriction extends Restriction
         return false;
     }
 
+    /**
+     * @return <code>true</code> if this restriction is based on equality comparison rather than a range or negation
+     */
+    default boolean isEqualityBased()
+    {
+        return isEQ() || isIN();
+    }
+
     public default boolean isNotNull()
     {
         return false;
     }
 
     public default boolean isMultiColumn()
+    {
+        return false;
+    }
+
+    public default boolean isIndexBasedOrdering()
+    {
+        return false;
+    }
+
+    public default boolean isBoundedAnn()
     {
         return false;
     }
@@ -100,7 +123,7 @@ public interface SingleRestriction extends Restriction
      * @param options the query options
      * @return the <code>MultiCBuilder</code>
      */
-    public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options);
+    public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options);
 
     /**
      * Appends the values of the <code>SingleRestriction</code> for the specified bound to the specified builder.
@@ -110,8 +133,20 @@ public interface SingleRestriction extends Restriction
      * @param options the query options
      * @return the <code>MultiCBuilder</code>
      */
-    public default MultiCBuilder appendBoundTo(MultiCBuilder builder, Bound bound, QueryOptions options)
+    public default MultiClusteringBuilder appendBoundTo(MultiClusteringBuilder builder, Bound bound, QueryOptions options)
     {
         return appendTo(builder, options);
+    }
+
+    /**
+     * @return true if the other restriction should be merged with this one.
+     * This is NOT for preventing illegal combinations of restrictions, e.g.
+     * a=1 AND a=2; that is handled by mergeWith.  Instead, this is for the case
+     * where we want two completely different semantics against the same column.
+     * Currently the only such case is BM25 with MATCH.
+     */
+    default boolean shouldMerge(SingleRestriction other)
+    {
+        return true;
     }
 }

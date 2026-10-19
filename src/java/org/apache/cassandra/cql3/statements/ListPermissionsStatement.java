@@ -64,6 +64,7 @@ public class ListPermissionsStatement extends AuthorizationStatement
         this.grantee = grantee.hasName()? RoleResource.role(grantee.getName()) : null;
     }
 
+    @Override
     public void validate(ClientState state) throws RequestValidationException
     {
         // a check to ensure the existence of the user isn't being leaked by user existence check.

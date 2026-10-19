@@ -17,8 +17,8 @@
  */
 package org.apache.cassandra.service.reads;
 
-import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.metrics.SnapshottingTimer;
 import org.apache.cassandra.schema.TableParams;
 
 public interface SpeculativeRetryPolicy
@@ -28,7 +28,14 @@ public interface SpeculativeRetryPolicy
         NEVER, FIXED, PERCENTILE, HYBRID, ALWAYS
     }
 
-    long calculateThreshold(Snapshot latency, long existingValue);
+    /**
+     * Calculate the delay in microseconds after which speculation takes place
+     *
+     * @param latency       snapshot of coordinator latencies (in microseconds)
+     * @param existingValue existing speculation threshold (in microseconds)
+     * @return speculation delay (in microseconds).
+     */
+    long calculateThreshold(SnapshottingTimer latency, long existingValue);
 
     Kind kind();
 

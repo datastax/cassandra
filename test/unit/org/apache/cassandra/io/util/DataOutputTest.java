@@ -24,15 +24,12 @@ import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.EOFException;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.Random;
 import java.util.concurrent.Callable;
@@ -109,7 +106,7 @@ public class DataOutputTest
     @Test
     public void testDataOutputDirectByteBuffer() throws IOException
     {
-        ByteBuffer buf = wrap(new byte[345], true);
+        ByteBuffer buf = wrap(new byte[381], true);
         BufferedDataOutputStreamPlus write = new BufferedDataOutputStreamPlus(null, buf.duplicate());
         DataInput canon = testWrite(write);
         DataInput test = new DataInputStream(new ByteArrayInputStream(ByteBufferUtil.getArray(buf)));
@@ -119,7 +116,7 @@ public class DataOutputTest
     @Test
     public void testDataOutputHeapByteBuffer() throws IOException
     {
-        ByteBuffer buf = wrap(new byte[345], false);
+        ByteBuffer buf = wrap(new byte[381], false);
         BufferedDataOutputStreamPlus write = new BufferedDataOutputStreamPlus(null, buf.duplicate());
         DataInput canon = testWrite(write);
         DataInput test = new DataInputStream(new ByteArrayInputStream(ByteBufferUtil.getArray(buf)));
@@ -210,11 +207,11 @@ public class DataOutputTest
             checkThrowsException(validateReallocationCallable(write, DataOutputBuffer.MAX_ARRAY_SIZE + 1),
                                  BufferOverflowException.class);
             //Check that it does throw
-            checkThrowsException(() -> 
+            checkThrowsException(() ->
                                  {
                                      write.write(42);
                                      return null;
-                                 }, 
+                                 },
                                  BufferOverflowException.class);
         }
     }
@@ -314,8 +311,8 @@ public class DataOutputTest
         try (SafeMemoryWriter write = new SafeMemoryWriter(10))
         {
             DataInput canon = testWrite(write);
-            byte[] bytes = new byte[345];
-            write.currentBuffer().getBytes(0, bytes, 0, 345);
+            byte[] bytes = new byte[381];
+            write.currentBuffer().getBytes(0, bytes, 0, 381);
             DataInput test = new DataInputStream(new ByteArrayInputStream(bytes));
             testRead(test, canon);
         }
@@ -327,16 +324,16 @@ public class DataOutputTest
         File file = FileUtils.createTempFile("dataoutput", "test");
         try
         {
-            DataOutputStreamPlus write = new WrappedDataOutputStreamPlus(new FileOutputStream(file));
+            DataOutputStreamPlus write = new WrappedDataOutputStreamPlus(new FileOutputStreamPlus(file));
             DataInput canon = testWrite(write);
             write.close();
-            DataInputStream test = new DataInputStream(new FileInputStream(file));
+            DataInputStream test = new DataInputStream(new FileInputStreamPlus(file));
             testRead(test, canon);
             test.close();
         }
         finally
         {
-            Assert.assertTrue(file.delete());
+            Assert.assertTrue(file.tryDelete());
         }
     }
 
@@ -346,16 +343,16 @@ public class DataOutputTest
         File file = FileUtils.createTempFile("dataoutput", "test");
         try
         {
-            DataOutputStreamPlus write = new BufferedDataOutputStreamPlus(new FileOutputStream(file));
+            DataOutputStreamPlus write = new FileOutputStreamPlus(file);
             DataInput canon = testWrite(write);
             write.close();
-            DataInputStream test = new DataInputStream(new FileInputStream(file));
+            DataInputStream test = new DataInputStream(new FileInputStreamPlus(file));
             testRead(test, canon);
             test.close();
         }
         finally
         {
-            Assert.assertTrue(file.delete());
+            Assert.assertTrue(file.tryDelete());
         }
     }
 
@@ -365,18 +362,16 @@ public class DataOutputTest
         File file = FileUtils.createTempFile("dataoutput", "test");
         try
         {
-            @SuppressWarnings("resource")
-            final RandomAccessFile raf = new RandomAccessFile(file, "rw");
-            DataOutputStreamPlus write = new BufferedDataOutputStreamPlus(raf.getChannel());
+            DataOutputStreamPlus write = new BufferedDataOutputStreamPlus(file.newReadWriteChannel());
             DataInput canon = testWrite(write);
             write.close();
-            DataInputStream test = new DataInputStream(new FileInputStream(file));
+            DataInputStream test = new DataInputStream(new FileInputStreamPlus(file));
             testRead(test, canon);
             test.close();
         }
         finally
         {
-            Assert.assertTrue(file.delete());
+            Assert.assertTrue(file.tryDelete());
         }
     }
 
@@ -390,10 +385,10 @@ public class DataOutputTest
         DataInput canon = testWrite(write);
         write.flush();
         write.close();
-        DataInputStream test = new DataInputStream(new FileInputStream(file));
+        DataInputStream test = new DataInputStream(new FileInputStreamPlus(file));
         testRead(test, canon);
         test.close();
-        Assert.assertTrue(file.delete());
+        Assert.assertTrue(file.tryDelete());
     }
 
     private DataInput testWrite(DataOutputPlus test) throws IOException
@@ -465,6 +460,21 @@ public class DataOutputTest
             canon.writeFloat(v);
         }
 
+        byte[] rndBytes = new byte[Long.BYTES];
+        for (int i = 1; i <= Long.BYTES; i++)
+        {
+            Arrays.fill(rndBytes, 0, rndBytes.length, (byte) 0);
+            rnd.nextBytes(rndBytes);
+            // keep only first i random bytes
+            Arrays.fill(rndBytes,  i, rndBytes.length, (byte) 0);
+            long val = ByteBufferUtil.toLong(ByteBuffer.wrap(rndBytes));
+            test.writeMostSignificantBytes(val, i);
+            byte[] arr = new byte[i];
+            System.arraycopy(rndBytes, 0, arr, 0, i);
+            canon.write(arr);
+        }
+
+
         // 27
         return new DataInputStream(new ByteArrayInputStream(bos.toByteArray()));
     }
@@ -483,6 +493,10 @@ public class DataOutputTest
         assert test.readByte() == canon.readByte();
         assert test.readDouble() == canon.readDouble();
         assert test.readFloat() == canon.readFloat();
+        for (int i = 1; i <= Long.BYTES; i++)
+        {
+            Assert.assertArrayEquals(ByteBufferUtil.readBytes(canon, i), ByteBufferUtil.readBytes(test, i));
+        }
         try
         {
             test.readInt();

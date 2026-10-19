@@ -3359,7 +3359,6 @@ org.apache.cassandra.db:type=StorageService:
   - {access: read-only, name: Joined, type: boolean}
   - {access: read-only, name: JoiningNodes, type: java.util.List}
   - {access: read-only, name: JoiningNodesWithPort, type: java.util.List}
-  - {access: read/write, name: KeyspaceCountWarnThreshold, type: int}
   - {access: read-only, name: Keyspaces, type: java.util.List}
   - {access: read-only, name: LeavingNodes, type: java.util.List}
   - {access: read-only, name: LeavingNodesWithPort, type: java.util.List}
@@ -3401,7 +3400,6 @@ org.apache.cassandra.db:type=StorageService:
   - {access: read/write, name: SnapshotLinksPerSecond, type: long}
   - {access: read-only, name: Starting, type: boolean}
   - {access: read/write, name: StreamThroughputMbPerSec, type: int}
-  - {access: read/write, name: TableCountWarnThreshold, type: int}
   - {access: read-only, name: TokenToEndpointMap, type: java.util.Map}
   - {access: read-only, name: TokenToEndpointWithPortMap, type: java.util.Map}
   - {access: read-only, name: Tokens, type: java.util.List}
@@ -10373,13 +10371,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=IndexInfo,n
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=IndexInfo,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=IndexInfo,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -10967,27 +10958,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=IndexInfo,n
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=IndexInfo,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -11278,13 +11248,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_r
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -11872,27 +11835,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_r
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges_v2,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -12183,13 +12125,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_r
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges_v2,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges_v2,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -12777,27 +12712,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_r
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=available_ranges_v2,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=batches,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -13088,13 +13002,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=batches,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=batches,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=batches,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -13682,27 +13589,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=batches,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=batches,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=built_views,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -13993,13 +13879,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=built_views
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=built_views,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=built_views,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -14587,27 +14466,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=built_views
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=built_views,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=compaction_history,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -14898,13 +14756,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=compaction_
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=compaction_history,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=compaction_history,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -15492,27 +15343,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=compaction_
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=compaction_history,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=local,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -15803,13 +15633,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=local,name=
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=local,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=local,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -16397,27 +16220,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=local,name=
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=local,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=paxos,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -16708,13 +16510,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=paxos,name=
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=paxos,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=paxos,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -17302,27 +17097,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=paxos,name=
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=paxos,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -17613,13 +17387,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -18207,27 +17974,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events_v2,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -18518,13 +18264,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events_v2,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events_v2,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -19112,27 +18851,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peer_events_v2,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -19423,13 +19141,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers,name=
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -20017,27 +19728,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers,name=
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers_v2,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -20328,13 +20018,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers_v2,na
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers_v2,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers_v2,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -20922,27 +20605,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers_v2,na
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=peers_v2,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=prepared_statements,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -21233,13 +20895,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=prepared_st
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=prepared_statements,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=prepared_statements,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -21827,27 +21482,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=prepared_st
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=prepared_statements,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=repairs,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -22138,13 +21772,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=repairs,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=repairs,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=repairs,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -22732,27 +22359,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=repairs,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=repairs,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=size_estimates,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -23043,13 +22649,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=size_estima
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=size_estimates,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=size_estimates,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -23637,27 +23236,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=size_estima
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=size_estimates,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=sstable_activity,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -23948,13 +23526,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=sstable_act
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=sstable_activity,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=sstable_activity,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -24542,27 +24113,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=sstable_act
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=sstable_activity,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=table_estimates,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -24853,13 +24403,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=table_estim
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=table_estimates,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=table_estimates,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -25447,27 +24990,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=table_estim
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=table_estimates,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -25758,13 +25280,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -26352,27 +25867,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges_v2,name=AdditionalWriteLatencyNanos
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -26663,13 +26157,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges_v2,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges_v2,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -27257,27 +26744,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=transferred_ranges_v2,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=view_builds_in_progress,name=AdditionalWriteLatencyNanos
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -27568,13 +27034,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=view_builds
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=view_builds_in_progress,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=view_builds_in_progress,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -28162,27 +27621,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=view_builds
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system,scope=view_builds_in_progress,name=WaitingOnFreeMemtableSpace
-: attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=network_permissions,name=AdditionalWriteLatencyNanos
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -28473,13 +27911,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=networ
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=network_permissions,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=network_permissions,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -29067,27 +28498,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=networ
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=network_permissions,name=WaitingOnFreeMemtableSpace
-: attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=resource_role_permissons_index,name=AdditionalWriteLatencyNanos
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -29378,13 +28788,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=resour
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=resource_role_permissons_index,name=DroppedMutations
-: attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=resource_role_permissons_index,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -29972,27 +29375,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=resour
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=resource_role_permissons_index,name=WaitingOnFreeMemtableSpace
-: attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_members,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -30283,13 +29665,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_m
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_members,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_members,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -30877,27 +30252,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_m
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_members,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_permissions,name=AdditionalWriteLatencyNanos
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -31188,13 +30542,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_p
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_permissions,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_permissions,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -31782,27 +31129,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_p
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=role_permissions,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=roles,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -32093,13 +31419,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=roles,
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=roles,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=roles,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -32687,27 +32006,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=roles,
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_auth,scope=roles,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=parent_repair_history,name=AdditionalWriteLatencyNanos
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -32998,13 +32296,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=parent_repair_history,name=DroppedMutations
-: attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=parent_repair_history,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -33592,27 +32883,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=parent_repair_history,name=WaitingOnFreeMemtableSpace
-: attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=repair_history,name=AdditionalWriteLatencyNanos
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -33903,13 +33173,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=repair_history,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=repair_history,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -34497,27 +33760,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=repair_history,name=WaitingOnFreeMemtableSpace
-: attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=view_build_status,name=AdditionalWriteLatencyNanos
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -34808,13 +34050,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=view_build_status,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=view_build_status,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -35402,27 +34637,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_distributed,scope=view_build_status,name=WaitingOnFreeMemtableSpace
-: attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=aggregates,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -35713,13 +34927,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=aggr
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=aggregates,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=aggregates,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -36307,27 +35514,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=aggr
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=aggregates,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=columns,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -36618,13 +35804,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=colu
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=columns,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=columns,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -37212,27 +36391,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=colu
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=columns,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=dropped_columns,name=AdditionalWriteLatencyNanos
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -37523,13 +36681,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=drop
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=dropped_columns,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=dropped_columns,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -38117,27 +37268,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=drop
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=dropped_columns,name=WaitingOnFreeMemtableSpace
-: attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=functions,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -38428,13 +37558,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=func
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=functions,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=functions,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -39022,27 +38145,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=func
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=functions,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=indexes,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -39333,13 +38435,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=inde
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=indexes,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=indexes,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -39927,27 +39022,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=inde
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=indexes,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=keyspaces,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -40238,13 +39312,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=keys
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=keyspaces,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=keyspaces,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -40832,27 +39899,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=keys
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=keyspaces,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=tables,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -41143,13 +40189,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=tabl
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=tables,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=tables,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -41737,27 +40776,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=tabl
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=tables,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=triggers,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -42048,13 +41066,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=trig
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=triggers,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=triggers,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -42642,27 +41653,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=trig
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=triggers,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=types,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -42953,13 +41943,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=type
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=types,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=types,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -43547,27 +42530,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=type
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=types,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=views,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -43858,13 +42820,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=view
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=views,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=views,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -44452,27 +43407,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=view
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_schema,scope=views,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=events,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -44763,13 +43697,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=even
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=events,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=events,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -45357,27 +44284,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=even
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=events,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=sessions,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -45668,13 +44574,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=sess
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=sessions,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=sessions,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -46262,27 +45161,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=sess
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=ColumnFamily,keyspace=system_traces,scope=sessions,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=ColumnFamily,name=AdditionalWriteLatencyNanos:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -46486,13 +45364,6 @@ org.apache.cassandra.metrics:type=ColumnFamily,name=CompressionMetadataOffHeapMe
     parameters: []
     returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=ColumnFamily,name=CompressionRatio:
-  attributes:
-  - {access: read-only, name: Value, type: java.lang.Object}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-org.apache.cassandra.metrics:type=ColumnFamily,name=DroppedMutations:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
   operations:
@@ -58564,13 +57435,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=IndexInfo,name=Coo
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=IndexInfo,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=IndexInfo,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -59226,27 +58090,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=IndexInfo,name=Vie
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=IndexInfo,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=IndexInfo,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -59673,13 +58516,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges,n
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -60335,27 +59171,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges,n
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -60782,13 +59597,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges_v
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges_v2,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges_v2,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -61444,27 +60252,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges_v
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges_v2,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=available_ranges_v2,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -61891,13 +60678,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=batches,name=Coord
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=batches,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=batches,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -62553,27 +61333,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=batches,name=ViewR
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=batches,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=batches,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -63000,13 +61759,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=built_views,name=C
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=built_views,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=built_views,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -63662,27 +62414,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=built_views,name=V
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=built_views,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=built_views,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -64109,13 +62840,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=compaction_history
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=compaction_history,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=compaction_history,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -64771,27 +63495,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=compaction_history
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=compaction_history,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=compaction_history,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -65218,13 +63921,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=local,name=Coordin
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=local,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=local,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -65880,27 +64576,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=local,name=ViewRea
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=local,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=local,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -66327,13 +65002,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=paxos,name=Coordin
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=paxos,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=paxos,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -66989,27 +65657,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=paxos,name=ViewRea
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=paxos,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=paxos,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -67436,13 +66083,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events,name=C
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -68098,27 +66738,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events,name=V
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -68545,13 +67164,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events_v2,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events_v2,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events_v2,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -69207,27 +67819,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events_v2,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events_v2,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peer_events_v2,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -69654,13 +68245,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers,name=Coordin
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -70316,27 +68900,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers,name=ViewRea
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -70763,13 +69326,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers_v2,name=Coor
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers_v2,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers_v2,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -71425,27 +69981,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers_v2,name=View
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers_v2,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=peers_v2,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -71872,13 +70407,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=prepared_statement
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=prepared_statements,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=prepared_statements,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -72534,27 +71062,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=prepared_statement
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=prepared_statements,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=prepared_statements,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -72981,13 +71488,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=repairs,name=Coord
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=repairs,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=repairs,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -73643,27 +72143,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=repairs,name=ViewR
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=repairs,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=repairs,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -74090,13 +72569,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=size_estimates,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=size_estimates,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=size_estimates,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -74752,27 +73224,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=size_estimates,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=size_estimates,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=size_estimates,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -75199,13 +73650,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=sstable_activity,n
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=sstable_activity,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=sstable_activity,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -75861,27 +74305,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=sstable_activity,n
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=sstable_activity,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=sstable_activity,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -76308,13 +74731,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=table_estimates,na
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=table_estimates,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=table_estimates,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -76970,27 +75386,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=table_estimates,na
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=table_estimates,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=table_estimates,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -77417,13 +75812,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -78079,27 +76467,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -78526,13 +76893,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges_v2,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges_v2,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -79188,27 +77548,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges_v2,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=transferred_ranges_v2,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -79635,13 +77974,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=view_builds_in_pro
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=view_builds_in_progress,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=view_builds_in_progress,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -80297,27 +78629,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system,scope=view_builds_in_pro
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system,scope=view_builds_in_progress,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system,scope=view_builds_in_progress,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -80744,13 +79055,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=network_permi
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=network_permissions,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=network_permissions,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -81406,27 +79710,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=network_permi
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=network_permissions,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=network_permissions,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -81853,13 +80136,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=resource_role
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=resource_role_permissons_index,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=resource_role_permissons_index,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -82515,27 +80791,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=resource_role
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=resource_role_permissons_index,name=WaitingOnFreeMemtableSpace
-: attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=resource_role_permissons_index,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -82962,13 +81217,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_members,
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_members,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_members,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -83624,27 +81872,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_members,
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_members,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_members,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -84071,13 +82298,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_permissi
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_permissions,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_permissions,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -84733,27 +82953,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_permissi
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_permissions,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=role_permissions,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -85180,13 +83379,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=roles,name=Co
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=roles,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=roles,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -85842,27 +84034,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=roles,name=Vi
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=roles,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_auth,scope=roles,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -86289,13 +84460,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=parent
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=parent_repair_history,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=parent_repair_history,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -86951,27 +85115,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=parent
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=parent_repair_history,name=WaitingOnFreeMemtableSpace
-: attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=parent_repair_history,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -87398,13 +85541,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=repair
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=repair_history,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=repair_history,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -88060,27 +86196,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=repair
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=repair_history,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=repair_history,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -88507,13 +86622,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=view_b
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=view_build_status,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 ? org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=view_build_status,name=EstimatedColumnCountHistogram
 : attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -89169,27 +87277,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=view_b
   - name: values
     parameters: []
     returnType: long[]
-? org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=view_build_status,name=WaitingOnFreeMemtableSpace
-: attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_distributed,scope=view_build_status,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -89616,13 +87703,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=aggregates,
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=aggregates,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=aggregates,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -90278,27 +88358,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=aggregates,
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=aggregates,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=aggregates,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -90725,13 +88784,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=columns,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=columns,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=columns,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -91387,27 +89439,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=columns,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=columns,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=columns,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -91834,13 +89865,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=dropped_col
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=dropped_columns,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=dropped_columns,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -92496,27 +90520,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=dropped_col
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=dropped_columns,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=dropped_columns,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -92943,13 +90946,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=functions,n
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=functions,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=functions,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -93605,27 +91601,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=functions,n
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=functions,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=functions,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -94052,13 +92027,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=indexes,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=indexes,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=indexes,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -94714,27 +92682,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=indexes,nam
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=indexes,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=indexes,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -95161,13 +93108,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=keyspaces,n
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=keyspaces,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=keyspaces,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -95823,27 +93763,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=keyspaces,n
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=keyspaces,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=keyspaces,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -96270,13 +94189,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=tables,name
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=tables,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=tables,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -96932,27 +94844,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=tables,name
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=tables,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=tables,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -97379,13 +95270,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=triggers,na
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=triggers,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=triggers,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -98041,27 +95925,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=triggers,na
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=triggers,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=triggers,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -98488,13 +96351,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=types,name=
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=types,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=types,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -99150,27 +97006,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=types,name=
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=types,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=types,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -99597,13 +97432,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=views,name=
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=views,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=views,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -100259,27 +98087,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=views,name=
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=views,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_schema,scope=views,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -100706,13 +98513,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=events,name
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=events,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=events,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -101368,27 +99168,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=events,name
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=events,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=events,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -101815,13 +99594,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=sessions,na
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=sessions,name=DroppedMutations:
-  attributes:
-  - {access: read-only, name: Count, type: long}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=sessions,name=EstimatedColumnCountHistogram:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
@@ -102477,27 +100249,6 @@ org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=sessions,na
   - name: values
     parameters: []
     returnType: long[]
-org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=sessions,name=WaitingOnFreeMemtableSpace:
-  attributes:
-  - {access: read-only, name: 50thPercentile, type: double}
-  - {access: read-only, name: 75thPercentile, type: double}
-  - {access: read-only, name: 95thPercentile, type: double}
-  - {access: read-only, name: 98thPercentile, type: double}
-  - {access: read-only, name: 999thPercentile, type: double}
-  - {access: read-only, name: 99thPercentile, type: double}
-  - {access: read-only, name: Count, type: long}
-  - {access: read-only, name: Max, type: long}
-  - {access: read-only, name: Mean, type: double}
-  - {access: read-only, name: Min, type: long}
-  - {access: read-only, name: RecentValues, type: 'long[]'}
-  - {access: read-only, name: StdDev, type: double}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-  - name: values
-    parameters: []
-    returnType: long[]
 org.apache.cassandra.metrics:type=Table,keyspace=system_traces,scope=sessions,name=WriteLatency:
   attributes:
   - {access: read-only, name: 50thPercentile, type: double}
@@ -102735,13 +100486,6 @@ org.apache.cassandra.metrics:type=Table,name=CompressionMetadataOffHeapMemoryUse
     parameters: []
     returnType: javax.management.ObjectName
 org.apache.cassandra.metrics:type=Table,name=CompressionRatio:
-  attributes:
-  - {access: read-only, name: Value, type: java.lang.Object}
-  operations:
-  - name: objectName
-    parameters: []
-    returnType: javax.management.ObjectName
-org.apache.cassandra.metrics:type=Table,name=DroppedMutations:
   attributes:
   - {access: read-only, name: Value, type: java.lang.Object}
   operations:

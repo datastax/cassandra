@@ -22,33 +22,52 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.distributed.shared.ClusterUtils;
+import org.apache.cassandra.utils.concurrent.Condition;
+
 import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SystemDistributedKeyspace;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.concurrent.SimpleCondition;
-import org.apache.cassandra.utils.progress.ProgressEventType;
+
+import static com.google.common.collect.ImmutableList.of;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
+
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.apache.cassandra.distributed.shared.AssertUtils.assertRows;
 import static org.apache.cassandra.distributed.test.ExecUtil.rethrow;
+import static org.apache.cassandra.service.StorageService.instance;
+import static org.apache.cassandra.utils.concurrent.Condition.newOneTimeCondition;
+import static org.apache.cassandra.utils.progress.ProgressEventType.COMPLETE;
 
+@RunWith(Parameterized.class)
 public class RepairTest extends TestBaseImpl
 {
+    private static boolean nodesHaveCDC;
+    private static boolean tableHasCDC;
     private static ICluster<IInvokableInstance> cluster;
+
+    @Parameterized.Parameters(name = "nodesHaveCDC={0}, tableHasCDC={1}")
+    public static Iterable<Object[]> data()
+    {
+        return Arrays.asList(new Object[][] {{ false, false }, { false, true } , { true, false }, { true, true }});
+    }
 
     private static void insert(ICluster<IInvokableInstance> cluster, String keyspace, int start, int end, int ... nodes)
     {
@@ -77,14 +96,14 @@ public class RepairTest extends TestBaseImpl
     private static void flush(ICluster<IInvokableInstance> cluster, String keyspace, int ... nodes)
     {
         for (int node : nodes)
-            cluster.get(node).runOnInstance(rethrow(() -> StorageService.instance.forceKeyspaceFlush(keyspace)));
+            cluster.get(node).runOnInstance(rethrow(() -> StorageService.instance.forceKeyspaceFlush(keyspace,
+                                                                                                     ColumnFamilyStore.FlushReason.UNIT_TESTS)));
     }
 
-    private static ICluster create(Consumer<IInstanceConfig> configModifier) throws IOException
+    private ICluster create(Consumer<IInstanceConfig> configModifier) throws IOException
     {
         configModifier = configModifier.andThen(
         config -> config.set("hinted_handoff_enabled", false)
-                        .set("commitlog_sync_batch_window_in_ms", 5)
                         .with(NETWORK)
                         .with(GOSSIP)
         );
@@ -94,22 +113,42 @@ public class RepairTest extends TestBaseImpl
 
     static void repair(ICluster<IInvokableInstance> cluster, String keyspace, Map<String, String> options)
     {
+        long[] startPositions = new long[cluster.size()];
+        for (int i = 1; i <= cluster.size(); i++)
+        {
+            IInvokableInstance node = cluster.get(i);
+            if (node.isShutdown())
+                continue;
+            startPositions[i - 1] = node.logs().mark();
+        }
+
         cluster.get(1).runOnInstance(rethrow(() -> {
-            SimpleCondition await = new SimpleCondition();
-            StorageService.instance.repair(keyspace, options, ImmutableList.of((tag, event) -> {
-                if (event.getType() == ProgressEventType.COMPLETE)
+            Condition await = newOneTimeCondition();
+            instance.repair(keyspace, options, of((tag, event) -> {
+                if (event.getType() == COMPLETE)
                     await.signalAll();
             })).right.get();
             await.await(1L, MINUTES);
         }));
+
+        for (int i = 1; i <= cluster.size(); i++)
+        {
+            IInvokableInstance node = cluster.get(i);
+            if (node.isShutdown())
+                continue;
+            Assert.assertEquals("We should use the local write path (which requires flushing) if CDC is enabled on both a node and table-level",
+                                nodesHaveCDC && tableHasCDC,
+                                !node.logs().grep(startPositions[i - 1],
+                                                 String.format("Enqueuing flush of %s.test, Reason\\: STREAMS_RECEIVED", keyspace)).getResult().isEmpty());
+        }
     }
 
-    static void populate(ICluster<IInvokableInstance> cluster, String keyspace, String compression) throws Exception
+    void populate(ICluster<IInvokableInstance> cluster, String keyspace, String compression) throws Exception
     {
         try
         {
             cluster.schemaChange(String.format("DROP TABLE IF EXISTS %s.test;", keyspace));
-            cluster.schemaChange(String.format("CREATE TABLE %s.test (k text, c1 text, c2 text, PRIMARY KEY (k)) WITH compression = %s", keyspace, compression));
+            cluster.schemaChange(String.format("CREATE TABLE %s.test (k text, c1 text, c2 text, PRIMARY KEY (k)) WITH compression = %s AND cdc = %s;", keyspace, compression, tableHasCDC));
 
             insert(cluster, keyspace, 0, 1000, 1, 2, 3);
             flush(cluster, keyspace, 1);
@@ -139,14 +178,25 @@ public class RepairTest extends TestBaseImpl
     void shutDownNodesAndForceRepair(ICluster<IInvokableInstance> cluster, String keyspace, int downNode) throws Exception
     {
         populate(cluster, keyspace, "{'enabled': false}");
-        cluster.get(downNode).shutdown().get(5, TimeUnit.SECONDS);
+        ClusterUtils.stopUnchecked(cluster.get(downNode));
         repair(cluster, keyspace, ImmutableMap.of("forceRepair", "true"));
     }
 
-    @BeforeClass
-    public static void setupCluster() throws IOException
+    public RepairTest(boolean nodesHaveCDC, boolean tableHasCDC) throws Exception
     {
-        cluster = create(config -> {});
+        // This runs per method, but we only want to rebuild the cluster if nodesHaveCDC has changed since the last
+        // build and we need to update the configuration accordingly
+        if (cluster != null && RepairTest.nodesHaveCDC != nodesHaveCDC)
+        {
+            cluster.close();
+            cluster = null;
+        }
+
+        if (cluster == null)
+            cluster = create(config -> config.set("cdc_enabled", nodesHaveCDC));
+
+        RepairTest.nodesHaveCDC = nodesHaveCDC;
+        RepairTest.tableHasCDC = tableHasCDC;
     }
 
     @AfterClass
@@ -198,7 +248,13 @@ public class RepairTest extends TestBaseImpl
         // The test uses its own keyspace with rf == 2
         String forceRepairKeyspace = "test_force_repair_keyspace";
         int rf = 2;
-        cluster.schemaChange("CREATE KEYSPACE " + forceRepairKeyspace + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': " + rf + "};");
+        int tokenCount = ClusterUtils.getTokenCount(cluster.get(1));
+
+        cluster.schemaChange("CREATE KEYSPACE IF NOT EXISTS " + forceRepairKeyspace + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': " + rf + "};");
+
+        // Truncate distributed repair keyspace due to test class parameterization. We only want results
+        // from our run
+        cluster.schemaChange("TRUNCATE TABLE " + SchemaConstants.DISTRIBUTED_KEYSPACE_NAME + "." + SystemDistributedKeyspace.PARENT_REPAIR_HISTORY);
 
         try
         {
@@ -208,9 +264,9 @@ public class RepairTest extends TestBaseImpl
                 Set<String> requestedRanges = row.getSet("requested_ranges");
                 Assert.assertNotNull("Found no successful ranges", successfulRanges);
                 Assert.assertNotNull("Found no requested ranges", requestedRanges);
-                Assert.assertEquals("Requested ranges count should equals to replication factor", rf, requestedRanges.size());
-                Assert.assertTrue("Given clusterSize = 3, RF = 2 and 1 node down in the replica set, it should yield only 1 successful repaired range.",
-                                  successfulRanges.size() == 1 && !successfulRanges.contains("")); // the successful ranges set should not only contain empty string
+                Assert.assertEquals("Requested ranges count should equals to replication factor", rf * tokenCount, requestedRanges.size());
+                Assert.assertTrue("Given clusterSize = 3, RF = 2 and 1 node down in the replica set, it should yield only " + tokenCount + " successful repaired range.",
+                                  successfulRanges.size() == tokenCount && !successfulRanges.contains("")); // the successful ranges set should not only contain empty string
             });
         }
         finally

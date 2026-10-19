@@ -22,7 +22,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.db.marshal.ByteArrayAccessor;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -30,17 +32,17 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.utils.memory.AbstractAllocator;
+import org.apache.cassandra.utils.memory.ByteBufferCloner;
 
 import static org.apache.cassandra.db.AbstractBufferClusteringPrefix.EMPTY_VALUES_ARRAY;
 
-public interface Clustering<V> extends ClusteringPrefix<V>
+public interface Clustering<V> extends ClusteringPrefix<V>, IMeasurableMemory
 {
     public static final Serializer serializer = new Serializer();
 
     public long unsharedHeapSizeExcludingData();
 
-    public default Clustering<?> copy(AbstractAllocator allocator)
+    public default Clustering<?> clone(ByteBufferCloner cloner)
     {
         // Important for STATIC_CLUSTERING (but must copy empty native clustering types).
         if (size() == 0)
@@ -49,10 +51,22 @@ public interface Clustering<V> extends ClusteringPrefix<V>
         ByteBuffer[] newValues = new ByteBuffer[size()];
         for (int i = 0; i < size(); i++)
         {
-            ByteBuffer val = accessor().toBuffer(get(i));
-            newValues[i] = val == null ? null : allocator.clone(val);
+            ByteBuffer val = bufferAt(i);
+            newValues[i] = val == null ? null : cloner.clone(val);
         }
         return new BufferClustering(newValues);
+    }
+
+    @Override
+    default ClusteringBound<V> asStartBound()
+    {
+        return ClusteringBound.inclusiveStartOf(this);
+    }
+
+    @Override
+    default ClusteringBound<V> asEndBound()
+    {
+        return ClusteringBound.inclusiveEndOf(this);
     }
 
     public default String toString(TableMetadata metadata)
@@ -66,13 +80,14 @@ public interface Clustering<V> extends ClusteringPrefix<V>
         return sb.toString();
     }
 
-    public default String toCQLString(TableMetadata metadata)
+    default String toCQLString(TableMetadata metadata, Redaction redaction)
     {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < size(); i++)
         {
             ColumnMetadata c = metadata.clusteringColumns().get(i);
-            sb.append(i == 0 ? "" : ", ").append(c.type.getString(get(i), accessor()));
+            ByteBuffer value = bufferAt(i);
+            sb.append(i == 0 ? "" : ", ").append(c.type.toCQLString(value, redaction));
         }
         return sb.toString();
     }

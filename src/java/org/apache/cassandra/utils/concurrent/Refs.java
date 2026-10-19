@@ -20,8 +20,13 @@
  */
 package org.apache.cassandra.utils.concurrent;
 
-import java.util.*;
-
+import java.util.AbstractCollection;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Function;
@@ -89,7 +94,7 @@ public final class Refs<T extends RefCounted<T>> extends AbstractCollection<T> i
      */
     public void release(T referenced)
     {
-        Ref ref = references.remove(referenced);
+        Ref<T> ref = references.remove(referenced);
         if (ref == null)
             throw new IllegalStateException("This Refs collection does not hold a reference to " + referenced);
         ref.release();
@@ -102,7 +107,7 @@ public final class Refs<T extends RefCounted<T>> extends AbstractCollection<T> i
      */
     public boolean releaseIfHolds(T referenced)
     {
-        Ref ref = references.remove(referenced);
+        Ref<T> ref = references.remove(referenced);
         if (ref != null)
             ref.release();
         return ref != null;
@@ -114,9 +119,9 @@ public final class Refs<T extends RefCounted<T>> extends AbstractCollection<T> i
         release.retainAll(keep);
         release(release);
     }
+
     /**
      * Release a retained Ref to all of the provided objects; if any is not held, an exception will be thrown
-     * @param release
      */
     public void release(Collection<T> release)
     {
@@ -204,7 +209,7 @@ public final class Refs<T extends RefCounted<T>> extends AbstractCollection<T> i
     /**
      * Acquire a reference to all of the provided objects, or none
      */
-    public static <T extends RefCounted<T>> Refs<T> tryRef(Iterable<T> reference)
+    public static <T extends RefCounted<T>> Refs<T> tryRef(Iterable<? extends T> reference)
     {
         HashMap<T, Ref<T>> refs = new HashMap<>();
         for (T rc : reference)
@@ -217,10 +222,10 @@ public final class Refs<T extends RefCounted<T>> extends AbstractCollection<T> i
             }
             refs.put(rc, ref);
         }
-        return new Refs<T>(refs);
+        return new Refs<>(refs);
     }
 
-    public static <T extends RefCounted<T>> Refs<T> ref(Iterable<T> reference)
+    public static <T extends RefCounted<T>> Refs<T> ref(Iterable<? extends T> reference)
     {
         Refs<T> refs = tryRef(reference);
         if (refs != null)
@@ -232,9 +237,10 @@ public final class Refs<T extends RefCounted<T>> extends AbstractCollection<T> i
     {
         maybeFail(release(refs, null));
     }
+
     public static Throwable release(Iterable<? extends Ref<?>> refs, Throwable accumulate)
     {
-        for (Ref ref : refs)
+        for (Ref<?> ref : refs)
         {
             try
             {

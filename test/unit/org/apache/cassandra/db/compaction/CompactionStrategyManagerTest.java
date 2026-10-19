@@ -18,27 +18,25 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
 import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,26 +48,30 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.RowUpdateBuilder;
+import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.db.compaction.AbstractStrategyHolder.GroupedSSTableContainer;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.UUIDGen;
+import org.mockito.Mockito;
 
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.Mockito.when;
 
 public class CompactionStrategyManagerTest
 {
@@ -129,12 +131,12 @@ public class CompactionStrategyManagerTest
             if (i % 3 == 0)
             {
                 //make 1 third of sstables repaired
-                cfs.getCompactionStrategyManager().mutateRepaired(newSSTables, System.currentTimeMillis(), null, false);
+                cfs.mutateRepaired(newSSTables, System.currentTimeMillis(), null, false);
             }
             else if (i % 3 == 1)
             {
                 //make 1 third of sstables pending repair
-                cfs.getCompactionStrategyManager().mutateRepaired(newSSTables, 0, UUIDGen.getTimeUUID(), false);
+                cfs.mutateRepaired(newSSTables, 0, nextTimeUUID(), false);
             }
             previousSSTables = currentSSTables;
         }
@@ -151,6 +153,7 @@ public class CompactionStrategyManagerTest
     {
         // Create a mock CFS with the given number of disks
         MockCFS cfs = createJBODMockCFS(numDisks);
+        CompactionStrategyFactory strategyFactory = new CompactionStrategyFactory(cfs);
         //Check that CFS will contain numSSTables
         assertEquals(numSSTables, cfs.getLiveSSTables().size());
 
@@ -159,8 +162,11 @@ public class CompactionStrategyManagerTest
 
         MockBoundaryManager mockBoundaryManager = new MockBoundaryManager(cfs, boundaries);
         logger.debug("Boundaries for {} disks is {}", numDisks, Arrays.toString(boundaries));
-        CompactionStrategyManager csm = new CompactionStrategyManager(cfs, mockBoundaryManager::getBoundaries,
+        CompactionStrategyManager csm = new CompactionStrategyManager(strategyFactory,
+                                                                      mockBoundaryManager::getBoundaries,
+                                                                      true,
                                                                       true);
+        csm.reload(csm, cfs.metadata().params.compaction, CompactionStrategyContainer.ReloadReason.FULL);
 
         // Check that SSTables are assigned to the correct Compaction Strategy
         for (SSTableReader reader : cfs.getLiveSSTables())
@@ -200,82 +206,10 @@ public class CompactionStrategyManagerTest
         }
     }
 
-    @Test
-    public void testAutomaticUpgradeConcurrency() throws Exception
-    {
-        ColumnFamilyStore cfs = Keyspace.open(KS_PREFIX).getColumnFamilyStore(TABLE_PREFIX);
-        DatabaseDescriptor.setAutomaticSSTableUpgradeEnabled(true);
-        DatabaseDescriptor.setMaxConcurrentAutoUpgradeTasks(1);
-
-        // latch to block CompactionManager.BackgroundCompactionCandidate#maybeRunUpgradeTask
-        // inside the currentlyBackgroundUpgrading check - with max_concurrent_auto_upgrade_tasks = 1 this will make
-        // sure that BackgroundCompactionCandidate#maybeRunUpgradeTask returns false until the latch has been counted down
-        CountDownLatch latch = new CountDownLatch(1);
-        AtomicInteger upgradeTaskCount = new AtomicInteger(0);
-        MockCFSForCSM mock = new MockCFSForCSM(cfs, latch, upgradeTaskCount);
-
-        CompactionManager.BackgroundCompactionCandidate r = CompactionManager.instance.getBackgroundCompactionCandidate(mock);
-        CompactionStrategyManager mgr = mock.getCompactionStrategyManager();
-        // basic idea is that we start a thread which will be able to get in to the currentlyBackgroundUpgrading-guarded
-        // code in CompactionManager, then we try to run a bunch more of the upgrade tasks which should return false
-        // due to the currentlyBackgroundUpgrading count being >= max_concurrent_auto_upgrade_tasks
-        Thread t = new Thread(() -> r.maybeRunUpgradeTask(mgr));
-        t.start();
-        Thread.sleep(100); // let the thread start and grab the task
-        assertEquals(1, CompactionManager.instance.currentlyBackgroundUpgrading.get());
-        assertFalse(r.maybeRunUpgradeTask(mgr));
-        assertFalse(r.maybeRunUpgradeTask(mgr));
-        latch.countDown();
-        t.join();
-        assertEquals(1, upgradeTaskCount.get()); // we should only call findUpgradeSSTableTask once when concurrency = 1
-        assertEquals(0, CompactionManager.instance.currentlyBackgroundUpgrading.get());
-
-        DatabaseDescriptor.setAutomaticSSTableUpgradeEnabled(false);
-    }
-
-    @Test
-    public void testAutomaticUpgradeConcurrency2() throws Exception
-    {
-        ColumnFamilyStore cfs = Keyspace.open(KS_PREFIX).getColumnFamilyStore(TABLE_PREFIX);
-        DatabaseDescriptor.setAutomaticSSTableUpgradeEnabled(true);
-        DatabaseDescriptor.setMaxConcurrentAutoUpgradeTasks(2);
-        // latch to block CompactionManager.BackgroundCompactionCandidate#maybeRunUpgradeTask
-        // inside the currentlyBackgroundUpgrading check - with max_concurrent_auto_upgrade_tasks = 1 this will make
-        // sure that BackgroundCompactionCandidate#maybeRunUpgradeTask returns false until the latch has been counted down
-        CountDownLatch latch = new CountDownLatch(1);
-        AtomicInteger upgradeTaskCount = new AtomicInteger();
-        MockCFSForCSM mock = new MockCFSForCSM(cfs, latch, upgradeTaskCount);
-
-        CompactionManager.BackgroundCompactionCandidate r = CompactionManager.instance.getBackgroundCompactionCandidate(mock);
-        CompactionStrategyManager mgr = mock.getCompactionStrategyManager();
-
-        // basic idea is that we start 2 threads who will be able to get in to the currentlyBackgroundUpgrading-guarded
-        // code in CompactionManager, then we try to run a bunch more of the upgrade task which should return false
-        // due to the currentlyBackgroundUpgrading count being >= max_concurrent_auto_upgrade_tasks
-        Thread t = new Thread(() -> r.maybeRunUpgradeTask(mgr));
-        t.start();
-        Thread t2 = new Thread(() -> r.maybeRunUpgradeTask(mgr));
-        t2.start();
-        Thread.sleep(100); // let the threads start and grab the task
-        assertEquals(2, CompactionManager.instance.currentlyBackgroundUpgrading.get());
-        assertFalse(r.maybeRunUpgradeTask(mgr));
-        assertFalse(r.maybeRunUpgradeTask(mgr));
-        assertFalse(r.maybeRunUpgradeTask(mgr));
-        assertEquals(2, CompactionManager.instance.currentlyBackgroundUpgrading.get());
-        latch.countDown();
-        t.join();
-        t2.join();
-        assertEquals(2, upgradeTaskCount.get());
-        assertEquals(0, CompactionManager.instance.currentlyBackgroundUpgrading.get());
-
-        DatabaseDescriptor.setMaxConcurrentAutoUpgradeTasks(1);
-        DatabaseDescriptor.setAutomaticSSTableUpgradeEnabled(false);
-    }
-
     private static void assertHolderExclusivity(boolean isRepaired, boolean isPendingRepair, boolean isTransient, Class<? extends AbstractStrategyHolder> expectedType)
     {
         ColumnFamilyStore cfs = Keyspace.open(KS_PREFIX).getColumnFamilyStore(TABLE_PREFIX);
-        CompactionStrategyManager csm = cfs.getCompactionStrategyManager();
+        CompactionStrategyManager csm = (CompactionStrategyManager) cfs.getCompactionStrategy();
 
         AbstractStrategyHolder holder = csm.getHolder(isRepaired, isPendingRepair, isTransient);
         assertNotNull(holder);
@@ -296,7 +230,7 @@ public class CompactionStrategyManagerTest
     private static void assertInvalieHolderConfig(boolean isRepaired, boolean isPendingRepair, boolean isTransient)
     {
         ColumnFamilyStore cfs = Keyspace.open(KS_PREFIX).getColumnFamilyStore(TABLE_PREFIX);
-        CompactionStrategyManager csm = cfs.getCompactionStrategyManager();
+        CompactionStrategyManager csm = (CompactionStrategyManager) cfs.getCompactionStrategy();
         try
         {
             csm.getHolder(isRepaired, isPendingRepair, isTransient);
@@ -325,10 +259,10 @@ public class CompactionStrategyManagerTest
         assertInvalieHolderConfig(true, false, true);
     }
 
-    PartitionPosition forKey(int key)
+    Token forKey(int key)
     {
         DecoratedKey dk = Util.dk(String.format("%04d", key));
-        return dk.getToken().minKeyBound();
+        return dk.getToken();
     }
 
     /**
@@ -339,6 +273,7 @@ public class CompactionStrategyManagerTest
     {
         final int numDir = 4;
         ColumnFamilyStore cfs = createJBODMockCFS(numDir);
+        CompactionStrategyFactory strategyFactory = new CompactionStrategyFactory(cfs);
         Keyspace.open(cfs.keyspace.getName()).getColumnFamilyStore(cfs.name).disableAutoCompaction();
         assertTrue(cfs.getLiveSSTables().isEmpty());
         List<SSTableReader> transientRepairs = new ArrayList<>();
@@ -348,28 +283,33 @@ public class CompactionStrategyManagerTest
 
         for (int i = 0; i < numDir; i++)
         {
-            int key = 100 * i;
-            transientRepairs.add(createSSTableWithKey(cfs.keyspace.getName(), cfs.name, key++));
-            pendingRepair.add(createSSTableWithKey(cfs.keyspace.getName(), cfs.name, key++));
-            unrepaired.add(createSSTableWithKey(cfs.keyspace.getName(), cfs.name, key++));
-            repaired.add(createSSTableWithKey(cfs.keyspace.getName(), cfs.name, key++));
+            int key = 100 * i + 1;  // key must not fall on boundary where it would be taken to belong to previous disk
+            transientRepairs.add(createSSTableWithKey(cfs.getKeyspaceName(), cfs.name, key++));
+            pendingRepair.add(createSSTableWithKey(cfs.getKeyspaceName(), cfs.name, key++));
+            unrepaired.add(createSSTableWithKey(cfs.getKeyspaceName(), cfs.name, key++));
+            repaired.add(createSSTableWithKey(cfs.getKeyspaceName(), cfs.name, key++));
         }
 
-        cfs.getCompactionStrategyManager().mutateRepaired(transientRepairs, 0, UUID.randomUUID(), true);
-        cfs.getCompactionStrategyManager().mutateRepaired(pendingRepair, 0, UUID.randomUUID(), false);
-        cfs.getCompactionStrategyManager().mutateRepaired(repaired, 1000, null, false);
+        cfs.mutateRepaired(transientRepairs, 0, nextTimeUUID(), true);
+        cfs.mutateRepaired(pendingRepair, 0, nextTimeUUID(), false);
+        cfs.mutateRepaired(repaired, 1000, null, false);
+
+
+        SortedLocalRanges localRanges = Mockito.mock(SortedLocalRanges.class);
+        when(localRanges.getRingVersion()).thenReturn(10L);
 
         DiskBoundaries boundaries = new DiskBoundaries(cfs, cfs.getDirectories().getWriteableLocations(),
                                                        Lists.newArrayList(forKey(100), forKey(200), forKey(300)),
-                                                       10, 10);
+                                                       localRanges, 10);
 
-        CompactionStrategyManager csm = new CompactionStrategyManager(cfs, () -> boundaries, true);
+        CompactionStrategyManager csm = new CompactionStrategyManager(strategyFactory, () -> boundaries, true, true);
+        csm.reload(csm, cfs.metadata().params.compaction, CompactionStrategyContainer.ReloadReason.FULL);
 
-        List<GroupedSSTableContainer> grouped = csm.groupSSTables(Iterables.concat( transientRepairs, pendingRepair, repaired, unrepaired));
+        List<GroupedSSTableContainer<SSTableReader>> grouped = csm.groupSSTables(Iterables.concat( transientRepairs, pendingRepair, repaired, unrepaired));
 
         for (int x=0; x<grouped.size(); x++)
         {
-            GroupedSSTableContainer group = grouped.get(x);
+            GroupedSSTableContainer<SSTableReader> group = grouped.get(x);
             AbstractStrategyHolder holder = csm.getHolders().get(x);
             for (int y=0; y<numDir; y++)
             {
@@ -397,13 +337,48 @@ public class CompactionStrategyManagerTest
         }
     }
 
+    @Test
+    public void testCountsByBuckets()
+    {
+        Assert.assertArrayEquals(
+            new int[] {2, 2, 4},
+            CompactionStrategyManager.sumCountsByBucket(ImmutableList.of(
+                ImmutableMap.of(60000L, 1, 0L, 2, 180000L, 1),
+                ImmutableMap.of(60000L, 1, 0L, 2, 180000L, 1)), CompactionStrategyManager.TWCS_BUCKET_COUNT_MAX));
+        Assert.assertArrayEquals(
+            new int[] {1, 1, 3},
+            CompactionStrategyManager.sumCountsByBucket(ImmutableList.of(
+                ImmutableMap.of(60000L, 1, 0L, 1),
+                ImmutableMap.of(0L, 2, 180000L, 1)), CompactionStrategyManager.TWCS_BUCKET_COUNT_MAX));
+        Assert.assertArrayEquals(
+            new int[] {1, 1},
+            CompactionStrategyManager.sumCountsByBucket(ImmutableList.of(
+                ImmutableMap.of(60000L, 1, 0L, 1),
+                ImmutableMap.of()), CompactionStrategyManager.TWCS_BUCKET_COUNT_MAX));
+        Assert.assertArrayEquals(
+            new int[] {8, 4},
+            CompactionStrategyManager.sumCountsByBucket(ImmutableList.of(
+                ImmutableMap.of(60000L, 2, 0L, 1, 180000L, 4),
+                ImmutableMap.of(60000L, 2, 0L, 1, 180000L, 4)), 2));
+        Assert.assertArrayEquals(
+            new int[] {1, 1, 2},
+            CompactionStrategyManager.sumCountsByBucket(ImmutableList.of(
+                Collections.emptyMap(),
+                ImmutableMap.of(60000L, 1, 0L, 2, 180000L, 1)), CompactionStrategyManager.TWCS_BUCKET_COUNT_MAX));
+        Assert.assertArrayEquals(
+            new int[] {},
+            CompactionStrategyManager.sumCountsByBucket(ImmutableList.of(
+                Collections.emptyMap(),
+                Collections.emptyMap()), CompactionStrategyManager.TWCS_BUCKET_COUNT_MAX));
+    }
+
     private MockCFS createJBODMockCFS(int disks)
     {
         // Create #disks data directories to simulate JBOD
         Directories.DataDirectory[] directories = new Directories.DataDirectory[disks];
         for (int i = 0; i < disks; ++i)
         {
-            File tempDir = Files.createTempDir();
+            File tempDir = new File(Files.createTempDir());
             tempDir.deleteOnExit();
             directories[i] = new Directories.DataDirectory(tempDir);
         }
@@ -436,7 +411,7 @@ public class CompactionStrategyManagerTest
         int index = getSSTableIndex(boundaries, reader);
         assertEquals(index, csm.compactionStrategyIndexFor(reader));
         // Check that compaction strategy actually contains SSTable
-        assertTrue(((SizeTieredCompactionStrategy)csm.compactionStrategyFor(reader)).sstables.contains(reader));
+        assertTrue(((SizeTieredCompactionStrategy) csm.compactionStrategyFor(reader)).sstables.contains(reader));
     }
 
     /**
@@ -459,16 +434,14 @@ public class CompactionStrategyManagerTest
     private int getSSTableIndex(Integer[] boundaries, SSTableReader reader)
     {
         int index = 0;
-        int firstKey = Integer.parseInt(new String(ByteBufferUtil.getArray(reader.first.getKey())));
-        while (boundaries[index] <= firstKey)
+        int firstKey = Integer.parseInt(new String(ByteBufferUtil.getArray(reader.getFirst().getKey())));
+        while (boundaries[index] < firstKey)
             index++;
-        logger.debug("Index for SSTable {} on boundary {} is {}", reader.descriptor.generation, Arrays.toString(boundaries), index);
+        logger.debug("Index for SSTable {} on boundary {} is {}", reader.descriptor.id, Arrays.toString(boundaries), index);
         return index;
     }
 
-
-
-    class MockBoundaryManager
+    private class MockBoundaryManager
     {
         private final ColumnFamilyStore cfs;
         private Integer[] positions;
@@ -495,8 +468,10 @@ public class CompactionStrategyManagerTest
 
         private DiskBoundaries createDiskBoundaries(ColumnFamilyStore cfs, Integer[] boundaries)
         {
-            List<PartitionPosition> positions = Arrays.stream(boundaries).map(b -> Util.token(String.format(String.format("%04d", b))).minKeyBound()).collect(Collectors.toList());
-            return new DiskBoundaries(cfs, cfs.getDirectories().getWriteableLocations(), positions, 0, 0);
+            List<Token> positions = Arrays.stream(boundaries).map(b -> Util.token(String.format(String.format("%04d", b)))).collect(Collectors.toList());
+            SortedLocalRanges localRanges = Mockito.mock(SortedLocalRanges.class);
+            when(localRanges.getRingVersion()).thenReturn(0L);
+            return new DiskBoundaries(cfs, cfs.getDirectories().getWriteableLocations(), positions, localRanges, 0);
         }
     }
 
@@ -511,7 +486,7 @@ public class CompactionStrategyManagerTest
         .build()
         .applyUnsafe();
         Set<SSTableReader> before = cfs.getLiveSSTables();
-        cfs.forceBlockingFlush();
+        Util.flush(cfs);
         Set<SSTableReader> after = cfs.getLiveSSTables();
         return Iterables.getOnlyElement(Sets.difference(after, before));
     }
@@ -521,53 +496,7 @@ public class CompactionStrategyManagerTest
     {
         MockCFS(ColumnFamilyStore cfs, Directories dirs)
         {
-            super(cfs.keyspace, cfs.getTableName(), 0, cfs.metadata, dirs, false, false, true);
-        }
-    }
-
-    private static class MockCFSForCSM extends ColumnFamilyStore
-    {
-        private final CountDownLatch latch;
-        private final AtomicInteger upgradeTaskCount;
-
-        private MockCFSForCSM(ColumnFamilyStore cfs, CountDownLatch latch, AtomicInteger upgradeTaskCount)
-        {
-            super(cfs.keyspace, cfs.name, 10, cfs.metadata, cfs.getDirectories(), true, false, false);
-            this.latch = latch;
-            this.upgradeTaskCount = upgradeTaskCount;
-        }
-        @Override
-        public CompactionStrategyManager getCompactionStrategyManager()
-        {
-            return new MockCSM(this, latch, upgradeTaskCount);
-        }
-    }
-
-    private static class MockCSM extends CompactionStrategyManager
-    {
-        private final CountDownLatch latch;
-        private final AtomicInteger upgradeTaskCount;
-
-        private MockCSM(ColumnFamilyStore cfs, CountDownLatch latch, AtomicInteger upgradeTaskCount)
-        {
-            super(cfs);
-            this.latch = latch;
-            this.upgradeTaskCount = upgradeTaskCount;
-        }
-
-        @Override
-        public AbstractCompactionTask findUpgradeSSTableTask()
-        {
-            try
-            {
-                latch.await();
-                upgradeTaskCount.incrementAndGet();
-            }
-            catch (InterruptedException e)
-            {
-                throw new RuntimeException(e);
-            }
-            return null;
+            super(cfs.keyspace, cfs.getTableName(), Util.newSeqGen(), cfs.metadata, dirs, false, false, true);
         }
     }
 }

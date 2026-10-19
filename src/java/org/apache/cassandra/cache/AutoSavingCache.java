@@ -17,48 +17,65 @@
  */
 package org.apache.cassandra.cache;
 
-import java.io.*;
-import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.nio.file.NoSuchFileException;
+import java.util.ArrayDeque;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.concurrent.NotThreadSafe;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import org.cliffc.high_scale_lib.NonBlockingHashSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.ListeningExecutorService;
-import com.google.common.util.concurrent.MoreExecutors;
-
+import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.compaction.CompactionInfo.Unit;
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.util.*;
+import org.apache.cassandra.io.util.ChecksummedRandomAccessReader;
+import org.apache.cassandra.io.util.ChecksummedSequentialWriter;
 import org.apache.cassandra.io.util.CorruptFileException;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.DataOutputStreamPlus;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
+import org.apache.cassandra.io.util.FileOutputStreamPlus;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.SequentialWriterOption;
+import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.concurrent.Future;
+
+import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
 public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K, V>
 {
     public interface IStreamFactory
     {
-        InputStream getInputStream(File dataPath, File crcPath) throws IOException;
-        OutputStream getOutputStream(File dataPath, File crcPath) throws FileNotFoundException;
+        DataInputStreamPlus getInputStream(File dataPath, File crcPath) throws IOException;
+
+        DataOutputStreamPlus getOutputStream(File dataPath, File crcPath);
     }
 
     private static final Logger logger = LoggerFactory.getLogger(AutoSavingCache.class);
@@ -70,6 +87,8 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
     protected final CacheService.CacheType cacheType;
 
     private final CacheSerializer<K, V> cacheLoader;
+
+    private final Supplier<Predicate<K>> keyFilterSupplier;
 
     /*
      * CASSANDRA-10155 required a format change to fix 2i indexes and caching.
@@ -83,24 +102,26 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
      * "e" introduced with CASSANDRA-11206, omits IndexInfo from key-cache, stores offset into index-file
      *
      * "f" introduced with CASSANDRA-9425, changes "keyspace.table.index" in cache keys to TableMetadata.id+TableMetadata.indexName
+     *
+     * "g" introduced an explicit sstable format type ordinal number so that the entry can be skipped regardless of the actual implementation and used serializer
      */
-    private static final String CURRENT_VERSION = "f";
+    private static final String CURRENT_VERSION = "g";
 
     private static volatile IStreamFactory streamFactory = new IStreamFactory()
     {
         private final SequentialWriterOption writerOption = SequentialWriterOption.newBuilder()
                                                                     .trickleFsync(DatabaseDescriptor.getTrickleFsync())
-                                                                    .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
+                                                                    .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKiB() * 1024)
                                                                     .finishOnClose(true).build();
 
-        public InputStream getInputStream(File dataPath, File crcPath) throws IOException
+        public DataInputStreamPlus getInputStream(File dataPath, File crcPath) throws IOException
         {
             return ChecksummedRandomAccessReader.open(dataPath, crcPath);
         }
 
-        public OutputStream getOutputStream(File dataPath, File crcPath)
+        public DataOutputStreamPlus getOutputStream(File dataPath, File crcPath)
         {
-            return new ChecksummedSequentialWriter(dataPath, crcPath, null, writerOption);
+            return new ChecksummedSequentialWriter(dataPath, crcPath, writerOption);
         }
     };
 
@@ -110,21 +131,27 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
         AutoSavingCache.streamFactory = streamFactory;
     }
 
-    public AutoSavingCache(ICache<K, V> cache, CacheService.CacheType cacheType, CacheSerializer<K, V> cacheloader)
+    public AutoSavingCache(ICache<K, V> cache, CacheService.CacheType cacheType, CacheSerializer<K, V> cacheloader, Supplier<Predicate<K>> keyFilterSupplier)
     {
-        super(cacheType.toString(), cache);
+        super(cacheType, cache);
         this.cacheType = cacheType;
         this.cacheLoader = cacheloader;
+        this.keyFilterSupplier = keyFilterSupplier;
     }
 
     public File getCacheDataPath(String version)
     {
-        return DatabaseDescriptor.getSerializedCachePath( cacheType, version, "db");
+        return DatabaseDescriptor.getSerializedCachePath(cacheType, version, "db");
     }
 
     public File getCacheCrcPath(String version)
     {
-        return DatabaseDescriptor.getSerializedCachePath( cacheType, version, "crc");
+        return DatabaseDescriptor.getSerializedCachePath(cacheType, version, "crc");
+    }
+
+    public File getCacheMetadataPath(String version)
+    {
+        return DatabaseDescriptor.getSerializedCachePath(cacheType, version, "metadata");
     }
 
     public Writer getWriter(int keysToSave)
@@ -155,32 +182,20 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
         }
     }
 
-    public ListenableFuture<Integer> loadSavedAsync()
+    public Future<Integer> loadSavedAsync()
     {
-        final ListeningExecutorService es = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor());
-        final long start = System.nanoTime();
+        final ExecutorPlus es = executorFactory().sequential("loadSavedCache");
+        final long start = nanoTime();
 
-        ListenableFuture<Integer> cacheLoad = es.submit(new Callable<Integer>()
-        {
-            @Override
-            public Integer call()
-            {
-                return loadSaved();
-            }
+        Future<Integer> cacheLoad = es.submit(this::loadSaved);
+        cacheLoad.addListener(() -> {
+            if (size() > 0)
+                logger.info("Completed loading ({} ms; {} keys) {} cache",
+                        TimeUnit.NANOSECONDS.toMillis(nanoTime() - start),
+                        CacheService.instance.keyCache.size(),
+                        cacheType);
+            es.shutdown();
         });
-        cacheLoad.addListener(new Runnable()
-        {
-            @Override
-            public void run()
-            {
-                if (size() > 0)
-                    logger.info("Completed loading ({} ms; {} keys) {} cache",
-                            TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start),
-                            CacheService.instance.keyCache.size(),
-                            cacheType);
-                es.shutdown();
-            }
-        }, MoreExecutors.directExecutor());
 
         return cacheLoad;
     }
@@ -188,43 +203,38 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
     public int loadSaved()
     {
         int count = 0;
-        long start = System.nanoTime();
+        long start = nanoTime();
 
         // modern format, allows both key and value (so key cache load can be purely sequential)
         File dataPath = getCacheDataPath(CURRENT_VERSION);
         File crcPath = getCacheCrcPath(CURRENT_VERSION);
-        if (dataPath.exists() && crcPath.exists())
+        File metadataPath = getCacheMetadataPath(CURRENT_VERSION);
+        if (dataPath.exists() && crcPath.exists() && metadataPath.exists())
         {
             DataInputStreamPlus in = null;
             try
             {
-                logger.info("reading saved cache {}", dataPath);
-                in = new DataInputStreamPlus(new LengthAvailableInputStream(new BufferedInputStream(streamFactory.getInputStream(dataPath, crcPath)), dataPath.length()));
+                logger.info("Reading saved cache: {}, {}, {}", dataPath, crcPath, metadataPath);
+                try (FileInputStreamPlus metadataIn = metadataPath.newInputStream())
+                {
+                    cacheLoader.deserializeMetadata(metadataIn);
+                }
+
+                in = streamFactory.getInputStream(dataPath, crcPath);
 
                 //Check the schema has not changed since CFs are looked up by name which is ambiguous
                 UUID schemaVersion = new UUID(in.readLong(), in.readLong());
                 if (!schemaVersion.equals(Schema.instance.getVersion()))
                     throw new RuntimeException("Cache schema version "
-                                              + schemaVersion
-                                              + " does not match current schema version "
-                                              + Schema.instance.getVersion());
+                                               + schemaVersion
+                                               + " does not match current schema version "
+                                               + Schema.instance.getVersion());
 
-                ArrayDeque<Future<Pair<K, V>>> futures = new ArrayDeque<Future<Pair<K, V>>>();
-                while (in.available() > 0)
+                ArrayDeque<Future<Pair<K, V>>> futures = new ArrayDeque<>();
+                long loadByNanos = start + TimeUnit.SECONDS.toNanos(DatabaseDescriptor.getCacheLoadTimeout());
+                while (nanoTime() < loadByNanos && in.available() > 0)
                 {
-                    //tableId and indexName are serialized by the serializers in CacheService
-                    //That is delegated there because there are serializer specific conditions
-                    //where a cache key is skipped and not written
-                    TableId tableId = TableId.deserialize(in);
-                    String indexName = in.readUTF();
-                    if (indexName.isEmpty())
-                        indexName = null;
-
-                    ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(tableId);
-                    if (indexName != null && cfs != null)
-                        cfs = cfs.indexManager.getIndexByName(indexName).getBackingTable().orElse(null);
-
-                    Future<Pair<K, V>> entryFuture = cacheLoader.deserialize(in, cfs);
+                    Future<Pair<K, V>> entryFuture = cacheLoader.deserialize(in);
                     // Key cache entry can return null, if the SSTable doesn't exist.
                     if (entryFuture == null)
                         continue;
@@ -262,21 +272,22 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             catch (CorruptFileException e)
             {
                 JVMStabilityInspector.inspectThrowable(e);
-                logger.warn(String.format("Non-fatal checksum error reading saved cache %s", dataPath.getAbsolutePath()), e);
+                logger.warn("Non-fatal checksum error reading saved cache {}: {}", dataPath.absolutePath(), e.getMessage());
             }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t);
-                logger.info(String.format("Harmless error reading saved cache %s", dataPath.getAbsolutePath()), t);
+                logger.info("Harmless error reading saved cache {}: {}", dataPath.absolutePath(), t.getMessage());
             }
             finally
             {
                 FileUtils.closeQuietly(in);
+                cacheLoader.cleanupAfterDeserialize();
             }
         }
         if (logger.isTraceEnabled())
             logger.trace("completed reading ({} ms; {} keys) saved cache {}",
-                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start), count, dataPath);
+                         TimeUnit.NANOSECONDS.toMillis(nanoTime() - start), count, dataPath);
         return count;
     }
 
@@ -285,12 +296,13 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
         return CompactionManager.instance.submitCacheWrite(getWriter(keysToSave));
     }
 
-    public class Writer extends CompactionInfo.Holder
+    public class Writer extends AbstractTableOperation
     {
         private final Iterator<K> keyIterator;
-        private final CompactionInfo info;
+        private final OperationProgress info;
         private long keysWritten;
         private final long keysEstimate;
+        private final Predicate<K> keyFilter;
 
         protected Writer(int keysToSave)
         {
@@ -305,6 +317,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                 keyIterator = hotKeyIterator(keysToSave);
                 keysEstimate = keysToSave;
             }
+            this.keyFilter = keyFilterSupplier != null ? keyFilterSupplier.get() : null;
 
             OperationType type;
             if (cacheType == CacheService.CacheType.KEY_CACHE)
@@ -316,12 +329,13 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             else
                 type = OperationType.UNKNOWN;
 
-            info = CompactionInfo.withoutSSTables(TableMetadata.minimal(SchemaConstants.SYSTEM_KEYSPACE_NAME, cacheType.toString()),
-                                                  type,
-                                                  0,
-                                                  keysEstimate,
-                                                  Unit.KEYS,
-                                                  UUIDGen.getTimeUUID());
+            info = OperationProgress.withoutSSTables(TableMetadata.minimal(SchemaConstants.SYSTEM_KEYSPACE_NAME, cacheType.toString()),
+                                                     type,
+                                                     0,
+                                                     keysEstimate,
+                                                     Unit.KEYS, 
+                                                     nextTimeUUID(),
+                                                     getCacheDataPath(CURRENT_VERSION).toPath().toString());
         }
 
         public CacheService.CacheType cacheType()
@@ -329,7 +343,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             return cacheType;
         }
 
-        public CompactionInfo getCompactionInfo()
+        public OperationProgress getProgress()
         {
             // keyset can change in size, thus total can too
             // TODO need to check for this one... was: info.forProgress(keysWritten, Math.max(keysWritten, keys.size()));
@@ -347,76 +361,88 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                 return;
             }
 
-            long start = System.nanoTime();
+            long start = nanoTime();
 
-            Pair<File, File> cacheFilePaths = tempCacheFiles();
-            try (WrappedDataOutputStreamPlus writer = new WrappedDataOutputStreamPlus(streamFactory.getOutputStream(cacheFilePaths.left, cacheFilePaths.right)))
+            File dataTmpFile = getTempCacheFile(getCacheDataPath(CURRENT_VERSION));
+            File crcTmpFile = getTempCacheFile(getCacheCrcPath(CURRENT_VERSION));
+            File metadataTmpFile = getTempCacheFile(getCacheMetadataPath(CURRENT_VERSION));
+
+            try (WrappedDataOutputStreamPlus writer = new WrappedDataOutputStreamPlus(streamFactory.getOutputStream(dataTmpFile, crcTmpFile));
+                 FileOutputStreamPlus metadataWriter = metadataTmpFile.newOutputStream(File.WriteMode.OVERWRITE))
             {
-
                 //Need to be able to check schema version because CF names are ambiguous
                 UUID schemaVersion = Schema.instance.getVersion();
-                if (schemaVersion == null)
-                {
-                    Schema.instance.updateVersion();
-                    schemaVersion = Schema.instance.getVersion();
-                }
                 writer.writeLong(schemaVersion.getMostSignificantBits());
                 writer.writeLong(schemaVersion.getLeastSignificantBits());
 
                 while (keyIterator.hasNext())
                 {
                     K key = keyIterator.next();
+                    ColumnFamilyStore cfs;
+                    if ((keyFilter == null || keyFilter.test(key)) && (cfs = Schema.instance.getColumnFamilyStoreInstance(key.tableId)) != null)
+                    {
+                        if (key.indexName != null)
+                            cfs = cfs.indexManager.getIndexByName(key.indexName).getBackingTable().orElse(null);
 
-                    ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(key.tableId);
-                    if (cfs == null)
-                        continue; // the table or 2i has been dropped.
-                    if (key.indexName != null)
-                        cfs = cfs.indexManager.getIndexByName(key.indexName).getBackingTable().orElse(null);
+                        cacheLoader.serialize(key, writer, cfs);
 
-                    cacheLoader.serialize(key, writer, cfs);
-
-                    keysWritten++;
-                    if (keysWritten >= keysEstimate)
-                        break;
+                        keysWritten++;
+                        if (keysWritten >= keysEstimate)
+                            break;
+                    }
+                    else
+                    {
+                        // remove stale entry from cache before saving basing on the existence of a table and provided filter
+                        keyIterator.remove();
+                    }
                 }
+
+                cacheLoader.serializeMetadata(metadataWriter);
+                metadataWriter.sync();
             }
-            catch (FileNotFoundException e)
+            catch (FileNotFoundException | NoSuchFileException e)
             {
                 throw new RuntimeException(e);
             }
             catch (IOException e)
             {
-                throw new FSWriteError(e, cacheFilePaths.left);
+                throw new FSWriteError(e, dataTmpFile);
+            }
+            finally
+            {
+                cacheLoader.cleanupAfterSerialize();
             }
 
-            File cacheFile = getCacheDataPath(CURRENT_VERSION);
+            File dataFile = getCacheDataPath(CURRENT_VERSION);
             File crcFile = getCacheCrcPath(CURRENT_VERSION);
+            File metadataFile = getCacheMetadataPath(CURRENT_VERSION);
 
-            cacheFile.delete(); // ignore error if it didn't exist
-            crcFile.delete();
+            dataFile.tryDelete(); // ignore error if it didn't exist
+            crcFile.tryDelete();
+            metadataFile.tryDelete();
 
-            if (!cacheFilePaths.left.renameTo(cacheFile))
-                logger.error("Unable to rename {} to {}", cacheFilePaths.left, cacheFile);
+            if (!dataTmpFile.tryMove(dataFile))
+                logger.error("Unable to rename {} to {}", dataTmpFile, dataFile);
 
-            if (!cacheFilePaths.right.renameTo(crcFile))
-                logger.error("Unable to rename {} to {}", cacheFilePaths.right, crcFile);
+            if (!crcTmpFile.tryMove(crcFile))
+                logger.error("Unable to rename {} to {}", crcTmpFile, crcFile);
 
-            logger.info("Saved {} ({} items) in {} ms", cacheType, keysWritten, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+            if (!metadataTmpFile.tryMove(metadataFile))
+                logger.error("Unable to rename {} to {}", metadataTmpFile, metadataFile);
+
+            logger.info("Saved {} ({} items) in {} ms to {} : {} MB", cacheType, keysWritten, TimeUnit.NANOSECONDS.toMillis(nanoTime() - start), dataFile.toPath(), dataFile.length() / (1 << 20));
         }
 
-        private Pair<File, File> tempCacheFiles()
+        private File getTempCacheFile(File cacheFile)
         {
-            File dataPath = getCacheDataPath(CURRENT_VERSION);
-            File crcPath = getCacheCrcPath(CURRENT_VERSION);
-            return Pair.create(FileUtils.createTempFile(dataPath.getName(), null, dataPath.getParentFile()),
-                               FileUtils.createTempFile(crcPath.getName(), null, crcPath.getParentFile()));
+            return FileUtils.createTempFile(cacheFile.name(), null, cacheFile.parent());
         }
 
         private void deleteOldCacheFiles()
         {
-            File savedCachesDir = new File(DatabaseDescriptor.getSavedCachesLocation());
+            File savedCachesDir = DatabaseDescriptor.getSavedCachesLocation();
             assert savedCachesDir.exists() && savedCachesDir.isDirectory();
-            File[] files = savedCachesDir.listFiles();
+            File[] files = savedCachesDir.tryList();
             if (files != null)
             {
                 String cacheNameFormat = String.format("%s-%s.db", cacheType.toString(), CURRENT_VERSION);
@@ -425,11 +451,11 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                     if (!file.isFile())
                         continue; // someone's been messing with our directory.  naughty!
 
-                    if (file.getName().endsWith(cacheNameFormat)
-                     || file.getName().endsWith(cacheType.toString()))
+                    if (file.name().endsWith(cacheNameFormat)
+                     || file.name().endsWith(cacheType.toString()))
                     {
-                        if (!file.delete())
-                            logger.warn("Failed to delete {}", file.getAbsolutePath());
+                        if (!file.tryDelete())
+                            logger.warn("Failed to delete {}", file.absolutePath());
                     }
                 }
             }
@@ -445,10 +471,91 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
         }
     }
 
-    public interface CacheSerializer<K extends CacheKey, V>
+    /**
+     * A base cache serializer that is used to serialize/deserialize a cache to/from disk.
+     * <p>
+     * It expects the following lifecycle:
+     * Serializations:
+     * 1. {@link #serialize(CacheKey, DataOutputPlus, ColumnFamilyStore)} is called for each key in the cache.
+     * 2. {@link #serializeMetadata(DataOutputPlus)} is called to serialize any metadata.
+     * 3. {@link #cleanupAfterSerialize()} is called to clean up any resources allocated for serialization.
+     * <p>
+     * Deserializations:
+     * 1. {@link #deserializeMetadata(DataInputPlus)} is called to deserialize any metadata.
+     * 2. {@link #deserialize(DataInputPlus)} is called for each key in the cache.
+     * 3. {@link #cleanupAfterDeserialize()} is called to clean up any resources allocated for deserialization.
+     * <p>
+     * This abstract class provides the default implementation for the metadata serialization/deserialization.
+     * The metadata includes a dictionary of column family stores collected during serialization whenever
+     * {@link #writeCFS(DataOutputPlus, ColumnFamilyStore)} or {@link #getOrCreateCFSOrdinal(ColumnFamilyStore)}
+     * are called. When such metadata is deserialized, the implementation of {@link #deserialize(DataInputPlus)} may
+     * use {@link #readCFS(DataInputPlus)} method to read the ColumnFamilyStore stored with
+     * {@link #writeCFS(DataOutputPlus, ColumnFamilyStore)}.
+     */
+    @NotThreadSafe
+    public static abstract class CacheSerializer<K extends CacheKey, V>
     {
-        void serialize(K key, DataOutputPlus out, ColumnFamilyStore cfs) throws IOException;
+        private ColumnFamilyStore[] cfStores;
 
-        Future<Pair<K, V>> deserialize(DataInputPlus in, ColumnFamilyStore cfs) throws IOException;
+        private final LinkedHashMap<Pair<TableId, String>, Integer> cfsOrdinals = new LinkedHashMap<>();
+
+        protected final int getOrCreateCFSOrdinal(ColumnFamilyStore cfs)
+        {
+            Integer ordinal = cfsOrdinals.putIfAbsent(Pair.create(cfs.metadata().id, cfs.metadata().indexName().orElse("")), cfsOrdinals.size());
+            if (ordinal == null)
+                ordinal = cfsOrdinals.size() - 1;
+            return ordinal;
+        }
+
+        protected ColumnFamilyStore readCFS(DataInputPlus in) throws IOException
+        {
+            return cfStores[in.readUnsignedVInt32()];
+        }
+
+        protected void writeCFS(DataOutputPlus out, ColumnFamilyStore cfs) throws IOException
+        {
+            out.writeUnsignedVInt32(getOrCreateCFSOrdinal(cfs));
+        }
+
+        public void serializeMetadata(DataOutputPlus out) throws IOException
+        {
+            // write the table ids
+            out.writeUnsignedVInt32(cfsOrdinals.size());
+            for (Pair<TableId, String> tableAndIndex : cfsOrdinals.keySet())
+            {
+                tableAndIndex.left.serialize(out);
+                out.writeUTF(tableAndIndex.right);
+            }
+        }
+
+        public void deserializeMetadata(DataInputPlus in) throws IOException
+        {
+            int tableEntries = in.readUnsignedVInt32();
+            if (tableEntries == 0)
+                return;
+            cfStores = new ColumnFamilyStore[tableEntries];
+            for (int i = 0; i < tableEntries; i++)
+            {
+                TableId tableId = TableId.deserialize(in);
+                String indexName = in.readUTF();
+                cfStores[i] = Schema.instance.getColumnFamilyStoreInstance(tableId);
+                if (cfStores[i] != null && !indexName.isEmpty())
+                    cfStores[i] = cfStores[i].indexManager.getIndexByName(indexName).getBackingTable().orElse(null);
+            }
+        }
+
+        public abstract void serialize(K key, DataOutputPlus out, ColumnFamilyStore cfs) throws IOException;
+
+        public abstract Future<Pair<K, V>> deserialize(DataInputPlus in) throws IOException;
+
+        public void cleanupAfterSerialize()
+        {
+            cfsOrdinals.clear();
+        }
+
+        public void cleanupAfterDeserialize()
+        {
+            cfStores = null;
+        }
     }
 }

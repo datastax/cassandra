@@ -18,14 +18,13 @@
 
 package org.apache.cassandra.net;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.util.Random;
 
+import org.apache.cassandra.io.util.File;
 import org.junit.Test;
 
 import io.netty.buffer.ByteBuf;
@@ -105,7 +104,7 @@ public class AsyncStreamingOutputPlusTest
                 buffer.putLong(1);
                 buffer.putLong(2);
                 buffer.flip();
-            }, new StreamManager.StreamRateLimiter(FBUtilities.getBroadcastAddressAndPort()));
+            }, StreamManager.getRateLimiter(FBUtilities.getBroadcastAddressAndPort()));
 
             assertEquals(40, out.position());
             assertEquals(40, out.flushed());
@@ -119,8 +118,26 @@ public class AsyncStreamingOutputPlusTest
     }
 
     @Test
-    public void testWriteFileToChannelZeroCopy() throws IOException
+    public void testWriteFileToChannelEntireSSTableNoThrottling() throws IOException
     {
+        // Disable throttling by setting entire SSTable throughput and entire SSTable inter-DC throughput to 0
+        DatabaseDescriptor.setEntireSSTableStreamThroughputOutboundMebibytesPerSec(0);
+        DatabaseDescriptor.setEntireSSTableInterDCStreamThroughputOutboundMebibytesPerSec(0);
+        StreamManager.StreamRateLimiter.updateEntireSSTableThroughput();
+        StreamManager.StreamRateLimiter.updateEntireSSTableInterDCThroughput();
+
+        testWriteFileToChannel(true);
+    }
+
+    @Test
+    public void testWriteFileToChannelEntireSSTable() throws IOException
+    {
+        // Enable entire SSTable throttling by setting it to 200 Mbps
+        DatabaseDescriptor.setEntireSSTableStreamThroughputOutboundMebibytesPerSec(200);
+        DatabaseDescriptor.setEntireSSTableInterDCStreamThroughputOutboundMebibytesPerSec(200);
+        StreamManager.StreamRateLimiter.updateEntireSSTableThroughput();
+        StreamManager.StreamRateLimiter.updateEntireSSTableInterDCThroughput();
+
         testWriteFileToChannel(true);
     }
 
@@ -136,10 +153,10 @@ public class AsyncStreamingOutputPlusTest
         int length = (int) file.length();
 
         EmbeddedChannel channel = new TestChannel(4);
-        StreamManager.StreamRateLimiter limiter = new StreamManager.StreamRateLimiter(FBUtilities.getBroadcastAddressAndPort());
+        StreamManager.StreamRateLimiter limiter = zeroCopy ? StreamManager.getEntireSSTableRateLimiter(FBUtilities.getBroadcastAddressAndPort())
+                                                           : StreamManager.getRateLimiter(FBUtilities.getBroadcastAddressAndPort());
 
-        try (RandomAccessFile raf = new RandomAccessFile(file.getPath(), "r");
-             FileChannel fileChannel = raf.getChannel();
+        try (FileChannel fileChannel = file.newReadChannel();
              AsyncStreamingOutputPlus out = new AsyncStreamingOutputPlus(channel))
         {
             assertTrue(fileChannel.isOpen());
@@ -159,7 +176,7 @@ public class AsyncStreamingOutputPlusTest
 
     private File populateTempData(String name) throws IOException
     {
-        File file = Files.createTempFile(name, ".txt").toFile();
+        File file = new File(Files.createTempFile(name, ".txt"));
         file.deleteOnExit();
 
         Random r = new Random();

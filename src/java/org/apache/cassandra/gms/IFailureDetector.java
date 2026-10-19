@@ -17,7 +17,13 @@
  */
 package org.apache.cassandra.gms;
 
+import java.util.function.Predicate;
+
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.utils.FBUtilities;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_FAILURE_DETECTOR_PROPERTY;
 
 /**
  * An interface that provides an application with the ability
@@ -28,6 +34,14 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 
 public interface IFailureDetector
 {
+    IFailureDetector instance = CUSTOM_FAILURE_DETECTOR_PROPERTY.isPresent()
+                                ? FBUtilities.construct(CUSTOM_FAILURE_DETECTOR_PROPERTY.getString(),
+                                                        "Failure Detector")
+                                : new FailureDetector();
+
+    public static final Predicate<InetAddressAndPort> isEndpointAlive = instance::isAlive;
+    public static final Predicate<Replica> isReplicaAlive = r -> isEndpointAlive.test(r.endpoint());
+
     /**
      * Failure Detector's knowledge of whether a node is up or
      * down.

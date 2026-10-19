@@ -17,23 +17,32 @@
  */
 package org.apache.cassandra.auth;
 
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.collect.ImmutableSet;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Tables;
+import org.apache.cassandra.utils.CassandraVersion;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SUPERUSER_SETUP_DELAY_MS;
 
 public final class AuthKeyspace
 {
     private AuthKeyspace()
     {
     }
+
+    private static final int DEFAULT_RF = CassandraRelevantProperties.SYSTEM_AUTH_DEFAULT_RF.getInt();
 
     /**
      * Generation is used as a timestamp for automatic table creation on startup.
@@ -50,8 +59,30 @@ public final class AuthKeyspace
     public static final String ROLE_PERMISSIONS = "role_permissions";
     public static final String RESOURCE_ROLE_INDEX = "resource_role_permissons_index";
     public static final String NETWORK_PERMISSIONS = "network_permissions";
+    public static final String CIDR_PERMISSIONS = "cidr_permissions";
+    public static final String CIDR_GROUPS = "cidr_groups";
+    public static final String IDENTITY_TO_ROLES = "identity_to_role";
 
-    public static final long SUPERUSER_SETUP_DELAY = Long.getLong("cassandra.superuser_setup_delay_ms", 10000);
+    /**
+     * Returns the set of table names that should exist in the system_auth keyspace.
+     * In compatibility mode (pre-5.0), CIDR and identity tables are excluded as they
+     * are Cassandra 5.0+ features.
+     *
+     * @return the set of table names appropriate for the current storage compatibility mode
+     */
+    public static Set<String> tableNames()
+    {
+        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+            return ImmutableSet.of(ROLES, ROLE_MEMBERS, ROLE_PERMISSIONS,
+                                   RESOURCE_ROLE_INDEX, NETWORK_PERMISSIONS);
+        else
+            return ImmutableSet.of(ROLES, ROLE_MEMBERS, ROLE_PERMISSIONS,
+                                   RESOURCE_ROLE_INDEX, NETWORK_PERMISSIONS,
+                                   CIDR_PERMISSIONS, CIDR_GROUPS,
+                                   IDENTITY_TO_ROLES);
+    }
+
+    public static final long SUPERUSER_SETUP_DELAY = SUPERUSER_SETUP_DELAY_MS.getLong();
 
     private static final TableMetadata Roles =
         parse(ROLES,
@@ -63,6 +94,15 @@ public final class AuthKeyspace
               + "salted_hash text,"
               + "member_of set<text>,"
               + "PRIMARY KEY(role))");
+
+    private static final TableMetadata IdentityToRoles =
+        parse(IDENTITY_TO_ROLES,
+              "mtls authorized identities lookup table",
+              "CREATE TABLE %s ("
+              + "identity text," // opaque identity string for use by role authenticators
+              + "role text,"
+              + "PRIMARY KEY(identity))"
+          );
 
     private static final TableMetadata RoleMembers =
         parse(ROLE_MEMBERS,
@@ -97,6 +137,28 @@ public final class AuthKeyspace
               + "dcs frozen<set<text>>, "
               + "PRIMARY KEY(role))");
 
+    public static final String CIDR_PERMISSIONS_TBL_ROLE_COL_NAME = "role";
+    public static final String CIDR_PERMISSIONS_TBL_CIDR_GROUPS_COL_NAME = "cidr_groups";
+    private static final TableMetadata CIDRPermissions =
+    parse(CIDR_PERMISSIONS,
+          "user cidr permissions",
+          "CREATE TABLE %s ("
+          + CIDR_PERMISSIONS_TBL_ROLE_COL_NAME + " text, "
+          + CIDR_PERMISSIONS_TBL_CIDR_GROUPS_COL_NAME + " frozen<set<text>>, "
+          + "PRIMARY KEY(" + CIDR_PERMISSIONS_TBL_ROLE_COL_NAME + "))"
+    );
+
+    public static final String CIDR_GROUPS_TBL_CIDR_GROUP_COL_NAME = "cidr_group";
+    public static final String CIDR_GROUPS_TBL_CIDRS_COL_NAME = "cidrs";
+    private static final TableMetadata CIDRGroups =
+    parse(CIDR_GROUPS,
+          "cidr groups to cidrs mapping",
+          "CREATE TABLE %s ("
+          + CIDR_GROUPS_TBL_CIDR_GROUP_COL_NAME + " text, "
+          + CIDR_GROUPS_TBL_CIDRS_COL_NAME + " frozen<set<tuple<inet, smallint>>>, "
+          + "PRIMARY KEY(" + CIDR_GROUPS_TBL_CIDR_GROUP_COL_NAME + "))"
+    );
+
     private static TableMetadata parse(String name, String description, String cql)
     {
         return CreateTableStatement.parse(format(cql, name), SchemaConstants.AUTH_KEYSPACE_NAME)
@@ -108,8 +170,17 @@ public final class AuthKeyspace
 
     public static KeyspaceMetadata metadata()
     {
-        return KeyspaceMetadata.create(SchemaConstants.AUTH_KEYSPACE_NAME,
-                                       KeyspaceParams.simple(1),
-                                       Tables.of(Roles, RoleMembers, RolePermissions, ResourceRoleIndex, NetworkPermissions));
+        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(CassandraVersion.CASSANDRA_5_0.major))
+            return KeyspaceMetadata.create(SchemaConstants.AUTH_KEYSPACE_NAME,
+                                           KeyspaceParams.systemDistributed(Math.max(DEFAULT_RF, DatabaseDescriptor.getDefaultKeyspaceRF())),
+                                           Tables.of(Roles, RoleMembers, RolePermissions,
+                                                     ResourceRoleIndex, NetworkPermissions));
+        else
+            return KeyspaceMetadata.create(SchemaConstants.AUTH_KEYSPACE_NAME,
+                                           KeyspaceParams.systemDistributed(Math.max(DEFAULT_RF, DatabaseDescriptor.getDefaultKeyspaceRF())),
+                                           Tables.of(Roles, RoleMembers, RolePermissions,
+                                                     ResourceRoleIndex, NetworkPermissions,
+                                                     CIDRPermissions, CIDRGroups,
+                                                     IdentityToRoles));
     }
 }

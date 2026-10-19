@@ -38,7 +38,7 @@ public final class KeyspaceAttributes extends PropertyDefinitions
         for (Option option : Option.values())
             validBuilder.add(option.toString());
         validKeywords = validBuilder.build();
-        obsoleteKeywords = ImmutableSet.of();
+        obsoleteKeywords = ImmutableSet.of("graph_engine");
     }
 
     public void validate()
@@ -50,7 +50,7 @@ public final class KeyspaceAttributes extends PropertyDefinitions
             throw new ConfigurationException("Missing replication strategy class");
     }
 
-    private String getReplicationStrategyClass()
+    public String getReplicationStrategyClass()
     {
         return getAllReplicationOptions().get(ReplicationParams.CLASS);
     }

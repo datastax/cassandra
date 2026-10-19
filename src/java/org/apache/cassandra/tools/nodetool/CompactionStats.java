@@ -19,18 +19,25 @@ package org.apache.cassandra.tools.nodetool;
 
 import java.io.PrintStream;
 import java.text.DecimalFormat;
+import java.text.NumberFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
+import com.codahale.metrics.Counter;
+import com.codahale.metrics.Meter;
+import io.airlift.airline.Arguments;
 import io.airlift.airline.Command;
 import io.airlift.airline.Option;
 
-import org.apache.cassandra.db.compaction.CompactionInfo;
-import org.apache.cassandra.db.compaction.CompactionManagerMBean;
-import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.compaction.CompactionInfo.Unit;
+import org.apache.cassandra.db.compaction.CompactionStrategyStatistics;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
 import org.apache.cassandra.tools.nodetool.formatter.TableBuilder;
@@ -45,70 +52,263 @@ public class CompactionStats extends NodeToolCmd
             description = "Display bytes in human readable form, i.e. KiB, MiB, GiB, TiB")
     private boolean humanReadable = false;
 
+    @Option(title = "vtable_output",
+            name = {"-V", "--vtable"},
+            description = "Display fields matching vtable output")
+    private boolean vtableOutput = false;
+
+    @Option(title = "aggregate",
+    name = {"-A", "--aggregate"},
+    description = "Show the compaction aggregates for the compactions in progress, e.g. the levels for LCS or the buckets for STCS and TWCS.")
+    private boolean aggregate = false;
+
+    @Option(title = "overlap",
+    name = {"-O", "--overlap"},
+    description = "Show a map of the maximum sstable overlap per compaction region.\n" +
+                  "Note: This map includes all sstables in the system, including ones that are currently being compacted, " +
+                  "and also takes into account early opened sstables. Overlaps per level may be greater than the values " +
+                  "the --aggregate option reports.")
+    private boolean overlap = false;
+
+    @Arguments(usage = "[<keyspace> <tables>...]", description = "With --aggregate or --overlap, optionally list only the data for the specified keyspace and tables.")
+    private List<String> args = new ArrayList<>();
+
     @Override
     public void execute(NodeProbe probe)
     {
         PrintStream out = probe.output().out;
-        CompactionManagerMBean cm = probe.getCompactionManagerProxy();
+        TableBuilder tableBuilder = new TableBuilder();
+        pendingTasksAndConcurrentCompactorsStats(probe, tableBuilder);
+        compactionsStats(probe, tableBuilder);
+        reportCompactionTable(probe.getCompactionManagerProxy().getCompactions(), probe.getCompactionThroughputBytes(), humanReadable, vtableOutput, out, tableBuilder);
+
+        Set<String> keyspaces = new HashSet<>(parseOptionalKeyspace(args, probe));
+        Set<String> tableNames = new HashSet<>(Arrays.asList(parseOptionalTables(args)));
+
+        if (aggregate)
+        {
+            reportAggregateCompactions(probe, keyspaces, tableNames, out);
+        }
+
+        if (overlap)
+            reportOverlap((Map<String, Map<String, Map<String, String>>>) probe.getCompactionMetric("MaxOverlapsMap"), keyspaces, tableNames, out);
+    }
+
+    private void pendingTasksAndConcurrentCompactorsStats(NodeProbe probe, TableBuilder tableBuilder)
+    {
         Map<String, Map<String, Integer>> pendingTaskNumberByTable =
             (Map<String, Map<String, Integer>>) probe.getCompactionMetric("PendingTasksByTableName");
-        int numTotalPendingTask = 0;
+        Map<String, Map<String, Double>> writeAmplificationByTableName =
+            (Map<String, Map<String, Double>>) probe.getCompactionMetric("WriteAmplificationByTableName");
+
+        tableBuilder.add("concurrent compactors", Integer.toString(probe.getConcurrentCompactors()));
+        int numTotalPendingTasks = 0;
+        double totWriteAmplification = 0;
         for (Entry<String, Map<String, Integer>> ksEntry : pendingTaskNumberByTable.entrySet())
         {
+            Map<String, Double> ksWriteAmplification = writeAmplificationByTableName.get(ksEntry.getKey());
             for (Entry<String, Integer> tableEntry : ksEntry.getValue().entrySet())
-                numTotalPendingTask += tableEntry.getValue();
+            {
+                numTotalPendingTasks += tableEntry.getValue();
+                if (ksWriteAmplification != null)
+                    totWriteAmplification += ksWriteAmplification.get(tableEntry.getKey());
+            }
         }
-        out.println("pending tasks: " + numTotalPendingTask);
+        tableBuilder.add("pending tasks", Integer.toString(numTotalPendingTasks));
+        tableBuilder.add("write amplification", String.format("%.2f", totWriteAmplification));
+
         for (Entry<String, Map<String, Integer>> ksEntry : pendingTaskNumberByTable.entrySet())
+        {
+            Map<String, Double> ksWriteAmplification = writeAmplificationByTableName.get(ksEntry.getKey());
+            for (Entry<String, Integer> tableEntry : ksEntry.getValue().entrySet())
+            {
+                double wa = ksWriteAmplification == null ? 0 : ksWriteAmplification.get(tableEntry.getKey());
+                tableBuilder.add(ksEntry.getKey(), tableEntry.getKey(), tableEntry.getValue().toString());
+                tableBuilder.add(ksEntry.getKey(), String.format("%s write amplification", tableEntry.getKey()), String.format("%.2f", wa));
+            }
+        }
+    }
+
+    private void compactionsStats(NodeProbe probe, TableBuilder tableBuilder)
+    {
+        // FIXME this is a hack to get the compaction metrics for NodeToolTest using InternalNodeProbe without JMX
+        Object totalCompactionsCompleted = probe.getCompactionMetric("TotalCompactionsCompleted");
+        double totalCompactionsCompletedFifteenMinuteRate;
+        double totalCompactionsCompletedMeanRate;
+        if (totalCompactionsCompleted instanceof Meter)
+        {
+            Meter totalCompactionsCompletedMeter = (Meter) totalCompactionsCompleted;
+            tableBuilder.add("compactions completed", String.valueOf(totalCompactionsCompletedMeter.getCount()));
+            totalCompactionsCompletedFifteenMinuteRate = totalCompactionsCompletedMeter.getFifteenMinuteRate();
+            totalCompactionsCompletedMeanRate = totalCompactionsCompletedMeter.getMeanRate();
+        }
+        else
+        {
+            CassandraMetricsRegistry.JmxMeterMBean totalCompactionsCompletedJmxMeterMBean = (CassandraMetricsRegistry.JmxMeterMBean) totalCompactionsCompleted;
+            tableBuilder.add("compactions completed", String.valueOf(totalCompactionsCompletedJmxMeterMBean.getCount()));
+            totalCompactionsCompletedFifteenMinuteRate = totalCompactionsCompletedJmxMeterMBean.getFifteenMinuteRate();
+            totalCompactionsCompletedMeanRate = totalCompactionsCompletedJmxMeterMBean.getMeanRate();
+        }
+
+        Object bytesCompacted = probe.getCompactionMetric("BytesCompacted");
+        long bytesCompactedCount;
+        if (bytesCompacted instanceof Counter)
+        {
+            Counter bytesCompactedCounter = (Counter) bytesCompacted;
+            bytesCompactedCount = bytesCompactedCounter.getCount();
+        }
+        else
+        {
+            CassandraMetricsRegistry.JmxCounterMBean bytesCompactedJmxCounterMBean = (CassandraMetricsRegistry.JmxCounterMBean) bytesCompacted;
+            bytesCompactedCount = bytesCompactedJmxCounterMBean.getCount();
+        }
+        if (humanReadable)
+            tableBuilder.add("data compacted", FileUtils.stringifyFileSize(Double.parseDouble(Long.toString(bytesCompactedCount))));
+        else
+            tableBuilder.add("data compacted", Long.toString(bytesCompactedCount));
+
+        Object compactionsAborted = probe.getCompactionMetric("CompactionsAborted");
+        if (compactionsAborted instanceof Counter)
+        {
+            Counter compactionsAbortedCounter = (Counter) compactionsAborted;
+            tableBuilder.add("compactions aborted", Long.toString(compactionsAbortedCounter.getCount()));
+        }
+        else
+        {
+            CassandraMetricsRegistry.JmxCounterMBean compactionsAbortedJmxCounterMBean = (CassandraMetricsRegistry.JmxCounterMBean) compactionsAborted;
+            tableBuilder.add("compactions aborted", Long.toString(compactionsAbortedJmxCounterMBean.getCount()));
+        }
+
+        Object compactionsReduced = probe.getCompactionMetric("CompactionsReduced");
+        if (compactionsReduced instanceof Counter)
+        {
+            Counter compactionsReducedCounter = (Counter) compactionsReduced;
+            tableBuilder.add("compactions reduced", Long.toString(compactionsReducedCounter.getCount()));
+        }
+        else
+        {
+            CassandraMetricsRegistry.JmxCounterMBean compactionsReducedJmxCounterMBean = (CassandraMetricsRegistry.JmxCounterMBean) compactionsReduced;
+            tableBuilder.add("compactions reduced", Long.toString(compactionsReducedJmxCounterMBean.getCount()));
+        }
+
+        Object sstablesDroppedFromCompaction = probe.getCompactionMetric("SSTablesDroppedFromCompaction");
+        if (sstablesDroppedFromCompaction instanceof Counter)
+        {
+            Counter sstablesDroppedFromCompactionCounter = (Counter) sstablesDroppedFromCompaction;
+            tableBuilder.add("sstables dropped from compaction", Long.toString(sstablesDroppedFromCompactionCounter.getCount()));
+        }
+        else
+        {
+            CassandraMetricsRegistry.JmxCounterMBean sstablesDroppedFromCompactionJmxCounterMBean = (CassandraMetricsRegistry.JmxCounterMBean) sstablesDroppedFromCompaction;
+            tableBuilder.add("sstables dropped from compaction", Long.toString(sstablesDroppedFromCompactionJmxCounterMBean.getCount()));
+        }
+
+        NumberFormat formatter = new DecimalFormat("0.00");
+
+        tableBuilder.add("15 minute rate", String.format("%s/minute", formatter.format(totalCompactionsCompletedFifteenMinuteRate * 60)));
+        tableBuilder.add("mean rate", String.format("%s/hour", formatter.format(totalCompactionsCompletedMeanRate * 60 * 60)));
+
+        double configured = probe.getStorageService().getCompactionThroughtputMibPerSecAsDouble();
+        tableBuilder.add("compaction throughput (MiB/s)", configured == 0 ? "throttling disabled (0)" : Double.toString(configured));
+    }
+
+    public static void reportCompactionTable(List<Map<String,String>> compactions, long compactionThroughputInBytes, boolean humanReadable, PrintStream out, TableBuilder table)
+    {
+        reportCompactionTable(compactions, compactionThroughputInBytes, humanReadable, false, out, table);
+    }
+
+    public static void reportCompactionTable(List<Map<String,String>> compactions, long compactionThroughputInBytes, boolean humanReadable, boolean vtableOutput, PrintStream out, TableBuilder table)
+    {
+        if (compactions.isEmpty())
+        {
+            table.printTo(out);
+            return;
+        }
+
+        long remainingBytes = 0;
+
+        if (vtableOutput)
+            table.add("keyspace", "table", "task id", "completion ratio", "kind", "progress", "sstables", "total", "unit", "target directory");
+        else
+            table.add("id", "compaction type", "keyspace", "table", "completed", "total", "unit", "progress");
+
+        for (Map<String, String> c : compactions)
+        {
+            long total = Long.parseLong(c.get(TableOperation.Progress.TOTAL));
+            long completed = Long.parseLong(c.get(TableOperation.Progress.COMPLETED));
+            String taskType = c.get(TableOperation.Progress.OPERATION_TYPE);
+            String keyspace = c.get(TableOperation.Progress.KEYSPACE);
+            String columnFamily = c.get(TableOperation.Progress.COLUMNFAMILY);
+            String unit = c.get(TableOperation.Progress.UNIT);
+            boolean toFileSize = humanReadable && TableOperation.Unit.isFileSize(unit);
+            String[] tables = c.get(TableOperation.Progress.SSTABLES).split(",");
+            String progressStr = toFileSize ? FileUtils.stringifyFileSize(completed) : Long.toString(completed);
+            String totalStr = toFileSize ? FileUtils.stringifyFileSize(total) : Long.toString(total);
+            String percentComplete = total == 0 ? "n/a" : new DecimalFormat("0.00").format((double) completed / total * 100) + '%';
+            String id = c.get(TableOperation.Progress.OPERATION_ID);
+            if (vtableOutput)
+            {
+                String targetDirectory = c.get(TableOperation.Progress.TARGET_DIRECTORY);
+                table.add(keyspace, columnFamily, id, percentComplete, taskType, progressStr, String.valueOf(tables.length), totalStr, unit, targetDirectory);
+            }
+            else
+                table.add(id, taskType, keyspace, columnFamily, progressStr, totalStr, unit, percentComplete);
+
+            remainingBytes += total - completed;
+        }
+
+        String remainingTime = "n/a";
+        if (compactionThroughputInBytes != 0)
+        {
+            long remainingTimeInSecs = remainingBytes / compactionThroughputInBytes;
+            remainingTime = format("%dh%02dm%02ds", remainingTimeInSecs / 3600, (remainingTimeInSecs % 3600) / 60, (remainingTimeInSecs % 60));
+        }
+
+        table.add("active compaction remaining time", remainingTime);
+        table.printTo(out);
+    }
+
+    private static void reportAggregateCompactions(NodeProbe probe, Set<String> keyspaces, Set<String> tableNames, PrintStream out)
+    {
+        List<CompactionStrategyStatistics> statistics = (List<CompactionStrategyStatistics>) probe.getCompactionMetric("AggregateCompactions");
+        if (statistics.isEmpty())
+            return;
+
+        out.println("Aggregated view:");
+        for (CompactionStrategyStatistics stat : statistics)
+        {
+            if (!keyspaces.contains(stat.keyspace()))
+                continue;
+            if (!tableNames.isEmpty() && !tableNames.contains(stat.table()))
+                continue;
+            out.println(stat.toString());
+        }
+    }
+
+    private static void reportOverlap(Map<String, Map<String, Map<String, String>>> maxOverlap, Set<String> keyspaces, Set<String> tableNames, PrintStream out)
+    {
+        if (maxOverlap == null)
+        {
+            out.println("Overlap map is not available.");
+            return;
+        }
+
+        for (Map.Entry<String, Map<String, Map<String, String>>> ksEntry : maxOverlap.entrySet())
         {
             String ksName = ksEntry.getKey();
-            for (Entry<String, Integer> tableEntry : ksEntry.getValue().entrySet())
+            if (!keyspaces.contains(ksName))
+                continue;
+            for (Map.Entry<String, Map<String, String>> tableEntry : ksEntry.getValue().entrySet())
             {
                 String tableName = tableEntry.getKey();
-                int pendingTaskCount = tableEntry.getValue();
-
-                out.println("- " + ksName + '.' + tableName + ": " + pendingTaskCount);
+                if (!tableNames.isEmpty() && !tableNames.contains(tableName))
+                    continue;
+                out.println("Max overlap map for " + ksName + "." + tableName + ":");
+                for (Map.Entry<String, String> compactionEntry : tableEntry.getValue().entrySet())
+                {
+                    out.println("  " + compactionEntry.getKey() + ": " + compactionEntry.getValue());
+                }
             }
         }
-        out.println();
-        reportCompactionTable(cm.getCompactions(), probe.getCompactionThroughput(), humanReadable, out);
     }
-
-    public static void reportCompactionTable(List<Map<String,String>> compactions, int compactionThroughput, boolean humanReadable, PrintStream out)
-    {
-        if (!compactions.isEmpty())
-        {
-            long remainingBytes = 0;
-            TableBuilder table = new TableBuilder();
-
-            table.add("id", "compaction type", "keyspace", "table", "completed", "total", "unit", "progress");
-            for (Map<String, String> c : compactions)
-            {
-                long total = Long.parseLong(c.get(CompactionInfo.TOTAL));
-                long completed = Long.parseLong(c.get(CompactionInfo.COMPLETED));
-                String taskType = c.get(CompactionInfo.TASK_TYPE);
-                String keyspace = c.get(CompactionInfo.KEYSPACE);
-                String columnFamily = c.get(CompactionInfo.COLUMNFAMILY);
-                String unit = c.get(CompactionInfo.UNIT);
-                boolean toFileSize = humanReadable && Unit.isFileSize(unit);
-                String completedStr = toFileSize ? FileUtils.stringifyFileSize(completed) : Long.toString(completed);
-                String totalStr = toFileSize ? FileUtils.stringifyFileSize(total) : Long.toString(total);
-                String percentComplete = total == 0 ? "n/a" : new DecimalFormat("0.00").format((double) completed / total * 100) + "%";
-                String id = c.get(CompactionInfo.COMPACTION_ID);
-                table.add(id, taskType, keyspace, columnFamily, completedStr, totalStr, unit, percentComplete);
-                if (taskType.equals(OperationType.COMPACTION.toString()))
-                    remainingBytes += total - completed;
-            }
-            table.printTo(out);
-
-            String remainingTime = "n/a";
-            if (compactionThroughput != 0)
-            {
-                long remainingTimeInSecs = remainingBytes / (1024L * 1024L * compactionThroughput);
-                remainingTime = format("%dh%02dm%02ds", remainingTimeInSecs / 3600, (remainingTimeInSecs % 3600) / 60, (remainingTimeInSecs % 60));
-            }
-            out.printf("%25s%10s%n", "Active compaction remaining time : ", remainingTime);
-        }
-    }
-
 }

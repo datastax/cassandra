@@ -18,23 +18,32 @@
 
 package org.apache.cassandra.auth;
 
+import java.util.Map;
 import java.util.Set;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.StorageService;
 
-import static org.apache.cassandra.auth.RoleTestUtils.*;
+import static org.apache.cassandra.auth.AuthTestUtils.*;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class CassandraRoleManagerTest
 {
-
     @BeforeClass
     public static void setupClass()
     {
@@ -43,6 +52,19 @@ public class CassandraRoleManagerTest
         SchemaLoader.createKeyspace(SchemaConstants.AUTH_KEYSPACE_NAME,
                                     KeyspaceParams.simple(1),
                                     Iterables.toArray(AuthKeyspace.metadata().tables, TableMetadata.class));
+        // We start StorageService because confirmFastRoleSetup confirms that CassandraRoleManager will
+        // take a faster path once the cluster is already setup, which includes checking MessagingService
+        // and issuing queries with QueryProcessor.process, which uses TokenMetadata
+        DatabaseDescriptor.daemonInitialization();
+        StorageService.instance.initServer(0);
+        AuthCacheService.initializeAndRegisterCaches();
+    }
+
+    @Before
+    public void setup() throws Exception
+    {
+        ColumnFamilyStore.getIfExists(SchemaConstants.AUTH_KEYSPACE_NAME, AuthKeyspace.ROLES).truncateBlocking();
+        ColumnFamilyStore.getIfExists(SchemaConstants.AUTH_KEYSPACE_NAME, AuthKeyspace.ROLE_MEMBERS).truncateBlocking();
     }
 
     @Test
@@ -55,34 +77,241 @@ public class CassandraRoleManagerTest
         // collects all of the necessary info with a single query for each granted role.
         // This just tests that that is the case, i.e. we perform 1 read per role in the
         // transitive set of granted roles
-        IRoleManager roleManager = new LocalCassandraRoleManager();
+        IRoleManager roleManager = new AuthTestUtils.LocalCassandraRoleManager();
         roleManager.setup();
         for (RoleResource r : ALL_ROLES)
             roleManager.createRole(AuthenticatedUser.ANONYMOUS_USER, r, new RoleOptions());
 
         // simple role with no grants
         fetchRolesAndCheckReadCount(roleManager, ROLE_A);
+        assertRoleMembers(roleManager, ImmutableSet.of(), ImmutableSet.of(ROLE_A));
+        
         // single level of grants
         grantRolesTo(roleManager, ROLE_A, ROLE_B, ROLE_C);
+        assertRoleMembers(roleManager, ImmutableSet.of(ROLE_A), ImmutableSet.of(ROLE_B, ROLE_C));
         fetchRolesAndCheckReadCount(roleManager, ROLE_A);
 
         // multi level role hierarchy
         grantRolesTo(roleManager, ROLE_B, ROLE_B_1, ROLE_B_2, ROLE_B_3);
+        assertRoleMembers(roleManager, ImmutableSet.of(ROLE_B), ImmutableSet.of(ROLE_B_1, ROLE_B_2, ROLE_B_3));
         grantRolesTo(roleManager, ROLE_C, ROLE_C_1, ROLE_C_2, ROLE_C_3);
+        assertRoleMembers(roleManager, ImmutableSet.of(ROLE_C), ImmutableSet.of(ROLE_C_1, ROLE_C_2, ROLE_C_3));
         fetchRolesAndCheckReadCount(roleManager, ROLE_A);
 
         // Check that when granted roles appear multiple times in parallel levels of the hierarchy, we don't
         // do redundant reads. E.g. here role_b_1, role_b_2 and role_b3 are granted to both role_b and role_c
         // but we only want to actually read them once
         grantRolesTo(roleManager, ROLE_C, ROLE_B_1, ROLE_B_2, ROLE_B_3);
+        assertRoleMembers(roleManager, ImmutableSet.of(ROLE_B, ROLE_C), ImmutableSet.of(ROLE_B_1, ROLE_B_2, ROLE_B_3));
         fetchRolesAndCheckReadCount(roleManager, ROLE_A);
     }
 
     private void fetchRolesAndCheckReadCount(IRoleManager roleManager, RoleResource primaryRole)
     {
-        long before = getReadCount();
+        long before = getRolesReadCount();
         Set<Role> granted = roleManager.getRoleDetails(primaryRole);
-        long after = getReadCount();
+        long after = getRolesReadCount();
         assertEquals(granted.size(), after - before);
+    }
+
+    @Test
+    public void confirmFastRoleSetup()
+    {
+        IRoleManager roleManager = new AuthTestUtils.LocalCassandraRoleManager();
+        roleManager.setup();
+        for (RoleResource r : ALL_ROLES)
+            roleManager.createRole(AuthenticatedUser.ANONYMOUS_USER, r, new RoleOptions());
+
+        CassandraRoleManager crm = new CassandraRoleManager();
+
+        assertTrue("Expected the role manager to have existing roles before CassandraRoleManager setup", CassandraRoleManager.hasExistingRoles());
+    }
+
+    @Test
+    public void warmCacheLoadsAllEntries()
+    {
+        IRoleManager roleManager = new AuthTestUtils.LocalCassandraRoleManager();
+        roleManager.setup();
+        for (RoleResource r : ALL_ROLES)
+            roleManager.createRole(AuthenticatedUser.ANONYMOUS_USER, r, new RoleOptions());
+
+        // Multi level role hierarchy
+        grantRolesTo(roleManager, ROLE_B, ROLE_B_1, ROLE_B_2, ROLE_B_3);
+        grantRolesTo(roleManager, ROLE_C, ROLE_C_1, ROLE_C_2, ROLE_C_3);
+
+        // Use CassandraRoleManager to get entries for pre-warming a cache, then verify those entries
+        CassandraRoleManager crm = new CassandraRoleManager();
+        crm.setup();
+        Map<RoleResource, Set<Role>> cacheEntries = crm.bulkLoader().get();
+
+        Set<Role> roleBRoles = cacheEntries.get(ROLE_B);
+        assertRoleSet(roleBRoles, ROLE_B, ROLE_B_1, ROLE_B_2, ROLE_B_3);
+
+        Set<Role> roleCRoles = cacheEntries.get(ROLE_C);
+        assertRoleSet(roleCRoles, ROLE_C, ROLE_C_1, ROLE_C_2, ROLE_C_3);
+
+        for (RoleResource r : ALL_ROLES)
+        {
+            // We already verified ROLE_B and ROLE_C
+            if (r.equals(ROLE_B) || r.equals(ROLE_C))
+                continue;
+
+            // Check the cache entries for the roles without any further grants
+            assertRoleSet(cacheEntries.get(r), r);
+        }
+    }
+
+    public void testPasswordUpdateRateLimiting() throws Exception
+    {
+        try
+        {
+            CassandraRoleManager.updatePasswordUpdateMinInterval(100);
+
+            IRoleManager roleManager = new LocalCassandraRoleManager();
+            roleManager.setup();
+
+            RoleResource testRole = RoleResource.role("test_password_role");
+            RoleOptions options = getLoginRoleOptions("initial_password");
+            roleManager.createRole(AuthenticatedUser.ANONYMOUS_USER, testRole, options);
+
+            // Wait for the rate limit interval to pass
+            Thread.sleep(150);
+
+            // First password change should succeed
+            RoleOptions newOptions1 = getLoginRoleOptions("new_password_1");
+            roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, testRole, newOptions1);
+
+            // Immediate second password change should fail with OverloadedException
+            try
+            {
+                RoleOptions newOptions2 = getLoginRoleOptions("new_password_2");
+                roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, testRole, newOptions2);
+                fail("Expected OverloadedException due to password update rate limiting");
+            }
+            catch (OverloadedException e)
+            {
+                assertEquals("Password for role test_password_role can only be changed every 100ms. ", e.getMessage());
+            }
+
+            // Wait for the rate limit interval to pass
+            Thread.sleep(150);
+
+            // After waiting, password change should succeed again
+            RoleOptions newOptions3 = getLoginRoleOptions("new_password_3");
+            roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, testRole, newOptions3);
+
+            roleManager.dropRole(AuthenticatedUser.ANONYMOUS_USER, testRole);
+        }
+        finally
+        {
+            CassandraRoleManager.updatePasswordUpdateMinInterval(CassandraRelevantProperties.ROLE_PASSWORD_UPDATE_MIN_INTERVAL_MS.getInt());
+        }
+    }
+
+    @Test
+    public void warmCacheWithEmptyTable()
+    {
+        CassandraRoleManager crm = new CassandraRoleManager();
+        crm.setup();
+        Map<RoleResource, Set<Role>> cacheEntries = crm.bulkLoader().get();
+        assertTrue(cacheEntries.isEmpty());
+    }
+
+    private void assertRoleSet(Set<Role> actual, RoleResource...expected)
+    {
+        assertEquals(expected.length, actual.size());
+
+        for (RoleResource expectedRole : expected)
+            assertTrue(actual.stream().anyMatch(role -> role.resource.equals(expectedRole)));
+    }
+
+    public void testPasswordUpdateRateLimitingDisabled() throws Exception
+    {
+        try
+        {
+            CassandraRoleManager.updatePasswordUpdateMinInterval(0);
+
+            IRoleManager roleManager = new LocalCassandraRoleManager();
+            roleManager.setup();
+
+            RoleResource testRole = RoleResource.role("test_no_limit_role");
+            RoleOptions options = getLoginRoleOptions("initial_password");
+            roleManager.createRole(AuthenticatedUser.ANONYMOUS_USER, testRole, options);
+
+            // Multiple rapid password changes should all succeed when rate limiting is disabled
+            for (int i = 0; i < 5; i++)
+                roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, testRole, getLoginRoleOptions("password_" + i));
+
+            roleManager.dropRole(AuthenticatedUser.ANONYMOUS_USER, testRole);
+        }
+        finally
+        {
+            CassandraRoleManager.updatePasswordUpdateMinInterval(CassandraRelevantProperties.ROLE_PASSWORD_UPDATE_MIN_INTERVAL_MS.getInt());
+        }
+    }
+
+    @Test
+    public void testPasswordUpdateRateLimitingPerRole() throws Exception
+    {
+        try
+        {
+            CassandraRoleManager.updatePasswordUpdateMinInterval(100);
+
+            IRoleManager roleManager = new LocalCassandraRoleManager();
+            roleManager.setup();
+
+            RoleResource role1 = RoleResource.role("test_role_1");
+            RoleResource role2 = RoleResource.role("test_role_2");
+
+            RoleOptions options1 = getLoginRoleOptions("password1");
+            roleManager.createRole(AuthenticatedUser.ANONYMOUS_USER, role1, options1);
+
+            RoleOptions options2 = getLoginRoleOptions("password2");
+            roleManager.createRole(AuthenticatedUser.ANONYMOUS_USER, role2, options2);
+
+            // Wait for the rate limit interval to pass
+            Thread.sleep(150);
+
+            RoleOptions newOptions1 = getLoginRoleOptions("new_password1");
+            roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, role1, newOptions1);
+
+            try
+            {
+                RoleOptions newOptions1Again = getLoginRoleOptions("another_password1");
+                roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, role1, newOptions1Again);
+                fail("Expected OverloadedException for test_role_1");
+            }
+            catch (OverloadedException e)
+            {
+                assertEquals("Password for role test_role_1 can only be changed every 100ms.", e.getMessage());
+            }
+
+            RoleOptions newOptions2 = getLoginRoleOptions("new_password2");
+            roleManager.alterRole(AuthenticatedUser.ANONYMOUS_USER, role2, newOptions2);
+
+            roleManager.dropRole(AuthenticatedUser.ANONYMOUS_USER, role1);
+            roleManager.dropRole(AuthenticatedUser.ANONYMOUS_USER, role2);
+        }
+        finally
+        {
+            CassandraRoleManager.updatePasswordUpdateMinInterval(CassandraRelevantProperties.ROLE_PASSWORD_UPDATE_MIN_INTERVAL_MS.getInt());
+        }
+    }
+
+    public static RoleOptions getLoginRoleOptions(String password)
+    {
+        RoleOptions roleOptions = new RoleOptions();
+        roleOptions.setOption(IRoleManager.Option.SUPERUSER, false);
+        roleOptions.setOption(IRoleManager.Option.LOGIN, true);
+        roleOptions.setOption(IRoleManager.Option.PASSWORD, password);
+        return roleOptions;
+    }
+    
+    private void assertRoleMembers(IRoleManager roleManager, Set<RoleResource> expectedMembers, Set<RoleResource> rolesToCheck)
+    {
+        for (RoleResource roleToCheck : rolesToCheck)
+        {
+            assertEquals(expectedMembers, roleManager.getMembersOf(roleToCheck));
+        }
     }
 }

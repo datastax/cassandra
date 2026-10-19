@@ -20,34 +20,55 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.Date;
 
-import org.apache.cassandra.cql3.Constants;
-import org.apache.cassandra.cql3.Term;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.serializers.TypeSerializer;
-import org.apache.cassandra.serializers.TimestampSerializer;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.serializers.TimestampSerializer;
+import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 /**
- * This is the old version of TimestampType, but has been replaced as it wasn't comparing pre-epoch timestamps
+ * @deprecated This is the old version of TimestampType, but has been replaced as it wasn't comparing pre-epoch timestamps
  * correctly. This is kept for backward compatibility but shouldn't be used in new code.
  */
-@Deprecated
+@Deprecated(since = "2.2.6")
 public class DateType extends AbstractType<Date>
 {
     private static final Logger logger = LoggerFactory.getLogger(DateType.class);
 
     public static final DateType instance = new DateType();
 
+    private static final TypeSerializer<Date> serializer = new TimestampSerializer();
+    private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDeserializer(instance);
+    private static final ByteBuffer MASKED_VALUE = instance.decompose(new Date(0));
+
     DateType() {super(ComparisonType.BYTE_ORDER);} // singleton
 
     public boolean isEmptyValueMeaningless()
     {
         return true;
+    }
+
+    @Override
+    public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
+    {
+        // While BYTE_ORDER would still work for this type, making use of the fixed length is more efficient.
+        return ByteSource.optionalFixedLength(accessor, data);
+    }
+
+    @Override
+    public <V> V fromComparableBytes(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes, ByteComparable.Version version)
+    {
+        return ByteSourceInverse.getOptionalFixedLength(accessor, comparableBytes, 8);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException
@@ -80,7 +101,7 @@ public class DateType extends AbstractType<Date>
     @Override
     public String toJSONString(ByteBuffer buffer, ProtocolVersion protocolVersion)
     {
-        return '"' + TimestampSerializer.getJsonDateFormatter().format(TimestampSerializer.instance.deserialize(buffer)) + '"';
+        return '"' + TimestampSerializer.getJsonDateFormatter().format(TimestampSerializer.instance.deserialize(buffer).toInstant()) + '"';
     }
 
     @Override
@@ -102,9 +123,9 @@ public class DateType extends AbstractType<Date>
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
+    protected boolean isValueCompatibleWithInternal(AbstractType<?> previous)
     {
-        return this == otherType || otherType == TimestampType.instance || otherType == LongType.instance;
+        return this == previous || previous == TimestampType.instance || previous == LongType.instance;
     }
 
     @Override
@@ -115,12 +136,24 @@ public class DateType extends AbstractType<Date>
 
     public TypeSerializer<Date> getSerializer()
     {
-        return TimestampSerializer.instance;
+        return serializer;
+    }
+
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
+    {
+        return ARGUMENT_DESERIALIZER;
     }
 
     @Override
     public int valueLengthIfFixed()
     {
         return 8;
+    }
+
+    @Override
+    public ByteBuffer getMaskedValue()
+    {
+        return MASKED_VALUE;
     }
 }

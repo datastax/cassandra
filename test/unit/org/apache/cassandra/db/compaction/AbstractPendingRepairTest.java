@@ -20,14 +20,16 @@ package org.apache.cassandra.db.compaction;
 
 import java.io.IOException;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Random;
 import java.util.Set;
-import java.util.UUID;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -39,41 +41,53 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.service.StorageService;
 
 @Ignore
-public class AbstractPendingRepairTest extends AbstractRepairTest
+public abstract class AbstractPendingRepairTest extends AbstractRepairTest
 {
     protected String ks;
     protected final String tbl = "tbl";
     protected TableMetadata cfm;
     protected ColumnFamilyStore cfs;
-    protected CompactionStrategyManager csm;
+    protected CompactionStrategyFactory strategyFactory;
+    protected CompactionStrategyContainer compactionStrategyContainer;
     protected static ActiveRepairService ARS;
 
-    private int nextSSTableKey = 0;
+    protected int nextSSTableKey = 0;
+    public abstract String createTableCql();
 
     @BeforeClass
     public static void setupClass()
     {
         SchemaLoader.prepareServer();
-        ARS = ActiveRepairService.instance;
+        ARS = ActiveRepairService.instance();
         LocalSessionAccessor.startup();
 
         // cutoff messaging service
         MessagingService.instance().outboundSink.add((message, to) -> false);
         MessagingService.instance().inboundSink.add((message) -> false);
+        StorageService.instance.initServer();
     }
 
     @Before
     public void setup()
     {
         ks = "ks_" + System.currentTimeMillis();
-        cfm = CreateTableStatement.parse(String.format("CREATE TABLE %s.%s (k INT PRIMARY KEY, v INT)", ks, tbl), ks).build();
+        cfm = CreateTableStatement.parse(createTableCql(), ks).build();
         SchemaLoader.createKeyspace(ks, KeyspaceParams.simple(1), cfm);
         cfs = Schema.instance.getColumnFamilyStoreInstance(cfm.id);
-        csm = cfs.getCompactionStrategyManager();
+        strategyFactory = cfs.getCompactionFactory();
+        compactionStrategyContainer = cfs.getCompactionStrategyContainer();
         nextSSTableKey = 0;
         cfs.disableAutoCompaction();
+    }
+
+    void handleOrphan(SSTableReader sstable)
+    {
+        compactionStrategyContainer.getStrategies(false, null)
+                                   .forEach(acs -> ((LegacyAbstractCompactionStrategy) acs).removeSSTable(sstable));
     }
 
     /**
@@ -83,10 +97,15 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
      */
     SSTableReader makeSSTable(boolean orphan)
     {
-        int pk = nextSSTableKey++;
+        // store a few shuffled keys to avoid non-overlap
         Set<SSTableReader> pre = cfs.getLiveSSTables();
-        QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES(?, ?)", ks, tbl), pk, pk);
-        cfs.forceBlockingFlush();
+        Random rand = new Random(nextSSTableKey++);
+        for (int i = 0; i < 10; ++i)
+        {
+            int pk = rand.nextInt();
+            QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES(?, ?)", ks, tbl), pk, pk);
+        }
+        Util.flush(cfs);
         Set<SSTableReader> post = cfs.getLiveSSTables();
         Set<SSTableReader> diff = new HashSet<>(post);
         diff.removeAll(pre);
@@ -94,12 +113,12 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         SSTableReader sstable = diff.iterator().next();
         if (orphan)
         {
-            csm.getUnrepairedUnsafe().allStrategies().forEach(acs -> acs.removeSSTable(sstable));
+            handleOrphan(sstable);
         }
         return sstable;
     }
 
-    public static void mutateRepaired(SSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient)
+    public static void mutateRepaired(SSTableReader sstable, long repairedAt, TimeUUID pendingRepair, boolean isTransient)
     {
         try
         {
@@ -117,8 +136,14 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         mutateRepaired(sstable, repairedAt, ActiveRepairService.NO_PENDING_REPAIR, false);
     }
 
-    public static void mutateRepaired(SSTableReader sstable, UUID pendingRepair, boolean isTransient)
+    public static void mutateRepaired(SSTableReader sstable, TimeUUID pendingRepair, boolean isTransient)
     {
         mutateRepaired(sstable, ActiveRepairService.UNREPAIRED_SSTABLE, pendingRepair, isTransient);
+    }
+
+    public static void mutateRepaired(List<SSTableReader> sstables, TimeUUID pendingRepair, boolean isTransient)
+    {
+        for (SSTableReader sstable : sstables)
+            mutateRepaired(sstable, ActiveRepairService.UNREPAIRED_SSTABLE, pendingRepair, isTransient);
     }
 }

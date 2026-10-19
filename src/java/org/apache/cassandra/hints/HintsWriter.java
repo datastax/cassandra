@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.hints;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
@@ -25,6 +24,7 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -33,10 +33,13 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.metrics.HintsServiceMetrics;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.Throwables;
 
+import static com.google.common.base.Preconditions.checkState;
 import static org.apache.cassandra.utils.FBUtilities.updateChecksum;
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 import static org.apache.cassandra.utils.Throwables.perform;
@@ -54,6 +57,9 @@ class HintsWriter implements AutoCloseable
 
     private volatile long lastSyncPosition = 0L;
 
+    @VisibleForTesting
+    AtomicLong totalHintsWritten = new AtomicLong();
+
     protected HintsWriter(File directory, HintsDescriptor descriptor, File file, FileChannel channel, int fd, CRC32 globalCRC)
     {
         this.directory = directory;
@@ -64,13 +70,12 @@ class HintsWriter implements AutoCloseable
         this.globalCRC = globalCRC;
     }
 
-    @SuppressWarnings("resource") // HintsWriter owns channel
     static HintsWriter create(File directory, HintsDescriptor descriptor) throws IOException
     {
-        File file = new File(directory, descriptor.fileName());
+        File file = descriptor.file(directory);
 
         FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
-        int fd = NativeLibrary.getfd(channel);
+        int fd = INativeLibrary.instance.getfd(channel);
 
         CRC32 crc = new CRC32();
 
@@ -78,9 +83,10 @@ class HintsWriter implements AutoCloseable
         {
             // write the descriptor
             descriptor.serialize(dob);
-            ByteBuffer descriptorBytes = dob.buffer();
+            ByteBuffer descriptorBytes = dob.unsafeGetBufferAndFlip();
             updateChecksum(crc, descriptorBytes);
             channel.write(descriptorBytes);
+            descriptor.hintsFileSize(channel.position());
 
             if (descriptor.isEncrypted())
                 return new EncryptedHintsWriter(directory, descriptor, file, channel, fd, crc);
@@ -102,7 +108,7 @@ class HintsWriter implements AutoCloseable
 
     private void writeChecksum()
     {
-        File checksumFile = new File(directory, descriptor.checksumFileName());
+        File checksumFile = descriptor.checksumFile(directory);
         try (OutputStream out = Files.newOutputStream(checksumFile.toPath()))
         {
             out.write(Integer.toHexString((int) globalCRC.getValue()).getBytes(StandardCharsets.UTF_8));
@@ -113,11 +119,16 @@ class HintsWriter implements AutoCloseable
         }
     }
 
+    @Override
     public void close()
     {
         perform(file, Throwables.FileOpType.WRITE, this::doFsync, channel::close);
 
         writeChecksum();
+        descriptor.setStatistics(new HintsDescriptor.Statistics(totalHintsWritten.get()));
+        descriptor.writeStatsComponent(file.toPath().getParent());
+
+        descriptor.setDataSize(file.length());
     }
 
     public void fsync()
@@ -168,6 +179,7 @@ class HintsWriter implements AutoCloseable
 
         private final long initialSize;
         private long bytesWritten;
+        private long hintsWritten;
 
         Session(ByteBuffer buffer, long initialSize)
         {
@@ -194,11 +206,11 @@ class HintsWriter implements AutoCloseable
          * writes to the underlying channel when the buffer is overflown.
          *
          * @param hint the serialized hint (with CRC included)
-         * @throws IOException
          */
         void append(ByteBuffer hint) throws IOException
         {
             bytesWritten += hint.remaining();
+            hintsWritten += 1;
 
             // if the hint to write won't fit in the aggregation buffer, flush it
             if (hint.remaining() > buffer.remaining())
@@ -223,11 +235,10 @@ class HintsWriter implements AutoCloseable
         /**
          * Serializes and appends the hint (with CRC included) to this session's aggregation buffer,
          * writes to the underlying channel when the buffer is overflown.
-         *
-         * Used mainly by tests and {@link LegacyHintsMigrator}
+         * <p>
+         * Used mainly by tests
          *
          * @param hint the unserialized hint
-         * @throws IOException
          */
         void append(Hint hint) throws IOException
         {
@@ -248,26 +259,40 @@ class HintsWriter implements AutoCloseable
                 updateChecksumInt(crc, hintSize);
                 out.writeInt((int) crc.getValue());
 
+                long startPosition = out.position();
                 Hint.serializer.serialize(hint, out, descriptor.messagingVersion());
+                long actualSize = out.position() - startPosition;
+                checkState(actualSize == hintSize, "Serialized hint size doesn't match calculated hint size");
                 updateChecksum(crc, hintBuffer, hintBuffer.position() - hintSize, hintSize);
                 out.writeInt((int) crc.getValue());
             }
 
             if (hintBuffer == buffer)
+            {
                 bytesWritten += totalSize;
+                hintsWritten += 1;
+            }
             else
-                append((ByteBuffer) hintBuffer.flip());
+            {
+                append(hintBuffer.flip());
+            }
         }
 
         /**
          * Closes the session - flushes the aggregation buffer (if not empty), does page aligning, and potentially fsyncs.
-         * @throws IOException
          */
+        @Override
         public void close() throws IOException
         {
             flushBuffer();
             maybeFsync();
             maybeSkipCache();
+            descriptor.hintsFileSize(position());
+            long hintsCnt = totalHintsWritten.addAndGet(hintsWritten);
+            descriptor.setDataSize(channel.position());
+            descriptor.setStatistics(new HintsDescriptor.Statistics(hintsCnt));
+            descriptor.writeStatsComponent(file.toPath().getParent());
+            HintsServiceMetrics.hintsOnDisk.inc(hintsWritten);
         }
 
         private void flushBuffer() throws IOException
@@ -284,7 +309,7 @@ class HintsWriter implements AutoCloseable
 
         private void maybeFsync()
         {
-            if (position() >= lastSyncPosition + DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024L)
+            if (position() >= lastSyncPosition + DatabaseDescriptor.getTrickleFsyncIntervalInKiB() * 1024L)
                 fsync();
         }
 
@@ -294,8 +319,8 @@ class HintsWriter implements AutoCloseable
 
             // don't skip page cache for tiny files, on the assumption that if they are tiny, the target node is probably
             // alive, and if so, the file will be closed and dispatched shortly (within a minute), and the file will be dropped.
-            if (position >= DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024L)
-                NativeLibrary.trySkipCache(fd, 0, position - (position % PAGE_SIZE), file.getPath());
+            if (position >= DatabaseDescriptor.getTrickleFsyncIntervalInKiB() * 1024L)
+                INativeLibrary.instance.trySkipCache(fd, 0, position - (position % PAGE_SIZE), file.path());
         }
     }
 }

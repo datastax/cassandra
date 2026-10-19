@@ -20,6 +20,10 @@ package org.apache.cassandra.tools.nodetool.stats;
 
 import java.io.PrintStream;
 import java.util.List;
+import java.util.Map;
+
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.utils.FBUtilities;
 
 public class TableStatsPrinter<T extends StatsHolder>
 {
@@ -47,6 +51,9 @@ public class TableStatsPrinter<T extends StatsHolder>
         @Override
         public void print(TableStatsHolder data, PrintStream out)
         {
+            if (data.numberOfTables == 0)
+                return;
+
             out.println("Total number of tables: " + data.numberOfTables);
             out.println("----------------");
 
@@ -54,7 +61,7 @@ public class TableStatsPrinter<T extends StatsHolder>
             for (StatsKeyspace keyspace : keyspaces)
             {
                 // print each keyspace's information
-                out.println("Keyspace : " + keyspace.name);
+                out.println("Keyspace: " + keyspace.name);
                 out.println("\tRead Count: " + keyspace.readCount);
                 out.println("\tRead Latency: " + keyspace.readLatency() + " ms");
                 out.println("\tWrite Count: " + keyspace.writeCount);
@@ -63,6 +70,9 @@ public class TableStatsPrinter<T extends StatsHolder>
 
                 // print each table's information
                 List<StatsTable> tables = keyspace.tables;
+                if (tables.size() == 0)
+                    continue;
+
                 for (StatsTable table : tables)
                 {
                     printStatsTable(table, table.tableName, "\t\t", out);
@@ -76,9 +86,16 @@ public class TableStatsPrinter<T extends StatsHolder>
             out.println(indent + "Table" + (table.isIndex ? " (index): " : ": ") + tableDisplayName);
             out.println(indent + "SSTable count: " + table.sstableCount);
             out.println(indent + "Old SSTable count: " + table.oldSSTableCount);
+            out.println(indent + "Max SSTable size: " + FBUtilities.prettyPrintMemory(table.maxSSTableSize));
+            if (table.twcs != null)
+                out.println(indent + "SSTables Time Window: " + table.twcs);
             if (table.isLeveledSstable)
+            {
                 out.println(indent + "SSTables in each level: [" + String.join(", ",
-                                                                          table.sstablesInEachLevel) + "]");
+                                                                               table.sstablesInEachLevel) + "]");
+                out.println(indent + "SSTable bytes in each level: [" + String.join(", ",
+                                                                                    table.sstableBytesInEachLevel) + "]");
+            }
 
             out.println(indent + "Space used (live): " + table.spaceUsedLive);
             out.println(indent + "Space used (total): " + table.spaceUsedTotal);
@@ -86,7 +103,7 @@ public class TableStatsPrinter<T extends StatsHolder>
 
             if (table.offHeapUsed)
                 out.println(indent + "Off heap memory used (total): " + table.offHeapMemoryUsedTotal);
-            out.println(indent + "SSTable Compression Ratio: " + table.sstableCompressionRatio);
+            out.printf(indent + "SSTable Compression Ratio: %01.5f%n", table.sstableCompressionRatio);
             out.println(indent + "Number of partitions (estimate): " + table.numberOfPartitionsEstimate);
             out.println(indent + "Memtable cell count: " + table.memtableCellCount);
             out.println(indent + "Memtable data size: " + table.memtableDataSize);
@@ -94,12 +111,20 @@ public class TableStatsPrinter<T extends StatsHolder>
             if (table.memtableOffHeapUsed)
                 out.println(indent + "Memtable off heap memory used: " + table.memtableOffHeapMemoryUsed);
             out.println(indent + "Memtable switch count: " + table.memtableSwitchCount);
+            out.println(indent + "Speculative retries: " + table.speculativeRetries);
             out.println(indent + "Local read count: " + table.localReadCount);
             out.printf(indent + "Local read latency: %01.3f ms%n", table.localReadLatencyMs);
             out.println(indent + "Local write count: " + table.localWriteCount);
             out.printf(indent + "Local write latency: %01.3f ms%n", table.localWriteLatencyMs);
+
+            out.printf(indent + "Local read/write ratio: %01.5f%n", table.localReadWriteRatio);
+
             out.println(indent + "Pending flushes: " + table.pendingFlushes);
             out.println(indent + "Percent repaired: " + table.percentRepaired);
+
+            out.println(indent +"Bytes repaired: " + FBUtilities.prettyPrintMemory(table.bytesRepaired));
+            out.println(indent +"Bytes unrepaired: " + FBUtilities.prettyPrintMemory(table.bytesUnrepaired));
+            out.println(indent +"Bytes pending repair: " + FBUtilities.prettyPrintMemory(table.bytesPendingRepair));
 
             out.println(indent + "Bloom filter false positives: " + table.bloomFilterFalsePositives);
             out.printf(indent + "Bloom filter false ratio: %01.5f%n", table.bloomFilterFalseRatio);
@@ -119,9 +144,39 @@ public class TableStatsPrinter<T extends StatsHolder>
             out.println(indent + "Maximum live cells per slice (last five minutes): " + table.maximumLiveCellsPerSliceLastFiveMinutes);
             out.println(indent + "Average tombstones per slice (last five minutes): " + table.averageTombstonesPerSliceLastFiveMinutes);
             out.println(indent + "Maximum tombstones per slice (last five minutes): " + table.maximumTombstonesPerSliceLastFiveMinutes);
-            out.println(indent + "Dropped Mutations: " + table.droppedMutations);
+            out.printf(indent + "Droppable tombstone ratio: %01.5f%n", table.droppableTombstoneRatio);
             if (table.isInCorrectLocation != null)
                 out.println(indent + "SSTables in correct location: " + table.isInCorrectLocation);
+            if (table.topSizePartitions != null && !table.topSizePartitions.isEmpty())
+            {
+                out.printf(indent + "Top partitions by size (last update: %s):%n", table.topSizePartitionsLastUpdate);
+                int maxWidth = Math.max(table.topSizePartitions.keySet().stream().map(String::length).max(Integer::compareTo).get() + 3, 5);
+                out.printf(indent + "  %-" + maxWidth + "s %s%n", "Key", "Size");
+                for (Map.Entry<String, String> size : table.topSizePartitions.entrySet())
+                    out.printf(indent + "  %-" + maxWidth + "s %s%n", size.getKey(), size.getValue());
+            }
+
+            if (table.topTombstonePartitions != null && !table.topTombstonePartitions.isEmpty())
+            {
+                out.printf(indent + "Top partitions by tombstone count (last update: %s):%n", table.topTombstonePartitionsLastUpdate);
+                int maxWidth = Math.max(table.topTombstonePartitions.keySet().stream().map(String::length).max(Integer::compareTo).get() + 3, 5);
+                out.printf(indent + "  %-" + maxWidth + "s %s%n", "Key", "Count");
+                for (Map.Entry<String, Long> tombstonecnt : table.topTombstonePartitions.entrySet())
+                    out.printf(indent + "  %-" + maxWidth + "s %s%n", tombstonecnt.getKey(), tombstonecnt.getValue());
+            }
+
+            if (!SchemaConstants.isSystemKeyspace(table.keyspaceName) && table.hasSaiIndexes)
+            {
+                out.println(indent + "SAI local query latency (mean): " + String.format("%.3f ms", table.saiQueryLatencyMs));
+                out.println(indent + "SAI post-filtering latency (mean): " + String.format("%.3f ms",table.saiPostFilteringReadLatencyMs));
+                out.println(indent + "SAI space used (bytes): " + table.saiDiskUsedBytes);
+                out.println(indent + "SAI sstable indexes hit per query (mean): " + table.saiSSTableIndexesHit);
+                out.println(indent + "SAI index segments hit per query (mean): " + table.saiIndexSegmentsHit);
+                out.println(indent + "SAI rows filtered per query (mean): " + table.saiRowsFiltered);
+                out.println(indent + "SAI local query timeouts: " + table.saiTotalQueryTimeouts);
+                out.println(indent + "SAI queryable/total indexes: " + table.saiTotalQueryableIndexRatio);
+            }
+
             out.println("");
         }
     }
@@ -135,6 +190,10 @@ public class TableStatsPrinter<T extends StatsHolder>
         public void print(TableStatsHolder data, PrintStream out)
         {
             List<StatsTable> tables = data.getSortedFilteredTables();
+
+            if (tables.size() == 0)
+                return;
+
             String totalTablesSummary = String.format("Total number of tables: %d", data.numberOfTables);
             if (data.top > 0)
             {

@@ -20,10 +20,10 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
@@ -142,18 +142,28 @@ public interface ClusteringIndexFilter
     public UnfilteredRowIterator getUnfilteredRowIterator(ColumnFilter columnFilter, Partition partition);
 
     /**
-     * Whether the provided sstable may contain data that is selected by this filter (based on the sstable metadata).
+     * Whether the data selected by this filter intersects with the provided slice.
      *
-     * @param sstable the sstable for which we want to test the need for inclusion.
+     * @param comparator the comparator of the table this if a filter on.
+     * @param slice the slice to check intersection with,
      *
-     * @return whether {@code sstable} should be included to answer this filter.
+     * @return whether the data selected by this filter intersects with {@code slice}.
      */
-    public boolean shouldInclude(SSTableReader sstable);
+    public boolean intersects(ClusteringComparator comparator, Slice slice);
 
     public Kind kind();
 
     public String toString(TableMetadata metadata);
-    public String toCQLString(TableMetadata metadata);
+
+    /**
+     * Returns a CQL string representing this clustering index filter and the specified {@link RowFilter}.
+     *
+     * @param metadata the table metadata
+     * @param rowFilter a row filter
+     * @param redaction whether to redact the clustering column value
+     * @return a CQL string representing this clustering index filter and the specified {@link RowFilter}
+     */
+    String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction);
 
     public interface Serializer
     {

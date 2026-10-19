@@ -21,16 +21,13 @@ import java.nio.ByteBuffer;
 import java.util.List;
 
 import com.google.common.base.Objects;
+import org.apache.commons.lang3.text.StrBuilder;
 
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.CQL3Type.Tuple;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.CqlBuilder;
-import org.apache.cassandra.cql3.CqlBuilder.Appender;
 import org.apache.cassandra.db.marshal.AbstractType;
-
-import org.apache.commons.lang3.text.StrBuilder;
 
 import static java.util.stream.Collectors.toList;
 
@@ -47,7 +44,7 @@ public abstract class AbstractFunction implements Function
     {
         this.name = name;
         this.argTypes = argTypes;
-        this.returnType = returnType;
+        this.returnType = returnType != null ? returnType.unwrap() : null;
     }
 
     public FunctionName name()
@@ -69,7 +66,7 @@ public abstract class AbstractFunction implements Function
     {
         return argTypes().stream()
                          .map(AbstractType::asCQL3Type)
-                         .map(CQL3Type::toString)
+                         .map(CQL3Type::toSchemaString)
                          .collect(toList());
     }
 
@@ -106,7 +103,7 @@ public abstract class AbstractFunction implements Function
         // We should ignore the fact that the receiver type is frozen in our comparison as functions do not support
         // frozen types for return type
         AbstractType<?> returnType = returnType();
-        if (receiver.type.isFreezable() && !receiver.type.isMultiCell())
+        if (!receiver.type.isMultiCell())
             returnType = returnType.freeze();
 
         if (receiver.type.equals(returnType))
@@ -116,6 +113,12 @@ public abstract class AbstractFunction implements Function
             return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
 
         return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+    }
+
+    @Override
+    public AbstractType<?> getCompatibleTypeIfKnown(String keyspace)
+    {
+        return returnType();
     }
 
     @Override
@@ -154,8 +157,7 @@ public abstract class AbstractFunction implements Function
      */
     protected String toCqlString(AbstractType<?> type)
     {
-        return type.isTuple() ? ((Tuple) type.asCQL3Type()).toString(false)
-                              : type.asCQL3Type().toString();
+        return type.asCQL3Type().toString();
     }
 
     @Override
@@ -165,5 +167,35 @@ public abstract class AbstractFunction implements Function
                                                 .appendWithSeparators(columnNames, ", ")
                                                 .append(')')
                                                 .toString();
+    }
+
+    /*
+     * We need to compare the CQL3 representation of the type because comparing
+     * the AbstractType will fail for example if a UDT has been changed.
+     * Reason is that UserType.equals() takes the field names and types into account.
+     * Example CQL sequence that would fail when comparing AbstractType:
+     *    CREATE TYPE foo ...
+     *    CREATE FUNCTION bar ( par foo ) RETURNS foo ...
+     *    ALTER TYPE foo ADD ...
+     * or
+     *    ALTER TYPE foo ALTER ...
+     * or
+     *    ALTER TYPE foo RENAME ...
+     */
+    public boolean typesMatch(List<AbstractType<?>> types)
+    {
+        if (argTypes().size() != types.size())
+            return false;
+
+        for (int i = 0; i < argTypes().size(); i++)
+            if (!typesMatch(argTypes().get(i), types.get(i)))
+                return false;
+
+        return true;
+    }
+
+    private static boolean typesMatch(AbstractType<?> t1, AbstractType<?> t2)
+    {
+        return t1.freeze().asCQL3Type().toString().equals(t2.freeze().asCQL3Type().toString());
     }
 }

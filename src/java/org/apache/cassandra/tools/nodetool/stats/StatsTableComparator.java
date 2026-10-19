@@ -65,7 +65,11 @@ public class StatsTableComparator implements Comparator<StatsTable>
                                                        "pending_flushes", "percent_repaired", "read_latency", "reads",
                                                        "space_used_by_snapshots_total", "space_used_live",
                                                        "space_used_total", "sstable_compression_ratio", "sstable_count",
-                                                       "table_name", "write_latency", "writes" };
+                                                       "table_name", "write_latency", "writes", "max_sstable_size",
+                                                       "local_read_write_ratio", "twcs_max_duration", "sai_local_query_latency_ms",
+                                                       "sai_post_filtering_read_latency","sai_disk_used_bytes","sai_sstable_indexes_hit",
+                                                       "sai_index_segments_hit","sai_rows_filtered","sai_total_query_timeouts",
+                                                       "sai_total_queryable_index_ratio"};
 
     public StatsTableComparator(String sortKey, boolean humanReadable)
     {
@@ -189,10 +193,6 @@ public class StatsTableComparator implements Comparator<StatsTable>
                                           sty.compressionMetadataOffHeapMemoryUsed);
             }
         }
-        else if (sortKey.equals("dropped_mutations"))
-        {
-            result = compareFileSizes(stx.droppedMutations, sty.droppedMutations);
-        }
         else if (sortKey.equals("full_name"))
         {
             return sign * stx.fullName.compareTo(sty.fullName);
@@ -228,6 +228,10 @@ public class StatsTableComparator implements Comparator<StatsTable>
         else if (sortKey.equals("local_write_latency_ms") || sortKey.equals("write_latency"))
         {
             result = compareDoubles(stx.localWriteLatencyMs, sty.localWriteLatencyMs);
+        }
+        else if (sortKey.equals("local_read_write_ratio"))
+        {
+            result = compareDoubles(stx.localReadWriteRatio, sty.localReadWriteRatio);
         }
         else if (sortKey.equals("maximum_live_cells_per_slice_last_five_minutes"))
         {
@@ -295,6 +299,21 @@ public class StatsTableComparator implements Comparator<StatsTable>
         {
             result = compareDoubles(stx.percentRepaired, sty.percentRepaired);
         }
+        else if (sortKey.equals("max_sstable_size"))
+        {
+            result = sign * stx.maxSSTableSize.compareTo(sty.maxSSTableSize);
+        }
+        else if (sortKey.equals("twcs_max_duration"))
+        {
+            if (stx.twcsDurationInMillis != null && sty.twcsDurationInMillis == null)
+                return sign;
+            else if (stx.twcsDurationInMillis == null && sty.twcsDurationInMillis != null)
+                return sign * -1;
+            else if (stx.twcsDurationInMillis == null)
+                return 0;
+            else
+                result = sign * stx.twcsDurationInMillis.compareTo(sty.twcsDurationInMillis);
+        }
         else if (sortKey.equals("space_used_by_snapshots_total"))
         {
             result = compareFileSizes(stx.spaceUsedBySnapshotsTotal,
@@ -321,6 +340,47 @@ public class StatsTableComparator implements Comparator<StatsTable>
         else if (sortKey.equals("table_name"))
         {
             return sign * stx.tableName.compareTo(sty.tableName);
+        }
+        else if(sortKey.equals("sai_local_query_latency_ms"))
+        {
+            result = compareDoubles(stx.saiQueryLatencyMs, sty.saiQueryLatencyMs);
+        }
+        else if(sortKey.equals("sai_post_filtering_read_latency"))
+        {
+            result = compareDoubles(stx.saiPostFilteringReadLatencyMs, sty.saiPostFilteringReadLatencyMs);
+        }
+        else if(sortKey.equals("sai_disk_used_bytes"))
+        {
+            result = compareFileSizes(stx.saiDiskUsedBytes,
+                                      sty.saiDiskUsedBytes);
+        }
+        else if(sortKey.equals("sai_sstable_indexes_hit"))
+        {
+            result = compareDoubles(stx.saiSSTableIndexesHit, sty.saiSSTableIndexesHit);
+        }
+        else if(sortKey.equals("sai_index_segments_hit"))
+        {
+            result = compareDoubles(stx.saiIndexSegmentsHit, sty.saiIndexSegmentsHit);
+        }
+        else if(sortKey.equals("sai_rows_filtered"))
+        {
+            result = compareDoubles(stx.saiRowsFiltered, sty.saiRowsFiltered);
+        }
+        else if(sortKey.equals("sai_total_query_timeouts"))
+        {
+            result = sign * Long.valueOf(stx.saiTotalQueryTimeouts)
+                                .compareTo(Long.valueOf(sty.saiTotalQueryTimeouts));
+        }
+        else if(sortKey.equals("sai_total_queryable_index_ratio"))
+        {
+            if (stx.saiTotalQueryableIndexRatio == null && sty.saiTotalQueryableIndexRatio != null)
+                return sign * -1;
+            else if (stx.saiTotalQueryableIndexRatio != null && sty.saiTotalQueryableIndexRatio == null)
+                return sign;
+            else if (stx.saiTotalQueryableIndexRatio == null && sty.saiTotalQueryableIndexRatio == null)
+                return 0;
+
+            result = sign * stx.saiTotalQueryableIndexRatio.compareTo(sty.saiTotalQueryableIndexRatio);
         }
         else
         {

@@ -27,21 +27,28 @@ import java.util.function.Function;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 
+import org.apache.cassandra.utils.concurrent.FutureCombiner;
+import org.apache.cassandra.utils.concurrent.Condition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.carrotsearch.hppc.ObjectObjectHashMap;
-import io.netty.util.concurrent.Future;
-import org.apache.cassandra.config.Config;
-import org.apache.cassandra.gms.Gossiper;
+import io.netty.util.concurrent.Future; //checkstyle: permit this import
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
-import org.apache.cassandra.utils.concurrent.SimpleCondition;
+import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
+import static java.lang.Math.max;
+import static org.apache.cassandra.config.CassandraRelevantProperties.OTCP_LARGE_MESSAGE_THRESHOLD;
+import static org.apache.cassandra.net.FrameEncoderCrc.HEADER_AND_TRAILER_LENGTH;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.ConnectionType.URGENT_MESSAGES;
 import static org.apache.cassandra.net.ConnectionType.LARGE_MESSAGES;
 import static org.apache.cassandra.net.ConnectionType.SMALL_MESSAGES;
+import static org.apache.cassandra.net.ResourceLimits.*;
+import static org.apache.cassandra.utils.concurrent.Condition.newOneTimeCondition;
 
 /**
  * Groups a set of outbound connections to a given peer, and routes outgoing messages to the appropriate connection
@@ -52,13 +59,19 @@ public class OutboundConnections
 {
     private static final Logger logger = LoggerFactory.getLogger(OutboundConnections.class);
 
-    @VisibleForTesting
-    public static final int LARGE_MESSAGE_THRESHOLD = Integer.getInteger(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64)
-    - Math.max(Math.max(LegacyLZ4Constants.HEADER_LENGTH, FrameEncoderCrc.HEADER_AND_TRAILER_LENGTH), FrameEncoderLZ4.HEADER_AND_TRAILER_LENGTH);
+    private static final int HEADER_LENGTH = 8  // magic number
+                                            + 1  // token
+                                            + 4  // compressed length
+                                            + 4  // uncompressed length
+                                            + 4; // checksum
 
-    private final SimpleCondition metricsReady = new SimpleCondition();
+    @VisibleForTesting
+    public static final int LARGE_MESSAGE_THRESHOLD = OTCP_LARGE_MESSAGE_THRESHOLD.getInt()
+    - max(max(HEADER_LENGTH, HEADER_AND_TRAILER_LENGTH), FrameEncoderLZ4.HEADER_AND_TRAILER_LENGTH);
+
+    private final Condition metricsReady = newOneTimeCondition();
     private volatile InternodeOutboundMetrics metrics;
-    private final ResourceLimits.Limit reserveCapacity;
+    private final Limit reserveCapacity;
 
     private OutboundConnectionSettings template;
     public final OutboundConnection small;
@@ -68,8 +81,8 @@ public class OutboundConnections
     private OutboundConnections(OutboundConnectionSettings template)
     {
         this.template = template = template.withDefaultReserveLimits();
-        reserveCapacity = new ResourceLimits.Concurrent(template.applicationSendQueueReserveEndpointCapacityInBytes);
-        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(reserveCapacity, template.applicationSendQueueReserveGlobalCapacityInBytes);
+        reserveCapacity = new Concurrent(template.applicationSendQueueReserveEndpointCapacityInBytes);
+        EndpointAndGlobal reserveCapacityInBytes = new EndpointAndGlobal(reserveCapacity, template.applicationSendQueueReserveGlobalCapacityInBytes);
         this.small = new OutboundConnection(SMALL_MESSAGES, template, reserveCapacityInBytes);
         this.large = new OutboundConnection(LARGE_MESSAGES, template, reserveCapacityInBytes);
         this.urgent = new OutboundConnection(URGENT_MESSAGES, template, reserveCapacityInBytes);
@@ -93,7 +106,7 @@ public class OutboundConnections
 
             if (existing == null)
             {
-                connections.metrics = new InternodeOutboundMetrics(settings.to, connections);
+                connections.metrics = InternodeOutboundMetrics.create(settings.to, connections);
                 connections.metricsReady.signalAll();
             }
             else
@@ -116,7 +129,7 @@ public class OutboundConnections
     synchronized Future<Void> reconnectWithNewIp(InetAddressAndPort addr)
     {
         template = template.withConnectTo(addr);
-        return new FutureCombiner(
+        return FutureCombiner.nettySuccessListener(
             apply(c -> c.reconnectWith(template))
         );
     }
@@ -130,7 +143,7 @@ public class OutboundConnections
     {
         // immediately release our metrics, so that if we need to re-open immediately we can safely register a new one
         releaseMetrics();
-        return new FutureCombiner(
+        return FutureCombiner.nettySuccessListener(
             apply(c -> c.scheduleClose(time, unit, flushQueues))
         );
     }
@@ -144,7 +157,7 @@ public class OutboundConnections
     {
         // immediately release our metrics, so that if we need to re-open immediately we can safely register a new one
         releaseMetrics();
-        return new FutureCombiner(
+        return FutureCombiner.nettySuccessListener(
             apply(c -> c.close(flushQueues))
         );
     }
@@ -157,7 +170,7 @@ public class OutboundConnections
         }
         catch (InterruptedException e)
         {
-            throw new RuntimeException(e);
+            throw new UncheckedInterruptedException(e);
         }
 
         if (metrics != null)
@@ -199,12 +212,26 @@ public class OutboundConnections
         if (specifyConnection != null)
             return specifyConnection;
 
-        if (msg.verb().priority == Verb.Priority.P0)
-            return URGENT_MESSAGES;
+        if (msg.serializedSize(current_version) > LARGE_MESSAGE_THRESHOLD)
+        {
+            if (msg.verb().priority == Verb.Priority.P0)
+            {
+                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                                 "Enqueued URGENT message which exceeds large message threshold");
 
-        return msg.serializedSize(current_version) <= LARGE_MESSAGE_THRESHOLD
-               ? SMALL_MESSAGES
-               : LARGE_MESSAGES;
+                if (logger.isTraceEnabled())
+                    logger.trace("{} message with size {} exceeded large message threshold {}",
+                                 msg.verb(),
+                                 msg.serializedSize(current_version),
+                                 LARGE_MESSAGE_THRESHOLD);
+            }
+
+            return LARGE_MESSAGES;
+        }
+
+        return msg.verb().priority == Verb.Priority.P0
+               ? URGENT_MESSAGES
+               : SMALL_MESSAGES;
     }
 
     @VisibleForTesting
@@ -284,9 +311,9 @@ public class OutboundConnections
                     continue;
 
                 if (cur.small == prev.small && cur.large == prev.large && cur.urgent == prev.urgent
-                    && !Gossiper.instance.isKnownEndpoint(connections.template.to))
+                    && !Nodes.isKnownEndpoint(connections.template.to))
                 {
-                    logger.info("Closing outbound connections to {}, as inactive and not known by Gossiper",
+                    logger.info("Closing outbound connections to {}, as inactive and not known",
                                 connections.template.to);
                     // close entirely if no traffic and the endpoint is unknown
                     messagingService.closeOutboundNow(connections);

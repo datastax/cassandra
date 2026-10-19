@@ -20,16 +20,27 @@ package org.apache.cassandra.db.filter;
 
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.db.ClusteringPrefix;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.RejectException;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.exceptions.InternalRequestExecutionException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.marshal.*;
 
-public class TombstoneOverwhelmingException extends RuntimeException
+public class TombstoneOverwhelmingException extends RejectException implements InternalRequestExecutionException
 {
-    public TombstoneOverwhelmingException(int numTombstones, String query, TableMetadata metadata, DecoratedKey lastPartitionKey, ClusteringPrefix<?> lastClustering)
+    public TombstoneOverwhelmingException(long numTombstones, String query, TableMetadata metadata, DecoratedKey lastPartitionKey, ClusteringPrefix<?> lastClustering)
     {
         super(String.format("Scanned over %d tombstones during query '%s' (last scanned row token was %s and partion key was (%s)); query aborted",
                             numTombstones, query, lastPartitionKey.getToken(), makePKString(metadata, lastPartitionKey.getKey(), lastClustering)));
+    }
+
+    @Override
+    public RequestFailureReason getReason()
+    {
+        return RequestFailureReason.READ_TOO_MANY_TOMBSTONES;
     }
 
     private static String makePKString(TableMetadata metadata, ByteBuffer partitionKey, ClusteringPrefix<?> clustering)
@@ -49,7 +60,7 @@ public class TombstoneOverwhelmingException extends RuntimeException
             {
                 if (i > 0)
                     sb.append(", ");
-                sb.append(ct.types.get(i).getString(values[i]));
+                sb.append(ct.subTypes.get(i).getString(values[i]));
             }
         }
         else

@@ -19,28 +19,28 @@
 package org.apache.cassandra.test.microbench;
 
 
-import java.io.File;
 import java.io.IOException;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
-import org.apache.cassandra.cql3.CQLTester;
+import org.openjdk.jmh.annotations.*;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy;
+import org.apache.cassandra.db.compaction.CompactionStrategyFactory;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
-import org.openjdk.jmh.annotations.*;
 
-@BenchmarkMode(Mode.AverageTime)
-@OutputTimeUnit(TimeUnit.MILLISECONDS)
-@Warmup(iterations = 25, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 5, time = 2, timeUnit = TimeUnit.SECONDS)
-@Fork(value = 1)
-@Threads(1)
-@State(Scope.Benchmark)
-public class CompactionBench extends CQLTester
+public class CompactionBench extends BaseCompactionBench
 {
+    @Param({"false", "true"})
+    boolean cursors;
+
     static String keyspace;
     String table;
     String writeStatement;
@@ -50,9 +50,9 @@ public class CompactionBench extends CQLTester
     List<Descriptor> liveFiles;
 
     @Setup(Level.Trial)
-    public void setup() throws Throwable
+    public void setup0() throws Throwable
     {
-        CQLTester.prepareServer();
+        CQLTester.setUpClass();
         keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
         table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))");
         execute("use "+keyspace+";");
@@ -70,13 +70,13 @@ public class CompactionBench extends CQLTester
             execute(writeStatement, i, i, i );
 
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
 
         System.err.println("Writing 50k again...");
         for (long i = 0; i < 50000; i++)
             execute(writeStatement, i, i, i );
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
 
         cfs.snapshot("originals");
 
@@ -108,7 +108,7 @@ public class CompactionBench extends CQLTester
 
         for (File file : directories)
         {
-            for (File f : file.listFiles())
+            for (File f : file.tryList())
             {
                 if (f.isDirectory())
                     continue;
@@ -119,14 +119,33 @@ public class CompactionBench extends CQLTester
 
 
         for (File file : snapshotFiles)
-            FileUtils.createHardLink(file, new File(file.toPath().getParent().getParent().getParent().toFile(), file.getName()));
+            FileUtils.createHardLink(file, new File(new File(file.toPath().getParent().getParent().getParent()), file.name()));
 
         cfs.loadNewSSTables();
     }
 
     @Benchmark
-    public void compactTest() throws Throwable
+    public void compactSSTables() throws Throwable
     {
         cfs.forceMajorCompaction();
+    }
+
+    @Override
+    public String compactionClass()
+    {
+        return cursors ? "SizeTieredCompactionStrategy" : "org.apache.cassandra.test.microbench.CompactionBenchmark$CursorDisabledStrategy";
+    }
+
+    public static class CursorDisabledStrategy extends SizeTieredCompactionStrategy
+    {
+        public CursorDisabledStrategy(CompactionStrategyFactory factory, Map<String, String> options)
+        {
+            super(factory, options);
+        }
+
+        public boolean supportsCursorCompaction()
+        {
+            return false;
+        }
     }
 }

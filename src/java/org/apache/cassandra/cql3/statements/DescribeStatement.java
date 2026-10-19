@@ -23,6 +23,7 @@ import java.util.*;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import com.google.common.collect.ImmutableList;
 
@@ -46,6 +47,7 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.pager.PagingState;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -67,17 +69,17 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
     private static final String CF = "describe";
 
     /**
-     * The columns returned by the describe queries that only list elements names (e.g. DESCRIBE KEYSPACES, DESCRIBE TABLES...) 
+     * The columns returned by the describe queries that only list elements names (e.g. DESCRIBE KEYSPACES, DESCRIBE TABLES...)
      */
-    private static final List<ColumnSpecification> LIST_METADATA = 
+    private static final List<ColumnSpecification> LIST_METADATA =
             ImmutableList.of(new ColumnSpecification(KS, CF, new ColumnIdentifier("keyspace_name", true), UTF8Type.instance),
                              new ColumnSpecification(KS, CF, new ColumnIdentifier("type", true), UTF8Type.instance),
                              new ColumnSpecification(KS, CF, new ColumnIdentifier("name", true), UTF8Type.instance));
 
     /**
-     * The columns returned by the describe queries that returns the CREATE STATEMENT for the different elements (e.g. DESCRIBE KEYSPACE, DESCRIBE TABLE ...) 
+     * The columns returned by the describe queries that returns the CREATE STATEMENT for the different elements (e.g. DESCRIBE KEYSPACE, DESCRIBE TABLE ...)
      */
-    private static final List<ColumnSpecification> ELEMENT_METADATA = 
+    private static final List<ColumnSpecification> ELEMENT_METADATA =
             ImmutableList.<ColumnSpecification>builder().addAll(LIST_METADATA)
                                                         .add(new ColumnSpecification(KS, CF, new ColumnIdentifier("create_statement", true), UTF8Type.instance))
                                                         .build();
@@ -124,7 +126,7 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
     }
 
     @Override
-    public final ResultMessage execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    public final ResultMessage execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime) throws RequestValidationException, RequestExecutionException
     {
         return executeLocally(state, options);
     }
@@ -132,13 +134,13 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
     @Override
     public ResultMessage executeLocally(QueryState state, QueryOptions options)
     {
-        Keyspaces keyspaces = Schema.instance.snapshot();
-        UUID schemaVersion = Schema.instance.getVersion();
+        DistributedSchema schema = Schema.instance.getDistributedSchemaBlocking();
 
-        keyspaces = Keyspaces.builder()
-                             .add(keyspaces)
-                             .add(VirtualKeyspaceRegistry.instance.virtualKeyspacesMetadata())
-                             .build();
+        Keyspaces keyspaces = Keyspaces.builder()
+                                       .add(schema.getKeyspaces())
+                                       .add(Schema.instance.getLocalKeyspaces())
+                                       .add(VirtualKeyspaceRegistry.instance.virtualKeyspacesMetadata())
+                                       .build();
 
         PagingState pagingState = options.getPagingState();
 
@@ -156,15 +158,18 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
         //   (vint bytes) serialized schema hash (currently the result of Keyspaces.hashCode())
         //
 
-        long offset = getOffset(pagingState, schemaVersion);
-        int pageSize = options.getPageSize();
+        long offset = getOffset(pagingState, schema.getVersion());
+        PageSize pageSize = options.getPageSize();
+
+        if (pageSize.isDefined() && pageSize.getUnit() != PageSize.PageUnit.ROWS)
+            throw new InvalidRequestException("Paging in bytes is not supported for describe statement. Please specify the page size in rows.");
 
         Stream<? extends T> stream = describe(state.getClientState(), keyspaces);
 
         if (offset > 0L)
             stream = stream.skip(offset);
-        if (pageSize > 0)
-            stream = stream.limit(pageSize);
+        if (pageSize.isDefined())
+            stream = stream.limit(pageSize.getSize());
 
         List<List<ByteBuffer>> rows = stream.map(e -> toRow(e, includeInternalDetails))
                                             .collect(Collectors.toList());
@@ -172,9 +177,9 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
         ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(metadata(state.getClientState()));
         ResultSet result = new ResultSet(resultMetadata, rows);
 
-        if (pageSize > 0 && rows.size() == pageSize)
+        if (pageSize.isDefined() && rows.size() == pageSize.getSize())
         {
-            result.metadata.setHasMorePages(getPagingState(offset + pageSize, schemaVersion));
+            result.metadata.setHasMorePages(getPagingState(offset + pageSize.getSize(), schema.getVersion()));
         }
 
         return new ResultMessage.Rows(result);
@@ -308,7 +313,7 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
      */
     public static DescribeStatement<SchemaElement> functions()
     {
-        return new Listing(ks -> ks.functions.udfs());
+        return new Listing(ks -> ks.userFunctions.udfs());
     }
 
     /**
@@ -316,7 +321,7 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
      */
     public static DescribeStatement<SchemaElement> aggregates()
     {
-        return new Listing(ks -> ks.functions.udas());
+        return new Listing(ks -> ks.userFunctions.udas());
     }
 
     /**
@@ -387,7 +392,7 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
     public static class Element extends DescribeStatement<SchemaElement>
     {
         /**
-         * The keyspace name 
+         * The keyspace name
          */
         private final String keyspace;
 
@@ -445,8 +450,8 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
         if (!onlyKeyspace)
         {
             s = Stream.concat(s, ks.types.sortedStream());
-            s = Stream.concat(s, ks.functions.udfs().sorted(SchemaElement.NAME_COMPARATOR));
-            s = Stream.concat(s, ks.functions.udas().sorted(SchemaElement.NAME_COMPARATOR));
+            s = Stream.concat(s, ks.userFunctions.udfs().sorted(SchemaElement.NAME_COMPARATOR));
+            s = Stream.concat(s, ks.userFunctions.udas().sorted(SchemaElement.NAME_COMPARATOR));
             s = Stream.concat(s, ks.tables.stream().sorted(SchemaElement.NAME_COMPARATOR)
                                                    .flatMap(tm -> getTableElements(ks, tm)));
         }
@@ -472,12 +477,19 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
     {
         return new Element(keyspace, name, (ks, t) -> {
 
-            TableMetadata table = checkNotNull(ks.getTableOrViewNullable(t),
+            TableMetadata table = checkNotNull(ks.getTableNullable(t),
                                                "Table '%s' not found in keyspace '%s'", t, ks.name);
 
-            return Stream.concat(Stream.of(table), table.indexes.stream()
-                                                                .map(index -> toDescribable(table, index))
-                                                                .sorted(SchemaElement.NAME_COMPARATOR));
+
+            Stream<SchemaElement> withIndexes = Stream.concat(Stream.of(table), table.indexes.stream()
+                                                                                             .map(index -> toDescribable(table, index))
+                                                                                             .sorted(SchemaElement.NAME_COMPARATOR));
+
+            Stream<SchemaElement> views = StreamSupport.stream(ks.views.forTable(table.id).spliterator(), false)
+                                                       .map(viewMetadata -> toDescribable(table, viewMetadata))
+                                                       .sorted(SchemaElement.NAME_COMPARATOR);
+
+            return Stream.concat(withIndexes, views);
         });
     }
 
@@ -534,7 +546,7 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
     {
         return new Element(keyspace, name, (ks, n) -> {
 
-            return checkNotEmpty(ks.functions.getUdfs(new FunctionName(ks.name, n)),
+            return checkNotEmpty(ks.userFunctions.getUdfs(new FunctionName(ks.name, n)),
                                  "User defined function '%s' not found in '%s'", n, ks.name).stream()
                                                                                              .sorted(SchemaElement.NAME_COMPARATOR);
         });
@@ -547,7 +559,7 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
     {
         return new Element(keyspace, name, (ks, n) -> {
 
-            return checkNotEmpty(ks.functions.getUdas(new FunctionName(ks.name, n)),
+            return checkNotEmpty(ks.userFunctions.getUdas(new FunctionName(ks.name, n)),
                                  "User defined aggregate '%s' not found in '%s'", n, ks.name).stream()
                                                                                               .sorted(SchemaElement.NAME_COMPARATOR);
         });
@@ -581,6 +593,36 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
                         return index.toCqlString(table, ifNotExists);
                     }
                 };
+    }
+
+    private static SchemaElement toDescribable(TableMetadata table, ViewMetadata viewMetadata)
+    {
+        return new SchemaElement()
+        {
+            @Override
+            public SchemaElementType elementType()
+            {
+                return SchemaElementType.MATERIALIZED_VIEW;
+            }
+
+            @Override
+            public String elementKeyspace()
+            {
+                return table.keyspace;
+            }
+
+            @Override
+            public String elementName()
+            {
+                return viewMetadata.name();
+            }
+
+            @Override
+            public String toCqlString(boolean withInternals, boolean ifNotExists)
+            {
+                return viewMetadata.toCqlString(withInternals, ifNotExists);
+            }
+        };
     }
 
     /**
@@ -681,7 +723,7 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
                 list.add(trimIfPresent(DatabaseDescriptor.getPartitionerName(), "org.apache.cassandra.dht."));
                 list.add(trimIfPresent(DatabaseDescriptor.getEndpointSnitch().getClass().getName(),
                                             "org.apache.cassandra.locator."));
- 
+
                 String useKs = state.getRawKeyspace();
                 if (mustReturnsRangeOwnerships(useKs))
                 {
@@ -721,7 +763,7 @@ public abstract class DescribeStatement<T> extends CQLStatement.Raw implements C
             @Override
             protected List<ByteBuffer> toRow(List<Object> elements, boolean withInternals)
             {
-                ImmutableList.Builder<ByteBuffer> builder = ImmutableList.builder(); 
+                ImmutableList.Builder<ByteBuffer> builder = ImmutableList.builder();
 
                 builder.add(UTF8Type.instance.decompose((String) elements.get(CLUSTER_NAME_INDEX)),
                             UTF8Type.instance.decompose((String) elements.get(PARTITIONER_NAME_INDEX)),

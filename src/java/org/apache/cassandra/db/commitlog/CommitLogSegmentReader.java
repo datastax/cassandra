@@ -26,6 +26,9 @@ import javax.crypto.Cipher;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.AbstractIterator;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.commitlog.EncryptedFileSegmentInputStream.ChunkProvider;
 import org.apache.cassandra.db.commitlog.CommitLogReadHandler.*;
 import org.apache.cassandra.io.FSReadError;
@@ -38,6 +41,7 @@ import org.apache.cassandra.security.EncryptionUtils;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.COMMITLOG_ALLOW_IGNORE_SYNC_CRC;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.SYNC_MARKER_SIZE;
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
@@ -46,6 +50,10 @@ import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
  */
 public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.SyncSegment>
 {
+    private static volatile boolean allowSkipSyncMarkerCrc = COMMITLOG_ALLOW_IGNORE_SYNC_CRC.getBoolean();
+
+    private static final Logger logger = LoggerFactory.getLogger(CommitLogSegmentReader.class);
+    
     private final CommitLogReadHandler handler;
     private final CommitLogDescriptor descriptor;
     private final RandomAccessReader reader;
@@ -75,6 +83,11 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
         else
             segmenter = new NoOpSegmenter(reader);
     }
+    
+    public static void setAllowSkipSyncMarkerCrc(boolean allow)
+    {
+        allowSkipSyncMarkerCrc = allow;
+    }
 
     public Iterator<SyncSegment> iterator()
     {
@@ -87,53 +100,77 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
         {
             while (true)
             {
+                final int currentStart = end;
                 try
                 {
-                    final int currentStart = end;
                     end = readSyncMarker(descriptor, currentStart, reader);
-                    if (end == -1)
-                    {
-                        return endOfData();
-                    }
-                    if (end > reader.length())
-                    {
-                        // the CRC was good (meaning it was good when it was written and still looks legit), but the file is truncated now.
-                        // try to grab and use as much of the file as possible, which might be nothing if the end of the file truly is corrupt
-                        end = (int) reader.length();
-                    }
-                    return segmenter.nextSegment(currentStart + SYNC_MARKER_SIZE, end);
                 }
-                catch(CommitLogSegmentReader.SegmentReadException e)
+                catch (CommitLogSegmentReader.SegmentReadException e)
                 {
-                    try
-                    {
-                        handler.handleUnrecoverableError(new CommitLogReadException(
-                                                    e.getMessage(),
-                                                    CommitLogReadErrorReason.UNRECOVERABLE_DESCRIPTOR_ERROR,
-                                                    !e.invalidCrc && tolerateTruncation));
-                    }
-                    catch (IOException ioe)
-                    {
-                        throw new RuntimeException(ioe);
-                    }
+                    logger.debug("Error reading commit log", e);
+                    handleUnrecoverableError(e, !e.invalidCrc && tolerateTruncation);
+                    end = -1; // skip the remaining part of the corrupted log segment
                 }
                 catch (IOException e)
                 {
-                    try
-                    {
-                        boolean tolerateErrorsInSection = tolerateTruncation & segmenter.tolerateSegmentErrors(end, reader.length());
-                        // if no exception is thrown, the while loop will continue
-                        handler.handleUnrecoverableError(new CommitLogReadException(
-                                                    e.getMessage(),
-                                                    CommitLogReadErrorReason.UNRECOVERABLE_DESCRIPTOR_ERROR,
-                                                    tolerateErrorsInSection));
-                    }
-                    catch (IOException ioe)
-                    {
-                        throw new RuntimeException(ioe);
-                    }
+                    logger.debug("Error reading commit log", e);
+                    boolean tolerateErrorsInSection = tolerateTruncation & segmenter.tolerateSegmentErrors(end, reader.length());
+                    handleUnrecoverableError(e, tolerateErrorsInSection);
+                    end = -1; // skip the remaining part of the corrupted log segment
+                }
+
+                if (end == -1)
+                {
+                    return endOfData();
+                }
+                if (end > reader.length())
+                {
+                    // the CRC was good (meaning it was good when it was written and still looks legit), but the file is truncated now.
+                    // try to grab and use as much of the file as possible, which might be nothing if the end of the file truly is corrupt
+                    end = (int) reader.length();
+                }
+
+                try
+                {
+                    return segmenter.nextSegment(currentStart + SYNC_MARKER_SIZE, end);
+                }
+                catch (CommitLogSegmentReader.SegmentReadException e)
+                {
+                    logger.debug("Error reading commit log", e);
+                    handleUnrecoverableError(e, !e.invalidCrc && tolerateTruncation);
+                    // if no exception is thrown, the while loop will continue
+                }
+                catch (IOException e)
+                {
+                    logger.debug("Error reading commit log", e);
+                    boolean tolerateErrorsInSection = tolerateTruncation & segmenter.tolerateSegmentErrors(end, reader.length());
+                    handleUnrecoverableError(e, tolerateErrorsInSection);
+                    // if no exception is thrown, the while loop will continue
+                }
+
+                // if we've not been able to read the sync marker, or the file is truncated,
+                // then return end of data, otherwise continue the loop
+                if (currentStart == end)
+                {
+                    return endOfData();
                 }
             }
+        }
+    }
+
+    private void handleUnrecoverableError(Exception e, boolean permissible)
+    {
+        try
+        {
+            handler.handleUnrecoverableError(new CommitLogReadException(
+                e.getMessage(),
+                CommitLogReadErrorReason.UNRECOVERABLE_DESCRIPTOR_ERROR,
+                permissible)
+            );
+        }
+        catch (IOException ioe)
+        {
+            throw new RuntimeException(ioe);
         }
     }
 
@@ -151,19 +188,34 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
         updateChecksumInt(crc, (int) reader.getPosition());
         final int end = reader.readInt();
         long filecrc = reader.readInt() & 0xffffffffL;
+
         if (crc.getValue() != filecrc)
         {
+            // The next marker position and CRC value are not written atomically, so it is possible for the latter to 
+            // still be zero after the former has been finalized, even though the mutations that follow it are valid.
+            // When there is no compression or encryption enabled, we can ignore a sync marker CRC mismatch and defer 
+            // to the per-mutation CRCs, which may be preferable to preventing startup altogether.
+            if (allowSkipSyncMarkerCrc
+                && descriptor.compression == null && !descriptor.getEncryptionContext().isEnabled()
+                && filecrc == 0 && end != 0)
+            {
+                logger.warn("Skipping sync marker CRC check at position {} (end={}, calculated crc={}) of commit log {}." +
+                            "Using per-mutation CRC checks to ensure correctness...",
+                            offset, end, crc.getValue(), reader.getFile());
+                return end;
+            }
+
             if (end != 0 || filecrc != 0)
             {
                 String msg = String.format("Encountered bad header at position %d of commit log %s, with invalid CRC. " +
-                             "The end of segment marker should be zero.", offset, reader.getPath());
+                             "The end of segment marker should be zero.", offset, reader.getFile());
                 throw new SegmentReadException(msg, true);
             }
             return -1;
         }
         else if (end < offset || end > reader.length())
         {
-            String msg = String.format("Encountered bad header at position %d of commit log %s, with bad position but valid CRC", offset, reader.getPath());
+            String msg = String.format("Encountered bad header at position %d of commit log %s, with bad position but valid CRC", offset, reader.getFile());
             throw new SegmentReadException(msg, false);
         }
         return end;
@@ -273,7 +325,6 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
             nextLogicalStart = reader.getFilePointer();
         }
 
-        @SuppressWarnings("resource")
         public SyncSegment nextSegment(final int startPosition, final int nextSectionStartPosition) throws IOException
         {
             reader.seek(startPosition);
@@ -288,7 +339,7 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
                uncompressedBuffer = new byte[(int) (1.2 * uncompressedLength)];
             int count = compressor.uncompress(compressedBuffer, 0, compressedLength, uncompressedBuffer, 0);
             nextLogicalStart += SYNC_MARKER_SIZE;
-            FileDataInput input = new FileSegmentInputStream(ByteBuffer.wrap(uncompressedBuffer, 0, count), reader.getPath(), nextLogicalStart);
+            FileDataInput input = new FileSegmentInputStream(ByteBuffer.wrap(uncompressedBuffer, 0, count), reader.getFile(), nextLogicalStart);
             nextLogicalStart += uncompressedLength;
             return new SyncSegment(input, startPosition, nextSectionStartPosition, (int)nextLogicalStart, tolerateSegmentErrors(nextSectionStartPosition, reader.length()));
         }
@@ -334,7 +385,7 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
             }
             catch (IOException ioe)
             {
-                throw new FSReadError(ioe, reader.getPath());
+                throw new FSReadError(ioe, reader.getFile());
             }
 
             chunkProvider = () -> {
@@ -348,19 +399,18 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
                 }
                 catch (IOException e)
                 {
-                    throw new FSReadError(e, reader.getPath());
+                    throw new FSReadError(e, reader.getFile());
                 }
             };
         }
 
-        @SuppressWarnings("resource")
         public SyncSegment nextSegment(int startPosition, int nextSectionStartPosition) throws IOException
         {
             int totalPlainTextLength = reader.readInt();
             currentSegmentEndPosition = nextSectionStartPosition - 1;
 
             nextLogicalStart += SYNC_MARKER_SIZE;
-            FileDataInput input = new EncryptedFileSegmentInputStream(reader.getPath(), nextLogicalStart, 0, totalPlainTextLength, chunkProvider);
+            FileDataInput input = new EncryptedFileSegmentInputStream(reader.getFile(), nextLogicalStart, 0, totalPlainTextLength, chunkProvider);
             nextLogicalStart += totalPlainTextLength;
             return new SyncSegment(input, startPosition, nextSectionStartPosition, (int)nextLogicalStart, tolerateSegmentErrors(nextSectionStartPosition, reader.length()));
         }

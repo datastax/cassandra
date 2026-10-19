@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -32,30 +33,39 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.dht.ByteOrderedPartitioner.BytesToken;
 import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.IEndpointSnitch;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.PendingRangeMaps;
+import org.apache.cassandra.locator.PropertyFileSnitch;
+import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -65,6 +75,7 @@ public class CleanupTest
     public static final String KEYSPACE1 = "CleanupTest1";
     public static final String CF_INDEXED1 = "Indexed1";
     public static final String CF_STANDARD1 = "Standard1";
+    public static final String CF_STANDARD_UCS1 = "StandardUCS1";
 
     public static final String KEYSPACE2 = "CleanupTestMultiDc";
     public static final String CF_INDEXED2 = "Indexed2";
@@ -87,7 +98,8 @@ public class CleanupTest
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1),
+                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1)
+                                                .compaction(CompactionParams.stcs(new HashMap<>())),
                                     SchemaLoader.compositeIndexCFMD(KEYSPACE1, CF_INDEXED1, true));
 
 
@@ -108,17 +120,22 @@ public class CleanupTest
 
         SchemaLoader.createKeyspace(KEYSPACE2,
                                     KeyspaceParams.nts("DC1", 1),
-                                    SchemaLoader.standardCFMD(KEYSPACE2, CF_STANDARD2),
-                                    SchemaLoader.compositeIndexCFMD(KEYSPACE2, CF_INDEXED2, true));
+                                    SchemaLoader.standardCFMD(KEYSPACE2, CF_STANDARD2)
+                                                .compaction(CompactionParams.stcs(new HashMap<>())),
+                                    SchemaLoader.compositeIndexCFMD(KEYSPACE2, CF_INDEXED2, true),
+                                    SchemaLoader.standardCFMD(KEYSPACE2, CF_STANDARD_UCS1)
+                                                .compaction(CompactionParams.ucs(new HashMap<>())));
         SchemaLoader.createKeyspace(KEYSPACE3,
                                     KeyspaceParams.nts("DC1", 1),
                                     SchemaLoader.standardCFMD(KEYSPACE3, CF_STANDARD3));
     }
 
     @Test
-    public void testCleanup() throws ExecutionException, InterruptedException
+    public void testCleanup() throws ExecutionException, InterruptedException, UnknownHostException
     {
-        StorageService.instance.getTokenMetadata().clearUnsafe();
+        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        tmd.clearUnsafe();
+        tmd.updateNormalToken(token(new byte[]{ 50 }), InetAddressAndPort.getByName("127.0.0.1"));
 
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD1);
@@ -155,11 +172,11 @@ public class CleanupTest
 
         ColumnMetadata cdef = cfs.metadata().getColumn(COLUMN);
         String indexName = "birthdate_key_index";
-        long start = System.nanoTime();
-        while (!cfs.getBuiltIndexes().contains(indexName) && System.nanoTime() - start < TimeUnit.SECONDS.toNanos(10))
+        long start = nanoTime();
+        while (!cfs.getBuiltIndexes().contains(indexName) && nanoTime() - start < TimeUnit.SECONDS.toNanos(10))
             Thread.sleep(10);
 
-        RowFilter cf = RowFilter.create();
+        RowFilter.Builder cf = RowFilter.builder(true);
         cf.add(cdef, Operator.EQ, VALUE);
         assertEquals(LOOPS, Util.getAll(Util.cmd(cfs).filterOn("birthdate", Operator.EQ, VALUE).build()).size());
 
@@ -209,18 +226,30 @@ public class CleanupTest
     }
 
     @Test
-    public void testCleanupWithNoTokenRange() throws Exception
+    public void testCleanupSTCSWithNoTokenRange() throws Exception
     {
-        testCleanupWithNoTokenRange(false);
+        testCleanupWithNoTokenRange(CF_STANDARD2, false);
     }
 
     @Test
-    public void testUserDefinedCleanupWithNoTokenRange() throws Exception
+    public void testUserDefinedCleanupSTCSWithNoTokenRange() throws Exception
     {
-        testCleanupWithNoTokenRange(true);
+        testCleanupWithNoTokenRange(CF_STANDARD2, true);
     }
 
-    private void testCleanupWithNoTokenRange(boolean isUserDefined) throws Exception
+    @Test
+    public void testCleanupUCSWithNoTokenRange() throws Exception
+    {
+        testCleanupWithNoTokenRange(CF_STANDARD_UCS1, false);
+    }
+
+    @Test
+    public void testUserDefinedCleanupUCSWithNoTokenRange() throws Exception
+    {
+        testCleanupWithNoTokenRange(CF_STANDARD_UCS1, true);
+    }
+
+    private void testCleanupWithNoTokenRange(String cfsName, boolean isUserDefined) throws Exception
     {
 
         TokenMetadata tmd = StorageService.instance.getTokenMetadata();
@@ -232,7 +261,7 @@ public class CleanupTest
 
         Keyspace keyspace = Keyspace.open(KEYSPACE2);
         keyspace.setMetadata(KeyspaceMetadata.create(KEYSPACE2, KeyspaceParams.nts("DC1", 1)));
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD2);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfsName);
 
         // insert data and verify we get it back w/ range query
         fillCF(cfs, "val", LOOPS);
@@ -258,6 +287,17 @@ public class CleanupTest
     @Test
     public void testCleanupSkippingSSTables() throws UnknownHostException, ExecutionException, InterruptedException
     {
+        testCleanupSkippingSSTablesHelper(false);
+    }
+
+    @Test
+    public void testCleanupSkippingRepairedSSTables() throws UnknownHostException, ExecutionException, InterruptedException
+    {
+        testCleanupSkippingSSTablesHelper(true);
+    }
+
+    public void testCleanupSkippingSSTablesHelper(boolean repaired) throws UnknownHostException, ExecutionException, InterruptedException
+    {
         Keyspace keyspace = Keyspace.open(KEYSPACE3);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD3);
         cfs.disableAutoCompaction();
@@ -272,10 +312,24 @@ public class CleanupTest
             .add("val", VALUE)
             .build()
             .applyUnsafe();
-            cfs.forceBlockingFlush();
+            Util.flush(cfs);
         }
 
         Set<SSTableReader> beforeFirstCleanup = Sets.newHashSet(cfs.getLiveSSTables());
+        if (repaired)
+        {
+            beforeFirstCleanup.forEach((sstable) -> {
+                try
+                {
+                    sstable.descriptor.getMetadataSerializer().mutateRepairMetadata(sstable.descriptor, System.currentTimeMillis(), null, false);
+                    sstable.reloadSSTableMetadata();
+                }
+                catch (Exception e)
+                {
+                    throw new RuntimeException(e);
+                }
+            });
+        }
         // single token - 127.0.0.1 owns everything, cleanup should be noop
         cfs.forceCleanup(2);
         assertEquals(beforeFirstCleanup, cfs.getLiveSSTables());
@@ -284,8 +338,8 @@ public class CleanupTest
         cfs.forceCleanup(2);
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            assertEquals(sstable.first, sstable.last); // single-token sstables
-            assertTrue(sstable.first.getToken().compareTo(token(new byte[]{ 50 })) <= 0);
+            assertEquals(sstable.getFirst(), sstable.getLast()); // single-token sstables
+            assertTrue(sstable.getFirst().getToken().compareTo(token(new byte[]{ 50 })) <= 0);
             // with single-token sstables they should all either be skipped or dropped:
             assertTrue(beforeFirstCleanup.contains(sstable));
         }
@@ -330,8 +384,8 @@ public class CleanupTest
 
         // prepare SSTable and some useful tokens
         SSTableReader ssTable = cfs.getLiveSSTables().iterator().next();
-        final Token ssTableMin = ssTable.first.getToken();
-        final Token ssTableMax = ssTable.last.getToken();
+        final Token ssTableMin = ssTable.getFirst().getToken();
+        final Token ssTableMax = ssTable.getLast().getToken();
 
         final Token min = token((byte) 0);
         final Token before1 = token((byte) 2);
@@ -379,6 +433,43 @@ public class CleanupTest
             assertEquals(testCase.getKey(), CompactionManager.needsCleanup(ssTable, testCase.getValue()));
         }
     }
+
+    @Test
+    public void testCleanupIsAbortedWhenNodeHasPendingRanges() throws ExecutionException, InterruptedException, UnknownHostException
+    {
+        // given
+        StorageService.instance.getTokenMetadata().clearUnsafe();
+
+        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD1);
+
+        fillCF(cfs, "val", LOOPS);
+        assertEquals(LOOPS, Util.getAll(Util.cmd(cfs).build()).size());
+
+        Range<Token> range = range(new BytesToken(new byte[]{0}), new BytesToken(new byte[]{1}));
+        givenPendingRange(cfs, range);
+
+        // when
+        CompactionManager.AllSSTableOpStatus status = CompactionManager.instance.performCleanup(cfs, 2);
+
+        // then
+        assertEquals("cleanup should be aborted", CompactionManager.AllSSTableOpStatus.ABORTED, status);
+    }
+
+    private void givenPendingRange(ColumnFamilyStore cfs, Range<Token> range) throws UnknownHostException
+    {
+        StorageService.instance.getTokenMetadata().calculatePendingRanges(createStrategy(cfs.keyspace.getName()), cfs.keyspace.getName());
+        PendingRangeMaps ranges = StorageService.instance.getTokenMetadata().getPendingRanges(cfs.keyspace.getName());
+        ranges.addPendingRange(range, Replica.fullReplica(InetAddressAndPort.getByName("127.0.0.1"), range));
+    }
+
+    private AbstractReplicationStrategy createStrategy(String keyspace)
+    {
+        IEndpointSnitch snitch = new PropertyFileSnitch();
+        DatabaseDescriptor.setEndpointSnitch(snitch);
+        return new SimpleStrategy(keyspace, new TokenMetadata(), DatabaseDescriptor.getEndpointSnitch(), ImmutableMap.of(SimpleStrategy.REPLICATION_FACTOR, "1"));
+    }
+
     private static BytesToken token(byte ... value)
     {
         return new BytesToken(value);
@@ -407,7 +498,7 @@ public class CleanupTest
                     .applyUnsafe();
         }
 
-        cfs.forceBlockingFlush();
+        Util.flush(cfs);
     }
 
     protected List<Long> getMaxTimestampList(ColumnFamilyStore cfs)

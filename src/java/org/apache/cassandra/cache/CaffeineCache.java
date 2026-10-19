@@ -21,12 +21,11 @@ import static com.google.common.base.Preconditions.checkState;
 
 import java.util.Iterator;
 
-import com.google.common.util.concurrent.MoreExecutors;
-
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Policy.Eviction;
 import com.github.benmanes.caffeine.cache.Weigher;
+import org.apache.cassandra.concurrent.ImmediateExecutor;
 
 /**
  * An adapter from a Caffeine cache to the ICache interface. This provides an on-heap cache using
@@ -38,12 +37,32 @@ public class CaffeineCache<K extends IMeasurableMemory, V extends IMeasurableMem
     private final Cache<K, V> cache;
     private final Eviction<K, V> policy;
 
+    /**
+     * cache capacity cached for performance reasons
+     * </p>
+     * The need to cache this value arises from the fact that map.capacity() is an expensive operation for
+     * Caffeine caches, which use the cache eviction policy to determine the capacity, which, in turn,
+     * may take eviction lock and do cache maintenance before returning the actual value.
+     * </p>
+     * Cassandra frequently uses cache capacity to determine if a cache is enabled.
+     * See e.g:
+     * {@link org.apache.cassandra.db.ColumnFamilyStore#putCachedCounter},
+     * {@link org.apache.cassandra.db.ColumnFamilyStore#getCachedCounter},
+     * </p>
+     * In more stressful scenarios with many counter cache puts and gets asking the underlying cache to provide the
+     * capacity instead of using the cached value leads to a significant performance degradation.
+     * </p>
+     * No thread-safety guarantees are provided. The value may be a bit stale, and this is good enough.
+     */
+    private long cacheCapacity;
+
     private CaffeineCache(Cache<K, V> cache)
     {
         this.cache = cache;
         this.policy = cache.policy().eviction().orElseThrow(() -> 
             new IllegalArgumentException("Expected a size bounded cache"));
         checkState(policy.isWeighted(), "Expected a weighted cache");
+        this.cacheCapacity = capacitySlow();
     }
 
     /**
@@ -54,7 +73,7 @@ public class CaffeineCache<K extends IMeasurableMemory, V extends IMeasurableMem
         Cache<K, V> cache = Caffeine.newBuilder()
                 .maximumWeight(weightedCapacity)
                 .weigher(weigher)
-                .executor(MoreExecutors.directExecutor())
+                .executor(ImmediateExecutor.INSTANCE)
                 .build();
         return new CaffeineCache<>(cache);
     }
@@ -64,20 +83,22 @@ public class CaffeineCache<K extends IMeasurableMemory, V extends IMeasurableMem
         return create(weightedCapacity, (key, value) -> {
             long size = key.unsharedHeapSize() + value.unsharedHeapSize();
             if (size > Integer.MAX_VALUE) {
-                throw new IllegalArgumentException("Serialized size cannot be more than 2GB/Integer.MAX_VALUE");
+                throw new IllegalArgumentException("Serialized size cannot be more than 2GiB/Integer.MAX_VALUE");
             }
             return (int) size;
         });
     }
 
+    @Override
     public long capacity()
     {
-        return policy.getMaximum();
+        return cacheCapacity;
     }
 
     public void setCapacity(long capacity)
     {
         policy.setMaximum(capacity);
+        cacheCapacity = capacitySlow();
     }
 
     public boolean isEmpty()
@@ -138,5 +159,15 @@ public class CaffeineCache<K extends IMeasurableMemory, V extends IMeasurableMem
     public boolean containsKey(K key)
     {
         return cache.asMap().containsKey(key);
+    }
+
+    /**
+     * This method is used to get the capacity of the cache. It is a slow method because it may take the eviction lock
+     * and perform cache maintenance before returning the actual value.
+     * @return the capacity of the cache as determined by the eviction policy
+     */
+    private long capacitySlow()
+    {
+        return policy.getMaximum();
     }
 }

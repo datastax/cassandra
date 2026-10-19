@@ -17,14 +17,25 @@
  */
 package org.apache.cassandra.db;
 
+import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.annotations.VisibleForTesting;
+
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.Snapshot;
+import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.context.OperationContext;
+import org.apache.cassandra.service.context.OperationContextTracker;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
-import static org.apache.cassandra.utils.MonotonicClock.preciseTime;
+import static org.apache.cassandra.utils.MonotonicClock.Global.preciseTime;
 
 public class ReadExecutionController implements AutoCloseable
 {
@@ -42,12 +53,18 @@ public class ReadExecutionController implements AutoCloseable
 
     private final long createdAtNanos; // Only used while sampling
 
-    private ReadExecutionController(ReadCommand command,
-                                    OpOrder.Group baseOp,
-                                    TableMetadata baseMetadata,
-                                    ReadExecutionController indexController,
-                                    WriteContext writeContext,
-                                    long createdAtNanos)
+    private final RepairedDataInfo repairedDataInfo;
+    private long oldestUnrepairedTombstone = Long.MAX_VALUE;
+
+    private final Histogram sstablesScannedPerRowRead;
+
+    ReadExecutionController(ReadCommand command,
+                            OpOrder.Group baseOp,
+                            TableMetadata baseMetadata,
+                            ReadExecutionController indexController,
+                            WriteContext writeContext,
+                            long createdAtNanos,
+                            boolean trackRepairedStatus)
     {
         // We can have baseOp == null, but only when empty() is called, in which case the controller will never really be used
         // (which validForReadOn should ensure). But if it's not null, we should have the proper metadata too.
@@ -58,6 +75,32 @@ public class ReadExecutionController implements AutoCloseable
         this.writeContext = writeContext;
         this.command = command;
         this.createdAtNanos = createdAtNanos;
+
+        // This is expensive to create, and since this is on the query hot path, we must only make it when we need it.
+        this.sstablesScannedPerRowRead = Tracing.isTracing()
+                ? new Histogram(new DecayingEstimatedHistogramReservoir(true))
+                : null;
+
+        if (trackRepairedStatus)
+        {
+            DataLimits.Counter repairedReadCount = command.limits().newCounter(command.nowInSec(),
+                                                                               false,
+                                                                               command.selectsFullPartition(),
+                                                                               metadata().enforceStrictLiveness()).onlyCount();
+            repairedDataInfo = new RepairedDataInfo(repairedReadCount);
+        }
+        else
+        {
+            repairedDataInfo = RepairedDataInfo.NO_OP_REPAIRED_DATA_INFO;
+        }
+
+        if (Tracing.isTracing())
+            Tracing.instance.setRangeQuery(isRangeCommand());
+    }
+
+    public boolean isRangeCommand()
+    {
+        return command != null && command.isRangeRequest();
     }
 
     public ReadExecutionController indexReadController()
@@ -70,6 +113,16 @@ public class ReadExecutionController implements AutoCloseable
         return writeContext;
     }
 
+    long oldestUnrepairedTombstone()
+    {
+        return oldestUnrepairedTombstone;
+    }
+    
+    void updateMinOldestUnrepairedTombstone(long candidate)
+    {
+        oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, candidate);
+    }
+
     boolean validForReadOn(ColumnFamilyStore cfs)
     {
         return baseOp != null && cfs.metadata.id.equals(baseMetadata.id);
@@ -77,7 +130,7 @@ public class ReadExecutionController implements AutoCloseable
 
     public static ReadExecutionController empty()
     {
-        return new ReadExecutionController(null, null, null, null, null, NO_SAMPLING);
+        return new ReadExecutionController(null, null, null, null, null, NO_SAMPLING, false);
     }
 
     /**
@@ -90,15 +143,17 @@ public class ReadExecutionController implements AutoCloseable
      * @return the created execution controller, which must always be closed.
      */
     @SuppressWarnings("resource") // ops closed during controller close
-    static ReadExecutionController forCommand(ReadCommand command)
+    static ReadExecutionController forCommand(ReadCommand command, boolean trackRepairedStatus)
     {
         ColumnFamilyStore baseCfs = Keyspace.openAndGetStore(command.metadata());
-        ColumnFamilyStore indexCfs = maybeGetIndexCfs(baseCfs, command);
+        ColumnFamilyStore indexCfs = maybeGetIndexCfs(command);
 
         long createdAtNanos = baseCfs.metric.topLocalReadQueryTime.isEnabled() ? clock.now() : NO_SAMPLING;
 
+        OperationContextTracker.start(OperationContext.FACTORY.forRead(command, baseCfs));
+
         if (indexCfs == null)
-            return new ReadExecutionController(command, baseCfs.readOrdering.start(), baseCfs.metadata(), null, null, createdAtNanos);
+            return new ReadExecutionController(command, baseCfs.readOrdering.start(), baseCfs.metadata(), null, null, createdAtNanos, trackRepairedStatus);
 
         OpOrder.Group baseOp = null;
         WriteContext writeContext = null;
@@ -107,14 +162,14 @@ public class ReadExecutionController implements AutoCloseable
         try
         {
             baseOp = baseCfs.readOrdering.start();
-            indexController = new ReadExecutionController(command, indexCfs.readOrdering.start(), indexCfs.metadata(), null, null, NO_SAMPLING);
+            indexController = new ReadExecutionController(command, indexCfs.readOrdering.start(), indexCfs.metadata(), null, null, NO_SAMPLING, false);
             /*
              * TODO: this should perhaps not open and maintain a writeOp for the full duration, but instead only *try*
              * to delete stale entries, without blocking if there's no room
              * as it stands, we open a writeOp and keep it open for the duration to ensure that should this CF get flushed to make room we don't block the reclamation of any room being made
              */
             writeContext = baseCfs.keyspace.getWriteHandler().createContextForRead();
-            return new ReadExecutionController(command, baseOp, baseCfs.metadata(), indexController, writeContext, createdAtNanos);
+            return new ReadExecutionController(command, baseOp, baseCfs.metadata(), indexController, writeContext, createdAtNanos, trackRepairedStatus);
         }
         catch (RuntimeException e)
         {
@@ -130,14 +185,19 @@ public class ReadExecutionController implements AutoCloseable
                 if (indexController != null)
                     indexController.close();
             }
+            OperationContextTracker.endCurrent();
             throw e;
         }
     }
 
-    private static ColumnFamilyStore maybeGetIndexCfs(ColumnFamilyStore baseCfs, ReadCommand command)
+    private static ColumnFamilyStore maybeGetIndexCfs(ReadCommand command)
     {
-        Index index = command.getIndex(baseCfs);
-        return index == null ? null : index.getBackingTable().orElse(null);
+        Index.QueryPlan queryPlan = command.indexQueryPlan();
+        if (queryPlan == null)
+            return null;
+
+        // only the index groups with a single member are allowed to have a backing table
+        return queryPlan.getFirst().getBackingTable().orElse(null);
     }
 
     public TableMetadata metadata()
@@ -167,16 +227,58 @@ public class ReadExecutionController implements AutoCloseable
             }
         }
 
+        OperationContextTracker.endCurrent();
+
         if (createdAtNanos != NO_SAMPLING)
             addSample();
+
+        if (sstablesScannedPerRowRead != null)
+        {
+            Snapshot sstablesHistogram = sstablesScannedPerRowRead.getSnapshot();
+            Tracing.trace("Scanned {} rows; average {} sstables scanned per row with stdev {} and max {}",
+                          sstablesScannedPerRowRead.getCount(),
+                          sstablesHistogram.getMean(),
+                          sstablesHistogram.getStdDev(),
+                          sstablesHistogram.getMax());
+        }
+}
+
+    public boolean isTrackingRepairedStatus()
+    {
+        return repairedDataInfo != RepairedDataInfo.NO_OP_REPAIRED_DATA_INFO;
+    }
+
+    @VisibleForTesting
+    public ByteBuffer getRepairedDataDigest()
+    {
+        return repairedDataInfo.getDigest();
+    }
+
+    @VisibleForTesting
+    public boolean isRepairedDataDigestConclusive()
+    {
+        return repairedDataInfo.isConclusive();
+    }
+
+    public RepairedDataInfo getRepairedDataInfo()
+    {
+        return repairedDataInfo;
     }
 
     private void addSample()
     {
-        String cql = command.toCQLString();
+        String cql = command.toCQLString(Redaction.REDACT);
         int timeMicros = (int) Math.min(TimeUnit.NANOSECONDS.toMicros(clock.now() - createdAtNanos), Integer.MAX_VALUE);
         ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(baseMetadata.id);
         if (cfs != null)
             cfs.metric.topLocalReadQueryTime.addSample(cql, timeMicros);
+    }
+
+    public void updateSstablesIteratedPerRow(int mergedSSTablesIterated)
+    {
+        if (sstablesScannedPerRowRead != null)
+        {
+            sstablesScannedPerRowRead.update(mergedSSTablesIterated);
+        }
     }
 }

@@ -17,8 +17,10 @@
  */
 package org.apache.cassandra.auth;
 
+import java.net.InetSocketAddress;
 import java.util.Set;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -28,7 +30,7 @@ import org.apache.cassandra.dht.Datacenters;
  * Returned from IAuthenticator#authenticate(), represents an authenticated user everywhere internally.
  *
  * Holds the name of the user and the roles that have been granted to the user. The roles will be cached
- * for roles_validity_in_ms.
+ * for roles_validity.
  */
 public class AuthenticatedUser
 {
@@ -39,11 +41,23 @@ public class AuthenticatedUser
     public static final AuthenticatedUser ANONYMOUS_USER = new AuthenticatedUser(ANONYMOUS_USERNAME);
 
     // User-level permissions cache.
-    private static final PermissionsCache permissionsCache = new PermissionsCache(DatabaseDescriptor.getAuthorizer());
-    private static final NetworkAuthCache networkAuthCache = new NetworkAuthCache(DatabaseDescriptor.getNetworkAuthorizer());
+    public static final PermissionsCache permissionsCache = new PermissionsCache(DatabaseDescriptor.getAuthorizer());
+    public static final NetworkPermissionsCache networkPermissionsCache = new NetworkPermissionsCache(DatabaseDescriptor.getNetworkAuthorizer());
+
+    private static final ICIDRAuthorizer cidrAuthorizer = DatabaseDescriptor.getCIDRAuthorizer();
+
+    /** Use {@link AuthCacheService#initializeAndRegisterCaches} rather than calling this directly */
+    public static void init()
+    {
+        AuthCacheService.instance.register(permissionsCache);
+        AuthCacheService.instance.register(networkPermissionsCache);
+
+        cidrAuthorizer.initCaches();
+    }
 
     private final String name;
-    // primary Role of the logged in user
+
+    // Primary Role of the logged in user
     private final RoleResource role;
 
     public AuthenticatedUser(String name)
@@ -117,6 +131,33 @@ public class AuthenticatedUser
     }
 
     /**
+     * Clears all entries from the permissions cache.
+     * 
+     * Used by CNDB Authorizer to clear all entries from the cache.
+     */
+    @VisibleForTesting
+    public static void clearCache()
+    {
+        permissionsCache.invalidate();
+    }
+
+    /**
+     * Clears all entries belonging to the given {@link RoleResource}
+     * from the permissions cache.
+     * 
+     * Used by CNDB Authorizer to clear entries after permissions are granted
+     * or revoked.
+     * 
+     * @param roleResource the {@link RoleResource} to clear from the cache 
+     */
+    @VisibleForTesting
+    public static void clearCache(RoleResource roleResource)
+    {
+        permissionsCache.maybeInvalidateByFilter(key -> key.left.equals(new AuthenticatedUser(roleResource.getRoleName())));
+    }
+
+
+    /**
      * Check whether this user has login privileges.
      * LOGIN is not inherited from granted roles, so must be directly granted to the primary role for this user
      *
@@ -136,7 +177,12 @@ public class AuthenticatedUser
      */
     public boolean hasLocalAccess()
     {
-        return networkAuthCache.get(this.getPrimaryRole()).canAccess(Datacenters.thisDatacenter());
+        return networkPermissionsCache.get(this.getPrimaryRole()).canAccess(Datacenters.thisDatacenter());
+    }
+
+    public boolean hasAccessFromIp(InetSocketAddress remoteAddress)
+    {
+        return cidrAuthorizer.hasAccessFromIp(role, remoteAddress.getAddress());
     }
 
     @Override
@@ -164,5 +210,4 @@ public class AuthenticatedUser
     {
         return Objects.hashCode(name);
     }
-
 }

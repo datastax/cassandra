@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -46,7 +47,7 @@ public class ResultSet
     public static final Codec codec = new Codec();
 
     public final ResultMetadata metadata;
-    public final List<List<ByteBuffer>> rows;
+    public List<List<ByteBuffer>> rows;
 
     public ResultSet(ResultMetadata resultMetadata)
     {
@@ -93,14 +94,11 @@ public class ResultSet
         Collections.reverse(rows);
     }
 
-    public void trim(int limit)
+    public ResultSet withMetadata(ResultMetadata newMetadata)
     {
-        int toRemove = rows.size() - limit;
-        if (toRemove > 0)
-        {
-            for (int i = 0; i < toRemove; i++)
-                rows.remove(rows.size() - 1);
-        }
+        if (newMetadata != metadata)
+            return new ResultSet(newMetadata, rows);
+        return this;
     }
 
     @Override
@@ -137,6 +135,15 @@ public class ResultSet
         {
             throw new RuntimeException(e);
         }
+    }
+
+    public ResultSet withOverriddenKeyspace(UnaryOperator<String> keyspaceMapper)
+    {
+        if (keyspaceMapper == Constants.IDENTITY_STRING_MAPPER)
+            return this;
+
+        ResultMetadata newMetadata = metadata.withOverriddenKeyspace(keyspaceMapper);
+        return metadata == newMetadata ? this : new ResultSet(newMetadata, rows);
     }
 
     public static class Codec implements CBCodec<ResultSet>
@@ -228,13 +235,21 @@ public class ResultSet
                 flags.add(Flag.GLOBAL_TABLES_SPEC);
         }
 
-        private ResultMetadata(MD5Digest resultMetadataId, EnumSet<Flag> flags, List<ColumnSpecification> names, int columnCount, PagingState pagingState)
+        @VisibleForTesting
+        ResultMetadata(MD5Digest resultMetadataId, EnumSet<Flag> flags, List<ColumnSpecification> names, int columnCount, PagingState pagingState)
         {
             this.resultMetadataId = resultMetadataId;
             this.flags = flags;
             this.names = names;
             this.columnCount = columnCount;
             this.pagingState = pagingState;
+        }
+
+        public ResultMetadata withRecomputedResultMetadataIdIfMissing()
+        {
+            if (this.resultMetadataId == null)
+                return new ResultMetadata(computeResultMetadataId(names), EnumSet.copyOf(flags), names, columnCount, pagingState);
+            return this;
         }
 
         public ResultMetadata copy()
@@ -366,6 +381,23 @@ public class ResultSet
             return sb.toString();
         }
 
+        public ResultMetadata withOverriddenKeyspace(UnaryOperator<String> keyspaceMapper)
+        {
+            if ((keyspaceMapper == Constants.IDENTITY_STRING_MAPPER) || (names == null))
+                return this;
+
+            boolean changed = false;
+            List<ColumnSpecification> newNames = new ArrayList<>(names.size());
+            for (ColumnSpecification cs : names)
+            {
+                ColumnSpecification newColumnSpecification = cs.withOverriddenKeyspace(keyspaceMapper);
+                newNames.add(newColumnSpecification);
+                if (newColumnSpecification != cs)
+                    changed = true;
+            }
+            return changed ? new ResultMetadata(computeResultMetadataId(newNames), EnumSet.copyOf(flags), newNames, columnCount, pagingState) : this;
+        }
+
         private static class Codec implements CBCodec<ResultMetadata>
         {
             public ResultMetadata decode(ByteBuf body, ProtocolVersion version)
@@ -430,7 +462,7 @@ public class ResultSet
                 if (hasMorePages)
                     CBUtil.writeValue(m.pagingState.serialize(version), dest);
 
-                if (version.isGreaterOrEqualTo(ProtocolVersion.V5)  && metadataChanged)
+                if (version.isGreaterOrEqualTo(ProtocolVersion.V5) && metadataChanged)
                 {
                     assert !noMetadata : "MetadataChanged and NoMetadata are mutually exclusive flags";
                     CBUtil.writeBytes(m.getResultMetadataId().bytes, dest);
@@ -576,6 +608,23 @@ public class ResultSet
         public static PreparedMetadata fromPrepared(CQLStatement statement)
         {
             return new PreparedMetadata(statement.getBindVariables(), statement.getPartitionKeyBindVariableIndexes());
+        }
+
+        public PreparedMetadata withOverriddenKeyspace(UnaryOperator<String> keyspaceMapper)
+        {
+            if (keyspaceMapper == Constants.IDENTITY_STRING_MAPPER)
+                return this;
+
+            boolean changed = false;
+            List<ColumnSpecification> newNames = new ArrayList<>(names.size());
+            for (ColumnSpecification cs : names)
+            {
+                ColumnSpecification newColumnSpecification = cs.withOverriddenKeyspace(keyspaceMapper);
+                newNames.add(newColumnSpecification);
+                if (newColumnSpecification != cs)
+                    changed = true;
+            }
+            return changed ? new PreparedMetadata(EnumSet.copyOf(flags), newNames, partitionKeyBindIndexes == null ? null : Arrays.copyOf(partitionKeyBindIndexes, partitionKeyBindIndexes.length)) : this;
         }
 
         private static class Codec implements CBCodec<PreparedMetadata>

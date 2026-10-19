@@ -17,32 +17,65 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
+import javax.annotation.Nullable;
+
+import com.google.common.annotations.VisibleForTesting;
+
+import com.codahale.metrics.Clock;
+import org.apache.cassandra.cql3.QualifiedName;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.exceptions.SyntaxException;
 
+
 public class PropertyDefinitions
 {
-    private static final Pattern PATTERN_POSITIVE = Pattern.compile("(1|true|yes)");
-    
+    public static final String MULTIPLE_DEFINITIONS_ERROR = "Multiple definitions for property '%s'";
+    private static final Pattern POSITIVE_PATTERN = Pattern.compile("(1|true|yes)");
+    private static final Pattern NEGATIVE_PATTERN = Pattern.compile("(0|false|no)");
+    private static final Map<String, Long> OBSOLETE_PROPERTY_LAST_LOG_TIMES = new ConcurrentHashMap<>();
+    private static final long OBSOLETE_PROPERTY_LOG_INTERVAL_MS = 30_000;
+
     protected static final Logger logger = LoggerFactory.getLogger(PropertyDefinitions.class);
 
-    protected final Map<String, Object> properties = new HashMap<String, Object>();
+    protected final Map<String, Object> properties = new HashMap<>();
+    // Wrapper around System.currentTimeMillis() to simplify unit testing.
+    private final Clock clock;
+
+    @VisibleForTesting
+    PropertyDefinitions(Clock clock)
+    {
+        this.clock = clock;
+    }
+
+    public PropertyDefinitions() {
+        this.clock = Clock.defaultClock();
+    }
 
     public void addProperty(String name, String value) throws SyntaxException
     {
-        if (properties.put(name, value) != null)
-            throw new SyntaxException(String.format("Multiple definition for property '%s'", name));
+        if (properties.putIfAbsent(name, value) != null)
+            throw new SyntaxException(String.format(MULTIPLE_DEFINITIONS_ERROR, name));
     }
 
     public void addProperty(String name, Map<String, String> value) throws SyntaxException
     {
-        if (properties.put(name, value) != null)
-            throw new SyntaxException(String.format("Multiple definition for property '%s'", name));
+        if (properties.putIfAbsent(name, value) != null)
+            throw new SyntaxException(String.format(MULTIPLE_DEFINITIONS_ERROR, name));
+    }
+
+    public void addProperty(String name, Set<QualifiedName> value) throws SyntaxException
+    {
+        if (properties.putIfAbsent(name, value) != null)
+            throw new SyntaxException(String.format(MULTIPLE_DEFINITIONS_ERROR, name));
     }
 
     public void validate(Set<String> keywords, Set<String> obsolete) throws SyntaxException
@@ -53,12 +86,21 @@ public class PropertyDefinitions
                 continue;
 
             if (obsolete.contains(name))
-                logger.warn("Ignoring obsolete property {}", name);
+            {
+                long now = clock.getTime();
+                Long lastLogged = OBSOLETE_PROPERTY_LAST_LOG_TIMES.putIfAbsent(name, now);
+
+                if (lastLogged == null || (now - lastLogged) >= OBSOLETE_PROPERTY_LOG_INTERVAL_MS)
+                {
+                    logger.warn("Ignoring obsolete property {}", name);
+                }
+            }
             else
                 throw new SyntaxException(String.format("Unknown property '%s'", name));
         }
     }
 
+    @Nullable
     protected String getSimple(String name) throws SyntaxException
     {
         Object val = properties.get(name);
@@ -69,11 +111,29 @@ public class PropertyDefinitions
         return (String)val;
     }
 
-    protected Map<String, String> getMap(String name) throws SyntaxException
+    @Nullable
+    @SuppressWarnings("unchecked")
+    public Set<QualifiedName> getQualifiedNames(String name) throws SyntaxException
     {
         Object val = properties.get(name);
         if (val == null)
             return null;
+        if (val instanceof Map && ((Map<?, ?>)val).isEmpty()) // to solve the ambiguity between empty map and empty set
+            return Collections.emptySet();
+        if (!(val instanceof Set))
+            throw new SyntaxException(String.format("Invalid value for property '%s'. It should be a set of identifiers.", name));
+        return (Set<QualifiedName>) val;
+    }
+
+    @Nullable
+    @SuppressWarnings("unchecked")
+    public Map<String, String> getMap(String name) throws SyntaxException
+    {
+        Object val = properties.get(name);
+        if (val == null)
+            return null;
+        if (val instanceof Set && ((Set<?>)val).isEmpty()) // to solve the ambiguity between empty map and empty set
+            return Collections.emptyMap();
         if (!(val instanceof Map))
             throw new SyntaxException(String.format("Invalid value for property '%s'. It should be a map.", name));
         return (Map<String, String>)val;
@@ -84,17 +144,29 @@ public class PropertyDefinitions
         return properties.containsKey(name);
     }
 
-    public String getString(String key, String defaultValue) throws SyntaxException
+    public static boolean parseBoolean(String key, String value) throws SyntaxException
     {
-        String value = getSimple(key);
-        return value != null ? value : defaultValue;
+        if (null == value)
+            throw new IllegalArgumentException("value argument can't be null");
+
+        String lowerCasedValue = value.toLowerCase();
+
+        if (POSITIVE_PATTERN.matcher(lowerCasedValue).matches())
+            return true;
+        else if (NEGATIVE_PATTERN.matcher(lowerCasedValue).matches())
+            return false;
+
+        throw new SyntaxException(String.format("Invalid boolean value %s for '%s'. " +
+                                                "Positive values can be '1', 'true' or 'yes'. " +
+                                                "Negative values can be '0', 'false' or 'no'.",
+                                                value, key));
     }
 
     // Return a property value, typed as a Boolean
     public Boolean getBoolean(String key, Boolean defaultValue) throws SyntaxException
     {
         String value = getSimple(key);
-        return (value == null) ? defaultValue : PATTERN_POSITIVE.matcher(value.toLowerCase()).matches();
+        return (value == null) ? defaultValue : parseBoolean(key, value);
     }
 
     // Return a property value, typed as a double
@@ -142,5 +214,27 @@ public class PropertyDefinitions
                 throw new SyntaxException(String.format("Invalid integer value %s for '%s'", value, key));
             }
         }
+    }
+
+    /**
+     * Returns the name of all the properties that are updated by this object.
+     */
+    public Set<String> updatedProperties()
+    {
+        return properties.keySet();
+    }
+
+    public void removeProperty(String name)
+    {
+        properties.remove(name);
+    }
+    
+    public Object getProperty(String name)
+    {
+        Object ret = properties.get(name);
+        if (ret == null)
+            throw new SyntaxException(String.format("Invalid value for property '%s'. It should not be null.", name));
+
+        return ret;
     }
 }

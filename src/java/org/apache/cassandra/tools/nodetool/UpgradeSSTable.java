@@ -24,6 +24,9 @@ import io.airlift.airline.Option;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
 
@@ -33,8 +36,15 @@ public class UpgradeSSTable extends NodeToolCmd
     @Arguments(usage = "[<keyspace> <tables>...]", description = "The keyspace followed by one or many tables")
     private List<String> args = new ArrayList<>();
 
-    @Option(title = "include_all", name = {"-a", "--include-all-sstables"}, description = "Use -a to include all sstables, even those already on the current version")
+    @Option(title = "include_all",
+            name = {"-a", "--include-all-sstables"},
+            description = "Use -a to include all sstables, even those already on the current version")
     private boolean includeAll = false;
+
+    @Option(title = "max_timestamp",
+            name = {"-t", "--max-timestamp"},
+            description = "Use -t to compact only SSTables that have local creation time _older_ than the given timestamp")
+    private long maxSSTableTimestamp = Long.MAX_VALUE;
 
     @Option(title = "jobs",
             name = {"-j", "--jobs"},
@@ -49,13 +59,25 @@ public class UpgradeSSTable extends NodeToolCmd
 
         for (String keyspace : keyspaces)
         {
-            try
+            for (int retries = 0; retries < 5; retries++)
             {
-                probe.upgradeSSTables(probe.output().out, keyspace, !includeAll, jobs, tableNames);
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException("Error occurred during enabling auto-compaction", e);
+                try
+                {
+                    if (retries > 0)
+                        Thread.sleep(500);
+                    probe.upgradeSSTables(probe.output().out, keyspace, !includeAll, maxSSTableTimestamp, jobs, tableNames);
+                    break;
+                }
+                catch (RuntimeException cie)
+                {
+                    // Spin retry. See CASSANDRA-18635
+                    if (ExceptionUtils.indexOfThrowable(cie, CompactionInterruptedException.class) != -1 && retries == 4)
+                        throw (cie);
+                }
+                catch (Exception e)
+                {
+                    throw new RuntimeException("Error occurred during enabling auto-compaction", e);
+                }
             }
         }
     }

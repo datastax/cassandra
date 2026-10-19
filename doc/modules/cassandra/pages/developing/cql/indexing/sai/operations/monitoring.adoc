@@ -1,0 +1,188 @@
+= Monitor SAI indexes
+:description: Use metrics to monitor secondary indexes that were created with Storage-Attached Indexing (SAI).
+
+Both virtual tables and JMX-based metrics can be used to monitor the SAI indexes in your cluster.
+
+[[saiMonitorVirtualTables]]
+== SAI virtual tables
+
+You can refer to data in the following {product} virtual tables to determine the status of indexes created with SAI:
+
+* `system_views.indexes` -- provides information at the column index level, including the index name, number of indexed SSTables, disk usage, and index state.
+From the index state, the data reveals if the index is currently building, and whether the index can be queried.
++
+[TIP]
+====
+include::cassandra:partial$sai/queryable-paragraph.adoc[]
+====
+
+* `system_views.sstable_indexes` -- describes individual SSTable indexes, and includes information around disk size, min/max row ID, the min/max ring token, and the write-time version of the index.
+* `system_views.sstable_index_segments` -- describes the segments of the SSTable indexes.
+It exposes the segment row ID offset and most of the information in the SSTable-level virtual table, specifically at a segment granularity.
+For more details, refer to xref:cassandra:reference/sai-virtual-table-indexes.adoc[Virtual tables for SAI indexes and SSTables].
+
+== SAI tracing
+
+SAI provides tracing capability just like other database components.
+Information is captured by the `system_traces` keyspace.
+You can enable tracing in CQLSH with `TRACING ON`, or in the Cassandra driver with `statement.enableTracing()`.
+
+The number of rows filtered by a particular query will show up in the CQL query trace.
+Example:
+
+[source,no-highlight]
+----
+Index query accessed memtable indexes, 2 SSTable indexes, and 2 segments, post-filtered 14 rows in 14 partitions, and took 88582 microseconds.
+----
+
+For details about tracing, refer to CQL xref:cassandra:managing/tools/cqlsh.adoc#tracing[TRACING].
+
+[[saiMonitorMetrics]]
+== SAI metrics
+
+SAI provides a number of metrics to help you monitor the health of your indexes.
+
+The categorized data:
+
+* Global indexing metrics
+* Table query metrics
+* Per query metrics
+* Column query metrics per index
+* Range slice metrics
+
+For example, you can use metrics to get the current count of total partitions fetched since the node started for `cycling.cyclist_semi_pro`.
+The keyspace and table were defined in xref:cassandra:getting-started/sai-quickstart.adoc[SAI quickstart].
+This metric's `ObjectName`: `org.apache.cassandra.metrics:type=StorageAttachedIndex,keyspace=cycling,table=cyclist_semi_pro,scope=TableQueryMetrics,name=TotalPartitionsFetched`.
+
+The metrics are exposed via JMX, so any JMX-based tool can be used to monitor.
+
+[[saiGlobalIndexingMetrics]]
+== Global indexing metrics
+
+----
+ObjectName: org.apache.cassandra.metrics,type=StorageAttachedIndex,name=<metric>
+----
+
+The global indexing metrics for this node are:
+
+* `ColumnIndexBuildsInProgress` -- The number of individual on-disk column indexes currently being built.
+* `SegmentBufferSpaceLimitBytes` -- The limit on heap used to buffer SSTable index segments during compaction and index builds.
++
+[TIP]
+====
+In cassandra.yaml, `segment_write_buffer_space_mb` limits the amount of heap used to build on-disk column indexes during compaction and initial builds.
+The default is 1024 MB.
+====
+
+For example, if there is only one column index building, SAI can buffer up to `segment_write_buffer_space_mb`.
+If there is one column index building per table across 8 compactors, each index will be eligible to flush once it reaches (`segment_write_buffer_space_mb / 8`) MBs.
+
+* `SegmentBufferSpaceUsedBytes` -- The heap currently being used to buffer SSTable index segments during compaction and index builds.
+
+[NOTE]
+====
+At any given time, the minimum size for a flushing segment, in bytes, is (`SegmentBufferSpaceLimitBytes / ColumnIndexBuildsInProgress`).
+====
+
+[[saiIndexGroupMetrics]]
+== Index group metrics
+
+----
+ObjectName: org.apache.cassandra.metrics:type=StorageAttachedIndex,keyspace=<keyspace>,table=<table>,scope=IndexGroupMetrics,name=<metric>
+----
+
+The index group metrics for the given keyspace and table:
+
+* `DiskUsedBytes` -- Size in bytes on disk of the per-SSTable components of the given table's SAI indices.
+* `OpenIndexFiles` -- Number of open index files for the given table's SAI indices.
+
+== Per query metrics
+
+----
+ObjectName: org.apache.cassandra.metrics:type=StorageAttachedIndex,keyspace=<keyspace>,table=<table>,scope=PerQuery,name=<metric>
+----
+
+The per query metrics for the given keyspace and table include:
+
+* `QueryLatency` -- Overall query latency percentiles (in microseconds) and one/five/fifteen minute query throughput.
+This timer, which covers all the queries, is not registered if both `cassandra.sai.metrics.histograms.enabled` and `cassandra.sai.metrics.histograms.all_queries.enabled` are `false`.
+* `PostFilteringReadLatency` -- Timer of the time spent per query reading the rows from the storage engine to post-filter them (in microseconds).
+* `SSTableIndexesHit` -- Histogram over the number of SSTable indexes read per query.
+* `IndexSegmentsHit` -- Histogram over the number of index segments having results per query.
+* `KeysFetched` -- Histogram over the number of partition or row keys fetched from the indexes per query.
+* `PartitionsFetched` -- Histogram over the number of live partitions fetched from the storage engine per query, before post-filtering.
+* `PartitionsReturned` -- Histogram over the number of live partitions returned to the coordinator per query, after post-filtering.
+* `RowsFetched` -- Histogram over the number of live rows fetched from the storage engine per query, before post-filtering.
+* `RowsReturned` -- Histogram over the number of live rows returned to the coordinator per query, after post-filtering.
+
+`nodetool tablestats` reports the means of `QueryLatency`, `PostFilteringReadLatency`, `SSTableIndexesHit`, `IndexSegmentsHit` and `RowsFetched`, the latter as "SAI rows filtered per query".
+Its "SAI space used" is the `DiskUsedBytes` of the table state metrics, or the one of the index group metrics, which only counts the per-SSTable components, if the table state metrics are disabled.
+Its "SAI local query timeouts" is the `TotalQueryTimeouts` of the table query metrics, and its "SAI queryable/total indexes" is made of the `TotalQueryableIndexCount` and `TotalIndexCount` of the table state metrics, or `n/a` if the table state metrics are disabled.
+
+== Table query metrics
+
+----
+ObjectName: org.apache.cassandra.metrics:type=StorageAttachedIndex,keyspace=<keyspace>,table=<table>,scope=TableQueryMetrics,name=<metric>
+----
+
+The table query metrics for the given keyspace and table include:
+
+* `TotalKeysFetched` -- Total number of partition or row keys fetched from the indexes by all queries since the node started.
+* `TotalPartitionsFetched` -- Total number of live partitions fetched from the storage engine by all queries since the node started, before post-filtering.
+* `TotalPartitionsReturned` -- Total number of live partitions returned to the coordinator by all queries since the node started, after post-filtering.
+* `TotalQueriesCompleted` -- Total number of successfully completed queries since the node started.
+* `TotalQueryTimeouts` -- Total number of timeouts from queries since the node started.
+* `TotalRowsFetched` -- Total number of live rows fetched from the storage engine by all queries since the node started, before post-filtering.
+* `TotalRowsReturned` -- Total number of live rows returned to the coordinator by all queries since the node started, after post-filtering.
+
+[[saiTableStateMetrics]]
+== Table state metrics
+
+----
+ObjectName: org.apache.cassandra.metrics:type=StorageAttachedIndex,keyspace=<keyspace>,table=<table>,scope=TableStateMetrics,name=<metric>
+----
+
+The table state metrics for the given keyspace and table, which are not registered if `cassandra.sai.metrics.table_state.enabled` is `false`:
+
+* `DiskPercentageOfBaseTable` -- SAI size on disk as a fraction of the table size per table.
+* `DiskUsedBytes` -- Size on-disk in bytes of SAI indices per table, including both the per-SSTable and the per-column index components.
+* `TotalIndexBuildsInProgress` -- Status of SAI indices per table currently in the `is_building` state.
+* `TotalIndexCount` -- Total number of SAI indices per table.
+* `TotalQueryableIndexCount` -- Status of SAI indices per table currently in the `is_queryable` state.
+
+== Column query metrics for each numeric index
+
+----
+ObjectName: org.apache.cassandra.metrics:type=StorageAttachedIndex,keyspace=<keyspace>,table=<table>,index=<index>,scope=ColumnQueryMetrics,name=<metric>
+----
+
+The column query metrics for the given keyspace, table, and index include:
+
+* `KDTreeNiceTryLatency` -- For numeric indexes, such as `age_sai_idx` in the xref:cassandra:getting-started/sai-quickstart.adoc[quickstart] examples, this metric may be used to present a histogram of the times spent waiting for chunk cache misses during kd-tree intersection (in microseconds) and one/five/fifteen minute chunk miss throughputs.
++
+[NOTE]
+====
+The throughputs are zero if there are no cache misses during kd-tree intersection.
+====
+
+== Column query metrics for each string index
+
+----
+ObjectName: org.apache.cassandra.metrics:type=StorageAttachedIndex,keyspace=<keyspace>,table=<table>,index=<index>,scope=ColumnQueryMetrics,name=<metric>
+----
+
+The column query metrics for the given keyspace, table, and index include:
+
+* `TermsLookupLatency` -- For string indexes, such as `country_sai_idx` in the xref:cassandra:getting-started/sai-quickstart.adoc[quickstart] examples, this metric shows terms lookup latency percentiles (in microseconds) per one/five/fifteen minute query throughput.
+
+== Range slice metrics
+
+----
+ObjectName: org.apache.cassandra.metrics:type=ClientRequest,scope=RangeSlice,name=<metric>
+----
+
+The `RoundTripsPerReadHistogram` metric tracks the number of round-trip requests sent for range query commands from the coordinator.
+Fewer requests typically mean the server is operating more efficiently than ones requiring more requests to satisfy the same range queries.
+
+Latency metric tracks the min, max, mean as well as a set of percentiles for range read requests latency.
+Timeouts metric tracks the number of timeouts for range read requests.

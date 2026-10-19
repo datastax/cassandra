@@ -38,7 +38,11 @@ import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.util.DefaultPrettyPrinter;
 import com.fasterxml.jackson.core.util.DefaultPrettyPrinter.Indenter;
 import com.fasterxml.jackson.core.util.MinimalPrettyPrinter;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.ClusteringBound;
+import org.apache.cassandra.db.ClusteringPrefix;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
@@ -57,6 +61,8 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
 public final class JsonTransformer
 {
@@ -163,9 +169,9 @@ public final class JsonTransformer
                 }
 
                 int i = 0;
-                while (keyBytes.remaining() > 0 && i < compositeType.getComponents().size())
+                while (keyBytes.remaining() > 0 && i < compositeType.subTypes().size())
                 {
-                    AbstractType<?> colType = compositeType.getComponents().get(i);
+                    AbstractType<?> colType = compositeType.subTypes().get(i);
 
                     ByteBuffer value = ByteBufferUtil.readBytesWithShortLength(keyBytes);
                     String colValue = colType.getString(value);
@@ -201,7 +207,8 @@ public final class JsonTransformer
         try
         {
             json.writeStartObject();
-
+            json.writeObjectField("table kind", metadata.kind.name());
+            
             json.writeFieldName("partition");
             json.writeStartObject();
             json.writeFieldName("key");
@@ -282,7 +289,7 @@ public final class JsonTransformer
                     json.writeFieldName("expires_at");
                     json.writeString(dateString(TimeUnit.SECONDS, liveInfo.localExpirationTime()));
                     json.writeFieldName("expired");
-                    json.writeBoolean(liveInfo.localExpirationTime() < (System.currentTimeMillis() / 1000));
+                    json.writeBoolean(liveInfo.localExpirationTime() < (currentTimeMillis() / 1000));
                 }
                 json.writeEndObject();
                 objectIndenter.setCompact(false);
@@ -367,7 +374,8 @@ public final class JsonTransformer
                 }
                 else
                 {
-                    json.writeRawValue(column.cellValueType().toJSONString(clustering.get(i), clustering.accessor(), ProtocolVersion.CURRENT));
+                    AbstractType<?> type = column.cellValueType();
+                    json.writeRawValue(type.toJSONString(clustering.get(i), clustering.accessor(), ProtocolVersion.CURRENT));
                 }
             }
             json.writeEndArray();
@@ -497,7 +505,7 @@ public final class JsonTransformer
                 json.writeFieldName("expires_at");
                 json.writeString(dateString(TimeUnit.SECONDS, cell.localDeletionTime()));
                 json.writeFieldName("expired");
-                json.writeBoolean(!cell.isLive((int) (System.currentTimeMillis() / 1000)));
+                json.writeBoolean(!cell.isLive((int) (currentTimeMillis() / 1000)));
             }
             json.writeEndObject();
             objectIndenter.setCompact(false);

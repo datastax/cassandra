@@ -20,6 +20,7 @@ package org.apache.cassandra.db.marshal;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.util.UUID;
@@ -28,6 +29,8 @@ import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.service.paxos.Ballot;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.UUIDGen;
@@ -102,6 +105,9 @@ public class ByteBufferAccessor implements ValueAccessor<ByteBuffer>
     @Override
     public ByteBuffer slice(ByteBuffer input, int offset, int length)
     {
+        int size = sizeFromOffset(input, offset);
+        if (size < length)
+            throw new IndexOutOfBoundsException(String.format("Attempted to read %d, but the size is %d", length, size));
         ByteBuffer copy = input.duplicate();
         copy.position(copy.position() + offset);
         copy.limit(copy.position() + length);
@@ -209,6 +215,18 @@ public class ByteBufferAccessor implements ValueAccessor<ByteBuffer>
     }
 
     @Override
+    public float getFloat(ByteBuffer value, int offset)
+    {
+        return value.getFloat(offset);
+    }
+
+    @Override
+    public double getDouble(ByteBuffer value, int offset)
+    {
+        return value.getDouble(offset);
+    }
+
+    @Override
     public long toLong(ByteBuffer value)
     {
         return ByteBufferUtil.toLong(value);
@@ -227,6 +245,18 @@ public class ByteBufferAccessor implements ValueAccessor<ByteBuffer>
     }
 
     @Override
+    public float[] toFloatArray(ByteBuffer value, int dimension)
+    {
+        FloatBuffer floatBuffer = value.asFloatBuffer();
+        if (floatBuffer.remaining() != dimension)
+            throw new IllegalArgumentException(String.format("Could not convert to a float[] with different dimension. " +
+                                                             "Was expecting %d but got %d", dimension, floatBuffer.remaining()));
+        float[] floatArray = new float[floatBuffer.remaining()];
+        floatBuffer.get(floatArray);
+        return floatArray;
+    }
+
+    @Override
     public double toDouble(ByteBuffer value)
     {
         return ByteBufferUtil.toDouble(value);
@@ -236,6 +266,25 @@ public class ByteBufferAccessor implements ValueAccessor<ByteBuffer>
     public UUID toUUID(ByteBuffer value)
     {
         return UUIDGen.getUUID(value);
+    }
+
+    @Override
+    public TimeUUID toTimeUUID(ByteBuffer value)
+    {
+        return TimeUUID.fromBytes(value.getLong(value.position()), value.getLong(value.position() + 8));
+    }
+
+    @Override
+    public Ballot toBallot(ByteBuffer value)
+    {
+        return Ballot.deserialize(value);
+    }
+
+    @Override
+    public int putByte(ByteBuffer dst, int offset, byte value)
+    {
+        dst.put(dst.position() + offset, value);
+        return TypeSizes.BYTE_SIZE;
     }
 
     @Override
@@ -257,6 +306,13 @@ public class ByteBufferAccessor implements ValueAccessor<ByteBuffer>
     {
         dst.putLong(dst.position() + offset, value);
         return TypeSizes.LONG_SIZE;
+    }
+
+    @Override
+    public int putFloat(ByteBuffer dst, int offset, float value)
+    {
+        dst.putFloat(dst.position() + offset, value);
+        return TypeSizes.FLOAT_SIZE;
     }
 
     @Override

@@ -29,8 +29,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.distributed.api.IInstance;
@@ -45,14 +47,21 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.schema.MigrationCoordinator;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.distributed.impl.DistributedTestSnitch.toCassandraInetAddressAndPort;
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import static org.junit.Assert.assertTrue;
 
 public class GossipHelper
 {
+    public static InstanceAction statusToBlank(IInvokableInstance newNode)
+    {
+        return (instance) -> changeGossipState(instance, newNode,Collections.emptyList());
+    }
+
     public static InstanceAction statusToBootstrap(IInvokableInstance newNode)
     {
         return (instance) ->
@@ -62,6 +71,18 @@ public class GossipHelper
                               Arrays.asList(tokens(newNode),
                                             statusBootstrapping(newNode),
                                             statusWithPortBootstrapping(newNode)));
+        };
+    }
+
+    public static InstanceAction statusToDecommission(IInvokableInstance newNode)
+    {
+        return (instance) ->
+        {
+            changeGossipState(instance,
+                              newNode,
+                              Arrays.asList(tokens(newNode),
+                                            statusLeaving(newNode),
+                                            statusWithPortLeaving(newNode)));
         };
     }
 
@@ -86,7 +107,7 @@ public class GossipHelper
      */
     public static void unsafeStatusToNormal(IInvokableInstance target, IInstance peer)
     {
-        int messagingVersion = peer.getMessagingVersion();
+        final int messagingVersion = getOrDefaultMessagingVersion(target, peer);
         changeGossipState(target,
                           peer,
                           Arrays.asList(unsafeVersionedValue(target,
@@ -221,8 +242,8 @@ public class GossipHelper
             pullTo.acceptsOnInstance((InetSocketAddress pullFrom) -> {
                 InetAddressAndPort endpoint = toCassandraInetAddressAndPort(pullFrom);
                 EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-                MigrationCoordinator.instance.reportEndpointVersion(endpoint, state);
-                MigrationCoordinator.instance.awaitSchemaRequests(TimeUnit.SECONDS.toMillis(10));
+                Gossiper.instance.doOnChangeNotifications(endpoint, ApplicationState.SCHEMA, state.getApplicationState(ApplicationState.SCHEMA));
+                assertTrue("schema is ready", Schema.instance.waitUntilReady(Duration.ofSeconds(10)));
             }).accept(pullFrom);
         }
     }
@@ -252,7 +273,7 @@ public class GossipHelper
                 List<Token> tokens = Collections.singletonList(partitioner.getTokenFactory().fromString(tokenString));
                 try
                 {
-                    Collection<InetAddressAndPort> collisions = StorageService.instance.prepareForBootstrap(waitForSchema.toMillis());
+                    Collection<InetAddressAndPort> collisions = StorageService.instance.prepareForBootstrap(waitForSchema.toMillis(), 0);
                     assert collisions.size() == 0 : String.format("Didn't expect any replacements but got %s", collisions);
                     boolean isBootstrapSuccessful = StorageService.instance.bootstrap(tokens, waitForBootstrap.toMillis());
                     assert isBootstrapSuccessful : "Bootstrap did not complete successfully";
@@ -329,14 +350,14 @@ public class GossipHelper
     public static VersionedApplicationState statusLeft(IInvokableInstance instance)
     {
         return versionedToken(instance, ApplicationState.STATUS, (partitioner, tokens) -> {
-            return new VersionedValue.VersionedValueFactory(partitioner).left(tokens, System.currentTimeMillis() + Gossiper.aVeryLongTime);
+            return new VersionedValue.VersionedValueFactory(partitioner).left(tokens, currentTimeMillis() + Gossiper.aVeryLongTime);
         });
     }
 
     public static VersionedApplicationState statusWithPortLeft(IInvokableInstance instance)
     {
         return versionedToken(instance, ApplicationState.STATUS_WITH_PORT, (partitioner, tokens) -> {
-            return new VersionedValue.VersionedValueFactory(partitioner).left(tokens, System.currentTimeMillis() + Gossiper.aVeryLongTime);
+            return new VersionedValue.VersionedValueFactory(partitioner).left(tokens, currentTimeMillis() + Gossiper.aVeryLongTime);
 
         });
     }
@@ -363,9 +384,11 @@ public class GossipHelper
     {
         return instance.appliesOnInstance((String partitionerString, String tokenString) -> {
             IPartitioner partitioner = FBUtilities.newPartitioner(partitionerString);
-            Token token = partitioner.getTokenFactory().fromString(tokenString);
+            Collection<Token> tokens = tokenString.contains(",")
+                                       ? Stream.of(tokenString.split(",")).map(partitioner.getTokenFactory()::fromString).collect(Collectors.toList())
+                                       : Collections.singleton(partitioner.getTokenFactory().fromString(tokenString));
 
-            VersionedValue versionedValue = supplier.apply(partitioner, Collections.singleton(token));
+            VersionedValue versionedValue = supplier.apply(partitioner, tokens);
             return new VersionedApplicationState(applicationState.ordinal(), versionedValue.value, versionedValue.version);
         }).apply(partitionerStr, initialTokenStr);
     }
@@ -411,7 +434,7 @@ public class GossipHelper
     {
         InetSocketAddress addr = peer.broadcastAddress();
         UUID hostId = peer.config().hostId();
-        int netVersion = peer.getMessagingVersion();
+        final int netVersion = getOrDefaultMessagingVersion(target, peer);
         target.runOnInstance(() -> {
             InetAddressAndPort endpoint = toCassandraInetAddressAndPort(addr);
             StorageService storageService = StorageService.instance;
@@ -437,25 +460,32 @@ public class GossipHelper
         });
     }
 
-    public static void withProperty(String prop, boolean value, Runnable r)
+    private static int getOrDefaultMessagingVersion(IInvokableInstance target, IInstance peer)
+    {
+        int peerVersion = peer.getMessagingVersion();
+        final int netVersion = peerVersion == 0 ? target.getMessagingVersion() : peerVersion;
+        assert netVersion != 0 : "Unable to determine messaging version for peer {}" + peer.config().num();
+        return netVersion;
+    }
+
+    public static void withProperty(CassandraRelevantProperties prop, boolean value, Runnable r)
     {
         withProperty(prop, Boolean.toString(value), r);
     }
 
-    public static void withProperty(String prop, String value, Runnable r)
+    public static void withProperty(CassandraRelevantProperties prop, String value, Runnable r)
     {
-        String before = System.getProperty(prop);
+        String prev = prop.setString(value);
         try
         {
-            System.setProperty(prop, value);
             r.run();
         }
         finally
         {
-            if (before == null)
-                System.clearProperty(prop);
+            if (prev == null)
+                prop.clearValue(); // checkstyle: suppress nearby 'clearValueSystemPropertyUsage'
             else
-                System.setProperty(prop, before);
+                prop.setString(prev);
         }
     }
 }

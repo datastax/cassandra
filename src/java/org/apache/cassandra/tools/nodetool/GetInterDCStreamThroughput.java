@@ -17,17 +17,71 @@
  */
 package org.apache.cassandra.tools.nodetool;
 
-import io.airlift.airline.Command;
+import com.google.common.math.DoubleMath;
 
+import io.airlift.airline.Command;
+import io.airlift.airline.Option;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
 
-@Command(name = "getinterdcstreamthroughput", description = "Print the Mb/s throughput cap for inter-datacenter streaming in the system")
+@Command(name = "getinterdcstreamthroughput", description = "Print the throughput cap for inter-datacenter streaming and entire SSTable inter-datacenter streaming in the system" +
+                                                            "in rounded megabits. For precise number, please, use option -d")
 public class GetInterDCStreamThroughput extends NodeToolCmd
 {
+    @SuppressWarnings("UnusedDeclaration")
+    @Option(name = { "-e", "--entire-sstable-throughput" }, description = "Print entire SSTable streaming throughput in MiB/s")
+    private boolean entireSSTableThroughput;
+
+    @SuppressWarnings("UnusedDeclaration")
+    @Option(name = { "-m", "--mib" }, description = "Print the throughput cap for inter-datacenter streaming in MiB/s")
+    private boolean interDCStreamThroughputMiB;
+
+    @SuppressWarnings("UnusedDeclaration")
+    @Option(name = { "-d", "--precise-mbit" }, description = "Print the throughput cap for inter-datacenter streaming in precise Mbits (double)")
+    private boolean interDCStreamThroughputDoubleMbit;
+
     @Override
     public void execute(NodeProbe probe)
     {
-        probe.output().out.println("Current inter-datacenter stream throughput: " + probe.getInterDCStreamThroughput() + " Mb/s");
+        int throughput;
+        double throughputInDouble;
+
+        if (entireSSTableThroughput)
+        {
+            if (interDCStreamThroughputDoubleMbit || interDCStreamThroughputMiB)
+                throw new IllegalArgumentException("You cannot use more than one flag with this command");
+
+            throughputInDouble = probe.getEntireSSTableInterDCStreamThroughput();
+            probe.output().out.printf("Current entire SSTable inter-datacenter stream throughput: %s%n",
+                                      throughputInDouble > 0 ? throughputInDouble + " MiB/s" : "unlimited");
+        }
+        else if (interDCStreamThroughputMiB)
+        {
+            if (interDCStreamThroughputDoubleMbit)
+                throw new IllegalArgumentException("You cannot use more than one flag with this command");
+
+            throughputInDouble = probe.getInterDCStreamThroughputMibAsDouble();
+            probe.output().out.printf("Current inter-datacenter stream throughput: %s%n",
+                                      throughputInDouble > 0 ? throughputInDouble + " MiB/s" : "unlimited");
+
+        }
+        else if (interDCStreamThroughputDoubleMbit)
+        {
+            throughputInDouble = probe.getInterDCStreamThroughputAsDouble();
+            probe.output().out.printf("Current stream throughput: %s%n",
+                                      throughputInDouble > 0 ? throughputInDouble + " Mb/s" : "unlimited");
+        }
+        else
+        {
+            throughputInDouble = probe.getInterDCStreamThroughputAsDouble();
+            throughput = probe.getInterDCStreamThroughput();
+
+            if (throughput <= 0)
+                probe.output().out.printf("Current inter-datacenter stream throughput: unlimited%n");
+            else if (DoubleMath.isMathematicalInteger(throughputInDouble))
+                probe.output().out.printf(throughputInDouble + "Current inter-datacenter stream throughput: %s%n", throughput + " Mb/s");
+            else
+                throw new RuntimeException("Use the -d flag to quiet this error and get the exact throughput in megabits/s");
+        }
     }
 }

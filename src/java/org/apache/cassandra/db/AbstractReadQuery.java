@@ -17,12 +17,20 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Set;
+
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.monitoring.MonitorableImpl;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -31,13 +39,13 @@ import org.apache.cassandra.schema.TableMetadata;
 abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
 {
     private final TableMetadata metadata;
-    private final int nowInSec;
+    private final long nowInSec;
 
     private final ColumnFilter columnFilter;
     private final RowFilter rowFilter;
     private final DataLimits limits;
 
-    protected AbstractReadQuery(TableMetadata metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits)
+    protected AbstractReadQuery(TableMetadata metadata, long nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits)
     {
         this.metadata = metadata;
         this.nowInSec = nowInSec;
@@ -53,9 +61,10 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
     }
 
     // Monitorable interface
+    @Override
     public String name()
     {
-        return toCQLString();
+        return toCQLString(Redaction.REDACT);
     }
 
     @Override
@@ -71,7 +80,7 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
     }
 
     @Override
-    public int nowInSec()
+    public long nowInSec()
     {
         return nowInSec;
     }
@@ -89,28 +98,66 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
     }
 
     /**
-     * Recreate the CQL string corresponding to this query.
+     * Recreates the CQL string corresponding to this query.
+     * </p>
+     * If the {@code redact} parameter is set to {@code true}, the query string will be redacted, replacing any specific
+     * column values with '?'. If set to {@code false}, the query string will not be redacted, and it might expose the
+     * queried column values which might contain sensitive data. The latter will be problematic if the query string ends
+     * up in logs or any other unprotected place. Therefore, non-redaction should only be used for debugging purposes or
+     * to present the query string to the same end user that created the query.
      * <p>
      * Note that in general the returned string will not be exactly the original user string, first
-     * because there isn't always a single syntax for a given query,  but also because we don't have
+     * because there isn't always a single syntax for a given query, but also because we don't have
      * all the information needed (we know the non-PK columns queried but not the PK ones as internally
-     * we query them all). So this shouldn't be relied too strongly, but this should be good enough for
-     * debugging purpose which is what this is for.
+     * we query them all). So this shouldn't be relied upon too strongly, but this should be good enough for
+     * debugging purposes which is what this is for.
+     *
+     * @param redaction whether to redact the queried column values.
      */
-    public String toCQLString()
-    {
-        StringBuilder sb = new StringBuilder().append("SELECT ")
-                                              .append(columnFilter().toCQLString())
-                                              .append(" FROM ")
-                                              .append(metadata().keyspace)
-                                              .append('.')
-                                              .append(metadata().name);
-        appendCQLWhereClause(sb);
 
-        if (limits() != DataLimits.NONE)
-            sb.append(' ').append(limits());
-        return sb.toString();
+    public String toUnredactedCQLString()
+    {
+        return toCQLString(Redaction.NONE);
     }
 
-    protected abstract void appendCQLWhereClause(StringBuilder sb);
+    public String toRedactedCQLString()
+    {
+        return toCQLString(Redaction.REDACT);
+    }
+
+    public String toCQLString(Redaction redaction)
+    {
+        CqlBuilder builder = new CqlBuilder();
+        builder.append("SELECT ").append(columnFilter().toCQLString(redaction));
+        builder.append(" FROM ").append(ColumnIdentifier.maybeQuote(metadata().keyspace))
+               .append('.')
+               .append(ColumnIdentifier.maybeQuote(metadata().name));
+
+        appendCQLWhereClause(builder, redaction);
+
+        if (limits() != DataLimits.NONE)
+            builder.append(' ').append(limits().toCQLString());
+
+        // ALLOW FILTERING might not be strictly necessary
+        builder.append(" ALLOW FILTERING");
+
+        builder.appendOptions(b -> {
+            IndexHints indexHints = rowFilter().indexHints;
+            Set<String> included = IndexMetadata.toNames(indexHints.included);
+            Set<String> excluded = IndexMetadata.toNames(indexHints.excluded);
+            b.append(SelectOptions.INCLUDED_INDEXES, included)
+             .append(SelectOptions.EXCLUDED_INDEXES, excluded)
+             .append(SelectOptions.ANN_OPTIONS, rowFilter().annOptions().toCQLString());
+        });
+
+        // The limits used by the subsequent queries of paging don't have a clear direct translation into CQL.
+        // However, they change the meaning of the query, and it can be useful to identify them in logs.
+        // That's why here we append a fragment of invalid CQL syntanx, at the end of the query.
+        if (limits.isPagingContinuation())
+            builder.append(" [paging continuation]");
+
+        return builder.toString();
+    }
+
+    protected abstract void appendCQLWhereClause(CqlBuilder builder, Redaction redaction);
 }

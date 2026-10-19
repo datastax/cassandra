@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.utils;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Path;
@@ -30,13 +29,11 @@ import java.nio.file.attribute.BasicFileAttributes;
  */
 public class DirectorySizeCalculator extends SimpleFileVisitor<Path>
 {
-    protected volatile long size = 0;
-    protected final File path;
+    private volatile long size = 0;
 
-    public DirectorySizeCalculator(File path)
+    public DirectorySizeCalculator()
     {
         super();
-        this.path = path;
     }
 
     public boolean isAcceptable(Path file)
@@ -53,7 +50,7 @@ public class DirectorySizeCalculator extends SimpleFileVisitor<Path>
     }
 
     @Override
-    public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException
+    public FileVisitResult visitFileFailed(Path file, IOException exc)
     {
         return FileVisitResult.CONTINUE;
     }
@@ -61,5 +58,13 @@ public class DirectorySizeCalculator extends SimpleFileVisitor<Path>
     public long getAllocatedSize()
     {
         return size;
+    }
+
+    /**
+     * Reset the size to 0 in case that the size calculator is used multiple times
+     */
+    protected void resetSize()
+    {
+        size = 0;
     }
 }

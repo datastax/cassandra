@@ -17,33 +17,39 @@
  */
 package org.apache.cassandra.cql3;
 
-import static org.apache.cassandra.cql3.Constants.UNSET_VALUE;
-
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import org.apache.cassandra.db.marshal.ByteBufferAccessor;
-import org.apache.cassandra.schema.ColumnMetadata;
 import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.ListType;
-import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.VectorType;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellPath;
+import org.apache.cassandra.db.rows.ComplexColumnData;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.UUIDGen;
+
+import static org.apache.cassandra.cql3.Constants.UNSET_VALUE;
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import static org.apache.cassandra.utils.TimeUUID.Generator.atUnixMillisAsBytes;
 
 /**
  * Static helper methods and classes for lists.
@@ -62,14 +68,9 @@ public abstract class Lists
         return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), elementsType(column.type));
     }
 
-    private static AbstractType<?> unwrap(AbstractType<?> type)
-    {
-        return type.isReversed() ? unwrap(((ReversedType<?>) type).baseType) : type;
-    }
-
     private static AbstractType<?> elementsType(AbstractType<?> type)
     {
-        return ((ListType) unwrap(type)).getElementsType();
+        return ((ListType<?>) type.unwrap()).getElementsType();
     }
 
     /**
@@ -81,10 +82,10 @@ public abstract class Lists
     public static AssignmentTestable.TestResult testListAssignment(ColumnSpecification receiver,
                                                                    List<? extends AssignmentTestable> elements)
     {
-        if (!(receiver.type instanceof ListType))
+        if (!(receiver.type instanceof ListType || receiver.type instanceof VectorType))
             return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
 
-        // If there is no elements, we can't say it's an exact match (an empty list if fundamentally polymorphic).
+        // If there is no elements, we can't say it's an exact match (an empty list is fundamentally polymorphic).
         if (elements.isEmpty())
             return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
 
@@ -114,7 +115,7 @@ public abstract class Lists
     public static <T> String listToString(Iterable<T> items, java.util.function.Function<T, String> mapper)
     {
         return StreamSupport.stream(items.spliterator(), false)
-                            .map(e -> mapper.apply(e))
+                            .map(mapper)
                             .collect(Collectors.joining(", ", "[", "]"));
     }
 
@@ -125,11 +126,41 @@ public abstract class Lists
      * @param mapper the mapper used to retrieve the element types from the items
      * @return the exact ListType from the items if it can be known or <code>null</code>
      */
-    public static <T> AbstractType<?> getExactListTypeIfKnown(List<T> items,
-                                                              java.util.function.Function<T, AbstractType<?>> mapper)
+    public static <T> ListType<?> getExactListTypeIfKnown(List<T> items,
+                                                          java.util.function.Function<T, AbstractType<?>> mapper)
     {
-        Optional<AbstractType<?>> type = items.stream().map(mapper).filter(Objects::nonNull).findFirst();
-        return type.isPresent() ? ListType.getInstance(type.get(), false) : null;
+        AbstractType<?> type = getElementType(items, mapper);
+        return type != null ? ListType.getInstance(type, false) : null;
+    }
+
+    protected static <T> AbstractType<?> getElementType(List<T> items,
+                                                        java.util.function.Function<T, AbstractType<?>> mapper)
+    {
+        AbstractType<?> type = null;
+        for (T item : items)
+        {
+            AbstractType<?> itemType = mapper.apply(item);
+            if (itemType == null)
+                continue;
+
+            if (type != null && !itemType.isCompatibleWith(type))
+            {
+                if (type.isCompatibleWith(itemType))
+                    continue;
+
+                throw new InvalidRequestException("Invalid collection literal: all selectors must have the same CQL type inside collection literals");
+            }
+            type = itemType;
+        }
+        return type;
+    }
+
+    public static <T> ListType<?> getPreferredCompatibleType(List<T> items,
+                                                             java.util.function.Function<T, AbstractType<?>> mapper)
+    {
+        Set<AbstractType<?>> types = items.stream().map(mapper).filter(Objects::nonNull).collect(Collectors.toSet());
+        AbstractType<?> type = AssignmentTestable.getCompatibleTypeIfKnown(types);
+        return type == null ? null : ListType.getInstance(type.freeze(), false);
     }
 
     public static class Literal extends Term.Raw
@@ -166,7 +197,7 @@ public abstract class Lists
 
         private void validateAssignableTo(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
-            AbstractType<?> type = unwrap(receiver.type);
+            AbstractType<?> type = receiver.type.unwrap();
 
             if (!(type instanceof ListType))
                 throw new InvalidRequestException(String.format("Invalid list literal for %s of type %s", receiver.name, receiver.type.asCQL3Type()));
@@ -190,6 +221,12 @@ public abstract class Lists
             return getExactListTypeIfKnown(elements, p -> p.getExactTypeIfKnown(keyspace));
         }
 
+        @Override
+        public AbstractType<?> getCompatibleTypeIfKnown(String keyspace)
+        {
+            return Lists.getPreferredCompatibleType(elements, p -> p.getCompatibleTypeIfKnown(keyspace));
+        }
+
         public String getText()
         {
             return listToString(elements, Term.Raw::getText);
@@ -205,15 +242,15 @@ public abstract class Lists
             this.elements = elements;
         }
 
-        public static Value fromSerialized(ByteBuffer value, ListType type, ProtocolVersion version) throws InvalidRequestException
+        public static <T> Value fromSerialized(ByteBuffer value, ListType<T> type) throws InvalidRequestException
         {
             try
             {
                 // Collections have this small hack that validate cannot be called on a serialized object,
                 // but compose does the validation (so we're fine).
-                List<?> l = type.getSerializer().deserializeForNativeProtocol(value, ByteBufferAccessor.instance, version);
+                List<T> l = type.getSerializer().deserialize(value, ByteBufferAccessor.instance);
                 List<ByteBuffer> elements = new ArrayList<>(l.size());
-                for (Object element : l)
+                for (T element : l)
                     // elements can be null in lists that represent a set of IN values
                     elements.add(element == null ? null : type.getElementsType().decompose(element));
                 return new Value(elements);
@@ -224,12 +261,12 @@ public abstract class Lists
             }
         }
 
-        public ByteBuffer get(ProtocolVersion protocolVersion)
+        public ByteBuffer get(ProtocolVersion version)
         {
-            return CollectionSerializer.pack(elements, elements.size(), protocolVersion);
+            return CollectionSerializer.pack(elements, elements.size());
         }
 
-        public boolean equals(ListType lt, Value v)
+        public boolean equals(ListType<?> lt, Value v)
         {
             if (elements.size() != v.elements.size())
                 return false;
@@ -248,9 +285,9 @@ public abstract class Lists
     }
 
     /**
-     * Basically similar to a Value, but with some non-pure function (that need
+     * Basically similar to a Value, but with some non-deterministic function (that need
      * to be evaluated at execution time) in it.
-     *
+     * </p>
      * Note: this would also work for a list with bind markers, but we don't support
      * that because 1) it's not excessively useful and 2) we wouldn't have a good
      * column name to return in the ColumnSpecification for those markers (not a
@@ -316,7 +353,7 @@ public abstract class Lists
                 return null;
             if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
                 return UNSET_VALUE;
-            return Value.fromSerialized(value, (ListType)receiver.type, options.getProtocolVersion());
+            return Value.fromSerialized(value, (ListType<?>) receiver.type);
         }
     }
 
@@ -359,7 +396,7 @@ public abstract class Lists
                 else
                 {
                     // in addition to being at the same millisecond, we handle the unexpected case of the millis parameter
-                    // being in the past. That could happen if the System.currentTimeMillis() not operating montonically
+                    // being in the past. That could happen if the Global.currentTimeMillis() not operating montonically
                     // or if one thread is just a really big loser in the compareAndSet game of life.
                     long millisToUse = millis <= current.millis ? millis : current.millis;
 
@@ -442,10 +479,14 @@ public abstract class Lists
             idx.collectMarkerSpecification(boundNames);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             // we should not get here for frozen lists
             assert column.type.isMultiCell() : "Attempted to set an individual element on a frozen list";
+
+            Guardrails.readBeforeWriteListOperationsEnabled
+            .ensureEnabled("Setting of list items by index requiring read before write", params.clientState);
 
             ByteBuffer index = idx.bindAndGet(params.options);
             ByteBuffer value = t.bindAndGet(params.options);
@@ -478,6 +519,7 @@ public abstract class Lists
             super(column, t);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to append to a frozen list";
@@ -487,26 +529,43 @@ public abstract class Lists
 
         static void doAppend(Term.Terminal value, ColumnMetadata column, UpdateParameters params) throws InvalidRequestException
         {
-            if (column.type.isMultiCell())
+            if (value == null)
             {
+                // for frozen lists, we're overwriting the whole cell value
+                if (!column.type.isMultiCell())
+                    params.addTombstone(column);
+
                 // If we append null, do nothing. Note that for Setter, we've
                 // already removed the previous value so we're good here too
-                if (value == null)
+                return;
+            }
+
+            List<ByteBuffer> elements = ((Value) value).elements;
+
+            if (column.type.isMultiCell())
+            {
+                if (elements.size() == 0)
                     return;
 
-                for (ByteBuffer buffer : ((Value) value).elements)
+                // Guardrails about collection size are only checked for the added elements without considering
+                // already existent elements. This is done so to avoid read-before-write, having additional checks
+                // during SSTable write.
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, params.clientState);
+
+                int dataSize = 0;
+                for (ByteBuffer buffer : elements)
                 {
-                    ByteBuffer uuid = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes());
-                    params.addCell(column, CellPath.create(uuid), buffer);
+                    ByteBuffer uuid = ByteBuffer.wrap(params.nextTimeUUIDAsBytes());
+                    Cell<?> cell = params.addCell(column, CellPath.create(uuid), buffer);
+                    dataSize += cell.dataSize();
                 }
+                Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, params.clientState);
             }
             else
             {
-                // for frozen lists, we're overwriting the whole cell value
-                if (value == null)
-                    params.addTombstone(column);
-                else
-                    params.addCell(column, value.get(ProtocolVersion.CURRENT));
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, params.clientState);
+                Cell<?> cell = params.addCell(column, value.get(ProtocolVersion.CURRENT));
+                Guardrails.collectionSize.guard(cell.dataSize(), column.name.toString(), false, params.clientState);
             }
         }
     }
@@ -528,22 +587,31 @@ public abstract class Lists
             List<ByteBuffer> toAdd = ((Value) value).elements;
             final int totalCount = toAdd.size();
 
+            // Guardrails about collection size are only checked for the added elements without considering
+            // already existent elements. This is done so to avoid read-before-write, having additional checks
+            // during SSTable write.
+            Guardrails.itemsPerCollection.guard(totalCount, column.name.toString(), false, params.clientState);
+
             // we have to obey MAX_NANOS per batch - in the unlikely event a client has decided to prepend a list with
             // an insane number of entries.
             PrecisionTime pt = null;
             int remainingInBatch = 0;
+            int dataSize = 0;
             for (int i = totalCount - 1; i >= 0; i--)
             {
                 if (remainingInBatch == 0)
                 {
-                    long time = PrecisionTime.REFERENCE_TIME - (System.currentTimeMillis() - PrecisionTime.REFERENCE_TIME);
+                    long time = PrecisionTime.REFERENCE_TIME - (currentTimeMillis() - PrecisionTime.REFERENCE_TIME);
                     remainingInBatch = Math.min(PrecisionTime.MAX_NANOS, i) + 1;
                     pt = PrecisionTime.getNext(time, remainingInBatch);
                 }
 
-                ByteBuffer uuid = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes(pt.millis, (pt.nanos + remainingInBatch--)));
-                params.addCell(column, CellPath.create(uuid), toAdd.get(i));
+                // TODO: is this safe as part of LWTs?
+                ByteBuffer uuid = ByteBuffer.wrap(atUnixMillisAsBytes(pt.millis, (pt.nanos + remainingInBatch--)));
+                Cell cell = params.addCell(column, CellPath.create(uuid), toAdd.get(i));
+                dataSize += cell.dataSize();
             }
+            Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, params.clientState);
         }
     }
 
@@ -560,9 +628,13 @@ public abstract class Lists
             return true;
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to delete from a frozen list";
+
+            Guardrails.readBeforeWriteListOperationsEnabled
+            .ensureEnabled("Removal of list items requiring read before write", params.clientState);
 
             // We want to call bind before possibly returning to reject queries where the value provided is not a list.
             Term.Terminal value = t.bind(params.options);
@@ -598,9 +670,14 @@ public abstract class Lists
             return true;
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to delete an item by index from a frozen list";
+
+            Guardrails.readBeforeWriteListOperationsEnabled
+            .ensureEnabled("Removal of list items by index requiring read before write", params.clientState);
+
             Term.Terminal index = t.bind(params.options);
             if (index == null)
                 throw new InvalidRequestException("Invalid null value for list index");

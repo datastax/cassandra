@@ -19,13 +19,24 @@ package org.apache.cassandra.db;
 
 import java.nio.ByteBuffer;
 import java.util.Comparator;
+import java.util.List;
+import java.util.StringJoiner;
+import java.util.function.BiFunction;
 
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.dht.Token.KeyBound;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.MurmurHash;
 import org.apache.cassandra.utils.IFilter.FilterKey;
+import org.apache.cassandra.utils.MurmurHash;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
+import org.apache.cassandra.utils.memory.HeapCloner;
 
 /**
  * Represents a decorated key, handy for certain operations
@@ -38,13 +49,7 @@ import org.apache.cassandra.utils.IFilter.FilterKey;
  */
 public abstract class DecoratedKey implements PartitionPosition, FilterKey
 {
-    public static final Comparator<DecoratedKey> comparator = new Comparator<DecoratedKey>()
-    {
-        public int compare(DecoratedKey o1, DecoratedKey o2)
-        {
-            return o1.compareTo(o2);
-        }
-    };
+    public static final Comparator<DecoratedKey> comparator = DecoratedKey::compareTo;
 
     private final Token token;
 
@@ -72,6 +77,7 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         return ByteBufferUtil.compareUnsigned(getKey(), other.getKey()) == 0; // we compare faster than BB.equals for array backed BB
     }
 
+    @Override
     public int compareTo(PartitionPosition pos)
     {
         if (this == pos)
@@ -95,6 +101,37 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         DecoratedKey otherKey = (DecoratedKey) position;
         int cmp = partitioner.getToken(key).compareTo(otherKey.getToken());
         return cmp == 0 ? ByteBufferUtil.compareUnsigned(key, otherKey.getKey()) : cmp;
+    }
+
+    @Override
+    public ByteSource asComparableBytes(Version version)
+    {
+        // Note: In the legacy version one encoding could be a prefix of another as the escaping is only weakly
+        // prefix-free (see ByteSourceTest.testDecoratedKeyPrefixes()).
+        // The OSS41 and 50 versions avoids this by adding a terminator.
+        return ByteSource.withTerminatorMaybeLegacy(version,
+                                                    ByteSource.END_OF_STREAM,
+                                                    token.asComparableBytes(version),
+                                                    keyComparableBytes(version));
+    }
+
+    @Override
+    public ByteComparable asComparableBound(boolean before)
+    {
+        return version ->
+        {
+            assert (version != Version.LEGACY) : "Decorated key bounds are not supported by the legacy encoding.";
+
+            return ByteSource.withTerminator(
+                    before ? ByteSource.LT_NEXT_COMPONENT : ByteSource.GT_NEXT_COMPONENT,
+                    token.asComparableBytes(version),
+                    keyComparableBytes(version));
+        };
+    }
+
+    protected ByteSource keyComparableBytes(Version version)
+    {
+        return ByteSource.of(getKey(), version);
     }
 
     public IPartitioner getPartitioner()
@@ -125,16 +162,99 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         return "DecoratedKey(" + getToken() + ", " + keystring + ")";
     }
 
+    /**
+     * Returns a CQL representation of this key.
+     *
+     * @param metadata the table metadata
+     * @param redaction whether to redact the key value, as in "k1 = ? AND k2 = ?".
+     * @return a CQL representation of this key
+     */
+    public String toCQLString(TableMetadata metadata, Redaction redaction)
+    {
+        List<ColumnMetadata> columns = metadata.partitionKeyColumns();
+
+        if (columns.size() == 1)
+            return toCQLString(columns.get(0), getKey(), redaction);
+
+        ByteBuffer[] values = ((CompositeType) metadata.partitionKeyType).split(getKey());
+        StringJoiner joiner = new StringJoiner(" AND ");
+
+        for (int i = 0; i < columns.size(); i++)
+            joiner.add(toCQLString(columns.get(i), values[i], redaction));
+
+        return joiner.toString();
+    }
+
+    private static String toCQLString(ColumnMetadata metadata, ByteBuffer key, Redaction redaction)
+    {
+        return String.format("%s = %s", metadata.name.toCQLString(), metadata.type.toCQLString(key, redaction));
+    }
+
     public Token getToken()
     {
         return token;
     }
 
     public abstract ByteBuffer getKey();
+    public abstract int getKeyLength();
+
+    /**
+     * If this key occupies only part of a larger buffer, allocate a new buffer that is only as large as necessary.
+     * Otherwise, it returns this key.
+     */
+    public DecoratedKey retainable()
+    {
+        return ByteBufferUtil.canMinimize(getKey())
+               ? new BufferDecoratedKey(getToken(), HeapCloner.instance.clone(getKey()))
+               : this;
+    }
 
     public void filterHash(long[] dest)
     {
         ByteBuffer key = getKey();
         MurmurHash.hash3_x64_128(key, key.position(), key.remaining(), 0, dest);
+    }
+
+    /**
+     * A template factory method for creating decorated keys from their byte-comparable representation.
+     */
+    static <T extends DecoratedKey> T fromByteComparable(ByteComparable byteComparable,
+                                                         Version version,
+                                                         IPartitioner partitioner,
+                                                         BiFunction<Token, byte[], T> decoratedKeyFactory)
+    {
+        ByteSource.Peekable peekable = ByteSource.peekable(byteComparable.asComparableBytes(version));
+        // Decode the token from the first component of the multi-component sequence representing the whole decorated key.
+        Token token = partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), version);
+        // Decode the key bytes from the second component.
+        byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
+        // Consume the terminator byte.
+        int terminator = peekable.next();
+        assert terminator == ByteSource.TERMINATOR : "Decorated key encoding must end in terminator.";
+        // Instantiate a decorated key from the decoded token and key bytes, using the provided factory method.
+        return decoratedKeyFactory.apply(token, keyBytes);
+    }
+
+    public static byte[] keyFromByteComparable(ByteComparable byteComparable,
+                                               Version version,
+                                               IPartitioner partitioner)
+    {
+        return keyFromByteSource(ByteSource.peekable(byteComparable.asComparableBytes(version)), version, partitioner);
+    }
+
+
+    public static byte[] keyFromByteSource(ByteSource.Peekable peekableByteSource,
+                                           Version version,
+                                           IPartitioner partitioner)
+    {
+        assert version != Version.LEGACY;   // reverse translation is not supported for LEGACY version.
+        // Decode the token from the first component of the multi-component sequence representing the whole decorated key.
+        // We won't use it, but the decoding also positions the byte source after it.
+        partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekableByteSource), version);
+        // Decode the key bytes from the second component.
+        byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekableByteSource));
+        int terminator = peekableByteSource.next();
+        assert terminator == ByteSource.TERMINATOR : "Decorated key encoding must end in terminator.";
+        return keyBytes;
     }
 }

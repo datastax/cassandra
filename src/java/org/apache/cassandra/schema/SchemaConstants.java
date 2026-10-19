@@ -25,12 +25,22 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
 
+import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.db.Digest;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.tracing.TraceKeyspace;
 
+import static org.apache.cassandra.db.Directories.TABLE_DIRECTORY_NAME_SEPARATOR;
+
+/**
+ * When adding new String keyspace names here, double check if it needs to be added to PartitionDenylist.canDenylistKeyspace
+ */
 public final class SchemaConstants
 {
     public static final Pattern PATTERN_WORD_CHARS = Pattern.compile("\\w+");
+    public static final Pattern PATTERN_NON_WORD_CHAR = Pattern.compile("\\W");
 
     public static final String SYSTEM_KEYSPACE_NAME = "system";
     public static final String SCHEMA_KEYSPACE_NAME = "system_schema";
@@ -43,29 +53,68 @@ public final class SchemaConstants
 
     public static final String VIRTUAL_VIEWS = "system_views";
 
+    public static final String DUMMY_KEYSPACE_OR_TABLE_NAME = "--dummy--";
+
     /* system keyspace names (the ones with LocalStrategy replication strategy) */
-    public static final Set<String> LOCAL_SYSTEM_KEYSPACE_NAMES =
-        ImmutableSet.of(SYSTEM_KEYSPACE_NAME, SCHEMA_KEYSPACE_NAME);
+    public static final Set<String> LOCAL_SYSTEM_KEYSPACE_NAMES = ImmutableSet.of(SYSTEM_KEYSPACE_NAME, SCHEMA_KEYSPACE_NAME);
+
+    /* virtual table system keyspace names */
+    public static final Set<String> VIRTUAL_SYSTEM_KEYSPACE_NAMES =
+        ImmutableSet.of(VIRTUAL_VIEWS, VIRTUAL_SCHEMA);
 
     /* replicate system keyspace names (the ones with a "true" replication strategy) */
-    public static final Set<String> REPLICATED_SYSTEM_KEYSPACE_NAMES =
-        ImmutableSet.of(TRACE_KEYSPACE_NAME, AUTH_KEYSPACE_NAME, DISTRIBUTED_KEYSPACE_NAME);
+    public static final Set<String> REPLICATED_SYSTEM_KEYSPACE_NAMES = ImmutableSet.of(TRACE_KEYSPACE_NAME, AUTH_KEYSPACE_NAME, DISTRIBUTED_KEYSPACE_NAME);
+
     /**
-     * longest permissible KS or CF name.  Our main concern is that filename not be more than 255 characters;
-     * the filename will contain both the KS and CF names. Since non-schema-name components only take up
-     * ~64 characters, we could allow longer names than this, but on Windows, the entire path should be not greater than
-     * 255 characters, so a lower limit here helps avoid problems.  See CASSANDRA-4110.
+     * Longest acceptable file name. Longer names lead to file write or read errors.
      */
-    public static final int NAME_LENGTH = 48;
+    public static final int FILENAME_LENGTH = 255;
+
+     /**
+     * The longest permissible KS or CF name.
+     *
+     * Before CASSANDRA-16956, we used to care about not having the entire path longer than 255 characters because of
+     * Windows support but this limit is by implementing CASSANDRA-16956 not in effect anymore.
+     *
+     * Note: This extended to 222 for CNDB tenant specific keyspaces.
+     * 222 is maximum filename length of 255 chars minus a separator char and
+     * 32 chars for table UUID.
+     */
+    public static final int NAME_LENGTH = FILENAME_LENGTH - 32 - 1;
+
+    /**
+     * Length of a table uuid as a hex string.
+     */
+    public static final int TABLE_UUID_AS_HEX_LENGTH = 32;
+
+    /**
+     * Longest acceptable table name, so it can be used in a directory
+     * name constructed with a suffix of a table id and a separator.
+     */
+    public static final int TABLE_NAME_LENGTH = FILENAME_LENGTH - TABLE_UUID_AS_HEX_LENGTH - TABLE_DIRECTORY_NAME_SEPARATOR.length();
+
+    /** Longest permissible index name, so no index can fail on file name error.
+     * It is based on the most restrictive requirement coming from SAI and calculated by
+     * {@link org.apache.cassandra.index.sai.disk.format.Version#calculateIndexNameAllowedLength}.
+     * The exact number is used here, since it will be in user's documentation.
+     */
+    public static final int INDEX_NAME_LENGTH = 182;
 
     // 59adb24e-f3cd-3e02-97f0-5b395827453f
     public static final UUID emptyVersion;
 
     public static final List<String> LEGACY_AUTH_TABLES = Arrays.asList("credentials", "users", "permissions");
 
-    public static boolean isValidName(String name)
+    /**
+     * Validates that a name is not empty and contains only alphanumeric characters or
+     * underscore, so it can be used in file or directory names.
+     *
+     * @param name the name to check
+     * @return whether the non-empty name contains only valid characters
+     */
+    public static boolean isValidCharsName(String name)
     {
-        return name != null && !name.isEmpty() && name.length() <= NAME_LENGTH && PATTERN_WORD_CHARS.matcher(name).matches();
+        return name != null && !name.isEmpty() && PATTERN_WORD_CHARS.matcher(name).matches();
     }
 
     static
@@ -78,7 +127,7 @@ public final class SchemaConstants
      */
     public static boolean isLocalSystemKeyspace(String keyspaceName)
     {
-        return LOCAL_SYSTEM_KEYSPACE_NAMES.contains(keyspaceName.toLowerCase());
+        return LOCAL_SYSTEM_KEYSPACE_NAMES.contains(keyspaceName.toLowerCase()) || isVirtualSystemKeyspace(keyspaceName);
     }
 
     /**
@@ -95,7 +144,7 @@ public final class SchemaConstants
      */
     public static boolean isVirtualSystemKeyspace(String keyspaceName)
     {
-        return VIRTUAL_SCHEMA.equals(keyspaceName.toLowerCase()) || VIRTUAL_VIEWS.equals(keyspaceName.toLowerCase());
+        return VIRTUAL_SYSTEM_KEYSPACE_NAMES.contains(keyspaceName.toLowerCase());
     }
 
     /**
@@ -104,8 +153,64 @@ public final class SchemaConstants
      */
     public static boolean isSystemKeyspace(String keyspaceName)
     {
+        return isLocalSystemKeyspace(keyspaceName) // this includes vtables
+                || isReplicatedSystemKeyspace(keyspaceName);
+    }
+
+    /**
+     * @return whether or not the keyspace is a non-virtual, system keyspace
+     */
+    public static boolean isNonVirtualSystemKeyspace(String keyspaceName)
+    {
+        final String lowercaseKeyspaceName = keyspaceName.toLowerCase();
+        return LOCAL_SYSTEM_KEYSPACE_NAMES.contains(lowercaseKeyspaceName)
+               || REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(lowercaseKeyspaceName);
+    }
+
+    /**
+     * Returns the set of all system keyspaces
+     * @return all system keyspaces
+     */
+    public static Set<String> getSystemKeyspaces()
+    {
+        return Sets.union(Sets.union(LOCAL_SYSTEM_KEYSPACE_NAMES, REPLICATED_SYSTEM_KEYSPACE_NAMES), VIRTUAL_SYSTEM_KEYSPACE_NAMES);
+    }
+
+    /**
+     * Returns the set of local and replicated system keyspace names
+     * @return all local and replicated system keyspace names
+     */
+    public static Set<String> getLocalAndReplicatedSystemKeyspaceNames()
+    {
+        return Sets.union(LOCAL_SYSTEM_KEYSPACE_NAMES, REPLICATED_SYSTEM_KEYSPACE_NAMES);
+    }
+    
+    /**
+     * Returns the set of all local and replicated system table names
+     * @return all local and replicated system table names
+     */
+    public static Set<String> getLocalAndReplicatedSystemTableNames()
+    {
+        return ImmutableSet.<String>builder()
+                           .addAll(SystemKeyspace.TABLE_NAMES)
+                           .addAll(SchemaKeyspaceTables.ALL)
+                           .addAll(TraceKeyspace.TABLE_NAMES)
+                           .addAll(AuthKeyspace.tableNames())
+                           .addAll(SystemDistributedKeyspace.TABLE_NAMES)
+                           .build();
+    }
+    
+    public static boolean isInternalKeyspace(String keyspaceName)
+    {
         return isLocalSystemKeyspace(keyspaceName)
-                || isReplicatedSystemKeyspace(keyspaceName)
-                || isVirtualSystemKeyspace(keyspaceName);
+               || isReplicatedSystemKeyspace(keyspaceName);
+    }
+    
+    /**
+     * @return whether or not the keyspace is a user keyspace
+     */
+    public static boolean isUserKeyspace(String keyspaceName)
+    {
+        return !isInternalKeyspace(keyspaceName);
     }
 }

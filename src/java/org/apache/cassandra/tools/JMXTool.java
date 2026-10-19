@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.tools;
 
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -64,13 +62,17 @@ import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.airlift.airline.Arguments;
 import io.airlift.airline.Cli;
 import io.airlift.airline.Command;
 import io.airlift.airline.Help;
 import io.airlift.airline.HelpOption;
 import io.airlift.airline.Option;
+import org.apache.cassandra.config.YamlConfigurationLoader;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
+import org.apache.cassandra.utils.JsonUtils;
+import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.TypeDescription;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.Constructor;
@@ -132,7 +134,6 @@ public class JMXTool
             {
                 void dump(OutputStream output, Map<String, Info> map)
                 {
-                    @SuppressWarnings("resource")
                     // output should be released by caller
                     PrintStream out = toPrintStream(output);
                     for (Map.Entry<String, Info> e : map.entrySet())
@@ -157,15 +158,14 @@ public class JMXTool
             {
                 void dump(OutputStream output, Map<String, Info> map) throws IOException
                 {
-                    ObjectMapper mapper = new ObjectMapper();
-                    mapper.writeValue(output, map);
+                    JsonUtils.JSON_OBJECT_PRETTY_WRITER.writeValue(output, map);
                 }
             },
             yaml
             {
                 void dump(OutputStream output, Map<String, Info> map) throws IOException
                 {
-                    Representer representer = new Representer();
+                    Representer representer = new Representer(new DumperOptions());
                     representer.addClassTag(Info.class, Tag.MAP); // avoid the auto added tag
                     Yaml yaml = new Yaml(representer);
                     yaml.dump(map, new OutputStreamWriter(output));
@@ -229,8 +229,8 @@ public class JMXTool
             Preconditions.checkArgument(files.size() == 2, "files requires 2 arguments but given %s", files);
             Map<String, Info> left;
             Map<String, Info> right;
-            try (FileInputStream leftStream = new FileInputStream(files.get(0));
-                 FileInputStream rightStream = new FileInputStream(files.get(1)))
+            try (FileInputStreamPlus leftStream = new FileInputStreamPlus(files.get(0));
+                 FileInputStreamPlus rightStream = new FileInputStreamPlus(files.get(1)))
             {
                 left = format.load(leftStream);
                 right = format.load(rightStream);
@@ -303,7 +303,8 @@ public class JMXTool
                 DiffResult<Operation> operations = diff(leftInfo.operationSet(), rightInfo.operationSet(), operation -> {
                     for (CliPattern p : excludeOperations)
                     {
-                        if (p.pattern.matcher(operation.name).matches())
+                        if (p.pattern.matcher(operation.name).matches() ||
+                            p.pattern.matcher(operation.toString().replaceAll(" +", "")).matches())
                             return false;
                     }
                     return true;
@@ -373,8 +374,7 @@ public class JMXTool
             {
                 Map<String, Info> load(InputStream input) throws IOException
                 {
-                    ObjectMapper mapper = new ObjectMapper();
-                    return mapper.readValue(input, new TypeReference<Map<String, Info>>() {});
+                    return JsonUtils.JSON_OBJECT_MAPPER.readValue(input, new TypeReference<Map<String, Info>>() {});
                 }
             },
             yaml
@@ -396,6 +396,7 @@ public class JMXTool
 
             public CustomConstructor()
             {
+                super(YamlConfigurationLoader.getDefaultLoaderOptions());
                 this.rootTag = new Tag(ROOT);
                 this.addTypeDescription(INFO_TYPE);
             }

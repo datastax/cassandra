@@ -18,29 +18,38 @@
 
 package org.apache.cassandra.distributed.test;
 
-import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
 import java.sql.Date;
 import java.text.SimpleDateFormat;
-import java.time.Instant;
 import java.util.function.Consumer;
 import javax.management.MBeanServer;
+import javax.management.MBeanServerConnection;
+import javax.management.remote.JMXConnector;
 
+import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
 
 import com.sun.management.HotSpotDiagnosticMXBean;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
+import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
+import org.apache.cassandra.distributed.api.IInvokableInstance;
+import org.apache.cassandra.distributed.shared.JMXUtil;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.SigarLibrary;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
+import static org.apache.cassandra.distributed.api.Feature.JMX;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
+import static org.apache.cassandra.distributed.test.jmx.JMXGetterCheckTest.testAllValidGetters;
+import static org.apache.cassandra.utils.FBUtilities.now;
+import static org.hamcrest.Matchers.startsWith;
 
 /* Resource Leak Test - useful when tracking down issues with in-JVM framework cleanup.
  * All objects referencing the InstanceClassLoader need to be garbage collected or
@@ -62,10 +71,10 @@ public class ResourceLeakTest extends TestBaseImpl
     final boolean dumpEveryLoop = false;   // Dump heap & possibly files every loop
     final boolean dumpFileHandles = false; // Call lsof whenever dumping resources
     final boolean forceCollection = false; // Whether to explicitly force finalization/gc for smaller heap dumps
-    final long finalWaitMillis = 0l;       // Number of millis to wait before final resource dump to give gc a chance
+    final long finalWaitMillis = 0L;       // Number of millis to wait before final resource dump to give gc a chance
 
     static final SimpleDateFormat format = new SimpleDateFormat("yyyyMMddHHmmss");
-    static final String when = format.format(Date.from(Instant.now()));
+    static final String when = format.format(Date.from(now()));
 
     static String outputFilename(String base, String description, String extension)
     {
@@ -123,7 +132,7 @@ public class ResourceLeakTest extends TestBaseImpl
         long pid = getProcessId();
         ProcessBuilder map = new ProcessBuilder("/usr/sbin/lsof", "-p", Long.toString(pid));
         File output = new File(outputFilename("lsof", description, ".txt"));
-        map.redirectOutput(output);
+        map.redirectOutput(output.toJavaIOFile());
         map.redirectErrorStream(true);
         map.start().waitFor();
     }
@@ -137,7 +146,36 @@ public class ResourceLeakTest extends TestBaseImpl
         }
     }
 
+    static void testJmx(Cluster cluster)
+    {
+        try
+        {
+            for (IInvokableInstance instance : cluster.get(1, cluster.size()))
+            {
+                IInstanceConfig config = instance.config();
+                try (JMXConnector jmxc = JMXUtil.getJmxConnector(config, 5))
+                {
+                    MBeanServerConnection mbsc = jmxc.getMBeanServerConnection();
+                    // instances get their default domain set to their IP address, so us it
+                    // to check that we are actually connecting to the correct instance
+                    String defaultDomain = mbsc.getDefaultDomain();
+                    Assert.assertThat(defaultDomain, startsWith(JMXUtil.getJmxHost(config) + ":" + config.jmxPort()));
+                }
+            }
+            testAllValidGetters(cluster);
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
     void doTest(int numClusterNodes, Consumer<IInstanceConfig> updater) throws Throwable
+    {
+        doTest(numClusterNodes, updater, ignored -> {});
+    }
+
+    void doTest(int numClusterNodes, Consumer<IInstanceConfig> updater, Consumer<Cluster> actionToPerform) throws Throwable
     {
         for (int loop = 0; loop < numTestLoops; loop++)
         {
@@ -149,6 +187,7 @@ public class ResourceLeakTest extends TestBaseImpl
                 cluster.schemaChange("CREATE TABLE " + KEYSPACE + "." + tableName + " (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
                 cluster.coordinator(1).execute("INSERT INTO " + KEYSPACE + "." + tableName + "(pk,ck,v) VALUES (0,0,0)", ConsistencyLevel.ALL);
                 cluster.get(1).flush(KEYSPACE);
+                actionToPerform.accept(cluster);
                 if (dumpEveryLoop)
                 {
                     dumpResources(String.format("loop%03d", loop));
@@ -206,5 +245,34 @@ public class ResourceLeakTest extends TestBaseImpl
             Thread.sleep(finalWaitMillis);
         }
         dumpResources("final-native");
+    }
+
+    @Test
+    public void looperJmxTest() throws Throwable
+    {
+        doTest(2, config -> config.with(JMX), ResourceLeakTest::testJmx);
+        if (forceCollection)
+        {
+            System.runFinalization();
+            System.gc();
+            Thread.sleep(finalWaitMillis);
+        }
+        dumpResources("final-jmx");
+    }
+
+    @Test
+    public void looperEverythingTest() throws Throwable
+    {
+        doTest(2, config -> config.with(Feature.values()),
+               cluster -> {
+                   testJmx(cluster);
+               });
+        if (forceCollection)
+        {
+            System.runFinalization();
+            System.gc();
+            Thread.sleep(finalWaitMillis);
+        }
+        dumpResources("final-everything");
     }
 }

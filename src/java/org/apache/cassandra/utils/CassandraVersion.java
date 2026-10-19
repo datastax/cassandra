@@ -27,6 +27,8 @@ import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Suppliers;
+
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
 
 /**
@@ -41,15 +43,31 @@ public class CassandraVersion implements Comparable<CassandraVersion>
      * note: 3rd/4th groups matches to words but only allows number and checked after regexp test.
      * this is because 3rd and the last can be identical.
      **/
-    private static final String VERSION_REGEXP = "(\\d+)\\.(\\d+)(?:\\.(\\w+))?(?:\\.(\\w+))?(\\-[-.\\w]+)?([.+][.\\w]+)?";
+    private static final String VERSION_REGEXP = "(?<major>\\d+)\\.(?<minor>\\d+)(\\.(?<patch>\\w+)(\\.(?<hotfix>\\w+))?)?(-(?<prerelease>[-.\\w]+))?([.+](?<build>[.\\w]+))?";
     private static final Pattern PATTERN_WORDS = Pattern.compile("\\w+");
     @VisibleForTesting
     static final int NO_HOTFIX = -1;
 
     private static final Pattern PATTERN = Pattern.compile(VERSION_REGEXP);
 
+    public static final CassandraVersion CASSANDRA_5_0 = new CassandraVersion("5.0").familyLowerBound.get();
+    public static final CassandraVersion CASSANDRA_4_1 = new CassandraVersion("4.1").familyLowerBound.get();
     public static final CassandraVersion CASSANDRA_4_0 = new CassandraVersion("4.0").familyLowerBound.get();
+    public static final CassandraVersion CASSANDRA_4_0_RC2 = new CassandraVersion(4, 0, 0, NO_HOTFIX, new String[] {"rc2"}, null);
     public static final CassandraVersion CASSANDRA_3_4 = new CassandraVersion("3.4").familyLowerBound.get();
+
+    /**
+     * Used to indicate that there was a previous version written to the legacy (pre 1.2)
+     * system.Versions table, but that we cannot read it. Suffice to say, any upgrade should
+     * proceed through 1.2.x before upgrading to the current version.
+     */
+    public static final CassandraVersion UNREADABLE_VERSION = new CassandraVersion("0.0.0-unknown");
+
+    /**
+     * Used to indicate that no previous version information was found. When encountered, we assume that
+     * Cassandra was not previously installed and we're in the process of starting a fresh node.
+     */
+    public static final CassandraVersion NULL_VERSION = new CassandraVersion("0.0.0-absent");
 
     public final int major;
     public final int minor;
@@ -87,13 +105,13 @@ public class CassandraVersion implements Comparable<CassandraVersion>
 
         try
         {
-            this.major = Integer.parseInt(matcher.group(1));
-            this.minor = Integer.parseInt(matcher.group(2));
-            this.patch = matcher.group(3) != null ? Integer.parseInt(matcher.group(3)) : 0;
-            this.hotfix = matcher.group(4) != null ? Integer.parseInt(matcher.group(4)) : NO_HOTFIX;
+            this.major = intPart(matcher, "major");
+            this.minor = intPart(matcher, "minor");
+            this.patch = intPart(matcher, "patch", 0);
+            this.hotfix = intPart(matcher, "hotfix", NO_HOTFIX);
 
-            String pr = matcher.group(5);
-            String bld = matcher.group(6);
+            String pr = matcher.group("prerelease");
+            String bld = matcher.group("build");
 
             this.preRelease = pr == null || pr.isEmpty() ? null : parseIdentifiers(version, pr);
             this.build = bld == null || bld.isEmpty() ? null : parseIdentifiers(version, bld);
@@ -104,17 +122,27 @@ public class CassandraVersion implements Comparable<CassandraVersion>
         }
     }
 
+    private static int intPart(Matcher matcher, String group)
+    {
+        return Integer.parseInt(matcher.group(group));
+    }
+
+    private static int intPart(Matcher matcher, String group, int orElse)
+    {
+        String value = matcher.group(group);
+        return value == null ? orElse : Integer.parseInt(value);
+    }
+
     private CassandraVersion getFamilyLowerBound()
     {
         return patch == 0 && hotfix == NO_HOTFIX && preRelease != null && preRelease.length == 0 && build == null
                ? this
-               : new CassandraVersion(major, minor, 0, NO_HOTFIX, new String[0], null);
+               : new CassandraVersion(major, minor, 0, NO_HOTFIX, ArrayUtils.EMPTY_STRING_ARRAY, null);
     }
 
     private static String[] parseIdentifiers(String version, String str)
     {
         // Drop initial - or +
-        str = str.substring(1);
         String[] parts = StringUtils.split(str, ".-");
         for (String part : parts)
         {
@@ -136,6 +164,11 @@ public class CassandraVersion implements Comparable<CassandraVersion>
 
     public int compareTo(CassandraVersion other)
     {
+        return compareTo(other, false);
+    }
+
+    public int compareTo(CassandraVersion other, boolean compareToPatchOnly)
+    {
         if (major < other.major)
             return -1;
         if (major > other.major)
@@ -150,6 +183,9 @@ public class CassandraVersion implements Comparable<CassandraVersion>
             return -1;
         if (patch > other.patch)
             return 1;
+
+        if (compareToPatchOnly)
+            return 0;
 
         int c = Integer.compare(hotfix, other.hotfix);
         if (c != 0)
@@ -189,16 +225,34 @@ public class CassandraVersion implements Comparable<CassandraVersion>
                 if (i2 != null)
                     return 1;
 
-                int c = ids1[i].compareTo(ids2[i]);
+                int c = ids1[i].compareToIgnoreCase(ids2[i]);
                 if (c != 0)
                     return c;
             }
         }
 
         if (ids1.length < ids2.length)
-            return -1;
+        {
+            // If the preRelease is empty it means that it is a family lower bound and that the first identifier is smaller than the second one
+            // (e.g. 4.0.0- < 4.0.0-beta1)
+            if (ids1.length == 0)
+                return -1;
+
+            // If the difference in length is only due to SNAPSHOT we know that the second identifier is smaller than the first one.
+            // (e.g. 4.0.0-rc1 > 4.0.0-rc1-SNAPSHOT)
+            return (ids2.length - ids1.length) == 1 && ids2[ids2.length - 1].equalsIgnoreCase("SNAPSHOT") ? 1 : -1;
+        }
         if (ids1.length > ids2.length)
-            return 1;
+        {
+            // If the preRelease is empty it means that it is a family lower bound and that the second identifier is smaller than the first one
+            // (e.g. 4.0.0-beta1 > 4.0.0-)
+            if (ids2.length == 0)
+                return 1;
+
+            // If the difference in length is only due to SNAPSHOT we know that the first identifier is smaller than the second one.
+            // (e.g. 4.0.0-rc1-SNAPSHOT < 4.0.0-rc1)
+            return (ids1.length - ids2.length) == 1 && ids1[ids1.length - 1].equalsIgnoreCase("SNAPSHOT") ? -1 : 1;
+        }
         return 0;
     }
 
@@ -249,5 +303,10 @@ public class CassandraVersion implements Comparable<CassandraVersion>
         if (build != null)
             sb.append('+').append(StringUtils.join(build, "."));
         return sb.toString();
+    }
+
+    public String toMajorMinorString()
+    {
+        return String.format("%d.%d", major, minor);
     }
 }

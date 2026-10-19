@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.hints;
 
-import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -28,6 +27,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.Files;
+import org.apache.cassandra.io.util.File;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 
@@ -37,7 +37,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.utils.UUIDGen;
+import org.hamcrest.Matchers;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
@@ -81,11 +81,11 @@ public abstract class AlteredHints
         int bufferSize = HintsWriteExecutor.WRITE_BUFFER_SIZE;
         List<Hint> hints = new LinkedList<>();
 
-        UUID hostId = UUIDGen.getTimeUUID();
+        UUID hostId = UUID.randomUUID();
         long ts = System.currentTimeMillis();
 
         HintsDescriptor descriptor = new HintsDescriptor(hostId, ts, params());
-        File dir = Files.createTempDir();
+        File dir = new File(Files.createTempDir());
         try (HintsWriter writer = HintsWriter.create(dir, descriptor))
         {
             Assert.assertTrue(looksLegit(writer));
@@ -101,9 +101,11 @@ public abstract class AlteredHints
                     hintNum++;
                 }
             }
+
+            Assert.assertThat(descriptor.hintsFileSize(dir), Matchers.greaterThan(0L));
         }
 
-        try (HintsReader reader = HintsReader.open(new File(dir, descriptor.fileName())))
+        try (HintsReader reader = HintsReader.open(descriptor.file(dir)))
         {
             Assert.assertTrue(looksLegit(reader.getInput()));
             List<Hint> deserialized = new ArrayList<>(hintNum);

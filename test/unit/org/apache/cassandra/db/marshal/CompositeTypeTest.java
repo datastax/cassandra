@@ -20,27 +20,42 @@ package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Random;
+import java.util.UUID;
 
 import com.google.common.collect.Lists;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.junit.Assert.fail;
 import static org.junit.Assert.assertEquals;
+import static org.quicktheories.QuickTheory.qt;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.serializers.UUIDSerializer;
 import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
+import org.assertj.core.api.Assertions;
+import org.quicktheories.generators.SourceDSL;
 
 public class CompositeTypeTest
 {
@@ -57,11 +72,11 @@ public class CompositeTypeTest
     }
 
     private static final int UUID_COUNT = 3;
-    private static final UUID[] uuids = new UUID[UUID_COUNT];
+    private static final TimeUUID[] uuids = new TimeUUID[UUID_COUNT];
     static
     {
         for (int i = 0; i < UUID_COUNT; ++i)
-            uuids[i] = UUIDGen.getTimeUUID();
+            uuids[i] = nextTimeUUID();
     }
 
     @BeforeClass
@@ -138,7 +153,7 @@ public class CompositeTypeTest
         ByteBuffer key = createCompositeKey("test1", uuids[1], 42, false);
         comparator.validate(key);
 
-        key = createCompositeKey("test1", null, -1, false);
+        key = createCompositeKey("test1", (ByteBuffer) null, -1, false);
         comparator.validate(key);
 
         key = createCompositeKey("test1", uuids[2], -1, true);
@@ -168,7 +183,7 @@ public class CompositeTypeTest
             assert e.toString().contains("should be 16 or 0 bytes");
         }
 
-        key = createCompositeKey("test1", UUID.randomUUID(), 42, false);
+        key = createCompositeKey("test1", UUIDSerializer.instance.serialize(UUID.randomUUID()), 42, false);
         try
         {
             comparator.validate(key);
@@ -186,7 +201,7 @@ public class CompositeTypeTest
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARDCOMPOSITE);
 
-        ByteBuffer cname1 = createCompositeKey("test1", null, -1, false);
+        ByteBuffer cname1 = createCompositeKey("test1", (ByteBuffer) null, -1, false);
         ByteBuffer cname2 = createCompositeKey("test1", uuids[0], 24, false);
         ByteBuffer cname3 = createCompositeKey("test1", uuids[0], 42, false);
         ByteBuffer cname4 = createCompositeKey("test2", uuids[0], -1, false);
@@ -203,8 +218,8 @@ public class CompositeTypeTest
 
         ColumnMetadata cdef = cfs.metadata().getColumn(ByteBufferUtil.bytes("val"));
 
-        ImmutableBTreePartition readPartition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
-        Iterator<Row> iter = readPartition.iterator();
+        Partition readPartition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
+        Iterator<Row> iter = readPartition.rowIterator();
 
         compareValues(iter.next().getCell(cdef), "cname1");
         compareValues(iter.next().getCell(cdef), "cname2");
@@ -281,7 +296,12 @@ public class CompositeTypeTest
         }
     }
 
-    private ByteBuffer createCompositeKey(String s, UUID uuid, int i, boolean lastIsOne)
+    private ByteBuffer createCompositeKey(String s, TimeUUID uuid, int i, boolean lastIsOne)
+    {
+        return createCompositeKey(s, uuid == null ? null : uuid.toBytes(), i, lastIsOne);
+    }
+
+    private ByteBuffer createCompositeKey(String s, ByteBuffer uuid, int i, boolean lastIsOne)
     {
         ByteBuffer bytes = ByteBufferUtil.bytes(s);
         int totalSize = 0;
@@ -308,7 +328,7 @@ public class CompositeTypeTest
             if (uuid != null)
             {
                 bb.putShort((short) 16);
-                bb.put(UUIDGen.decompose(uuid));
+                bb.put(uuid);
                 bb.put(i == -1 && lastIsOne ? (byte)1 : (byte)0);
                 if (i != -1)
                 {
@@ -342,5 +362,20 @@ public class CompositeTypeTest
         ByteBuffer serialized = CompositeType.build(ByteBufferAccessor.instance, expected);
         for (ValueAccessor<?> accessor : ValueAccessors.ACCESSORS)
             testToFromString(serialized, accessor, type);
+    }
+
+    @Test
+    public void testSizeHeader()
+    {
+        ByteBuffer bb = ByteBuffer.allocate(2);
+        qt().forAll(SourceDSL.integers().between(0, FBUtilities.MAX_UNSIGNED_SHORT)).checkAssert(size -> {
+            bb.clear();
+
+            ByteBufferUtil.writeShortLength(bb, size);
+            bb.flip();
+            Assertions.assertThat(ByteBufferAccessor.instance.getUnsignedShort(bb, 0))
+                      .isEqualTo(ByteBufferUtil.readShortLength(bb))
+                      .isEqualTo(size);
+        });
     }
 }

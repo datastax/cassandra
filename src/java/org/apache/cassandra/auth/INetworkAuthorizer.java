@@ -20,7 +20,7 @@ package org.apache.cassandra.auth;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 
-public interface INetworkAuthorizer
+public interface INetworkAuthorizer extends AuthCache.BulkLoader<RoleResource, DCPermissions>
 {
     /**
      * Whether or not the authorizer will attempt authorization.
@@ -46,7 +46,7 @@ public interface INetworkAuthorizer
     void setRoleDatacenters(RoleResource role, DCPermissions permissions);
 
     /**
-     * Called when a role is deleted, so any corresponding network auth
+     * Called when a role is deleted, so any corresponding network permissions
      * data can also be cleaned up
      */
     void drop(RoleResource role);

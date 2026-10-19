@@ -73,7 +73,7 @@ public class SchemaArgsParser implements Iterable<ColumnFamilyStore>
         if (schemaArgs.isEmpty())
         {
             // iterate over everything
-            Iterator<String> ksNames = Schema.instance.getNonLocalStrategyKeyspaces().iterator();
+            Iterator<String> ksNames = Schema.instance.distributedKeyspaces().names().iterator();
 
             return new AbstractIterator<ColumnFamilyStore>()
             {

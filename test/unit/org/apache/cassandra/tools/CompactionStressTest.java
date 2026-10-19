@@ -18,15 +18,12 @@
 
 package org.apache.cassandra.tools;
 
-import java.io.File;
 
+import org.apache.cassandra.io.util.File;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 
-@RunWith(OrderedJUnit4ClassRunner.class)
 public class CompactionStressTest extends OfflineToolUtils
 {
     @Test
@@ -41,7 +38,7 @@ public class CompactionStressTest extends OfflineToolUtils
     {
         ClassLoader classLoader = getClass().getClassLoader();
         File file = new File(classLoader.getResource("blogpost.yaml").getFile());
-        String profileFile = file.getAbsolutePath();
+        String profileFile = file.absolutePath();
 
         ToolResult tool = ToolRunner.invokeClass("org.apache.cassandra.stress.CompactionStress",
                                                  "write",
@@ -52,7 +49,7 @@ public class CompactionStressTest extends OfflineToolUtils
                                                  "-p",
                                                  profileFile,
                                                  "-t",
-                                                 "4");
+                                                 "8");
         tool.assertOnCleanExit();
 
         tool = ToolRunner.invokeClass("org.apache.cassandra.stress.CompactionStress",
@@ -62,7 +59,7 @@ public class CompactionStressTest extends OfflineToolUtils
                                       "-p",
                                       profileFile,
                                       "-t",
-                                      "4");
+                                      "8");
               tool.assertOnCleanExit();
     }
 }

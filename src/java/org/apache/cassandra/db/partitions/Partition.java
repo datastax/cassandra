@@ -17,12 +17,12 @@
  */
 package org.apache.cassandra.db.partitions;
 
+import java.util.Iterator;
 import java.util.NavigableSet;
 
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -51,10 +51,43 @@ public interface Partition
     public boolean isEmpty();
 
     /**
-     * Returns the row corresponding to the provided clustering, or null if there is not such row.
+     * Whether the partition object has any rows, excluding the static row.
+     * This may be false but partition still be non-empty if it has a deletion or a non-empty static row.
+     */
+    boolean hasRows();
+
+    /**
+     * Returns the number of rows in this partition, excluding the static row.
+     */
+    int rowCount();
+
+    /**
+     * Returns an iterator over the rows of this partition excluding the static row.
+     */
+    Iterator<Row> rowIterator();
+
+    /**
+     * Returns the collection of rows of this partition excluding the static row as an iterable.
+     */
+    default Iterable<Row> rows()
+    {
+        return this::rowIterator;
+    }
+
+    Row staticRow();
+
+    /**
+     * Returns the last non-static row in the partition.
+     */
+    Row lastRow();
+
+    /**
+     * Returns the row corresponding to the provided clustering, or null if there is no such row.
      *
      * @param clustering clustering key to search
-     * @return row corresponding to the clustering, it's either null or non-empty row.
+     * @return Row corresponding to the clustering, it's either null or non-empty row. Note that the returned row can
+     * be fully deleted (i.e. contain only a row deletion timestamp). The method will return a deleted row also in
+     * the case where no row exists for the given clustering, but it is covered under a range deletion.
      */
     public @Nullable Row getRow(Clustering<?> clustering);
 
@@ -74,4 +107,37 @@ public interface Partition
      * selected by the provided clusterings.
      */
     public UnfilteredRowIterator unfilteredIterator(ColumnFilter columns, NavigableSet<Clustering<?>> clusteringsInQueryOrder, boolean reversed);
+
+    static String toString(Partition p)
+    {
+        return toString(p, true);
+    }
+
+    static String toString(Partition p, boolean includeFullDetails)
+    {
+        StringBuilder sb = new StringBuilder();
+        if (includeFullDetails)
+        {
+            sb.append(String.format("[%s.%s] key=%s partition_deletion=%s columns=%s",
+                                    p.metadata().keyspace,
+                                    p.metadata().name,
+                                    p.metadata().partitionKeyType.getString(p.partitionKey().getKey()),
+                                    p.partitionLevelDeletion(),
+                                    p.columns()));
+        }
+        else
+        {
+            sb.append("key=").append(p.metadata().partitionKeyType.getString(p.partitionKey().getKey()));
+        }
+
+        if (p.staticRow() != Rows.EMPTY_STATIC_ROW)
+            sb.append("\n    ").append(p.staticRow().toString(p.metadata(), includeFullDetails));
+
+        try (UnfilteredRowIterator iter = p.unfilteredIterator())
+        {
+            while (iter.hasNext())
+                sb.append("\n    ").append(iter.next().toString(p.metadata(), includeFullDetails));
+        }
+        return sb.toString();
+    }
 }

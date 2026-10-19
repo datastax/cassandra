@@ -18,7 +18,9 @@
 package org.apache.cassandra.cql3.validation.entities;
 
 import java.lang.reflect.Field;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableSet;
@@ -26,15 +28,26 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.AuthenticatedUser;
+import org.apache.cassandra.auth.DataResource;
+import org.apache.cassandra.auth.FunctionResource;
+import org.apache.cassandra.auth.IAuthorizer;
+import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.RoleResource;
+import org.apache.cassandra.auth.StubAuthorizer;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.Attributes;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.cql3.functions.UserFunction;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.ClientState;
 
 import static org.junit.Assert.assertEquals;
@@ -226,7 +239,7 @@ public class UFAuthTest extends CQLTester
             functions.add(functionName);
             statements.add(stmt);
         }
-        BatchStatement batch = new BatchStatement(BatchStatement.Type.LOGGED, VariableSpecifications.empty(), statements, Attributes.none());
+        BatchStatement batch = new BatchStatement(null, BatchStatement.Type.LOGGED, VariableSpecifications.empty(), statements, Attributes.none());
         assertUnauthorized(batch, functions);
 
         grantExecuteOnFunction(functions.get(0));
@@ -311,14 +324,14 @@ public class UFAuthTest extends CQLTester
     public void systemFunctionsRequireNoExplicitPrivileges() throws Throwable
     {
         // with terminal arguments, so evaluated at prepare time
-        String cql = String.format("UPDATE %s SET v2 = 0 WHERE k = blobasint(intasblob(0)) and v1 = 0",
+        String cql = String.format("UPDATE %s SET v2 = 0 WHERE k = blob_as_int(int_as_blob(0)) and v1 = 0",
                                    KEYSPACE + "." + currentTable());
         getStatement(cql).authorize(clientState);
 
         // with non-terminal arguments, so evaluated at execution
         String functionName = createSimpleFunction();
         grantExecuteOnFunction(functionName);
-        cql = String.format("UPDATE %s SET v2 = 0 WHERE k = blobasint(intasblob(%s)) and v1 = 0",
+        cql = String.format("UPDATE %s SET v2 = 0 WHERE k = blob_as_int(int_as_blob(%s)) and v1 = 0",
                             KEYSPACE + "." + currentTable(),
                             functionCall(functionName));
         getStatement(cql).authorize(clientState);
@@ -635,7 +648,7 @@ public class UFAuthTest extends CQLTester
         // It is here to avoid having to duplicate the functionality of CqlParser
         // for transforming cql types into AbstractTypes
         FunctionName fn = parseFunctionName(functionName);
-        Collection<Function> functions = Schema.instance.getFunctions(fn);
+        Collection<UserFunction> functions = Schema.instance.getUserFunctions(fn);
         assertEquals(String.format("Expected a single function definition for %s, but found %s",
                                    functionName,
                                    functions.size()),

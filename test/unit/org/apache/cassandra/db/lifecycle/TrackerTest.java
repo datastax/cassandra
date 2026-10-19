@@ -25,34 +25,48 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import javax.annotation.Nullable;
-
-import com.google.common.base.Function;
 import com.google.common.base.Predicate;
+import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.utils.TimeUUID;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 
-import org.junit.Assert;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.notifications.*;
+import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
+import org.apache.cassandra.notifications.INotification;
+import org.apache.cassandra.notifications.INotificationConsumer;
+import org.apache.cassandra.notifications.InitialSSTableAddedNotification;
+import org.apache.cassandra.notifications.MemtableDiscardedNotification;
+import org.apache.cassandra.notifications.MemtableRenewedNotification;
+import org.apache.cassandra.notifications.MemtableSwitchedNotification;
+import org.apache.cassandra.notifications.SSTableAddedNotification;
+import org.apache.cassandra.notifications.SSTableAddingNotification;
+import org.apache.cassandra.notifications.SSTableDeletingNotification;
+import org.apache.cassandra.notifications.SSTableListChangedNotification;
+import org.apache.cassandra.notifications.SSTableRepairStatusChanged;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
+import org.mockito.Mockito;
 
 import static com.google.common.collect.ImmutableSet.copyOf;
 import static java.util.Collections.singleton;
 
+@RunWith(BMUnitRunner.class)
 public class TrackerTest
 {
-
     private static final class MockListener implements INotificationConsumer
     {
         final boolean throwException;
@@ -85,7 +99,7 @@ public class TrackerTest
     public void testTryModify()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        Tracker tracker = new Tracker(null, false);
+        Tracker tracker = Tracker.newDummyTracker(cfs.metadata);
         List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, true, cfs), MockSchema.sstable(1, cfs), MockSchema.sstable(2, cfs));
         tracker.addInitialSSTables(copyOf(readers));
         Assert.assertNull(tracker.tryModify(ImmutableList.of(MockSchema.sstable(0, cfs)), OperationType.COMPACTION));
@@ -108,30 +122,10 @@ public class TrackerTest
     public void testApply()
     {
         final ColumnFamilyStore cfs = MockSchema.newCFS();
-        final Tracker tracker = new Tracker(null, false);
+        final Tracker tracker = Tracker.newDummyTracker(cfs.metadata);
         final View resultView = ViewTest.fakeView(0, 0, cfs);
         final AtomicInteger count = new AtomicInteger();
-        tracker.apply(new Predicate<View>()
-        {
-            public boolean apply(View view)
-            {
-                // confound the CAS by swapping the view, and check we retry
-                if (count.incrementAndGet() < 3)
-                    tracker.view.set(ViewTest.fakeView(0, 0, cfs));
-                return true;
-            }
-        }, new Function<View, View>()
-        {
-            @Nullable
-            public View apply(View view)
-            {
-                return resultView;
-            }
-        });
-        Assert.assertEquals(3, count.get());
-        Assert.assertEquals(resultView, tracker.getView());
-
-        count.set(0);
+        tracker.apply(Predicates.alwaysTrue(), view -> resultView);
         // check that if the predicate returns false, we stop immediately and return null
         Assert.assertNull(tracker.apply(new Predicate<View>()
         {
@@ -157,13 +151,16 @@ public class TrackerTest
                                                        MockSchema.sstable(2, 9, cfs));
         tracker.addInitialSSTables(copyOf(readers));
 
-        Assert.assertEquals(3, tracker.view.get().sstables.size());
-        Assert.assertEquals(1, listener.senders.size());
-        Assert.assertEquals(1, listener.received.size());
-        Assert.assertTrue(listener.received.get(0) instanceof InitialSSTableAddedNotification);
+        Assert.assertEquals(3, tracker.view.sstables.size());
+        Assert.assertEquals(2, listener.senders.size()); // one sender sent two notifications
+        Assert.assertEquals(listener.senders.get(0), listener.senders.get(1));
+        Assert.assertEquals(2, listener.received.size());
+        Assert.assertTrue(listener.received.get(0) instanceof SSTableAddingNotification);
+        Assert.assertTrue(listener.received.get(1) instanceof InitialSSTableAddedNotification);
 
         for (SSTableReader reader : readers)
-            Assert.assertTrue(reader.isKeyCacheEnabled());
+            if (reader instanceof KeyCacheSupport<?>)
+                Assert.assertTrue(((KeyCacheSupport<?>)reader).getKeyCache().isEnabled());
 
         Assert.assertEquals(17 + 121 + 9, cfs.metric.liveDiskSpaceUsed.getCount());
     }
@@ -180,28 +177,89 @@ public class TrackerTest
         List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, 17, cfs),
                                                        MockSchema.sstable(1, 121, cfs),
                                                        MockSchema.sstable(2, 9, cfs));
-        tracker.addSSTables(copyOf(readers));
+        tracker.addSSTables(copyOf(readers), OperationType.UNKNOWN);
 
-        Assert.assertEquals(3, tracker.view.get().sstables.size());
+        Assert.assertEquals(3, tracker.view.sstables.size());
 
         for (SSTableReader reader : readers)
-            Assert.assertTrue(reader.isKeyCacheEnabled());
+        {
+            if (reader instanceof KeyCacheSupport<?>)
+                Assert.assertTrue(((KeyCacheSupport<?>)reader).getKeyCache().isEnabled());
+        }
 
         Assert.assertEquals(17 + 121 + 9, cfs.metric.liveDiskSpaceUsed.getCount());
-        Assert.assertEquals(1, listener.senders.size());
-        Assert.assertEquals(1, listener.received.size());
+        Assert.assertEquals(2, listener.senders.size()); // one tracker issued two notifications
+        Assert.assertEquals(2, listener.received.size()); // 'adding' and 'added' notifications
         Assert.assertEquals(tracker, listener.senders.get(0));
-        Assert.assertTrue(listener.received.get(0) instanceof SSTableAddedNotification);
+        Assert.assertEquals(tracker, listener.senders.get(1));
+        Assert.assertTrue(listener.received.get(0) instanceof SSTableAddingNotification);
+        Assert.assertTrue(listener.received.get(1) instanceof SSTableAddedNotification);
         DatabaseDescriptor.setIncrementalBackupsEnabled(backups);
+    }
+
+    @Test
+    public void testLateSubscribers()
+    {
+        boolean backups = DatabaseDescriptor.isIncrementalBackupsEnabled();
+        DatabaseDescriptor.setIncrementalBackupsEnabled(false);
+        try
+        {
+            ColumnFamilyStore cfs = MockSchema.newCFS();
+            Tracker tracker = cfs.getTracker();
+
+            OrderTestingMockListener listener1 = new OrderTestingMockListener("l1");
+            OrderTestingMockListener listener2 = new OrderTestingMockListener("l2");
+            OrderTestingMockListener lateListener1 = new OrderTestingMockListener("ll1");
+            OrderTestingMockListener lateListener2 = new OrderTestingMockListener("ll2");
+
+            int initialCount = OrderTestingMockListener.counter.get();
+
+            tracker.subscribeLateConsumer(lateListener1);
+            tracker.subscribe(listener1);
+            tracker.subscribeLateConsumer(lateListener2);
+            tracker.subscribe(listener2);
+
+            List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, 17, cfs));
+            tracker.addSSTables(copyOf(readers), OperationType.UNKNOWN);
+
+            Assert.assertEquals(initialCount, listener1.captured);
+            Assert.assertEquals(initialCount + 1, listener2.captured);
+            Assert.assertEquals(initialCount + 2, lateListener1.captured);
+            Assert.assertEquals(initialCount + 3, lateListener2.captured);
+        }
+        finally
+        {
+            DatabaseDescriptor.setIncrementalBackupsEnabled(backups);
+        }
+    }
+
+    // Mock listener that let us test the order of notifications by capturing and incrementing a common counter.
+    // Please note that this only capture the counter value for the first time a notification is triggered
+    private static final class OrderTestingMockListener implements INotificationConsumer
+    {
+        static final AtomicInteger counter = new AtomicInteger();
+        volatile int captured = -1;
+        private final String name;
+
+        OrderTestingMockListener(String name)
+        {
+            this.name = name;
+        }
+
+        public void handleNotification(INotification notification, Object sender)
+        {
+            if (captured < 0)
+                captured = counter.getAndIncrement();
+        }
     }
 
     @Test
     public void testDropSSTables()
     {
         testDropSSTables(false);
-        LogTransaction.waitForDeletions();
+        LifecycleTransaction.waitForDeletions();
         testDropSSTables(true);
-        LogTransaction.waitForDeletions();
+        LifecycleTransaction.waitForDeletions();
     }
 
     private void testDropSSTables(boolean invalidate)
@@ -224,7 +282,7 @@ public class TrackerTest
             else
             {
                 tracker.dropSSTables();
-                LogTransaction.waitForDeletions();
+                LifecycleTransaction.waitForDeletions();
             }
             Assert.assertEquals(9, cfs.metric.totalDiskSpaceUsed.getCount());
             Assert.assertEquals(9, cfs.metric.liveDiskSpaceUsed.getCount());
@@ -245,16 +303,17 @@ public class TrackerTest
             Assert.assertNull(tracker.dropSSTables(reader -> reader != readers.get(0), OperationType.UNKNOWN, null));
 
             Assert.assertEquals(1, tracker.getView().sstables.size());
-            Assert.assertEquals(4, listener.received.size());
+            Assert.assertEquals(5, listener.received.size());
             Assert.assertEquals(tracker, listener.senders.get(0));
-            Assert.assertTrue(listener.received.get(0) instanceof InitialSSTableAddedNotification);
-            Assert.assertTrue(listener.received.get(1) instanceof SSTableDeletingNotification);
-            Assert.assertTrue(listener.received.get(2) instanceof  SSTableDeletingNotification);
-            Assert.assertTrue(listener.received.get(3) instanceof SSTableListChangedNotification);
-            Assert.assertEquals(readers.get(1), ((SSTableDeletingNotification) listener.received.get(1)).deleting);
-            Assert.assertEquals(readers.get(2), ((SSTableDeletingNotification)listener.received.get(2)).deleting);
-            Assert.assertEquals(2, ((SSTableListChangedNotification) listener.received.get(3)).removed.size());
-            Assert.assertEquals(0, ((SSTableListChangedNotification) listener.received.get(3)).added.size());
+            Assert.assertTrue(listener.received.get(0) instanceof SSTableAddingNotification);
+            Assert.assertTrue(listener.received.get(1) instanceof InitialSSTableAddedNotification);
+            Assert.assertTrue(listener.received.get(2) instanceof SSTableDeletingNotification);
+            Assert.assertTrue(listener.received.get(3) instanceof  SSTableDeletingNotification);
+            Assert.assertTrue(listener.received.get(4) instanceof SSTableListChangedNotification);
+            Assert.assertEquals(readers.get(1), ((SSTableDeletingNotification) listener.received.get(2)).deleting);
+            Assert.assertEquals(readers.get(2), ((SSTableDeletingNotification)listener.received.get(3)).deleting);
+            Assert.assertEquals(2, ((SSTableListChangedNotification) listener.received.get(4)).removed.size());
+            Assert.assertEquals(0, ((SSTableListChangedNotification) listener.received.get(4)).added.size());
             Assert.assertEquals(9, cfs.metric.liveDiskSpaceUsed.getCount());
             readers.get(0).selfRef().release();
         }
@@ -268,6 +327,64 @@ public class TrackerTest
     }
 
     @Test
+    public void testDropSSTablesWithTxnCommitFailureLiveSSTables()
+    {
+        dropSSTablesWithTxnCommitFailure(true, false);
+    }
+
+    @Test
+    public void testDropSSTablesWithTxnCommitFailure()
+    {
+        dropSSTablesWithTxnCommitFailure(false, false);
+    }
+
+    @Test
+    @BMRule(name = "fail abort obsoletion",
+            targetClass = "Helpers",
+            targetMethod = "abortObsoletion",
+            action = "return new java.lang.RuntimeException(\"failed to abort obsoletions\")")
+    public void testDropSSTablesWithTxnCommitFailureAndAbortedObsoletions()
+    {
+        dropSSTablesWithTxnCommitFailure(true, true);
+    }
+
+    private void dropSSTablesWithTxnCommitFailure(boolean liveSSTables, boolean abortObsoletions)
+    {
+        ColumnFamilyStore cfs = MockSchema.newCFS();
+        Tracker tracker = Mockito.spy(cfs.getTracker());
+
+        Mockito.doThrow(new RuntimeException("Test throw")).when(tracker).notifySSTablesChanged(
+        Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any());
+
+        if (!liveSSTables)
+            cfs.invalidate(false, false);
+
+        MockListener listener = new MockListener(false);
+        tracker.subscribe(listener);
+        final List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, 9, true, cfs),
+                                                             MockSchema.sstable(1, 15, true, cfs),
+                                                             MockSchema.sstable(2, 71, true, cfs));
+        tracker.addInitialSSTables(copyOf(readers));
+
+        try (LifecycleTransaction txn = tracker.tryModify(readers.get(0), OperationType.COMPACTION))
+        {
+            Assert.assertThrows(RuntimeException.class, () -> tracker.dropSSTables());
+        }
+        catch (RuntimeException ex)
+        {
+            Assert.assertTrue(abortObsoletions);
+        }
+
+        // If obsoletions were aborted then we can't make any guarantees about the state of the SSTable liveset.
+        if (abortObsoletions)
+            return;
+
+        // Make sure that all SSTables are still live after the commit failed, unless we invalidated the CFS first.
+        int numSSTables = liveSSTables ? readers.size() : 0;
+        Assert.assertEquals(numSSTables, tracker.getLiveSSTables().size());
+    }
+
+    @Test
     public void testMemtableReplacement()
     {
         boolean backups = DatabaseDescriptor.isIncrementalBackupsEnabled();
@@ -277,15 +394,15 @@ public class TrackerTest
         Tracker tracker = cfs.getTracker();
         tracker.subscribe(listener);
 
-        Memtable prev1 = tracker.switchMemtable(true, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs));
+        Memtable prev1 = tracker.switchMemtable(true, cfs.createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition())));
         OpOrder.Group write1 = cfs.keyspace.writeOrder.getCurrent();
         OpOrder.Barrier barrier1 = cfs.keyspace.writeOrder.newBarrier();
-        prev1.setDiscarding(barrier1, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
+        prev1.switchOut(barrier1, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
         barrier1.issue();
-        Memtable prev2 = tracker.switchMemtable(false, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs));
+        Memtable prev2 = tracker.switchMemtable(false, cfs.createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition())));
         OpOrder.Group write2 = cfs.keyspace.writeOrder.getCurrent();
         OpOrder.Barrier barrier2 = cfs.keyspace.writeOrder.newBarrier();
-        prev2.setDiscarding(barrier2, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
+        prev2.switchOut(barrier2, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
         barrier2.issue();
         Memtable cur = tracker.getView().getCurrentMemtable();
         OpOrder.Group writecur = cfs.keyspace.writeOrder.getCurrent();
@@ -305,19 +422,20 @@ public class TrackerTest
         Assert.assertTrue(tracker.getView().flushingMemtables.contains(prev1));
         Assert.assertEquals(2, tracker.getView().flushingMemtables.size());
 
-        tracker.replaceFlushed(prev1, Collections.emptyList());
+        tracker.replaceFlushed(prev1, Collections.emptyList(), Optional.empty());
         Assert.assertEquals(1, tracker.getView().flushingMemtables.size());
         Assert.assertTrue(tracker.getView().flushingMemtables.contains(prev2));
 
         SSTableReader reader = MockSchema.sstable(0, 10, false, cfs);
-        tracker.replaceFlushed(prev2, singleton(reader));
+        tracker.replaceFlushed(prev2, singleton(reader), Optional.empty());
         Assert.assertEquals(1, tracker.getView().sstables.size());
-        Assert.assertEquals(2, listener.received.size());
-        Assert.assertEquals(prev2, ((MemtableDiscardedNotification) listener.received.get(0)).memtable);
+        Assert.assertEquals(3, listener.received.size());
         Assert.assertEquals(singleton(reader), ((SSTableAddedNotification) listener.received.get(1)).added);
         Assert.assertEquals(Optional.of(prev2), ((SSTableAddedNotification) listener.received.get(1)).memtable());
+        Assert.assertEquals(prev2, ((MemtableDiscardedNotification) listener.received.get(2)).memtable);
         listener.received.clear();
-        Assert.assertTrue(reader.isKeyCacheEnabled());
+        if (reader instanceof KeyCacheSupport<?>)
+            Assert.assertTrue(((KeyCacheSupport<?>) reader).getKeyCache().isEnabled());
         Assert.assertEquals(10, cfs.metric.liveDiskSpaceUsed.getCount());
 
         // test invalidated CFS
@@ -325,21 +443,24 @@ public class TrackerTest
         tracker = cfs.getTracker();
         listener = new MockListener(false);
         tracker.subscribe(listener);
-        prev1 = tracker.switchMemtable(false, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs));
+        Memtable next1 = cfs.createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
+        prev1 = tracker.switchMemtable(false, next1);
         tracker.markFlushing(prev1);
         reader = MockSchema.sstable(0, 10, true, cfs);
         cfs.invalidate(false);
-        tracker.replaceFlushed(prev1, singleton(reader));
+        tracker.replaceFlushed(prev1, singleton(reader), Optional.empty());
         Assert.assertEquals(0, tracker.getView().sstables.size());
         Assert.assertEquals(0, tracker.getView().flushingMemtables.size());
         Assert.assertEquals(0, cfs.metric.liveDiskSpaceUsed.getCount());
-        Assert.assertEquals(5, listener.received.size());
-        Assert.assertEquals(prev1, ((MemtableSwitchedNotification) listener.received.get(0)).memtable);
-        Assert.assertEquals(prev1, ((MemtableDiscardedNotification) listener.received.get(1)).memtable);
+        Assert.assertEquals(6, listener.received.size());
+        Assert.assertEquals(prev1, ((MemtableSwitchedNotification) listener.received.get(0)).previous);
+        Assert.assertEquals(next1, ((MemtableSwitchedNotification) listener.received.get(0)).next);
+        Assert.assertTrue(listener.received.get(1) instanceof SSTableAddingNotification);
         Assert.assertEquals(singleton(reader), ((SSTableAddedNotification) listener.received.get(2)).added);
         Assert.assertEquals(Optional.of(prev1), ((SSTableAddedNotification) listener.received.get(2)).memtable());
-        Assert.assertTrue(listener.received.get(3) instanceof SSTableDeletingNotification);
-        Assert.assertEquals(1, ((SSTableListChangedNotification) listener.received.get(4)).removed.size());
+        Assert.assertEquals(prev1, ((MemtableDiscardedNotification) listener.received.get(3)).memtable);
+        Assert.assertTrue(listener.received.get(4) instanceof SSTableDeletingNotification);
+        Assert.assertEquals(1, ((SSTableListChangedNotification) listener.received.get(5)).removed.size());
         DatabaseDescriptor.setIncrementalBackupsEnabled(backups);
     }
 
@@ -348,41 +469,59 @@ public class TrackerTest
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         SSTableReader r1 = MockSchema.sstable(0, cfs), r2 = MockSchema.sstable(1, cfs);
-        Tracker tracker = new Tracker(null, false);
+        Tracker tracker = Tracker.newDummyTracker(cfs.metadata);
+        Memtable memtable = MockSchema.memtable(cfs);
         MockListener listener = new MockListener(false);
         tracker.subscribe(listener);
-        tracker.notifyAdded(singleton(r1), false);
+        tracker.notifyAdded(singleton(r1), OperationType.UNKNOWN, false);
         Assert.assertEquals(singleton(r1), ((SSTableAddedNotification) listener.received.get(0)).added);
+        Assert.assertFalse(((SSTableAddedNotification) listener.received.get(0)).fromStreaming());
+        Assert.assertFalse(((SSTableAddedNotification) listener.received.get(0)).operationId.isPresent());
+        listener.received.clear();
+        TimeUUID flushOperationId = TimeUUID.Generator.nextTimeUUID();
+        tracker.notifyAdded(singleton(r1), OperationType.FLUSH, Optional.of(flushOperationId), false, memtable, null);
+        Assert.assertEquals(singleton(r1), ((SSTableAddedNotification) listener.received.get(0)).added);
+        Assert.assertEquals(memtable, (((SSTableAddedNotification) listener.received.get(0)).memtable().get()));
+        Assert.assertTrue(((SSTableAddedNotification) listener.received.get(0)).operationId.isPresent());
+        Assert.assertEquals(flushOperationId, (((SSTableAddedNotification) listener.received.get(0)).operationId.get()));
         listener.received.clear();
         tracker.notifyDeleting(r1);
         Assert.assertEquals(r1, ((SSTableDeletingNotification) listener.received.get(0)).deleting);
         listener.received.clear();
-        Assert.assertNull(tracker.notifySSTablesChanged(singleton(r1), singleton(r2), OperationType.COMPACTION, null));
+        Assert.assertNull(tracker.notifySSTablesChanged(singleton(r1), singleton(r2), OperationType.COMPACTION, Optional.empty(), null));
         Assert.assertEquals(singleton(r1), ((SSTableListChangedNotification) listener.received.get(0)).removed);
         Assert.assertEquals(singleton(r2), ((SSTableListChangedNotification) listener.received.get(0)).added);
         listener.received.clear();
         tracker.notifySSTableRepairedStatusChanged(singleton(r1));
         Assert.assertEquals(singleton(r1), ((SSTableRepairStatusChanged) listener.received.get(0)).sstables);
         listener.received.clear();
-        Memtable memtable = MockSchema.memtable(cfs);
         tracker.notifyRenewed(memtable);
         Assert.assertEquals(memtable, ((MemtableRenewedNotification) listener.received.get(0)).renewed);
-        listener.received.clear();
-        tracker.notifySSTableMetadataChanged(r1, r1.getSSTableMetadata());
-        Assert.assertEquals(((SSTableMetadataChanged)listener.received.get(0)).sstable, r1);
-        Assert.assertEquals(r1.getSSTableMetadata(), ((SSTableMetadataChanged)listener.received.get(0)).oldMetadata);
         listener.received.clear();
         tracker.unsubscribe(listener);
         MockListener failListener = new MockListener(true);
         tracker.subscribe(failListener);
         tracker.subscribe(listener);
-        Assert.assertNotNull(tracker.notifyAdded(singleton(r1), false, null, null));
+        Assert.assertNotNull(tracker.notifyAdded(singleton(r1), OperationType.REGION_DECOMMISSION, Optional.empty(), false, null, null));
         Assert.assertEquals(singleton(r1), ((SSTableAddedNotification) listener.received.get(0)).added);
+        Assert.assertEquals(OperationType.REGION_DECOMMISSION, ((SSTableAddedNotification) listener.received.get(0)).operationType);
         Assert.assertFalse(((SSTableAddedNotification) listener.received.get(0)).memtable().isPresent());
+        Assert.assertTrue(((SSTableAddedNotification) listener.received.get(0)).fromStreaming());
         listener.received.clear();
-        Assert.assertNotNull(tracker.notifySSTablesChanged(singleton(r1), singleton(r2), OperationType.COMPACTION, null));
+        Assert.assertNotNull(tracker.notifySSTablesChanged(singleton(r1), singleton(r2), OperationType.COMPACTION, Optional.empty(), null));
         Assert.assertEquals(singleton(r1), ((SSTableListChangedNotification) listener.received.get(0)).removed);
         Assert.assertEquals(singleton(r2), ((SSTableListChangedNotification) listener.received.get(0)).added);
+        Assert.assertFalse(((SSTableListChangedNotification) listener.received.get(0)).operationId.isPresent());
+        listener.received.clear();
+        TimeUUID compactionOperationId = TimeUUID.Generator.nextTimeUUID();
+        Assert.assertNotNull(tracker.notifySSTablesChanged(singleton(r1), singleton(r2), OperationType.COMPACTION, Optional.of(compactionOperationId), null));
+        Assert.assertEquals(singleton(r1), ((SSTableListChangedNotification) listener.received.get(0)).removed);
+        Assert.assertEquals(singleton(r2), ((SSTableListChangedNotification) listener.received.get(0)).added);
+        Assert.assertTrue(((SSTableListChangedNotification) listener.received.get(0)).operationId.isPresent());
+        Assert.assertEquals(compactionOperationId, ((SSTableListChangedNotification) listener.received.get(0)).operationId.get());
+        listener.received.clear();
+        Assert.assertNotNull(tracker.notifyAdded(singleton(r1), OperationType.UNKNOWN, Optional.empty(), true, null, null));
+        Assert.assertEquals(singleton(r1), ((InitialSSTableAddedNotification) listener.received.get(0)).added);
         listener.received.clear();
     }
 

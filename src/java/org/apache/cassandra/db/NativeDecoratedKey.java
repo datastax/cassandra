@@ -20,10 +20,13 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 import org.apache.cassandra.utils.memory.NativeAllocator;
+import org.apache.cassandra.utils.memory.NativeEndianMemoryUtil;
 
 public class NativeDecoratedKey extends DecoratedKey
 {
@@ -37,12 +40,48 @@ public class NativeDecoratedKey extends DecoratedKey
 
         int size = key.remaining();
         this.peer = allocator.allocate(4 + size, writeOp);
-        MemoryUtil.setInt(peer, size);
+        NativeEndianMemoryUtil.setInt(peer, size);
         MemoryUtil.setBytes(peer + 4, key);
     }
 
+    public NativeDecoratedKey(Token token, NativeAllocator allocator, OpOrder.Group writeOp, byte[] keyBytes)
+    {
+        super(token);
+        assert keyBytes != null;
+
+        int size = keyBytes.length;
+        this.peer = allocator.allocate(4 + size, writeOp);
+        NativeEndianMemoryUtil.setInt(peer, size);
+        MemoryUtil.setBytes(peer + 4, keyBytes, 0, size);
+    }
+
+    @Inline
+    int length()
+    {
+        return NativeEndianMemoryUtil.getInt(peer);
+    }
+
+    @Inline
+    long address()
+    {
+        return this.peer + 4;
+    }
+
+    @Override
     public ByteBuffer getKey()
     {
-        return MemoryUtil.getByteBuffer(peer + 4, MemoryUtil.getInt(peer), ByteOrder.BIG_ENDIAN);
+        return MemoryUtil.getByteBuffer(address(), length(), ByteOrder.BIG_ENDIAN);
+    }
+
+    @Override
+    public int getKeyLength()
+    {
+        return NativeEndianMemoryUtil.getInt(peer);
+    }
+
+    @Override
+    protected ByteSource keyComparableBytes(Version version)
+    {
+        return ByteSource.ofMemory(address(), length(), version);
     }
 }

@@ -21,16 +21,22 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
-
+import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -40,19 +46,27 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.io.sstable.format.bti.BtiTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.hamcrest.Matchers;
+import org.mockito.Mockito;
 
 import static org.apache.cassandra.dht.AbstractBounds.isEmpty;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class SSTableScannerTest
 {
@@ -104,7 +118,8 @@ public class SSTableScannerTest
                 {
                     if (end < start && e.compareTo(s) > 0)
                         continue;
-                    if (!isEmpty(new AbstractBounds.Boundary<>(s, inclusiveStart), new AbstractBounds.Boundary<>(e, inclusiveEnd)))
+                    // a non-wrapping request covers only the non-empty bounds; a wrapping one only the wrapping bounds
+                    if (end >= start && isEmpty(new AbstractBounds.Boundary<>(s, inclusiveStart), new AbstractBounds.Boundary<>(e, inclusiveEnd)))
                         continue;
                     ranges.add(dataRange(metadata, s, inclusiveStart, e, inclusiveEnd));
                 }
@@ -179,12 +194,70 @@ public class SSTableScannerTest
 
     private static void assertScanMatches(SSTableReader sstable, int scanStart, int scanEnd, int ... boundaries)
     {
+        assertScanFromDataRangeMatches(sstable, scanStart, scanEnd, boundaries);
+        assertScanFromIteratorMatches(sstable, scanStart, scanEnd, boundaries);
+        assertScanMatchesUsingSimple(sstable, scanStart, scanEnd, boundaries);
+    }
+
+    private static void assertScanFromDataRangeMatches(SSTableReader sstable, int scanStart, int scanEnd, int ... boundaries)
+    {
+        assert boundaries.length % 2 == 0;
+        Iterable<DataRange> ranges = dataRanges(sstable.metadata(), scanStart, scanEnd);
+        assertTrue("No data range for " + scanStart + ", " + scanEnd, ranges.iterator().hasNext());
+        for (DataRange range : ranges)
+        {
+            try(UnfilteredPartitionIterator scanner = sstable.partitionIterator(ColumnFilter.all(sstable.metadata()),
+                                                                                range,
+                                                                                SSTableReadsListener.NOOP_LISTENER))
+            {
+                for (int b = 0; b < boundaries.length; b += 2)
+                    for (int i = boundaries[b]; i <= boundaries[b + 1]; i++)
+                        assertEquals(toKey(i), new String(scanner.next().partitionKey().getKey().array()));
+                assertFalse(scanner.hasNext());
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    private static void assertScanFromIteratorMatches(SSTableReader sstable, int scanStart, int scanEnd, int ... boundaries)
+    {
+        assert boundaries.length % 2 == 0;
+        Range<Token> range = rangeFor(scanStart, scanEnd);
+        List<Range<Token>> ranges = scanStart <= scanEnd ? List.of(range) : range.unwrap();
+        List<AbstractBounds<PartitionPosition>> pps =
+            ranges.stream()
+                  .sorted(Comparator.comparing(b -> b.left))
+                  .map(r -> new Range<PartitionPosition>(r.left.minKeyBound(), r.right.maxKeyBound()))
+                  .collect(Collectors.<AbstractBounds<PartitionPosition>>toList());
+
+        try(ISSTableScanner scanner = sstable.getScanner(pps.iterator()))
+        {
+            for (int b = 0; b < boundaries.length; b += 2)
+                for (int i = boundaries[b]; i <= boundaries[b + 1]; i++)
+                    assertEquals(toKey(i), new String(scanner.next().partitionKey().getKey().array()));
+            List<String> extra = new ArrayList<>();
+            while (scanner.hasNext())
+                extra.add(new String(scanner.next().partitionKey().getKey().array()));
+            assertTrue("Got extra keys " + extra, extra.isEmpty());
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static void assertScanMatchesUsingSimple(SSTableReader sstable, int scanStart, int scanEnd, int ... boundaries)
+    {
         assert boundaries.length % 2 == 0;
         for (DataRange range : dataRanges(sstable.metadata(), scanStart, scanEnd))
         {
-            try(ISSTableScanner scanner = sstable.getScanner(ColumnFilter.all(sstable.metadata()),
-                                                             range,
-                                                             SSTableReadsListener.NOOP_LISTENER))
+            if (range.isWrapAround() && !range.keyRange().right.isMinimum()) // getScanner on AbstractBounds<PartitionPosition> does not handle wraparounds
+                continue;
+
+            try(UnfilteredPartitionIterator scanner = sstable.getScanner(Collections.singleton(range.keyRange()).iterator()))
             {
                 for (int b = 0; b < boundaries.length; b += 2)
                     for (int i = boundaries[b]; i <= boundaries[b + 1]; i++)
@@ -206,6 +279,32 @@ public class SSTableScannerTest
     @Test
     public void testSingleDataRange() throws IOException
     {
+        testSingleDataRange(false, false);
+    }
+
+    @Test
+    public void testSingleDataRangeWithChangedStart() throws IOException
+    {
+        testSingleDataRange(true, false);
+    }
+
+    @Test
+    public void testSingleDataRangeWithChangedEnd() throws IOException
+    {
+
+        Assume.assumeTrue(DatabaseDescriptor.getSelectedSSTableFormat() == BtiFormat.getInstance());
+        testSingleDataRange(false, true);
+    }
+
+    @Test
+    public void testSingleDataRangeWithChangedBothEnds() throws IOException
+    {
+        Assume.assumeTrue(DatabaseDescriptor.getSelectedSSTableFormat() == BtiFormat.getInstance());
+        testSingleDataRange(true, true);
+    }
+
+    private void testSingleDataRange(boolean filterFirst, boolean filterLast)
+    {
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(TABLE);
         store.clearUnsafe();
@@ -213,13 +312,53 @@ public class SSTableScannerTest
         // disable compaction while flushing
         store.disableAutoCompaction();
 
-        for (int i = 2; i < 10; i++)
+        for (int i = filterFirst ? 0 : 2; i <= (filterLast ? 12 : 9); i++)
             insertRowWithKey(store.metadata(), i);
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         assertEquals(1, store.getLiveSSTables().size());
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
+        SSTableReader startClone = null;
+        SSTableReader endBoundClone = null;
+        try
+        {
+            if (filterFirst)
+                sstable = startClone = sstable.cloneWithNewStart(dk(2));
+            if (filterLast)
+                sstable = endBoundClone = cloneWithNewEndBound(sstable, dk(9));
+            testSingleDataRange(sstable);
+        }
+        finally
+        {
+            // the clones are new readers with their own references; a spy copies the fields, so releasing the spy
+            // releases the reference of the reader it was made from
+            if (endBoundClone != null)
+                endBoundClone.selfRef().release();
+            if (startClone != null)
+                startClone.selfRef().release();
+        }
+    }
 
+    /**
+     * Returns a new reader over the same files, with the given last key and filterLast() set. The caller must release
+     * the returned reader's {@link SSTableReader#selfRef()}.
+     */
+    private SSTableReader cloneWithNewEndBound(SSTableReader sstable, DecoratedKey last)
+    {
+        long fileEnd = sstable.getPosition(last, SSTableReader.Operator.GT);
+        // Change the end bound and make sure it is applied.
+        sstable = ((BtiTableReader) sstable).unbuildTo(new BtiTableReader.Builder(sstable.descriptor), true)
+                                            .setLast(last)
+                                            .build(sstable.owner().orElse(null), true, true);
+        BtiTableReader spied = Mockito.spy((BtiTableReader) sstable);
+        Mockito.when(spied.filterLast()).thenReturn(true);
+        // When it's given a position beyond the last key, the sstable will use uncompressedLength(). Mock that too.
+        Mockito.when(spied.uncompressedLength()).thenReturn(fileEnd);
+        return spied;
+    }
+
+    private void testSingleDataRange(SSTableReader sstable)
+    {
         // full range scan
         ISSTableScanner scanner = sstable.getScanner();
         for (int i = 2; i < 10; i++)
@@ -238,7 +377,7 @@ public class SSTableScannerTest
         // end of range edge conditions
         assertScanMatches(sstable, 1, 8, 2, 8);
         assertScanMatches(sstable, 1, 9, 2, 9);
-        assertScanMatches(sstable, 1, 9, 2, 9);
+        assertScanMatches(sstable, 1, 99, 2, 9);
 
         // single item ranges
         assertScanMatches(sstable, 2, 2, 2, 2);
@@ -289,6 +428,109 @@ public class SSTableScannerTest
         assertScanMatches(sstable, 1, 0, 2, 9);
     }
 
+    @Test
+    public void testSingleDataRangeWithMovedStart() throws IOException
+    {
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore(TABLE);
+        store.clearUnsafe();
+
+        // disable compaction while flushing
+        store.disableAutoCompaction();
+
+        for (int i = 2; i < 10; i++)
+            insertRowWithKey(store.metadata(), i);
+        Util.flush(store);
+
+        assertEquals(1, store.getLiveSSTables().size());
+        SSTableReader startClone = store.getLiveSSTables().iterator().next().cloneWithNewStart(dk(4));
+        try
+        {
+            testSingleDataRangeWithMovedStart(startClone);
+        }
+        finally
+        {
+            // the clone is a new reader with its own reference
+            startClone.selfRef().release();
+        }
+    }
+
+    private void testSingleDataRangeWithMovedStart(SSTableReader sstable)
+    {
+        // full range scan
+        ISSTableScanner scanner = sstable.getScanner();
+        for (int i = 4; i < 10; i++)
+        {
+            try (UnfilteredRowIterator row = scanner.next())
+            {
+                assertEquals(toKey(i), new String(row.partitionKey().getKey().array()));
+            }
+        }
+
+        scanner.close();
+
+        // a simple read of a chunk in the middle
+        assertScanMatches(sstable, 3, 6, 4, 6);
+
+        // start of range edge conditions
+        assertScanMatches(sstable, 3, 9, 4, 9);
+        assertScanMatches(sstable, 4, 9, 4, 9);
+        assertScanMatches(sstable, 5, 9, 5, 9);
+
+        // end of range edge conditions
+        assertScanMatches(sstable, 1, 8, 4, 8);
+        assertScanMatches(sstable, 1, 9, 4, 9);
+        assertScanMatches(sstable, 1, 99, 4, 9);
+
+        // single item ranges
+        assertScanMatches(sstable, 4, 4, 4, 4);
+        assertScanMatches(sstable, 5, 5, 5, 5);
+        assertScanMatches(sstable, 9, 9, 9, 9);
+
+        // empty ranges
+        assertScanEmpty(sstable, 2, 3);
+        assertScanEmpty(sstable, 10, 11);
+
+        // wrapping, starts in middle
+        assertScanMatches(sstable, 7, 5, 4, 5, 7, 9);
+        assertScanMatches(sstable, 5, 4, 4, 4, 5, 9);
+        assertScanMatches(sstable, 5, 3, 5, 9);
+        assertScanMatches(sstable, 5, Integer.MIN_VALUE, 5, 9);
+        // wrapping, starts at end
+        assertScanMatches(sstable, 9, 8, 4, 8, 9, 9);
+        assertScanMatches(sstable, 9, 5, 4, 5, 9, 9);
+        assertScanMatches(sstable, 9, 4, 4, 4, 9, 9);
+        assertScanMatches(sstable, 9, 3, 9, 9);
+        assertScanMatches(sstable, 9, Integer.MIN_VALUE, 9, 9);
+        assertScanMatches(sstable, 8, 5, 4, 5, 8, 9);
+        assertScanMatches(sstable, 8, 4, 4, 4, 8, 9);
+        assertScanMatches(sstable, 8, 3, 8, 9);
+        assertScanMatches(sstable, 8, Integer.MIN_VALUE, 8, 9);
+        // wrapping, starts past end
+        assertScanMatches(sstable, 10, 9, 4, 9);
+        assertScanMatches(sstable, 10, 5, 4, 5);
+        assertScanMatches(sstable, 10, 4, 4, 4);
+        assertScanEmpty(sstable, 10, 3);
+        assertScanEmpty(sstable, 10, Integer.MIN_VALUE);
+        assertScanMatches(sstable, 11, 10, 4, 9);
+        assertScanMatches(sstable, 11, 9, 4, 9);
+        assertScanMatches(sstable, 11, 5, 4, 5);
+        assertScanMatches(sstable, 11, 4, 4, 4);
+        assertScanEmpty(sstable, 11, 3);
+        assertScanEmpty(sstable, 11, Integer.MIN_VALUE);
+        // wrapping, starts at start
+        assertScanMatches(sstable, 5, 1, 5, 9);
+        assertScanMatches(sstable, 5, Integer.MIN_VALUE, 5, 9);
+        assertScanMatches(sstable, 4, 1, 4, 9);
+        assertScanMatches(sstable, 4, Integer.MIN_VALUE, 4, 9);
+        assertScanMatches(sstable, 1, 0, 4, 9);
+        assertScanMatches(sstable, 1, Integer.MIN_VALUE, 4, 9);
+        // wrapping, starts before
+        assertScanMatches(sstable, 3, -1, 4, 9);
+        assertScanMatches(sstable, 3, Integer.MIN_VALUE, 4, 9);
+        assertScanMatches(sstable, 3, 0, 4, 9);
+    }
+
     private static void assertScanContainsRanges(ISSTableScanner scanner, int ... rangePairs) throws IOException
     {
         assert rangePairs.length % 2 == 0;
@@ -321,7 +563,7 @@ public class SSTableScannerTest
         for (int i = 0; i < 3; i++)
             for (int j = 2; j < 10; j++)
                 insertRowWithKey(store.metadata(), i * 100 + j);
-        store.forceBlockingFlush();
+        Util.flush(store);
 
         assertEquals(1, store.getLiveSSTables().size());
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
@@ -441,7 +683,7 @@ public class SSTableScannerTest
         store.disableAutoCompaction();
 
         insertRowWithKey(store.metadata(), 205);
-        store.forceBlockingFlush();
+        Util.flush(store);
 
         assertEquals(1, store.getLiveSSTables().size());
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
@@ -456,5 +698,112 @@ public class SSTableScannerTest
 
         // this will currently fail
         assertScanContainsRanges(scanner, 205, 205);
+    }
+
+    private static void testRequestNextRowIteratorWithoutConsumingPrevious(Function<SSTableReader, UnfilteredPartitionIterator> makeScanner,
+                                                                           Consumer<UnfilteredPartitionIterator> requestNext,
+                                                                           String messagePattern)
+    {
+        final SSTableReader sstable = prepareSmallSSTable();
+
+        try (UnfilteredPartitionIterator scanner = makeScanner.apply(sstable);
+             UnfilteredRowIterator currentRowIterator = scanner.next())
+        {
+            assertTrue(currentRowIterator.hasNext());
+            try
+            {
+                requestNext.accept(scanner);
+                currentRowIterator.next();
+                fail("Should have thrown IllegalStateException");
+            }
+            catch (IllegalStateException e)
+            {
+                Assert.assertThat(e.getMessage(), Matchers.matchesPattern(messagePattern));
+            }
+        }
+    }
+
+    private static SSTableReader prepareSmallSSTable()
+    {
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore(TABLE);
+        store.clearUnsafe();
+
+        // disable compaction while flushing
+        store.disableAutoCompaction();
+
+        insertRowWithKey(store.metadata(), 0);
+        insertRowWithKey(store.metadata(), 3);
+        store.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+        assertEquals(1, store.getLiveSSTables().size());
+        SSTableReader sstable = store.getLiveSSTables().iterator().next();
+        return sstable;
+    }
+
+    @Test
+    public void testSimpleHasNextRowIteratorWithoutConsumingPrevious()
+    {
+        testRequestNextRowIteratorWithoutConsumingPrevious(SSTableReader::getScanner,
+                                                           UnfilteredPartitionIterator::hasNext,
+                                                           "Iterator used after closing.");
+    }
+
+    @Test
+    public void testSimpleNextRowIteratorWithoutConsumingPrevious()
+    {
+        testRequestNextRowIteratorWithoutConsumingPrevious(SSTableReader::getScanner,
+                                                           UnfilteredPartitionIterator::next,
+                                                           "Iterator used after closing.");
+    }
+
+    @Test
+    public void testHasNextRowIteratorWithoutConsumingPrevious()
+    {
+        testRequestNextRowIteratorWithoutConsumingPrevious(r -> r.partitionIterator(ColumnFilter.NONE, DataRange.allData(r.getPartitioner()), SSTableReadsListener.NOOP_LISTENER),
+                                                           UnfilteredPartitionIterator::hasNext,
+                                                           ".*UnfilteredRowIterator.*(should|must) be.*closed.*");
+    }
+
+    @Test
+    public void testNextRowIteratorWithoutConsumingPrevious()
+    {
+        testRequestNextRowIteratorWithoutConsumingPrevious(r -> r.partitionIterator(ColumnFilter.NONE, DataRange.allData(r.getPartitioner()), SSTableReadsListener.NOOP_LISTENER),
+                                                           UnfilteredPartitionIterator::next,
+                                                           ".*UnfilteredRowIterator.*(should|must) be.*closed.*");
+    }
+
+    private static void testRequestNextRowIteratorAfterClosingPrevious(Function<SSTableReader, UnfilteredPartitionIterator> makeScanner)
+    {
+        final SSTableReader sstable = prepareSmallSSTable();
+
+        try (UnfilteredPartitionIterator scanner = makeScanner.apply(sstable))
+        {
+            try (UnfilteredRowIterator p = scanner.next())
+            {
+                assertEquals(toKey(0), new String(p.partitionKey().getKey().array()));
+                // do not read it, but close it
+            }
+
+            try (UnfilteredRowIterator p = scanner.next())
+            {
+                assertEquals(toKey(3), new String(p.partitionKey().getKey().array()));
+                assertTrue(p.hasNext());
+                assertTrue(p.next() instanceof Row);
+            }
+        }
+    }
+
+
+    @Test
+    public void testSimpleRequestNextRowIteratorAfterClosingPreviouss()
+    {
+        testRequestNextRowIteratorAfterClosingPrevious(SSTableReader::getScanner);
+    }
+
+    @Test
+    public void testRequestNextRowIteratorAfterClosingPrevious()
+    {
+        testRequestNextRowIteratorAfterClosingPrevious(r -> r.partitionIterator(ColumnFilter.NONE, DataRange.allData(r.getPartitioner()), SSTableReadsListener.NOOP_LISTENER));
     }
 }

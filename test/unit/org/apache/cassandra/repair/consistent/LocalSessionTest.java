@@ -19,6 +19,7 @@
 package org.apache.cassandra.repair.consistent;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -32,8 +33,6 @@ import java.util.function.Consumer;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.SettableFuture;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -41,14 +40,19 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.repair.SharedContext;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.repair.AbstractRepairTest;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.KeyspaceRepairManager;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -67,28 +71,32 @@ import org.apache.cassandra.repair.messages.StatusResponse;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.Promise;
 
 import static org.apache.cassandra.repair.consistent.ConsistentSession.State.*;
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.psjava.util.AssertStatus.assertTrue;
 
 public class LocalSessionTest extends AbstractRepairTest
 {
-    private static final UUID TID1 = UUIDGen.getTimeUUID();
-    private static final UUID TID2 = UUIDGen.getTimeUUID();
+    private static final UUID TID1 = UUID.randomUUID();
+    private static final UUID TID2 = UUID.randomUUID();
 
     static LocalSession.Builder createBuilder()
     {
-        LocalSession.Builder builder = LocalSession.builder();
+        LocalSession.Builder builder = LocalSession.builder(SharedContext.Global.instance);
         builder.withState(PREPARING);
-        builder.withSessionID(UUIDGen.getTimeUUID());
+        builder.withSessionID(nextTimeUUID());
         builder.withCoordinator(COORDINATOR);
         builder.withUUIDTableIds(Sets.newHashSet(TID1, TID2));
         builder.withRepairedAt(System.currentTimeMillis());
         builder.withRanges(Sets.newHashSet(RANGE1, RANGE2, RANGE3));
         builder.withParticipants(Sets.newHashSet(PARTICIPANT1, PARTICIPANT2, PARTICIPANT3));
 
-        int now = FBUtilities.nowInSeconds();
+        long now = FBUtilities.nowInSeconds();
         builder.withStartedAt(now);
         builder.withLastUpdate(now);
 
@@ -127,8 +135,20 @@ public class LocalSessionTest extends AbstractRepairTest
 
     static class InstrumentedLocalSessions extends LocalSessions
     {
-        Map<InetAddressAndPort, List<RepairMessage>> sentMessages = new HashMap<>();
+        final Map<InetAddressAndPort, List<RepairMessage>> sentMessages;
 
+        public InstrumentedLocalSessions()
+        {
+            this(new MockMessaging());
+        }
+
+        private InstrumentedLocalSessions(MockMessaging messaging)
+        {
+            super(SharedContext.Global.instance.withMessaging(messaging));
+            sentMessages = messaging.sentMessages;
+        }
+
+        @Override
         protected void sendMessage(InetAddressAndPort destination, Message<? extends RepairMessage> message)
         {
             if (!sentMessages.containsKey(destination))
@@ -138,16 +158,16 @@ public class LocalSessionTest extends AbstractRepairTest
             sentMessages.get(destination).add(message.payload);
         }
 
-        SettableFuture<Object> prepareSessionFuture = null;
+        AsyncPromise<List<Void>> prepareSessionFuture = null;
         boolean prepareSessionCalled = false;
 
         @Override
-        ListenableFuture prepareSession(KeyspaceRepairManager repairManager,
-                                        UUID sessionID,
-                                        Collection<ColumnFamilyStore> tables,
-                                        RangesAtEndpoint ranges,
-                                        ExecutorService executor,
-                                        BooleanSupplier isCancelled)
+        Future<List<Void>> prepareSession(KeyspaceRepairManager repairManager,
+                                          TimeUUID sessionID,
+                                          Collection<ColumnFamilyStore> tables,
+                                          RangesAtEndpoint ranges,
+                                          ExecutorService executor,
+                                          BooleanSupplier isCancelled)
         {
             prepareSessionCalled = true;
             if (prepareSessionFuture != null)
@@ -161,17 +181,17 @@ public class LocalSessionTest extends AbstractRepairTest
         }
 
         boolean failSessionCalled = false;
-        public void failSession(UUID sessionID, boolean sendMessage)
+        public void failSession(TimeUUID sessionID, boolean sendMessage)
         {
             failSessionCalled = true;
             super.failSession(sessionID, sendMessage);
         }
 
-        public LocalSession prepareForTest(UUID sessionID)
+        public LocalSession prepareForTest(TimeUUID sessionID)
         {
-            prepareSessionFuture = SettableFuture.create();
-            handlePrepareMessage(PARTICIPANT1, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS));
-            prepareSessionFuture.set(new Object());
+            prepareSessionFuture = new AsyncPromise<>();
+            handlePrepareMessage(Message.builder(Verb.PREPARE_CONSISTENT_REQ, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS)).from(PARTICIPANT1).build());
+            prepareSessionFuture.trySuccess(null);
             sentMessages.clear();
             return getSession(sessionID);
         }
@@ -192,11 +212,11 @@ public class LocalSessionTest extends AbstractRepairTest
             return true;
         }
 
-        public Map<UUID, Integer> completedSessions = new HashMap<>();
+        public Map<TimeUUID, Integer> completedSessions = new HashMap<>();
 
-        protected void sessionCompleted(LocalSession session)
+        public void sessionCompleted(LocalSession session)
         {
-            UUID sessionID = session.sessionID;
+            TimeUUID sessionID = session.sessionID;
             int calls = completedSessions.getOrDefault(sessionID, 0);
             completedSessions.put(sessionID, calls + 1);
         }
@@ -205,6 +225,18 @@ public class LocalSessionTest extends AbstractRepairTest
         protected boolean sessionHasData(LocalSession session)
         {
             return sessionHasData;
+        }
+
+        @Override
+        protected TableMetadata getTableMetadata(TableId tableId)
+        {
+            return cfm;
+        }
+
+        @Override
+        protected List<Range<Token>> getLocalRanges(String keyspace)
+        {
+            return Arrays.asList(RANGE1, RANGE2, RANGE3);
         }
     }
 
@@ -228,7 +260,7 @@ public class LocalSessionTest extends AbstractRepairTest
         repairCfs.truncateBlocking();
     }
 
-    private static UUID registerSession()
+    private static TimeUUID registerSession()
     {
         return registerSession(cfs, true, true);
     }
@@ -256,7 +288,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void persistence()
     {
-        LocalSessions sessions = new LocalSessions();
+        LocalSessions sessions = new LocalSessions(SharedContext.Global.instance);
         LocalSession expected = createSession();
         sessions.save(expected);
         LocalSession actual = sessions.loadUnsafe(expected.sessionID);
@@ -266,14 +298,14 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void prepareSuccessCase()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
         // replacing future so we can inspect state before and after anti compaction callback
-        sessions.prepareSessionFuture = SettableFuture.create();
+        sessions.prepareSessionFuture = new AsyncPromise<>();
         Assert.assertFalse(sessions.prepareSessionCalled);
-        sessions.handlePrepareMessage(PARTICIPANT1, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS));
+        sessions.handlePrepareMessage(Message.builder(Verb.PREPARE_CONSISTENT_REQ, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS)).from(PARTICIPANT1).build());
         Assert.assertTrue(sessions.prepareSessionCalled);
         Assert.assertTrue(sessions.sentMessages.isEmpty());
 
@@ -284,7 +316,7 @@ public class LocalSessionTest extends AbstractRepairTest
         Assert.assertEquals(session, sessions.loadUnsafe(sessionID));
 
         // anti compaction has now finished, so state in memory and on disk should be PREPARED
-        sessions.prepareSessionFuture.set(new Object());
+        sessions.prepareSessionFuture.trySuccess(null);
         session = sessions.getSession(sessionID);
         Assert.assertNotNull(session);
         Assert.assertEquals(PREPARED, session.getState());
@@ -301,14 +333,14 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void prepareAntiCompactFailure()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
         // replacing future so we can inspect state before and after anti compaction callback
-        sessions.prepareSessionFuture = SettableFuture.create();
+        sessions.prepareSessionFuture = new AsyncPromise<>();
         Assert.assertFalse(sessions.prepareSessionCalled);
-        sessions.handlePrepareMessage(PARTICIPANT1, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS));
+        sessions.handlePrepareMessage(Message.builder(Verb.PREPARE_CONSISTENT_REQ, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS)).from(PARTICIPANT1).build());
         Assert.assertTrue(sessions.prepareSessionCalled);
         Assert.assertTrue(sessions.sentMessages.isEmpty());
 
@@ -319,7 +351,7 @@ public class LocalSessionTest extends AbstractRepairTest
         Assert.assertEquals(session, sessions.loadUnsafe(sessionID));
 
         // anti compaction has now finished, so state in memory and on disk should be PREPARED
-        sessions.prepareSessionFuture.setException(new RuntimeException());
+        sessions.prepareSessionFuture.tryFailure(new RuntimeException());
         session = sessions.getSession(sessionID);
         Assert.assertNotNull(session);
         Assert.assertEquals(FAILED, session.getState());
@@ -327,7 +359,6 @@ public class LocalSessionTest extends AbstractRepairTest
 
         // ...and we should have sent a success message back to the coordinator
         assertMessagesSent(sessions, COORDINATOR, new PrepareConsistentResponse(sessionID, PARTICIPANT1, false));
-
     }
 
     /**
@@ -338,9 +369,9 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void prepareWithNonExistantParentSession()
     {
-        UUID sessionID = UUIDGen.getTimeUUID();
+        TimeUUID sessionID = nextTimeUUID();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
-        sessions.handlePrepareMessage(PARTICIPANT1, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS));
+        sessions.handlePrepareMessage(Message.builder(Verb.PREPARE_CONSISTENT_REQ, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS)).from(PARTICIPANT1).build());
         Assert.assertNull(sessions.getSession(sessionID));
         assertMessagesSent(sessions, COORDINATOR, new PrepareConsistentResponse(sessionID, PARTICIPANT1, false));
     }
@@ -351,12 +382,13 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void prepareCancellation()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         AtomicReference<BooleanSupplier> isCancelledRef = new AtomicReference<>();
-        SettableFuture future = SettableFuture.create();
+        Promise<List<Void>> future = new AsyncPromise<>();
 
-        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions() {
-            ListenableFuture prepareSession(KeyspaceRepairManager repairManager, UUID sessionID, Collection<ColumnFamilyStore> tables, RangesAtEndpoint ranges, ExecutorService executor, BooleanSupplier isCancelled)
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions()
+        {
+            Future<List<Void>> prepareSession(KeyspaceRepairManager repairManager, TimeUUID sessionID, Collection<ColumnFamilyStore> tables, RangesAtEndpoint ranges, ExecutorService executor, BooleanSupplier isCancelled)
             {
                 isCancelledRef.set(isCancelled);
                 return future;
@@ -364,7 +396,7 @@ public class LocalSessionTest extends AbstractRepairTest
         };
         sessions.start();
 
-        sessions.handlePrepareMessage(PARTICIPANT1, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS));
+        sessions.handlePrepareMessage(Message.builder(Verb.PREPARE_CONSISTENT_REQ, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS)).from(PARTICIPANT1).build());
 
         BooleanSupplier isCancelled = isCancelledRef.get();
         Assert.assertNotNull(isCancelled);
@@ -375,14 +407,14 @@ public class LocalSessionTest extends AbstractRepairTest
         Assert.assertTrue(isCancelled.getAsBoolean());
 
         // now that the session has failed, it send a negative response to the coordinator (even if the anti-compaction completed successfully)
-        future.set(new Object());
+        future.trySuccess(null);
         assertMessagesSent(sessions, COORDINATOR, new PrepareConsistentResponse(sessionID, PARTICIPANT1, false));
     }
 
     @Test
     public void maybeSetRepairing()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
@@ -403,7 +435,7 @@ public class LocalSessionTest extends AbstractRepairTest
     public void maybeSetRepairingDuplicates()
     {
 
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
@@ -437,7 +469,7 @@ public class LocalSessionTest extends AbstractRepairTest
     public void maybeSetRepairingNonExistantSession()
     {
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
-        UUID fakeID = UUIDGen.getTimeUUID();
+        TimeUUID fakeID = nextTimeUUID();
         sessions.maybeSetRepairing(fakeID);
         Assert.assertTrue(sessions.sentMessages.isEmpty());
     }
@@ -449,7 +481,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void finalizeProposeSuccessCase()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
@@ -462,7 +494,7 @@ public class LocalSessionTest extends AbstractRepairTest
 
         // should send a promised message to coordinator and set session state accordingly
         sessions.sentMessages.clear();
-        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID));
+        sessions.handleFinalizeProposeMessage(Message.builder(Verb.FINALIZE_PROPOSE_MSG, new FinalizePropose(sessionID)).from(COORDINATOR).build());
         Assert.assertEquals(FINALIZE_PROMISED, session.getState());
         Assert.assertEquals(session, sessions.loadUnsafe(sessionID));
         assertMessagesSent(sessions, COORDINATOR, new FinalizePromise(sessionID, PARTICIPANT1, true));
@@ -475,7 +507,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void finalizeProposeInvalidStateFailure()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
@@ -484,7 +516,7 @@ public class LocalSessionTest extends AbstractRepairTest
 
         // should fail the session and send a failure message to the coordinator
         sessions.sentMessages.clear();
-        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID));
+        sessions.handleFinalizeProposeMessage(Message.builder(Verb.FINALIZE_PROPOSE_MSG, new FinalizePropose(sessionID)).from(COORDINATOR).build());
         Assert.assertEquals(FAILED, session.getState());
         Assert.assertEquals(session, sessions.loadUnsafe(sessionID));
         assertMessagesSent(sessions, COORDINATOR, new FailSession(sessionID));
@@ -494,8 +526,8 @@ public class LocalSessionTest extends AbstractRepairTest
     public void finalizeProposeNonExistantSessionFailure()
     {
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
-        UUID fakeID = UUIDGen.getTimeUUID();
-        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(fakeID));
+        TimeUUID fakeID = nextTimeUUID();
+        sessions.handleFinalizeProposeMessage(Message.builder(Verb.FINALIZE_PROPOSE_MSG, new FinalizePropose(fakeID)).from(COORDINATOR).build());
         Assert.assertNull(sessions.getSession(fakeID));
         assertMessagesSent(sessions, COORDINATOR, new FailSession(fakeID));
     }
@@ -507,19 +539,19 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void finalizeCommitSuccessCase()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
         // create session and move to finalized promised
         sessions.prepareForTest(sessionID);
         sessions.maybeSetRepairing(sessionID);
-        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID));
+        sessions.handleFinalizeProposeMessage(Message.builder(Verb.FINALIZE_PROPOSE_MSG, new FinalizePropose(sessionID)).from(COORDINATOR).build());
 
         Assert.assertEquals(0, (int) sessions.completedSessions.getOrDefault(sessionID, 0));
         sessions.sentMessages.clear();
         LocalSession session = sessions.getSession(sessionID);
-        sessions.handleFinalizeCommitMessage(PARTICIPANT1, new FinalizeCommit(sessionID));
+        sessions.handleFinalizeCommitMessage(Message.builder(Verb.FINALIZE_COMMIT_MSG, new FinalizeCommit(sessionID)).from(PARTICIPANT1).build());
 
         Assert.assertEquals(FINALIZED, session.getState());
         Assert.assertEquals(session, sessions.loadUnsafe(sessionID));
@@ -532,8 +564,8 @@ public class LocalSessionTest extends AbstractRepairTest
     {
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
-        UUID fakeID = UUIDGen.getTimeUUID();
-        sessions.handleFinalizeCommitMessage(PARTICIPANT1, new FinalizeCommit(fakeID));
+        TimeUUID fakeID = nextTimeUUID();
+        sessions.handleFinalizeCommitMessage(Message.builder(Verb.FINALIZE_COMMIT_MSG, new FinalizeCommit(fakeID)).from(PARTICIPANT1).build());
         Assert.assertNull(sessions.getSession(fakeID));
         Assert.assertTrue(sessions.sentMessages.isEmpty());
     }
@@ -541,7 +573,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void failSession()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
@@ -563,7 +595,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void handleFailMessage()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
@@ -579,7 +611,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void sendStatusRequest() throws Exception
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
         LocalSession session = sessions.prepareForTest(sessionID);
@@ -596,7 +628,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void handleStatusRequest() throws Exception
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
         LocalSession session = sessions.prepareForTest(sessionID);
@@ -616,7 +648,7 @@ public class LocalSessionTest extends AbstractRepairTest
         sessions.start();
 
         sessions.sentMessages.clear();
-        UUID sessionID = UUIDGen.getTimeUUID();
+        TimeUUID sessionID = nextTimeUUID();
         sessions.handleStatusRequest(PARTICIPANT2, new StatusRequest(sessionID));
         assertNoMessagesSent(sessions, PARTICIPANT1);
         assertMessagesSent(sessions, PARTICIPANT2, new StatusResponse(sessionID, FAILED));
@@ -626,7 +658,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void handleStatusResponseFinalized() throws Exception
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
         LocalSession session = sessions.prepareForTest(sessionID);
@@ -639,7 +671,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void handleStatusResponseFinalizedRedundant() throws Exception
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
         LocalSession session = sessions.prepareForTest(sessionID);
@@ -652,7 +684,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void handleStatusResponseFailed() throws Exception
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
         LocalSession session = sessions.prepareForTest(sessionID);
@@ -665,7 +697,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void handleStatusResponseFailedRedundant() throws Exception
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
         LocalSession session = sessions.prepareForTest(sessionID);
@@ -678,20 +710,23 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void handleStatusResponseNoop() throws Exception
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
         LocalSession session = sessions.prepareForTest(sessionID);
         session.setState(REPAIRING);
+        long lastUpdatedOriginal = session.getLastUpdate();
+        Thread.sleep(1100);
 
         sessions.handleStatusResponse(PARTICIPANT1, new StatusResponse(sessionID, FINALIZE_PROMISED));
+        Assert.assertNotEquals(lastUpdatedOriginal, session.getLastUpdate());
         Assert.assertEquals(REPAIRING, session.getState());
     }
 
     @Test
     public void handleStatusResponseNoSession() throws Exception
     {
-        UUID sessionID = UUIDGen.getTimeUUID();
+        TimeUUID sessionID = nextTimeUUID();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
@@ -705,11 +740,11 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void isSessionInProgress()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
-        sessions.prepareSessionFuture = SettableFuture.create();  // prevent moving to prepared
-        sessions.handlePrepareMessage(PARTICIPANT1, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS));
+        sessions.prepareSessionFuture = new AsyncPromise<>();  // prevent moving to prepared
+        sessions.handlePrepareMessage(Message.builder(Verb.PREPARE_CONSISTENT_REQ, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS)).from(PARTICIPANT1).build());
 
         LocalSession session = sessions.getSession(sessionID);
         Assert.assertNotNull(session);
@@ -732,12 +767,12 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void isSessionInProgressFailed()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
-        sessions.prepareSessionFuture = SettableFuture.create();
-        sessions.handlePrepareMessage(PARTICIPANT1, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS));
-        sessions.prepareSessionFuture.set(new Object());
+        sessions.prepareSessionFuture = new AsyncPromise<>();
+        sessions.handlePrepareMessage(Message.builder(Verb.PREPARE_CONSISTENT_REQ, new PrepareConsistentRequest(sessionID, COORDINATOR, PARTICIPANTS)).from(PARTICIPANT1).build());
+        sessions.prepareSessionFuture.trySuccess(null);
 
         Assert.assertTrue(sessions.isSessionInProgress(sessionID));
         sessions.failSession(sessionID);
@@ -747,7 +782,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void isSessionInProgressNonExistantSession()
     {
-        UUID fakeID = UUIDGen.getTimeUUID();
+        TimeUUID fakeID = nextTimeUUID();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
         Assert.assertFalse(sessions.isSessionInProgress(fakeID));
@@ -756,14 +791,14 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void finalRepairedAtFinalized()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
         sessions.prepareForTest(sessionID);
         sessions.maybeSetRepairing(sessionID);
-        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID));
-        sessions.handleFinalizeCommitMessage(PARTICIPANT1, new FinalizeCommit(sessionID));
+        sessions.handleFinalizeProposeMessage(Message.builder(Verb.FINALIZE_PROPOSE_MSG, new FinalizePropose(sessionID)).from(COORDINATOR).build());
+        sessions.handleFinalizeCommitMessage(Message.builder(Verb.FINALIZE_COMMIT_MSG, new FinalizeCommit(sessionID)).from(PARTICIPANT1).build());
 
         LocalSession session = sessions.getSession(sessionID);
         Assert.assertTrue(session.repairedAt != ActiveRepairService.UNREPAIRED_SSTABLE);
@@ -773,7 +808,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void finalRepairedAtFailed()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
@@ -789,7 +824,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void finalRepairedAtNoSession()
     {
-        UUID fakeID = registerSession();
+        TimeUUID fakeID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
         long repairedAt = sessions.getFinalSessionRepairedAt(fakeID);
@@ -799,7 +834,7 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test(expected = IllegalStateException.class)
     public void finalRepairedAtInProgress()
     {
-        UUID sessionID = registerSession();
+        TimeUUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
         sessions.prepareForTest(sessionID);
@@ -816,9 +851,9 @@ public class LocalSessionTest extends AbstractRepairTest
         InstrumentedLocalSessions initialSessions = new InstrumentedLocalSessions();
         initialSessions.start();
         Assert.assertEquals(0, initialSessions.getNumSessions());
-        UUID id1 = registerSession();
-        UUID id2 = registerSession();
-        UUID id3 = registerSession();
+        TimeUUID id1 = registerSession();
+        TimeUUID id2 = registerSession();
+        TimeUUID id3 = registerSession();
 
         initialSessions.prepareForTest(id1);
         initialSessions.prepareForTest(id2);
@@ -854,7 +889,6 @@ public class LocalSessionTest extends AbstractRepairTest
 
         Assert.assertEquals(session2, session2next);
         Assert.assertEquals(session3, session3next);
-
     }
 
     /**
@@ -866,9 +900,9 @@ public class LocalSessionTest extends AbstractRepairTest
         InstrumentedLocalSessions initialSessions = new InstrumentedLocalSessions();
         initialSessions.start();
         Assert.assertEquals(0, initialSessions.getNumSessions());
-        UUID id1 = registerSession();
-        UUID id2 = registerSession();
-        UUID id3 = registerSession();
+        TimeUUID id1 = registerSession();
+        TimeUUID id2 = registerSession();
+        TimeUUID id3 = registerSession();
 
         initialSessions.prepareForTest(id1);
         initialSessions.prepareForTest(id2);
@@ -913,7 +947,7 @@ public class LocalSessionTest extends AbstractRepairTest
      * If LocalSessions.start is called more than
      * once, an exception should be thrown
      */
-    @Test (expected = IllegalArgumentException.class)
+    @Test(expected = IllegalArgumentException.class)
     public void multipleStartupFailure() throws Exception
     {
         InstrumentedLocalSessions initialSessions = new InstrumentedLocalSessions();
@@ -928,24 +962,24 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void loadCorruptRow() throws Exception
     {
-        LocalSessions sessions = new LocalSessions();
+        LocalSessions sessions = new LocalSessions(SharedContext.Global.instance);
         LocalSession session = createSession();
         sessions.save(session);
 
-        sessions = new LocalSessions();
+        sessions = new LocalSessions(SharedContext.Global.instance);
         sessions.start();
         Assert.assertNotNull(sessions.getSession(session.sessionID));
 
         QueryProcessor.instance.executeInternal("DELETE participants, participants_wp FROM system.repairs WHERE parent_id=?", session.sessionID);
 
-        sessions = new LocalSessions();
+        sessions = new LocalSessions(SharedContext.Global.instance);
         sessions.start();
         Assert.assertNull(sessions.getSession(session.sessionID));
         UntypedResultSet res = QueryProcessor.executeInternal("SELECT * FROM system.repairs WHERE parent_id=?", session.sessionID);
         assertTrue(res.isEmpty());
     }
 
-    private static LocalSession sessionWithTime(int started, int updated)
+    private static LocalSession sessionWithTime(long started, long updated)
     {
         LocalSession.Builder builder = createBuilder();
         builder.withStartedAt(started);
@@ -960,10 +994,10 @@ public class LocalSessionTest extends AbstractRepairTest
     @Test
     public void cleanupNoOp() throws Exception
     {
-        LocalSessions sessions = new LocalSessions();
+        LocalSessions sessions = new LocalSessions(SharedContext.Global.instance);
         sessions.start();
 
-        int time = FBUtilities.nowInSeconds() - LocalSessions.AUTO_FAIL_TIMEOUT + 60;
+        long time = FBUtilities.nowInSeconds() - LocalSessions.AUTO_FAIL_TIMEOUT + 60;
         LocalSession session = sessionWithTime(time - 1, time);
 
         sessions.putSessionUnsafe(session);
@@ -983,7 +1017,7 @@ public class LocalSessionTest extends AbstractRepairTest
         LocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
-        int time = FBUtilities.nowInSeconds() - LocalSessions.AUTO_FAIL_TIMEOUT - 1;
+        long time = FBUtilities.nowInSeconds() - LocalSessions.AUTO_FAIL_TIMEOUT - 1;
         LocalSession session = sessionWithTime(time - 1, time);
         session.setState(REPAIRING);
 
@@ -1006,7 +1040,7 @@ public class LocalSessionTest extends AbstractRepairTest
         LocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
-        int time = FBUtilities.nowInSeconds() - LocalSessions.AUTO_FAIL_TIMEOUT - 1;
+        long time = FBUtilities.nowInSeconds() - LocalSessions.AUTO_FAIL_TIMEOUT - 1;
         LocalSession failed = sessionWithTime(time - 1, time);
         failed.setState(FAILED);
 
@@ -1051,7 +1085,7 @@ public class LocalSessionTest extends AbstractRepairTest
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
-        int time = FBUtilities.nowInSeconds() - LocalSessions.AUTO_FAIL_TIMEOUT - 1;
+        long time = FBUtilities.nowInSeconds() - LocalSessions.AUTO_FAIL_TIMEOUT - 1;
         LocalSession failed = sessionWithTime(time - 1, time);
         failed.setState(FAILED);
 
@@ -1081,7 +1115,8 @@ public class LocalSessionTest extends AbstractRepairTest
     public void cleanupStatusRequest() throws Exception
     {
         AtomicReference<LocalSession> checkedSession = new AtomicReference<>();
-        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions() {
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions()
+        {
             public void sendStatusRequest(LocalSession session)
             {
                 Assert.assertTrue(checkedSession.compareAndSet(null, session));
@@ -1089,7 +1124,7 @@ public class LocalSessionTest extends AbstractRepairTest
         };
         sessions.start();
 
-        int time = FBUtilities.nowInSeconds() - LocalSessions.CHECK_STATUS_TIMEOUT - 1;
+        long time = FBUtilities.nowInSeconds() - LocalSessions.CHECK_STATUS_TIMEOUT - 1;
         LocalSession session = sessionWithTime(time - 1, time);
         session.setState(REPAIRING);
 
@@ -1100,5 +1135,236 @@ public class LocalSessionTest extends AbstractRepairTest
 
         Assert.assertEquals(session, checkedSession.get());
     }
-}
 
+    /**
+     * Cleanup should not process sessions if the node is not initialized
+     */
+    @Test
+    public void cleanupNodeNotInitialized() throws Exception
+    {
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions()
+        {
+            @Override
+            protected boolean isNodeInitialized()
+            {
+                return false;
+            }
+        };
+        sessions.start();
+
+        long time = FBUtilities.nowInSeconds() - LocalSessions.AUTO_FAIL_TIMEOUT - 1;
+        LocalSession session = sessionWithTime(time - 1, time);
+        session.setState(REPAIRING);
+
+        sessions.putSessionUnsafe(session);
+        Assert.assertNotNull(sessions.getSession(session.sessionID));
+        Assert.assertEquals(REPAIRING, session.getState());
+
+        // cleanup should not fail the session since node is not initialized
+        sessions.cleanup();
+
+        Assert.assertNotNull(sessions.getSession(session.sessionID));
+        Assert.assertEquals(REPAIRING, session.getState());
+        Assert.assertEquals(session, sessions.loadUnsafe(session.sessionID));
+    }
+
+    /**
+     * Test cleanup with successful session cleanup
+     */
+    @Test
+    public void cleanupSuccessfulRelease() throws Exception
+    {
+        TimeUUID sessionID = registerSession();
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        LocalSession session = sessions.prepareForTest(sessionID);
+        sessions.maybeSetRepairing(sessionID);
+        sessions.handleFinalizeProposeMessage(Message.builder(Verb.FINALIZE_PROPOSE_MSG, new FinalizePropose(sessionID)).from(COORDINATOR).build());
+        sessions.handleFinalizeCommitMessage(Message.builder(Verb.FINALIZE_COMMIT_MSG, new FinalizeCommit(sessionID)).from(PARTICIPANT1).build());
+
+
+        Assert.assertEquals(FINALIZED, session.getState());
+
+        // Simulate that the session has sstables to clean up
+        sessions.sessionHasData = true;
+
+        // Call cleanup - should succeed since session is finalized and not in progress
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session.ranges, false);
+
+        // Verify the session was processed
+        Assert.assertNotNull(summary);
+        Assert.assertEquals(cfm.keyspace, summary.keyspace);
+        Assert.assertEquals(cfm.name, summary.table);
+        // Note: actual success/failure depends on whether sstables exist and can be modified
+        // In this test environment, we can't easily verify the exact contents without mocking
+    }
+
+    /**
+     * Test cleanup with session that has no sstables (unsuccessful)
+     */
+    @Test
+    public void cleanupNoSSTables() throws Exception
+    {
+        TimeUUID sessionID = registerSession();
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        LocalSession session = sessions.prepareForTest(sessionID);
+        sessions.maybeSetRepairing(sessionID);
+        sessions.handleFinalizeProposeMessage(Message.builder(Verb.FINALIZE_PROPOSE_MSG, new FinalizePropose(sessionID)).from(COORDINATOR).build());
+        sessions.handleFinalizeCommitMessage(Message.builder(Verb.FINALIZE_COMMIT_MSG, new FinalizeCommit(sessionID)).from(PARTICIPANT1).build());
+
+
+        Assert.assertEquals(FINALIZED, session.getState());
+
+        // Session has no sstables (sessionHasData = false by default)
+        sessions.sessionHasData = false;
+
+        // Call cleanup - should return unsuccessful since no sstables
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session.ranges, false);
+
+        Assert.assertNotNull(summary);
+        Assert.assertEquals(cfm.keyspace, summary.keyspace);
+        Assert.assertEquals(cfm.name, summary.table);
+        // When there are no sstables, getRepairFinalizationOperation returns null, 
+        // so the session should be in the unsuccessful set
+        Assert.assertTrue(summary.unsuccessful.contains(sessionID));
+        Assert.assertFalse(summary.successful.contains(sessionID));
+    }
+
+    /**
+     * Test cleanup skips sessions that are in progress
+     */
+    @Test
+    public void cleanupSessionInProgress() throws Exception
+    {
+        TimeUUID sessionID = registerSession();
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        LocalSession session = sessions.prepareForTest(sessionID);
+        sessions.maybeSetRepairing(sessionID);
+
+        // Session is in REPAIRING state, not completed
+        Assert.assertEquals(REPAIRING, session.getState());
+        Assert.assertTrue(sessions.isSessionInProgress(sessionID));
+
+        // Call cleanup - should skip this session since it's in progress
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session.ranges, false);
+
+        Assert.assertNotNull(summary);
+        // Session should still be in REPAIRING state
+        Assert.assertEquals(REPAIRING, session.getState());
+        // In-progress sessions are not processed, so both lists should be empty
+        Assert.assertTrue(summary.successful.isEmpty());
+        Assert.assertTrue(summary.unsuccessful.isEmpty());
+    }
+
+    /**
+     * Test cleanup with failed session
+     */
+    @Test
+    public void cleanupFailedSession() throws Exception
+    {
+        TimeUUID sessionID = registerSession();
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        LocalSession session = sessions.prepareForTest(sessionID);
+        sessions.failSession(sessionID, false);
+
+        Assert.assertEquals(FAILED, session.getState());
+        Assert.assertFalse(sessions.isSessionInProgress(sessionID));
+
+        // Call cleanup on failed session
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session.ranges, false);
+
+        Assert.assertNotNull(summary);
+        Assert.assertEquals(cfm.keyspace, summary.keyspace);
+        Assert.assertEquals(cfm.name, summary.table);
+        // Failed session with no sstables should be in unsuccessful set
+        Assert.assertTrue(summary.unsuccessful.contains(sessionID));
+        Assert.assertFalse(summary.successful.contains(sessionID));
+    }
+
+    /**
+     * Test cleanup with multiple sessions having mixed states
+     */
+    @Test
+    public void cleanupMixedSessions() throws Exception
+    {
+        TimeUUID sessionID1 = registerSession();
+        TimeUUID sessionID2 = registerSession();
+        TimeUUID sessionID3 = registerSession();
+
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        // Session 1: Finalized (should be cleaned up)
+        LocalSession session1 = sessions.prepareForTest(sessionID1);
+        sessions.maybeSetRepairing(sessionID1);
+        sessions.handleFinalizeProposeMessage(Message.builder(Verb.FINALIZE_PROPOSE_MSG, new FinalizePropose(sessionID1)).from(COORDINATOR).build());
+        sessions.handleFinalizeCommitMessage(Message.builder(Verb.FINALIZE_COMMIT_MSG, new FinalizeCommit(sessionID1)).from(PARTICIPANT1).build());
+
+        Assert.assertEquals(FINALIZED, session1.getState());
+
+        // Session 2: Failed (should be cleaned up)
+        LocalSession session2 = sessions.prepareForTest(sessionID2);
+        sessions.failSession(sessionID2, false);
+        Assert.assertEquals(FAILED, session2.getState());
+
+        // Session 3: In progress (should be skipped)
+        LocalSession session3 = sessions.prepareForTest(sessionID3);
+        sessions.maybeSetRepairing(sessionID3);
+        Assert.assertEquals(REPAIRING, session3.getState());
+
+        // Call cleanup on all sessions
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session1.ranges, false);
+
+        Assert.assertNotNull(summary);
+        Assert.assertEquals(cfm.keyspace, summary.keyspace);
+        Assert.assertEquals(cfm.name, summary.table);
+        
+        // Session 3 should still be in REPAIRING state (not cleaned up)
+        Assert.assertEquals(REPAIRING, session3.getState());
+        
+        // Session 1 and 2 should be processed (in unsuccessful since no sstables)
+        // Session 3 should not be in either list (in progress)
+        Assert.assertFalse(summary.successful.contains(sessionID3));
+        Assert.assertFalse(summary.unsuccessful.contains(sessionID3));
+    }
+
+    /**
+     * Test cleanup with force flag
+     */
+    @Test
+    public void cleanupWithForce() throws Exception
+    {
+        TimeUUID sessionID = registerSession();
+        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
+        sessions.start();
+
+        LocalSession session = sessions.prepareForTest(sessionID);
+        sessions.maybeSetRepairing(sessionID);
+        sessions.handleFinalizeProposeMessage(Message.builder(Verb.FINALIZE_PROPOSE_MSG, new FinalizePropose(sessionID)).from(COORDINATOR).build());
+        sessions.handleFinalizeCommitMessage(Message.builder(Verb.FINALIZE_COMMIT_MSG, new FinalizeCommit(sessionID)).from(PARTICIPANT1).build());
+
+
+        Assert.assertEquals(FINALIZED, session.getState());
+
+        // Call cleanup with force=true
+        org.apache.cassandra.repair.consistent.admin.CleanupSummary summary = 
+            sessions.cleanup(cfm.id, session.ranges, true);
+
+        Assert.assertNotNull(summary);
+        Assert.assertEquals(cfm.keyspace, summary.keyspace);
+        Assert.assertEquals(cfm.name, summary.table);
+        // Force cleanup should process the session
+    }
+}

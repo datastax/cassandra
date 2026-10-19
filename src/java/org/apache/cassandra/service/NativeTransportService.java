@@ -38,7 +38,9 @@ import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.Server;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.NATIVE_EPOLL_ENABLED;
 
 /**
  * Handles native transport server lifecycle and associated resources. Lazily initialized.
@@ -127,7 +129,7 @@ public class NativeTransportService
      */
     public void start()
     {
-        logger.info("Using Netty Version: {}", Version.identify().entrySet());
+        logger.debug("Using Netty Version: {}", Version.identify().entrySet());
         initialize();
         servers.forEach(Server::start);
     }
@@ -137,7 +139,12 @@ public class NativeTransportService
      */
     public void stop()
     {
-        servers.forEach(Server::stop);
+        stop(false);
+    }
+
+    public void stop(boolean force)
+    {
+        servers.forEach((s) -> s.stop(force));
     }
 
     /**
@@ -149,7 +156,8 @@ public class NativeTransportService
         servers = Collections.emptyList();
 
         // shutdown executors used by netty for native transport server
-        workerGroup.shutdownGracefully(3, 5, TimeUnit.SECONDS).awaitUninterruptibly();
+        if (workerGroup != null)
+            workerGroup.shutdownGracefully(3, 5, TimeUnit.SECONDS).awaitUninterruptibly();
 
         Dispatcher.shutdown();
     }
@@ -159,9 +167,9 @@ public class NativeTransportService
      */
     public static boolean useEpoll()
     {
-        final boolean enableEpoll = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"));
+        final boolean enableEpoll = NATIVE_EPOLL_ENABLED.getBoolean();
 
-        if (enableEpoll && !Epoll.isAvailable() && NativeLibrary.osType == NativeLibrary.OSType.LINUX)
+        if (enableEpoll && !Epoll.isAvailable() && INativeLibrary.instance.isOS(INativeLibrary.OSType.LINUX))
             logger.warn("epoll not available", Epoll.unavailabilityCause());
 
         return enableEpoll && Epoll.isAvailable();

@@ -25,15 +25,25 @@ import com.google.common.collect.ImmutableList;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.ExpirationDateOverflowHandling;
+import org.apache.cassandra.db.ExpirationDateOverflowHandling.ExpirationDateOverflowPolicy;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.utils.FBUtilities;
+import org.assertj.core.api.Assertions;
 
 import static java.lang.String.format;
+import static java.util.Collections.emptyMap;
 import static org.junit.Assert.assertEquals;
 
 public class CustomNowInSecondsTest extends CQLTester
@@ -41,6 +51,8 @@ public class CustomNowInSecondsTest extends CQLTester
     @BeforeClass
     public static void setUpClass()
     {
+        ServerTestUtils.daemonInitialization();
+
         prepareServer();
         requireNetwork();
     }
@@ -60,15 +72,57 @@ public class CustomNowInSecondsTest extends CQLTester
         String tbl = createTable(ks, "CREATE TABLE %s (id int primary key, val int)");
 
         // insert a row with TTL = 1 day.
-        executeModify(format("INSERT INTO %s.%s (id, val) VALUES (0, 0) USING TTL %d", ks, tbl, day), Integer.MIN_VALUE, prepared);
+        executeModify(format("INSERT INTO %s.%s (id, val) VALUES (0, 0) USING TTL %d", ks, tbl, day), Long.MIN_VALUE, prepared);
 
-        int now = (int) (System.currentTimeMillis() / 1000);
+        long now = FBUtilities.nowInSeconds();
 
         // execute a SELECT query without overriding nowInSeconds - make sure we observe one row.
         assertEquals(1, executeSelect(format("SELECT * FROM %s.%s", ks, tbl), Integer.MIN_VALUE, prepared).size());
 
         // execute a SELECT query with nowInSeconds set to [now + 1 day + 1], when the row should have expired.
         assertEquals(0, executeSelect(format("SELECT * FROM %s.%s", ks, tbl), now + day + 1, prepared).size());
+    }
+
+    @Test
+    public void testSelectQueryOverflowingIntTimestamps()
+    {
+        testSelectQueryOverflowingIntTimestamps(false);
+        testSelectQueryOverflowingIntTimestamps(true);
+    }
+
+    private void testSelectQueryOverflowingIntTimestamps(boolean prepared)
+    {
+        ExpirationDateOverflowPolicy origPolicy = ExpirationDateOverflowHandling.policy;
+        ExpirationDateOverflowHandling.policy = ExpirationDateOverflowPolicy.REJECT;
+
+        int ttl = Attributes.MAX_TTL - 10; // Give it a TTL that should overflow 'int' timestamps
+
+        String ks = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
+        String tbl = createTable(ks, "CREATE TABLE %s (id int primary key, val int)");
+
+        // insert a row with an int overflowing timestamp. Behavior will depend on the used sstable version
+        String query = format("INSERT INTO %s.%s (id, val) VALUES (0, 0) USING TTL %d", ks, tbl, ttl);
+
+        if (CellData.getVersionedMaxDeletiontionTime() == Cell.MAX_DELETION_TIME_2038_LEGACY_CAP)
+        {
+            Assertions.assertThatThrownBy(() -> executeModify(query, Long.MIN_VALUE, prepared))
+                      .isInstanceOf(InvalidRequestException.class)
+                      .hasMessageContaining("exceeds maximum supported expiration date");
+        }
+        else
+        {
+            executeModify(query, Long.MIN_VALUE, prepared);
+
+            long now = FBUtilities.nowInSeconds();
+
+            // execute a SELECT query without overriding nowInSeconds - make sure we observe one row.
+            assertEquals(1, executeSelect(format("SELECT * FROM %s.%s", ks, tbl), Long.MIN_VALUE, prepared).size());
+
+            // execute a SELECT query with nowInSeconds set to [now + ttl + 1], when the row should have expired.
+            assertEquals(0, executeSelect(format("SELECT * FROM %s.%s", ks, tbl), now + ttl + 1, prepared).size());
+        }
+
+        ExpirationDateOverflowHandling.policy = origPolicy;
     }
 
     @Test
@@ -80,7 +134,7 @@ public class CustomNowInSecondsTest extends CQLTester
 
     private void testModifyQuery(boolean prepared)
     {
-        int now = (int) (System.currentTimeMillis() / 1000);
+        long now = FBUtilities.nowInSeconds();
         int day = 86400;
 
         String ks = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
@@ -105,7 +159,7 @@ public class CustomNowInSecondsTest extends CQLTester
 
     private void testBatchQuery(boolean prepared)
     {
-        int now = (int) (System.currentTimeMillis() / 1000);
+        long now = FBUtilities.nowInSeconds();
         int day = 86400;
 
         String ks = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
@@ -132,7 +186,7 @@ public class CustomNowInSecondsTest extends CQLTester
     {
         // test BatchMessage path
 
-        int now = (int) (System.currentTimeMillis() / 1000);
+        long now = FBUtilities.nowInSeconds();
         int day = 86400;
 
         String ks = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
@@ -151,10 +205,10 @@ public class CustomNowInSecondsTest extends CQLTester
             statements.add((ModificationStatement) QueryProcessor.parseStatement(query, cs));
 
         BatchStatement batch =
-            new BatchStatement(BatchStatement.Type.UNLOGGED, VariableSpecifications.empty(), statements, Attributes.none());
+            new BatchStatement(null, BatchStatement.Type.UNLOGGED, VariableSpecifications.empty(), statements, Attributes.none());
 
         // execute an BATCH message with now set to [now + 1 day], with ttl = 1, making its effective ttl = 1 day + 1.
-        QueryProcessor.instance.processBatch(batch, qs, batchQueryOptions(now + day), Collections.emptyMap(), System.nanoTime());
+        QueryProcessor.instance.processBatch(batch, qs, batchQueryOptions(now + day), emptyMap(), Dispatcher.RequestTime.forImmediateExecution());
 
         // verify that despite TTL having passed at now + 1 the rows are still there.
         assertEquals(2, executeSelect(format("SELECT * FROM %s.%s", ks, tbl), now + 1, false).size());
@@ -163,19 +217,19 @@ public class CustomNowInSecondsTest extends CQLTester
         assertEquals(0, executeSelect(format("SELECT * FROM %s.%s", ks, tbl), now + day + 1, false).size());
     }
 
-    private static ResultSet executeSelect(String query, int nowInSeconds, boolean prepared)
+    private static ResultSet executeSelect(String query, long nowInSeconds, boolean prepared)
     {
         ResultMessage message = execute(query, nowInSeconds, prepared);
         return ((ResultMessage.Rows) message).result;
     }
 
-    private static void executeModify(String query, int nowInSeconds, boolean prepared)
+    private static void executeModify(String query, long nowInSeconds, boolean prepared)
     {
         execute(query, nowInSeconds, prepared);
     }
 
     // prepared = false tests QueryMessage path, prepared = true tests ExecuteMessage path
-    private static ResultMessage execute(String query, int nowInSeconds, boolean prepared)
+    private static ResultMessage execute(String query, long nowInSeconds, boolean prepared)
     {
         ClientState cs = ClientState.forInternalCalls();
         QueryState qs = new QueryState(cs);
@@ -183,21 +237,21 @@ public class CustomNowInSecondsTest extends CQLTester
         if (prepared)
         {
             CQLStatement statement = QueryProcessor.parseStatement(query, cs);
-            return QueryProcessor.instance.processPrepared(statement, qs, queryOptions(nowInSeconds), Collections.emptyMap(), System.nanoTime());
+            return QueryProcessor.instance.processPrepared(statement, qs, queryOptions(nowInSeconds), emptyMap(), Dispatcher.RequestTime.forImmediateExecution());
         }
         else
         {
             CQLStatement statement = QueryProcessor.instance.parse(query, qs, queryOptions(nowInSeconds));
-            return QueryProcessor.instance.process(statement, qs, queryOptions(nowInSeconds), Collections.emptyMap(), System.nanoTime());
+            return QueryProcessor.instance.process(statement, qs, queryOptions(nowInSeconds), emptyMap(), Dispatcher.RequestTime.forImmediateExecution());
         }
     }
 
-    private static QueryOptions queryOptions(int nowInSeconds)
+    private static QueryOptions queryOptions(long nowInSeconds)
     {
         return QueryOptions.create(ConsistencyLevel.ONE,
                                    Collections.emptyList(),
                                    false,
-                                   Integer.MAX_VALUE,
+                                   PageSize.NONE,
                                    null,
                                    null,
                                    ProtocolVersion.CURRENT,
@@ -206,7 +260,7 @@ public class CustomNowInSecondsTest extends CQLTester
                                    nowInSeconds);
     }
 
-    private static BatchQueryOptions batchQueryOptions(int nowInSeconds)
+    private static BatchQueryOptions batchQueryOptions(long nowInSeconds)
     {
         return BatchQueryOptions.withoutPerStatementVariables(queryOptions(nowInSeconds));
     }

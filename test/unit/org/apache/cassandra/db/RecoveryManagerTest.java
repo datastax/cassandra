@@ -22,9 +22,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Date;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -38,9 +36,6 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
@@ -48,9 +43,11 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogArchiver;
+import org.apache.cassandra.db.commitlog.CommitLogDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLogReplayer;
 import org.apache.cassandra.db.context.CounterContext;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.compress.DeflateCompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
@@ -61,14 +58,13 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.concurrent.AsyncFuture;
 
 import static org.junit.Assert.assertEquals;
 
 @RunWith(Parameterized.class)
 public class RecoveryManagerTest
 {
-    private static Logger logger = LoggerFactory.getLogger(RecoveryManagerTest.class);
-
     private static final String KEYSPACE1 = "RecoveryManagerTest1";
     private static final String CF_STANDARD1 = "Standard1";
     private static final String CF_STATIC1 = "Static1";
@@ -81,6 +77,7 @@ public class RecoveryManagerTest
     {
         DatabaseDescriptor.setCommitLogCompression(commitLogCompression);
         DatabaseDescriptor.setEncryptionContext(encryptionContext);
+        DatabaseDescriptor.initializeCommitLogDiskAccessMode();
     }
 
     @Parameters()
@@ -160,7 +157,7 @@ public class RecoveryManagerTest
             Assert.assertTrue(Util.getAllUnfiltered(Util.cmd(keyspace2.getColumnFamilyStore(CF_STANDARD3), dk).build()).isEmpty());
 
             final AtomicReference<Throwable> err = new AtomicReference<Throwable>();
-            Thread t = NamedThreadFactory.createThread(() ->
+            Thread t = NamedThreadFactory.createAnonymousThread(() ->
             {
                 try
                 {
@@ -241,7 +238,7 @@ public class RecoveryManagerTest
 
         keyspace1.getColumnFamilyStore("Counter1").clearUnsafe();
 
-        int replayed = CommitLog.instance.resetUnsafe(false);
+        CommitLog.instance.resetUnsafe(false);
 
         ColumnMetadata counterCol = cfs.metadata().getColumn(ByteBufferUtil.bytes("val"));
         Row row = Util.getOnlyRow(Util.cmd(cfs).includeRow("cc").columns("val").build());
@@ -252,14 +249,17 @@ public class RecoveryManagerTest
     public void testRecoverPIT() throws Exception
     {
         CommitLog.instance.resetUnsafe(true);
+        long originalPIT = CommitLog.instance.archiver.getRestorePointInTimeInMicroseconds();
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
-        Date date = CommitLogArchiver.format.parse("2112:12:12 12:12:12");
-        long timeMS = date.getTime() - 5000;
 
+        // seconds level
+        // the archiver's restorePointInTime use the commitlog_archiving_properties file's
+        long rpiTs = CommitLogArchiver.getRestorationPointInTimeInMicroseconds("2112:12:12 12:12:12");
+        long timeInMicroLevel =  rpiTs - 5000;
         Keyspace keyspace1 = Keyspace.open(KEYSPACE1);
         for (int i = 0; i < 10; ++i)
         {
-            long ts = TimeUnit.MILLISECONDS.toMicros(timeMS + (i * 1000));
+            long ts = timeInMicroLevel + (i * 1000);
             new RowUpdateBuilder(cfs.metadata(), ts, "name-" + i)
                 .clustering("cc")
                 .add("val", Integer.toString(i))
@@ -269,11 +269,66 @@ public class RecoveryManagerTest
 
         // Sanity check row count prior to clear and replay
         assertEquals(10, Util.getAll(Util.cmd(cfs).build()).size());
+        keyspace1.getColumnFamilyStore(CF_STANDARD1).clearUnsafe();
+        CommitLog.instance.resetUnsafe(false);
+        assertEquals(6, Util.getAll(Util.cmd(cfs).build()).size());
+        //reset the rpi
+        CommitLog.instance.archiver.setRestorePointInTimeInMicroseconds(originalPIT);
 
         keyspace1.getColumnFamilyStore("Standard1").clearUnsafe();
-        CommitLog.instance.resetUnsafe(false);
+        CommitLog.instance.resetUnsafe(true);
+        cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
+        keyspace1 = Keyspace.open(KEYSPACE1);
 
+        // milseconds level
+        keyspace1.getColumnFamilyStore(CF_STANDARD1).clearUnsafe();
+        rpiTs = CommitLogArchiver.getRestorationPointInTimeInMicroseconds("2112:12:12 12:12:12.063");
+        timeInMicroLevel = rpiTs - 5000;
+        keyspace1 = Keyspace.open(KEYSPACE1);
+        for (int i = 0; i < 10; ++i)
+        {
+            long ts = timeInMicroLevel + (i * 1000);
+            new RowUpdateBuilder(cfs.metadata(), ts, "name-" + i)
+                    .clustering("cc")
+                    .add("val", Integer.toString(i))
+                    .build()
+                    .apply();
+        }
+        // Sanity check row count prior to clear and replay
+        assertEquals(10, Util.getAll(Util.cmd(cfs).build()).size());
+        keyspace1.getColumnFamilyStore(CF_STANDARD1).clearUnsafe();
+        CommitLog.instance.archiver.setRestorePointInTimeInMicroseconds(rpiTs);
+        CommitLog.instance.resetUnsafe(false);
         assertEquals(6, Util.getAll(Util.cmd(cfs).build()).size());
+
+        //reset the rpi
+        CommitLog.instance.archiver.setRestorePointInTimeInMicroseconds(originalPIT);
+        CommitLog.instance.resetUnsafe(true);
+        cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
+        keyspace1 = Keyspace.open(KEYSPACE1);
+
+        // milseconds level
+        keyspace1.getColumnFamilyStore(CF_STANDARD1).clearUnsafe();
+        rpiTs = CommitLogArchiver.getRestorationPointInTimeInMicroseconds("2112:12:12 12:12:12.063222");
+        timeInMicroLevel = rpiTs - 5000;
+        keyspace1 = Keyspace.open(KEYSPACE1);
+        for (int i = 0; i < 10; ++i)
+        {
+            long ts = timeInMicroLevel + (i * 1000);
+            new RowUpdateBuilder(cfs.metadata(), ts, "name-" + i)
+                    .clustering("cc")
+                    .add("val", Integer.toString(i))
+                    .build()
+                    .apply();
+        }
+        // Sanity check row count prior to clear and replay
+        assertEquals(10, Util.getAll(Util.cmd(cfs).build()).size());
+        keyspace1.getColumnFamilyStore(CF_STANDARD1).clearUnsafe();
+        CommitLog.instance.archiver.setRestorePointInTimeInMicroseconds(rpiTs);
+        CommitLog.instance.resetUnsafe(false);
+        assertEquals(6, Util.getAll(Util.cmd(cfs).build()).size());
+        //reset the rpi
+        CommitLog.instance.archiver.setRestorePointInTimeInMicroseconds(originalPIT);
     }
 
     @Test
@@ -282,13 +337,11 @@ public class RecoveryManagerTest
         CommitLog.instance.resetUnsafe(true);
         Keyspace keyspace1 = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace1.getColumnFamilyStore(CF_STATIC1);
-        Date date = CommitLogArchiver.format.parse("2112:12:12 12:12:12");
-        long timeMS = date.getTime() - 5000;
 
-
+        long timeInMicroLevel = CommitLogArchiver.getRestorationPointInTimeInMicroseconds("2112:12:12 12:12:12") - 5000;
         for (int i = 0; i < 10; ++i)
         {
-            long ts = TimeUnit.MILLISECONDS.toMicros(timeMS + (i * 1000));
+            long ts = timeInMicroLevel + (i * 1000);
             new RowUpdateBuilder(cfs.metadata(), ts, "name-" + i)
             .add("val", Integer.toString(i))
             .build()
@@ -309,8 +362,8 @@ public class RecoveryManagerTest
     {
         CommitLog.instance.resetUnsafe(true);
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
-        Date date = CommitLogArchiver.format.parse("2112:12:12 12:12:12");
-        long timeMS = date.getTime();
+        // 2112:12:12 12:12:12 is from the commitlog_archiving.properties file for testing
+        long timeInMicroLevel = CommitLogArchiver.getRestorationPointInTimeInMicroseconds("2112:12:12 12:12:12");
 
         Keyspace keyspace1 = Keyspace.open(KEYSPACE1);
 
@@ -319,9 +372,9 @@ public class RecoveryManagerTest
         {
             long ts;
             if (i == 9)
-                ts = TimeUnit.MILLISECONDS.toMicros(timeMS - 1000);
+                ts = timeInMicroLevel - 1000;
             else
-                ts = TimeUnit.MILLISECONDS.toMicros(timeMS + (i * 1000));
+                ts = timeInMicroLevel + (i * 1000);
 
             new RowUpdateBuilder(cfs.metadata(), ts, "name-" + i)
                 .clustering("cc")
@@ -333,7 +386,7 @@ public class RecoveryManagerTest
         // Sanity check row count prior to clear and replay
         assertEquals(10, Util.getAll(Util.cmd(cfs).build()).size());
 
-        keyspace1.getColumnFamilyStore("Standard1").clearUnsafe();
+        keyspace1.getColumnFamilyStore(CF_STANDARD1).clearUnsafe();
         CommitLog.instance.resetUnsafe(false);
 
         assertEquals(2, Util.getAll(Util.cmd(cfs).build()).size());
@@ -345,31 +398,21 @@ public class RecoveryManagerTest
         final Semaphore blocked = new Semaphore(0);
 
         @Override
-        protected Future<Integer> initiateMutation(final Mutation mutation,
-                final long segmentId,
-                final int serializedSize,
-                final int entryLocation,
-                final CommitLogReplayer clr)
+        protected org.apache.cassandra.utils.concurrent.Future<Integer> initiateMutation(final Mutation mutation,
+                                                                                         final CommitLogDescriptor desc,
+                                                                                         final int serializedSize,
+                                                                                         final int entryLocation,
+                                                                                         final CommitLogReplayer clr)
         {
-            final Future<Integer> toWrap = super.initiateMutation(mutation,
-                                                                  segmentId,
-                                                                  serializedSize,
-                                                                  entryLocation,
-                                                                  clr);
-            return new Future<Integer>()
+            final org.apache.cassandra.utils.concurrent.Future<Integer> toWrap =
+                super.initiateMutation(mutation,
+                                       desc,
+                                       serializedSize,
+                                       entryLocation,
+                                       clr);
+
+            return new AsyncFuture<Integer>()
             {
-
-                @Override
-                public boolean cancel(boolean mayInterruptIfRunning)
-                {
-                    throw new UnsupportedOperationException();
-                }
-
-                @Override
-                public boolean isCancelled()
-                {
-                    throw new UnsupportedOperationException();
-                }
 
                 @Override
                 public boolean isDone()
@@ -380,7 +423,6 @@ public class RecoveryManagerTest
                 @Override
                 public Integer get() throws InterruptedException, ExecutionException
                 {
-                    System.out.println("Got blocker once");
                     blocked.release();
                     blocker.acquire();
                     return toWrap.get();

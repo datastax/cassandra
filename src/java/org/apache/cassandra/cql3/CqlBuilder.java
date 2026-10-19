@@ -19,11 +19,17 @@ package org.apache.cassandra.cql3;
 
 import java.util.Iterator;
 import java.util.Map;
-import java.util.Map.Entry;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.function.Consumer;
+
+import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.Redaction;
 
 /**
  * Utility class to facilitate the creation of the CQL representation of {@code SchemaElements}.
@@ -59,11 +65,34 @@ public final class CqlBuilder
         builder = new StringBuilder(capacity);
     }
 
+    public int length()
+    {
+        return builder.length();
+    }
+
+    public CqlBuilder append(Object o)
+    {
+        return append(String.valueOf(o));
+    }
+
     public CqlBuilder append(String str)
     {
         indentIfNeeded();
         builder.append(str);
         return this;
+    }
+
+    public CqlBuilder appendTypeQuotingIfNeeded(String str)
+    {
+        return append(maybeQuoteTypeName(str));
+    }
+
+    @VisibleForTesting
+    public static String maybeQuoteTypeName(String nameAsString)
+    {
+        return ReservedTypeNames.isReserved(nameAsString)
+               ? ColumnIdentifier.quote(nameAsString)
+               : ColumnIdentifier.maybeQuote(nameAsString);
     }
 
     public CqlBuilder appendQuotingIfNeeded(String str)
@@ -154,27 +183,44 @@ public final class CqlBuilder
 
     public CqlBuilder append(Map<String, String> map, boolean quoteValue)
     {
+        return append(new TreeMap<>(map).entrySet(), e -> {
+            appendWithSingleQuotes(e.getKey());
+            builder.append(": ");
+            appendCollectionValue(e.getValue(), quoteValue);
+        });
+    }
+
+    public CqlBuilder append(Set<String> set, boolean quoteValue)
+    {
+        return append(new TreeSet<>(set),
+                      value -> appendCollectionValue(value, quoteValue));
+    }
+
+    private <T> CqlBuilder append(Iterable<T> iterable, Consumer<T> appender)
+    {
         indentIfNeeded();
 
         builder.append('{');
 
-        Iterator<Entry<String, String>> iter = new TreeMap<>(map).entrySet()
-                                                                 .iterator();
-        while(iter.hasNext())
+        Iterator<T> iterator = iterable.iterator();
+        while (iterator.hasNext())
         {
-            Entry<String, String> e = iter.next();
-            appendWithSingleQuotes(e.getKey());
-            builder.append(": ");
-            if (quoteValue)
-                appendWithSingleQuotes(e.getValue());
-            else
-                builder.append(e.getValue());
+            appender.accept(iterator.next());
 
-            if (iter.hasNext())
+            if (iterator.hasNext())
                 builder.append(", ");
         }
+
         builder.append('}');
         return this;
+    }
+
+    private void appendCollectionValue(String value, boolean quote)
+    {
+        if (quote)
+            appendWithSingleQuotes(value);
+        else
+            builder.append(value);
     }
 
     public <T> CqlBuilder appendWithSeparators(Iterable<T> iterable, Appender<T> appender, String separator)
@@ -222,5 +268,85 @@ public final class CqlBuilder
     public String toString()
     {
         return builder.toString();
+    }
+
+    /**
+     * Builds a `WITH option1 = ... AND option2 = ... AND option3 = ... clause
+     *
+     * @param builder a consumer to receive a builder for the options to append
+     */
+    public CqlBuilder appendOptions(Consumer<OptionsBuilder> builder)
+    {
+        builder.accept(new OptionsBuilder(this));
+        return this;
+    }
+
+    /**
+     * Appends a row filter to the CQL string we are building.
+     *
+     * @param filter the row filter to append
+     * @param hasKeyRestrictions whether the query has key restrictions that have already been appended
+     * @param redaction whether to redact the column values in the row filter
+     * @return this CQL builder after appending the row filter
+     */
+    public CqlBuilder append(RowFilter filter, boolean hasKeyRestrictions, Redaction redaction)
+    {
+        return filter.isEmpty() ? this : appendRestrictions(filter.toCQLString(redaction), hasKeyRestrictions);
+    }
+
+    /**
+     * Appends the specified CQL restrictions to the CQL string we are building.
+     *
+     * @param filter the CQL restrictions to append
+     * @param hasMoreRestrictions whether the CQL query already has other restrictions appended
+     * @return this CQL builder after appending the row filter
+     */
+    public CqlBuilder appendRestrictions(String filter, boolean hasMoreRestrictions)
+    {
+        if (filter.isEmpty())
+            return this;
+
+        if (filter.startsWith("ORDER BY"))
+            append(' ');
+        else if (hasMoreRestrictions)
+            append(" AND ");
+        else
+            append(" WHERE ");
+
+        return append(filter);
+    }
+
+    public static class OptionsBuilder
+    {
+        private final CqlBuilder builder;
+        private boolean empty = true;
+
+        OptionsBuilder(CqlBuilder builder)
+        {
+            this.builder = builder;
+        }
+
+        public OptionsBuilder append(String name, Map<String, String> options)
+        {
+            return options.isEmpty() ? this : append(name, () -> builder.append(options, true));
+        }
+
+        public OptionsBuilder append(String name, Set<String> options)
+        {
+            return options.isEmpty() ? this : append(name, () -> builder.append(options, false));
+        }
+
+        public OptionsBuilder append(String name, String options)
+        {
+            return options.isEmpty() ? this : append(name, () -> builder.append(options));
+        }
+
+        private OptionsBuilder append(String name, Runnable appender)
+        {
+            builder.append((empty ? " WITH " : " AND ") + name + " = ");
+            empty = false;
+            appender.run();
+            return this;
+        }
     }
 }

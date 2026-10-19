@@ -1,0 +1,277 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.db.compaction;
+
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+
+import org.apache.cassandra.Util;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.TimeUUID;
+import org.mockito.Mockito;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.*;
+
+public class SharedCompactionObserverTest
+{
+    private SharedCompactionObserver sharedCompactionObserver;
+    private CompactionObserver mockObserver;
+    private CompactionProgress mockProgress;
+    private TimeUUID operationId;
+
+
+    @Before
+    public void setUp()
+    {
+        mockObserver = Mockito.mock(CompactionObserver.class);
+        operationId = TimeUUID.Generator.nextTimeUUID();
+        sharedCompactionObserver = new SharedCompactionObserver(operationId, mockObserver);
+        mockProgress = Mockito.mock(CompactionProgress.class);
+        when(mockProgress.operationId()).thenReturn(operationId);
+    }
+
+    @Test
+    public void testOnInProgress()
+    {
+        sharedCompactionObserver.onInProgress(mockProgress);
+        verify(mockObserver, times(1)).onInProgress(mockProgress);
+    }
+
+    @Test
+    public void testOnCompleted()
+    {
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, times(1)).onCompleted(operationId, null);
+    }
+
+    @Test
+    public void testOnCompletedFailure()
+    {
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+
+        Exception err = new RuntimeException();
+        sharedCompactionObserver.onCompleted(operationId, err);
+        verify(mockObserver, times(1)).onCompleted(operationId, err);
+    }
+
+    @Test
+    public void testMultipleSubtasksCompletion()
+    {
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        sharedCompactionObserver.onInProgress(mockProgress);
+
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, never()).onCompleted(any(TimeUUID.class), any());
+
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, times(1)).onCompleted(operationId, null);
+    }
+
+    @Test
+    public void testMultipleSubtasksInProgressAfterCompletion()
+    {
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, never()).onCompleted(any(TimeUUID.class), any());
+
+        sharedCompactionObserver.onInProgress(mockProgress);
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, times(1)).onCompleted(operationId, null);
+    }
+
+    @Test
+    public void testMultipleSubtasksCompletionWithFailure()
+    {
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        sharedCompactionObserver.onInProgress(mockProgress);
+
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, never()).onCompleted(any(TimeUUID.class), any());
+
+        Exception err = new RuntimeException();
+        sharedCompactionObserver.onCompleted(operationId, err);
+        verify(mockObserver, times(1)).onCompleted(operationId, err);
+    }
+
+    @Test
+    public void testConcurrentAccess() throws InterruptedException, ExecutionException
+    {
+        int threadCount = 100;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch latch = new CountDownLatch(threadCount);
+
+        for (int i = 0; i < threadCount; i++)
+            sharedCompactionObserver.registerExpectedSubtask();
+        List<Future<?>> futures = new ArrayList<>();
+
+        for (int i = 0; i < threadCount; i++)
+        {
+            futures.add(executor.submit(() ->
+                                        {
+                                            sharedCompactionObserver.onInProgress(mockProgress);
+                                            if (ThreadLocalRandom.current().nextBoolean())
+                                                FBUtilities.sleepQuietly(ThreadLocalRandom.current().nextInt(1));
+                                            sharedCompactionObserver.onCompleted(operationId, null);
+                                            latch.countDown();
+                                        }));
+        }
+
+        for (Future<?> future : futures)
+            future.get();
+
+        verify(mockObserver, times(1)).onInProgress(mockProgress);
+        verify(mockObserver, times(1)).onCompleted(operationId, null);
+        executor.shutdown();
+    }
+
+    @Test
+    public void testErrorNoRegister()
+    {
+        Util.assumeAssertsEnabled();
+        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onCompleted(operationId, null));
+    }
+
+    @Test
+    public void testNoInProgressIsAccepted()
+    {
+        Util.assumeAssertsEnabled();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, times(1)).onCompleted(operationId, null);
+    }
+
+    @Test
+    public void testErrorWrongProgress()
+    {
+        Util.assumeAssertsEnabled();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        var mockProgress2 = Mockito.mock(CompactionProgress.class);
+        when(mockProgress2.operationId()).thenReturn(TimeUUID.Generator.nextTimeUUID());
+        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onInProgress(mockProgress2));
+    }
+
+    @Test
+    public void testMultipleObserver()
+    {
+        CompactionObserver mockObserver1 = Mockito.mock(CompactionObserver.class);
+        CompactionObserver mockObserver2 = Mockito.mock(CompactionObserver.class);
+        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(operationId, mockObserver1, mockObserver2);
+
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        verify(mockObserver1, times(1)).onInProgress(mockProgress);
+        verify(mockObserver2, times(1)).onInProgress(mockProgress);
+
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver1, times(1)).onCompleted(operationId, null);
+        verify(mockObserver2, times(1)).onCompleted(operationId, null);
+    }
+
+    @Test
+    public void testMultipleObserverWithOnInProgressError()
+    {
+        CompactionObserver mockObserver1 = Mockito.mock(CompactionObserver.class);
+        CompactionObserver mockObserver2 = Mockito.mock(CompactionObserver.class);
+        Mockito.doThrow(new RuntimeException("Injected Exception")).when(mockObserver1).onInProgress(any());
+
+        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(operationId, mockObserver1, mockObserver2);
+
+        sharedCompactionObserver.registerExpectedSubtask();
+        assertThatThrownBy(() -> sharedCompactionObserver.onInProgress(mockProgress)).isInstanceOf(RuntimeException.class);
+
+        // both onInProgress are called
+        verify(mockObserver1, times(1)).onInProgress(mockProgress);
+        verify(mockObserver2, times(1)).onInProgress(mockProgress);
+    }
+
+    @Test
+    public void testMultipleObserverWithOnCompleteError()
+    {
+        CompactionObserver mockObserver1 = Mockito.mock(CompactionObserver.class);
+        CompactionObserver mockObserver2 = Mockito.mock(CompactionObserver.class);
+        Mockito.doThrow(new RuntimeException("Injected Exception")).when(mockObserver1).onCompleted(any(), any());
+
+        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(operationId, mockObserver1, mockObserver2);
+
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        verify(mockObserver1, times(1)).onInProgress(mockProgress);
+        verify(mockObserver2, times(1)).onInProgress(mockProgress);
+
+        assertThatThrownBy(() -> sharedCompactionObserver.onCompleted(operationId, null)).isInstanceOf(RuntimeException.class);
+        verify(mockObserver1, times(1)).onCompleted(operationId, null);
+        verify(mockObserver2, times(1)).onCompleted(operationId, null);
+    }
+
+    @Test
+    public void testNullPrimaryObserver()
+    {
+        Assert.assertThrows(IllegalArgumentException.class,
+                            () -> new SharedCompactionObserver(operationId, null));
+    }
+
+    @Test
+    public void testErrorWrongProgressId()
+    {
+        Util.assumeAssertsEnabled();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+
+        when(mockProgress.operationId()).thenReturn(TimeUUID.Generator.nextTimeUUID());
+        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onInProgress(mockProgress));
+    }
+
+    @Test
+    public void testFirstErrorWins()
+    {
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        sharedCompactionObserver.onInProgress(mockProgress);
+
+        Exception firstErr = new RuntimeException("first");
+        sharedCompactionObserver.onCompleted(operationId, firstErr);
+        sharedCompactionObserver.onCompleted(operationId, new RuntimeException("second"));
+
+        verify(mockObserver, times(1)).onCompleted(operationId, firstErr);
+    }
+}

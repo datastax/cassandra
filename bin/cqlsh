@@ -60,10 +60,14 @@ get_python_version() {
 # test whether a version string matches one of the supported versions for cqlsh
 is_supported_version() {
     version=$1
-    # shellcheck disable=SC2072
-    # python3.6+ is supported. python2.7 is deprecated but still compatible.
-    if [ ! "$version" \< "3.6" ] || [ "$version" = "2.7" ]; then
+    major_version="${version%.*}"
+    minor_version="${version#*.}"
+    # python 3.8-3.11 are supported
+    if [ "$major_version" = 3 ] && [ "$minor_version" -ge 8 ] && [ "$minor_version" -le 13 ]; then
         echo "supported"
+    # python 3.6-3.7 are deprecated
+    elif [ "$major_version" = 3 ] && [ "$minor_version" -ge 6 ] && [ "$minor_version" -le 7 ]; then
+        echo "deprecated"
     else
         echo "unsupported"
     fi
@@ -74,10 +78,17 @@ run_if_supported_version() {
     interpreter="$1" shift
 
     version=$(get_python_version "$interpreter")
+    version_status=$(is_supported_version "$version")
     if [ -n "$version" ]; then
-        if [ "$(is_supported_version "$version")" = "supported" ]; then
+        if [ "$version_status" = "supported" ] || [ "$version_status" = "deprecated" ]; then
+            if [ "$version_status" = "deprecated" ]; then
+                echo "Warning: using deprecated version of Python:" "$version" >&2
+            fi
+
             exec "$interpreter" "$($interpreter -c "import os; print(os.path.dirname(os.path.realpath('$0')))")/cqlsh.py" "$@"
             exit
+        else
+            echo "Warning: unsupported version of Python, required 3.6-3.13 but found" "$version" >&2
         fi
     fi
 }
@@ -87,7 +98,7 @@ if [ "$USER_SPECIFIED_PYTHON" != "" ]; then
     # run a user specified Python interpreter
     run_if_supported_version "$USER_SPECIFIED_PYTHON" "$@"
 else
-    for interpreter in python3 python python2.7; do
+    for interpreter in python3 python; do
         run_if_supported_version "$interpreter" "$@"
     done
 fi

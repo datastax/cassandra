@@ -464,31 +464,40 @@ public class MerkleTree
     EstimatedHistogram histogramOfRowSizePerLeaf()
     {
         HistogramBuilder histbuild = new HistogramBuilder();
-        for (TreeRange range : new TreeRangeIterator(this))
+        try (TreeRangeIterator trIter = new TreeRangeIterator(this))
         {
-            histbuild.add(range.node.sizeOfRange());
+            for (TreeRange range : trIter)
+            {
+                histbuild.add(range.node.sizeOfRange());
+            }
+            return histbuild.buildWithStdevRangesAroundMean();
         }
-        return histbuild.buildWithStdevRangesAroundMean();
     }
 
     EstimatedHistogram histogramOfRowCountPerLeaf()
     {
         HistogramBuilder histbuild = new HistogramBuilder();
-        for (TreeRange range : new TreeRangeIterator(this))
+        try (TreeRangeIterator trIter = new TreeRangeIterator(this))
         {
-            histbuild.add(range.node.partitionsInRange());
+            for (TreeRange range : trIter)
+            {
+                histbuild.add(range.node.partitionsInRange());
+            }
+            return histbuild.buildWithStdevRangesAroundMean();
         }
-        return histbuild.buildWithStdevRangesAroundMean();
     }
 
     public long rowCount()
     {
         long count = 0;
-        for (TreeRange range : new TreeRangeIterator(this))
+        try (TreeRangeIterator trIter = new TreeRangeIterator(this))
         {
-            count += range.node.partitionsInRange();
+            for (TreeRange range : trIter)
+            {
+                count += range.node.partitionsInRange();
+            }
+            return count;
         }
-        return count;
     }
 
     @Override
@@ -741,7 +750,7 @@ public class MerkleTree
         logger.debug("Allocating direct buffer of size {} for an off-heap merkle tree", size);
         ByteBuffer buffer = ByteBuffer.allocateDirect(size);
         if (Ref.DEBUG_ENABLED)
-            MemoryUtil.setAttachment(buffer, new Ref<>(null, null));
+            MemoryUtil.setAttachment(buffer, new Ref.DirectBufferRef<>(null, null));
         return buffer;
     }
 
@@ -976,8 +985,8 @@ public class MerkleTree
         void release()
         {
             Object attachment = MemoryUtil.getAttachment(buffer);
-            if (attachment instanceof Ref)
-                ((Ref) attachment).release();
+            if (attachment instanceof Ref.DirectBufferRef)
+                ((Ref.DirectBufferRef) attachment).release();
             FileUtils.clean(buffer);
         }
 
@@ -1015,7 +1024,7 @@ public class MerkleTree
         default void serialize(DataOutputPlus out, int version) throws IOException
         {
             byte[] hash = hash();
-            assert hash.length == HASH_SIZE;
+            assert hash.length == HASH_SIZE: String.format("Expected hash length to be %d, but given %d", HASH_SIZE, hash.length);
 
             out.writeByte(Leaf.IDENT);
 
@@ -1503,8 +1512,8 @@ public class MerkleTree
      *
      * n = floor(log_2((T + I) / (L + I))
      *
-     * @param numBytes: The number of bytes to fit the tree within
-     * @param bytesPerHash: The number of bytes stored in a leaf node, for example 2 * murmur128 will be 256 bits
+     * @param numBytes The number of bytes to fit the tree within
+     * @param bytesPerHash The number of bytes stored in a leaf node, for example 2 * murmur128 will be 256 bits
      *                    or 32 bytes
      * @return the estimated depth that will fit within the provided number of bytes
      */

@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
@@ -40,12 +39,11 @@ import org.apache.cassandra.net.FrameDecoder.FrameProcessor;
 import org.apache.cassandra.net.FrameDecoder.IntactFrame;
 import org.apache.cassandra.net.Message.Header;
 import org.apache.cassandra.net.ResourceLimits.Limit;
-import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static org.apache.cassandra.net.Crc.InvalidCrc;
-import static org.apache.cassandra.utils.MonotonicClock.approxTime;
+import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
 /**
  * Core logic for handling inbound message deserialization and execution (in tandem with {@link FrameDecoder}).
@@ -98,8 +96,8 @@ import static org.apache.cassandra.utils.MonotonicClock.approxTime;
  * the untouched frames to the correct thread pool for the verb to be deserialized there and immediately processed.
  *
  * See {@link LargeMessage} and subclasses for concrete {@link AbstractMessageHandler} implementations for details
- * of the large-message accumulating state-machine, and {@link ProcessMessage} and its inheritors for the differences
- *in execution.
+ * of the large-message accumulating state-machine, and {@link InboundMessageHandler.ProcessMessage} and its inheritors 
+ * for the differences in execution.
  *
  * # Flow control (backpressure)
  *
@@ -135,8 +133,7 @@ import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 public abstract class AbstractMessageHandler extends ChannelInboundHandlerAdapter implements FrameProcessor
 {
     private static final Logger logger = LoggerFactory.getLogger(AbstractMessageHandler.class);
-    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1L, TimeUnit.SECONDS);
-
+    
     protected final FrameDecoder decoder;
 
     protected final Channel channel;
@@ -221,6 +218,11 @@ public abstract class AbstractMessageHandler extends ChannelInboundHandlerAdapte
         return true;
     }
 
+    /**
+     * React to the decoder being reactivated
+     */
+    protected abstract void onDecoderReactivated();
+
     private boolean processIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve) throws IOException
     {
         if (frame.isSelfContained)
@@ -304,12 +306,17 @@ public abstract class AbstractMessageHandler extends ChannelInboundHandlerAdapte
         try
         {
             /*
-             * Process up to one message using supplied overriden reserves - one of them pre-allocated,
-             * and guaranteed to be enough for one message - then, if no obstacles enountered, reactivate
+             * Process up to one message using supplied overridden reserves - one of them pre-allocated,
+             * and guaranteed to be enough for one message - then, if no obstacles encountered, reactivate
              * the frame decoder using normal reserve capacities.
              */
             if (processUpToOneMessage(endpointReserve, globalReserve))
+            {
                 decoder.reactivate();
+
+                if (decoder.isActive())
+                    onDecoderReactivated();
+            }
         }
         catch (Throwable t)
         {
@@ -321,7 +328,7 @@ public abstract class AbstractMessageHandler extends ChannelInboundHandlerAdapte
 
     // return true if the handler should be reactivated - if no new hurdles were encountered,
     // like running out of the other kind of reserve capacity
-    private boolean processUpToOneMessage(Limit endpointReserve, Limit globalReserve) throws IOException
+    protected boolean processUpToOneMessage(Limit endpointReserve, Limit globalReserve) throws IOException
     {
         UpToOneMessageFrameProcessor processor = new UpToOneMessageFrameProcessor(endpointReserve, globalReserve);
         decoder.processBacklog(processor);
@@ -559,7 +566,7 @@ public abstract class AbstractMessageHandler extends ChannelInboundHandlerAdapte
             return size == received;
         }
 
-        private void onIntactFrame(IntactFrame frame)
+        protected void onIntactFrame(IntactFrame frame)
         {
             boolean expires = approxTime.isAfter(expiresAtNanos);
             if (!isExpired && !isCorrupt)
@@ -575,7 +582,7 @@ public abstract class AbstractMessageHandler extends ChannelInboundHandlerAdapte
             isExpired |= expires;
         }
 
-        private void onCorruptFrame()
+        protected void onCorruptFrame()
         {
             if (!isExpired && !isCorrupt)
                 releaseBuffersAndCapacity(); // release resources once we transition from normal state to corrupt

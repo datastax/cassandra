@@ -19,16 +19,29 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.TypeParser;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.exceptions.InvalidColumnTypeException;
 import org.apache.cassandra.exceptions.UnknownColumnException;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.IMetadataComponentSerializer;
@@ -38,10 +51,13 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.serializers.AbstractTypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class SerializationHeader
 {
+    private final static Logger logger = LoggerFactory.getLogger(SerializationHeader.class);
+
     public static final Serializer serializer = new Serializer();
 
     private final boolean isForSSTable;
@@ -82,7 +98,7 @@ public class SerializationHeader
         // kind of ok because those stats are only used for optimizing the underlying storage format and so we
         // just have to strive for as good as possible. Currently, we stick to a relatively naive merge of existing
         // global stats because it's simple and probably good enough in most situation but we could probably
-        // improve our marging of inaccuracy through the use of more fine-grained stats in the future.
+        // improve our margin of inaccuracy through the use of more fine-grained stats in the future.
         // Note however that to avoid seeing our accuracy degrade through successive compactions, we don't base
         // our stats merging on the compacted files headers, which as we just said can be somewhat inaccurate,
         // but rather on their stats stored in StatsMetadata that are fully accurate.
@@ -105,7 +121,7 @@ public class SerializationHeader
             return sstables;
 
         List<SSTableReader> readers = new ArrayList<>(sstables);
-        readers.sort(SSTableReader.generationReverseComparator);
+        readers.sort(SSTableReader.idReverseComparator);
         return readers;
     }
 
@@ -167,20 +183,26 @@ public class SerializationHeader
         out.writeUnsignedVInt(timestamp - stats.minTimestamp);
     }
 
-    public void writeLocalDeletionTime(int localDeletionTime, DataOutputPlus out) throws IOException
+    public void writeLocalDeletionTime(long localDeletionTime, DataOutputPlus out) throws IOException
     {
-        out.writeUnsignedVInt(localDeletionTime - stats.minLocalDeletionTime);
+        out.writeUnsignedVInt32((int) (localDeletionTime - stats.minLocalDeletionTime));
     }
 
     public void writeTTL(int ttl, DataOutputPlus out) throws IOException
     {
-        out.writeUnsignedVInt(ttl - stats.minTTL);
+        out.writeUnsignedVInt32(ttl - stats.minTTL);
     }
 
     public void writeDeletionTime(DeletionTime dt, DataOutputPlus out) throws IOException
     {
         writeTimestamp(dt.markedForDeleteAt(), out);
-        writeLocalDeletionTime(dt.localDeletionTime(), out);
+        // LIVE DeletionTime has localDeletionTime=Long.MAX_VALUE which overflows the 32-bit delta encoding
+        // (Long.MAX_VALUE - minLocalDeletionTime doesn't fit in an int). Write a zero delta instead;
+        // the read side recognizes LIVE by markedForDeleteAt == Long.MIN_VALUE.
+        if (dt.isLive())
+            writeLocalDeletionTime(stats.minLocalDeletionTime, out);
+        else
+            writeLocalDeletionTime(dt.localDeletionTime(), out);
     }
 
     public long readTimestamp(DataInputPlus in) throws IOException
@@ -188,21 +210,26 @@ public class SerializationHeader
         return in.readUnsignedVInt() + stats.minTimestamp;
     }
 
-    public int readLocalDeletionTime(DataInputPlus in) throws IOException
+    public long readLocalDeletionTime(DataInputPlus in) throws IOException
     {
-        return (int)in.readUnsignedVInt() + stats.minLocalDeletionTime;
+        return in.readUnsignedVInt32() + stats.minLocalDeletionTime;
     }
 
     public int readTTL(DataInputPlus in) throws IOException
     {
-        return (int)in.readUnsignedVInt() + stats.minTTL;
+        return in.readUnsignedVInt32() + stats.minTTL;
     }
 
     public DeletionTime readDeletionTime(DataInputPlus in) throws IOException
     {
         long markedAt = readTimestamp(in);
-        int localDeletionTime = readLocalDeletionTime(in);
-        return new DeletionTime(markedAt, localDeletionTime);
+        long localDeletionTime = readLocalDeletionTime(in);
+        // markedForDeleteAt == Long.MIN_VALUE means LIVE (no deletion). The localDeletionTime may be corrupt
+        // due to a 32-bit overflow bug in the delta encoding of Long.MAX_VALUE (CASSANDRA-14227), so we
+        // ignore it and return LIVE directly. This handles both old (broken) and new (fixed) sstables.
+        if (markedAt == Long.MIN_VALUE)
+            return DeletionTime.LIVE;
+        return DeletionTime.build(markedAt, localDeletionTime);
     }
 
     public long timestampSerializedSize(long timestamp)
@@ -210,7 +237,7 @@ public class SerializationHeader
         return TypeSizes.sizeofUnsignedVInt(timestamp - stats.minTimestamp);
     }
 
-    public long localDeletionTimeSerializedSize(int localDeletionTime)
+    public long localDeletionTimeSerializedSize(long localDeletionTime)
     {
         return TypeSizes.sizeofUnsignedVInt(localDeletionTime - stats.minLocalDeletionTime);
     }
@@ -223,7 +250,7 @@ public class SerializationHeader
     public long deletionTimeSerializedSize(DeletionTime dt)
     {
         return timestampSerializedSize(dt.markedForDeleteAt())
-             + localDeletionTimeSerializedSize(dt.localDeletionTime());
+               + localDeletionTimeSerializedSize(dt.isLive() ? stats.minLocalDeletionTime : dt.localDeletionTime());
     }
 
     public void skipTimestamp(DataInputPlus in) throws IOException
@@ -249,8 +276,8 @@ public class SerializationHeader
 
     public Component toComponent()
     {
-        Map<ByteBuffer, AbstractType<?>> staticColumns = new LinkedHashMap<>();
-        Map<ByteBuffer, AbstractType<?>> regularColumns = new LinkedHashMap<>();
+        LinkedHashMap<ByteBuffer, AbstractType<?>> staticColumns = new LinkedHashMap<>();
+        LinkedHashMap<ByteBuffer, AbstractType<?>> regularColumns = new LinkedHashMap<>();
         for (ColumnMetadata column : columns.statics)
             staticColumns.put(column.name.bytes, column.type);
         for (ColumnMetadata column : columns.regulars)
@@ -272,14 +299,14 @@ public class SerializationHeader
     {
         private final AbstractType<?> keyType;
         private final List<AbstractType<?>> clusteringTypes;
-        private final Map<ByteBuffer, AbstractType<?>> staticColumns;
-        private final Map<ByteBuffer, AbstractType<?>> regularColumns;
+        private final LinkedHashMap<ByteBuffer, AbstractType<?>> staticColumns;
+        private final LinkedHashMap<ByteBuffer, AbstractType<?>> regularColumns;
         private final EncodingStats stats;
 
         private Component(AbstractType<?> keyType,
                           List<AbstractType<?>> clusteringTypes,
-                          Map<ByteBuffer, AbstractType<?>> staticColumns,
-                          Map<ByteBuffer, AbstractType<?>> regularColumns,
+                          LinkedHashMap<ByteBuffer, AbstractType<?>> staticColumns,
+                          LinkedHashMap<ByteBuffer, AbstractType<?>> regularColumns,
                           EncodingStats stats)
         {
             this.keyType = keyType;
@@ -294,8 +321,8 @@ public class SerializationHeader
          */
         public static Component buildComponentForTools(AbstractType<?> keyType,
                                                        List<AbstractType<?>> clusteringTypes,
-                                                       Map<ByteBuffer, AbstractType<?>> staticColumns,
-                                                       Map<ByteBuffer, AbstractType<?>> regularColumns,
+                                                       LinkedHashMap<ByteBuffer, AbstractType<?>> staticColumns,
+                                                       LinkedHashMap<ByteBuffer, AbstractType<?>> regularColumns,
                                                        EncodingStats stats)
         {
             return new Component(keyType, clusteringTypes, staticColumns, regularColumns, stats);
@@ -306,7 +333,169 @@ public class SerializationHeader
             return MetadataType.HEADER;
         }
 
-        public SerializationHeader toHeader(TableMetadata metadata) throws UnknownColumnException
+        private static AbstractType<?> validateAndMaybeFixColumnType(String description,
+                                                                     TableMetadata metadata,
+                                                                     ByteBuffer columnName,
+                                                                     AbstractType<?> type,
+                                                                     boolean allowImplicitlyFrozenTuples,
+                                                                     boolean isForOfflineTool)
+        {
+            boolean dropped = metadata.getDroppedColumn(columnName) != null;
+            boolean isPrimaryKeyColumn = Iterables.any(metadata.primaryKeyColumns(), cd -> cd.name.bytes.equals(columnName));
+
+            try
+            {
+                type.validateForColumn(columnName, isPrimaryKeyColumn, metadata.isCounter(), dropped, isForOfflineTool);
+                return type;
+            }
+            catch (InvalidColumnTypeException e)
+            {
+                // Always try to fix tuple types regardless of allowImplicitlyFrozenTuples. Tuples are
+                // always implicitly frozen in CQL, so a multi-cell tuple indicates old data that needs fixing.
+                // The allowImplicitlyFrozenTuples flag controls whether to allow implicit freezing for OTHER types
+                // (like UDTs), but tuples must always be frozen to ensure consistent column ordering.
+                boolean shouldTryFix = allowImplicitlyFrozenTuples || isForOfflineTool || type.isTuple();
+                AbstractType<?> fixed = shouldTryFix ? tryFix(type, columnName, isPrimaryKeyColumn, metadata.isCounter(), dropped, isForOfflineTool) : null;
+                if (fixed == null)
+                {
+                    // We don't know how to fix. We throw an error here because reading such table may result in corruption
+                    String msg = String.format("Error reading SSTable header %s, the type for column %s in %s is %s, which is invalid (%s); " +
+                                               "The type could not be automatically fixed.",
+                                               description, ColumnIdentifier.toCQLString(columnName), metadata, type.asCQL3Type().toSchemaString(),
+                                               e.getMessage());
+                    throw new IllegalArgumentException(msg, e);
+                }
+                else
+                {
+                    // For dropped tuple columns, use the schema's dropped column type to determine the correct
+                    // isMultiCell. We cannot rely on the SSTable header's isMultiCell because old SSTable formats
+                    // (e.g. C41) may incorrectly record plain tuples (TupleType, not UserType) as multi-cell
+                    // even though they were always implicitly frozen (single-cell) in CQL. The schema's dropped
+                    // column type is the authoritative source because it preserves the original column type at
+                    // drop time: plain tuples are recorded
+                    // as frozen<tuple<...>> (single-cell), while non-frozen UDTs are recorded as the UDT type
+                    // (multi-cell). If the schema entry is missing, we keep the tryFix default (frozen for tuples).
+                    if (dropped && fixed.isTuple())
+                    {
+                        ColumnMetadata droppedColumn = metadata.getDroppedColumn(columnName);
+                        if (droppedColumn != null && droppedColumn.type.isMultiCell() != fixed.isMultiCell())
+                        {
+                            logger.debug("Adjusting dropped column {} isMultiCell from {} to {} to match schema",
+                                         ColumnIdentifier.toCQLString(columnName), fixed.isMultiCell(), droppedColumn.type.isMultiCell());
+                            fixed = fixed.with(fixed.subTypes(), droppedColumn.type.isMultiCell());
+                        }
+                    }
+                    logger.debug("Error reading SSTable header {}, the type for column {} in {} is {}, which is " +
+                                 "invalid ({}); The type has been automatically fixed to {}, but please contact " +
+                                 "support if this is incorrect",
+                                 description, ColumnIdentifier.toCQLString(columnName), metadata, type.asCQL3Type().toSchemaString(),
+                                 e.getMessage(), fixed.asCQL3Type().toSchemaString());
+                    return fixed;
+                }
+            }
+        }
+
+        /**
+         * Attempts to return a "fixed" (and thus valid) version of the type. Doing is so is only possible in restrained
+         * case where we know why the type is invalid and are confident we know what it should be.
+         *
+         * @return if we know how to auto-magically fix the invalid type that triggered this exception, the hopefully
+         * fixed version of said type. Otherwise, {@code null}.
+         */
+        public static AbstractType<?> tryFix(AbstractType<?> invalidType, ByteBuffer name, boolean isPrimaryKeyColumn, boolean isCounterTable, boolean isDroppedColumn, boolean isForOfflineTool)
+        {
+            AbstractType<?> fixed = tryFixInternal(invalidType, isPrimaryKeyColumn, isDroppedColumn);
+            if (fixed != null)
+            {
+                try
+                {
+                    // Make doubly sure the fixed type is valid before returning it.
+                    fixed.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn, isForOfflineTool);
+                    return fixed;
+                }
+                catch (InvalidColumnTypeException e2)
+                {
+                    // Continue as if we hadn't been able to fix, since we haven't
+                }
+            }
+            return null;
+        }
+
+        private static AbstractType<?> tryFixInternal(AbstractType<?> invalidType, boolean isPrimaryKeyColumn, boolean isDroppedColumn)
+        {
+            if (isPrimaryKeyColumn)
+            {
+                // The only issue we have a fix to in that case if the type is not frozen; we can then just freeze it.
+                if (invalidType.isMultiCell())
+                    return invalidType.freeze();
+            }
+            else
+            {
+                // Here again, it's mainly issues of frozen-ness that are fixable, namely multi-cell types that either:
+                // - are plain tuples (TupleType, not UserType) which _should_ be frozen. In which case we freeze it.
+                // - has non-frozen subtypes. In which case, we just freeze all subtypes.
+                if (invalidType.isMultiCell())
+                {
+                    // For tuples, default to frozen (isMultiCell=false) since plain tuples (TupleType) in CQL are
+                    // always implicitly frozen. For dropped columns, validateAndMaybeFixColumnType will adjust
+                    // the isMultiCell to match the schema's dropped column type, which preserves the original
+                    // frozen status from before the column was dropped.
+                    boolean isMultiCell = !invalidType.isTuple();
+                    return invalidType.with(AbstractType.freeze(invalidType.subTypes()), isMultiCell);
+                }
+
+            }
+            // In other case, we don't know how to fix (at least somewhat auto-magically) and will have to fail.
+            return null;
+        }
+
+        private static AbstractType<?> validateAndMaybeFixPartitionKeyType(String descriptor,
+                                                                           TableMetadata metadata,
+                                                                           AbstractType<?> fullType,
+                                                                           boolean allowImplicitlyFrozenTuples,
+                                                                           boolean isForOfflineTool)
+        {
+            List<ColumnMetadata> pkColumns = metadata.partitionKeyColumns();
+            int pkCount = pkColumns.size();
+
+            if (pkCount == 1)
+                return validateAndMaybeFixColumnType(descriptor, metadata, pkColumns.get(0).name.bytes, fullType, allowImplicitlyFrozenTuples, isForOfflineTool);
+
+            List<AbstractType<?>> subTypes = fullType.subTypes();
+            assert fullType instanceof CompositeType && subTypes.size() == pkCount
+            : String.format("In %s, got %s as table %s partition key type but partition key is %s",
+                            descriptor, fullType, metadata, pkColumns);
+
+            return CompositeType.getInstance(validateAndMaybeFixPKTypes(descriptor, metadata, pkColumns, subTypes, allowImplicitlyFrozenTuples, isForOfflineTool));
+        }
+
+        private static List<AbstractType<?>> validateAndMaybeFixPKTypes(String descriptor,
+                                                                        TableMetadata table,
+                                                                        List<ColumnMetadata> pkColumns,
+                                                                        List<AbstractType<?>> pkTypes,
+                                                                        boolean allowImplicitlyFrozenTuples,
+                                                                        boolean isForOfflineTool)
+        {
+            int count = pkTypes.size();
+            List<AbstractType<?>> updated = new ArrayList<>(count);
+            for (int i = 0; i < count; i++)
+            {
+                updated.add(validateAndMaybeFixColumnType(descriptor,
+                                                          table,
+                                                          pkColumns.get(i).name.bytes,
+                                                          pkTypes.get(i),
+                                                          allowImplicitlyFrozenTuples,
+                                                          isForOfflineTool));
+            }
+            return updated;
+        }
+
+        public SerializationHeader toHeader(Descriptor descriptor, TableMetadata metadata) throws UnknownColumnException
+        {
+            return toHeader(descriptor.toString(), metadata, descriptor.version, false);
+        }
+
+        public SerializationHeader toHeader(String descriptor, TableMetadata metadata, Version sstableVersion, boolean isForOfflineTool) throws UnknownColumnException
         {
             Map<ByteBuffer, AbstractType<?>> typeMap = new HashMap<>(staticColumns.size() + regularColumns.size());
 
@@ -317,8 +506,9 @@ public class SerializationHeader
                 for (Map.Entry<ByteBuffer, AbstractType<?>> e : map.entrySet())
                 {
                     ByteBuffer name = e.getKey();
-                    AbstractType<?> other = typeMap.put(name, e.getValue());
-                    if (other != null && !other.equals(e.getValue()))
+                    AbstractType<?> type = validateAndMaybeFixColumnType(descriptor, metadata, name, e.getValue(), sstableVersion.hasImplicitlyFrozenTuples(), isForOfflineTool);
+                    AbstractType<?> other = typeMap.put(name, type);
+                    if (other != null && !other.equals(type))
                         throw new IllegalStateException("Column " + name + " occurs as both regular and static with types " + other + "and " + e.getValue());
 
                     ColumnMetadata column = metadata.getColumn(name);
@@ -331,14 +521,38 @@ public class SerializationHeader
 
                         // If we don't find the definition, it could be we have data for a dropped column, and we shouldn't
                         // fail deserialization because of that. So we grab a "fake" ColumnDefinition that ensure proper
-                        // deserialization. The column will be ignore later on anyway.
-                        column = metadata.getDroppedColumn(name, isStatic);
-                        if (column == null)
+                        // deserialization. The column will be ignored later on anyway.
+                        ColumnMetadata droppedColumn = metadata.getDroppedColumn(name, isStatic);
+                        if (droppedColumn == null)
                             throw new UnknownColumnException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
+
+                        // Use the SSTable's validated type for the dropped column metadata instead of the
+                        // schema's type. This is critical because column ordering depends on isComplex() which depends
+                        // on the type's isMultiCell(). The SSTable's type has been validated and adjusted above
+                        // (via tryFix + schema-based isMultiCell correction for tuples), so it reflects the correct
+                        // frozen status for deserialization. Using the schema's type directly could have a different
+                        // isMultiCell, causing column order mismatches and data corruption.
+                        // We must also expand user types since droppedColumn() asserts that the type has no UDT refs.
+                        // expandUserTypes() preserves the isMultiCell() property which is what we need.
+                        AbstractType<?> expandedType = type.expandUserTypes();
+                        column = ColumnMetadata.droppedColumn(droppedColumn.ksName,
+                                                              droppedColumn.cfName,
+                                                              droppedColumn.name,
+                                                              expandedType,
+                                                              droppedColumn.kind,
+                                                              droppedColumn.getMask());
                     }
                     builder.add(column);
                 }
             }
+
+            AbstractType<?> keyType = validateAndMaybeFixPartitionKeyType(descriptor, metadata, this.keyType, sstableVersion.hasImplicitlyFrozenTuples(), isForOfflineTool);
+            List<AbstractType<?>> clusteringTypes = validateAndMaybeFixPKTypes(descriptor,
+                                                                               metadata,
+                                                                               metadata.clusteringColumns(),
+                                                                               this.clusteringTypes,
+                                                                               sstableVersion.hasImplicitlyFrozenTuples(),
+                                                                               isForOfflineTool);
 
             return new SerializationHeader(true, keyType, clusteringTypes, builder.build(), stats, typeMap);
         }
@@ -394,10 +608,34 @@ public class SerializationHeader
         {
             return stats;
         }
+
+        @SuppressWarnings("unused")
+        public Component withMigratedKeyspaces(Map<String, String> keyspaceMapping)
+        {
+            if (keyspaceMapping.isEmpty())
+                return this;
+
+            AbstractType<?> newKeyType = keyType.overrideKeyspace(ks -> keyspaceMapping.getOrDefault(ks, ks));
+            List<AbstractType<?>> clusteringTypes = this.clusteringTypes.stream().map(t -> t.overrideKeyspace(ks -> keyspaceMapping.getOrDefault(ks, ks))).collect(Collectors.toList());
+            LinkedHashMap<ByteBuffer, AbstractType<?>> staticColumns = this.staticColumns.entrySet().stream().collect(Collectors.toMap(
+                    Map.Entry::getKey,
+                    e -> e.getValue().overrideKeyspace(ks -> keyspaceMapping.getOrDefault(ks, ks)),
+                    (a, b) -> { throw new IllegalArgumentException("Duplicate key"); },
+                    LinkedHashMap::new));
+            LinkedHashMap<ByteBuffer, AbstractType<?>> regularColumns = this.regularColumns.entrySet().stream().collect(Collectors.toMap(
+                    Map.Entry::getKey,
+                    e -> e.getValue().overrideKeyspace(ks -> keyspaceMapping.getOrDefault(ks, ks)),
+                    (a, b) -> { throw new IllegalArgumentException("Duplicate key"); },
+                    LinkedHashMap::new));
+            return new Component(newKeyType, clusteringTypes, staticColumns, regularColumns, stats);
+        }
+
     }
 
     public static class Serializer implements IMetadataComponentSerializer<Component>
     {
+        private final AbstractTypeSerializer typeSerializer = new AbstractTypeSerializer();
+
         public void serializeForMessaging(SerializationHeader header, ColumnFilter selection, DataOutputPlus out, boolean hasStatic) throws IOException
         {
             EncodingStats.serializer.serialize(header.stats, out);
@@ -426,8 +664,8 @@ public class SerializationHeader
             Columns statics, regulars;
             if (selection == null)
             {
-                statics = hasStatic ? Columns.serializer.deserializeStatics(in, metadata) : Columns.NONE;
-                regulars = Columns.serializer.deserializeRegulars(in, metadata);
+                statics = hasStatic ? Columns.serializer.deserialize(in, metadata) : Columns.NONE;
+                regulars = Columns.serializer.deserialize(in, metadata);
             }
             else
             {
@@ -462,10 +700,8 @@ public class SerializationHeader
         {
             EncodingStats.serializer.serialize(header.stats, out);
 
-            writeType(header.keyType, out);
-            out.writeUnsignedVInt(header.clusteringTypes.size());
-            for (AbstractType<?> type : header.clusteringTypes)
-                writeType(type, out);
+            typeSerializer.serialize(header.keyType, out);
+            typeSerializer.serializeList(header.clusteringTypes, out);
 
             writeColumnsWithTypes(header.staticColumns, out);
             writeColumnsWithTypes(header.regularColumns, out);
@@ -476,17 +712,11 @@ public class SerializationHeader
         {
             EncodingStats stats = EncodingStats.serializer.deserialize(in);
 
-            AbstractType<?> keyType = readType(in);
-            int size = (int)in.readUnsignedVInt();
-            List<AbstractType<?>> clusteringTypes = new ArrayList<>(size);
-            for (int i = 0; i < size; i++)
-                clusteringTypes.add(readType(in));
+            AbstractType<?> keyType = typeSerializer.deserialize(in);
+            List<AbstractType<?>> clusteringTypes = typeSerializer.deserializeList(in);
 
-            Map<ByteBuffer, AbstractType<?>> staticColumns = new LinkedHashMap<>();
-            Map<ByteBuffer, AbstractType<?>> regularColumns = new LinkedHashMap<>();
-
-            readColumnsWithType(in, staticColumns);
-            readColumnsWithType(in, regularColumns);
+            LinkedHashMap<ByteBuffer, AbstractType<?>> staticColumns = readColumnsWithType(in);
+            LinkedHashMap<ByteBuffer, AbstractType<?>> regularColumns = readColumnsWithType(in);
 
             return new Component(keyType, clusteringTypes, staticColumns, regularColumns, stats);
         }
@@ -496,10 +726,8 @@ public class SerializationHeader
         {
             int size = EncodingStats.serializer.serializedSize(header.stats);
 
-            size += sizeofType(header.keyType);
-            size += TypeSizes.sizeofUnsignedVInt(header.clusteringTypes.size());
-            for (AbstractType<?> type : header.clusteringTypes)
-                size += sizeofType(type);
+            size += typeSerializer.serializedSize(header.keyType);
+            size += typeSerializer.serializedListSize(header.clusteringTypes);
 
             size += sizeofColumnsWithTypes(header.staticColumns);
             size += sizeofColumnsWithTypes(header.regularColumns);
@@ -508,11 +736,11 @@ public class SerializationHeader
 
         private void writeColumnsWithTypes(Map<ByteBuffer, AbstractType<?>> columns, DataOutputPlus out) throws IOException
         {
-            out.writeUnsignedVInt(columns.size());
+            out.writeUnsignedVInt32(columns.size());
             for (Map.Entry<ByteBuffer, AbstractType<?>> entry : columns.entrySet())
             {
                 ByteBufferUtil.writeWithVIntLength(entry.getKey(), out);
-                writeType(entry.getValue(), out);
+                typeSerializer.serialize(entry.getValue(), out);
             }
         }
 
@@ -522,36 +750,21 @@ public class SerializationHeader
             for (Map.Entry<ByteBuffer, AbstractType<?>> entry : columns.entrySet())
             {
                 size += ByteBufferUtil.serializedSizeWithVIntLength(entry.getKey());
-                size += sizeofType(entry.getValue());
+                size += typeSerializer.serializedSize(entry.getValue());
             }
             return size;
         }
 
-        private void readColumnsWithType(DataInputPlus in, Map<ByteBuffer, AbstractType<?>> typeMap) throws IOException
+        private LinkedHashMap<ByteBuffer, AbstractType<?>> readColumnsWithType(DataInputPlus in) throws IOException
         {
-            int length = (int)in.readUnsignedVInt();
+            int length =  in.readUnsignedVInt32();
+            LinkedHashMap<ByteBuffer, AbstractType<?>> typeMap = new LinkedHashMap<>(length);
             for (int i = 0; i < length; i++)
             {
                 ByteBuffer name = ByteBufferUtil.readWithVIntLength(in);
-                typeMap.put(name, readType(in));
+                typeMap.put(name, typeSerializer.deserialize(in));
             }
-        }
-
-        private void writeType(AbstractType<?> type, DataOutputPlus out) throws IOException
-        {
-            // TODO: we should have a terser serializaion format. Not a big deal though
-            ByteBufferUtil.writeWithVIntLength(UTF8Type.instance.decompose(type.toString()), out);
-        }
-
-        private AbstractType<?> readType(DataInputPlus in) throws IOException
-        {
-            ByteBuffer raw = ByteBufferUtil.readWithVIntLength(in);
-            return TypeParser.parse(UTF8Type.instance.compose(raw));
-        }
-
-        private int sizeofType(AbstractType<?> type)
-        {
-            return ByteBufferUtil.serializedSizeWithVIntLength(UTF8Type.instance.decompose(type.toString()));
+            return typeMap;
         }
     }
 }

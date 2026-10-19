@@ -27,13 +27,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.compress.CompressionMetadata;
-import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.ChannelProxy;
-import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.net.AsyncStreamingOutputPlus;
 import org.apache.cassandra.streaming.ProgressInfo;
 import org.apache.cassandra.streaming.StreamSession;
+import org.apache.cassandra.streaming.StreamingDataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -48,18 +47,19 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
 
     private final CompressionInfo compressionInfo;
     private final long totalSize;
+    private final long onDiskOffset;
 
     public CassandraCompressedStreamWriter(SSTableReader sstable, CassandraStreamHeader header, StreamSession session)
     {
         super(sstable, header, session);
         this.compressionInfo = header.compressionInfo;
         this.totalSize = header.size();
+        this.onDiskOffset = sstable.getCompressionMetadata().chunkFor(sstable.getDataFileSliceDescriptor().sliceStart).offset;
     }
 
     @Override
-    public void write(DataOutputStreamPlus output) throws IOException
+    public void write(StreamingDataOutputPlus out) throws IOException
     {
-        AsyncStreamingOutputPlus out = (AsyncStreamingOutputPlus) output;
         long totalSize = totalSize();
         logger.debug("[Stream #{}] Start streaming file {} to {}, repairedAt = {}, totalSize = {}", session.planId(),
                      sstable.getFilename(), session.peer, sstable.getSSTableMetadata().repairedAt, totalSize);
@@ -73,6 +73,7 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
             int sectionIdx = 0;
 
             // stream each of the required sections of the file
+            String filename = sstable.descriptor.fileFor(Components.DATA).toString();
             for (Section section : sections)
             {
                 // length of the section to stream
@@ -85,7 +86,10 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
                 while (bytesTransferred < length)
                 {
                     int toTransfer = (int) Math.min(CHUNK_SIZE, length - bytesTransferred);
-                    long position = section.start + bytesTransferred;
+                    // since we access the file directly (not through the rebufferer) we need to adjust the position
+                    // manually when dealing with a slice (see ZeroCopyMetadata); therefore we subtract the onDiskOffset
+                    // by which all the section positions are translated
+                    long position = section.start + bytesTransferred - onDiskOffset;
 
                     out.writeToChannel(bufferSupplier -> {
                         ByteBuffer outBuffer = bufferSupplier.get(toTransfer);
@@ -96,7 +100,7 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
 
                     bytesTransferred += toTransfer;
                     progress += toTransfer;
-                    session.progress(sstable.descriptor.filenameFor(Component.DATA), ProgressInfo.Direction.OUT, progress, totalSize);
+                    session.progress(filename, ProgressInfo.Direction.OUT, progress, toTransfer, totalSize);
                 }
             }
             logger.debug("[Stream #{}] Finished streaming file {} to {}, bytesTransferred = {}, totalSize = {}",

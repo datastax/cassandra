@@ -50,10 +50,11 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.net.ConnectionTest.SETTINGS;
 import static org.apache.cassandra.net.OutboundConnectionSettings.Framing.CRC;
-import static org.apache.cassandra.utils.MonotonicClock.approxTime;
+import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
 public class ProxyHandlerConnectionsTest
 {
@@ -198,18 +199,11 @@ public class ProxyHandlerConnectionsTest
                 boolean expire = i % 2 == 0;
                 Message.Builder builder = Message.builder(Verb._TEST_1, 1L);
 
-                if (settings.right.acceptVersions == ConnectionTest.legacy)
-                {
-                    // backdate messages; leave 500 milliseconds to leave outbound path
-                    builder.withCreatedAt(nanoTime - (expire ? 0 : MILLISECONDS.toNanos(1500)));
-                }
-                else
-                {
-                    // Give messages 500 milliseconds to leave outbound path
-                    builder.withCreatedAt(nanoTime)
-                           .withExpiresAt(nanoTime + (expire ? MILLISECONDS.toNanos(500) : MILLISECONDS.toNanos(3000)));
-                }
-                outbound.enqueue(builder.build());
+                // Give messages 500 milliseconds to leave outbound path
+                builder.withCreatedAt(nanoTime)
+                       .withExpiresAt(nanoTime + (expire ? MILLISECONDS.toNanos(500) : MILLISECONDS.toNanos(3000)));
+
+                    outbound.enqueue(builder.build());
             }
             enqueueDone.countDown();
 
@@ -276,7 +270,7 @@ public class ProxyHandlerConnectionsTest
     {
         CompletableFuture.runAsync(() -> {
             while (!cond.get()) {}
-        }).get(30, SECONDS);
+        }).get(1, MINUTES);
     }
 
     private static void waitForCondition(Supplier<Boolean> cond, Supplier<String> s) throws Throwable
@@ -395,7 +389,7 @@ public class ProxyHandlerConnectionsTest
 
     private void connect(OutboundConnection outbound) throws Throwable
     {
-        tryConnect(outbound, 10, SECONDS, true);
+        tryConnect(outbound, 30, SECONDS, true);
     }
 
     private void tryConnect(OutboundConnection outbound, long timeout, TimeUnit timeUnit, boolean throwOnFailure) throws Throwable

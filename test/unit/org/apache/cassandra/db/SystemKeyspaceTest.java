@@ -20,24 +20,38 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.*;
+import java.util.stream.Collectors;
 
+import com.google.common.collect.Sets;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.dht.ByteOrderedPartitioner.BytesToken;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.nodes.ILocalInfo;
+import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaKeyspace;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
+import org.apache.cassandra.utils.TimeUUID;
 
+import static java.lang.String.format;
+import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
+import static org.apache.cassandra.db.SystemKeyspace.LOCAL;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class SystemKeyspaceTest
@@ -47,9 +61,6 @@ public class SystemKeyspaceTest
     {
         DatabaseDescriptor.daemonInitialization();
         CommitLog.instance.start();
-
-        if (FBUtilities.isWindows)
-            WindowsFailedSnapshotTracker.deleteOldSnapshots();
     }
 
     @Test
@@ -78,7 +89,7 @@ public class SystemKeyspaceTest
     {
         BytesToken token = new BytesToken(ByteBufferUtil.bytes("token3"));
         InetAddressAndPort address = InetAddressAndPort.getByName("127.0.0.2");
-        SystemKeyspace.updateTokens(address, Collections.<Token>singletonList(token));
+        SystemKeyspace.updateTokens(address, Sets.newHashSet(token));
         assert SystemKeyspace.loadTokens().get(address).contains(token);
         SystemKeyspace.removeEndpoint(address);
         assert !SystemKeyspace.loadTokens().containsValue(token);
@@ -87,31 +98,14 @@ public class SystemKeyspaceTest
     @Test
     public void testLocalHostID()
     {
-        UUID firstId = SystemKeyspace.getLocalHostId();
-        UUID secondId = SystemKeyspace.getLocalHostId();
+        UUID firstId = SystemKeyspace.getOrInitializeLocalHostId();
+        UUID secondId = SystemKeyspace.getOrInitializeLocalHostId();
         assert firstId.equals(secondId) : String.format("%s != %s%n", firstId.toString(), secondId.toString());
     }
 
-    private void assertDeletedOrDeferred(int expectedCount)
+    private void assertDeleted()
     {
-        if (FBUtilities.isWindows)
-            assertEquals(expectedCount, getDeferredDeletionCount());
-        else
-            assertTrue(getSystemSnapshotFiles(SchemaConstants.SYSTEM_KEYSPACE_NAME).isEmpty());
-    }
-
-    private int getDeferredDeletionCount()
-    {
-        try
-        {
-            Class c = Class.forName("java.io.DeleteOnExitHook");
-            LinkedHashSet<String> files = (LinkedHashSet<String>)FBUtilities.getProtectedField(c, "files").get(c);
-            return files.size();
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
-        }
+        assertTrue(getSystemSnapshotFiles(SchemaConstants.SYSTEM_KEYSPACE_NAME).isEmpty());
     }
 
     @Test
@@ -120,17 +114,15 @@ public class SystemKeyspaceTest
         // First, check that in the absence of any previous installed version, we don't create snapshots
         for (ColumnFamilyStore cfs : Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStores())
             cfs.clearUnsafe();
-        Keyspace.clearSnapshot(null, SchemaConstants.SYSTEM_KEYSPACE_NAME);
-
-        int baseline = getDeferredDeletionCount();
+        StorageService.instance.clearSnapshot(Collections.emptyMap(), null, SchemaConstants.SYSTEM_KEYSPACE_NAME);
 
         SystemKeyspace.snapshotOnVersionChange();
-        assertDeletedOrDeferred(baseline);
+        assertDeleted();
 
         // now setup system.local as if we're upgrading from a previous version
         setupReleaseVersion(getOlderVersionString());
-        Keyspace.clearSnapshot(null, SchemaConstants.SYSTEM_KEYSPACE_NAME);
-        assertDeletedOrDeferred(baseline);
+        StorageService.instance.clearSnapshot(Collections.emptyMap(), null, SchemaConstants.SYSTEM_KEYSPACE_NAME);
+        assertDeleted();
 
         // Compare versions again & verify that snapshots were created for all tables in the system ks
         SystemKeyspace.snapshotOnVersionChange();
@@ -142,17 +134,41 @@ public class SystemKeyspaceTest
 
         // clear out the snapshots & set the previous recorded version equal to the latest, we shouldn't
         // see any new snapshots created this time.
-        Keyspace.clearSnapshot(null, SchemaConstants.SYSTEM_KEYSPACE_NAME);
+        StorageService.instance.clearSnapshot(Collections.emptyMap(), null, SchemaConstants.SYSTEM_KEYSPACE_NAME);
         setupReleaseVersion(FBUtilities.getReleaseVersionString());
 
         SystemKeyspace.snapshotOnVersionChange();
 
-        // snapshotOnVersionChange for upgrade case will open a SSTR when the CFS is flushed. On Windows, we won't be
-        // able to delete hard-links to that file while segments are memory-mapped, so they'll be marked for deferred deletion.
+        // snapshotOnVersionChange for upgrade case will open a SSTR when the CFS is flushed.
         // 10 files expected.
-        assertDeletedOrDeferred(baseline + 10);
+        assertDeleted();
 
-        Keyspace.clearSnapshot(null, SchemaConstants.SYSTEM_KEYSPACE_NAME);
+        StorageService.instance.clearSnapshot(Collections.emptyMap(), null, SchemaConstants.SYSTEM_KEYSPACE_NAME);
+    }
+
+    @Test
+    public void testPersistLocalMetadata()
+    {
+        SystemKeyspace.persistLocalMetadata();
+
+        UntypedResultSet result = executeInternal(format("SELECT * FROM system.%s WHERE key='%s'", LOCAL, LOCAL));
+
+        assertNotNull(result);
+        UntypedResultSet.Row row = result.one();
+
+        assertEquals(DatabaseDescriptor.getClusterName(), row.getString("cluster_name"));
+        assertEquals(FBUtilities.getReleaseVersionString(), row.getString("release_version"));
+        assertEquals(QueryProcessor.CQL_VERSION.toString(), row.getString("cql_version"));
+        assertEquals(String.valueOf(ProtocolVersion.CURRENT.asInt()), row.getString("native_protocol_version"));
+        assertEquals(DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter(), row.getString("data_center"));
+        assertEquals(DatabaseDescriptor.getEndpointSnitch().getLocalRack(), row.getString("rack"));
+        assertEquals(DatabaseDescriptor.getPartitioner().getClass().getName(), row.getString("partitioner"));
+        assertEquals(FBUtilities.getJustBroadcastNativeAddress(), row.getInetAddress("rpc_address"));
+        assertEquals(DatabaseDescriptor.getNativeTransportPort(), row.getInt("rpc_port"));
+        assertEquals(FBUtilities.getJustBroadcastAddress(), row.getInetAddress("broadcast_address"));
+        assertEquals(DatabaseDescriptor.getStoragePort(), row.getInt("broadcast_port"));
+        assertEquals(FBUtilities.getJustLocalAddress(), row.getInetAddress("listen_address"));
+        assertEquals(DatabaseDescriptor.getStoragePort(), row.getInt("listen_port"));
     }
 
     private String getOlderVersionString()
@@ -168,7 +184,7 @@ public class SystemKeyspaceTest
         Set<String> snapshottedTableNames = new HashSet<>();
         for (ColumnFamilyStore cfs : Keyspace.open(keyspace).getColumnFamilyStores())
         {
-            if (!cfs.getSnapshotDetails().isEmpty())
+            if (!cfs.listSnapshots().isEmpty())
                 snapshottedTableNames.add(cfs.getTableName());
         }
         return snapshottedTableNames;
@@ -178,17 +194,89 @@ public class SystemKeyspaceTest
     {
         // besides the release_version, we also need to insert the cluster_name or the check
         // in SystemKeyspace.checkHealth were we verify it matches DatabaseDescriptor will fail
-        QueryProcessor.executeInternal(String.format("INSERT INTO system.local(key, release_version, cluster_name) " +
-                                                     "VALUES ('local', '%s', '%s')",
-                                                     version,
-                                                     DatabaseDescriptor.getClusterName()));
+        Nodes.local().update(current -> current.setReleaseVersion(new CassandraVersion(version)).setClusterName(DatabaseDescriptor.getClusterName()), true);
         String r = readLocalVersion();
         assertEquals(String.format("Expected %s, got %s", version, r), version, r);
     }
 
     private String readLocalVersion()
     {
-        UntypedResultSet rs = QueryProcessor.executeInternal("SELECT release_version FROM system.local WHERE key='local'");
-        return rs.isEmpty() || !rs.one().has("release_version") ? null : rs.one().getString("release_version");
+        ILocalInfo info = Nodes.local().get();
+        return info != null && info.getReleaseVersion() != null ? info.getReleaseVersion().toString() : null;
     }
+
+    @Test
+    public void testCompactionHistoryTableSelectionByCompatMode()
+    {
+        StorageCompatibilityMode original = DatabaseDescriptor.getStorageCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.CASSANDRA_4);
+            TableMetadata v1Table = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.COMPACTION_HISTORY);
+            assertNotNull(v1Table);
+            Set<String> v1Columns = v1Table.columns().stream().map(c -> c.name.toString()).collect(Collectors.toSet());
+            assertThat(v1Columns).doesNotContain("compaction_properties");
+
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+            TableMetadata cc4Table = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.COMPACTION_HISTORY);
+            assertNotNull(cc4Table);
+            Set<String> cc4Columns = cc4Table.columns().stream().map(c -> c.name.toString()).collect(Collectors.toSet());
+            assertThat(cc4Columns).doesNotContain("compaction_properties");
+
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.NONE);
+            TableMetadata v2Table = SystemKeyspace.metadata().tables.getNullable(SystemKeyspace.COMPACTION_HISTORY);
+            assertNotNull(v2Table);
+            Set<String> v2Columns = v2Table.columns().stream().map(c -> c.name.toString()).collect(Collectors.toSet());
+            assertThat(v2Columns).contains("compaction_properties");
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(original);
+        }
+    }
+
+    @Test
+    public void testUpdateCompactionHistoryBefore5()
+    {
+        StorageCompatibilityMode original = DatabaseDescriptor.getStorageCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.CASSANDRA_4);
+            TimeUUID taskId1 = TimeUUID.Generator.nextTimeUUID();
+            Map<Integer, Long> partitionsMerged = Collections.singletonMap(2, 10L);
+            Map<String, String> compactionProperties = Collections.singletonMap("type", "COMPACTION");
+
+            SystemKeyspace.updateCompactionHistory(taskId1, "ks1", "cf1", System.currentTimeMillis(), 100L, 50L, partitionsMerged, compactionProperties);
+
+            UntypedResultSet result = executeInternal(format("SELECT * FROM system.%s WHERE id = ?", SystemKeyspace.COMPACTION_HISTORY), taskId1);
+            assertThat(result).isNotNull();
+            assertThat(result.isEmpty()).isFalse();
+            UntypedResultSet.Row row = result.one();
+            assertEquals("ks1", row.getString("keyspace_name"));
+            assertEquals("cf1", row.getString("columnfamily_name"));
+            assertEquals(100L, row.getLong("bytes_in"));
+            assertEquals(50L, row.getLong("bytes_out"));
+            assertThat(row.has("compaction_properties")).isFalse();
+
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+            TimeUUID taskId2 = TimeUUID.Generator.nextTimeUUID();
+
+            SystemKeyspace.updateCompactionHistory(taskId2, "ks2", "cf2", System.currentTimeMillis(), 200L, 100L, partitionsMerged, compactionProperties);
+
+            result = executeInternal(format("SELECT * FROM system.%s WHERE id = ?", SystemKeyspace.COMPACTION_HISTORY), taskId2);
+            assertThat(result).isNotNull();
+            assertThat(result.isEmpty()).isFalse();
+            row = result.one();
+            assertEquals("ks2", row.getString("keyspace_name"));
+            assertEquals("cf2", row.getString("columnfamily_name"));
+            assertEquals(200L, row.getLong("bytes_in"));
+            assertEquals(100L, row.getLong("bytes_out"));
+            assertThat(row.has("compaction_properties")).isFalse();
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(original);
+        }
+    }
+
 }

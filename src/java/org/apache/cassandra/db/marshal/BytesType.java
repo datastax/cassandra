@@ -22,9 +22,10 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
-import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.BytesSerializer;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Hex;
@@ -33,7 +34,15 @@ public class BytesType extends AbstractType<ByteBuffer>
 {
     public static final BytesType instance = new BytesType();
 
+    private static final ByteBuffer MASKED_VALUE = ByteBufferUtil.EMPTY_BYTE_BUFFER;
+
     BytesType() {super(ComparisonType.BYTE_ORDER);} // singleton
+
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
 
     public ByteBuffer fromString(String source)
     {
@@ -73,16 +82,25 @@ public class BytesType extends AbstractType<ByteBuffer>
     @Override
     public boolean isCompatibleWith(AbstractType<?> previous)
     {
+        // TODO BytesType is actually compatible with all types which use BYTE_ORDER comparison type
         // Both asciiType and utf8Type really use bytes comparison and
         // bytesType validate everything, so it is compatible with the former.
         return this == previous || previous == AsciiType.instance || previous == UTF8Type.instance;
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
+    protected boolean isValueCompatibleWithInternal(AbstractType<?> previous)
     {
         // BytesType can read anything
         return true;
+    }
+
+    @Override
+    public boolean isSerializationCompatibleWith(AbstractType<?> previous)
+    {
+        // BytesType should only be compatible with simple scalar types, not with collections or UDTs
+        // because converting a collection or UDT to raw bytes is nonsensical
+        return !previous.isCollection() && !previous.isUDT() && super.isSerializationCompatibleWith(previous);
     }
 
     public CQL3Type asCQL3Type()
@@ -93,5 +111,17 @@ public class BytesType extends AbstractType<ByteBuffer>
     public TypeSerializer<ByteBuffer> getSerializer()
     {
         return BytesSerializer.instance;
+    }
+
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
+    {
+        return ArgumentDeserializer.NOOP_DESERIALIZER;
+    }
+
+    @Override
+    public ByteBuffer getMaskedValue()
+    {
+        return MASKED_VALUE;
     }
 }

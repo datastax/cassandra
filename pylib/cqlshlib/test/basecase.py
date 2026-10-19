@@ -16,26 +16,24 @@
 
 import logging
 import os
+from os.path import dirname, join, normpath
 import sys
 import unittest
 
-from os.path import dirname, join, normpath
-
 cqlshlog = logging.getLogger('test_cqlsh')
 
-rundir = dirname(__file__)
-cqlshdir = normpath(join(rundir, '..', '..', '..', 'bin'))
-path_to_cqlsh = normpath(join(cqlshdir, 'cqlsh.py'))
+test_dir = dirname(__file__)
+cassandra_dir = normpath(join(test_dir, '..', '..', '..'))
+cqlsh_dir = join(cassandra_dir, 'bin')
+path_to_cqlsh = join(cqlsh_dir, 'cqlsh.py')
 
-sys.path.append(cqlshdir)
-
-import cqlsh
-cql = cqlsh.cassandra.cluster.Cluster
-policy = cqlsh.cassandra.policies.RoundRobinPolicy()
-quote_name = cqlsh.cassandra.metadata.maybe_escape_name
+sys.path.append(cqlsh_dir)
 
 TEST_HOST = os.environ.get('CQL_TEST_HOST', '127.0.0.1')
 TEST_PORT = int(os.environ.get('CQL_TEST_PORT', 9042))
+TEST_USER = os.environ.get('CQL_TEST_USER', 'cassandra')
+TEST_PWD = os.environ.get('CQL_TEST_PWD', 'cassandra')
+
 
 class BaseTestCase(unittest.TestCase):
     def assertNicelyFormattedTableHeader(self, line, msg=None):
@@ -61,6 +59,7 @@ class BaseTestCase(unittest.TestCase):
         else:
             return self.assertNotRegexpMatches(text, regex, msg)
 
+
 def dedent(s):
     lines = [ln.rstrip() for ln in s.splitlines()]
     if lines[0] == '':
@@ -68,6 +67,7 @@ def dedent(s):
     spaces = [len(line) - len(line.lstrip()) for line in lines if line]
     minspace = min(spaces if len(spaces) > 0 else (0,))
     return '\n'.join(line[minspace:] for line in lines)
+
 
 def at_a_time(i, num):
     return zip(*([iter(i)] * num))

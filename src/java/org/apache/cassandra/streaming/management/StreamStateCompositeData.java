@@ -21,7 +21,6 @@ import java.util.*;
 import javax.management.openmbean.*;
 
 import com.google.common.base.Function;
-import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -29,6 +28,7 @@ import com.google.common.collect.Sets;
 import org.apache.cassandra.streaming.SessionInfo;
 import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.streaming.StreamOperation;
+import org.apache.cassandra.utils.TimeUUID;
 
 /**
  */
@@ -66,7 +66,7 @@ public class StreamStateCompositeData
         }
         catch (OpenDataException e)
         {
-            throw Throwables.propagate(e);
+            throw new RuntimeException(e);
         }
     }
 
@@ -113,7 +113,7 @@ public class StreamStateCompositeData
         }
         catch (OpenDataException e)
         {
-            throw Throwables.propagate(e);
+            throw new RuntimeException(e);
         }
     }
 
@@ -121,7 +121,7 @@ public class StreamStateCompositeData
     {
         assert cd.getCompositeType().equals(COMPOSITE_TYPE);
         Object[] values = cd.getAll(ITEM_NAMES);
-        UUID planId = UUID.fromString((String) values[0]);
+        TimeUUID planId = TimeUUID.fromString((String) values[0]);
         String typeString = (String) values[1];
         Set<SessionInfo> sessions = Sets.newHashSet(Iterables.transform(Arrays.asList((CompositeData[]) values[2]),
                                                                         new Function<CompositeData, SessionInfo>()

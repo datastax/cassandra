@@ -94,6 +94,13 @@ interface InboundMessageCallbacks
 
     /**
      * Invoked at the very end of execution of the message-processing task, no matter the outcome of processing.
+     * timeElapsed is the duration on message processing in the relevant stage
      */
     void onExecuted(int messageSize, Header header, long timeElapsed, TimeUnit unit);
+
+    /**
+     * Invoked at the very end of execution of the message-processing task, no matter the outcome of processing.
+     * timeElapsed is the duration of the whole messaging processing, including deserialization, stage queue wait time
+     */
+    void onMessageHandlingCompleted(Header header, long timeElapsed, TimeUnit unit);
 }

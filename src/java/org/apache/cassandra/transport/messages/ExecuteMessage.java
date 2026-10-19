@@ -17,28 +17,49 @@
  */
 package org.apache.cassandra.transport.messages;
 
+import java.nio.ByteBuffer;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
+import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryEvents;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.ResultSet;
+import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
+import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.reads.thresholds.CoordinatorWarnings;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.CBUtil;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Closeable;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 public class ExecuteMessage extends Message.Request
 {
+    private static final NoSpamLogger nospam = NoSpamLogger.getLogger(logger, 10, TimeUnit.MINUTES);
+
     public static final Message.Codec<ExecuteMessage> codec = new Message.Codec<ExecuteMessage>()
     {
         public ExecuteMessage decode(ByteBuf body, ProtocolVersion version)
@@ -110,7 +131,13 @@ public class ExecuteMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+    protected boolean isTrackable()
+    {
+        return true;
+    }
+
+    @Override
+    protected Future<Response> maybeExecuteAsync(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest)
     {
         QueryHandler.Prepared prepared = null;
         try
@@ -120,24 +147,90 @@ public class ExecuteMessage extends Message.Request
             if (prepared == null)
                 throw new PreparedQueryNotFoundException(statementId);
 
+            if (!prepared.fullyQualified
+                && !Objects.equals(queryState.getClientState().getRawKeyspace(), prepared.keyspace)
+                // We can not reliably detect inconsistencies for batches yet
+                && !(prepared.statement instanceof BatchStatement))
+            {
+                queryState.getClientState().warnAboutUseWithPreparedStatements(statementId, prepared.keyspace);
+                String msg = String.format("Tried to execute a prepared unqalified statement on a keyspace it was not prepared on. " +
+                                           "Executing the resulting prepared statement will return unexpected results: %s (on keyspace %s, previously prepared on %s)",
+                                           statementId, queryState.getClientState().getRawKeyspace(), prepared.keyspace);
+                nospam.error(msg);
+            }
+
             CQLStatement statement = prepared.statement;
             options.prepare(statement.getBindVariables());
 
-            if (options.getPageSize() == 0)
+            if (options.getPageSize().getSize() == 0)
                 throw new ProtocolException("The page size cannot be 0");
 
             if (traceRequest)
-                traceQuery(state, prepared);
+                traceQuery(queryState, prepared);
 
-            // Some custom QueryHandlers are interested by the bound names. We provide them this information
+            // Some custom QueryHandlers are interested in the bound names. We provide them this information
             // by wrapping the QueryOptions.
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.statement.getBindVariables());
 
-            long requestStartTime = System.currentTimeMillis();
+            Tracing.trace("Executing prepared message started");
+            long requestStartMillisTime = Clock.Global.currentTimeMillis();
+            Optional<Stage> asyncStage = Stage.fromStatement(statement);
+            if (asyncStage.isPresent())
+            {
+                // Execution will continue on a new thread, but Dispatcher already called CoordinatorWarnings.init
+                // on the current thread; the Dispatcher.processRequest request.execute() callback must call
+                // CoordinatorWarnings.done() on the same thread that called init(). Reset CoordinatorWarnings on the
+                // current thread, and init on the new thread. See CNDB-13432 and CNDB-10759.
+                CoordinatorWarnings.reset();
+                // Capture ExecutorLocals (including ClientWarn.State) to propagate to the async stage thread
+                // so that warnings generated during query execution are properly captured.
+                ExecutorLocals executorLocals = ExecutorLocals.current();
+                QueryHandler.Prepared finalPrepared = prepared;
+                return asyncStage.get().submit(() ->
+                                               {
+                                                   // Restore ExecutorLocals on the async stage thread
+                                                   try (Closeable ignored = executorLocals.get())
+                                                   {
+                                                       try
+                                                       {
+                                                           if (isTrackable())
+                                                               CoordinatorWarnings.init();
 
-            Message.Response response = handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime);
+                                                           // at the time of the check, this includes the time spent in the NTR queue, basic query parsing/set up,
+                                                           // and any time spent in the queue for the async stage
+                                                           long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+                                                           ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                                                           if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+                                                           {
+                                                               ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
+                                                               throw new OverloadedException("Query timed out before it could start");
+                                                           }
+                                                       }
+                                                       catch (Exception e)
+                                                       {
+                                                           return handleException(queryState, finalPrepared, e);
+                                                       }
+                                                       return handleRequest(queryState, requestTime, handler, queryOptions, statement, finalPrepared, requestStartMillisTime);
+                                                   }
+                                               });
+            }
+            else
+                return ImmediateFuture.success(handleRequest(queryState, requestTime, handler, queryOptions, statement, prepared, requestStartMillisTime));
+        }
+        catch (Exception e)
+        {
+            return ImmediateFuture.success(handleException(queryState, prepared, e));
+        }
+    }
 
-            QueryEvents.instance.notifyExecuteSuccess(prepared.statement, prepared.rawCQLStatement, options, state, requestStartTime, response);
+    private Response handleRequest(QueryState queryState, Dispatcher.RequestTime requestTime, QueryHandler queryHandler, QueryOptions queryOptions, CQLStatement statement, QueryHandler.Prepared prepared, long requestStartMillisTime)
+    {
+        try
+        {
+            Response response = queryHandler.processPrepared(statement, queryState, queryOptions, getCustomPayload(), requestTime);
+
+            QueryEvents.instance.notifyExecuteSuccess(prepared.statement, options, queryState,
+                                                      requestStartMillisTime, response);
 
             if (response instanceof ResultMessage.Rows)
             {
@@ -173,29 +266,42 @@ public class ExecuteMessage extends Message.Request
         }
         catch (Exception e)
         {
-            QueryEvents.instance.notifyExecuteFailure(prepared, options, state, e);
-            JVMStabilityInspector.inspectThrowable(e);
-            return ErrorMessage.fromException(e);
+            return handleException(queryState, prepared, e);
         }
+        finally
+        {
+            Tracing.trace("Executing prepared message completed");
+        }
+    }
+
+    private ErrorMessage handleException(QueryState queryState, QueryHandler.Prepared prepared, Exception e)
+    {
+        QueryEvents.instance.notifyExecuteFailure(prepared, options, queryState, e);
+        JVMStabilityInspector.inspectThrowable(e);
+        return ErrorMessage.fromException(e);
     }
 
     private void traceQuery(QueryState state, QueryHandler.Prepared prepared)
     {
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-        if (options.getPageSize() > 0)
-            builder.put("page_size", Integer.toString(options.getPageSize()));
+        if (options.getPageSize().isDefined())
+        {
+            builder.put("page_size", Integer.toString(options.getPageSize().getSize()));
+            builder.put("page_size_unit", options.getPageSize().getUnit().name());
+        }
         if (options.getConsistency() != null)
             builder.put("consistency_level", options.getConsistency().name());
-        if (options.getSerialConsistency() != null)
-            builder.put("serial_consistency_level", options.getSerialConsistency().name());
+        if (options.getSerialConsistency(state) != null)
+            builder.put("serial_consistency_level", options.getSerialConsistency(state).name());
 
-        builder.put("query", prepared.rawCQLStatement);
+        builder.put("query", prepared.statement.getRawCQLStatement());
 
         for (int i = 0; i < prepared.statement.getBindVariables().size(); i++)
         {
             ColumnSpecification cs = prepared.statement.getBindVariables().get(i);
             String boundName = cs.name.toString();
-            String boundValue = cs.type.asCQL3Type().toCQLLiteral(options.getValues().get(i), options.getProtocolVersion());
+            ByteBuffer bytes = options.getValues().get(i);
+            String boundValue = (bytes == ByteBufferUtil.UNSET_BYTE_BUFFER) ? "<unset>" : cs.type.asCQL3Type().toCQLLiteral(bytes);
             if (boundValue.length() > 1000)
                 boundValue = boundValue.substring(0, 1000) + "...'";
 

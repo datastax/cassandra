@@ -24,8 +24,8 @@ import java.io.OutputStream;
 import java.io.StringWriter;
 import java.text.NumberFormat;
 
-import junit.framework.AssertionFailedError;
-import junit.framework.Test;
+import junit.framework.AssertionFailedError;  // checkstyle: permit this import
+import junit.framework.Test;  // checkstyle: permit this import
 
 import org.apache.tools.ant.BuildException;
 import org.apache.tools.ant.taskdefs.optional.junit.IgnoredTestListener;
@@ -35,6 +35,9 @@ import org.apache.tools.ant.taskdefs.optional.junit.JUnitTestRunner;
 import org.apache.tools.ant.taskdefs.optional.junit.JUnitVersionHelper;
 import org.apache.tools.ant.util.FileUtils;
 import org.apache.tools.ant.util.StringUtils;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_KEEPBRIEFBRIEF;
+import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_TESTTAG;
 
 /**
  * Prints plain text output of the test to a specified Writer.
@@ -47,9 +50,9 @@ public class CassandraBriefJUnitResultFormatter implements JUnitResultFormatter,
 
     private static final double ONE_SECOND = 1000.0;
 
-    private static final String tag = System.getProperty("cassandra.testtag", "");
+    private static final String tag = TEST_CASSANDRA_TESTTAG.getString();
 
-    private static final Boolean keepBriefBrief = Boolean.getBoolean("cassandra.keepBriefBrief");
+    private static final Boolean keepBriefBrief = TEST_CASSANDRA_KEEPBRIEFBRIEF.getBoolean();
 
     /**
      * Where to write the log to.

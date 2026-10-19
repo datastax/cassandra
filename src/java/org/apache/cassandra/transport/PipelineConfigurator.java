@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 
 import org.slf4j.Logger;
@@ -44,8 +45,12 @@ import io.netty.util.Version;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.net.*;
+import org.apache.cassandra.security.ISslContextFactory;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.transport.messages.StartupMessage;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_UNSAFE_VERBOSE_DEBUG_CLIENT_PROTOCOL;
+import static org.apache.cassandra.net.SocketFactory.newSslHandler;
 
 /**
  * Takes care of intializing a Netty Channel and Pipeline for client protocol connections.
@@ -60,7 +65,9 @@ public class PipelineConfigurator
 
     // Not to be used in production, this causes a Netty logging handler to be added to the pipeline,
     // which will throttle a system under any normal load.
-    private static final boolean DEBUG = Boolean.getBoolean("cassandra.unsafe_verbose_debug_client_protocol");
+    private static final boolean DEBUG = TEST_UNSAFE_VERBOSE_DEBUG_CLIENT_PROTOCOL.getBoolean();
+
+    public static final String SSL_FACTORY_CONTEXT_DESCRIPTION = "client_encryption_options";
 
     // Stateless handlers
     private static final ConnectionLimitHandler connectionLimitHandler = new ConnectionLimitHandler();
@@ -91,16 +98,32 @@ public class PipelineConfigurator
     private final boolean keepAlive;
     private final EncryptionOptions.TlsEncryptionPolicy tlsEncryptionPolicy;
     private final Dispatcher dispatcher;
+    // Shared between pre-v5 and CQLMessage handlers
+    private final QueueBackpressure queueBackpressure;
 
     public PipelineConfigurator(boolean epoll,
                                 boolean keepAlive,
-                                boolean legacyFlusher,
+                                EncryptionOptions.TlsEncryptionPolicy encryptionPolicy,
+                                Dispatcher dispatcher)
+    {
+        this.epoll               = epoll;
+        this.keepAlive           = keepAlive;
+        this.tlsEncryptionPolicy = encryptionPolicy;
+        this.dispatcher          = dispatcher;
+        this.queueBackpressure   = QueueBackpressure.DEFAULT;
+    }
+
+    @VisibleForTesting
+    public PipelineConfigurator(boolean epoll,
+                                boolean keepAlive,
+                                boolean useLegacyFlusher,
                                 EncryptionOptions.TlsEncryptionPolicy encryptionPolicy)
     {
         this.epoll               = epoll;
         this.keepAlive           = keepAlive;
         this.tlsEncryptionPolicy = encryptionPolicy;
-        this.dispatcher          = dispatcher(legacyFlusher);
+        this.dispatcher          = new Dispatcher(useLegacyFlusher);
+        this.queueBackpressure   = QueueBackpressure.DEFAULT;
     }
 
     public ChannelFuture initializeChannel(final EventLoopGroup workerGroup,
@@ -121,7 +144,7 @@ public class PipelineConfigurator
         bootstrap.childHandler(initializer);
 
         // Bind and start to accept incoming connections.
-        logger.info("Using Netty Version: {}", Version.identify().entrySet());
+        logger.debug("Using Netty Version: {}", Version.identify().entrySet());
         logger.info("Starting listening for CQL clients on {} ({})...", socket, tlsEncryptionPolicy.description());
         return bootstrap.bind(socket);
     }
@@ -163,7 +186,8 @@ public class PipelineConfigurator
                 return channel -> {
                     SslContext sslContext = SSLFactory.getOrCreateSslContext(encryptionOptions,
                                                                              encryptionOptions.require_client_auth,
-                                                                             SSLFactory.SocketType.SERVER);
+                                                                             ISslContextFactory.SocketType.SERVER,
+                                                                             SSL_FACTORY_CONTEXT_DESCRIPTION);
 
                     channel.pipeline().addFirst(SSL_HANDLER, new ByteToMessageDecoder()
                     {
@@ -180,7 +204,8 @@ public class PipelineConfigurator
                             {
                                 // Connection uses SSL/TLS, replace the detection handler with a SslHandler and so use
                                 // encryption.
-                                SslHandler sslHandler = sslContext.newHandler(channel.alloc());
+                                InetSocketAddress peer = encryptionOptions.require_endpoint_verification ? (InetSocketAddress) channel.remoteAddress() : null;
+                                SslHandler sslHandler = newSslHandler(channel, sslContext, peer);
                                 channelHandlerContext.pipeline().replace(SSL_HANDLER, SSL_HANDLER, sslHandler);
                             }
                             else
@@ -197,8 +222,10 @@ public class PipelineConfigurator
                 return channel -> {
                     SslContext sslContext = SSLFactory.getOrCreateSslContext(encryptionOptions,
                                                                              encryptionOptions.require_client_auth,
-                                                                             SSLFactory.SocketType.SERVER);
-                    channel.pipeline().addFirst(SSL_HANDLER, sslContext.newHandler(channel.alloc()));
+                                                                             ISslContextFactory.SocketType.SERVER,
+                                                                             SSL_FACTORY_CONTEXT_DESCRIPTION);
+                    InetSocketAddress peer = encryptionOptions.require_endpoint_verification ? (InetSocketAddress) channel.remoteAddress() : null;
+                    channel.pipeline().addFirst(SSL_HANDLER, newSslHandler(channel, sslContext, peer));
                 };
             default:
                 throw new IllegalStateException("Unrecognized TLS encryption policy: " + this.tlsEncryptionPolicy);
@@ -247,6 +274,7 @@ public class PipelineConfigurator
     }
 
     public void configureModernPipeline(ChannelHandlerContext ctx,
+                                        ServerConnection serverConnection,
                                         ClientResourceLimits.Allocator resourceAllocator,
                                         ProtocolVersion version,
                                         Map<String, String> options)
@@ -278,11 +306,17 @@ public class PipelineConfigurator
         int queueCapacity = DatabaseDescriptor.getNativeTransportReceiveQueueCapacityInBytes();
         ClientResourceLimits.ResourceProvider resourceProvider = resourceProvider(resourceAllocator);
         AbstractMessageHandler.OnHandlerClosed onClosed = handler -> resourceProvider.release();
-        boolean throwOnOverload = "1".equals(options.get(StartupMessage.THROW_ON_OVERLOAD));
+        String fromOptions = options.get(StartupMessage.THROW_ON_OVERLOAD);
+        boolean throwOnOverload;
+        if (fromOptions == null)
+            throwOnOverload = DatabaseDescriptor.getNativeTransportThrowOnOverload();
+        else
+            throwOnOverload = "1".equals(fromOptions);
 
         CQLMessageHandler.MessageConsumer<Message.Request> messageConsumer = messageConsumer();
         CQLMessageHandler<Message.Request> processor =
             new CQLMessageHandler<>(ctx.channel(),
+                                    serverConnection,
                                     version,
                                     frameDecoder,
                                     envelopeDecoder,
@@ -290,6 +324,7 @@ public class PipelineConfigurator
                                     messageConsumer,
                                     payloadAllocator,
                                     queueCapacity,
+                                    queueBackpressure,
                                     resourceProvider,
                                     onClosed,
                                     errorHandler,
@@ -324,7 +359,7 @@ public class PipelineConfigurator
 
     protected CQLMessageHandler.MessageConsumer<Message.Request> messageConsumer()
     {
-        return dispatcher::dispatch;
+        return dispatcher;
     }
 
     protected Message.Decoder<Message.Request> messageDecoder()
@@ -358,7 +393,7 @@ public class PipelineConfigurator
         pipeline.addBefore(INITIAL_HANDLER, MESSAGE_COMPRESSOR, Envelope.Compressor.instance);
         pipeline.addBefore(INITIAL_HANDLER, MESSAGE_DECODER, PreV5Handlers.ProtocolDecoder.instance);
         pipeline.addBefore(INITIAL_HANDLER, MESSAGE_ENCODER, PreV5Handlers.ProtocolEncoder.instance);
-        pipeline.addBefore(INITIAL_HANDLER, LEGACY_MESSAGE_PROCESSOR, new PreV5Handlers.LegacyDispatchHandler(dispatcher, limits));
+        pipeline.addBefore(INITIAL_HANDLER, LEGACY_MESSAGE_PROCESSOR, new PreV5Handlers.LegacyDispatchHandler(dispatcher, queueBackpressure, limits));
         pipeline.remove(INITIAL_HANDLER);
         onNegotiationComplete(pipeline);
     }

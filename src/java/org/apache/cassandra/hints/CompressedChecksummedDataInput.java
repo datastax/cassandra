@@ -147,7 +147,7 @@ public final class CompressedChecksummedDataInput extends ChecksummedDataInput
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, getPath());
+            throw new FSReadError(e, getFile());
         }
     }
 
@@ -158,13 +158,12 @@ public final class CompressedChecksummedDataInput extends ChecksummedDataInput
         super.close();
     }
 
-    @SuppressWarnings("resource") // Closing the ChecksummedDataInput will close the underlying channel.
     public static ChecksummedDataInput upgradeInput(ChecksummedDataInput input, ICompressor compressor)
     {
         long position = input.getPosition();
         input.close();
 
-        ChannelProxy channel = new ChannelProxy(input.getPath());
+        ChannelProxy channel = new ChannelProxy(input.getFile());
         try
         {
             return new CompressedChecksummedDataInput(channel, compressor, position);

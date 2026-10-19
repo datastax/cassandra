@@ -26,6 +26,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import io.airlift.airline.Arguments;
 import io.airlift.airline.Command;
 import io.airlift.airline.Option;
@@ -112,7 +114,7 @@ public class Dump implements Runnable
               .append(generatedTimestamp)
               .append(System.lineSeparator());
 
-            int generatedNowInSeconds = wireIn.read(FullQueryLogger.GENERATED_NOW_IN_SECONDS).int32();
+            long generatedNowInSeconds = wireIn.read(FullQueryLogger.GENERATED_NOW_IN_SECONDS).int64();
             sb.append("Generated nowInSeconds:")
               .append(generatedNowInSeconds)
               .append(System.lineSeparator());
@@ -124,7 +126,7 @@ public class Dump implements Runnable
                     break;
 
                 case (FullQueryLogger.BATCH):
-                    dumpBatch(options, wireIn, sb);
+                    dumpBatch(wireIn, sb);
                     break;
 
                 default:
@@ -164,7 +166,8 @@ public class Dump implements Runnable
         }
     }
 
-    private static void dumpQuery(QueryOptions options, WireIn wireIn, StringBuilder sb)
+    @VisibleForTesting
+    static void dumpQuery(QueryOptions options, WireIn wireIn, StringBuilder sb)
     {
         sb.append("Query: ")
           .append(wireIn.read(FullQueryLogger.QUERY).text())
@@ -180,7 +183,7 @@ public class Dump implements Runnable
         sb.append(System.lineSeparator());
     }
 
-    private static void dumpBatch(QueryOptions options, WireIn wireIn, StringBuilder sb)
+    private static void dumpBatch(WireIn wireIn, StringBuilder sb)
     {
         sb.append("Batch type: ")
           .append(wireIn.read(FullQueryLogger.BATCH_TYPE).text())
@@ -200,7 +203,10 @@ public class Dump implements Runnable
             int numSubValues = in.int32();
             List<ByteBuffer> subValues = new ArrayList<>(numSubValues);
             for (int j = 0; j < numSubValues; j++)
-                subValues.add(ByteBuffer.wrap(in.bytes()));
+            {
+                byte[] valueBytes = in.bytes();
+                subValues.add(valueBytes == null ? null : ByteBuffer.wrap(valueBytes));
+            }
 
             sb.append("Query: ")
               .append(queries.get(i))
@@ -216,25 +222,24 @@ public class Dump implements Runnable
 
     private static void appendValuesToStringBuilder(List<ByteBuffer> values, StringBuilder sb)
     {
-        boolean first = true;
         for (ByteBuffer value : values)
         {
-            Bytes bytes = Bytes.wrapForRead(value);
-            long maxLength2 = Math.min(1024, bytes.readLimit() - bytes.readPosition());
-            toHexString(bytes, bytes.readPosition(), maxLength2, sb);
-            if (maxLength2 < bytes.readLimit() - bytes.readPosition())
+            if (null == value)
             {
-                sb.append("... truncated").append(System.lineSeparator());
-            }
-
-            if (first)
-            {
-                first = false;
+                sb.append("null").append(System.lineSeparator());
             }
             else
             {
-                sb.append("-----").append(System.lineSeparator());
+                Bytes<ByteBuffer> bytes = Bytes.wrapForRead(value);
+                long maxLength2 = Math.min(1024, bytes.readLimit() - bytes.readPosition());
+                toHexString(bytes, bytes.readPosition(), maxLength2, sb);
+                if (maxLength2 < bytes.readLimit() - bytes.readPosition())
+                {
+                    sb.append("... truncated").append(System.lineSeparator());
+                }
             }
+
+            sb.append("-----").append(System.lineSeparator());
         }
     }
 

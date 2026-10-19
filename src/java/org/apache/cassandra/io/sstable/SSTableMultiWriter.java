@@ -20,6 +20,8 @@ package org.apache.cassandra.io.sstable;
 
 import java.util.Collection;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableId;
@@ -34,16 +36,28 @@ public interface SSTableMultiWriter extends Transactional
      * @param partition the partition to append
      * @return true if the partition was written, false otherwise
      */
-    boolean append(UnfilteredRowIterator partition);
+    void append(UnfilteredRowIterator partition);
 
-    Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult);
-    Collection<SSTableReader> finish(boolean openResult);
+    Collection<SSTableReader> finish(boolean openResult, @Nullable StorageHandler handler);
     Collection<SSTableReader> finished();
 
-    SSTableMultiWriter setOpenResult(boolean openResult);
+    /**
+     * Opens the resulting sstables after writing has finished. If those readers need to be accessed, then this must
+     * be called after `prepareToCommit` (so the writing is complete) but before `commit` (because committing closes
+     * some of the resources used to create the underlying readers). When used, the readers can then be accessed by
+     * calling `finished()`.
+     *
+     * @param storageHandler the underlying storage handler. This is used in case of a failure opening the
+     *                       SSTableReader(s) to call the `StorageHandler#onOpeningWrittenSSTableFailure` callback, which
+     *                       in some implementations may attempt to recover from the error. If `null`, the said callback
+     *                       will not be called on failure (and the exception will propagate).
+     */
+    void openResult(@Nullable StorageHandler storageHandler);
 
     String getFilename();
-    long getFilePointer();
+    long getBytesWritten();
+    long getOnDiskBytesWritten();
+    int getSegmentCount();
     TableId getTableId();
 
     static void abortOrDie(SSTableMultiWriter writer)

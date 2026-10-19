@@ -18,33 +18,63 @@
 */
 package org.apache.cassandra.config;
 
+import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.nio.file.Files;
+import java.nio.file.FileStore;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.Enumeration;
-
+import java.util.function.Consumer;
 
 import com.google.common.base.Throwables;
+import com.google.common.collect.HashMultiset;
+import com.google.common.collect.Multiset;
 import org.junit.Assert;
 import org.junit.BeforeClass;
+import org.junit.Rule;
 import org.junit.Test;
-import org.junit.runner.RunWith;
+import org.junit.rules.TemporaryFolder;
 
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.security.EncryptionContext;
+import org.apache.cassandra.security.EncryptionContextGenerator;
+import org.assertj.core.api.Assertions;
+import org.mockito.MockedStatic;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.utils.MBeanWrapper;
+import org.mockito.Mockito;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNLIMITED_CONCURRENT_VALIDATIONS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CONFIG_LOADER;
+import static org.apache.cassandra.config.CassandraRelevantProperties.PARTITIONER;
+import static org.apache.cassandra.config.DataStorageSpec.DataStorageUnit.KIBIBYTES;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
-@RunWith(OrderedJUnit4ClassRunner.class)
 public class DatabaseDescriptorTest
 {
+    @Rule
+    public TemporaryFolder temporaryFolder = new TemporaryFolder();
+
     @BeforeClass
     public static void setupDatabaseDescriptor()
     {
@@ -62,10 +92,12 @@ public class DatabaseDescriptorTest
 
         // Now try custom loader
         ConfigurationLoader testLoader = new TestLoader();
-        System.setProperty("cassandra.config.loader", testLoader.getClass().getName());
+        CONFIG_LOADER.setString(testLoader.getClass().getName());
 
         config = DatabaseDescriptor.loadConfig();
         assertEquals("ConfigurationLoader Test", config.cluster_name);
+
+        System.clearProperty("cassandra.config.loader");
     }
 
     public static class TestLoader implements ConfigurationLoader
@@ -113,7 +145,7 @@ public class DatabaseDescriptorTest
     }
 
     @Test
-    public void testRpcInterface() throws Exception
+    public void testRpcInterface()
     {
         Config testConfig = DatabaseDescriptor.loadConfig();
         testConfig.rpc_interface = suitableInterface.getName();
@@ -198,7 +230,7 @@ public class DatabaseDescriptorTest
     }
 
     @Test
-    public void testRpcAddress() throws Exception
+    public void testRpcAddress()
     {
         Config testConfig = DatabaseDescriptor.loadConfig();
         testConfig.rpc_address = suitableInterface.getInterfaceAddresses().get(0).getAddress().getHostAddress();
@@ -232,11 +264,8 @@ public class DatabaseDescriptorTest
     @Test
     public void testInvalidPartitionPropertyOverride() throws Exception
     {
-        String key = Config.PROPERTY_PREFIX + "partitioner";
-        String previous = System.getProperty(key);
-        try
+        try (WithProperties properties = new WithProperties().set(PARTITIONER, "ThisDoesNotExist"))
         {
-            System.setProperty(key, "ThisDoesNotExist");
             Config testConfig = DatabaseDescriptor.loadConfig();
             testConfig.partitioner = "Murmur3Partitioner";
 
@@ -255,19 +284,8 @@ public class DatabaseDescriptorTest
                 Assert.assertEquals("org.apache.cassandra.dht.ThisDoesNotExist", cause.getMessage());
             }
         }
-        finally
-        {
-            if (previous == null)
-            {
-                System.getProperties().remove(key);
-            }
-            else
-            {
-                System.setProperty(key, previous);
-            }
-        }
     }
-    
+
     @Test
     public void testTokensFromString()
     {
@@ -281,122 +299,152 @@ public class DatabaseDescriptorTest
     public void testExceptionsForInvalidConfigValues() {
         try
         {
-            DatabaseDescriptor.setColumnIndexCacheSize(-1);
-            fail("Should have received a ConfigurationException column_index_cache_size_in_kb = -1");
+            DatabaseDescriptor.setColumnIndexCacheSizeInKiB(-1);
+            fail("Should have received a IllegalArgumentException column_index_cache_size = -1");
+        }
+        catch (IllegalArgumentException ignored) { }
+        Assert.assertEquals(2048, DatabaseDescriptor.getColumnIndexCacheSize());
+
+        try
+        {
+            DatabaseDescriptor.setColumnIndexCacheSizeInKiB(2 * 1024 * 1024);
+            fail("Should have received a ConfigurationException column_index_cache_size = 2GiB");
         }
         catch (ConfigurationException ignored) { }
         Assert.assertEquals(2048, DatabaseDescriptor.getColumnIndexCacheSize());
 
         try
         {
-            DatabaseDescriptor.setColumnIndexCacheSize(2 * 1024 * 1024);
-            fail("Should have received a ConfigurationException column_index_cache_size_in_kb = 2GiB");
+            DatabaseDescriptor.setColumnIndexSizeInKiB(-5);
+            fail("Should have received a IllegalArgumentException column_index_size = -5");
         }
-        catch (ConfigurationException ignored) { }
-        Assert.assertEquals(2048, DatabaseDescriptor.getColumnIndexCacheSize());
+        catch (IllegalArgumentException ignored) { }
+        Assert.assertEquals(4096, DatabaseDescriptor.getColumnIndexSize(0));
 
         try
         {
-            DatabaseDescriptor.setColumnIndexSize(-1);
-            fail("Should have received a ConfigurationException column_index_size_in_kb = -1");
+            DatabaseDescriptor.setColumnIndexSizeInKiB(2 * 1024 * 1024);
+            fail("Should have received a ConfigurationException column_index_size = 2GiB");
         }
         catch (ConfigurationException ignored) { }
-        Assert.assertEquals(4096, DatabaseDescriptor.getColumnIndexSize());
+        Assert.assertEquals(4096, DatabaseDescriptor.getColumnIndexSize(0));
+
+        DatabaseDescriptor.setColumnIndexSizeInKiB(-1);  // set undefined
+        Assert.assertEquals(8192, DatabaseDescriptor.getColumnIndexSize(8192));
 
         try
         {
-            DatabaseDescriptor.setColumnIndexSize(2 * 1024 * 1024);
-            fail("Should have received a ConfigurationException column_index_size_in_kb = 2GiB");
+            DatabaseDescriptor.setBatchSizeWarnThresholdInKiB(-1);
+            fail("Should have received a IllegalArgumentException batch_size_warn_threshold = -1");
         }
-        catch (ConfigurationException ignored) { }
-        Assert.assertEquals(4096, DatabaseDescriptor.getColumnIndexSize());
+        catch (IllegalArgumentException ignored) { }
+        Assert.assertEquals(65536, DatabaseDescriptor.getBatchSizeWarnThreshold());
 
         try
         {
-            DatabaseDescriptor.setBatchSizeWarnThresholdInKB(-1);
-            fail("Should have received a ConfigurationException batch_size_warn_threshold_in_kb = -1");
+            DatabaseDescriptor.setBatchSizeWarnThresholdInKiB(2 * 1024 * 1024);
+            fail("Should have received a ConfigurationException batch_size_warn_threshold = 2GiB");
         }
         catch (ConfigurationException ignored) { }
-        Assert.assertEquals(5120, DatabaseDescriptor.getBatchSizeWarnThreshold());
+        Assert.assertEquals(65536, DatabaseDescriptor.getBatchSizeWarnThreshold());
+    }
 
-        try
-        {
-            DatabaseDescriptor.setBatchSizeWarnThresholdInKB(2 * 1024 * 1024);
-            fail("Should have received a ConfigurationException batch_size_warn_threshold_in_kb = 2GiB");
-        }
-        catch (ConfigurationException ignored) { }
-        Assert.assertEquals(4096, DatabaseDescriptor.getColumnIndexSize());
+    @Test
+    public void testWidenToLongInBytes() throws ConfigurationException
+    {
+        Config conf = DatabaseDescriptor.getRawConfig();
+        int maxInt = Integer.MAX_VALUE - 1;
+        long maxIntMebibytesAsBytes = (long) maxInt * 1024 * 1024;
+        long maxIntKibibytesAsBytes = (long) maxInt * 1024;
+
+        conf.min_free_space_per_drive = new DataStorageSpec.IntMebibytesBound(maxInt);
+        Assert.assertEquals(maxIntMebibytesAsBytes, DatabaseDescriptor.getMinFreeSpacePerDriveInBytes());
+
+        conf.max_hints_file_size = new DataStorageSpec.IntMebibytesBound(maxInt);
+        Assert.assertEquals(maxIntMebibytesAsBytes, DatabaseDescriptor.getMaxHintsFileSize());
+
+        DatabaseDescriptor.setBatchSizeFailThresholdInKiB(maxInt);
+        Assert.assertEquals((maxIntKibibytesAsBytes), DatabaseDescriptor.getBatchSizeFailThreshold());
     }
 
     @Test
     public void testLowestAcceptableTimeouts() throws ConfigurationException
     {
         Config testConfig = new Config();
-        testConfig.read_request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT + 1;
-        testConfig.range_request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT + 1;
-        testConfig.write_request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT + 1;
-        testConfig.truncate_request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT + 1;
-        testConfig.cas_contention_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT + 1;
-        testConfig.counter_write_request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT + 1;
-        testConfig.request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT + 1;
-        
-        assertTrue(testConfig.read_request_timeout_in_ms > DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.range_request_timeout_in_ms > DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.write_request_timeout_in_ms > DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.truncate_request_timeout_in_ms > DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.cas_contention_timeout_in_ms > DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.counter_write_request_timeout_in_ms > DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.request_timeout_in_ms > DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
+
+        DurationSpec.LongMillisecondsBound greaterThanLowestTimeout = new DurationSpec.LongMillisecondsBound(DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT.toMilliseconds() + 1);
+
+        testConfig.read_request_timeout = greaterThanLowestTimeout;
+        testConfig.range_request_timeout = greaterThanLowestTimeout;
+        testConfig.write_request_timeout = greaterThanLowestTimeout;
+        testConfig.truncate_request_timeout = greaterThanLowestTimeout;
+        testConfig.cas_contention_timeout = greaterThanLowestTimeout;
+        testConfig.counter_write_request_timeout = greaterThanLowestTimeout;
+        testConfig.request_timeout = greaterThanLowestTimeout;
+        testConfig.native_transport_timeout = greaterThanLowestTimeout;
+
+        assertEquals(testConfig.read_request_timeout, greaterThanLowestTimeout);
+        assertEquals(testConfig.range_request_timeout, greaterThanLowestTimeout);
+        assertEquals(testConfig.write_request_timeout, greaterThanLowestTimeout);
+        assertEquals(testConfig.truncate_request_timeout, greaterThanLowestTimeout);
+        assertEquals(testConfig.cas_contention_timeout, greaterThanLowestTimeout);
+        assertEquals(testConfig.counter_write_request_timeout, greaterThanLowestTimeout);
+        assertEquals(testConfig.request_timeout, greaterThanLowestTimeout);
+        assertEquals(testConfig.native_transport_timeout, greaterThanLowestTimeout);
 
         //set less than Lowest acceptable value
-        testConfig.read_request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT - 1;
-        testConfig.range_request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT - 1;
-        testConfig.write_request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT - 1;
-        testConfig.truncate_request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT - 1;
-        testConfig.cas_contention_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT - 1;
-        testConfig.counter_write_request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT - 1;
-        testConfig.request_timeout_in_ms = DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT - 1;
+        DurationSpec.LongMillisecondsBound lowerThanLowestTimeout = new DurationSpec.LongMillisecondsBound(DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT.toMilliseconds() - 1);
+
+        testConfig.read_request_timeout = lowerThanLowestTimeout;
+        testConfig.range_request_timeout = lowerThanLowestTimeout;
+        testConfig.write_request_timeout = lowerThanLowestTimeout;
+        testConfig.truncate_request_timeout = lowerThanLowestTimeout;
+        testConfig.cas_contention_timeout = lowerThanLowestTimeout;
+        testConfig.counter_write_request_timeout = lowerThanLowestTimeout;
+        testConfig.request_timeout = lowerThanLowestTimeout;
+        testConfig.native_transport_timeout = lowerThanLowestTimeout;
 
         DatabaseDescriptor.checkForLowestAcceptedTimeouts(testConfig);
 
-        assertTrue(testConfig.read_request_timeout_in_ms == DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.range_request_timeout_in_ms == DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.write_request_timeout_in_ms == DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.truncate_request_timeout_in_ms == DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.cas_contention_timeout_in_ms == DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.counter_write_request_timeout_in_ms == DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
-        assertTrue(testConfig.request_timeout_in_ms == DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
+        assertEquals(testConfig.read_request_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
+        assertEquals(testConfig.range_request_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
+        assertEquals(testConfig.write_request_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
+        assertEquals(testConfig.truncate_request_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
+        assertEquals(testConfig.cas_contention_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
+        assertEquals(testConfig.counter_write_request_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
+        assertEquals(testConfig.request_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
+        assertEquals(testConfig.native_transport_timeout, DatabaseDescriptor.LOWEST_ACCEPTED_TIMEOUT);
     }
 
     @Test
     public void testRepairSessionMemorySizeToggles()
     {
-        int previousSize = DatabaseDescriptor.getRepairSessionSpaceInMegabytes();
+        int previousSize = DatabaseDescriptor.getRepairSessionSpaceInMiB();
         try
         {
             Assert.assertEquals((Runtime.getRuntime().maxMemory() / (1024 * 1024) / 16),
-                                DatabaseDescriptor.getRepairSessionSpaceInMegabytes());
+                                DatabaseDescriptor.getRepairSessionSpaceInMiB());
 
             int targetSize = (int) (Runtime.getRuntime().maxMemory() / (1024 * 1024) / 4) + 1;
 
-            DatabaseDescriptor.setRepairSessionSpaceInMegabytes(targetSize);
-            Assert.assertEquals(targetSize, DatabaseDescriptor.getRepairSessionSpaceInMegabytes());
+            DatabaseDescriptor.setRepairSessionSpaceInMiB(targetSize);
+            Assert.assertEquals(targetSize, DatabaseDescriptor.getRepairSessionSpaceInMiB());
 
-            DatabaseDescriptor.setRepairSessionSpaceInMegabytes(10);
-            Assert.assertEquals(10, DatabaseDescriptor.getRepairSessionSpaceInMegabytes());
+            DatabaseDescriptor.setRepairSessionSpaceInMiB(10);
+            Assert.assertEquals(10, DatabaseDescriptor.getRepairSessionSpaceInMiB());
 
             try
             {
-                DatabaseDescriptor.setRepairSessionSpaceInMegabytes(0);
-                fail("Should have received a ConfigurationException for depth of 9");
+                DatabaseDescriptor.setRepairSessionSpaceInMiB(0);
+                fail("Should have received a ConfigurationException for depth of 0");
             }
             catch (ConfigurationException ignored) { }
 
-            Assert.assertEquals(10, DatabaseDescriptor.getRepairSessionSpaceInMegabytes());
+            Assert.assertEquals(10, DatabaseDescriptor.getRepairSessionSpaceInMiB());
         }
         finally
         {
-            DatabaseDescriptor.setRepairSessionSpaceInMegabytes(previousSize);
+            DatabaseDescriptor.setRepairSessionSpaceInMiB(previousSize);
         }
     }
 
@@ -436,25 +484,70 @@ public class DatabaseDescriptorTest
     }
 
     @Test
-    public void testCalculateDefaultSpaceInMB()
+    public void testCalculateDefaultSpaceInMiB()
     {
         // check prefered size is used for a small storage volume
-        int preferredInMB = 667;
+        int preferredInMiB = 667;
         int numerator = 2;
         int denominator = 3;
         int spaceInBytes = 999 * 1024 * 1024;
 
         assertEquals(666, // total size is less than preferred, so return lower limit
-                     DatabaseDescriptor.calculateDefaultSpaceInMB("type", "/path", "setting_name", preferredInMB, spaceInBytes, numerator, denominator));
+                     DatabaseDescriptor.calculateDefaultSpaceInMiB("type", "/path", "setting_name", preferredInMiB, spaceInBytes, numerator, denominator));
 
         // check preferred size is used for a small storage volume
-        preferredInMB = 100;
+        preferredInMiB = 100;
         numerator = 1;
         denominator = 3;
         spaceInBytes = 999 * 1024 * 1024;
 
         assertEquals(100, // total size is more than preferred so keep the configured limit
-                     DatabaseDescriptor.calculateDefaultSpaceInMB("type", "/path", "setting_name", preferredInMB, spaceInBytes, numerator, denominator));
+                     DatabaseDescriptor.calculateDefaultSpaceInMiB("type", "/path", "setting_name", preferredInMiB, spaceInBytes, numerator, denominator));
+    }
+
+    @Test
+    public void testZeroMemtableOffheapSpaceRejectedForOffheapAllocationTypes()
+    {
+        // off-heap allocators must not be configured with an off-heap space of 0
+        for (Config.MemtableAllocationType type : EnumSet.of(Config.MemtableAllocationType.offheap_buffers,
+                                                            Config.MemtableAllocationType.offheap_objects))
+        {
+            Config conf = new Config();
+            conf.memtable_allocation_type = type;
+            conf.memtable_offheap_space = new DataStorageSpec.IntMebibytesBound(0);
+
+            assertThatExceptionOfType(ConfigurationException.class)
+                .isThrownBy(() -> DatabaseDescriptor.applyMemtableSpace(conf))
+                .withMessageContaining("memtable_offheap_space must be positive")
+                .withMessageContaining(type.toString());
+        }
+    }
+
+    @Test
+    public void testZeroMemtableOffheapSpaceAllowedForHeapAllocationTypes()
+    {
+        for (Config.MemtableAllocationType type : EnumSet.of(Config.MemtableAllocationType.heap_buffers,
+                                                             Config.MemtableAllocationType.unslabbed_heap_buffers,
+                                                             Config.MemtableAllocationType.unslabbed_heap_buffers_logged))
+        {
+            Config conf = new Config();
+            conf.memtable_allocation_type = type;
+            conf.memtable_offheap_space = new DataStorageSpec.IntMebibytesBound(0);
+
+            DatabaseDescriptor.applyMemtableSpace(conf);
+            assertThat(conf.memtable_heap_space.toMebibytes()).isGreaterThan(0);
+        }
+    }
+
+    @Test
+    public void testZeroMemtableHeapSpaceIsRejected()
+    {
+        Config conf = new Config();
+        conf.memtable_heap_space = new DataStorageSpec.IntMebibytesBound(0);
+
+        assertThatExceptionOfType(ConfigurationException.class)
+            .isThrownBy(() -> DatabaseDescriptor.applyMemtableSpace(conf))
+            .withMessageContaining("memtable_heap_space must be positive");
     }
 
     @Test
@@ -477,7 +570,7 @@ public class DatabaseDescriptorTest
         catch (ConfigurationException e)
         {
             assertThat(e.getMessage()).isEqualTo("To set concurrent_validations > concurrent_compactors, " +
-                                                 "set the system property cassandra.allow_unlimited_concurrent_validations=true");
+                                                 "set the system property -D" + ALLOW_UNLIMITED_CONCURRENT_VALIDATIONS.getKey() + "=true");
         }
 
         // unless we disable that check (done with a system property at startup or via JMX)
@@ -560,6 +653,44 @@ public class DatabaseDescriptorTest
     }
 
     @Test
+    public void testUpperBoundStreamingConfigOnStartup()
+    {
+        Config config = DatabaseDescriptor.loadConfig();
+
+        String expectedMsg = "Invalid value of entire_sstable_stream_throughput_outbound:";
+        config.entire_sstable_stream_throughput_outbound = new DataRateSpec.LongBytesPerSecondBound(Integer.MAX_VALUE, DataRateSpec.DataRateUnit.MEBIBYTES_PER_SECOND);
+        validateProperty(expectedMsg);
+
+        expectedMsg = "Invalid value of entire_sstable_stream_throughput_outbound:";
+        config.entire_sstable_inter_dc_stream_throughput_outbound = new DataRateSpec.LongBytesPerSecondBound(Integer.MAX_VALUE, DataRateSpec.DataRateUnit.MEBIBYTES_PER_SECOND);
+        validateProperty(expectedMsg);
+
+        expectedMsg = "Invalid value of stream_throughput_outbound:";
+        config.stream_throughput_outbound = new DataRateSpec.LongBytesPerSecondBound(Integer.MAX_VALUE * 125_000L);
+        validateProperty(expectedMsg);
+
+        expectedMsg = "Invalid value of inter_dc_stream_throughput_outbound:";
+        config.inter_dc_stream_throughput_outbound = new DataRateSpec.LongBytesPerSecondBound(Integer.MAX_VALUE * 125_000L);
+        validateProperty(expectedMsg);
+
+        expectedMsg = "compaction_throughput:";
+        config.compaction_throughput = new DataRateSpec.LongBytesPerSecondBound(Integer.MAX_VALUE, DataRateSpec.DataRateUnit.MEBIBYTES_PER_SECOND);
+        validateProperty(expectedMsg);
+    }
+
+    private static void validateProperty(String expectedMsg)
+    {
+        try
+        {
+            DatabaseDescriptor.validateUpperBoundStreamingConfig();
+        }
+        catch (ConfigurationException ex)
+        {
+            Assert.assertEquals(expectedMsg, ex.getMessage());
+        }
+    }
+
+    @Test
     public void testApplyTokensConfigInitialTokensNotSetNumTokensSet()
     {
         Config config = DatabaseDescriptor.loadConfig();
@@ -592,5 +723,334 @@ public class DatabaseDescriptorTest
 
         Assert.assertEquals(Integer.valueOf(1), config.num_tokens);
         Assert.assertEquals(1, DatabaseDescriptor.tokensFromString(config.initial_token).size());
+    }
+
+    @Test
+    public void testDenylistInvalidValuesRejected()
+    {
+        DatabaseDescriptor.loadConfig();
+
+        expectIllegalArgumentException(DatabaseDescriptor::setDenylistRefreshSeconds, 0, "denylist_refresh must be a positive integer.");
+        expectIllegalArgumentException(DatabaseDescriptor::setDenylistRefreshSeconds, -1, "denylist_refresh must be a positive integer.");
+        expectIllegalArgumentException(DatabaseDescriptor::setDenylistMaxKeysPerTable, 0, "denylist_max_keys_per_table must be a positive integer.");
+        expectIllegalArgumentException(DatabaseDescriptor::setDenylistMaxKeysPerTable, -1, "denylist_max_keys_per_table must be a positive integer.");
+        expectIllegalArgumentException(DatabaseDescriptor::setDenylistMaxKeysTotal, 0, "denylist_max_keys_total must be a positive integer.");
+        expectIllegalArgumentException(DatabaseDescriptor::setDenylistMaxKeysTotal, -1, "denylist_max_keys_total must be a positive integer.");
+    }
+
+    private void expectIllegalArgumentException(Consumer<Integer> c, int val, String expectedMessage)
+    {
+        assertThatThrownBy(() -> c.accept(val))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining(expectedMessage);
+    }
+
+    // coordinator read
+    @Test
+    public void testClientLargeReadWarnGreaterThanAbort()
+    {
+        Config conf = new Config();
+        conf.coordinator_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        conf.coordinator_read_size_fail_threshold = new DataStorageSpec.LongBytesBound(1, KIBIBYTES);
+        Assertions.assertThatThrownBy(() -> DatabaseDescriptor.applyReadThresholdsValidations(conf))
+                  .isInstanceOf(ConfigurationException.class)
+                  .hasMessage("coordinator_read_size_fail_threshold (1KiB) must be greater than or equal to coordinator_read_size_warn_threshold (2KiB)");
+    }
+
+    @Test
+    public void testClientLargeReadWarnEqAbort()
+    {
+        Config conf = new Config();
+        conf.coordinator_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        conf.coordinator_read_size_fail_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        DatabaseDescriptor.applyReadThresholdsValidations(conf);
+    }
+
+    @Test
+    public void testClientLargeReadWarnEnabledAbortDisabled()
+    {
+        Config conf = new Config();
+        conf.coordinator_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        conf.coordinator_read_size_fail_threshold = null;
+        DatabaseDescriptor.applyReadThresholdsValidations(conf);
+    }
+
+    @Test
+    public void testClientLargeReadAbortEnabledWarnDisabled()
+    {
+        Config conf = new Config();
+        conf.coordinator_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(0, KIBIBYTES);
+        conf.coordinator_read_size_fail_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        DatabaseDescriptor.applyReadThresholdsValidations(conf);
+    }
+
+    // local read
+
+    @Test
+    public void testLocalLargeReadWarnGreaterThanAbort()
+    {
+        Config conf = new Config();
+        conf.local_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        conf.local_read_size_fail_threshold = new DataStorageSpec.LongBytesBound(1, KIBIBYTES);
+        Assertions.assertThatThrownBy(() -> DatabaseDescriptor.applyReadThresholdsValidations(conf))
+                  .isInstanceOf(ConfigurationException.class)
+                  .hasMessage("local_read_size_fail_threshold (1KiB) must be greater than or equal to local_read_size_warn_threshold (2KiB)");
+    }
+
+    @Test
+    public void testLocalLargeReadWarnEqAbort()
+    {
+        Config conf = new Config();
+        conf.local_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        conf.local_read_size_fail_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        DatabaseDescriptor.applyReadThresholdsValidations(conf);
+    }
+
+    @Test
+    public void testLocalLargeReadWarnEnabledAbortDisabled()
+    {
+        Config conf = new Config();
+        conf.local_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        conf.local_read_size_fail_threshold = null;
+        DatabaseDescriptor.applyReadThresholdsValidations(conf);
+    }
+
+    @Test
+    public void testLocalLargeReadAbortEnabledWarnDisabled()
+    {
+        Config conf = new Config();
+        conf.local_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(0, KIBIBYTES);
+        conf.local_read_size_fail_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        DatabaseDescriptor.applyReadThresholdsValidations(conf);
+    }
+
+    // row index entry
+
+    @Test
+    public void testRowIndexSizeWarnGreaterThanAbort()
+    {
+        Config conf = new Config();
+        conf.row_index_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        conf.row_index_read_size_fail_threshold = new DataStorageSpec.LongBytesBound(1, KIBIBYTES);
+        Assertions.assertThatThrownBy(() -> DatabaseDescriptor.applyReadThresholdsValidations(conf))
+                  .isInstanceOf(ConfigurationException.class)
+                  .hasMessage("row_index_read_size_fail_threshold (1KiB) must be greater than or equal to row_index_read_size_warn_threshold (2KiB)");
+    }
+
+    @Test
+    public void testRowIndexSizeWarnEqAbort()
+    {
+        Config conf = new Config();
+        conf.row_index_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        conf.row_index_read_size_fail_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        DatabaseDescriptor.applyReadThresholdsValidations(conf);
+    }
+
+    @Test
+    public void testRowIndexSizeWarnEnabledAbortDisabled()
+    {
+        Config conf = new Config();
+        conf.row_index_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        conf.row_index_read_size_fail_threshold = null;
+        DatabaseDescriptor.applyReadThresholdsValidations(conf);
+    }
+
+    @Test
+    public void testRowIndexSizeAbortEnabledWarnDisabled()
+    {
+        Config conf = new Config();
+        conf.row_index_read_size_warn_threshold = new DataStorageSpec.LongBytesBound(0, KIBIBYTES);
+        conf.row_index_read_size_fail_threshold = new DataStorageSpec.LongBytesBound(2, KIBIBYTES);
+        DatabaseDescriptor.applyReadThresholdsValidations(conf);
+    }
+
+    @Test
+    public void testDefaultSslContextFactoryConfiguration()
+    {
+        Config config = DatabaseDescriptor.loadConfig();
+        Assert.assertEquals("org.apache.cassandra.security.DefaultSslContextFactory",
+                            config.client_encryption_options.ssl_context_factory.class_name);
+        Assert.assertTrue(config.client_encryption_options.ssl_context_factory.parameters.isEmpty());
+        Assert.assertEquals("org.apache.cassandra.security.DefaultSslContextFactory",
+                            config.server_encryption_options.ssl_context_factory.class_name);
+        Assert.assertTrue(config.server_encryption_options.ssl_context_factory.parameters.isEmpty());
+    }
+
+    @Test (expected = IllegalArgumentException.class)
+    public void testInvalidSub1DefaultRFs() throws IllegalArgumentException
+    {
+        DatabaseDescriptor.setDefaultKeyspaceRF(0);
+    }
+
+    @Test
+    public void testCommitLogDiskAccessMode() throws IOException
+    {
+        ParameterizedClass savedCompression = DatabaseDescriptor.getCommitLogCompression();
+        EncryptionContext savedEncryptionContexg = DatabaseDescriptor.getEncryptionContext();
+        Config.DiskAccessMode savedCommitLogDOS = DatabaseDescriptor.getCommitLogWriteDiskAccessMode();
+        File savedCommitLogLocation = DatabaseDescriptor.getCommitLogLocation();
+
+        try
+        {
+            // block size available
+            DatabaseDescriptor.setCommitLogLocation(new File(Files.createTempDirectory("testCommitLogDiskAccessMode")));
+
+            // no encryption or compression
+            DatabaseDescriptor.setCommitLogCompression(null);
+            DatabaseDescriptor.setEncryptionContext(null);
+            DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.spinning;
+            assertCommitLogDiskAccessModes(Config.DiskAccessMode.mmap, Config.DiskAccessMode.mmap, Config.DiskAccessMode.mmap, Config.DiskAccessMode.direct);
+            DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.ssd;
+            assertCommitLogDiskAccessModes(Config.DiskAccessMode.mmap, Config.DiskAccessMode.direct, Config.DiskAccessMode.mmap, Config.DiskAccessMode.direct);
+
+            // compression enabled
+            DatabaseDescriptor.setCommitLogCompression(new ParameterizedClass("LZ4Compressor", null));
+            DatabaseDescriptor.setEncryptionContext(null);
+            DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.spinning;
+            assertCommitLogDiskAccessModes(Config.DiskAccessMode.standard, Config.DiskAccessMode.standard, Config.DiskAccessMode.standard);
+            DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.ssd;
+            assertCommitLogDiskAccessModes(Config.DiskAccessMode.standard, Config.DiskAccessMode.standard, Config.DiskAccessMode.standard);
+
+            // encryption enabled
+            DatabaseDescriptor.setCommitLogCompression(null);
+            DatabaseDescriptor.setEncryptionContext(new EncryptionContext(EncryptionContextGenerator.createEncryptionOptions()));
+            DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.spinning;
+            assertCommitLogDiskAccessModes(Config.DiskAccessMode.standard, Config.DiskAccessMode.standard, Config.DiskAccessMode.standard);
+            DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.ssd;
+            assertCommitLogDiskAccessModes(Config.DiskAccessMode.standard, Config.DiskAccessMode.standard, Config.DiskAccessMode.standard);
+
+            // block size not available
+            try (MockedStatic<FileUtils> fileUtilsMock = mockStatic(FileUtils.class);
+                 MockedStatic<PathUtils> pathUtilsMock = mockStatic(PathUtils.class))
+            {
+                pathUtilsMock.when(() -> PathUtils.createDirectoriesIfNotExists(any())).thenAnswer(invocation -> null);
+                fileUtilsMock.when(() -> FileUtils.getBlockSize(any())).thenThrow(new RuntimeException("unable to get block size"));
+
+                // no encryption or compression
+                DatabaseDescriptor.setCommitLogCompression(null);
+                DatabaseDescriptor.setEncryptionContext(null);
+                DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.spinning;
+                assertCommitLogDiskAccessModes(Config.DiskAccessMode.mmap, Config.DiskAccessMode.mmap, Config.DiskAccessMode.mmap);
+                DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.ssd;
+                assertCommitLogDiskAccessModes(Config.DiskAccessMode.mmap, Config.DiskAccessMode.mmap, Config.DiskAccessMode.mmap);
+
+                // compression enabled
+                DatabaseDescriptor.setCommitLogCompression(new ParameterizedClass("LZ4Compressor", null));
+                DatabaseDescriptor.setEncryptionContext(null);
+                DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.spinning;
+                assertCommitLogDiskAccessModes(Config.DiskAccessMode.standard, Config.DiskAccessMode.standard, Config.DiskAccessMode.standard);
+                DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.ssd;
+                assertCommitLogDiskAccessModes(Config.DiskAccessMode.standard, Config.DiskAccessMode.standard, Config.DiskAccessMode.standard);
+
+                // encryption enabled
+                DatabaseDescriptor.setCommitLogCompression(null);
+                DatabaseDescriptor.setEncryptionContext(new EncryptionContext(EncryptionContextGenerator.createEncryptionOptions()));
+                DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.spinning;
+                assertCommitLogDiskAccessModes(Config.DiskAccessMode.standard, Config.DiskAccessMode.standard, Config.DiskAccessMode.standard);
+                DatabaseDescriptor.getRawConfig().disk_optimization_strategy = Config.DiskOptimizationStrategy.ssd;
+                assertCommitLogDiskAccessModes(Config.DiskAccessMode.standard, Config.DiskAccessMode.standard, Config.DiskAccessMode.standard);
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setCommitLogCompression(savedCompression);
+            DatabaseDescriptor.setEncryptionContext(savedEncryptionContexg);
+            DatabaseDescriptor.setCommitLogWriteDiskAccessMode(savedCommitLogDOS);
+            DatabaseDescriptor.setCommitLogLocation(savedCommitLogLocation);
+        }
+    }
+
+    private void assertCommitLogDiskAccessModes(Config.DiskAccessMode expectedLegacy, Config.DiskAccessMode expectedAuto, Config.DiskAccessMode... allowedModesArray)
+    {
+        EnumSet<Config.DiskAccessMode> allowedModes = EnumSet.copyOf(Arrays.asList(allowedModesArray));
+        allowedModes.add(Config.DiskAccessMode.legacy);
+        allowedModes.add(Config.DiskAccessMode.auto);
+
+        EnumSet<Config.DiskAccessMode> disallowedModes = EnumSet.complementOf(allowedModes);
+
+        for (Config.DiskAccessMode mode : disallowedModes)
+        {
+            DatabaseDescriptor.setCommitLogWriteDiskAccessMode(mode);
+            assertThatExceptionOfType(ConfigurationException.class).isThrownBy(DatabaseDescriptor::initializeCommitLogDiskAccessMode);
+        }
+
+        for (Config.DiskAccessMode mode : allowedModes)
+        {
+            DatabaseDescriptor.setCommitLogWriteDiskAccessMode(mode);
+            DatabaseDescriptor.initializeCommitLogDiskAccessMode();
+            boolean changed = DatabaseDescriptor.getCommitLogWriteDiskAccessMode() != mode;
+            assertThat(changed).isEqualTo(mode == Config.DiskAccessMode.legacy || mode == Config.DiskAccessMode.auto);
+            if (mode == Config.DiskAccessMode.legacy)
+                assertThat(DatabaseDescriptor.getCommitLogWriteDiskAccessMode()).isEqualTo(expectedLegacy);
+            else if (mode == Config.DiskAccessMode.auto)
+                assertThat(DatabaseDescriptor.getCommitLogWriteDiskAccessMode()).isEqualTo(expectedAuto);
+            else
+                assertThat(DatabaseDescriptor.getCommitLogWriteDiskAccessMode()).isEqualTo(mode);
+        }
+    }
+    
+    @Test
+    public void testDataFileDirectoriesMinTotalSpaceInGB() throws IOException
+    {
+        DatabaseDescriptor.setDataDirectories(new File[] {});
+        assertEquals(0L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB());
+
+        DatabaseDescriptor.setDataDirectories(new File[] { new File(temporaryFolder.newFolder("data"))});
+        assertTrue(DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB() > 0);
+
+        Multiset<FileStore> fileStoreMultiset = HashMultiset.create();
+
+        // single disk (i.e. mockFileStore1)
+        FileStore mockFileStore1 = Mockito.mock(FileStore.class);
+        when(mockFileStore1.getTotalSpace()).thenReturn(1L << 43); // 8 TB
+        fileStoreMultiset.add(mockFileStore1);
+        assertEquals(8192L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        // two different disks (i.e. mockFileStore1, mockFileStore2)
+        FileStore mockFileStore2 = Mockito.mock(FileStore.class);
+        when(mockFileStore2.getTotalSpace()).thenReturn(1L << 41); // 2 TB
+        fileStoreMultiset.add(mockFileStore2);
+        assertEquals(4096L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        // two different disks with three directories. Two directories are on disk 1 (i.e. mockFileStore1)
+        fileStoreMultiset.add(mockFileStore1);
+        assertEquals(6144L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        fileStoreMultiset.clear();
+
+        FileStore mockLargeFileStore = Mockito.mock(FileStore.class);
+        when(mockLargeFileStore.getTotalSpace()).thenReturn(-1L);
+        fileStoreMultiset.add(mockLargeFileStore);
+        assertEquals(Long.MAX_VALUE >> 30, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+
+        FileStore mockSmallFileStore = Mockito.mock(FileStore.class);
+        when(mockSmallFileStore.getTotalSpace()).thenReturn(1L << 29); // 512 MB
+        fileStoreMultiset.add(mockSmallFileStore);
+        assertEquals(0L, DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB(fileStoreMultiset));
+    }
+
+    @Test
+    public void testResetUnsafe()
+    {
+        assertTrue(DatabaseDescriptor.isDaemonInitialized());
+        assertFalse(DatabaseDescriptor.isClientOrToolInitialized());
+        assertNotNull(DatabaseDescriptor.getPartitioner());
+        assertNotNull(DatabaseDescriptor.getEndpointSnitch());
+        assertTrue(MBeanWrapper.instance.isRegistered("org.apache.cassandra.db:type=EndpointSnitchInfo"));
+
+        try
+        {
+            DatabaseDescriptor.resetUnsafe();
+
+            assertFalse(DatabaseDescriptor.isDaemonInitialized());
+            assertFalse(DatabaseDescriptor.isClientOrToolInitialized());
+            assertNull(DatabaseDescriptor.getPartitioner());
+            assertNull(DatabaseDescriptor.getEndpointSnitch());
+            assertFalse(MBeanWrapper.instance.isRegistered("org.apache.cassandra.db:type=EndpointSnitchInfo"));
+        }
+        finally
+        {
+            DatabaseDescriptor.daemonInitialization();
+        }
     }
 }

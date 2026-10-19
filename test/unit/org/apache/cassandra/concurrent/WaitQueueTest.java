@@ -26,9 +26,11 @@ import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.junit.*;
 
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.cassandra.utils.concurrent.WaitQueue.newWaitQueue;
 import static org.junit.Assert.*;
 
 public class WaitQueueTest
@@ -37,14 +39,14 @@ public class WaitQueueTest
     @Test
     public void testSerial() throws InterruptedException
     {
-        testSerial(new WaitQueue());
+        testSerial(newWaitQueue());
     }
     public void testSerial(final WaitQueue queue) throws InterruptedException
     {
         final AtomicInteger ready = new AtomicInteger();
         Thread[] ts = new Thread[4];
         for (int i = 0 ; i < ts.length ; i++)
-            ts[i] = NamedThreadFactory.createThread(new Runnable()
+            ts[i] = NamedThreadFactory.createAnonymousThread(new Runnable()
         {
             @Override
             public void run()
@@ -77,14 +79,14 @@ public class WaitQueueTest
     @Test
     public void testCondition() throws InterruptedException
     {
-        testCondition(new WaitQueue());
+        testCondition(newWaitQueue());
     }
     public void testCondition(final WaitQueue queue) throws InterruptedException
     {
         final AtomicBoolean ready = new AtomicBoolean(false);
         final AtomicBoolean condition = new AtomicBoolean(false);
         final AtomicBoolean fail = new AtomicBoolean(false);
-        Thread t = NamedThreadFactory.createThread(new Runnable()
+        Thread t = NamedThreadFactory.createAnonymousThread(new Runnable()
         {
             @Override
             public void run()
@@ -118,4 +120,73 @@ public class WaitQueueTest
         assertFalse(fail.get());
     }
 
+    @Test
+    public void testInterruptOfSignalAwaitingThread() throws InterruptedException
+    {
+        final WaitQueue waitQueue = newWaitQueue();
+        Thread writerAwaitThread = createThread(() -> {
+            Thread.currentThread().interrupt();
+            WaitQueue.Signal signal = waitQueue.register();
+            signal.awaitUninterruptibly();
+
+        }, "writer.await");
+
+        writerAwaitThread.start();
+
+        Thread.sleep(1_000); // wait to enter signal.awaitUninterruptibly()
+        waitQueue.signalAll();
+
+        writerAwaitThread.join(4_000);
+        if (writerAwaitThread.isAlive())
+        {
+            printThreadStackTrace(writerAwaitThread);
+            fail("signal.awaitUninterruptibly() is stuck");
+        }
+    }
+
+    @Test
+    public void testInterruptOfSignalAwaitingWithTimeoutThread() throws InterruptedException
+    {
+        final WaitQueue waitQueue = newWaitQueue();
+        Thread writerAwaitThread = createThread(() -> {
+            Thread.currentThread().interrupt();
+            WaitQueue.Signal signal = waitQueue.register();
+            signal.awaitUninterruptibly(100_000, TimeUnit.MILLISECONDS);
+        }, "writer.await");
+
+        writerAwaitThread.start();
+
+        Thread.sleep(1_000); // wait to enter signal.awaitUninterruptibly()
+        waitQueue.signalAll();
+
+        writerAwaitThread.join(4_000);
+        if (writerAwaitThread.isAlive())
+        {
+            printThreadStackTrace(writerAwaitThread);
+            fail("signal.awaitUninterruptibly() is stuck");
+        }
+    }
+
+    private static Thread createThread(Runnable job, String name)
+    {
+        Thread thread = new Thread(job, name);
+        thread.setDaemon(true);
+        return thread;
+    }
+
+    private static void printThreadStackTrace(Thread thread)
+    {
+        System.out.println("Stack trace for thread: " + thread.getName());
+        StackTraceElement[] stackTrace = thread.getStackTrace();
+        if (stackTrace.length == 0)
+        {
+            System.out.println("The thread is not currently running or has no stack trace.");
+        } else
+        {
+            for (StackTraceElement element : stackTrace)
+            {
+                System.out.println("\tat " + element);
+            }
+        }
+    }
 }

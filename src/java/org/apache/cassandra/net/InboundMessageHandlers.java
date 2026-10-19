@@ -31,9 +31,6 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeInboundMetrics;
 import org.apache.cassandra.net.Message.Header;
 
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
-import static org.apache.cassandra.utils.MonotonicClock.approxTime;
-
 /**
  * An aggregation of {@link InboundMessageHandler}s for all connections from a peer.
  *
@@ -88,8 +85,10 @@ public final class InboundMessageHandlers
     public interface GlobalMetricCallbacks
     {
         LatencyConsumer internodeLatencyRecorder(InetAddressAndPort to);
-        void recordInternalLatency(Verb verb, long timeElapsed, TimeUnit timeUnit);
+        void recordInternalLatency(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit timeUnit);
         void recordInternodeDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit);
+        void recordMessageStageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit);
+        void recordTotalMessageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit);
     }
 
     public InboundMessageHandlers(InetAddressAndPort self,
@@ -129,7 +128,7 @@ public final class InboundMessageHandlers
         largeCallbacks  = makeMessageCallbacks(peer, largeCounters,  globalMetricCallbacks, messageConsumer);
         legacyCallbacks = makeMessageCallbacks(peer, legacyCounters, globalMetricCallbacks, messageConsumer);
 
-        metrics = new InternodeInboundMetrics(peer, this);
+        metrics = InternodeInboundMetrics.create(peer, this);
     }
 
     InboundMessageHandler createHandler(FrameDecoder frameDecoder, ConnectionType type, Channel channel, int version)
@@ -201,9 +200,9 @@ public final class InboundMessageHandlers
             @Override
             public void onHeaderArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
-                // do not log latency if we are within error bars of zero
-                if (timeElapsed > unit.convert(approxTime.error(), NANOSECONDS))
-                    internodeLatency.accept(timeElapsed, unit);
+                // log latency even if we are within error bars of zero
+                // log negative numbers too; we are interested in the distribution, not precise values
+                internodeLatency.accept(header.verb, timeElapsed, unit);
             }
 
             @Override
@@ -264,13 +263,20 @@ public final class InboundMessageHandlers
             @Override
             public void onExecuting(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
-                globalMetrics.recordInternalLatency(header.verb, timeElapsed, unit);
+                globalMetrics.recordInternalLatency(header.verb, header.from, timeElapsed, unit);
             }
 
             @Override
             public void onExecuted(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
                 counters.removePending(messageSize);
+                globalMetrics.recordMessageStageProcessingTime(header.verb, header.from, timeElapsed, unit);
+            }
+
+            @Override
+            public void onMessageHandlingCompleted(Header header, long timeElapsed, TimeUnit unit)
+            {
+                globalMetrics.recordTotalMessageProcessingTime(header.verb, header.from, timeElapsed, unit);
             }
 
             @Override
@@ -429,6 +435,13 @@ public final class InboundMessageHandlers
              + mapping.applyAsLong(smallCounters)
              + mapping.applyAsLong(largeCounters)
              + mapping.applyAsLong(legacyCounters);
+    }
+
+    @VisibleForTesting
+    public void assertHandlersMessagingVersion(int expectedVersion)
+    {
+        for (InboundMessageHandler handler : handlers)
+            assert handler.version == expectedVersion : "Expected all handlers to be at version " + expectedVersion + " but found " + handler.version;
     }
 
     interface HandlerProvider

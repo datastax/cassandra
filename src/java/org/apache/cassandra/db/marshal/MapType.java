@@ -18,20 +18,33 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
-import org.apache.cassandra.cql3.Json;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+
 import org.apache.cassandra.cql3.Maps;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.CollectionSerializer;
-import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.MapSerializer;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable.Version;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 public class MapType<K, V> extends CollectionType<Map<K, V>>
 {
@@ -42,7 +55,6 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     private final AbstractType<K> keys;
     private final AbstractType<V> values;
     private final MapSerializer<K, V> serializer;
-    private final boolean isMultiCell;
 
     public static MapType<?, ?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
@@ -50,58 +62,35 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
         if (l.size() != 2)
             throw new ConfigurationException("MapType takes exactly 2 type parameters");
 
-        return getInstance(l.get(0), l.get(1), true);
+        return getInstance(l.get(0).freeze(), l.get(1).freeze(), true);
     }
 
+    @SuppressWarnings("unchecked")
     public static <K, V> MapType<K, V> getInstance(AbstractType<K> keys, AbstractType<V> values, boolean isMultiCell)
     {
-        ConcurrentHashMap<Pair<AbstractType<?>, AbstractType<?>>, MapType> internMap = isMultiCell ? instances : frozenInstances;
-        Pair<AbstractType<?>, AbstractType<?>> p = Pair.create(keys, values);
-        MapType<K, V> t = internMap.get(p);
-        return null == t
-             ? internMap.computeIfAbsent(p, k -> new MapType<>(k.left, k.right, isMultiCell))
-             : t;
+        return getInstance(isMultiCell ? instances : frozenInstances, Pair.create(keys, values), () -> new MapType<>(keys, values, isMultiCell));
     }
 
     private MapType(AbstractType<K> keys, AbstractType<V> values, boolean isMultiCell)
     {
-        super(ComparisonType.CUSTOM, Kind.MAP);
+        super(ComparisonType.CUSTOM, Kind.MAP, isMultiCell, ImmutableList.of(keys, values));
         this.keys = keys;
         this.values = values;
         this.serializer = MapSerializer.getInstance(keys.getSerializer(),
                                                     values.getSerializer(),
                                                     keys.comparatorSet);
-        this.isMultiCell = isMultiCell;
     }
 
     @Override
-    public <T> boolean referencesUserType(T name, ValueAccessor<T> accessor)
+    @SuppressWarnings("unchecked")
+    public MapType<K, V> with(ImmutableList<AbstractType<?>> subTypes, boolean isMultiCell)
     {
-        return keys.referencesUserType(name, accessor) || values.referencesUserType(name, accessor);
-    }
+        Preconditions.checkArgument(subTypes.size() == 2, "Invalid number of subTypes for MapType (got %s)", subTypes.size());
 
-    @Override
-    public MapType<?,?> withUpdatedUserType(UserType udt)
-    {
-        if (!referencesUserType(udt.name))
+        if (subTypes.equals(this.subTypes()) && isMultiCell == this.isMultiCell())
             return this;
 
-        (isMultiCell ? instances : frozenInstances).remove(Pair.create(keys, values));
-
-        return getInstance(keys.withUpdatedUserType(udt), values.withUpdatedUserType(udt), isMultiCell);
-    }
-
-    @Override
-    public AbstractType<?> expandUserTypes()
-    {
-        return getInstance(keys.expandUserTypes(), values.expandUserTypes(), isMultiCell);
-    }
-
-    @Override
-    public boolean referencesDuration()
-    {
-        // Maps cannot be created with duration as keys
-        return getValuesType().referencesDuration();
+        return getInstance((AbstractType<K>) subTypes.get(0), (AbstractType<V>) subTypes.get(1), isMultiCell);
     }
 
     public AbstractType<K> getKeysType()
@@ -114,6 +103,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
         return values;
     }
 
+    @Override
     public AbstractType<K> nameComparator()
     {
         return keys;
@@ -122,60 +112,6 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     public AbstractType<V> valueComparator()
     {
         return values;
-    }
-
-    @Override
-    public boolean isMultiCell()
-    {
-        return isMultiCell;
-    }
-
-    @Override
-    public List<AbstractType<?>> subTypes()
-    {
-        return Arrays.asList(keys, values);
-    }
-
-    @Override
-    public AbstractType<?> freeze()
-    {
-        if (isMultiCell)
-            return getInstance(this.keys, this.values, false);
-        else
-            return this;
-    }
-
-    @Override
-    public AbstractType<?> freezeNestedMulticellTypes()
-    {
-        if (!isMultiCell())
-            return this;
-
-        AbstractType<?> keyType = (keys.isFreezable() && keys.isMultiCell())
-                                ? keys.freeze()
-                                : keys.freezeNestedMulticellTypes();
-
-        AbstractType<?> valueType = (values.isFreezable() && values.isMultiCell())
-                                  ? values.freeze()
-                                  : values.freezeNestedMulticellTypes();
-
-        return getInstance(keyType, valueType, isMultiCell);
-    }
-
-    @Override
-    public boolean isCompatibleWithFrozen(CollectionType<?> previous)
-    {
-        assert !isMultiCell;
-        MapType tprev = (MapType) previous;
-        return keys.isCompatibleWith(tprev.keys) && values.isCompatibleWith(tprev.values);
-    }
-
-    @Override
-    public boolean isValueCompatibleWithFrozen(CollectionType<?> previous)
-    {
-        assert !isMultiCell;
-        MapType tprev = (MapType) previous;
-        return keys.isCompatibleWith(tprev.keys) && values.isValueCompatibleWith(tprev.values);
     }
 
     public <RL, TR> int compareCustom(RL left, ValueAccessor<RL> accessorL, TR right, ValueAccessor<TR> accessorR)
@@ -189,33 +125,95 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             return Boolean.compare(accessorR.isEmpty(right), accessorL.isEmpty(left));
 
 
-        ProtocolVersion protocolVersion = ProtocolVersion.V3;
-        int sizeL = CollectionSerializer.readCollectionSize(left, accessorL, protocolVersion);
-        int sizeR = CollectionSerializer.readCollectionSize(right, accessorR, protocolVersion);
+        int sizeL = CollectionSerializer.readCollectionSize(left, accessorL);
+        int sizeR = CollectionSerializer.readCollectionSize(right, accessorR);
 
-        int offsetL = CollectionSerializer.sizeOfCollectionSize(sizeL, protocolVersion);
-        int offsetR = CollectionSerializer.sizeOfCollectionSize(sizeR, protocolVersion);
+        int offsetL = CollectionSerializer.sizeOfCollectionSize();
+        int offsetR = CollectionSerializer.sizeOfCollectionSize();
 
         for (int i = 0; i < Math.min(sizeL, sizeR); i++)
         {
-            TL k1 = CollectionSerializer.readValue(left, accessorL, offsetL, protocolVersion);
-            offsetL += CollectionSerializer.sizeOfValue(k1, accessorL, protocolVersion);
-            TR k2 = CollectionSerializer.readValue(right, accessorR, offsetR, protocolVersion);
-            offsetR += CollectionSerializer.sizeOfValue(k2, accessorR, protocolVersion);
+            TL k1 = CollectionSerializer.readValue(left, accessorL, offsetL);
+            offsetL += CollectionSerializer.sizeOfValue(k1, accessorL);
+            TR k2 = CollectionSerializer.readValue(right, accessorR, offsetR);
+            offsetR += CollectionSerializer.sizeOfValue(k2, accessorR);
             int cmp = keysComparator.compare(k1, accessorL, k2, accessorR);
             if (cmp != 0)
                 return cmp;
 
-            TL v1 = CollectionSerializer.readValue(left, accessorL, offsetL, protocolVersion);
-            offsetL += CollectionSerializer.sizeOfValue(v1, accessorL, protocolVersion);
-            TR v2 = CollectionSerializer.readValue(right, accessorR, offsetR, protocolVersion);
-            offsetR += CollectionSerializer.sizeOfValue(v2, accessorR, protocolVersion);
+            TL v1 = CollectionSerializer.readValue(left, accessorL, offsetL);
+            offsetL += CollectionSerializer.sizeOfValue(v1, accessorL);
+            TR v2 = CollectionSerializer.readValue(right, accessorR, offsetR);
+            offsetR += CollectionSerializer.sizeOfValue(v2, accessorR);
             cmp = valuesComparator.compare(v1, accessorL, v2, accessorR);
             if (cmp != 0)
                 return cmp;
         }
 
-        return sizeL == sizeR ? 0 : (sizeL < sizeR ? -1 : 1);
+        return Integer.compare(sizeL, sizeR);
+    }
+
+    @Override
+    public <T> ByteSource asComparableBytes(ValueAccessor<T> accessor, T data, Version version)
+    {
+        return asComparableBytesMap(getKeysType(), getValuesType(), accessor, data, version);
+    }
+
+    @Override
+    public <T> T fromComparableBytes(ValueAccessor<T> accessor, ByteSource.Peekable comparableBytes, Version version)
+    {
+        return fromComparableBytesMap(accessor, comparableBytes, version, getKeysType(), getValuesType());
+    }
+
+    static <V> ByteSource asComparableBytesMap(AbstractType<?> keysComparator,
+                                               AbstractType<?> valuesComparator,
+                                               ValueAccessor<V> accessor,
+                                               V data,
+                                               Version version)
+    {
+        if (accessor.isEmpty(data))
+            return null;
+
+        int offset = 0;
+        int size = CollectionSerializer.readCollectionSize(data, accessor);
+        offset += CollectionSerializer.sizeOfCollectionSize();
+        ByteSource[] srcs = new ByteSource[size * 2];
+        for (int i = 0; i < size; ++i)
+        {
+            V k = CollectionSerializer.readValue(data, accessor, offset);
+            offset += CollectionSerializer.sizeOfValue(k, accessor);
+            srcs[i * 2 + 0] = keysComparator.asComparableBytes(accessor, k, version);
+            V v = CollectionSerializer.readValue(data, accessor, offset);
+            offset += CollectionSerializer.sizeOfValue(v, accessor);
+            srcs[i * 2 + 1] = valuesComparator.asComparableBytes(accessor, v, version);
+        }
+        return ByteSource.withTerminatorMaybeLegacy(version, 0x00, srcs);
+    }
+
+    static <V> V fromComparableBytesMap(ValueAccessor<V> accessor,
+                                        ByteSource.Peekable comparableBytes,
+                                        Version version,
+                                        AbstractType<?> keysComparator,
+                                        AbstractType<?> valuesComparator)
+    {
+        if (comparableBytes == null)
+            return accessor.empty();
+        assert version != ByteComparable.Version.LEGACY; // legacy translation is not reversible
+
+        List<V> buffers = new ArrayList<>();
+        int separator = comparableBytes.next();
+        while (separator != ByteSource.TERMINATOR)
+        {
+            buffers.add(ByteSourceInverse.nextComponentNull(separator)
+                        ? null
+                        : keysComparator.fromComparableBytes(accessor, comparableBytes, version));
+            separator = comparableBytes.next();
+            buffers.add(ByteSourceInverse.nextComponentNull(separator)
+                        ? null
+                        : valuesComparator.fromComparableBytes(accessor, comparableBytes, version));
+            separator = comparableBytes.next();
+        }
+        return CollectionSerializer.pack(buffers, accessor,buffers.size() / 2);
     }
 
     @Override
@@ -228,19 +226,6 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     protected int collectionSize(List<ByteBuffer> values)
     {
         return values.size() / 2;
-    }
-
-    public String toString(boolean ignoreFreezing)
-    {
-        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
-
-        StringBuilder sb = new StringBuilder();
-        if (includeFrozenType)
-            sb.append(FrozenType.class.getName()).append("(");
-        sb.append(getClass().getName()).append(TypeParser.stringifyTypeParameters(Arrays.asList(keys, values), ignoreFreezing || !isMultiCell));
-        if (includeFrozenType)
-            sb.append(")");
-        return sb.toString();
     }
 
     public List<ByteBuffer> serializedValues(Iterator<Cell<?>> cells)
@@ -260,15 +245,15 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     public Term fromJSONObject(Object parsed) throws MarshalException
     {
         if (parsed instanceof String)
-            parsed = Json.decodeJson((String) parsed);
+            parsed = JsonUtils.decodeJson((String) parsed);
 
         if (!(parsed instanceof Map))
             throw new MarshalException(String.format(
                     "Expected a map, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
-        Map<Object, Object> map = (Map<Object, Object>) parsed;
+        Map<?, ?> map = (Map<?, ?>) parsed;
         Map<Term, Term> terms = new HashMap<>(map.size());
-        for (Map.Entry<Object, Object> entry : map.entrySet())
+        for (Map.Entry<?, ?> entry : map.entrySet())
         {
             if (entry.getKey() == null)
                 throw new MarshalException("Invalid null key in map");
@@ -286,27 +271,64 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     {
         ByteBuffer value = buffer.duplicate();
         StringBuilder sb = new StringBuilder("{");
-        int size = CollectionSerializer.readCollectionSize(value, protocolVersion);
-        int offset = CollectionSerializer.sizeOfCollectionSize(size, protocolVersion);
+        int size = CollectionSerializer.readCollectionSize(value, ByteBufferAccessor.instance);
+        int offset = CollectionSerializer.sizeOfCollectionSize();
         for (int i = 0; i < size; i++)
         {
             if (i > 0)
                 sb.append(", ");
 
             // map keys must be JSON strings, so convert non-string keys to strings
-            ByteBuffer kv = CollectionSerializer.readValue(value, ByteBufferAccessor.instance, offset, protocolVersion);
-            offset += CollectionSerializer.sizeOfValue(kv, ByteBufferAccessor.instance, protocolVersion);
+            ByteBuffer kv = CollectionSerializer.readValue(value, ByteBufferAccessor.instance, offset);
+            offset += CollectionSerializer.sizeOfValue(kv, ByteBufferAccessor.instance);
             String key = keys.toJSONString(kv, protocolVersion);
             if (key.startsWith("\""))
                 sb.append(key);
             else
-                sb.append('"').append(Json.quoteAsJsonString(key)).append('"');
+                sb.append('"').append(JsonUtils.quoteAsJsonString(key)).append('"');
 
             sb.append(": ");
-            ByteBuffer vv = CollectionSerializer.readValue(value, ByteBufferAccessor.instance, offset, protocolVersion);
-            offset += CollectionSerializer.sizeOfValue(vv, ByteBufferAccessor.instance, protocolVersion);
+            ByteBuffer vv = CollectionSerializer.readValue(value, ByteBufferAccessor.instance, offset);
+            offset += CollectionSerializer.sizeOfValue(vv, ByteBufferAccessor.instance);
             sb.append(values.toJSONString(vv, protocolVersion));
         }
         return sb.append("}").toString();
+    }
+
+    @Override
+    public void forEach(ByteBuffer input, Consumer<ByteBuffer> action)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public ByteBuffer getMaskedValue()
+    {
+        return decompose(Collections.emptyMap());
+    }
+
+    /**
+     * Checks if the specified serialized map contains the specified serialized map value.
+     *
+     * @param map a serialized map
+     * @param value a serialized map value
+     * @return {@code true} if the map contains the value, {@code false} otherwise
+     */
+    @Override
+    public boolean contains(ByteBuffer map, ByteBuffer value)
+    {
+        return CollectionSerializer.contains(getValuesType(), map, value, true, false);
+    }
+
+    /**
+     * Checks if the specified serialized map contains the specified serialized map key.
+     *
+     * @param map a serialized map
+     * @param key a serialized map key
+     * @return {@code true} if the map contains the key, {@code false} otherwise
+     */
+    public boolean containsKey(ByteBuffer map, ByteBuffer key)
+    {
+        return CollectionSerializer.contains(getKeysType(), map, key, true, true);
     }
 }

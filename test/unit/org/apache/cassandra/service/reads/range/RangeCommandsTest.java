@@ -28,17 +28,22 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.AbstractReadCommandBuilder;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.CachedPartition;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.StubIndex;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.transport.Dispatcher;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.MAX_CONCURRENT_RANGE_REQUESTS;
 import static org.apache.cassandra.db.ConsistencyLevel.ONE;
+import static org.apache.cassandra.service.QueryInfoTracker.*;
 import static org.junit.Assert.assertEquals;
 
 /**
@@ -46,18 +51,20 @@ import static org.junit.Assert.assertEquals;
  */
 public class RangeCommandsTest extends CQLTester
 {
+
+    static WithProperties properties;
     private static final int MAX_CONCURRENCY_FACTOR = 4;
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
-        System.setProperty("cassandra.max_concurrent_range_requests", String.valueOf(MAX_CONCURRENCY_FACTOR));
+        properties = new WithProperties().set(MAX_CONCURRENT_RANGE_REQUESTS, MAX_CONCURRENCY_FACTOR);
     }
 
     @AfterClass
     public static void cleanup()
     {
-        System.clearProperty("cassandra.max_concurrent_range_requests");
+        properties.close();
     }
 
     @Test
@@ -73,8 +80,8 @@ public class RangeCommandsTest extends CQLTester
 
         // verify that a low concurrency factor is not capped by the max concurrency factor
         PartitionRangeReadCommand command = command(cfs, 50, 50);
-        try (RangeCommandIterator partitions = RangeCommands.rangeCommandIterator(command, ONE, System.nanoTime());
-             ReplicaPlanIterator ranges = new ReplicaPlanIterator(command.dataRange().keyRange(), keyspace, ONE))
+        try (RangeCommandIterator partitions = RangeCommands.rangeCommandIterator(command, ONE, Dispatcher.RequestTime.forImmediateExecution(), ReadTracker.NOOP);
+             ReplicaPlanIterator ranges = new ReplicaPlanIterator(command.dataRange().keyRange(), command.indexQueryPlan(), keyspace, ONE))
         {
             assertEquals(2, partitions.concurrencyFactor());
             assertEquals(MAX_CONCURRENCY_FACTOR, partitions.maxConcurrencyFactor());
@@ -83,8 +90,8 @@ public class RangeCommandsTest extends CQLTester
 
         // verify that a high concurrency factor is capped by the max concurrency factor
         command = command(cfs, 1000, 50);
-        try (RangeCommandIterator partitions = RangeCommands.rangeCommandIterator(command, ONE, System.nanoTime());
-             ReplicaPlanIterator ranges = new ReplicaPlanIterator(command.dataRange().keyRange(), keyspace, ONE))
+        try (RangeCommandIterator partitions = RangeCommands.rangeCommandIterator(command, ONE, Dispatcher.RequestTime.forImmediateExecution(), ReadTracker.NOOP);
+             ReplicaPlanIterator ranges = new ReplicaPlanIterator(command.dataRange().keyRange(), command.indexQueryPlan(), keyspace, ONE))
         {
             assertEquals(MAX_CONCURRENCY_FACTOR, partitions.concurrencyFactor());
             assertEquals(MAX_CONCURRENCY_FACTOR, partitions.maxConcurrencyFactor());
@@ -93,8 +100,8 @@ public class RangeCommandsTest extends CQLTester
 
         // with 0 estimated results per range the concurrency factor should be 1
         command = command(cfs, 1000, 0);
-        try (RangeCommandIterator partitions = RangeCommands.rangeCommandIterator(command, ONE, System.nanoTime());
-             ReplicaPlanIterator ranges = new ReplicaPlanIterator(command.dataRange().keyRange(), keyspace, ONE))
+        try (RangeCommandIterator partitions = RangeCommands.rangeCommandIterator(command, ONE, Dispatcher.RequestTime.forImmediateExecution(), ReadTracker.NOOP);
+             ReplicaPlanIterator ranges = new ReplicaPlanIterator(command.dataRange().keyRange(), command.indexQueryPlan(), keyspace, ONE))
         {
             assertEquals(1, partitions.concurrencyFactor());
             assertEquals(MAX_CONCURRENCY_FACTOR, partitions.maxConcurrencyFactor());
@@ -215,13 +222,13 @@ public class RangeCommandsTest extends CQLTester
         }
 
         @Override
-        public DataLimits forPaging(int pageSize)
+        public DataLimits forPaging(PageSize pageSize)
         {
             return wrapped.forPaging(pageSize);
         }
 
         @Override
-        public DataLimits forPaging(int pageSize, ByteBuffer lastReturnedKey, int lastReturnedKeyRemaining)
+        public DataLimits forPaging(PageSize pageSize, ByteBuffer lastReturnedKey, int lastReturnedKeyRemaining)
         {
             return wrapped.forPaging(pageSize, lastReturnedKey, lastReturnedKeyRemaining);
         }
@@ -233,15 +240,27 @@ public class RangeCommandsTest extends CQLTester
         }
 
         @Override
-        public boolean hasEnoughLiveData(CachedPartition cached, int nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
+        public boolean hasEnoughLiveData(CachedPartition cached, long nowInSec, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
         {
             return wrapped.hasEnoughLiveData(cached, nowInSec, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
         }
 
         @Override
-        public Counter newCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
+        public Counter newCounter(long nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData, boolean enforceStrictLiveness)
         {
             return wrapped.newCounter(nowInSec, assumeLiveData, countPartitionsWithOnlyStaticData, enforceStrictLiveness);
+        }
+
+        @Override
+        public int bytes()
+        {
+            return wrapped.bytes();
+        }
+
+        @Override
+        public int rows()
+        {
+            return wrapped.rows();
         }
 
         @Override
@@ -260,6 +279,24 @@ public class RangeCommandsTest extends CQLTester
         public DataLimits withoutState()
         {
             return wrapped.withoutState();
+        }
+
+        @Override
+        public DataLimits withCountedLimit(int newCountedLimit)
+        {
+            return wrapped.withCountedLimit(newCountedLimit);
+        }
+
+        @Override
+        public DataLimits withBytesLimit(int bytesLimit)
+        {
+            return wrapped.withBytesLimit(bytesLimit);
+        }
+
+        @Override
+        public String toCQLString()
+        {
+            return wrapped.toCQLString();
         }
     }
 

@@ -19,10 +19,8 @@
 package org.apache.cassandra.db.filter;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -33,6 +31,7 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.SingletonUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.BTreeRow;
@@ -45,13 +44,16 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.btree.BTree;
+
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class RowFilterTest
 {
-
     @Test
-    public void testCQLFilterClose()
+    public void testRowFilterClose()
     {
         // CASSANDRA-15126
         TableMetadata metadata = TableMetadata.builder("testks", "testcf")
@@ -63,10 +65,10 @@ public class RowFilterTest
         ColumnMetadata r = metadata.getColumn(new ColumnIdentifier("r", true));
 
         ByteBuffer one = Int32Type.instance.decompose(1);
-        RowFilter filter = RowFilter.NONE.withNewExpressions(new ArrayList<>());
+        RowFilter.Builder filter = RowFilter.builder(false);
         filter.add(s, Operator.NEQ, one);
         AtomicBoolean closed = new AtomicBoolean();
-        UnfilteredPartitionIterator iter = filter.filter(new SingletonUnfilteredPartitionIterator(new UnfilteredRowIterator()
+        UnfilteredPartitionIterator iter = filter.build().filter(new SingletonUnfilteredPartitionIterator(new UnfilteredRowIterator()
         {
             public DeletionTime partitionLevelDeletion() { return null; }
             public EncodingStats stats() { return null; }
@@ -88,13 +90,13 @@ public class RowFilterTest
                 closed.set(true);
             }
         }), 1);
-        Assert.assertFalse(iter.hasNext());
-        Assert.assertTrue(closed.get());
+        assertFalse(iter.hasNext());
+        assertTrue(closed.get());
 
-        filter = RowFilter.NONE.withNewExpressions(new ArrayList<>());
+        filter = RowFilter.builder(false);
         filter.add(r, Operator.NEQ, one);
         closed.set(false);
-        iter = filter.filter(new SingletonUnfilteredPartitionIterator(new UnfilteredRowIterator()
+        iter = filter.build().filter(new SingletonUnfilteredPartitionIterator(new UnfilteredRowIterator()
         {
             boolean hasNext = true;
             public DeletionTime partitionLevelDeletion() { return null; }
@@ -122,9 +124,45 @@ public class RowFilterTest
                 closed.set(true);
             }
         }), 1);
-        Assert.assertFalse(iter.hasNext());
-        Assert.assertTrue(closed.get());
+        assertFalse(iter.hasNext());
+        assertTrue(closed.get());
     }
 
+    @Test
+    public void testMutableIntersections()
+    {
+        TableMetadata metadata = TableMetadata.builder("testks", "testcf")
+                                              .addPartitionKeyColumn("pk", Int32Type.instance)
+                                              .addRegularColumn("r", Int32Type.instance)
+                                              .addRegularColumn("t", UTF8Type.instance)
+                                              .build();
 
+        // Empty filter - no expressions
+        RowFilter filter = RowFilter.builder(false).build();
+        assertFalse(filter.isMutableIntersection());
+        
+        ColumnMetadata r = metadata.getColumn(new ColumnIdentifier("r", true));
+        
+        // Single expression on one column
+        RowFilter.Builder builder = RowFilter.builder(false);
+        builder.add(r, Operator.GT, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+        filter = builder.build();
+        assertFalse(filter.isMutableIntersection());
+
+        // Two expressions on the same column
+        builder = RowFilter.builder(false);
+        builder.add(r, Operator.GT, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+        builder.add(r, Operator.LT, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+        filter = builder.build();
+        assertFalse(filter.isMutableIntersection());
+
+        // Three expressions on two different columns - this is a mutable intersection
+        ColumnMetadata t = metadata.getColumn(new ColumnIdentifier("t", true));
+        builder = RowFilter.builder(false);
+        builder.add(r, Operator.GT, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+        builder.add(r, Operator.LT, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+        builder.add(t, Operator.EQ, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+        filter = builder.build();
+        assertTrue(filter.isMutableIntersection());
+    }
 }

@@ -17,15 +17,17 @@
  */
 package org.apache.cassandra.io.sstable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Iterator;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
+import org.apache.cassandra.utils.Throwables;
 
 /**
  * Caller must acquire and release references to the sstables used here.
@@ -33,13 +35,28 @@ import org.apache.cassandra.utils.MergeIterator;
 public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
 {
     private final ArrayList<KeyIterator> iters;
-    private volatile IMergeIterator<DecoratedKey, DecoratedKey> mi;
+    private volatile CloseableIterator<DecoratedKey> mi;
+    private final long totalLength;
 
     public ReducingKeyIterator(Collection<SSTableReader> sstables)
     {
         iters = new ArrayList<>(sstables.size());
+        long len = 0;
         for (SSTableReader sstable : sstables)
-            iters.add(new KeyIterator(sstable.descriptor, sstable.metadata()));
+        {
+            try
+            {
+                KeyIterator iter = sstable.keyIterator();
+                iters.add(iter);
+                len += iter.getTotalBytes();
+            }
+            catch (IOException | RuntimeException ex)
+            {
+                iters.forEach(FileUtils::closeQuietly);
+                throw new RuntimeException("Failed to create a key iterator for sstable " + sstable.getFilename(), ex);
+            }
+        }
+        this.totalLength = len;
     }
 
     private void maybeInit()
@@ -51,12 +68,12 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         {
             if (mi == null)
             {
-                mi = MergeIterator.get(iters, DecoratedKey.comparator, new MergeIterator.Reducer<DecoratedKey, DecoratedKey>()
+                mi = MergeIterator.getCloseable(iters, DecoratedKey.comparator, new Reducer<>()
                 {
                     DecoratedKey reduced = null;
 
                     @Override
-                    public boolean trivialReduceIsTrivial()
+                    public boolean singleSourceReduceIsTrivial()
                     {
                         return true;
                     }
@@ -66,7 +83,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
                         reduced = current;
                     }
 
-                    protected DecoratedKey getReduced()
+                    public DecoratedKey getReduced()
                     {
                         return reduced;
                     }
@@ -78,19 +95,22 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
     public void close()
     {
         if (mi != null)
+        {
             mi.close();
+        }
+        else
+        {
+            // if merging iterator was not initialized before this reducing iterator is closed, we need to close the
+            // underlying iterators manually
+            Throwable err = Throwables.close(null, iters);
+            if (err != null)
+                throw Throwables.unchecked(err);
+        }
     }
 
     public long getTotalBytes()
     {
-        maybeInit();
-
-        long m = 0;
-        for (Iterator<DecoratedKey> iter : mi.iterators())
-        {
-            m += ((KeyIterator) iter).getTotalBytes();
-        }
-        return m;
+        return totalLength;
     }
 
     public long getBytesRead()
@@ -98,9 +118,9 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         maybeInit();
 
         long m = 0;
-        for (Iterator<DecoratedKey> iter : mi.iterators())
+        for (KeyIterator iter : iters)
         {
-            m += ((KeyIterator) iter).getBytesRead();
+            m += iter.getBytesRead();
         }
         return m;
     }

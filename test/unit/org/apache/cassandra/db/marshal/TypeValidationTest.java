@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.marshal;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.AbstractTypeGenerators;
@@ -40,11 +41,17 @@ import java.util.UUID;
 import static org.apache.cassandra.utils.AbstractTypeGenerators.getTypeSupport;
 import static org.apache.cassandra.utils.AbstractTypeGenerators.primitiveTypeGen;
 import static org.apache.cassandra.utils.AbstractTypeGenerators.userTypeGen;
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUIDAsBytes;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.quicktheories.QuickTheory.qt;
 
 public class TypeValidationTest
 {
+    static
+    {
+        CassandraRelevantProperties.VECTOR_FLOAT_ONLY.setBoolean(false);
+    }
+    
     @Test(expected = MarshalException.class)
     public void testInvalidAscii()
     {
@@ -61,7 +68,7 @@ public class TypeValidationTest
     @Test
     public void testValidTimeUUID()
     {
-        TimeUUIDType.instance.validate(ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes()));
+        TimeUUIDType.instance.validate(ByteBuffer.wrap(nextTimeUUIDAsBytes()));
     }
 
     @Test
@@ -203,7 +210,7 @@ public class TypeValidationTest
         qt().forAll(tupleWithValueGen(baseGen)).checkAssert(pair -> {
             TupleType tuple = pair.left;
             ByteBuffer value = pair.right;
-            Assertions.assertThat(TupleType.buildValue(tuple.split(value)))
+            Assertions.assertThat(TupleType.buildValue(tuple.split(ByteBufferAccessor.instance, value)))
                       .as("TupleType.buildValue(split(value)) == value")
                       .isEqualTo(value);
         });

@@ -17,23 +17,36 @@
  */
 package org.apache.cassandra.cql3;
 
-import static org.apache.cassandra.cql3.Constants.UNSET_VALUE;
-
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.guardrails.Guardrails;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
+
+import static org.apache.cassandra.cql3.Constants.UNSET_VALUE;
 
 /**
  * Static helper methods and classes for maps.
@@ -52,19 +65,14 @@ public abstract class Maps
         return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), valuesType(column.type));
     }
 
-    private static AbstractType<?> unwrap(AbstractType<?> type)
-    {
-        return type.isReversed() ? unwrap(((ReversedType<?>) type).baseType) : type;
-    }
-
     private static AbstractType<?> keysType(AbstractType<?> type)
     {
-        return ((MapType<?, ?>) unwrap(type)).getKeysType();
+        return ((MapType<?, ?>) type.unwrap()).getKeysType();
     }
 
     private static AbstractType<?> valuesType(AbstractType<?> type)
     {
-        return ((MapType<?, ?>) unwrap(type)).getValuesType();
+        return ((MapType<?, ?>) type.unwrap()).getValuesType();
     }
 
     /**
@@ -127,21 +135,51 @@ public abstract class Maps
      * @param mapper the mapper used to retrieve the key and value types from the entries
      * @return the exact MapType from the entries if it can be known or <code>null</code>
      */
-    public static <T> AbstractType<?> getExactMapTypeIfKnown(List<Pair<T, T>> entries,
-                                                             java.util.function.Function<T, AbstractType<?>> mapper)
+    public static <T> MapType<?, ?> getExactMapTypeIfKnown(List<Pair<T, T>> entries,
+                                                           java.util.function.Function<T, AbstractType<?>> mapper)
     {
         AbstractType<?> keyType = null;
         AbstractType<?> valueType = null;
         for (Pair<T, T> entry : entries)
         {
-            if (keyType == null)
-                keyType = mapper.apply(entry.left);
-            if (valueType == null)
-                valueType = mapper.apply(entry.right);
-            if (keyType != null && valueType != null)
-                return MapType.getInstance(keyType, valueType, false);
+            keyType = selectType(keyType, mapper.apply(entry.left));
+            valueType = selectType(valueType, mapper.apply(entry.right));
         }
+
+        if (keyType != null && valueType != null)
+            return MapType.getInstance(keyType.freeze(), valueType.freeze(), false);
         return null;
+    }
+
+    private static <T> AbstractType<?> selectType(AbstractType<?> type, AbstractType<?> otherType)
+    {
+        if (otherType == null)
+            return type;
+
+        if (type != null && !otherType.isCompatibleWith(type))
+        {
+            if (type.isCompatibleWith(otherType))
+                return type;
+
+            throw new InvalidRequestException("Invalid collection literal: all selectors must have the same CQL type inside collection literals");
+        }
+        return otherType;
+    }
+
+    public static <T> MapType<?, ?> getPreferredCompatibleType(List<Pair<T, T>> entries,
+                                                               java.util.function.Function<T, AbstractType<?>> mapper)
+    {
+        Set<AbstractType<?>> keyTypes = entries.stream().map(Pair::left).map(mapper).filter(Objects::nonNull).collect(Collectors.toSet());
+        AbstractType<?> keyType = AssignmentTestable.getCompatibleTypeIfKnown(keyTypes);
+        if (keyType == null)
+            return null;
+
+        Set<AbstractType<?>> valueTypes = entries.stream().map(Pair::right).map(mapper).filter(Objects::nonNull).collect(Collectors.toSet());
+        AbstractType<?> valueType = AssignmentTestable.getCompatibleTypeIfKnown(valueTypes);
+        if (valueType == null)
+            return null;
+
+        return  MapType.getInstance(keyType.freeze(), valueType.freeze(), false);
     }
 
     public static class Literal extends Term.Raw
@@ -180,7 +218,7 @@ public abstract class Maps
 
         private void validateAssignableTo(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
-            AbstractType<?> type = unwrap(receiver.type);
+            AbstractType<?> type = receiver.type.unwrap();
 
             if (!(type instanceof MapType))
                 throw new InvalidRequestException(String.format("Invalid map literal for %s of type %s", receiver.name, receiver.type.asCQL3Type()));
@@ -207,6 +245,12 @@ public abstract class Maps
             return getExactMapTypeIfKnown(entries, p -> p.getExactTypeIfKnown(keyspace));
         }
 
+        @Override
+        public AbstractType<?> getCompatibleTypeIfKnown(String keyspace)
+        {
+            return Maps.getPreferredCompatibleType(entries, p -> p.getCompatibleTypeIfKnown(keyspace));
+        }
+
         public String getText()
         {
             return mapToString(entries, Term.Raw::getText);
@@ -215,22 +259,23 @@ public abstract class Maps
 
     public static class Value extends Term.Terminal
     {
-        public final Map<ByteBuffer, ByteBuffer> map;
+        public final SortedMap<ByteBuffer, ByteBuffer> map;
 
-        public Value(Map<ByteBuffer, ByteBuffer> map)
+        public Value(SortedMap<ByteBuffer, ByteBuffer> map)
         {
             this.map = map;
         }
 
-        public static Value fromSerialized(ByteBuffer value, MapType type, ProtocolVersion version) throws InvalidRequestException
+        public static <K, V> Value fromSerialized(ByteBuffer value, MapType<K, V> type) throws InvalidRequestException
         {
             try
             {
                 // Collections have this small hack that validate cannot be called on a serialized object,
                 // but compose does the validation (so we're fine).
-                Map<?, ?> m = type.getSerializer().deserializeForNativeProtocol(value, ByteBufferAccessor.instance, version);
-                Map<ByteBuffer, ByteBuffer> map = new LinkedHashMap<>(m.size());
-                for (Map.Entry<?, ?> entry : m.entrySet())
+                Map<K, V> m = type.getSerializer().deserialize(value, ByteBufferAccessor.instance);
+                // We depend on Maps to be properly sorted by their keys, so use a sorted map implementation here.
+                SortedMap<ByteBuffer, ByteBuffer> map = new TreeMap<>(type.getKeysType());
+                for (Map.Entry<K, V> entry : m.entrySet())
                     map.put(type.getKeysType().decompose(entry.getKey()), type.getValuesType().decompose(entry.getValue()));
                 return new Value(map);
             }
@@ -241,7 +286,7 @@ public abstract class Maps
         }
 
         @Override
-        public ByteBuffer get(ProtocolVersion protocolVersion)
+        public ByteBuffer get(ProtocolVersion version)
         {
             List<ByteBuffer> buffers = new ArrayList<>(2 * map.size());
             for (Map.Entry<ByteBuffer, ByteBuffer> entry : map.entrySet())
@@ -249,10 +294,10 @@ public abstract class Maps
                 buffers.add(entry.getKey());
                 buffers.add(entry.getValue());
             }
-            return CollectionSerializer.pack(buffers, map.size(), protocolVersion);
+            return CollectionSerializer.pack(buffers, map.size());
         }
 
-        public boolean equals(MapType mt, Value v)
+        public boolean equals(MapType<?, ?> mt, Value v)
         {
             if (map.size() != v.map.size())
                 return false;
@@ -296,7 +341,7 @@ public abstract class Maps
 
         public Terminal bind(QueryOptions options) throws InvalidRequestException
         {
-            Map<ByteBuffer, ByteBuffer> buffers = new TreeMap<ByteBuffer, ByteBuffer>(comparator);
+            SortedMap<ByteBuffer, ByteBuffer> buffers = new TreeMap<>(comparator);
             for (Map.Entry<Term, Term> entry : elements.entrySet())
             {
                 // We don't support values > 64K because the serialization format encode the length as an unsigned short.
@@ -340,7 +385,7 @@ public abstract class Maps
                 return null;
             if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
                 return UNSET_VALUE;
-            return Value.fromSerialized(value, (MapType)receiver.type, options.getProtocolVersion());
+            return Value.fromSerialized(value, (MapType<?, ?>) receiver.type);
         }
     }
 
@@ -351,6 +396,7 @@ public abstract class Maps
             super(column, t);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             Term.Terminal value = t.bind(params.options);
@@ -381,6 +427,7 @@ public abstract class Maps
             k.collectMarkerSpecification(boundNames);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to set a value for a single key on a frozen map";
@@ -411,6 +458,7 @@ public abstract class Maps
             super(column, t);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to add items to a frozen map";
@@ -421,22 +469,40 @@ public abstract class Maps
 
         static void doPut(Term.Terminal value, ColumnMetadata column, UpdateParameters params) throws InvalidRequestException
         {
+            if (value == null)
+            {
+                // for frozen maps, we're overwriting the whole cell
+                if (!column.type.isMultiCell())
+                    params.addTombstone(column);
+
+                return;
+            }
+
+            SortedMap<ByteBuffer, ByteBuffer> elements = ((Value) value).map;
+
             if (column.type.isMultiCell())
             {
-                if (value == null)
+                if (elements.size() == 0)
                     return;
 
-                Map<ByteBuffer, ByteBuffer> elements = ((Value) value).map;
+                // Guardrails about collection size are only checked for the added elements without considering
+                // already existent elements. This is done so to avoid read-before-write, having additional checks
+                // during SSTable write.
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, params.clientState);
+
+                int dataSize = 0;
                 for (Map.Entry<ByteBuffer, ByteBuffer> entry : elements.entrySet())
-                    params.addCell(column, CellPath.create(entry.getKey()), entry.getValue());
+                {
+                    Cell<?> cell = params.addCell(column, CellPath.create(entry.getKey()), entry.getValue());
+                    dataSize += cell.dataSize();
+                }
+                Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, params.clientState);
             }
             else
             {
-                // for frozen maps, we're overwriting the whole cell
-                if (value == null)
-                    params.addTombstone(column);
-                else
-                    params.addCell(column, value.get(ProtocolVersion.CURRENT));
+                Guardrails.itemsPerCollection.guard(elements.size(), column.name.toString(), false, params.clientState);
+                Cell<?> cell = params.addCell(column, value.get(ProtocolVersion.CURRENT));
+                Guardrails.collectionSize.guard(cell.dataSize(), column.name.toString(), false, params.clientState);
             }
         }
     }
@@ -448,6 +514,7 @@ public abstract class Maps
             super(column, k);
         }
 
+        @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             assert column.type.isMultiCell() : "Attempted to delete a single key in a frozen map";

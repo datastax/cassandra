@@ -71,6 +71,7 @@ public class TableStatsTestBase
         template.oldSSTableCount = 0L;
         template.spaceUsedLive = "0";
         template.spaceUsedTotal = "0";
+        template.maxSSTableSize = 0L;
         template.spaceUsedBySnapshotsTotal = "0";
         template.percentRepaired = 1.0D;
         template.bytesRepaired = 0L;
@@ -81,6 +82,7 @@ public class TableStatsTestBase
         template.memtableCellCount = 0L;
         template.memtableDataSize = "0";
         template.memtableSwitchCount = 0L;
+        template.speculativeRetries = 0L;
         template.localReadCount =0L;
         template.localReadLatencyMs = Double.NaN;
         template.localWriteCount = 0L;
@@ -98,7 +100,16 @@ public class TableStatsTestBase
         template.maximumLiveCellsPerSliceLastFiveMinutes = 0L;
         template.averageTombstonesPerSliceLastFiveMinutes = Double.NaN;
         template.maximumTombstonesPerSliceLastFiveMinutes = 0L;
-        template.droppedMutations = "0";
+        template.twcs = null;
+        template.twcsDurationInMillis = 0L;
+        template.saiQueryLatencyMs = Double.NaN;
+        template.saiPostFilteringReadLatencyMs = Double.NaN;
+        template.saiDiskUsedBytes = "NaN";
+        template.saiSSTableIndexesHit = Double.NaN;
+        template.saiIndexSegmentsHit = Double.NaN;
+        template.saiRowsFiltered = Double.NaN;
+        template.saiTotalQueryTimeouts = 0L;
+        template.saiTotalQueryableIndexRatio = "0/0";
         return template;
     }
 
@@ -168,13 +179,6 @@ public class TableStatsTestBase
         table4.compactedPartitionMinimumBytes = 5L;
         table5.compactedPartitionMinimumBytes = 3L;
         table6.compactedPartitionMinimumBytes = 6L;
-        // dropped mutations: 6 > 3 > 4 > 2 > 1 = 5
-        table1.droppedMutations = "0";
-        table2.droppedMutations = "222";
-        table3.droppedMutations = "33333";
-        table4.droppedMutations = "4444";
-        table5.droppedMutations = "0";
-        table6.droppedMutations = "666666";
         // local reads: 6 > 5 > 4 > 3 > 2 > 1
         table1.localReadCount = 0L;
         table2.localReadCount = 1L;
@@ -294,6 +298,13 @@ public class TableStatsTestBase
         table4.sstableCount = 2000;
         table5.sstableCount = 40000;
         table6.sstableCount = 1000;
+        // Droppable Tombstone ratio
+        table1.droppableTombstoneRatio = 0;
+        table2.droppableTombstoneRatio = 0.222222;
+        table3.droppableTombstoneRatio = 0.333333;
+        table4.droppableTombstoneRatio = 0.444444;
+        table5.droppableTombstoneRatio = 0.555555;
+        table6.droppableTombstoneRatio = 0.666666;
         // set even numbered tables to have some offheap usage
         table2.offHeapUsed = true;
         table4.offHeapUsed = true;
@@ -330,6 +341,23 @@ public class TableStatsTestBase
         table2.memtableOffHeapMemoryUsed = "314159265";
         table4.memtableOffHeapMemoryUsed = "141421356";
         table6.memtableOffHeapMemoryUsed = "161803398";
+        // twcs max duration: 2 > 4 > 1 = 3 = 6 = 5
+        table2.twcsDurationInMillis = 2000L;
+        table4.twcsDurationInMillis = 1000L;
+        table5.twcsDurationInMillis = null;
+
+        // Table5 with 5 SAI.
+        table5.saiQueryLatencyMs = 10.000D;
+        table5.saiPostFilteringReadLatencyMs = 1.000D;
+        table5.saiDiskUsedBytes = "40 bytes";
+        table5.saiSSTableIndexesHit = 3.5D;
+        table5.saiIndexSegmentsHit = 4.0D;
+        table5.saiRowsFiltered = 55.0D;
+        table5.saiTotalQueryTimeouts = 4L;
+        table5.hasSaiIndexes = true;
+        table5.saiTotalIndexCount = 5;
+        table5.saiTotalQueryableIndexRatio = "5/5";
+
         // create test keyspaces from templates
         testKeyspaces = new ArrayList<>();
         StatsKeyspace keyspace1 = createStatsKeyspaceTemplate("keyspace1");
@@ -388,6 +416,10 @@ public class TableStatsTestBase
         humanReadableTable4.memtableDataSize = "999 bytes";
         humanReadableTable5.memtableDataSize = "3.14 MiB";
         humanReadableTable6.memtableDataSize = "0 bytes";
+
+        // cretae human-readable SAI disk space used size:
+        humanReadableTable5.saiDiskUsedBytes = "40 bytes";
+
         // create human readable keyspaces from template
         humanReadableKeyspaces = new ArrayList<>();
         StatsKeyspace humanReadableKeyspace1 = createStatsKeyspaceTemplate("keyspace1");

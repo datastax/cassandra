@@ -31,15 +31,12 @@ import java.text.ParseException;
 import java.util.*;
 import java.util.regex.Pattern;
 
-import com.google.common.io.ByteArrayDataOutput;
 import com.google.common.io.ByteStreams;
 import com.google.common.reflect.TypeToken;
 
-import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.cql3.functions.types.DataType.CollectionType;
-import org.apache.cassandra.cql3.functions.types.DataType.Name;
 import org.apache.cassandra.cql3.functions.types.exceptions.InvalidTypeException;
 import org.apache.cassandra.cql3.functions.types.utils.Bytes;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -125,6 +122,7 @@ import static org.apache.cassandra.cql3.functions.types.DataType.*;
  */
 public abstract class TypeCodec<T>
 {
+    private final static int VARIABLE_LENGTH = -1;
 
     /**
      * Return the default codec for the CQL type {@code boolean}. The returned codec maps the CQL type
@@ -379,6 +377,19 @@ public abstract class TypeCodec<T>
     }
 
     /**
+     * Return a newly-created codec for the given CQL vector type. The returned codec maps the vector
+     * type into the Java type {@link List}. This method does not cache returned instances and
+     * returns a newly-allocated object at each invocation.
+     *
+     * @param type the vector type this codec should handle.
+     * @return A newly-created codec for the given CQL tuple type.
+     */
+    public static <E> TypeCodec<List<E>> vector(VectorType type, TypeCodec<E> valueCodec)
+    {
+        return VectorCodec.of(type, valueCodec);
+    }
+
+    /**
      * Return a newly-created codec for the given user-defined CQL type. The returned codec maps the
      * user-defined type into the Java type {@link UDTValue}. This method does not cache returned
      * instances and returns a newly-allocated object at each invocation.
@@ -489,6 +500,24 @@ public abstract class TypeCodec<T>
     public DataType getCqlType()
     {
         return cqlType;
+    }
+
+    /**
+     * @return the length of values for this type if all values are of fixed length, {@link #VARIABLE_LENGTH} otherwise
+     */
+    public int serializedSize()
+    {
+        return VARIABLE_LENGTH;
+    }
+
+    /**
+     * Checks if all values are of fixed length.
+     *
+     * @return {@code true} if all values are of fixed length, {@code false} otherwise.
+     */
+    public final boolean isSerializedSizeFixed()
+    {
+        return serializedSize() != VARIABLE_LENGTH;
     }
 
     /**
@@ -1024,6 +1053,12 @@ public abstract class TypeCodec<T>
         }
 
         @Override
+        public int serializedSize()
+        {
+            return 8;
+        }
+
+        @Override
         public Long parse(String value)
         {
             try
@@ -1194,6 +1229,12 @@ public abstract class TypeCodec<T>
         }
 
         @Override
+        public int serializedSize()
+        {
+            return 1;
+        }
+
+        @Override
         public Boolean parse(String value)
         {
             if (value == null || value.isEmpty() || value.equalsIgnoreCase("NULL")) return null;
@@ -1312,6 +1353,12 @@ public abstract class TypeCodec<T>
         }
 
         @Override
+        public int serializedSize()
+        {
+            return 8;
+        }
+
+        @Override
         public Double parse(String value)
         {
             try
@@ -1365,6 +1412,12 @@ public abstract class TypeCodec<T>
         private FloatCodec()
         {
             super(DataType.cfloat());
+        }
+
+        @Override
+        public int serializedSize()
+        {
+            return 4;
         }
 
         @Override
@@ -1597,6 +1650,12 @@ public abstract class TypeCodec<T>
         }
 
         @Override
+        public int serializedSize()
+        {
+            return 4;
+        }
+
+        @Override
         public Integer parse(String value)
         {
             try
@@ -1650,6 +1709,12 @@ public abstract class TypeCodec<T>
         private TimestampCodec()
         {
             super(DataType.timestamp(), Date.class);
+        }
+
+        @Override
+        public int serializedSize()
+        {
+            return 8;
         }
 
         @Override
@@ -1806,6 +1871,13 @@ public abstract class TypeCodec<T>
         }
 
         @Override
+        public int serializedSize()
+        {
+            // matching behavior of TimeType, which is not declared as fixed length
+            return VARIABLE_LENGTH;
+        }
+
+        @Override
         public Long parse(String value)
         {
             if (value == null || value.isEmpty() || value.equalsIgnoreCase("NULL")) return null;
@@ -1857,6 +1929,12 @@ public abstract class TypeCodec<T>
         private AbstractUUIDCodec(DataType cqlType)
         {
             super(cqlType, UUID.class);
+        }
+
+        @Override
+        public int serializedSize()
+        {
+            return 16;
         }
 
         @Override
@@ -3045,19 +3123,12 @@ public abstract class TypeCodec<T>
             VIntCoding.computeVIntSize(months)
             + VIntCoding.computeVIntSize(days)
             + VIntCoding.computeVIntSize(nanoseconds);
-            ByteArrayDataOutput out = ByteStreams.newDataOutput(size);
-            try
-            {
-                VIntCoding.writeVInt(months, out);
-                VIntCoding.writeVInt(days, out);
-                VIntCoding.writeVInt(nanoseconds, out);
-            }
-            catch (IOException e)
-            {
-                // cannot happen
-                throw new AssertionError();
-            }
-            return ByteBuffer.wrap(out.toByteArray());
+            ByteBuffer bb = ByteBuffer.allocate(size);
+            VIntCoding.writeVInt(months, bb);
+            VIntCoding.writeVInt(days, bb);
+            VIntCoding.writeVInt(nanoseconds, bb);
+            bb.flip();
+            return bb;
         }
 
         @Override
@@ -3073,8 +3144,8 @@ public abstract class TypeCodec<T>
                 DataInput in = ByteStreams.newDataInput(Bytes.getArray(bytes));
                 try
                 {
-                    int months = (int) VIntCoding.readVInt(in);
-                    int days = (int) VIntCoding.readVInt(in);
+                    int months = VIntCoding.readVInt32(in);
+                    int days = VIntCoding.readVInt32(in);
                     long nanoseconds = VIntCoding.readVInt(in);
                     return Duration.newInstance(months, days, nanoseconds);
                 }

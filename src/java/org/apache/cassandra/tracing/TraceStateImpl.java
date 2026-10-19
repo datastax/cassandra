@@ -17,12 +17,9 @@
  */
 package org.apache.cassandra.tracing;
 
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -31,13 +28,22 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.WrappedRunnable;
+import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.FutureCombiner;
+
+import static java.util.Collections.singletonList;
+import static org.apache.cassandra.db.ConsistencyLevel.ANY;
 
 /**
  * ThreadLocal state for a tracing session. The presence of an instance of this class as a ThreadLocal denotes that an
@@ -48,14 +54,13 @@ public class TraceStateImpl extends TraceState
     private static final Logger logger = LoggerFactory.getLogger(TraceStateImpl.class);
 
     @VisibleForTesting
-    public static int WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS =
-      Integer.parseInt(System.getProperty("cassandra.wait_for_tracing_events_timeout_secs", "0"));
+    public static int WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS = CassandraRelevantProperties.WAIT_FOR_TRACING_EVENTS_TIMEOUT_SECS.getInt();
 
     private final Set<Future<?>> pendingFutures = ConcurrentHashMap.newKeySet();
 
-    public TraceStateImpl(InetAddressAndPort coordinator, UUID sessionId, Tracing.TraceType traceType)
+    public TraceStateImpl(ClientState state, InetAddressAndPort coordinator, TimeUUID sessionId, Tracing.TraceType traceType)
     {
-        super(coordinator, sessionId, traceType);
+        super(state, coordinator, sessionId, traceType);
     }
 
     protected void traceImpl(String message)
@@ -82,8 +87,8 @@ public class TraceStateImpl extends TraceState
                 logger.trace("Waiting for up to {} seconds for {} trace events to complete",
                              +WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS, pendingFutures.size());
 
-            CompletableFuture.allOf(pendingFutures.toArray(new CompletableFuture<?>[pendingFutures.size()]))
-                             .get(WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS, TimeUnit.SECONDS);
+            FutureCombiner.allOf(Arrays.asList(pendingFutures.toArray(new Future<?>[pendingFutures.size()])))
+                          .get(WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS, TimeUnit.SECONDS);
         }
         catch (TimeoutException ex)
         {
@@ -101,24 +106,18 @@ public class TraceStateImpl extends TraceState
 
     void executeMutation(final Mutation mutation)
     {
-        CompletableFuture<Void> fut = CompletableFuture.runAsync(new WrappedRunnable()
-        {
-            protected void runMayThrow()
-            {
-                mutateWithCatch(mutation);
-            }
-        }, Stage.TRACING.executor());
-
+        Future<Void> fut = Stage.TRACING.submit(() -> mutateWithCatch(clientState, mutation), null);
         boolean ret = pendingFutures.add(fut);
         if (!ret)
             logger.warn("Failed to insert pending future, tracing synchronization may not work");
     }
 
-    static void mutateWithCatch(Mutation mutation)
+    static void mutateWithCatch(ClientState state, Mutation mutation)
     {
         try
         {
-            StorageProxy.mutate(Collections.singletonList(mutation), ConsistencyLevel.ANY, System.nanoTime());
+            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(mutation.getKeyspaceName());
+            StorageProxy.mutate(singletonList(mutation), ANY, Dispatcher.RequestTime.forImmediateExecution(), metrics, state);
         }
         catch (OverloadedException e)
         {

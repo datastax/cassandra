@@ -58,17 +58,17 @@ public class HintMessageTest
         UUID hostId = UUID.randomUUID();
         long now = FBUtilities.timestampMicros();
         TableMetadata table = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
-        
-        Mutation mutation = 
+
+        Mutation mutation =
             new RowUpdateBuilder(table, now, bytes("key")).clustering("column").add("val", "val" + 1234).build();
-        
+
         Hint hint = Hint.create(mutation, now / 1000);
         HintMessage message = new HintMessage(hostId, hint);
 
         // serialize
         int serializedSize = (int) HintMessage.serializer.serializedSize(message, MessagingService.current_version);
         HintMessage deserializedMessage;
-        
+
         try (DataOutputBuffer dob = new DataOutputBuffer())
         {
             HintMessage.serializer.serialize(message, dob, MessagingService.current_version);
@@ -80,9 +80,9 @@ public class HintMessageTest
         }
 
         // compare before/after
-        assertEquals(hostId, deserializedMessage.hostId);
-        assertNotNull(deserializedMessage.hint);
-        assertHintsEqual(hint, deserializedMessage.hint);
+        assertEquals(hostId, deserializedMessage.hostId());
+        assertNotNull(deserializedMessage.hint());
+        assertHintsEqual(hint, deserializedMessage.hint());
     }
 
     @Test
@@ -91,13 +91,13 @@ public class HintMessageTest
         UUID hostId = UUID.randomUUID();
         long now = FBUtilities.timestampMicros();
         TableMetadata table = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
-        
+
         Mutation mutation =
             new RowUpdateBuilder(table, now, bytes("key")).clustering("column").add("val", "val" + 1234) .build();
-        
+
         Hint hint = Hint.create(mutation, now / 1000);
         HintMessage.Encoded message;
-        
+
         try (DataOutputBuffer dob = new DataOutputBuffer())
         {
             Hint.serializer.serialize(hint, dob, MessagingService.current_version);
@@ -115,8 +115,9 @@ public class HintMessageTest
         HintMessage deserializedMessage = HintMessage.serializer.deserialize(dip, MessagingService.current_version);
 
         // compare before/after
-        assertEquals(hostId, deserializedMessage.hostId);
-        assertNotNull(deserializedMessage.hint);
-        assertHintsEqual(hint, deserializedMessage.hint);
+        assertEquals(hostId, deserializedMessage.hostId());
+        assertNotNull(deserializedMessage.hint());
+        assertHintsEqual(hint, deserializedMessage.hint());
     }
+
 }

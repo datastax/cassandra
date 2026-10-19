@@ -22,13 +22,18 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
-
 import javax.annotation.Nullable;
 
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableCollection;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.MapDifference;
+import com.google.common.collect.Maps;
 
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.index.internal.CassandraIndex;
@@ -123,7 +128,7 @@ public final class Tables implements Iterable<TableMetadata>
     }
 
     @Nullable
-    TableMetadata getNullable(TableId id)
+    public TableMetadata getNullable(TableId id)
     {
         return tablesById.get(id);
     }
@@ -177,6 +182,31 @@ public final class Tables implements Iterable<TableMetadata>
         return any(this, t -> t.referencesUserType(udt.name))
              ? builder().add(transform(this, t -> t.withUpdatedUserType(udt))).build()
              : this;
+    }
+
+    public Tables withNewKeyspace(String newName, Types udts)
+    {
+        Map<String, TableMetadata> updated = new HashMap<>();
+        for (TableMetadata table : this)
+        {
+            updated.put(table.name, table.withNewKeyspace(newName, udts));
+        }
+
+        return builder().add(updated.values()).build();
+    }
+
+    public Tables withTransformedParams(Function<TableParams, TableParams> transformFunction)
+    {
+        Map<String, TableMetadata> updated = new HashMap<>();
+
+        // We order the tables by dependencies so that vertices tables are
+        // processed before edges tables, in case graph constructs are used
+        for (TableMetadata table : this)
+        {
+            updated.put(table.name, table.withTransformedParams(transformFunction));
+        }
+
+        return builder().add(updated.values()).build();
     }
 
     MapDifference<String, TableMetadata> indexesDiff(Tables other)

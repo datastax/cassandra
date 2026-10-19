@@ -21,12 +21,12 @@ import java.util.Set;
 
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
+
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
@@ -43,6 +43,7 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
         this.grantee = RoleResource.role(grantee.getName());
     }
 
+    @Override
     public void validate(ClientState state) throws RequestValidationException
     {
         // validate login here before authorize to avoid leaking user existence to anonymous users.
@@ -54,13 +55,6 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
         // if a keyspace is omitted when GRANT/REVOKE ON TABLE <table>, we need to correct the resource.
         // called both here and in authorize(), as in some cases we do not call the latter.
         resource = maybeCorrectResource(resource, state);
-
-        // altering permissions on builtin functions is not supported
-        if (resource instanceof FunctionResource
-            && SchemaConstants.SYSTEM_KEYSPACE_NAME.equals(((FunctionResource)resource).getKeyspace()))
-        {
-            throw new InvalidRequestException("Altering permissions on builtin functions is not supported");
-        }
 
         if (!resource.exists())
             throw new InvalidRequestException(String.format("Resource %s doesn't exist", resource));
@@ -78,7 +72,7 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
         for (Permission p : permissions)
             state.ensurePermission(p, resource);
     }
-    
+
     @Override
     public String toString()
     {

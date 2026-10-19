@@ -119,6 +119,57 @@ public class NetworkTopologyStrategyTest
     }
 
     @Test
+    public void testAcceptsNodesFromSameRack() throws IOException, ConfigurationException
+    {
+        IEndpointSnitch snitch = new RackInferringSnitch();
+        DatabaseDescriptor.setEndpointSnitch(snitch);
+        TokenMetadata metadata = new TokenMetadata();
+
+        tokenFactory(metadata, "123", new byte[]{ 10, 0, 0, 10 });
+        tokenFactory(metadata, "234", new byte[]{ 10, 0, 0, 11 });
+        tokenFactory(metadata, "345", new byte[]{ 10, 0, 1, 12 });
+
+        Map<String, String> configOptions = new HashMap<>();
+        configOptions.put("0", "3");
+
+        NetworkTopologyStrategy strategy = new NetworkTopologyStrategy(KEYSPACE, metadata, snitch, configOptions);
+        Assert.assertEquals(3, strategy.getReplicationFactor("0").allReplicas);
+
+        EndpointsForToken endpoints = strategy.getNaturalReplicasForToken(new StringToken("123"));
+        Assert.assertEquals(3, endpoints.size());
+    }
+
+    @Test
+    public void testDoNotAcceptNodesFromSameRackIfQuorumExists() throws IOException, ConfigurationException
+    {
+        IEndpointSnitch snitch = new RackInferringSnitch()
+        {
+            @Override
+            public boolean acceptsNodesFromSameRack(int rf, int rackCount)
+            {
+                int quorum = rf / 2 + 1;
+                return rackCount < quorum;
+            }
+        };
+        DatabaseDescriptor.setEndpointSnitch(snitch);
+        TokenMetadata metadata = new TokenMetadata();
+
+        tokenFactory(metadata, "123", new byte[]{ 10, 0, 0, 10 });
+        tokenFactory(metadata, "234", new byte[]{ 10, 0, 0, 11 });
+        tokenFactory(metadata, "345", new byte[]{ 10, 0, 1, 12 });
+
+        Map<String, String> configOptions = new HashMap<>();
+        configOptions.put("0", "3");
+
+        NetworkTopologyStrategy strategy = new NetworkTopologyStrategy(KEYSPACE, metadata, snitch, configOptions);
+        Assert.assertEquals(3, strategy.getReplicationFactor("0").allReplicas);
+
+        EndpointsForToken endpoints = strategy.getNaturalReplicasForToken(new StringToken("123"));
+        Assert.assertEquals(2, endpoints.size());
+        Assert.assertNotEquals(snitch.getRack(endpoints.get(0).endpoint()), snitch.getRack(endpoints.get(1).endpoint()));
+    }
+
+    @Test
     public void testLargeCluster() throws UnknownHostException, ConfigurationException
     {
         int[] dcRacks = new int[]{2, 4, 8};
@@ -478,9 +529,10 @@ public class NetworkTopologyStrategyTest
 
         NetworkTopologyStrategy strategy = new NetworkTopologyStrategy("ks", new TokenMetadata(), snitch, configOptions);
         StorageService.instance.getTokenMetadata().updateHostId(UUID.randomUUID(), FBUtilities.getBroadcastAddressAndPort());
+        StorageService.instance.getTokenMetadata().updateNormalToken(new LongToken(1), FBUtilities.getBroadcastAddressAndPort());
         
         ClientWarn.instance.captureWarnings();
-        strategy.maybeWarnOnOptions();
+        strategy.maybeWarnOnOptions(null);
         assertTrue(ClientWarn.instance.getWarnings().stream().anyMatch(s -> s.contains("Your replication factor")));
     }
 }

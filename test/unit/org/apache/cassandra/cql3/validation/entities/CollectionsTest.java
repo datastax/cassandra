@@ -25,12 +25,16 @@ import com.datastax.driver.core.ColumnDefinitions;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
+import com.datastax.driver.core.utils.UUIDs;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.junit.Assert.assertEquals;
 
 public class CollectionsTest extends CQLTester
@@ -575,18 +579,6 @@ public class CollectionsTest extends CQLTester
         execute("ALTER TABLE %s ADD alist list<text>");
     }
 
-    /**
-     * Migrated from cql_tests.py:TestCQL.collection_function_test()
-     */
-    @Test
-    public void testFunctionsOnCollections() throws Throwable
-    {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, l set<int>)");
-
-        assertInvalid("SELECT ttl(l) FROM %s WHERE k = 0");
-        assertInvalid("SELECT writetime(l) FROM %s WHERE k = 0");
-    }
-
     @Test
     public void testInRestrictionWithCollection() throws Throwable
     {
@@ -695,7 +687,7 @@ public class CollectionsTest extends CQLTester
     public void testMapWithLargePartition() throws Throwable
     {
         Random r = new Random();
-        long seed = System.nanoTime();
+        long seed = nanoTime();
         System.out.println("Seed " + seed);
         r.setSeed(seed);
 
@@ -974,7 +966,7 @@ public class CollectionsTest extends CQLTester
         createTable("CREATE TABLE %s(pk int PRIMARY KEY, s set<text>)");
         assertInvalidMessage("Not enough bytes to read a set",
                              "INSERT INTO %s (pk, s) VALUES (?, ?)", 1, "test");
-        assertInvalidMessage("String didn't validate.",
+        assertInvalidMessage("Null value read when not allowed",
                              "INSERT INTO %s (pk, s) VALUES (?, ?)", 1, Long.MAX_VALUE);
         assertInvalidMessage("Not enough bytes to read a set",
                              "INSERT INTO %s (pk, s) VALUES (?, ?)", 1, "");
@@ -988,7 +980,7 @@ public class CollectionsTest extends CQLTester
         createTable("CREATE TABLE %s(pk int PRIMARY KEY, m map<text, text>)");
         assertInvalidMessage("Not enough bytes to read a map",
                              "INSERT INTO %s (pk, m) VALUES (?, ?)", 1, "test");
-        assertInvalidMessage("String didn't validate.",
+        assertInvalidMessage("Null value read when not allowed",
                              "INSERT INTO %s (pk, m) VALUES (?, ?)", 1, Long.MAX_VALUE);
         assertInvalidMessage("Not enough bytes to read a map",
                              "INSERT INTO %s (pk, m) VALUES (?, ?)", 1, "");
@@ -1761,15 +1753,15 @@ public class CollectionsTest extends CQLTester
     {
         String type = createType("CREATE TYPE %s (s set<int>, m map<text, text>)");
 
-        assertInvalidMessage("Non-frozen UDTs are not allowed inside collections",
+        assertInvalidMessage("non-frozen user types are only supported at top-level",
                              "CREATE TABLE " + KEYSPACE + ".t (k int PRIMARY KEY, v map<text, " + type + ">)");
 
         String mapType = "map<text, frozen<" + type + ">>";
         for (boolean frozen : new boolean[]{false, true})
         {
-            mapType = frozen ? "frozen<" + mapType + ">" : mapType;
+            mapType = frozen ? "frozen<" + mapType + '>' : mapType;
 
-            createTable("CREATE TABLE %s (k int PRIMARY KEY, v " + mapType + ")");
+            createTable("CREATE TABLE %s (k int PRIMARY KEY, v " + mapType + ')');
 
             execute("INSERT INTO %s(k, v) VALUES (0, ?)", map("abc", userType("s", set(2, 4, 6), "m", map("a", "v1", "d", "v2"))));
 
@@ -1781,16 +1773,16 @@ public class CollectionsTest extends CQLTester
             });
         }
 
-        assertInvalidMessage("Non-frozen UDTs with nested non-frozen collections are not supported",
-                             "CREATE TABLE " + KEYSPACE + ".t (k int PRIMARY KEY, v " + type + ")");
+        assertInvalidMessage("non-frozen collections are only supported at top-level",
+                             "CREATE TABLE " + KEYSPACE + ".t (k int PRIMARY KEY, v " + type + ')');
 
         type = createType("CREATE TYPE %s (s frozen<set<int>>, m frozen<map<text, text>>)");
 
         for (boolean frozen : new boolean[]{false, true})
         {
-            type = frozen ? "frozen<" + type + ">" : type;
+            type = frozen ? "frozen<" + type + '>' : type;
 
-            createTable("CREATE TABLE %s (k int PRIMARY KEY, v " + type + ")");
+            createTable("CREATE TABLE %s (k int PRIMARY KEY, v " + type + ')');
 
             execute("INSERT INTO %s(k, v) VALUES (0, ?)", userType("s", set(2, 4, 6), "m", map("a", "v1", "d", "v2")));
 
@@ -1888,7 +1880,7 @@ public class CollectionsTest extends CQLTester
                              "INSERT INTO %s (k, s) VALUES (0, ?)",
                              set(tuple(1, "1", 1.0, 1), tuple(2, "2", 2.0, 2)));
 
-        assertInvalidMessage("Invalid set literal for s: value (1, '1', 1.0, 1) is not of type frozen<tuple<int, text, double>>",
+        assertInvalidMessage("Invalid set literal for s: value (1, '1', 1.0, 1) is not of type tuple<int, text, double>",
                              "INSERT INTO %s (k, s) VALUES (0, {(1, '1', 1.0, 1)})");
 
         createTable("CREATE TABLE %s (k int PRIMARY KEY, l frozen<list<tuple<int, text, double>>>)");
@@ -1896,7 +1888,7 @@ public class CollectionsTest extends CQLTester
                              "INSERT INTO %s (k, l) VALUES (0, ?)",
                              list(tuple(1, "1", 1.0, 1), tuple(2, "2", 2.0, 2)));
 
-        assertInvalidMessage("Invalid list literal for l: value (1, '1', 1.0, 1) is not of type frozen<tuple<int, text, double>>",
+        assertInvalidMessage("Invalid list literal for l: value (1, '1', 1.0, 1) is not of type tuple<int, text, double>",
                              "INSERT INTO %s (k, l) VALUES (0, [(1, '1', 1.0, 1)])");
 
         createTable("CREATE TABLE %s (k int PRIMARY KEY, m frozen<map<tuple<int, text, double>, int>>)");
@@ -1904,7 +1896,7 @@ public class CollectionsTest extends CQLTester
                              "INSERT INTO %s (k, m) VALUES (0, ?)",
                              map(tuple(1, "1", 1.0, 1), 1, tuple(2, "2", 2.0, 2), 2));
 
-        assertInvalidMessage("Invalid map literal for m: key (1, '1', 1.0, 1) is not of type frozen<tuple<int, text, double>>",
+        assertInvalidMessage("Invalid map literal for m: key (1, '1', 1.0, 1) is not of type tuple<int, text, double>",
                              "INSERT INTO %s (k, m) VALUES (0, {(1, '1', 1.0, 1) : 1})");
 
         createTable("CREATE TABLE %s (k int PRIMARY KEY, m frozen<map<int, tuple<int, text, double>>>)");
@@ -1912,7 +1904,7 @@ public class CollectionsTest extends CQLTester
                              "INSERT INTO %s (k, m) VALUES (0, ?)",
                              map(1, tuple(1, "1", 1.0, 1), 2, tuple(2, "2", 2.0, 2)));
 
-        assertInvalidMessage("Invalid map literal for m: value (1, '1', 1.0, 1) is not of type frozen<tuple<int, text, double>>",
+        assertInvalidMessage("Invalid map literal for m: value (1, '1', 1.0, 1) is not of type tuple<int, text, double>",
                              "INSERT INTO %s (k, m) VALUES (0, {1 : (1, '1', 1.0, 1)})");
     }
 
@@ -1978,5 +1970,192 @@ public class CollectionsTest extends CQLTester
             assertRows(execute("SELECT m['0'..'1'], s[0..1] FROM %s WHERE k = 3"), row(null, null));
             assertRows(execute("SELECT m['0'..'1']['3'..'5'], s[0..1][3..5] FROM %s WHERE k = 3"), row(null, null));
         });
+    }
+
+    /*
+     Tests for CASSANDRA-17623
+     Before CASSANDRA-17623, parameterized queries with maps as values would fail because frozen maps were
+     required to be sorted by the sort order of their key type, but weren't always sorted correctly.
+     Also adding tests for Sets, which did work because they always used SortedSet, to make sure this behavior is maintained.
+     We use `executeNet` in these tests because `execute` passes parameters through CqlTester#transformValues(), which calls
+     AbstractType#decompose() on the value, which "fixes" the map order, but wouldn't happen normally.
+     */
+
+    @Test
+    public void testInsertingMapDataWithParameterizedQueriesIsKeyOrderIndependent() throws Throwable
+    {
+        UUID uuid1 = UUIDs.timeBased();
+        UUID uuid2 = UUIDs.timeBased();
+        createTable("CREATE TABLE %s (k text, c frozen<map<timeuuid, text>>, PRIMARY KEY (k, c));");
+        executeNet("INSERT INTO %s (k, c) VALUES ('0', ?)", linkedHashMap(uuid1, "0", uuid2, "1"));
+        executeNet("INSERT INTO %s (k, c) VALUES ('0', ?)", linkedHashMap(uuid2, "3", uuid1, "4"));
+        beforeAndAfterFlush(() -> {
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k='0' AND c={" + uuid1 + ": '0', " + uuid2 + ": '1'}"), 1);
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k='0' AND c={" + uuid2 + ": '1', " + uuid1 + ": '0'}"), 1);
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k='0' AND c={" + uuid1 + ": '4', " + uuid2 + ": '3'}"), 1);
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k='0' AND c={" + uuid2 + ": '3', " + uuid1 + ": '4'}"), 1);
+        });
+    }
+
+    @Test
+    public void testInsertingMapDataWithParameterizedQueriesIsKeyOrderIndependentWithSelectSlice() throws Throwable
+    {
+        UUID uuid1 = UUIDs.timeBased();
+        UUID uuid2 = UUIDs.timeBased();
+        createTable("CREATE TABLE %s (k text, c frozen<map<timeuuid, text>>, PRIMARY KEY (k, c));");
+        beforeAndAfterFlush(() -> {
+            executeNet("INSERT INTO %s (k, c) VALUES ('0', ?)", linkedHashMap(uuid2, "2", uuid1, "1"));
+            // Make sure that we can slice either value out of the map
+            assertRowsNet(executeNet("SELECT k, c[" + uuid2 + "] from %s"), row("0", "2"));
+            assertRowsNet(executeNet("SELECT k, c[" + uuid1 + "] from %s"), row("0", "1"));
+        });
+    }
+
+    @Test
+    public void testSelectingMapDataWithParameterizedQueriesIsKeyOrderIndependent() throws Throwable
+    {
+        UUID uuid1 = UUIDs.timeBased();
+        UUID uuid2 = UUIDs.timeBased();
+        createTable("CREATE TABLE %s (k text, c frozen<map<timeuuid, text>>, PRIMARY KEY (k, c));");
+        executeNet("INSERT INTO %s (k, c) VALUES ('0', {" + uuid1 + ": '0', " + uuid2 + ": '1'})");
+        executeNet("INSERT INTO %s (k, c) VALUES ('0', {" + uuid2 + ": '3', " + uuid1 + ": '4'})");
+        beforeAndAfterFlush(() -> {
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k=? AND c=?", "0", linkedHashMap(uuid1, "0", uuid2, "1")), 1);
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k=? AND c=?", "0", linkedHashMap(uuid2, "1", uuid1, "0")), 1);
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k=? AND c=?", "0", linkedHashMap(uuid1, "4", uuid2, "3")), 1);
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k=? AND c=?", "0", linkedHashMap(uuid2, "3", uuid1, "4")), 1);
+        });
+    }
+
+    @Test
+    public void testInsertingSetDataWithParameterizedQueriesIsKeyOrderIndependent() throws Throwable
+    {
+        UUID uuid1 = UUIDs.timeBased();
+        UUID uuid2 = UUIDs.timeBased();
+        createTable("CREATE TABLE %s (k text, c frozen<set<timeuuid>>, PRIMARY KEY (k, c));");
+        executeNet("INSERT INTO %s (k, c) VALUES ('0', ?)", linkedHashSet(uuid1, uuid2));
+        executeNet("INSERT INTO %s (k, c) VALUES ('0', ?)", linkedHashSet(uuid2, uuid1));
+        beforeAndAfterFlush(() -> {
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k='0' AND c={" + uuid1 + ", " + uuid2 + '}'), 1);
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k='0' AND c={" + uuid2 + ", " + uuid1 + '}'), 1);
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k='0' AND c={" + uuid1 + ", " + uuid2 + '}'), 1);
+            assertRowCountNet(executeNet("SELECT * FROM %s WHERE k='0' AND c={" + uuid2 + ", " + uuid1 + '}'), 1);
+        });
+    }
+
+    @Test
+    public void testInsertingSetDataWithParameterizedQueriesIsKeyOrderIndependentWithSelectSlice() throws Throwable
+    {
+        UUID uuid1 = UUIDs.timeBased();
+        UUID uuid2 = UUIDs.timeBased();
+        createTable("CREATE TABLE %s (k text, c frozen<set<timeuuid>>, PRIMARY KEY (k, c));");
+        beforeAndAfterFlush(() -> {
+            executeNet("INSERT INTO %s (k, c) VALUES ('0', ?)", linkedHashSet(uuid2, uuid1));
+            assertRowsNet(executeNet("SELECT k, c[" + uuid2 + "] from %s"), row("0", uuid2));
+            assertRowsNet(executeNet("SELECT k, c[" + uuid1 + "] from %s"), row("0", uuid1));
+        });
+    }
+
+    @Test
+    public void testSelectingSetDataWithParameterizedQueriesIsKeyOrderIndependent() throws Throwable
+    {
+        UUID uuid1 = UUIDs.timeBased();
+        UUID uuid2 = UUIDs.timeBased();
+        createTable("CREATE TABLE %s (k text, c frozen<set<timeuuid>>, PRIMARY KEY (k, c));");
+        executeNet("INSERT INTO %s (k, c) VALUES ('0', {" + uuid1 + ", " + uuid2 + "})");
+        beforeAndAfterFlush(() -> {
+            assertRowsNet(executeNet("SELECT k, c from %s where k='0' and c=?", linkedHashSet(uuid1, uuid2)), row("0", list(uuid1, uuid2)));
+            assertRowsNet(executeNet("SELECT k, c from %s where k='0' and c=?", linkedHashSet(uuid2, uuid1)), row("0", list(uuid1, uuid2)));
+        });
+    }
+    // End tests for CASSANDRA-17623
+
+    @Test
+    public void testMapReversed() throws Throwable
+    {
+        createTable("CREATE TABLE %s (" +
+                    "   k int, " +
+                    "   c frozen<map<text, int>>, " +
+                    "   v int, " +
+                    "   PRIMARY KEY(k, c)" +
+                    ") WITH CLUSTERING ORDER BY (c DESC)");
+
+        execute("INSERT INTO %s(k, c, v) VALUES (1, {'t1':1,'t2':2,'t3':3,'t4':4}, 2)");
+        assertRows(execute("SELECT c['nonexisting'] FROM %s"), row((Object)null));
+        assertRows(execute("SELECT c['t1'] FROM %s"), row(1));
+        assertRows(execute("SELECT c['t1'..'t3'] FROM %s"), row(map("t1", 1, "t2", 2, "t3", 3)));
+        assertRows(execute("SELECT c['t3'..'t5'] FROM %s"), row(map("t3", 3, "t4", 4)));
+        assertRows(execute("SELECT c[..'t2'] FROM %s"), row(map("t1", 1, "t2", 2)));
+        assertRows(execute("SELECT c['t3'..] FROM %s"), row(map("t3", 3, "t4", 4)));
+        assertRows(execute("SELECT c[..'t5'] FROM %s"), row(map("t1", 1, "t2", 2, "t3", 3, "t4", 4)));
+    }
+
+    /**
+     * CNDB-17045: When a row has multiple complex columns (e.g. set + map) and only a subset are
+     * updated, untouched columns carry DeletionTime.LIVE as their complex deletion. A 32-bit
+     * overflow in SerializationHeader.writeLocalDeletionTime caused LIVE's localDeletionTime
+     * (Long.MAX_VALUE) to be corrupted during delta encoding. With corrupted_tombstone_strategy
+     * set to exception, this would surface as CorruptSSTableException during compaction or reads.
+     * <p>
+     * Note: BTreeRow.CellResolver.resolve() currently heals the corrupted InvalidDeletionTime
+     * back to DeletionTime.LIVE during row construction, because the overflowed LIVE deletion
+     * has markedForDeleteAt=Long.MIN_VALUE and Long.MIN_VALUE > Long.MIN_VALUE is false. This
+     * makes the corruption invisible to UnfilteredValidation at the CQL level. The primary
+     * protection is the fix in SerializationHeader.writeDeletionTime; this test serves as an
+     * extra regression guard.
+     *
+     * @see BTreeRow.Builder.CellResolver#resolve(Object[], int, int)
+     */
+    @Test
+    public void testMixedComplexDeletionsWithCorruptedTombstoneException() throws Throwable
+    {
+        Config.CorruptedTombstoneStrategy original = DatabaseDescriptor.getCorruptedTombstoneStrategy();
+        try
+        {
+            DatabaseDescriptor.setCorruptedTombstoneStrategy(Config.CorruptedTombstoneStrategy.exception);
+
+            createTable("CREATE TABLE %s (k int PRIMARY KEY, s set<text>, m map<text, text>)");
+
+            // Insert setting only the set column — the map column's complex deletion will be LIVE
+            execute("INSERT INTO %s (k, s) VALUES (1, {'a', 'b'})");
+            flush();
+
+            // Update only the map column — the set column's complex deletion will be LIVE
+            execute("UPDATE %s SET m = m + {'x': '1'} WHERE k = 1");
+            flush();
+
+            // Compaction reads both sstables and re-serializes the merged row.
+            // Before the fix, the LIVE complex deletion on the untouched column would overflow
+            // the 32-bit delta encoding in writeLocalDeletionTime.
+            compact();
+
+            // Read back to verify no CorruptSSTableException and data integrity
+            assertRows(execute("SELECT k, s, m FROM %s WHERE k = 1"),
+                       row(1, set("a", "b"), map("x", "1")));
+        }
+        finally
+        {
+            DatabaseDescriptor.setCorruptedTombstoneStrategy(original);
+        }
+    }
+
+    @Test
+    public void testSetReversed() throws Throwable
+    {
+        createTable("CREATE TABLE %s (" +
+                    "   k int, " +
+                    "   c frozen<set<text>>, " +
+                    "   v int, " +
+                    "   PRIMARY KEY(k, c)" +
+                    ") WITH CLUSTERING ORDER BY (c DESC)");
+
+        execute("INSERT INTO %s(k, c, v) VALUES (1, {'t1','t2','t3','t4'}, 2)");
+        assertRows(execute("SELECT c['nonexisting'] FROM %s"), row((Object)null));
+        assertRows(execute("SELECT c['t1'] FROM %s"), row("t1"));
+        assertRows(execute("SELECT c['t1'..'t3'] FROM %s"), row(set("t1", "t2", "t3")));
+        assertRows(execute("SELECT c['t3'..'t5'] FROM %s"), row(set("t3", "t4")));
+        assertRows(execute("SELECT c[..'t2'] FROM %s"), row(set("t1", "t2")));
+        assertRows(execute("SELECT c['t3'..] FROM %s"), row(set("t3", "t4")));
+        assertRows(execute("SELECT c[..'t5'] FROM %s"), row(set("t1", "t2", "t3", "t4")));
     }
 }

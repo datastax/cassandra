@@ -33,26 +33,63 @@ import com.google.common.collect.Iterators;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.TrieBackedPartitionStage2;
+import org.apache.cassandra.db.partitions.TrieBackedPartitionStage3;
+import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AsciiType;
-import org.apache.cassandra.db.partitions.AbstractBTreePartition;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.partitions.TrieBackedPartition;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.rows.Row.Deletion;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
+@RunWith(Parameterized.class)
 public class PartitionImplementationTest
 {
+    enum Implementation
+    {
+        BTREE(ImmutableBTreePartition::create, BTreePartitionUpdate.FACTORY, false),
+        TRIE_STAGE_2(TrieBackedPartitionStage2::fromIterator, BTreePartitionUpdate.FACTORY, false),
+        TRIE_STAGE_3(TrieBackedPartitionStage3::fromIterator, BTreePartitionUpdate.FACTORY, true),
+        TRIE(TrieBackedPartition::fromIterator, TriePartitionUpdate.FACTORY, true);
+
+        final Function<UnfilteredRowIterator, Partition> creator;
+        final PartitionUpdate.Factory factory;
+        final boolean filterInvalidEndThanStart;
+
+        Implementation(Function<UnfilteredRowIterator, Partition> creator, PartitionUpdate.Factory factory, boolean filterInvalidEndThanStart)
+        {
+            this.creator = creator;
+            this.factory = factory;
+            this.filterInvalidEndThanStart = filterInvalidEndThanStart;
+        }
+    }
+
+    @Parameterized.Parameters(name="{0}")
+    public static Object[] generateData()
+    {
+        return Implementation.values();
+    }
+
+    @Parameterized.Parameter(0)
+    public static Implementation implementation = Implementation.BTREE;
+
     private static final String KEYSPACE = "PartitionImplementationTest";
     private static final String CF = "Standard";
 
@@ -125,7 +162,7 @@ public class PartitionImplementationTest
     Row makeRow(Clustering<?> clustering, String colValue)
     {
         ColumnMetadata defCol = metadata.getColumn(new ColumnIdentifier("col", true));
-        Row.Builder row = BTreeRow.unsortedBuilder();
+        Row.Builder row = implementation.factory.rowBuilder(metadata.regularAndStaticColumns().columns(clustering == Clustering.STATIC_CLUSTERING), false);
         row.newRow(clustering);
         row.addCell(BufferCell.live(defCol, TIMESTAMP, ByteBufferUtil.bytes(colValue)));
         return row.build();
@@ -134,7 +171,7 @@ public class PartitionImplementationTest
     Row makeStaticRow()
     {
         ColumnMetadata defCol = metadata.getColumn(new ColumnIdentifier("static_col", true));
-        Row.Builder row = BTreeRow.unsortedBuilder();
+        Row.Builder row = implementation.factory.rowBuilder(metadata.staticColumns(), false);
         row.newRow(Clustering.STATIC_CLUSTERING);
         row.addCell(BufferCell.live(defCol, TIMESTAMP, ByteBufferUtil.bytes("static value")));
         return row.build();
@@ -165,7 +202,7 @@ public class PartitionImplementationTest
             while (!delTimes.add(delTime));
 
             int start = rand.nextInt(KEY_RANGE);
-            DeletionTime dt = new DeletionTime(delTime, delTime);
+            DeletionTime dt = DeletionTime.build(delTime, delTime);
             RangeTombstoneMarker open = RangeTombstoneBoundMarker.inclusiveOpen(false, clustering(start), dt);
             int end = start + rand.nextInt((KEY_RANGE - start) / 4 + 1);
             RangeTombstoneMarker close = RangeTombstoneBoundMarker.inclusiveClose(false, clustering(end), dt);
@@ -259,10 +296,10 @@ public class PartitionImplementationTest
     {
         NavigableSet<Clusterable> sortedContent = new TreeSet<Clusterable>(metadata.comparator);
         sortedContent.addAll(contentSupplier.get());
-        AbstractBTreePartition partition;
+        Partition partition;
         try (UnfilteredRowIterator iter = new Util.UnfilteredSource(metadata, Util.dk("pk"), staticRow, sortedContent.stream().map(x -> (Unfiltered) x).iterator()))
         {
-            partition = ImmutableBTreePartition.create(iter);
+            partition = implementation.creator.apply(iter);
         }
 
         ColumnMetadata defCol = metadata.getColumn(new ColumnIdentifier("col", true));
@@ -292,9 +329,13 @@ public class PartitionImplementationTest
         assertEquals(sortedContent.stream().anyMatch(x -> x instanceof Row),
                      partition.hasRows());
 
+        // rowCount
+        assertEquals(sortedContent.stream().filter(x -> x instanceof Row).count(),
+                     partition.rowCount());
+
         // iterator
         assertIteratorsEqual(sortedContent.stream().filter(x -> x instanceof Row).iterator(),
-                             partition.iterator());
+                             partition.rowIterator());
 
         // unfiltered iterator
         assertIteratorsEqual(sortedContent.iterator(),
@@ -401,7 +442,7 @@ public class PartitionImplementationTest
         return clusterings;
     }
 
-    private void testSlicingOfIterators(NavigableSet<Clusterable> sortedContent, AbstractBTreePartition partition, ColumnFilter cf, boolean reversed)
+    private void testSlicingOfIterators(NavigableSet<Clusterable> sortedContent, Partition partition, ColumnFilter cf, boolean reversed)
     {
         Function<? super Clusterable, ? extends Clusterable> colFilter = x -> x instanceof Row ? ((Row) x).filter(cf, metadata) : x;
         Slices slices = makeSlices();
@@ -424,7 +465,7 @@ public class PartitionImplementationTest
             if (reversed)
                 Collections.reverse(slicelist);
 
-            assertIteratorsEqual(Iterators.concat(slicelist.toArray(new Iterator[0])), slicedIter);
+            assertIteratorsEqual(maybeFilterInvalidCloseThenOpen(Iterators.concat(slicelist.toArray(new Iterator[0])), reversed), slicedIter);
         }
     }
 
@@ -437,7 +478,47 @@ public class PartitionImplementationTest
 
     private Iterator<Clusterable> slice(NavigableSet<Clusterable> sortedContent, Slices slices)
     {
-        return Iterators.concat(streamOf(slices).map(slice -> slice(sortedContent, slice)).iterator());
+        Iterator<Clusterable> result = Iterators.concat(streamOf(slices).map(slice -> slice(sortedContent, slice)).iterator());
+        result = maybeFilterInvalidCloseThenOpen(result, false);
+
+        return result;
+    }
+
+    private static Iterator<Clusterable> maybeFilterInvalidCloseThenOpen(Iterator<Clusterable> result, boolean reversed)
+    {
+        // Older implementations concatenate the individual slices, which may create an invalid close+open sequence with the same clustering.
+        // Stage 3 and later fix this problem.
+        if (!implementation.filterInvalidEndThanStart || !result.hasNext())
+            return result;
+
+        List<Clusterable> list = new ArrayList<>();
+        Clusterable c1 = result.next();
+        while (result.hasNext())
+        {
+            Clusterable c2 = result.next();
+            if (metadata.comparator.compare(c1.clustering(), c2.clustering()) == 0)
+            {
+                assertTrue(c1 instanceof RangeTombstoneBoundMarker);
+                assertTrue(c2 instanceof RangeTombstoneBoundMarker);
+                RangeTombstoneBoundMarker m1 = (RangeTombstoneBoundMarker) c1;
+                RangeTombstoneBoundMarker m2 = (RangeTombstoneBoundMarker) c2;
+                assertTrue(m1.isClose(reversed));
+                assertTrue(m2.isOpen(reversed));
+                if (m1.deletionTime().equals(m2.deletionTime()))
+                    c1 = result.hasNext() ? result.next() : null;
+                else
+                    c1 = RangeTombstoneBoundaryMarker.makeBoundary(reversed, m1.clustering(), m2.clustering(), m1.deletionTime(), m2.deletionTime());
+            }
+            else
+            {
+                list.add(c1);
+                c1 = c2;
+            }
+        }
+        if (c1 != null)
+            list.add(c1);
+        result = list.iterator();
+        return result;
     }
 
     private Iterator<Clusterable> slice(NavigableSet<Clusterable> sortedContent, Slice slice)
@@ -568,4 +649,19 @@ public class PartitionImplementationTest
         test(this::generateUnfiltereds, makeStaticRow());
     }
 
+    @Test
+    public void checkStaticPath()
+    {
+        ByteComparable sp = metadata.comparator.asByteComparable(Clustering.STATIC_CLUSTERING);
+        for (ByteComparable.Version v : ByteComparable.Version.values())
+            assertEquals(0, ByteComparable.compare(sp, TrieBackedPartition.STATIC_CLUSTERING_PATH, v));
+    }
+
+    @Test
+    public void checkBottomPath()
+    {
+        ByteComparable sp = metadata.comparator.asByteComparable(ClusteringBound.BOTTOM);
+        for (ByteComparable.Version v : ByteComparable.Version.values())
+            assertEquals(0, ByteComparable.compare(sp, TrieBackedPartition.BOTTOM_PATH, v));
+    }
 }

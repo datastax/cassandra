@@ -1,0 +1,5 @@
+= Terminology
+
+See the https://cassandra.apache.org/_/glossary.html[glossary].
+
+

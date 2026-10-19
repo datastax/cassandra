@@ -34,8 +34,6 @@ import org.apache.cassandra.exceptions.IncompatibleSchemaException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message.Header;
-import org.apache.cassandra.net.FrameDecoder.Frame;
-import org.apache.cassandra.net.FrameDecoder.FrameProcessor;
 import org.apache.cassandra.net.FrameDecoder.IntactFrame;
 import org.apache.cassandra.net.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.ResourceLimits.Limit;
@@ -45,7 +43,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
-import static org.apache.cassandra.utils.MonotonicClock.approxTime;
+import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
 /**
  * Implementation of {@link AbstractMessageHandler} for processing internode messages from peers.
@@ -77,7 +75,7 @@ public class InboundMessageHandler extends AbstractMessageHandler
     private final ConnectionType type;
     private final InetAddressAndPort self;
     private final InetAddressAndPort peer;
-    private final int version;
+    final int version;
 
     private final InboundMessageCallbacks callbacks;
     private final Consumer<Message<?>> consumer;
@@ -120,6 +118,12 @@ public class InboundMessageHandler extends AbstractMessageHandler
         this.consumer = consumer;
     }
 
+    @Override
+    protected void onDecoderReactivated()
+    {
+        // No-op for this implementation, as the InboundMessageHandler should not use ClientMetrics
+    }
+
     protected boolean processOneContainedMessage(ShareableBytes bytes, Limit endpointReserve, Limit globalReserve) throws IOException
     {
         ByteBuffer buf = bytes.get();
@@ -127,7 +131,7 @@ public class InboundMessageHandler extends AbstractMessageHandler
         long currentTimeNanos = approxTime.now();
         Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
         long timeElapsed = currentTimeNanos - header.createdAtNanos;
-        int size = serializer.inferMessageSize(buf, buf.position(), buf.limit(), version);
+        int size = serializer.inferMessageSize(buf, buf.position(), buf.limit());
 
         if (approxTime.isAfter(currentTimeNanos, header.expiresAtNanos))
         {
@@ -148,14 +152,14 @@ public class InboundMessageHandler extends AbstractMessageHandler
         receivedBytes += size;
 
         if (size <= largeThreshold)
-            processSmallMessage(bytes, size, header);
+            processSmallMessage(bytes, size, header, currentTimeNanos);
         else
-            processLargeMessage(bytes, size, header);
+            processLargeMessage(bytes, size, header, currentTimeNanos);
 
         return true;
     }
 
-    private void processSmallMessage(ShareableBytes bytes, int size, Header header)
+    private void processSmallMessage(ShareableBytes bytes, int size, Header header, long messageProcessingStartTimeNanos)
     {
         ByteBuffer buf = bytes.get();
         final int begin = buf.position();
@@ -193,13 +197,13 @@ public class InboundMessageHandler extends AbstractMessageHandler
         }
 
         if (null != message)
-            dispatch(new ProcessSmallMessage(message, size));
+            dispatch(new ProcessSmallMessage(message, size, messageProcessingStartTimeNanos));
     }
 
     // for various reasons, it's possible for a large message to be contained in a single frame
-    private void processLargeMessage(ShareableBytes bytes, int size, Header header)
+    private void processLargeMessage(ShareableBytes bytes, int size, Header header, long handlingStartNanos)
     {
-        new LargeMessage(size, header, bytes.sliceAndConsume(size).share()).schedule();
+        new LargeMessage(size, header, bytes.sliceAndConsume(size).share(), handlingStartNanos).schedule();
     }
 
     /*
@@ -213,7 +217,7 @@ public class InboundMessageHandler extends AbstractMessageHandler
 
         long currentTimeNanos = approxTime.now();
         Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
-        int size = serializer.inferMessageSize(buf, buf.position(), buf.limit(), version);
+        int size = serializer.inferMessageSize(buf, buf.position(), buf.limit());
 
         boolean expired = approxTime.isAfter(currentTimeNanos, header.expiresAtNanos);
         if (!expired && !acquireCapacity(endpointReserve, globalReserve, size, currentTimeNanos, header.expiresAtNanos))
@@ -221,7 +225,7 @@ public class InboundMessageHandler extends AbstractMessageHandler
 
         callbacks.onHeaderArrived(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
         receivedBytes += buf.remaining();
-        largeMessage = new LargeMessage(size, header, expired);
+        largeMessage = new LargeMessage(size, header, expired, currentTimeNanos);
         largeMessage.supply(frame);
         return true;
     }
@@ -316,19 +320,23 @@ public class InboundMessageHandler extends AbstractMessageHandler
      */
     private class LargeMessage extends AbstractMessageHandler.LargeMessage<Header>
     {
-        private LargeMessage(int size, Header header, boolean isExpired)
+        private long handlingStartNanos;
+
+        private LargeMessage(int size, Header header, boolean isExpired, long handlingStartNanos)
         {
             super(size, header, header.expiresAtNanos, isExpired);
+            this.handlingStartNanos = handlingStartNanos;
         }
 
-        private LargeMessage(int size, Header header, ShareableBytes bytes)
+        private LargeMessage(int size, Header header, ShareableBytes bytes, long handlingStartNanos)
         {
             super(size, header, header.expiresAtNanos, bytes);
+            this.handlingStartNanos = handlingStartNanos;
         }
 
         private void schedule()
         {
-            dispatch(new ProcessLargeMessage(this));
+            dispatch(new ProcessLargeMessage(this, handlingStartNanos));
         }
 
         protected void onComplete()
@@ -405,24 +413,24 @@ public class InboundMessageHandler extends AbstractMessageHandler
     {
         /**
          * Actually handle the message. Runs on the appropriate {@link Stage} for the {@link Verb}.
-         *
+         * <p>
          * Small messages will come pre-deserialized. Large messages will be deserialized on the stage,
          * just in time, and only then processed.
          */
         public void run()
         {
             Header header = header();
-            long currentTimeNanos = approxTime.now();
-            boolean expired = approxTime.isAfter(currentTimeNanos, header.expiresAtNanos);
+            long approxStartTimeNanos = approxTime.now();
+            boolean expired = approxTime.isAfter(approxStartTimeNanos, header.expiresAtNanos);
 
             boolean processed = false;
             try
             {
-                callbacks.onExecuting(size(), header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+                callbacks.onExecuting(size(), header, approxStartTimeNanos - header.createdAtNanos, NANOSECONDS);
 
                 if (expired)
                 {
-                    callbacks.onExpired(size(), header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+                    callbacks.onExpired(size(), header, approxStartTimeNanos - header.createdAtNanos, NANOSECONDS);
                     return;
                 }
 
@@ -443,10 +451,13 @@ public class InboundMessageHandler extends AbstractMessageHandler
 
                 releaseResources();
 
-                callbacks.onExecuted(size(), header, approxTime.now() - currentTimeNanos, NANOSECONDS);
+                long now = approxTime.now();
+                callbacks.onExecuted(size(), header, now - approxStartTimeNanos, NANOSECONDS);
+                callbacks.onMessageHandlingCompleted(header, now - handlingStartNanos(), NANOSECONDS);
             }
         }
 
+        abstract long handlingStartNanos();
         abstract int size();
         abstract Header header();
         abstract Message provideMessage();
@@ -457,11 +468,19 @@ public class InboundMessageHandler extends AbstractMessageHandler
     {
         private final int size;
         private final Message message;
+        private final long handlingStartNanos;
 
-        ProcessSmallMessage(Message message, int size)
+        ProcessSmallMessage(Message message, int size, long handlingStartNanos)
         {
             this.size = size;
             this.message = message;
+            this.handlingStartNanos = handlingStartNanos;
+        }
+
+        @Override
+        long handlingStartNanos()
+        {
+            return handlingStartNanos;
         }
 
         int size()
@@ -483,10 +502,18 @@ public class InboundMessageHandler extends AbstractMessageHandler
     private class ProcessLargeMessage extends ProcessMessage
     {
         private final LargeMessage message;
+        private final long handlingStartNanos;
 
-        ProcessLargeMessage(LargeMessage message)
+        ProcessLargeMessage(LargeMessage message, long handlingStartNanos)
         {
             this.message = message;
+            this.handlingStartNanos = handlingStartNanos;
+        }
+
+        @Override
+        long handlingStartNanos()
+        {
+            return handlingStartNanos;
         }
 
         int size()

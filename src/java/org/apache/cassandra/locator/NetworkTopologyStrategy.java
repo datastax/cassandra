@@ -17,26 +17,37 @@
  */
 package org.apache.cassandra.locator;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
-import org.apache.cassandra.locator.ReplicaCollection.Builder.Conflict;
+import com.google.common.collect.ImmutableMultimap;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.Multimaps;
+import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.dht.Datacenters;
 import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.locator.ReplicaCollection.Builder.Conflict;
 import org.apache.cassandra.locator.TokenMetadata.Topology;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
-
-import com.google.common.collect.ImmutableMultimap;
-import com.google.common.collect.Multimap;
 
 /**
  * <p>
@@ -85,7 +96,6 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
 
         datacenters = Collections.unmodifiableMap(newDatacenters);
         aggregateRf = ReplicationFactor.withTransient(replicas, trans);
-        logger.info("Configured datacenter replicas are {}", FBUtilities.toString(datacenters));
     }
 
     /**
@@ -112,7 +122,8 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
                             int rackCount,
                             int nodeCount,
                             EndpointsForRange.Builder replicas,
-                            Set<Pair<String, String>> racks)
+                            Set<Pair<String, String>> racks,
+                            IEndpointSnitch snitch)
         {
             this.replicas = replicas;
             this.racks = racks;
@@ -120,7 +131,7 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
             this.rfLeft = Math.min(rf.allReplicas, nodeCount);
             // If there aren't enough racks in this DC to fill the RF, we'll still use at least one node from each rack,
             // and the difference is to be filled by the first encountered nodes.
-            acceptableRackRepeats = rf.allReplicas - rackCount;
+            acceptableRackRepeats = snitch.acceptsNodesFromSameRack(rf.allReplicas, rackCount) ? rf.allReplicas - rackCount : 0;
 
             // if we have fewer replicas than rf calls for, reduce transients accordingly
             int reduceTransients = rf.allReplicas - this.rfLeft;
@@ -174,8 +185,12 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
     @Override
     public EndpointsForRange calculateNaturalReplicas(Token searchToken, TokenMetadata tokenMetadata)
     {
-        // we want to preserve insertion order so that the first added endpoint becomes primary
         ArrayList<Token> sortedTokens = tokenMetadata.sortedTokens();
+        // handle the case of an empty ring and return an empty EndpointsForRange
+        if (sortedTokens.isEmpty())
+            return EndpointsForRange.empty(new Range<>(tokenMetadata.partitioner.getMinimumToken(), tokenMetadata.partitioner.getMinimumToken()));
+
+        // we want to preserve insertion order so that the first added endpoint becomes primary
         Token replicaEnd = TokenMetadata.firstToken(sortedTokens, searchToken);
         Token replicaStart = tokenMetadata.getPredecessor(replicaEnd);
         Range<Token> replicatedRange = new Range<>(replicaStart, replicaEnd);
@@ -203,7 +218,7 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
             if (rf.allReplicas <= 0 || nodeCount <= 0)
                 continue;
 
-            DatacenterEndpoints dcEndpoints = new DatacenterEndpoints(rf, sizeOrZero(racks.get(dc)), nodeCount, builder, seenRacks);
+            DatacenterEndpoints dcEndpoints = new DatacenterEndpoints(rf, sizeOrZero(racks.get(dc)), nodeCount, builder, seenRacks, snitch);
             dcs.put(dc, dcEndpoints);
             ++dcsToFill;
         }
@@ -260,11 +275,20 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
      * the "replication_factor" options out into the known datacenters. It is called via reflection from
      * {@link AbstractReplicationStrategy#prepareReplicationStrategyOptions(Class, Map, Map)}.
      *
-     * @param options The proposed strategy options that will be potentially mutated
+     * @param options The proposed strategy options that will be potentially mutated. If empty, replication_factor will
+     *                be added either from previousOptions if one exists, or from default_keyspace_rf configuration.
      * @param previousOptions Any previous strategy options in the case of an ALTER statement
      */
     protected static void prepareOptions(Map<String, String> options, Map<String, String> previousOptions)
     {
+        // add replication_factor only if there is no explicit mention of DCs. Otherwise, non-mentioned DCs will be added with default RF
+        if (options.isEmpty())
+        {
+            String rf = previousOptions.containsKey(REPLICATION_FACTOR) ? previousOptions.get(REPLICATION_FACTOR)
+                                                                        : Integer.toString(DatabaseDescriptor.getDefaultKeyspaceRF());
+            options.putIfAbsent(REPLICATION_FACTOR, rf);
+        }
+
         String replication = options.remove(REPLICATION_FACTOR);
 
         if (replication == null && options.size() == 0)
@@ -301,6 +325,16 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
 
         // Validate the data center names
         super.validateExpectedOptions();
+
+        if (keyspaceName.equalsIgnoreCase(SchemaConstants.AUTH_KEYSPACE_NAME))
+        {
+            Set<String> differenceSet = Sets.difference((Set<String>) recognizedOptions(), configOptions.keySet());
+            if (!differenceSet.isEmpty())
+            {
+                throw new ConfigurationException("Following datacenters have active nodes and must be present in replication options for keyspace " + SchemaConstants.AUTH_KEYSPACE_NAME + ": " + differenceSet.toString());
+            }
+        }
+        logger.info("Configured datacenter replicas are {}", FBUtilities.toString(datacenters));
     }
 
     @Override
@@ -316,17 +350,18 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
     }
 
     @Override
-    public void maybeWarnOnOptions()
+    public void maybeWarnOnOptions(ClientState state)
     {
         if (!SchemaConstants.isSystemKeyspace(keyspaceName))
         {
-            ImmutableMultimap<String, InetAddressAndPort> dcsNodes = StorageService.instance.getTokenMetadata()
-                                                                                            .getDC2AllEndpoints(snitch);
+            ImmutableMultimap<String, InetAddressAndPort> dcsNodes = Multimaps.index(StorageService.instance.getTokenMetadataForKeyspace(keyspaceName).getAllMembers(), snitch::getDatacenter);
             for (Entry<String, String> e : this.configOptions.entrySet())
             {
 
                 String dc = e.getKey();
                 ReplicationFactor rf = getReplicationFactor(dc);
+                Guardrails.minimumReplicationFactor.guard(rf.fullReplicas, keyspaceName, false, state);
+                Guardrails.maximumReplicationFactor.guard(rf.fullReplicas, keyspaceName, false, state);
                 int nodeCount = dcsNodes.get(dc).size();
                 // nodeCount==0 on many tests
                 if (rf.fullReplicas > nodeCount && nodeCount != 0)

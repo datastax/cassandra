@@ -18,19 +18,26 @@
 
 package org.apache.cassandra.service.reads.range;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.locator.ReplicaPlans;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.FBUtilities;
-import org.assertj.core.util.VisibleForTesting;
 
 public class RangeCommands
 {
@@ -45,16 +52,15 @@ public class RangeCommands
      * don't want a burst of range requests that will back up, hurting all other queries. At the same time,
      * we want to give range queries a chance to run if resources are available.
      */
-    private static final int MAX_CONCURRENT_RANGE_REQUESTS = Math.max(1, Integer.getInteger("cassandra.max_concurrent_range_requests",
-                                                                                            FBUtilities.getAvailableProcessors() * 10));
+    private static final int MAX_CONCURRENT_RANGE_REQUESTS = Math.max(1, CassandraRelevantProperties.MAX_CONCURRENT_RANGE_REQUESTS.getInt(FBUtilities.getAvailableProcessors() * 10));
 
-    @SuppressWarnings("resource") // created iterators will be closed in CQL layer through the chain of transformations
     public static PartitionIterator partitions(PartitionRangeReadCommand command,
                                                ConsistencyLevel consistencyLevel,
-                                               long queryStartNanoTime)
+                                               Dispatcher.RequestTime requestTime,
+                                               QueryInfoTracker.ReadTracker readTracker)
     {
         // Note that in general, a RangeCommandIterator will honor the command limit for each range, but will not enforce it globally.
-        RangeCommandIterator rangeCommands = rangeCommandIterator(command, consistencyLevel, queryStartNanoTime);
+        RangeCommandIterator rangeCommands = rangeCommandIterator(command, consistencyLevel, requestTime, readTracker);
         return command.limits().filter(command.postReconciliationProcessing(rangeCommands),
                                        command.nowInSec(),
                                        command.selectsFullPartition(),
@@ -62,37 +68,55 @@ public class RangeCommands
     }
 
     @VisibleForTesting
-    @SuppressWarnings("resource") // created iterators will be closed in CQL layer through the chain of transformations
     static RangeCommandIterator rangeCommandIterator(PartitionRangeReadCommand command,
                                                      ConsistencyLevel consistencyLevel,
-                                                     long queryStartNanoTime)
+                                                     Dispatcher.RequestTime requestTime,
+                                                     QueryInfoTracker.ReadTracker readTracker)
     {
         Tracing.trace("Computing ranges to query");
 
         Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
-        ReplicaPlanIterator replicaPlans = new ReplicaPlanIterator(command.dataRange().keyRange(), keyspace, consistencyLevel);
+        ReplicaPlanIterator replicaPlans = new ReplicaPlanIterator(command.dataRange().keyRange(),
+                                                                   command.indexQueryPlan(),
+                                                                   keyspace,
+                                                                   consistencyLevel);
+        if (command.isTopK())
+            return new ScanAllRangesCommandIterator(keyspace, replicaPlans, command, replicaPlans.size(), requestTime, readTracker);
 
-        // our estimate of how many result rows there will be per-range
-        float resultsPerRange = estimateResultsPerRange(command, keyspace);
-        // underestimate how many rows we will get per-range in order to increase the likelihood that we'll
-        // fetch enough rows in the first round
-        resultsPerRange -= resultsPerRange * CONCURRENT_SUBREQUESTS_MARGIN;
         int maxConcurrencyFactor = Math.min(replicaPlans.size(), MAX_CONCURRENT_RANGE_REQUESTS);
-        int concurrencyFactor = resultsPerRange == 0.0
+        int concurrencyFactor = maxConcurrencyFactor;
+        Index.QueryPlan queryPlan = command.indexQueryPlan();
+        if (queryPlan == null || queryPlan.shouldEstimateInitialConcurrency())
+        {
+            // our estimate of how many result rows there will be per-range
+            float resultsPerRange = estimateResultsPerRange(command, keyspace);
+            // underestimate how many rows we will get per-range in order to increase the likelihood that we'll
+            // fetch enough rows in the first round
+            resultsPerRange -= resultsPerRange * CONCURRENT_SUBREQUESTS_MARGIN;
+            concurrencyFactor = resultsPerRange == 0.0
                                 ? 1
                                 : Math.max(1, Math.min(maxConcurrencyFactor, (int) Math.ceil(command.limits().count() / resultsPerRange)));
-        logger.trace("Estimated result rows per range: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
-                     resultsPerRange, command.limits().count(), replicaPlans.size(), concurrencyFactor);
-        Tracing.trace("Submitting range requests on {} ranges with a concurrency of {} ({} rows per range expected)",
-                      replicaPlans.size(), concurrencyFactor, resultsPerRange);
+            logger.trace("Estimated result rows per range: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
+                         resultsPerRange, command.limits().count(), replicaPlans.size(), concurrencyFactor);
+            Tracing.trace("Submitting range requests on {} ranges with a concurrency of {} ({} rows per range expected)",
+                          replicaPlans.size(), concurrencyFactor, resultsPerRange);
+        }
+        else
+        {
+            logger.trace("Max concurrent range requests: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
+                         MAX_CONCURRENT_RANGE_REQUESTS, command.limits().count(), replicaPlans.size(), concurrencyFactor);
+            Tracing.trace("Submitting range requests on {} ranges with a concurrency of {}", replicaPlans.size(), concurrencyFactor);
+        }
 
         ReplicaPlanMerger mergedReplicaPlans = new ReplicaPlanMerger(replicaPlans, keyspace, consistencyLevel);
-        return new RangeCommandIterator(mergedReplicaPlans,
-                                        command,
-                                        concurrencyFactor,
-                                        maxConcurrencyFactor,
-                                        replicaPlans.size(),
-                                        queryStartNanoTime);
+
+        return RangeCommandIterator.create(mergedReplicaPlans,
+                                           command,
+                                           concurrencyFactor,
+                                           maxConcurrencyFactor,
+                                           replicaPlans.size(),
+                                           requestTime,
+                                           readTracker);
     }
 
     /**
@@ -105,13 +129,37 @@ public class RangeCommands
     static float estimateResultsPerRange(PartitionRangeReadCommand command, Keyspace keyspace)
     {
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
-        Index index = command.getIndex(cfs);
+        Index.QueryPlan index = command.indexQueryPlan();
         float maxExpectedResults = index == null
                                    ? command.limits().estimateTotalResults(cfs)
-                                   : index.getEstimatedResultRows();
+                                   : command.indexQueryPlan().getEstimatedResultRows();
 
         // adjust maxExpectedResults by the number of tokens this node has and the replication factor for this ks
         return (maxExpectedResults / DatabaseDescriptor.getNumTokens())
                / keyspace.getReplicationStrategy().getReplicationFactor().allReplicas;
+    }
+
+    /**
+     * Added specifically to check for sufficient nodes live to serve partition denylist queries
+     */
+    public static boolean sufficientLiveNodesForSelectStar(TableMetadata metadata, ConsistencyLevel consistency)
+    {
+        try
+        {
+            Keyspace keyspace = Keyspace.open(metadata.keyspace);
+            ReplicaPlanIterator rangeIterator = new ReplicaPlanIterator(DataRange.allData(metadata.partitioner).keyRange(),
+                                                                        null,
+                                                                        keyspace,
+                                                                        consistency);
+
+            // Called for the side effect of running assureSufficientLiveReplicasForRead.
+            // Deliberately called with an invalid vnode count in case it is used elsewhere in the future..
+            rangeIterator.forEachRemaining(r ->  ReplicaPlans.forRangeRead(keyspace, null, consistency, r.range(), -1));
+            return true;
+        }
+        catch (UnavailableException e)
+        {
+            return false;
+        }
     }
 }

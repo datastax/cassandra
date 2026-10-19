@@ -17,10 +17,12 @@
  */
 package org.apache.cassandra.io.util;
 
-import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-
+import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.primitives.Ints;
@@ -29,7 +31,7 @@ import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.Rebufferer.BufferHolder;
 
 @NotThreadSafe
-public class RandomAccessReader extends RebufferingInputStream implements FileDataInput
+public class RandomAccessReader extends RebufferingInputStream implements FileDataInput, io.github.jbellis.jvector.disk.RandomAccessReader
 {
     // The default buffer size when the client doesn't specify it
     public static final int DEFAULT_BUFFER_SIZE = 4096;
@@ -38,17 +40,20 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     private long markedPointer;
 
     final Rebufferer rebufferer;
-    private BufferHolder bufferHolder = Rebufferer.EMPTY;
+    private BufferHolder bufferHolder;
+    private final ByteOrder order;
 
     /**
      * Only created through Builder
      *
      * @param rebufferer Rebufferer to use
      */
-    RandomAccessReader(Rebufferer rebufferer)
+    RandomAccessReader(Rebufferer rebufferer, ByteOrder order, BufferHolder bufferHolder)
     {
-        super(Rebufferer.EMPTY.buffer());
+        super(bufferHolder.buffer(), false);
+        this.bufferHolder = bufferHolder;
         this.rebufferer = rebufferer;
+        this.order = order;
     }
 
     /**
@@ -59,17 +64,180 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         if (isEOF())
             return;
 
-        reBufferAt(current());
+        // Not at EOF, so there is content (or padding, see bytesRemaining) after current(): its adjusted position is
+        // before length() (unlike in seek, it cannot be a length() at the start of the last chunk's hole, which
+        // adjustPosition would move past it). At padding, the reloaded chunk has nothing left: the read reports EOF.
+        reBufferAt(rebufferer.adjustPosition(current()));
     }
 
+    /**
+     * Moves the file pointer to the given position, which must not be after {@link #length()}. The position is not
+     * adjusted (see {@link ReaderFileProxy#adjustPosition}): at the start of a hole before {@link #length()} this loads
+     * the chunk ending there, with nothing remaining in the buffer, where reading the chunk's last byte leaves the
+     * reader.
+     */
     private void reBufferAt(long position)
     {
+        assert position <= length() : position + " > " + length();
         bufferHolder.release();
-        bufferHolder = rebufferer.rebuffer(position);
-        buffer = bufferHolder.buffer();
-        buffer.position(Ints.checkedCast(position - bufferHolder.offset()));
+        if (position == length())
+        {
+            bufferHolder = Rebufferer.emptyBufferHolderAt(position);
+            buffer = bufferHolder.buffer();
+        }
+        else
+        {
+            try
+            {
+                bufferHolder = rebufferer.rebuffer(position);
+            }
+            catch (Throwable t)
+            {
+                // The reader must neither release the holder again nor read from the buffer of the released one, whose
+                // memory may have been reused (by the chunk cache, or by the failed read itself). It stays at the
+                // position it failed to load, so that a later read tries to load it again.
+                bufferHolder = Rebufferer.emptyBufferHolderAt(position);
+                buffer = bufferHolder.buffer();
+                throw t;
+            }
+            buffer = bufferHolder.buffer();
+            // The buffer may hold data past length(), e.g. a chunk read in full when length() is in its middle, or a
+            // chunk cached (or a region mapped) for a handle of the same file with a longer length. Reads stop at
+            // length(); the limit of the buffer, which is this reader's own view, is the place to enforce it.
+            long lengthInBuffer = length() - bufferHolder.offset();
+            if (buffer.limit() > lengthInBuffer)
+                buffer.limit(Ints.checkedCast(lengthInBuffer));
+            long positionInBuffer = position - bufferHolder.offset();
+            // e.g. a position in the padding of a chunk of an encryption-only file (see bytesRemaining); the holder
+            // stays referenced by this reader, which releases it on the next rebuffer or close
+            if (positionInBuffer > buffer.limit())
+                throw new IllegalArgumentException(String.format("Unable to seek to position %d in %s (%d bytes) in read-only mode: past the end of the data at %d",
+                                                                 position, getFile(), length(), bufferHolder.offset() + buffer.limit()));
+            buffer.position(Ints.checkedCast(positionInBuffer));
+        }
+        buffer.order(order);
+    }
 
-        assert buffer.order() == ByteOrder.BIG_ENDIAN : "Buffer must have BIG ENDIAN byte ordering";
+    public ByteOrder order()
+    {
+        return order;
+    }
+
+    @Override
+    public void read(float[] dest, int offset, int count) throws IOException
+    {
+        for (int inBuffer = buffer.remaining() / Float.BYTES;
+             inBuffer < count;
+             inBuffer = buffer.remaining() / Float.BYTES)
+        {
+            if (inBuffer >= 1)
+            {
+                // read as much as we can from the buffer
+                readFloats(buffer, order, dest, offset, inBuffer);
+                offset += inBuffer;
+                count -= inBuffer;
+            }
+
+            if (buffer.remaining() > 0)
+            {
+                // read the buffer-spanning value using the slow path
+                dest[offset++] = readFloat();
+                --count;
+            }
+            else
+                reBuffer();
+        }
+
+        readFloats(buffer, order, dest, offset, count);
+    }
+
+    @Override
+    public void readFully(long[] dest) throws IOException
+    {
+        read(dest, 0, dest.length);
+    }
+
+    public void read(long[] dest, int offset, int count) throws IOException
+    {
+        for (int inBuffer = buffer.remaining() / Long.BYTES;
+             inBuffer < count;
+             inBuffer = buffer.remaining() / Long.BYTES)
+        {
+            if (inBuffer >= 1)
+            {
+                // read as much as we can from the buffer
+                readLongs(buffer, order, dest, offset, inBuffer);
+                offset += inBuffer;
+                count -= inBuffer;
+            }
+
+            if (buffer.remaining() > 0)
+            {
+                // read the buffer-spanning value using the slow path
+                dest[offset++] = readLong();
+                --count;
+            }
+            else
+                reBuffer();
+        }
+
+        readLongs(buffer, order, dest, offset, count);
+    }
+
+    @Override
+    public void read(int[] dest, int offset, int count) throws IOException
+    {
+        for (int inBuffer = buffer.remaining() / Integer.BYTES;
+             inBuffer < count;
+             inBuffer = buffer.remaining() / Integer.BYTES)
+        {
+            if (inBuffer >= 1)
+            {
+                // read as much as we can from the buffer
+                readInts(buffer, order, dest, offset, inBuffer);
+                offset += inBuffer;
+                count -= inBuffer;
+            }
+
+            if (buffer.remaining() > 0)
+            {
+                // read the buffer-spanning value using the slow path
+                dest[offset++] = readInt();
+                --count;
+            }
+            else
+                reBuffer();
+        }
+
+        readInts(buffer, order, dest, offset, count);
+    }
+
+    private static void readFloats(ByteBuffer buffer, ByteOrder order, float[] dest, int offset, int count)
+    {
+        FloatBuffer floatBuffer = updateBufferByteOrderIfNeeded(buffer, order).asFloatBuffer();
+        floatBuffer.get(dest, offset, count);
+        buffer.position(buffer.position() + count * Float.BYTES);
+    }
+
+    private static void readLongs(ByteBuffer buffer, ByteOrder order, long[] dest, int offset, int count)
+    {
+        LongBuffer longBuffer = updateBufferByteOrderIfNeeded(buffer, order).asLongBuffer();
+        longBuffer.get(dest, offset, count);
+        buffer.position(buffer.position() + count * Long.BYTES);
+    }
+
+    private static void readInts(ByteBuffer buffer, ByteOrder order, int[] dest, int offset, int count)
+    {
+        IntBuffer intBuffer = updateBufferByteOrderIfNeeded(buffer, order).asIntBuffer();
+        intBuffer.get(dest, offset, count);
+        buffer.position(buffer.position() + count * Integer.BYTES);
+    }
+
+    private static ByteBuffer updateBufferByteOrderIfNeeded(ByteBuffer buffer, ByteOrder order)
+    {
+        return buffer.order() != order
+               ? buffer.duplicate().order(order)
+               : buffer;    // Note: ?: rather than if to hit one-liner inlining path
     }
 
     @Override
@@ -85,9 +253,10 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         return bufferHolder.offset() + buffer.position();
     }
 
-    public String getPath()
+    @Override
+    public File getFile()
     {
-        return getChannel().filePath();
+        return getChannel().getFile();
     }
 
     public ChannelProxy getChannel()
@@ -135,16 +304,32 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     }
 
     /**
-     * @return true if there is no more data to read
+     * @return true if there is no more data to read, i.e. if {@link #bytesRemaining()} is 0; at the end of the data
+     * of a chunk padded before {@link #length()} (see {@link #bytesRemaining()}) this is false, although reads report
+     * EOF
      */
     public boolean isEOF()
     {
-        return current() == length();
+        return rebufferer.remainingBytes(current()) == 0;
     }
 
+    /**
+     * @return the number of bytes between the file pointer and {@link #length()}, not counting holes (see
+     * {@link ReaderFileProxy#remainingBytes}), or 0 after {@link #length()}; this is the number of bytes reads return
+     * before reporting EOF, with one exception.
+     * <p>
+     * In an encryption-only file a chunk padded before {@link #length()} has less content than its usable size, which
+     * only decrypting the chunk reveals: a chunk in the middle of the file (see
+     * {@link org.apache.cassandra.io.compress.EncryptedSequentialWriter#padToPageBoundary}), or a padded last chunk of
+     * a file opened without a length override, whose length is the usable end of the last chunk (see
+     * {@link FileHandle#dataLength()}; e.g. the row index). The padding is counted here but cannot be read: a read
+     * reaching it reports EOF (an {@link java.io.EOFException}, or -1 from {@link #read()}) without moving on to the
+     * next chunk or to {@link #length()}, and a seek or skip into it is an error. Nothing is written to be read across
+     * such padding.
+     */
     public long bytesRemaining()
     {
-        return length() - getFilePointer();
+        return rebufferer.remainingBytes(getFilePointer());
     }
 
     @Override
@@ -159,7 +344,6 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         // close needs to be idempotent.
         if (buffer == null)
             return;
-
         bufferHolder.release();
         rebufferer.closeReader();
         buffer = null;
@@ -206,8 +390,49 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
 
         if (newPosition > length())
             throw new IllegalArgumentException(String.format("Unable to seek to position %d in %s (%d bytes) in read-only mode",
-                                                         newPosition, getPath(), length()));
-        reBufferAt(newPosition);
+                                                             newPosition, getFile(), length()));
+        // For files with holes (see EncryptedChunkReader) length() may be the start of the last chunk's hole, which
+        // adjustPosition would move to the physical end of the file, where there is no chunk to read.
+        reBufferAt(newPosition == length() ? newPosition : rebufferer.adjustPosition(newPosition));
+    }
+
+    /**
+     * Skips {@code n} bytes, or up to {@link #length()} if fewer remain, leaving the file pointer where reading the same
+     * bytes would leave it.
+     * <p>
+     * For files with holes (see {@link EncryptedChunkReader}) this matters when the skipped bytes end exactly at the
+     * usable end of a chunk: a read leaves the pointer there (at the start of the hole), while {@link #seek} moves on to
+     * the start of the next chunk. Callers compare file pointers with positions recorded by the writer (e.g.
+     * {@code TrieIndexEntry.deserialize}), so the pointer is moved without adjusting the position.
+     * <p>
+     * A skip ending inside the padding of a chunk padded before {@link #length()} (see {@link #bytesRemaining()}) is an
+     * error; a skip across the padding, or ending at {@link #length()} after a padded last chunk, counts it as skipped
+     * (as a {@link #seek} to {@link #length()} succeeds).
+     *
+     * @return the number of bytes skipped, i.e. {@code n} unless the end of the file was reached first
+     */
+    @Override
+    public int skipBytes(int n) throws IOException
+    {
+        if (n <= 0)
+            return 0;
+        if (buffer == null)
+            throw new IOException("Attempted skipBytes() on a closed RAR");
+        if (n <= buffer.remaining())
+        {
+            buffer.position(buffer.position() + n);
+            return n;
+        }
+
+        long current = current();
+        long remaining = rebufferer.remainingBytes(current);
+        if (remaining <= 0)
+            return 0;
+        if (n > remaining)
+            n = (int) remaining;
+        // n is more than the buffer holds: the target is after the buffer, and not after length()
+        reBufferAt(rebufferer.positionForSkip(current, n));
+        return n;
     }
 
     /**
@@ -282,7 +507,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     {
         RandomAccessReaderWithOwnChannel(Rebufferer rebufferer)
         {
-            super(rebufferer);
+            super(rebufferer, ByteOrder.BIG_ENDIAN, Rebufferer.EMPTY);
         }
 
         @Override
@@ -312,14 +537,14 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
      * @param file File to open for reading
      * @return new RandomAccessReader that owns the channel opened in this method.
      */
-    @SuppressWarnings("resource")
+    @SuppressWarnings({ "resource", "RedundantSuppression" }) // reader is closed along with the returned RandomAccessReader instance
     public static RandomAccessReader open(File file)
     {
         ChannelProxy channel = new ChannelProxy(file);
         try
         {
             ChunkReader reader = new SimpleChunkReader(channel, -1, BufferType.OFF_HEAP, DEFAULT_BUFFER_SIZE);
-            Rebufferer rebufferer = reader.instantiateRebufferer();
+            Rebufferer rebufferer = reader.instantiateRebufferer(false);
             return new RandomAccessReaderWithOwnChannel(rebufferer);
         }
         catch (Throwable t)
@@ -328,4 +553,5 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             throw t;
         }
     }
+
 }

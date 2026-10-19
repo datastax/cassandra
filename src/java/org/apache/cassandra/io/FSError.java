@@ -17,17 +17,44 @@
  */
 package org.apache.cassandra.io;
 
-import java.io.File;
 import java.io.IOError;
+import java.nio.file.Path;
+
+import org.apache.cassandra.io.util.File;
 
 public abstract class FSError extends IOError
 {
-    public final File path;
+    final String message;
+    public final File file;
 
-    public FSError(Throwable cause, File path)
+    public FSError(Throwable cause, File file)
+    {
+        this(null, cause, file);
+    }
+
+    public FSError(Throwable cause, Path path)
+    {
+        this(null, cause, path);
+    }
+
+    public FSError(String message, Throwable cause, File file)
     {
         super(cause);
-        this.path = path;
+        this.message = message;
+        this.file = file;
+    }
+
+    public FSError(String message, Throwable cause, Path path)
+    {
+        super(cause);
+        this.message = message;
+        this.file = new File(path);
+    }
+
+    @Override
+    public String getMessage()
+    {
+        return super.getMessage() + " on file " + String.valueOf(file);
     }
 
     /**
@@ -44,5 +71,11 @@ public abstract class FSError extends IOError
         }
 
         return null;
+    }
+
+    @Override
+    public String toString()
+    {
+        return getClass().getSimpleName() + (message != null ? ' ' + message : "") + (file != null ? " in " + file : "");
     }
 }

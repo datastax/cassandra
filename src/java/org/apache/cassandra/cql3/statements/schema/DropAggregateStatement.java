@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements.schema;
 import java.util.Collection;
 import java.util.List;
 import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
 import org.apache.cassandra.audit.AuditLogContext;
@@ -27,22 +28,26 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.CQLStatement;
-import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.UDAggregate;
+import org.apache.cassandra.cql3.functions.UserFunction;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.schema.*;
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.Types;
+import org.apache.cassandra.schema.UserFunctions;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 
+import static com.google.common.collect.Iterables.transform;
 import static java.lang.String.format;
 import static java.lang.String.join;
 import static java.util.stream.Collectors.toList;
-
-import static com.google.common.collect.Iterables.transform;
 
 public final class DropAggregateStatement extends AlterSchemaStatement
 {
@@ -51,13 +56,14 @@ public final class DropAggregateStatement extends AlterSchemaStatement
     private final boolean argumentsSpeficied;
     private final boolean ifExists;
 
-    public DropAggregateStatement(String keyspaceName,
+    public DropAggregateStatement(String queryString,
+                                  String keyspaceName,
                                   String aggregateName,
                                   List<CQL3Type.Raw> arguments,
                                   boolean argumentsSpeficied,
                                   boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.aggregateName = aggregateName;
         this.arguments = arguments;
         this.argumentsSpeficied = argumentsSpeficied;
@@ -80,7 +86,7 @@ public final class DropAggregateStatement extends AlterSchemaStatement
             throw ire("Aggregate '%s' doesn't exist", name);
         }
 
-        Collection<Function> aggregates = keyspace.functions.get(new FunctionName(keyspaceName, aggregateName));
+        Collection<UserFunction> aggregates = keyspace.userFunctions.get(new FunctionName(keyspaceName, aggregateName));
         if (aggregates.size() > 1 && !argumentsSpeficied)
         {
             throw ire("'DROP AGGREGATE %s' matches multiple function definitions; " +
@@ -91,17 +97,17 @@ public final class DropAggregateStatement extends AlterSchemaStatement
         }
 
         arguments.stream()
-                 .filter(raw -> !raw.isTuple() && raw.isFrozen())
+                 .filter(raw -> !raw.isImplicitlyFrozen() && raw.isFrozen())
                  .findFirst()
                  .ifPresent(t -> { throw ire("Argument '%s' cannot be frozen; remove frozen<> modifier from '%s'", t, t); });
 
         List<AbstractType<?>> argumentTypes = prepareArgumentTypes(keyspace.types);
 
-        Predicate<Function> filter = Functions.Filter.UDA;
+        Predicate<UserFunction> filter = UserFunctions.Filter.UDA;
         if (argumentsSpeficied)
-            filter = filter.and(f -> Functions.typesMatch(f.argTypes(), argumentTypes));
+            filter = filter.and(f -> f.typesMatch(argumentTypes));
 
-        Function aggregate = aggregates.stream().filter(filter).findAny().orElse(null);
+        UserFunction aggregate = aggregates.stream().filter(filter).findAny().orElse(null);
         if (null == aggregate)
         {
             if (ifExists)
@@ -110,12 +116,12 @@ public final class DropAggregateStatement extends AlterSchemaStatement
             throw ire("Aggregate '%s' doesn't exist", name);
         }
 
-        return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.functions.without(aggregate)));
+        return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.userFunctions.without(aggregate)));
     }
 
     SchemaChange schemaChangeEvent(KeyspacesDiff diff)
     {
-        Functions dropped = diff.altered.get(0).udas.dropped;
+        UserFunctions dropped = diff.altered.get(0).udas.dropped;
         assert dropped.size() == 1;
         return SchemaChange.forAggregate(Change.DROPPED, (UDAggregate) dropped.iterator().next());
     }
@@ -126,9 +132,9 @@ public final class DropAggregateStatement extends AlterSchemaStatement
         if (null == keyspace)
             return;
 
-        Stream<Function> functions = keyspace.functions.get(new FunctionName(keyspaceName, aggregateName)).stream();
+        Stream<UserFunction> functions = keyspace.userFunctions.get(new FunctionName(keyspaceName, aggregateName)).stream();
         if (argumentsSpeficied)
-            functions = functions.filter(f -> Functions.typesMatch(f.argTypes(), prepareArgumentTypes(keyspace.types)));
+            functions = functions.filter(f -> f.typesMatch(prepareArgumentTypes(keyspace.types)));
 
         functions.forEach(f -> client.ensurePermission(Permission.DROP, FunctionResource.function(f)));
     }
@@ -148,11 +154,11 @@ public final class DropAggregateStatement extends AlterSchemaStatement
     {
         return arguments.stream()
                         .map(t -> t.prepare(keyspaceName, types))
-                        .map(CQL3Type::getType)
+                        .map(t -> t.getType().udfType())
                         .collect(toList());
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<DropAggregateStatement>
     {
         private final FunctionName name;
         private final List<CQL3Type.Raw> arguments;
@@ -170,10 +176,14 @@ public final class DropAggregateStatement extends AlterSchemaStatement
             this.ifExists = ifExists;
         }
 
-        public DropAggregateStatement prepare(ClientState state)
+        @Override
+        public DropAggregateStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.keyspace : state.getKeyspace();
-            return new DropAggregateStatement(keyspaceName, name.name, arguments, argumentsSpecified, ifExists);
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.keyspace : state.getKeyspace());
+            if (keyspaceMapper != Constants.IDENTITY_STRING_MAPPER)
+                arguments.forEach(t -> t.forEachUserType(name -> name.updateKeyspaceIfDefined(keyspaceMapper)));
+            return new DropAggregateStatement(rawCQLStatement, keyspaceName, name.name,
+                                              arguments, argumentsSpecified, ifExists);
         }
     }
 }

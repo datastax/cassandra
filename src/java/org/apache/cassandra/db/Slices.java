@@ -20,10 +20,15 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
 
+import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -53,7 +58,7 @@ public abstract class Slices implements Iterable<Slice>
      * Creates a {@code Slices} object that contains a single slice.
      *
      * @param comparator the comparator for the table {@code slice} is a slice of.
-     * @param slice the single slice that the return object should contains.
+     * @param slice the single slice that the return object should contain.
      *
      * @return the newly created {@code Slices} object.
      */
@@ -67,16 +72,16 @@ public abstract class Slices implements Iterable<Slice>
     }
 
     /**
-     * Whether the slices has a lower bound, that is whether it's first slice start is {@code Slice.BOTTOM}.
+     * Whether the slices instance has a lower bound, that is whether it's first slice start is {@code Slice.BOTTOM}.
      *
-     * @return whether the slices has a lower bound.
+     * @return whether this slices instance has a lower bound.
      */
     public abstract boolean hasLowerBound();
 
     /**
-     * Whether the slices has an upper bound, that is whether it's last slice end is {@code Slice.TOP}.
+     * Whether the slices instance has an upper bound, that is whether it's last slice end is {@code Slice.TOP}.
      *
-     * @return whether the slices has an upper bound.
+     * @return whether this slices instance has an upper bound.
      */
     public abstract boolean hasUpperBound();
 
@@ -94,6 +99,16 @@ public abstract class Slices implements Iterable<Slice>
      */
     public abstract Slice get(int i);
 
+    public ClusteringBound<?> start()
+    {
+        return get(0).start();
+    }
+
+    public ClusteringBound<?> end()
+    {
+        return get(size() - 1).end();
+    }
+
     /**
      * Returns slices for continuing the paging of those slices given the last returned clustering prefix.
      *
@@ -101,7 +116,7 @@ public abstract class Slices implements Iterable<Slice>
      * @param lastReturned the last clustering that was returned for the query we are paging for. The
      * resulting slices will be such that only results coming stricly after {@code lastReturned} are returned
      * (where coming after means "greater than" if {@code !reversed} and "lesser than" otherwise).
-     * @param inclusive whether or not we want to include the {@code lastReturned} in the newly returned page of results.
+     * @param inclusive whether we want to include the {@code lastReturned} in the newly returned page of results.
      * @param reversed whether the query we're paging for is reversed or not.
      *
      * @return new slices that select results coming after {@code lastReturned}.
@@ -128,20 +143,23 @@ public abstract class Slices implements Iterable<Slice>
      */
     public abstract boolean selects(Clustering<?> clustering);
 
+    /**
+     * Checks whether any of the slices intersects witht the given one.
+     *
+     * @return {@code true} if there exists a slice which ({@link Slice#intersects(ClusteringComparator, Slice)}) with
+     * the provided slice
+     */
+    public abstract boolean intersects(Slice slice);
 
     /**
-     * Given the per-clustering column minimum and maximum value a sstable contains, whether or not this slices potentially
-     * intersects that sstable or not.
+     * Returns a CQL string representing this slice and the specified {@link RowFilter}.
      *
-     * @param minClusteringValues the smallest values for each clustering column that a sstable contains.
-     * @param maxClusteringValues the biggest values for each clustering column that a sstable contains.
-     *
-     * @return whether the slices might intersects with the sstable having {@code minClusteringValues} and
-     * {@code maxClusteringValues}.
+     * @param metadata the table metadata
+     * @param rowFilter a row filter
+     * @param redaction whether to redact the slice column values
+     * @return a CQL string representing this slice and the specified {@link RowFilter}
      */
-    public abstract boolean intersects(List<ByteBuffer> minClusteringValues, List<ByteBuffer> maxClusteringValues);
-
-    public abstract String toCQLString(TableMetadata metadata);
+    public abstract String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction);
 
     /**
      * Checks if this <code>Slices</code> is empty.
@@ -155,12 +173,12 @@ public abstract class Slices implements Iterable<Slice>
     /**
      * In simple object that allows to test the inclusion of rows in those slices assuming those rows
      * are passed (to {@link #includes}) in clustering order (or reverse clustering ordered, depending
-     * of the argument passed to {@link #inOrderTester}).
+     * on the argument passed to {@link #inOrderTester}).
      */
     public interface InOrderTester
     {
-        public boolean includes(Clustering<?> value);
-        public boolean isDone();
+        boolean includes(Clustering<?> value);
+        boolean isDone();
     }
 
     /**
@@ -241,17 +259,12 @@ public abstract class Slices implements Iterable<Slice>
             if (slices.size() <= 1)
                 return slices;
 
-            Collections.sort(slices, new Comparator<Slice>()
-            {
-                @Override
-                public int compare(Slice s1, Slice s2)
-                {
-                    int c = comparator.compare(s1.start(), s2.start());
-                    if (c != 0)
-                        return c;
+            slices.sort((s1, s2) -> {
+                int c = comparator.compare(s1.start(), s2.start());
+                if (c != 0)
+                    return c;
 
-                    return comparator.compare(s1.end(), s2.end());
-                }
+                return comparator.compare(s2.end(), s1.end());
             });
 
             List<Slice> slicesCopy = new ArrayList<>(slices.size());
@@ -276,12 +289,7 @@ public abstract class Slices implements Iterable<Slice>
                 }
 
                 if (includesStart)
-                {
                     last = Slice.make(last.start(), s2.end());
-                    continue;
-                }
-
-                assert !includesFinish;
             }
 
             slicesCopy.add(last);
@@ -294,13 +302,13 @@ public abstract class Slices implements Iterable<Slice>
         public void serialize(Slices slices, DataOutputPlus out, int version) throws IOException
         {
             int size = slices.size();
-            out.writeUnsignedVInt(size);
+            out.writeUnsignedVInt32(size);
 
             if (size == 0)
                 return;
 
             List<AbstractType<?>> types = slices == ALL
-                                        ? Collections.<AbstractType<?>>emptyList()
+                                        ? Collections.emptyList()
                                         : ((ArrayBackedSlices)slices).comparator.subtypes();
 
             for (Slice slice : slices)
@@ -315,7 +323,7 @@ public abstract class Slices implements Iterable<Slice>
                 return size;
 
             List<AbstractType<?>> types = slices instanceof SelectAllSlices
-                                        ? Collections.<AbstractType<?>>emptyList()
+                                        ? Collections.emptyList()
                                         : ((ArrayBackedSlices)slices).comparator.subtypes();
 
             for (Slice slice : slices)
@@ -326,7 +334,7 @@ public abstract class Slices implements Iterable<Slice>
 
         public Slices deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
         {
-            int size = (int)in.readUnsignedVInt();
+            int size = in.readUnsignedVInt32();
 
             if (size == 0)
                 return NONE;
@@ -439,11 +447,12 @@ public abstract class Slices implements Iterable<Slice>
             return Slices.NONE;
         }
 
-        public boolean intersects(List<ByteBuffer> minClusteringValues, List<ByteBuffer> maxClusteringValues)
+        @Override
+        public boolean intersects(Slice slice)
         {
-            for (Slice slice : this)
+            for (Slice s : this)
             {
-                if (slice.intersects(comparator, minClusteringValues, maxClusteringValues))
+                if (s.intersects(comparator, slice))
                     return true;
             }
             return false;
@@ -538,20 +547,13 @@ public abstract class Slices implements Iterable<Slice>
         @Override
         public String toString()
         {
-            StringBuilder sb = new StringBuilder();
-            sb.append("{");
-            for (int i = 0; i < slices.length; i++)
-            {
-                if (i > 0)
-                    sb.append(", ");
-                sb.append(slices[i].toString(comparator));
-            }
-            return sb.append("}").toString();
+            return Arrays.stream(slices).map(s -> s.toString(comparator)).collect(Collectors.joining(", ", "{", "}"));
         }
 
-        public String toCQLString(TableMetadata metadata)
+        @Override
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
         {
-            StringBuilder sb = new StringBuilder();
+            CqlBuilder sb = new CqlBuilder();
 
             // In CQL, condition are expressed by column, so first group things that way,
             // i.e. for each column, we create a list of what each slice contains on that column
@@ -593,7 +595,7 @@ public abstract class Slices implements Iterable<Slice>
                         sb.append(" AND ");
                     needAnd = true;
 
-                    sb.append(column.name);
+                    sb.append(column.name.toCQLString());
 
                     Set<ByteBuffer> values = new LinkedHashSet<>();
                     for (int j = 0; j < componentInfo.size(); j++)
@@ -601,20 +603,25 @@ public abstract class Slices implements Iterable<Slice>
 
                     if (values.size() == 1)
                     {
-                        sb.append(" = ").append(column.type.getString(first.startValue));
+                        sb.append(" = ").append(column.type.toCQLString(first.startValue, redaction));
+                        rowFilter = rowFilter.without(column, Operator.EQ, first.startValue);
                     }
                     else
                     {
                         sb.append(" IN (");
                         int j = 0;
                         for (ByteBuffer value : values)
-                            sb.append(j++ == 0 ? "" : ", ").append(column.type.getString(value));
+                        {
+                            sb.append(j++ == 0 ? "" : ", ").append(column.type.toCQLString(value, redaction));
+                            rowFilter = rowFilter.without(column, Operator.EQ, value);
+                        }
                         sb.append(")");
                     }
                 }
                 else
                 {
                     boolean isReversed = column.isReversedType();
+                    Operator operator;
 
                     // As said above, we assume (without checking) that this means all ComponentOfSlice for this column
                     // are the same, so we only bother about the first.
@@ -623,31 +630,46 @@ public abstract class Slices implements Iterable<Slice>
                         if (needAnd)
                             sb.append(" AND ");
                         needAnd = true;
-                        sb.append(column.name);
+                        sb.append(column.name.toCQLString());
                         if (isReversed)
-                            sb.append(first.startInclusive ? " <= " : " < ");
+                            operator = first.startInclusive ? Operator.LTE : Operator.LT;
                         else
-                            sb.append(first.startInclusive ? " >= " : " > ");
-                        sb.append(column.type.getString(first.startValue));
+                            operator = first.startInclusive ? Operator.GTE : Operator.GT;
+                        sb.append(' ').append(operator).append(' ')
+                          .append(column.type.toCQLString(first.startValue, redaction));
+                        rowFilter = rowFilter.without(column, operator, first.startValue);
                     }
                     if (first.endValue != null)
                     {
                         if (needAnd)
                             sb.append(" AND ");
                         needAnd = true;
-                        sb.append(column.name);
+                        sb.append(column.name.toCQLString());
                         if (isReversed)
-                            sb.append(first.endInclusive ? " >= " : " > ");
+                            operator = first.endInclusive ? Operator.GTE : Operator.GT;
                         else
-                            sb.append(first.endInclusive ? " <= " : " < ");
-                        sb.append(column.type.getString(first.endValue));
+                            operator = first.endInclusive ? Operator.LTE : Operator.LT;
+                        sb.append(' ').append(operator).append(' ')
+                          .append(column.type.toCQLString(first.endValue, redaction));
+                        rowFilter = rowFilter.without(column, operator, first.endValue);
                     }
                 }
+
+                // Remove index restrictions for this clustering column from the row filter, so we don't print them twice.
+                // The row filter can contain expressions copying the clustering filter restrictions, because indexed
+                // clustering key restrictions are added to the row filter at the CQL layer for easier consumption
+                // downstream. However, due to CQL validation the row filter won't contain additional expressions for
+                // columns that are included in the clustering filter, besided the aformentioned copies.
+                rowFilter = rowFilter.withoutFirstLevelExpression(column);
             }
+
+            // Append the row filter.
+            sb.append(rowFilter, true, redaction);
+
             return sb.toString();
         }
 
-        // An somewhat adhoc utility class only used by nameAsCQLString
+        // Somewhat adhoc utility class only used by nameAsCQLString
         private static class ComponentOfSlice
         {
             public final boolean startInclusive;
@@ -748,7 +770,8 @@ public abstract class Slices implements Iterable<Slice>
             return trivialTester;
         }
 
-        public boolean intersects(List<ByteBuffer> minClusteringValues, List<ByteBuffer> maxClusteringValues)
+        @Override
+        public boolean intersects(Slice slice)
         {
             return true;
         }
@@ -764,9 +787,10 @@ public abstract class Slices implements Iterable<Slice>
             return "ALL";
         }
 
-        public String toCQLString(TableMetadata metadata)
+        @Override
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
         {
-            return "";
+            return rowFilter.toCQLString(redaction);
         }
     }
 
@@ -823,7 +847,8 @@ public abstract class Slices implements Iterable<Slice>
             return trivialTester;
         }
 
-        public boolean intersects(List<ByteBuffer> minClusteringValues, List<ByteBuffer> maxClusteringValues)
+        @Override
+        public boolean intersects(Slice slice)
         {
             return false;
         }
@@ -839,7 +864,8 @@ public abstract class Slices implements Iterable<Slice>
             return "NONE";
         }
 
-        public String toCQLString(TableMetadata metadata)
+        @Override
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
         {
             return "";
         }

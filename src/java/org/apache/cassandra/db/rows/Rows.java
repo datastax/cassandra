@@ -17,16 +17,24 @@
  */
 package org.apache.cassandra.db.rows;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.LivenessInfo;
+import org.apache.cassandra.db.SimpleBuilders;
+import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 
 /**
  * Static utilities to work on Row objects.
@@ -36,28 +44,6 @@ public abstract class Rows
     private Rows() {}
 
     public static final Row EMPTY_STATIC_ROW = BTreeRow.emptyRow(Clustering.STATIC_CLUSTERING);
-
-    public static Row.Builder copy(Row row, Row.Builder builder)
-    {
-        builder.newRow(row.clustering());
-        builder.addPrimaryKeyLivenessInfo(row.primaryKeyLivenessInfo());
-        builder.addRowDeletion(row.deletion());
-        for (ColumnData cd : row)
-        {
-            if (cd.column().isSimple())
-            {
-                builder.addCell((Cell<?>)cd);
-            }
-            else
-            {
-                ComplexColumnData complexData = (ComplexColumnData)cd;
-                builder.addComplexDeletion(complexData.column(), complexData.complexDeletion());
-                for (Cell<?> cell : complexData)
-                    builder.addCell(cell);
-            }
-        }
-        return builder;
-    }
 
     /**
      * Creates a new simple row builder.
@@ -119,9 +105,8 @@ public abstract class Rows
      *
      * @param row the row for which to collect stats.
      * @param collector the stats collector.
-     * @return the total number of cells in {@code row}.
      */
-    public static int collectStats(Row row, PartitionStatisticsCollector collector)
+    public static void collectStats(Row row, PartitionStatisticsCollector collector)
     {
         assert !row.isEmpty();
 
@@ -131,7 +116,26 @@ public abstract class Rows
         long result = row.accumulate(StatsAccumulation::accumulateOnColumnData, collector, 0);
 
         collector.updateColumnSetPerRow(StatsAccumulation.unpackColumnCount(result));
-        return StatsAccumulation.unpackCellCount(result);
+    }
+
+    public static long collectMaxTimestamp(Row row)
+    {
+        long maxTimestamp = row.primaryKeyLivenessInfo().timestamp();
+        for (ColumnData cd : row)
+        {
+            if (cd.column().isSimple())
+            {
+                maxTimestamp = Math.max(maxTimestamp, ((Cell<?>)cd).timestamp());
+            }
+            else
+            {
+                ComplexColumnData complexData = (ComplexColumnData)cd;
+                maxTimestamp = Math.max(maxTimestamp, complexData.complexDeletion().markedForDeleteAt());
+                for (Cell<?> cell : complexData)
+                    maxTimestamp = Math.max(maxTimestamp, cell.timestamp());
+            }
+        }
+        return maxTimestamp;
     }
 
     /**
@@ -145,7 +149,6 @@ public abstract class Rows
      * @param merged the result of merging {@code inputs}.
      * @param inputs the inputs whose merge yielded {@code merged}.
      */
-    @SuppressWarnings("resource")
     public static void diff(RowDiffListener diffListener, Row merged, Row...inputs)
     {
         Clustering<?> clustering = merged.clustering();
@@ -168,7 +171,7 @@ public abstract class Rows
         for (Row row : inputs)
             inputIterators.add(row == null ? Collections.emptyIterator() : row.iterator());
 
-        Iterator<?> iter = MergeIterator.get(inputIterators, ColumnData.comparator, new MergeIterator.Reducer<ColumnData, Object>()
+        Iterator<?> iter = MergeIterator.get(inputIterators, ColumnData.comparator, new Reducer<ColumnData, Object>()
         {
             ColumnData mergedData;
             ColumnData[] inputDatas = new ColumnData[inputs.length];
@@ -180,7 +183,7 @@ public abstract class Rows
                     inputDatas[idx - 1] = current;
             }
 
-            protected Object getReduced()
+            public Object getReduced()
             {
                 for (int i = 0 ; i != inputDatas.length ; i++)
                 {
@@ -242,7 +245,7 @@ public abstract class Rows
                 return null;
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 mergedData = null;
                 Arrays.fill(inputDatas, null);
@@ -253,40 +256,35 @@ public abstract class Rows
             iter.next();
     }
 
-    public static Row merge(Row row1, Row row2)
-    {
-        Row.Builder builder = BTreeRow.sortedBuilder();
-        merge(row1, row2, builder);
-        return builder.build();
-    }
-
     /**
-     * Merges two rows into the given builder, mainly for merging memtable rows. In addition to reconciling the cells
-     * in each row, the liveness info, and deletion times for the row and complex columns are also merged.
+     * Merges two rows into a new one. In addition to reconciling the cells in each row, the liveness info, and deletion
+     * times for the row and complex columns are also merged.
      * <p>
      * Note that this method assumes that the provided rows can meaningfully be reconciled together. That is,
      * that the rows share the same clustering value, and belong to the same partition.
      *
      * @param existing
      * @param update
-     * @param builder the row build to which the result of the reconciliation is written.
      *
-     * @return the smallest timestamp delta between corresponding rows from existing and update. A
-     * timestamp delta being computed as the difference between the cells and DeletionTimes from {@code existing}
-     * and those in {@code existing}.
+     * @return the row resulting from the merge.
      */
-    public static long merge(Row existing,
-                             Row update,
-                             Row.Builder builder)
+    public static Row merge(Row existing, Row update)
     {
+        if (existing.getClass() == update.getClass())
+            return existing.mergeWith(update);
+        else
+            return mergeRowsGeneric(existing, update);
+    }
+
+    private static Row mergeRowsGeneric(Row existing, Row update)
+    {
+        Row.Builder builder = BTreeRow.sortedBuilder();
         Clustering<?> clustering = existing.clustering();
         builder.newRow(clustering);
 
         LivenessInfo existingInfo = existing.primaryKeyLivenessInfo();
         LivenessInfo updateInfo = update.primaryKeyLivenessInfo();
         LivenessInfo mergedInfo = existingInfo.supersedes(updateInfo) ? existingInfo : updateInfo;
-
-        long timeDelta = Math.abs(existingInfo.timestamp() - mergedInfo.timestamp());
 
         Row.Deletion rowDeletion = existing.deletion().supersedes(update.deletion()) ? existing.deletion() : update.deletion();
 
@@ -303,7 +301,7 @@ public abstract class Rows
         Iterator<ColumnData> a = existing.iterator();
         Iterator<ColumnData> b = update.iterator();
         ColumnData nexta = a.hasNext() ? a.next() : null, nextb = b.hasNext() ? b.next() : null;
-        while (nexta != null | nextb != null)
+        while (nexta != null || nextb != null)
         {
             int comparison = nexta == null ? 1 : nextb == null ? -1 : nexta.column.compareTo(nextb.column);
             ColumnData cura = comparison <= 0 ? nexta : null;
@@ -311,7 +309,9 @@ public abstract class Rows
             ColumnMetadata column = getColumnMetadata(cura, curb);
             if (column.isSimple())
             {
-                timeDelta = Math.min(timeDelta, Cells.reconcile((Cell<?>) cura, (Cell<?>) curb, deletion, builder));
+                Cell<?> merged = Cells.reconcile((Cell<?>) cura, (Cell<?>) curb);
+                if (!deletion.deletes(merged))
+                    builder.addCell(merged);
             }
             else
             {
@@ -328,7 +328,7 @@ public abstract class Rows
 
                 Iterator<Cell<?>> existingCells = existingData == null ? null : existingData.iterator();
                 Iterator<Cell<?>> updateCells = updateData == null ? null : updateData.iterator();
-                timeDelta = Math.min(timeDelta, Cells.reconcileComplex(column, existingCells, updateCells, maxDt, builder));
+                Cells.reconcileComplex(column, existingCells, updateCells, maxDt, builder);
             }
 
             if (cura != null)
@@ -336,7 +336,7 @@ public abstract class Rows
             if (curb != null)
                 nextb = b.hasNext() ? b.next() : null;
         }
-        return timeDelta;
+        return builder.build();
     }
 
     /**

@@ -17,60 +17,85 @@
  */
 package org.apache.cassandra.hints;
 
+import java.net.UnknownHostException;
+import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.NoPayload;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.gms.IFailureDetectionEventListener;
-import org.apache.cassandra.gms.IFailureDetector;
-import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.NoPayload;
+import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
+import org.apache.cassandra.locator.IEndpointSnitch;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.metrics.HintsServiceMetrics;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.MockMessagingService;
 import org.apache.cassandra.net.MockMessagingSpy;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 
+import static org.apache.cassandra.hints.HintsTestUtil.*;
+import static org.junit.Assert.assertEquals;
+
+import org.awaitility.Awaitility;
+import org.awaitility.core.ConditionFactory;
+
 import static org.apache.cassandra.Util.dk;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SKIP_REWRITING_HINTS_ON_HOST_LEFT;
 import static org.apache.cassandra.net.Verb.HINT_REQ;
 import static org.apache.cassandra.net.Verb.HINT_RSP;
 import static org.apache.cassandra.net.MockMessagingService.verb;
-import static org.junit.Assert.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class HintsServiceTest
 {
     private static final String KEYSPACE = "hints_service_test";
     private static final String TABLE = "table";
-
     private final MockFailureDetector failureDetector = new MockFailureDetector();
+    private static TableMetadata metadata;
+    private final AtomicBoolean isAlive = new AtomicBoolean(true);
 
     @BeforeClass
     public static void defineSchema()
     {
+        SKIP_REWRITING_HINTS_ON_HOST_LEFT.setBoolean(true);
         SchemaLoader.prepareServer();
         StorageService.instance.initServer();
         SchemaLoader.createKeyspace(KEYSPACE,
                 KeyspaceParams.simple(1),
                 SchemaLoader.standardCFMD(KEYSPACE, TABLE));
+        metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
+        System.clearProperty(SKIP_REWRITING_HINTS_ON_HOST_LEFT.getKey());
     }
 
     @After
@@ -85,17 +110,91 @@ public class HintsServiceTest
         MessagingService.instance().inboundSink.clear();
         MessagingService.instance().outboundSink.clear();
 
+        // Hint service has to know the endpoint version to be able to send the hints. Otherwise,
+        // it wouldn't be able to make a decision whether to decode (rewrap) or not.
+        MessagingService.instance().versions.set(
+            HintsEndpointProvider.instance.endpointForHost(StorageService.instance.getLocalHostUUID()),
+            MessagingService.current_version);
+
         if (!HintsService.instance.isShutDown())
         {
             HintsService.instance.shutdownBlocking();
             HintsService.instance.deleteAllHints();
         }
 
-        failureDetector.isAlive = true;
+        isAlive.set(true);
 
-        HintsService.instance = new HintsService(failureDetector);
+        HintsService.instance = new HintsService(e -> isAlive.get());
 
         HintsService.instance.startDispatch();
+    }
+
+    @Test
+    public void testHintsDroppedForUnknownHost()
+    {
+        // pause the scheduled dispatch before writing hints
+        HintsService.instance.pauseDispatch();
+
+        long totalHints = StorageMetrics.totalHints.getCount();
+
+        // write 100 hints on disk for host that is not part of cluster
+        UUID randomHost = UUID.randomUUID();
+        int numHints = 100;
+
+        HintsStore store = writeAndFlushHints(metadata, randomHost, numHints);
+        assertTrue(store.hasFiles());
+
+        // metrics should have been updated with number of create hints
+        assertEquals(totalHints + numHints, StorageMetrics.totalHints.getCount());
+
+        // re-enable dispatching
+        HintsService.instance.resumeDispatch();
+
+        // trigger a manual dispatching on host that is not part of cluster: hints should be dropped
+        HintsService.instance.dispatcherExecutor().dispatch(store);
+        ConditionFactory hints_dropped = Awaitility.await("Hints dropped");
+        hints_dropped.atMost(30, TimeUnit.SECONDS);
+        hints_dropped.untilAsserted(() ->
+                                    assertEquals(totalHints + numHints,
+                                                 StorageMetrics.totalHints.getCount())
+        );
+    }
+
+    @Test
+    public void testCountingCorruptedHints()
+    {
+        // pause the scheduled dispatch before writing hints
+        HintsService.instance.pauseDispatch();
+        try
+        {
+            long hintsOnDisk0 = HintsServiceMetrics.hintsOnDisk.getCount();
+            long corruptedHintsOnDisk0 = HintsServiceMetrics.corruptedHintsOnDisk.getCount();
+
+            UUID randomHost1 = UUID.randomUUID();
+            UUID randomHost2 = UUID.randomUUID();
+            int numHints = 10;
+
+            HintsStore store1 = writeAndFlushHints(metadata, randomHost1, numHints);
+            HintsStore store2 = writeAndFlushHints(metadata, randomHost2, numHints);
+
+            HintsDescriptor desc1 = store1.poll();
+            store1.markCorrupted(desc1);
+
+            assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(hintsOnDisk0 + 20);
+            assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isEqualTo(corruptedHintsOnDisk0 + 10);
+
+            store1.deleteAllHints();
+            store2.deleteAllHints();
+
+            assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(hintsOnDisk0);
+            assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isEqualTo(corruptedHintsOnDisk0);
+        }
+        finally
+        {
+            // re-enable dispatching
+            HintsService.instance.resumeDispatch();
+        }
+
     }
 
     @Test
@@ -104,7 +203,7 @@ public class HintsServiceTest
         long cnt = StorageMetrics.totalHints.getCount();
 
         // create spy for hint messages
-        MockMessagingSpy spy = sendHintsAndResponses(100, -1);
+        MockMessagingSpy spy = sendHintsAndResponses(metadata, 100, -1);
 
         // metrics should have been updated with number of create hints
         assertEquals(cnt + 100, StorageMetrics.totalHints.getCount());
@@ -120,7 +219,7 @@ public class HintsServiceTest
         HintsService.instance.pauseDispatch();
 
         // create spy for hint messages
-        MockMessagingSpy spy = sendHintsAndResponses(100, -1);
+        MockMessagingSpy spy = sendHintsAndResponses(metadata, 100, -1);
 
         // we should not send any hints while paused
         ListenableFuture<Boolean> noMessagesWhilePaused = spy.interceptNoMsg(15, TimeUnit.SECONDS);
@@ -143,7 +242,7 @@ public class HintsServiceTest
     public void testPageRetry() throws InterruptedException, ExecutionException, TimeoutException
     {
         // create spy for hint messages, but only create responses for 5 hints
-        MockMessagingSpy spy = sendHintsAndResponses(20, 5);
+        MockMessagingSpy spy = sendHintsAndResponses(metadata, 20, 5);
 
         Futures.allAsList(
                 // the dispatcher will always send all hints within the current page
@@ -156,7 +255,7 @@ public class HintsServiceTest
         ).get();
 
         // marking the destination node as dead should stop sending hints
-        failureDetector.isAlive = false;
+        isAlive.set(false);
         spy.interceptNoMsg(20, TimeUnit.SECONDS).get();
     }
 
@@ -164,7 +263,7 @@ public class HintsServiceTest
     public void testPageSeek() throws InterruptedException, ExecutionException
     {
         // create spy for hint messages, stop replying after 12k (should be on 3rd page)
-        MockMessagingSpy spy = sendHintsAndResponses(20000, 12000);
+        MockMessagingSpy spy = sendHintsAndResponses(metadata, 20000, 12000);
 
         // At this point the dispatcher will constantly retry the page we stopped acking,
         // thus we receive the same hints from the page multiple times and in total more than
@@ -182,6 +281,101 @@ public class HintsServiceTest
         assertTrue(((ChecksummedDataInput.Position) dispatchOffset).sourcePosition > 0);
     }
 
+    @Test
+    public void testDeleteHintsForEndpoint() throws UnknownHostException
+    {
+        int numHints = 10;
+        TokenMetadata tokenMeta = StorageService.instance.getTokenMetadata();
+        InetAddressAndPort endpointToDeleteHints = InetAddressAndPort.getByName("1.1.1.1");
+        UUID hostIdToDeleteHints = UUID.randomUUID();
+        tokenMeta.updateHostId(hostIdToDeleteHints, endpointToDeleteHints);
+        InetAddressAndPort anotherEndpoint = InetAddressAndPort.getByName("1.1.1.2");
+        UUID anotherHostId = UUID.randomUUID();
+        tokenMeta.updateHostId(anotherHostId, anotherEndpoint);
+
+        HintsStore storeToDeleteHints = writeAndFlushHints(metadata, hostIdToDeleteHints, numHints);
+        assertTrue(storeToDeleteHints.hasFiles());
+        HintsStore anotherStore = writeAndFlushHints(metadata, anotherHostId, numHints);
+        assertTrue(anotherStore.hasFiles());
+        assertThat(HintsService.instance.getTotalFilesNum()).isEqualTo(2);
+        assertThat(HintsService.instance.getCorruptedFilesNum()).isEqualTo(0);
+        assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(20);
+        assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isZero();
+
+        HintsService.instance.deleteAllHintsForEndpoint(endpointToDeleteHints);
+        assertFalse(storeToDeleteHints.hasFiles());
+        assertTrue(anotherStore.hasFiles());
+        assertTrue(HintsService.instance.getCatalog().hasFiles());
+        assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(10);
+        assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isZero();
+
+        HintsService.instance.deleteAllHints();
+        assertEquals(0, HintsService.instance.getTotalHintsSize());
+        assertFalse(anotherStore.hasFiles());
+        assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(0);
+        assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isZero();
+    }
+
+    @Test
+    public void testReplayWaitsForWriteAffinity() throws Exception
+    {
+        UUID hostId = StorageService.instance.getLocalHostUUID();
+        InetAddressAndPort endpoint = HintsEndpointProvider.instance.endpointForHost(hostId);
+        IEndpointSnitch savedSnitch = DatabaseDescriptor.getEndpointSnitch();
+
+        try
+        {
+            DatabaseDescriptor.setEndpointSnitch(new WriteAffinityExcludingSnitch(endpoint));
+            HintsStore store = writeAndFlushHints(hostId, 1);
+            MockMessagingSpy spy = MockMessagingService.when(verb(HINT_REQ))
+                                                       .respond(Message.internalResponse(HINT_RSP, NoPayload.noPayload));
+
+            HintsService.instance.dispatcherExecutor().dispatch(store).get();
+            spy.interceptNoMsg(500, TimeUnit.MILLISECONDS).get();
+            assertTrue(store.hasFiles());
+
+            DatabaseDescriptor.setEndpointSnitch(savedSnitch);
+            HintsService.instance.dispatcherExecutor().dispatch(store).get();
+            spy.interceptMessageOut(1).get();
+            assertFalse(store.hasFiles());
+        }
+        finally
+        {
+            DatabaseDescriptor.setEndpointSnitch(savedSnitch);
+        }
+    }
+
+    private static class WriteAffinityExcludingSnitch extends AbstractNetworkTopologySnitch
+    {
+        private final InetAddressAndPort excluded;
+
+        WriteAffinityExcludingSnitch(InetAddressAndPort excluded)
+        {
+            this.excluded = excluded;
+        }
+
+        public String getRack(InetAddressAndPort endpoint)
+        {
+            return "rack1";
+        }
+
+        public String getDatacenter(InetAddressAndPort endpoint)
+        {
+            return "datacenter1";
+        }
+
+        @Override
+        public Predicate<InetAddressAndPort> filterByAffinityForWrites(String keyspace)
+        {
+            return endpoint -> !endpoint.equals(excluded);
+        }
+    }
+
+    private MockMessagingSpy sendHintsAndResponses(TableMetadata ignored, int noOfHints, int noOfResponses)
+    {
+        return sendHintsAndResponses(noOfHints, noOfResponses);
+    }
+
     private MockMessagingSpy sendHintsAndResponses(int noOfHints, int noOfResponses)
     {
         // create spy for hint messages, but only create responses for noOfResponses hints
@@ -197,8 +391,30 @@ public class HintsServiceTest
             spy = MockMessagingService.when(verb(HINT_REQ)).respond(message);
         }
 
+        writeHints(StorageService.instance.getLocalHostUUID(), noOfHints);
+        return spy;
+    }
+
+    private HintsStore writeAndFlushHints(TableMetadata ignored, UUID hostId, int noOfHints)
+    {
+        return writeAndFlushHints(hostId, noOfHints);
+    }
+
+    private HintsStore writeAndFlushHints(UUID hostId, int noOfHints)
+    {
+        writeHints(hostId, noOfHints);
+        HintsService.instance.flushAndFsyncBlockingly(Collections.singleton(hostId));
+
+        // close the write so hints are available for dispatching
+        HintsStore store = HintsService.instance.getCatalog().get(hostId);
+        store.closeWriter();
+
+        return store;
+    }
+
+    private void writeHints(UUID hostId, int noOfHints)
+    {
         // create and write noOfHints using service
-        UUID hostId = StorageService.instance.getLocalHostUUID();
         for (int i = 0; i < noOfHints; i++)
         {
             long now = System.currentTimeMillis();
@@ -208,47 +424,6 @@ public class HintsServiceTest
             builder.row("column0").add("val", "value0");
             Hint hint = Hint.create(builder.buildAsMutation(), now);
             HintsService.instance.write(hostId, hint);
-        }
-        return spy;
-    }
-
-    private static class MockFailureDetector implements IFailureDetector
-    {
-        private boolean isAlive = true;
-
-        public boolean isAlive(InetAddressAndPort ep)
-        {
-            return isAlive;
-        }
-
-        public void interpret(InetAddressAndPort ep)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void report(InetAddressAndPort ep)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void registerFailureDetectionEventListener(IFailureDetectionEventListener listener)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void unregisterFailureDetectionEventListener(IFailureDetectionEventListener listener)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void remove(InetAddressAndPort ep)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void forceConviction(InetAddressAndPort ep)
-        {
-            throw new UnsupportedOperationException();
         }
     }
 }

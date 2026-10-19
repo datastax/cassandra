@@ -22,12 +22,38 @@ import java.util.HashSet;
 import java.util.Set;
 
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.apache.cassandra.audit.AuditLogFilter.isFiltered;
 
 public class AuditLogFilterTest
 {
+    @BeforeClass
+    public static void setup()
+    {
+        // CNDB-9099: DatabaseDescriptor must be initialized before using FBUtilities.getBroadcastAddressAndPort()
+        DatabaseDescriptor.clientInitialization();
+    }
+    
+    @Test
+    public void testInputWithSpaces()
+    {
+        AuditLogOptions auditLogOptions = new AuditLogOptions.Builder()
+                                          .withIncludedKeyspaces(" ks, ks1, ks3, ")
+                                          .withEnabled(true)
+                                          .build();
+
+        AuditLogFilter auditLogFilter = AuditLogFilter.create(auditLogOptions);
+
+        Assert.assertFalse(auditLogFilter.isFiltered(new AuditLogEntry.Builder(AuditLogEntryType.CREATE_TYPE).setKeyspace("ks").build()));
+        Assert.assertFalse(auditLogFilter.isFiltered(new AuditLogEntry.Builder(AuditLogEntryType.CREATE_TYPE).setKeyspace("ks1").build()));
+        Assert.assertFalse(auditLogFilter.isFiltered(new AuditLogEntry.Builder(AuditLogEntryType.CREATE_TYPE).setKeyspace("ks3").build()));
+        Assert.assertTrue(auditLogFilter.isFiltered(new AuditLogEntry.Builder(AuditLogEntryType.CREATE_TYPE).setKeyspace("ks5").build()));
+    }
+
     @Test
     public void isFiltered_IncludeSetOnly()
     {

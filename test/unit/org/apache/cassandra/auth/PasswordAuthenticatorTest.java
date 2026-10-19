@@ -19,46 +19,73 @@ package org.apache.cassandra.auth;
 
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
-import com.google.common.collect.Iterables;
-import org.junit.AfterClass;
+import org.junit.Assert;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.distributed.shared.WithProperties;
+import org.mindrot.jbcrypt.BCrypt;
 
 import com.datastax.driver.core.Authenticator;
 import com.datastax.driver.core.EndPoint;
 import com.datastax.driver.core.PlainTextAuthProvider;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.exceptions.AuthenticationException;
-import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.transport.messages.AuthenticateMessage;
 
-import static org.apache.cassandra.auth.CassandraRoleManager.*;
-import static org.apache.cassandra.auth.PasswordAuthenticator.*;
+import static org.apache.cassandra.auth.AuthTestUtils.ALL_ROLES;
+import static org.apache.cassandra.auth.CassandraRoleManager.DEFAULT_SUPERUSER_PASSWORD;
+import static org.apache.cassandra.auth.CassandraRoleManager.getGensaltLogRounds;
+import static org.apache.cassandra.auth.PasswordAuthenticator.SaslNegotiator;
+import static org.apache.cassandra.auth.PasswordAuthenticator.checkpw;
+import static org.apache.cassandra.config.CassandraRelevantProperties.AUTH_BCRYPT_GENSALT_LOG2_ROUNDS;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.mindrot.jbcrypt.BCrypt.hashpw;
 import static org.mindrot.jbcrypt.BCrypt.gensalt;
+import static org.mindrot.jbcrypt.BCrypt.hashpw;
 
 public class PasswordAuthenticatorTest extends CQLTester
 {
+    private final static PasswordAuthenticator authenticator = new PasswordAuthenticator();
 
-    private static PasswordAuthenticator authenticator = new PasswordAuthenticator();
+    @BeforeClass
+    public static void setupClass() throws Exception
+    {
+        SchemaLoader.loadSchema();
+        DatabaseDescriptor.daemonInitialization();
+        StorageService.instance.initServer(0);
+    }
+
+    @Before
+    public void setup() throws Exception
+    {
+        ColumnFamilyStore.getIfExists(SchemaConstants.AUTH_KEYSPACE_NAME, AuthKeyspace.ROLES).truncateBlocking();
+        ColumnFamilyStore.getIfExists(SchemaConstants.AUTH_KEYSPACE_NAME, AuthKeyspace.ROLE_MEMBERS).truncateBlocking();
+    }
 
     @Test
-    public void testCheckpw() throws Exception
+    public void testCheckpw()
     {
         // Valid and correct
         assertTrue(checkpw(DEFAULT_SUPERUSER_PASSWORD, hashpw(DEFAULT_SUPERUSER_PASSWORD, gensalt(getGensaltLogRounds()))));
         assertTrue(checkpw(DEFAULT_SUPERUSER_PASSWORD, hashpw(DEFAULT_SUPERUSER_PASSWORD, gensalt(4))));
-        assertTrue(checkpw(DEFAULT_SUPERUSER_PASSWORD, hashpw(DEFAULT_SUPERUSER_PASSWORD, gensalt(31))));
+        assertTrue(checkpw(DEFAULT_SUPERUSER_PASSWORD, hashpw(DEFAULT_SUPERUSER_PASSWORD, gensalt(12))));
 
         // Valid but incorrect hashes
         assertFalse(checkpw(DEFAULT_SUPERUSER_PASSWORD, hashpw("incorrect0", gensalt(4))));
         assertFalse(checkpw(DEFAULT_SUPERUSER_PASSWORD, hashpw("incorrect1", gensalt(10))));
-        assertFalse(checkpw(DEFAULT_SUPERUSER_PASSWORD, hashpw("incorrect2", gensalt(31))));
+        assertFalse(checkpw(DEFAULT_SUPERUSER_PASSWORD, hashpw("incorrect2", gensalt(12))));
 
         // Invalid hash values, the jBCrypt library implementation
         // throws an exception which we catch and treat as a failure
@@ -78,6 +105,27 @@ public class PasswordAuthenticatorTest extends CQLTester
         // unpadded rounds
         assertFalse(checkpw(DEFAULT_SUPERUSER_PASSWORD, "$2$6$abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUVWXYZ01234"));
         assertFalse(checkpw(DEFAULT_SUPERUSER_PASSWORD, "$2a$6$abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUVWXYZ01234"));
+    }
+
+    @Test(expected = ConfigurationException.class)
+    public void testInvalidUpperBoundHashingRoundsValue()
+    {
+        executeSaltRoundsPropertyTest(31);
+    }
+
+    @Test(expected = ConfigurationException.class)
+    public void testInvalidLowerBoundHashingRoundsValue()
+    {
+        executeSaltRoundsPropertyTest(3);
+    }
+
+    private void executeSaltRoundsPropertyTest(Integer rounds)
+    {
+        try (WithProperties properties = new WithProperties().set(AUTH_BCRYPT_GENSALT_LOG2_ROUNDS, rounds))
+        {
+            getGensaltLogRounds();
+            Assert.fail("Property " + AUTH_BCRYPT_GENSALT_LOG2_ROUNDS.getKey() + " must be in interval [4,30]");
+        }
     }
 
     @Test(expected = AuthenticationException.class)
@@ -128,18 +176,35 @@ public class PasswordAuthenticatorTest extends CQLTester
         negotiator.getAuthenticatedUser();
     }
 
-    @BeforeClass
-    public static void setUp()
+    @Test
+    public void warmCacheLoadsAllEntriesFromTables()
     {
-        SchemaLoader.createKeyspace(SchemaConstants.AUTH_KEYSPACE_NAME,
-                                    KeyspaceParams.simple(1),
-                                    Iterables.toArray(AuthKeyspace.metadata().tables, TableMetadata.class));
-        authenticator.setup();
+        IRoleManager roleManager = new AuthTestUtils.LocalCassandraRoleManager();
+        roleManager.setup();
+        for (RoleResource r : ALL_ROLES)
+        {
+            RoleOptions options = new RoleOptions();
+            options.setOption(IRoleManager.Option.PASSWORD, "hash_for_" + r.getRoleName());
+            roleManager.createRole(AuthenticatedUser.ANONYMOUS_USER, r, options);
+        }
+
+        Map<String, String> cacheEntries = authenticator.bulkLoader().get();
+
+        assertEquals(ALL_ROLES.length, cacheEntries.size());
+        cacheEntries.forEach((username, hash) -> assertTrue(BCrypt.checkpw("hash_for_" + username, hash)));
     }
 
-    @AfterClass
-    public static void tearDown()
+    @Test
+    public void warmCacheWithEmptyTable()
     {
-        schemaChange("DROP KEYSPACE " + SchemaConstants.AUTH_KEYSPACE_NAME);
+        Map<String, String> cacheEntries = authenticator.bulkLoader().get();
+        assertTrue(cacheEntries.isEmpty());
+    }
+
+    @Test
+    public void testDefaultAuthenticateMessage()
+    {
+        AuthenticateMessage authenticateMessage = authenticator.getAuthenticateMessage(null);
+        assertThat(authenticateMessage.authenticator).isEqualTo(PasswordAuthenticator.class.getName());
     }
 }

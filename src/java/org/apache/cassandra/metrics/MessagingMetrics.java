@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.metrics;
 
-import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -41,6 +40,7 @@ import org.apache.cassandra.net.LatencyConsumer;
 import org.apache.cassandra.utils.StatusLogger;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.apache.cassandra.metrics.CassandraMetricsRegistry.DEFAULT_TIMER_UNIT;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
@@ -57,13 +57,14 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
         public final Timer dcLatency;
         public final Timer allLatency;
 
-        DCLatencyRecorder(Timer dcLatency, Timer allLatency)
+        public DCLatencyRecorder(Timer dcLatency, Timer allLatency)
         {
             this.dcLatency = dcLatency;
             this.allLatency = allLatency;
         }
 
-        public void accept(long timeTaken, TimeUnit units)
+        @Override
+        public void accept(Verb verb, long timeTaken, TimeUnit units)
         {
             if (timeTaken > 0)
             {
@@ -93,41 +94,49 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
     }
 
     private final Timer allLatency;
-    public final ConcurrentHashMap<String, DCLatencyRecorder> dcLatency;
-    public final EnumMap<Verb, Timer> internalLatency;
+    public final Map<String, DCLatencyRecorder> dcLatency = new ConcurrentHashMap<>();
+    public final Map<Verb, Timer> internalLatency = new ConcurrentHashMap<>();
 
     // total dropped message counts for server lifetime
-    private final Map<Verb, DroppedForVerb> droppedMessages = new EnumMap<>(Verb.class);
+    private final Map<Verb, DroppedForVerb> droppedMessages = new ConcurrentHashMap<>();
+    
+    // dropped mutations by table
+    private final Map<String, DroppedMessageMetrics> droppedMutationsByTable = new ConcurrentHashMap<>();
 
     public MessagingMetrics()
     {
         allLatency = Metrics.timer(factory.createMetricName("CrossNodeLatency"));
-        dcLatency = new ConcurrentHashMap<>();
-        internalLatency = new EnumMap<>(Verb.class);
-        for (Verb verb : Verb.VERBS)
+        for (Verb verb : Verb.getValues())
+        {
             internalLatency.put(verb, Metrics.timer(factory.createMetricName(verb + "-WaitLatency")));
-        for (Verb verb : Verb.values())
             droppedMessages.put(verb, new DroppedForVerb(verb));
+        }
     }
 
-    public DCLatencyRecorder internodeLatencyRecorder(InetAddressAndPort from)
+    public LatencyConsumer internodeLatencyRecorder(InetAddressAndPort from)
     {
         String dcName = DatabaseDescriptor.getEndpointSnitch().getDatacenter(from);
-        DCLatencyRecorder dcUpdater = dcLatency.get(dcName);
-        if (dcUpdater == null)
-            dcUpdater = dcLatency.computeIfAbsent(dcName, k -> new DCLatencyRecorder(Metrics.timer(factory.createMetricName(dcName + "-Latency")), allLatency));
+        DCLatencyRecorder dcUpdater = dcLatency.computeIfAbsent(dcName,
+                                                                k -> new DCLatencyRecorder(Metrics.timer(factory.createMetricName(dcName + "-Latency")),
+                                                                                           allLatency));
         return dcUpdater;
     }
 
-    public void recordInternalLatency(Verb verb, long timeTaken, TimeUnit units)
+    public void recordInternalLatency(Verb verb, InetAddressAndPort from, long timeTaken, TimeUnit units)
     {
         if (timeTaken > 0)
-            internalLatency.get(verb).update(timeTaken, units);
+        {
+            // We need to potentially compute absent entries if this is a custom verb
+            // that is not present in the Verb.getValues() list because it was
+            // instantiated after the Messaging metrics was created.
+            Timer latency = internalLatency.computeIfAbsent(verb, v -> Metrics.timer(factory.createMetricName(v + "-WaitLatency")));
+            latency.update(timeTaken, units);
+        }
     }
 
     public void recordSelfDroppedMessage(Verb verb)
     {
-        recordDroppedMessage(droppedMessages.get(verb), false);
+        recordDroppedMessage(droppedMessages.computeIfAbsent(verb, v -> new DroppedForVerb(v)), false);
     }
 
     public void recordSelfDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit)
@@ -140,14 +149,44 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
         recordDroppedMessage(verb, timeElapsed, timeUnit, true);
     }
 
+    @Override
+    public void recordMessageStageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit)
+    {
+        // NOOP
+    }
+
+    @Override
+    public void recordTotalMessageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit)
+    {
+        // NOOP
+    }
+
     public void recordDroppedMessage(Message<?> message, long timeElapsed, TimeUnit timeUnit)
     {
         recordDroppedMessage(message.verb(), timeElapsed, timeUnit, message.isCrossNode());
+        
+        if (message.verb() == Verb.MUTATION_REQ && message.payload instanceof org.apache.cassandra.db.Mutation)
+        {
+            org.apache.cassandra.db.Mutation mutation = (org.apache.cassandra.db.Mutation) message.payload;
+            for (org.apache.cassandra.db.partitions.PartitionUpdate update : mutation.getPartitionUpdates())
+            {
+                String tableKey = update.metadata().keyspace + '.' + update.metadata().name;
+                DroppedMessageMetrics tableMetrics = droppedMutationsByTable.get(tableKey);
+                if (tableMetrics == null)
+                    tableMetrics = droppedMutationsByTable.computeIfAbsent(tableKey,
+                        k -> new DroppedMessageMetrics("DroppedMutations", k));
+                tableMetrics.dropped.mark();
+                if (message.isCrossNode())
+                    tableMetrics.crossNodeDroppedLatency.update(timeElapsed, timeUnit);
+                else
+                    tableMetrics.internalDroppedLatency.update(timeElapsed, timeUnit);
+            }
+        }
     }
 
     public void recordDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit, boolean isCrossNode)
     {
-        recordDroppedMessage(droppedMessages.get(verb), timeElapsed, timeUnit, isCrossNode);
+        recordDroppedMessage(droppedMessages.computeIfAbsent(verb, v -> new DroppedForVerb(v)), timeElapsed, timeUnit, isCrossNode);
     }
 
     private static void recordDroppedMessage(DroppedForVerb droppedMessages, long timeTaken, TimeUnit units, boolean isCrossNode)
@@ -183,6 +222,14 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
             map.put(entry.getKey().toString(), (int) entry.getValue().metrics.dropped.getCount());
         return map;
     }
+    
+    public Map<String, Long> getDroppedMutationsByTable()
+    {
+        Map<String, Long> map = new HashMap<>(droppedMutationsByTable.size());
+        for (Map.Entry<String, DroppedMessageMetrics> entry : droppedMutationsByTable.entrySet())
+            map.put(entry.getKey(), entry.getValue().dropped.getCount());
+        return map;
+    }
 
     private void logDroppedMessages()
     {
@@ -209,8 +256,8 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
                                       LOG_DROPPED_INTERVAL_IN_MS,
                                       droppedInternal,
                                       droppedCrossNode,
-                                      TimeUnit.NANOSECONDS.toMillis((long) droppedForVerb.metrics.internalDroppedLatency.getSnapshot().getMean()),
-                                      TimeUnit.NANOSECONDS.toMillis((long) droppedForVerb.metrics.crossNodeDroppedLatency.getSnapshot().getMean())));
+                                      DEFAULT_TIMER_UNIT.toMillis((long) droppedForVerb.metrics.internalDroppedLatency.getSnapshot().getMean()),
+                                      DEFAULT_TIMER_UNIT.toMillis((long) droppedForVerb.metrics.crossNodeDroppedLatency.getSnapshot().getMean())));
                 ++count;
             }
         }
@@ -221,6 +268,6 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
     public void resetDroppedMessages()
     {
         droppedMessages.replaceAll((u, v) -> new DroppedForVerb(new DroppedMessageMetrics(u)));
+        droppedMutationsByTable.clear();
     }
-
 }

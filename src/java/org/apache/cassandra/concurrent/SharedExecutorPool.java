@@ -17,8 +17,11 @@
  */
 package org.apache.cassandra.concurrent;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -26,8 +29,13 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
+import java.util.stream.Collectors;
 
+import org.apache.cassandra.concurrent.DebuggableTask.RunningDebuggableTask;
+
+import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.concurrent.SEPWorker.Work;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 /**
  * A pool of worker threads that are shared between all Executors created with it. Each executor is treated as a distinct
@@ -56,11 +64,10 @@ import static org.apache.cassandra.concurrent.SEPWorker.Work;
  */
 public class SharedExecutorPool
 {
-
     public static final SharedExecutorPool SHARED = new SharedExecutorPool("SharedPool");
 
     // the name assigned to workers in the pool, and the id suffix
-    final String poolName;
+    final ThreadGroup threadGroup;
     final AtomicLong workerId = new AtomicLong();
 
     // the collection of executors serviced by this pool; periodically ordered by traffic volume
@@ -76,12 +83,19 @@ public class SharedExecutorPool
     final ConcurrentSkipListMap<Long, SEPWorker> spinning = new ConcurrentSkipListMap<>();
     // the collection of threads that have been asked to stop/deschedule - new workers are scheduled from here last
     final ConcurrentSkipListMap<Long, SEPWorker> descheduled = new ConcurrentSkipListMap<>();
+    // All SEPWorkers that are currently running
+    private final Set<SEPWorker> allWorkers = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     volatile boolean shuttingDown = false;
 
-    public SharedExecutorPool(String poolName)
+    public SharedExecutorPool(String name)
     {
-        this.poolName = poolName;
+        this(executorFactory().newThreadGroup(name));
+    }
+
+    public SharedExecutorPool(ThreadGroup threadGroup)
+    {
+        this.threadGroup = threadGroup;
     }
 
     void schedule(Work work)
@@ -96,7 +110,23 @@ public class SharedExecutorPool
                 return;
 
         if (!work.isStop())
-            new SEPWorker(workerId.incrementAndGet(), work, this);
+        {
+            SEPWorker worker = new SEPWorker(threadGroup, workerId.incrementAndGet(), work, this);
+            allWorkers.add(worker);
+        }
+    }
+
+    void workerEnded(SEPWorker worker)
+    {
+        allWorkers.remove(worker);
+    }
+
+    public List<RunningDebuggableTask> runningTasks()
+    {
+        return allWorkers.stream()
+                         .map(worker -> new RunningDebuggableTask(worker.toString(), worker.currentDebuggableTask()))
+                         .filter(RunningDebuggableTask::hasTask)
+                         .collect(Collectors.toList());
     }
 
     void maybeStartSpinningWorker()
@@ -108,12 +138,12 @@ public class SharedExecutorPool
             schedule(Work.SPINNING);
     }
 
-    public synchronized LocalAwareExecutorService newExecutor(int maxConcurrency, String jmxPath, String name)
+    public synchronized LocalAwareExecutorPlus newExecutor(int maxConcurrency, String jmxPath, String name)
     {
         return newExecutor(maxConcurrency, i -> {}, jmxPath, name);
     }
 
-    public LocalAwareExecutorService newExecutor(int maxConcurrency, LocalAwareExecutorService.MaximumPoolSizeListener maximumPoolSizeListener, String jmxPath, String name)
+    public LocalAwareExecutorPlus newExecutor(int maxConcurrency, ExecutorPlus.MaximumPoolSizeListener maximumPoolSizeListener, String jmxPath, String name)
     {
         SEPExecutor executor = new SEPExecutor(this, maxConcurrency, maximumPoolSizeListener, jmxPath, name);
         executors.add(executor);
@@ -128,10 +158,10 @@ public class SharedExecutorPool
 
         terminateWorkers();
 
-        long until = System.nanoTime() + unit.toNanos(timeout);
+        long until = nanoTime() + unit.toNanos(timeout);
         for (SEPExecutor executor : executors)
         {
-            executor.shutdown.await(until - System.nanoTime(), TimeUnit.NANOSECONDS);
+            executor.shutdown.await(until - nanoTime(), TimeUnit.NANOSECONDS);
             if (!executor.isTerminated())
                 throw new TimeoutException(executor.name + " not terminated");
         }

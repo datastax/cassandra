@@ -20,15 +20,19 @@ package org.apache.cassandra.auth;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -39,11 +43,12 @@ import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.mindrot.jbcrypt.BCrypt;
 
-import static org.apache.cassandra.auth.CassandraRoleManager.consistencyForRole;
+import static org.apache.cassandra.auth.CassandraRoleManager.consistencyForRoleRead;
 
 /**
  * PasswordAuthenticator is an IAuthenticator implementation
@@ -54,9 +59,12 @@ import static org.apache.cassandra.auth.CassandraRoleManager.consistencyForRole;
  * PasswordAuthenticator requires the use of CassandraRoleManager
  * for storage and retrieval of encrypted passwords.
  */
-public class PasswordAuthenticator implements IAuthenticator
+public class PasswordAuthenticator implements IAuthenticator, AuthCache.BulkLoader<String, String>
 {
     private static final Logger logger = LoggerFactory.getLogger(PasswordAuthenticator.class);
+
+    /** We intentionally use an empty string sentinel to allow object equality comparison */
+    private static final String NO_SUCH_CREDENTIAL = "";
 
     // name of the hash column.
     private static final String SALTED_HASH = "salted_hash";
@@ -68,12 +76,42 @@ public class PasswordAuthenticator implements IAuthenticator
     static final byte NUL = 0;
     private SelectStatement authenticateStatement;
 
-    private CredentialsCache cache;
+    private final CredentialsCache cache;
+
+    public PasswordAuthenticator()
+    {
+        cache = new CredentialsCache(this);
+        AuthCacheService.instance.register(cache);
+    }
 
     // No anonymous access.
     public boolean requireAuthentication()
     {
         return true;
+    }
+
+    @Override
+    public Supplier<Map<String, String>> bulkLoader()
+    {
+        return () ->
+        {
+            Map<String, String> entries = new HashMap<>();
+
+            logger.info("Pre-warming credentials cache from roles table");
+            UntypedResultSet results = process("SELECT role, salted_hash FROM system_auth.roles", CassandraAuthorizer.authReadConsistencyLevel());
+            results.forEach(row -> {
+                if (row.has("salted_hash"))
+                {
+                    entries.put(row.getString("role"), row.getString("salted_hash"));
+                }
+            });
+            return entries;
+        };
+    }
+
+    public CredentialsCache getCredentialsCache()
+    {
+        return cache;
     }
 
     protected static boolean checkpw(String password, String hash)
@@ -90,9 +128,39 @@ public class PasswordAuthenticator implements IAuthenticator
         }
     }
 
+    /**
+     * This is exposed so we can override the consistency level for tests that are single node
+     */
+    @VisibleForTesting
+    UntypedResultSet process(String query, ConsistencyLevel cl)
+    {
+        return QueryProcessor.process(query, cl);
+    }
+
     private AuthenticatedUser authenticate(String username, String password) throws AuthenticationException
     {
         String hash = cache.get(username);
+
+        // intentional use of object equality
+        if (hash == NO_SUCH_CREDENTIAL)
+        {
+            // The cache was unable to load credentials via queryHashedPassword, probably because the supplied
+            // rolename doesn't exist. If caching is enabled we will have now cached the sentinel value for that key
+            // so we should invalidate it otherwise the cache will continue to serve that until it expires which
+            // will be a problem if the role is added in the meantime.
+            //
+            // We can't just throw the AuthenticationException directly from queryHashedPassword for a similar reason:
+            // if an existing role is dropped and active updates are enabled for the cache, the refresh in
+            // CacheRefresher::run will log and swallow the exception and keep serving the stale credentials until they
+            // eventually expire.
+            //
+            // So whenever we encounter the sentinal value, here and also in CacheRefresher (if active updates are
+            // enabled), we manually expunge the key from the cache. If caching is not enabled, AuthCache::invalidate
+            // is a safe no-op.
+            cache.invalidateCredentials(username);
+            throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
+        }
+
         if (!checkpw(password, hash))
             throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
 
@@ -103,21 +171,21 @@ public class PasswordAuthenticator implements IAuthenticator
     {
         try
         {
-            ResultMessage.Rows rows =
-            authenticateStatement.execute(QueryState.forInternalCalls(),
-                                            QueryOptions.forInternalCalls(consistencyForRole(username),
-                                                                          Lists.newArrayList(ByteBufferUtil.bytes(username))),
-                                            System.nanoTime());
+            QueryOptions options = QueryOptions.forInternalCalls(consistencyForRoleRead(username),
+                    Lists.newArrayList(ByteBufferUtil.bytes(username)));
+
+            ResultMessage.Rows rows = select(authenticateStatement, options);
 
             // If either a non-existent role name was supplied, or no credentials
-            // were found for that role we don't want to cache the result so we throw
-            // an exception.
+            // were found for that role, we don't want to cache the result so we
+            // return a sentinel value. On receiving the sentinel, the caller can
+            // invalidate the cache and throw an appropriate exception.
             if (rows.result.isEmpty())
-                throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
+                return NO_SUCH_CREDENTIAL;
 
             UntypedResultSet result = UntypedResultSet.create(rows.result);
             if (!result.one().has(SALTED_HASH))
-                throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
+                return NO_SUCH_CREDENTIAL;
 
             return result.one().getString(SALTED_HASH);
         }
@@ -125,6 +193,12 @@ public class PasswordAuthenticator implements IAuthenticator
         {
             throw new AuthenticationException("Unable to perform authentication: " + e.getMessage(), e);
         }
+    }
+
+    @VisibleForTesting
+    ResultMessage.Rows select(SelectStatement statement, QueryOptions options)
+    {
+        return statement.execute(QueryState.forInternalCalls(), options, Dispatcher.RequestTime.forImmediateExecution());
     }
 
     public Set<DataResource> protectedResources()
@@ -144,8 +218,6 @@ public class PasswordAuthenticator implements IAuthenticator
                                      SchemaConstants.AUTH_KEYSPACE_NAME,
                                      AuthKeyspace.ROLES);
         authenticateStatement = prepare(query);
-
-        cache = new CredentialsCache(this);
     }
 
     public AuthenticatedUser legacyAuthenticate(Map<String, String> credentials) throws AuthenticationException
@@ -171,7 +243,8 @@ public class PasswordAuthenticator implements IAuthenticator
         return (SelectStatement) QueryProcessor.getStatement(query, ClientState.forInternalCalls());
     }
 
-    private class PlainTextSaslAuthenticator implements SaslNegotiator
+    @VisibleForTesting
+    class PlainTextSaslAuthenticator implements SaslNegotiator
     {
         private boolean complete = false;
         private String username;
@@ -199,7 +272,7 @@ public class PasswordAuthenticator implements IAuthenticator
         /**
          * SASL PLAIN mechanism specifies that credentials are encoded in a
          * sequence of UTF-8 bytes, delimited by 0 (US-ASCII NUL).
-         * The form is : {code}authzId<NUL>authnId<NUL>password<NUL>{code}
+         * The form is : {@code authzId<NUL>authnId<NUL>password<NUL>}
          * authzId is optional, and in fact we don't care about it here as we'll
          * set the authzId to match the authnId (that is, there is no concept of
          * a user being authorized to act on behalf of another with this IAuthenticator).
@@ -239,19 +312,24 @@ public class PasswordAuthenticator implements IAuthenticator
         }
     }
 
-    private static class CredentialsCache extends AuthCache<String, String> implements CredentialsCacheMBean
+    public static class CredentialsCache extends AuthCache<String, String> implements CredentialsCacheMBean
     {
         private CredentialsCache(PasswordAuthenticator authenticator)
         {
-            super("CredentialsCache",
+            super(CACHE_NAME,
                   DatabaseDescriptor::setCredentialsValidity,
                   DatabaseDescriptor::getCredentialsValidity,
                   DatabaseDescriptor::setCredentialsUpdateInterval,
                   DatabaseDescriptor::getCredentialsUpdateInterval,
                   DatabaseDescriptor::setCredentialsCacheMaxEntries,
                   DatabaseDescriptor::getCredentialsCacheMaxEntries,
+                  DatabaseDescriptor::setCredentialsCacheActiveUpdate,
+                  DatabaseDescriptor::getCredentialsCacheActiveUpdate,
                   authenticator::queryHashedPassword,
-                  () -> true);
+                  authenticator.bulkLoader(),
+                  () -> true,
+                  (k,v) -> NO_SUCH_CREDENTIAL == v); // use a known object as a sentinel value. CacheRefresher will
+                                                     // invalidate the key if the sentinel is loaded during a refresh
         }
 
         public void invalidateCredentials(String roleName)
@@ -262,6 +340,8 @@ public class PasswordAuthenticator implements IAuthenticator
 
     public static interface CredentialsCacheMBean extends AuthCacheMBean
     {
+        public static final String CACHE_NAME = "CredentialsCache";
+
         public void invalidateCredentials(String roleName);
     }
 }

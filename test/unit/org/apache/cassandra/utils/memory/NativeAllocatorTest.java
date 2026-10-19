@@ -26,6 +26,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class NativeAllocatorTest
@@ -65,7 +66,7 @@ public class NativeAllocatorTest
                 allocatorRef.get().offHeap().released(80);
                 isClean.countDown();
             }
-            return CompletableFuture.completedFuture(true);
+            return ImmediateFuture.success(true);
         });
         allocator = new NativeAllocator(pool);
         allocatorRef.set(allocator);
@@ -122,7 +123,7 @@ public class NativeAllocatorTest
             canClean.countDown();
             try
             {
-                isClean.await(10L, TimeUnit.MILLISECONDS);
+                Assert.assertTrue(isClean.await(10L, TimeUnit.SECONDS));
             }
             catch (InterruptedException e)
             {
@@ -140,10 +141,18 @@ public class NativeAllocatorTest
             allocator.allocate(50, group);
             verifyUsedReclaiming(80, 80);
 
-            // allocate above limit, check we block until "marked blocking"
-            exec.schedule(markBlocking, 10L, TimeUnit.MILLISECONDS);
+            // CASSANDRA-21019: allocations above the limit no longer block -- they only
+            // track usage; the limit is enforced before a mutation starts, in awaitRoom()
             allocator.allocate(30, group);
+            Assert.assertNull(barrier.get());
+            verifyUsedReclaiming(110, 110);
+
+            // the wait moved to awaitRoom(): above the limit it blocks until the pool has
+            // room or the group is "marked blocking", exactly as allocate() used to
+            exec.schedule(markBlocking, 10L, TimeUnit.MILLISECONDS);
+            allocator.offHeap().awaitRoom(group);
             Assert.assertNotNull(barrier.get());
+            Assert.assertEquals(1, pool.blockedOnAllocatingCount.getCount());
             verifyUsedReclaiming(110, 110);
 
             // release everything

@@ -18,9 +18,8 @@
 
 package org.apache.cassandra.service.reads;
 
-import org.apache.cassandra.locator.Endpoints;
-import org.apache.cassandra.locator.ReplicaPlan;
-import org.apache.cassandra.locator.ReplicaPlans;
+import java.util.concurrent.TimeUnit;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,48 +40,58 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.ExcludingBounds;
 import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.service.reads.repair.NoopReadRepair;
+import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.reads.repair.NoopReadRepair;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.Dispatcher;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 public class ShortReadPartitionsProtection extends Transformation<UnfilteredRowIterator> implements MorePartitions<UnfilteredPartitionIterator>
 {
     private static final Logger logger = LoggerFactory.getLogger(ShortReadPartitionsProtection.class);
+    private static final NoSpamLogger oneMinuteLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+
     private final ReadCommand command;
     private final Replica source;
 
     private final Runnable preFetchCallback; // called immediately before fetching more contents
 
-    private final DataLimits.Counter singleResultCounter; // unmerged per-source counter
+    protected final DataLimits.Counter singleResultCounter; // unmerged per-source counter
     private final DataLimits.Counter mergedResultCounter; // merged end-result counter
 
     private DecoratedKey lastPartitionKey; // key of the last observed partition
 
     private boolean partitionsFetched; // whether we've seen any new partitions since iteration start or last moreContents() call
+    protected boolean rangeFetched = false; // fetched by original read request or SRP request
 
-    private final long queryStartNanoTime;
+    private final Dispatcher.RequestTime requestTime;
 
     public ShortReadPartitionsProtection(ReadCommand command,
                                          Replica source,
                                          Runnable preFetchCallback,
                                          DataLimits.Counter singleResultCounter,
                                          DataLimits.Counter mergedResultCounter,
-                                         long queryStartNanoTime)
+                                         Dispatcher.RequestTime requestTime)
     {
         this.command = command;
         this.source = source;
         this.preFetchCallback = preFetchCallback;
         this.singleResultCounter = singleResultCounter;
         this.mergedResultCounter = mergedResultCounter;
-        this.queryStartNanoTime = queryStartNanoTime;
+        this.requestTime = requestTime;
     }
 
     @Override
     public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
     {
         partitionsFetched = true;
+        rangeFetched = true;
 
         lastPartitionKey = partition.partitionKey();
 
@@ -127,16 +136,17 @@ public class ShortReadPartitionsProtection extends Transformation<UnfilteredRowI
          * Can only take the short cut if there is no per partition limit set. Otherwise it's possible to hit false
          * positives due to some rows being uncounted for in certain scenarios (see CASSANDRA-13911).
          */
-        if (command.limits().isExhausted(singleResultCounter) && command.limits().perPartitionCount() == DataLimits.NO_LIMIT)
+        if (command.limits().isCounterBelowLimits(singleResultCounter) && command.limits().perPartitionCount() == DataLimits.NO_LIMIT)
             return null;
 
         /*
          * Either we had an empty iterator as the initial response, or our moreContents() call got us an empty iterator.
          * There is no point to ask the replica for more rows - it has no more in the requested range.
          */
-        if (!partitionsFetched)
+        if (rangeExhausted())
             return null;
         partitionsFetched = false;
+        rangeFetched = true;
 
         /*
          * We are going to fetch one partition at a time for thrift and potentially more for CQL.
@@ -150,12 +160,19 @@ public class ShortReadPartitionsProtection extends Transformation<UnfilteredRowI
 
         ColumnFamilyStore.metricsFor(command.metadata().id).shortReadProtectionRequests.mark();
         Tracing.trace("Requesting {} extra rows from {} for short read protection", toQuery, source);
-        logger.info("Requesting {} extra rows from {} for short read protection", toQuery, source);
+        // This is a NoSpamLogger because, in the event of unrepaired data or missing data on nodes in
+        // a cluster, we can end up spamming the logs with this message
+        oneMinuteLogger.info("Requesting {} extra rows from {} for short read protection", toQuery, source);
 
         // If we've arrived here, all responses have been consumed, and we're about to request more.
         preFetchCallback.run();
 
         return makeAndExecuteFetchAdditionalPartitionReadCommand(toQuery);
+    }
+
+    public boolean rangeExhausted()
+    {
+        return !partitionsFetched;
     }
 
     private UnfilteredPartitionIterator makeAndExecuteFetchAdditionalPartitionReadCommand(int toQuery)
@@ -174,21 +191,25 @@ public class ShortReadPartitionsProtection extends Transformation<UnfilteredRowI
         return executeReadCommand(cmd.withUpdatedLimitsAndDataRange(newLimits, newDataRange), ReplicaPlan.shared(replicaPlan));
     }
 
-    private <E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>>
+    private <E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
     UnfilteredPartitionIterator executeReadCommand(ReadCommand cmd, ReplicaPlan.Shared<E, P> replicaPlan)
     {
-        DataResolver<E, P> resolver = new DataResolver<>(cmd, replicaPlan, (NoopReadRepair<E, P>)NoopReadRepair.instance, queryStartNanoTime);
-        ReadCallback<E, P> handler = new ReadCallback<>(resolver, cmd, replicaPlan, queryStartNanoTime);
+        DataResolver<E, P> resolver = new DataResolver<>(cmd,
+                                                         replicaPlan,
+                                                         (NoopReadRepair<E, P>)NoopReadRepair.instance,
+                                                         requestTime,
+                                                         QueryInfoTracker.ReadTracker.NOOP);
+        ReadCallback<E, P> handler = new ReadCallback<>(resolver, cmd, replicaPlan, requestTime);
 
         if (source.isSelf())
         {
-            Stage.READ.maybeExecuteImmediately(new StorageProxy.LocalReadRunnable(cmd, handler));
+            Stage.READ.maybeExecuteImmediately(new StorageProxy.LocalReadRunnable(cmd, handler, requestTime));
         }
         else
         {
             if (source.isTransient())
                 cmd = cmd.copyAsTransientQuery(source);
-            MessagingService.instance().sendWithCallback(cmd.createMessage(false), source.endpoint(), handler);
+            MessagingService.instance().sendWithCallback(cmd.createMessage(false, requestTime), source.endpoint(), handler);
         }
 
         // We don't call handler.get() because we want to preserve tombstones since we're still in the middle of merging node results.

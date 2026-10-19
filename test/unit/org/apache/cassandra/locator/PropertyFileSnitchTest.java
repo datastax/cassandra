@@ -49,6 +49,8 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.GOSSIP_DISABLE_THREAD_VALIDATION;
+import static org.apache.cassandra.config.CassandraRelevantProperties.NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE;
 import static org.junit.Assert.*;
 
 /**
@@ -65,13 +67,14 @@ public class PropertyFileSnitchTest
     @BeforeClass
     public static void setupDD()
     {
+        NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.setBoolean(true);
         DatabaseDescriptor.daemonInitialization();
     }
 
     @Before
     public void setup() throws ConfigurationException, IOException
     {
-        System.setProperty(Gossiper.Props.DISABLE_THREAD_VALIDATION, "true");
+        GOSSIP_DISABLE_THREAD_VALIDATION.setBoolean(true);
         String confFile = FBUtilities.resourceToFile(PropertyFileSnitch.SNITCH_PROPERTIES_FILENAME);
         effectiveFile = Paths.get(confFile);
         backupFile = Paths.get(confFile + ".bak");

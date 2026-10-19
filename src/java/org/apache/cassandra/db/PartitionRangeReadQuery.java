@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.List;
+
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -29,22 +31,26 @@ import org.apache.cassandra.transport.ProtocolVersion;
 /**
  *  A {@code ReadQuery} for a range of partitions.
  */
-public interface PartitionRangeReadQuery extends ReadQuery
+public interface PartitionRangeReadQuery extends MultiPartitionReadQuery
 {
     static ReadQuery create(TableMetadata table,
-                            int nowInSec,
+                            long nowInSec,
                             ColumnFilter columnFilter,
                             RowFilter rowFilter,
                             DataLimits limits,
                             DataRange dataRange)
     {
-        if (table.isVirtual())
-            return VirtualTablePartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limits, dataRange);
-
         return PartitionRangeReadCommand.create(table, nowInSec, columnFilter, rowFilter, limits, dataRange);
     }
 
+
     DataRange dataRange();
+
+    @Override
+    default List<DataRange> ranges()
+    {
+        return List.of(dataRange());
+    }
 
     /**
      * Creates a new {@code PartitionRangeReadQuery} with the updated limits.
@@ -92,4 +98,5 @@ public interface PartitionRangeReadQuery extends ReadQuery
 
         return dataRange().selectsAllPartition() && !rowFilter().hasExpressionOnClusteringOrRegularColumns();
     }
+
 }

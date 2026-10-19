@@ -28,11 +28,29 @@ import org.apache.cassandra.io.sstable.SSTable;
 public interface LifecycleNewTracker
 {
     /**
-     * Called when a new table is about to be created, so that this table can be tracked by a transaction.
+     * Called when a new sstable is about to be created, so that this table can be tracked by a transaction.
      * @param table - the new table to be tracked
      */
     void trackNew(SSTable table);
 
+    /**
+     * Called when a new sstable and its indexes have been fully written.
+     * Implementation must be thread safe and not alter the state of the transaction.
+     *
+     * @param table - the newly written sstable to be tracked
+     */
+    default void trackNewWritten(SSTable table)
+    {
+    }
+
+    /**
+     * Track new index files attached to the given sstable. Used by CNDB to upload new archive file
+     *
+     * @param table on which index files should be tracked
+     */
+    default void trackNewAttachedIndexFiles(SSTable table)
+    {
+    }
 
     /**
      * Called when a new table is no longer required, so that this table can be untracked by a transaction.

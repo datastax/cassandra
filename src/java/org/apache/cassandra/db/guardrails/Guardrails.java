@@ -1,0 +1,1772 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.db.guardrails;
+
+import java.util.Collections;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import javax.annotation.Nullable;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
+import org.apache.commons.lang3.StringUtils;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DataStorageSpec;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.DurationSpec;
+import org.apache.cassandra.config.GuardrailsOptions;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.disk.usage.DiskUsageBroadcaster;
+import org.apache.cassandra.utils.MBeanWrapper;
+
+import static java.lang.String.format;
+
+/**
+ * Entry point for Guardrails, storing the defined guardrails and providing a few global methods over them.
+ */
+public final class Guardrails implements GuardrailsMBean
+{
+    public static final String MBEAN_NAME = "org.apache.cassandra.db:type=Guardrails";
+
+    public static final GuardrailsConfigProvider CONFIG_PROVIDER = GuardrailsConfigProvider.instance;
+    private static final GuardrailsOptions DEFAULT_CONFIG = DatabaseDescriptor.getGuardrailsConfig();
+
+    @VisibleForTesting
+    public static final Guardrails instance = new Guardrails();
+
+    /**
+     * Guardrail on the total number of user keyspaces.
+     */
+    public static final MaxThreshold keyspaces =
+    new MaxThreshold("keyspaces",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getKeyspacesWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getKeyspacesFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating keyspace %s, current number of keyspaces %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Cannot have more than %s keyspaces, aborting the creation of keyspace %s",
+                                        threshold, what));
+
+    /**
+     * Guardrail on the total number of tables on user keyspaces.
+     */
+    public static final MaxThreshold tables =
+    new MaxThreshold("tables",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getTablesWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getTablesFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating table %s, current number of tables %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Cannot have more than %s tables, aborting the creation of table %s",
+                                        threshold, what));
+
+    /**
+     * Guardrail on the number of columns per table.
+     */
+    public static final MaxThreshold columnsPerTable =
+    new MaxThreshold("columns_per_table",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getColumnsPerTableWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getColumnsPerTableFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("The table %s has %s columns, this exceeds the warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Tables cannot have more than %s columns, but %s provided for table %s",
+                                        threshold, value, what));
+
+    public static final MaxThreshold secondaryIndexesPerTable =
+    new MaxThreshold("secondary_indexes_per_table",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSecondaryIndexesPerTableWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSecondaryIndexesPerTableFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating secondary index %s, current number of indexes %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Tables cannot have more than %s secondary indexes, aborting the creation of secondary index %s",
+                                        threshold, what));
+
+    public static final MaxThreshold sasiIndexesPerTable =
+    new MaxThreshold("sasi_indexes_per_table",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSasiIndexesPerTableWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSasiIndexesPerTableFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating SASI index %s, current number of indexes %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Tables cannot have more than %s SASI indexes, aborting the creation of secondary index %s",
+                                        threshold, what));
+
+    public static final MaxThreshold saiIndexesPerTable =
+    new MaxThreshold("sai_indexes_per_table",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getStorageAttachedIndexesPerTableWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getStorageAttachedIndexesPerTableFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating StorageAttachedIndex secondary index %s, current number of StorageAttachedIndex secondary indexes %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Tables cannot have more than %s StorageAttachedIndex secondary indexes, aborting the creation of secondary index %s",
+                                        threshold, what));
+
+    public static final MaxThreshold saiIndexesTotal =
+    new MaxThreshold("sai_indexes_total",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getStorageAttachedIndexesTotalWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getStorageAttachedIndexesTotalFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating StorageAttachedIndex secondary index %s, current number of StorageAttachedIndex secondary indexes across all keyspaces %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Cannot have more than %s StorageAttachedIndex secondary indexes across all keyspaces, aborting the creation of secondary index %s",
+                                        threshold, what));
+
+    /**
+     * Guardrail on the number of trusted custom secondary indexes per table, counted per implementation class.
+     */
+    public static final MaxThreshold trustedIndexesPerTable =
+    new MaxThreshold("trusted_indexes_per_table",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getTrustedIndexesPerTableWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getTrustedIndexesPerTableFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating trusted custom secondary index %s, current number of indexes of the same class %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Tables cannot have more than %s trusted custom secondary indexes of the same class, aborting the creation of secondary index %s",
+                                        threshold, what));
+
+    /**
+     * Guardrail disabling user's ability to create secondary indexes
+     */
+    public static final EnableFlag createSecondaryIndexesEnabled =
+    new EnableFlag("secondary_indexes",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getSecondaryIndexesEnabled(),
+                   "User creation of secondary indexes");
+
+    /**
+     * Guardrail on the number of materialized views per table.
+     */
+    public static final MaxThreshold materializedViewsPerTable =
+    new MaxThreshold("materialized_views_per_table",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getMaterializedViewsPerTableWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getMaterializedViewsPerTableFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating materialized view %s, current number of views %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Tables cannot have more than %s materialized views, aborting the creation of materialized view %s",
+                                        threshold, what));
+
+    /**
+     * Guardrail warning about, ignoring or rejecting the usage of certain table properties.
+     */
+    public static final Values<String> tableProperties =
+    new Values<>("table_properties",
+                 null,
+                 state -> CONFIG_PROVIDER.getOrCreate(state).getTablePropertiesWarned(),
+                 state -> CONFIG_PROVIDER.getOrCreate(state).getTablePropertiesIgnored(),
+                 state -> CONFIG_PROVIDER.getOrCreate(state).getTablePropertiesDisallowed(),
+                 "Table Properties");
+
+    /**
+     * Guardrail disabling user-provided timestamps.
+     */
+    public static final EnableFlag userTimestampsEnabled =
+    new EnableFlag("user_timestamps",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getUserTimestampsEnabled(),
+                   "User provided timestamps (USING TIMESTAMP)");
+
+    public static final EnableFlag loggedBatchEnabled =
+    new EnableFlag("logged_batch",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getLoggedBatchEnabled(),
+                   "LOGGED batch");
+
+    public static final EnableFlag groupByEnabled =
+    new EnableFlag("group_by",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getGroupByEnabled(),
+                   "GROUP BY functionality");
+
+    /**
+     * Guardrail disabling ALTER TABLE column mutation access.
+     */
+    public static final EnableFlag alterTableEnabled =
+    new EnableFlag("alter_table",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getAlterTableEnabled(),
+                   "User access to ALTER TABLE statement for column mutation");
+
+    /**
+     * Guardrail disabling DROP / TRUNCATE TABLE behavior
+     */
+    public static final EnableFlag dropTruncateTableEnabled =
+    new EnableFlag("drop_truncate_table_enabled",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getDropTruncateTableEnabled(),
+                   "DROP and TRUNCATE TABLE functionality");
+
+    /**
+     * Guardrail disabling DROP KEYSPACE behavior
+     */
+    public static final EnableFlag dropKeyspaceEnabled =
+    new EnableFlag("drop_keyspace_enabled",
+                    null,
+                    state -> CONFIG_PROVIDER.getOrCreate(state).getDropKeyspaceEnabled(),
+                    "DROP KEYSPACE functionality");
+
+    /**
+     * Guardrail disabling user's ability to turn off compression
+     */
+    public static final EnableFlag uncompressedTablesEnabled =
+    new EnableFlag("uncompressed_tables_enabled",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getUncompressedTablesEnabled(),
+                   "Uncompressed table");
+
+    /**
+     * Guardrail disabling the creation of new COMPACT STORAGE tables
+     */
+    public static final EnableFlag compactTablesEnabled =
+    new EnableFlag("compact_tables",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getCompactTablesEnabled(),
+                   "Creation of new COMPACT STORAGE tables");
+
+    /**
+     * Guardrail to warn or fail a CREATE or ALTER TABLE statement when default_time_to_live is set to 0 and
+     * the table is using TimeWindowCompactionStrategy compaction or a subclass of it.
+     */
+    public static final EnableFlag zeroTTLOnTWCSEnabled =
+    new EnableFlag("zero_ttl_on_twcs",
+                   "It is suspicious to use default_time_to_live set to 0 with such compaction strategy. " +
+                   "Please keep in mind that data will not start to automatically expire after they are older " +
+                   "than a respective compaction window unit of a certain size. Please set TTL for your INSERT or UPDATE " +
+                   "statements if you expect data to be expired as table settings will not do it. ",
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getZeroTTLOnTWCSWarned(),
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getZeroTTLOnTWCSEnabled(),
+                   "0 default_time_to_live on a table with " + TimeWindowCompactionStrategy.class.getSimpleName() + " compaction strategy");
+
+    /**
+     * Guardrail to warn on or fail filtering queries that contain intersections on mutable columns at consistency
+     * levels that require coordinator reconciliation.
+     * 
+     * @see <a href="https://issues.apache.org/jira/browse/CASSANDRA-19007">CASSANDRA-19007</a>
+     */
+    public static final EnableFlag intersectFilteringQueryEnabled =
+            new EnableFlag("intersect_filtering_query",
+                           "Filtering queries involving an intersection on multiple mutable (i.e. non-key) columns " +
+                           "over unrepaired data at read consistency levels that would require coordinator " +
+                           "reconciliation may violate the guarantees of those consistency levels.",
+                           state -> CONFIG_PROVIDER.getOrCreate(state).getIntersectFilteringQueryWarned(),
+                           state -> CONFIG_PROVIDER.getOrCreate(state).getIntersectFilteringQueryEnabled(),
+                           "Filtering query with intersection on mutable columns at consistency level requiring coordinator reconciliation");
+
+    /**
+     * Guardrail on the number of elements returned within page.
+     */
+    public static final MaxThreshold pageSize =
+    new MaxThreshold("page_size",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getPageSizeWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getPageSizeFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Query for table %s with page size %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Aborting query for table %s, page size %s exceeds fail threshold of %s.",
+                                        what, value, threshold));
+
+    /**
+     * Guardrail on the weight (bytes) of elements returned within page.
+     */
+    public static final MaxThreshold pageWeight =
+    new MaxThreshold("page_weight",
+                     null,
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getPageWeightWarnThreshold()),
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getPageWeightFailThreshold()),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Query for table %s with page weight %s bytes exceeds warning threshold of %s bytes.",
+                                        what, value, threshold)
+                               : format("Aborting query for table %s, page weight %s bytes exceeds fail threshold of %s bytes.",
+                                        what, value, threshold));
+
+    /**
+     * Guardrail on the number of partition keys in the IN clause.
+     */
+    public static final MaxThreshold partitionKeysInSelect =
+    new MaxThreshold("partition_keys_in_select",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getPartitionKeysInSelectWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getPartitionKeysInSelectFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Query with partition keys in IN clause on table %s, with number of " +
+                                        "partition keys %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Aborting query with partition keys in IN clause on table %s, " +
+                                        "number of partition keys %s exceeds fail threshold of %s.",
+                                        what, value, threshold));
+
+    /**
+     * Guardrail disabling operations on lists that require read before write.
+     */
+    public static final EnableFlag readBeforeWriteListOperationsEnabled =
+    new EnableFlag("read_before_write_list_operations",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getReadBeforeWriteListOperationsEnabled(),
+                   "List operation requiring read before write");
+
+    /**
+     * Guardrail disabling ALLOW FILTERING statement within a query
+     */
+    public static final EnableFlag allowFilteringEnabled =
+    new EnableFlag("allow_filtering",
+                   "ALLOW FILTERING can potentially visit all the data in the table and have unpredictable performance.",
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getAllowFilteringEnabled(),
+                   "Querying with ALLOW FILTERING");
+
+    /**
+     * Guardrail disabling setting SimpleStrategy via keyspace creation or alteration
+     */
+    public static final EnableFlag simpleStrategyEnabled =
+    new EnableFlag("simplestrategy",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getSimpleStrategyEnabled(),
+                   "SimpleStrategy");
+
+    /**
+     * Guardrail disabling use of Counters
+     */
+    public static final EnableFlag counterEnabled =
+    new EnableFlag("counter",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getCounterEnabled(),
+                   "Counter");
+
+    /**
+     * Guardrail on the number of restrictions created by a cartesian product of a CQL's {@code IN} query.
+     */
+    public static final MaxThreshold inSelectCartesianProduct =
+    new MaxThreshold("in_select_cartesian_product",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getInSelectCartesianProductWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getInSelectCartesianProductFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("The cartesian product of the IN restrictions on %s produces %s values, " +
+                                        "this exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Aborting query because the cartesian product of the IN restrictions on %s " +
+                                        "produces %s values, this exceeds fail threshold of %s.",
+                                        what, value, threshold));
+
+    /**
+     * Guardrail on read consistency levels.
+     */
+    public static final Values<ConsistencyLevel> readConsistencyLevels =
+    new Values<>("read_consistency_levels",
+                 null,
+                 state -> CONFIG_PROVIDER.getOrCreate(state).getReadConsistencyLevelsWarned(),
+                 state -> Collections.emptySet(),
+                 state -> CONFIG_PROVIDER.getOrCreate(state).getReadConsistencyLevelsDisallowed(),
+                 "read consistency levels");
+
+    /**
+     * Guardrail on write consistency levels.
+     */
+    public static final Values<ConsistencyLevel> writeConsistencyLevels =
+    new Values<>("write_consistency_levels",
+                 null,
+                 state -> CONFIG_PROVIDER.getOrCreate(state).getWriteConsistencyLevelsWarned(),
+                 state -> Collections.emptySet(),
+                 state -> CONFIG_PROVIDER.getOrCreate(state).getWriteConsistencyLevelsDisallowed(),
+                 "write consistency levels");
+
+    /**
+     * Guardrail on the size of a partition.
+     */
+    public static final MaxThreshold partitionSize =
+    new MaxThreshold("partition_size",
+                     "Too large partitions can cause performance problems.",
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getPartitionSizeWarnThreshold()),
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getPartitionSizeFailThreshold()),
+                     (isWarning, what, value, threshold) ->
+                             format("Partition %s has size %s, this exceeds the %s threshold of %s.",
+                                    what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
+     * Guardrail on the number of rows of a partition.
+     */
+    public static final MaxThreshold partitionTombstones =
+    new MaxThreshold("partition_tombstones",
+                     "Partitions with too many tombstones can cause performance problems.",
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getPartitionTombstonesWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getPartitionTombstonesFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                             format("Partition %s has %s tombstones, this exceeds the %s threshold of %s.",
+                                    what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
+     * Guardrail on the size of a collection.
+     */
+    public static final MaxThreshold columnValueSize =
+    new MaxThreshold("column_value_size",
+                     null,
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getColumnValueSizeWarnThreshold()),
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getColumnValueSizeFailThreshold()),
+                     (isWarning, what, value, threshold) ->
+                     format("Value of column '%s' has size %s, this exceeds the %s threshold of %s.",
+                            what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
+     * Guardrail on the size of a collection.
+     */
+    public static final MaxThreshold collectionSize =
+    new MaxThreshold("collection_size",
+                     null,
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getCollectionSizeWarnThreshold()),
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getCollectionSizeFailThreshold()),
+                     (isWarning, what, value, threshold) ->
+                     format("Detected collection %s of size %s, this exceeds the %s threshold of %s.",
+                            what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
+     * Guardrail on the number of items of a collection.
+     */
+    public static final MaxThreshold itemsPerCollection =
+    new MaxThreshold("items_per_collection",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getItemsPerCollectionWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getItemsPerCollectionFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     format("Detected collection %s with %s items, this exceeds the %s threshold of %s.",
+                            what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
+     * Guardrail on the number of fields on each UDT.
+     */
+    public static final MaxThreshold fieldsPerUDT =
+    new MaxThreshold("fields_per_udt",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getFieldsPerUDTWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getFieldsPerUDTFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("The user type %s has %s columns, this exceeds the warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("User types cannot have more than %s columns, but %s provided for user type %s.",
+                                        threshold, value, what));
+
+    /**
+     * Guardrail on the usage of vector type.
+     *
+     * This may be useful when running clusters that have diverse clients, where some do not support the vector type.
+     * Clients that do not support vector may fail to establish sessions or fail to read results containing vector
+     * columns.
+     */
+    public static final EnableFlag vectorTypeEnabled =
+    new EnableFlag("vector_type_enabled",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getVectorTypeEnabled(),
+                    "usage of the vector type");
+
+    /**
+     * Guardrail on the number of dimensions of vector columns.
+     */
+    public static final MaxThreshold vectorDimensions =
+    new MaxThreshold("vector_dimensions",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getVectorDimensionsWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getVectorDimensionsFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     format("%s has a vector of %s dimensions, this exceeds the %s threshold of %s.",
+                            what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
+     * Guardrail on the maximum value for the rerank_k parameter, an ANN query option.
+     */
+    public static final MaxThreshold annRerankKMaxValue =
+    new MaxThreshold("sai_ann_rerank_k_max_value",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSaiAnnRerankKWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSaiAnnRerankKFailThreshold(),
+                      (isWarning, what, value, threshold) ->
+                      format("%s specifies rerank_k=%s, this exceeds the %s threshold of %s.",
+                             what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
+     * Guardrail on the data disk usage on the local node, used by a periodic task to calculate and propagate that status.
+     * See {@link org.apache.cassandra.service.disk.usage.DiskUsageMonitor} and {@link DiskUsageBroadcaster}.
+     */
+    public static final PercentageThreshold localDataDiskUsage =
+    new PercentageThreshold("local_data_disk_usage",
+                            null,
+                            state -> CONFIG_PROVIDER.getOrCreate(state).getDataDiskUsagePercentageWarnThreshold(),
+                            state -> CONFIG_PROVIDER.getOrCreate(state).getDataDiskUsagePercentageFailThreshold(),
+                            (isWarning, what, value, threshold) ->
+                            isWarning ? format("Local data disk usage %s(%s) exceeds warning threshold of %s",
+                                               value, what, threshold)
+                                      : format("Local data disk usage %s(%s) exceeds failure threshold of %s, " +
+                                               "will stop accepting writes",
+                                               value, what, threshold));
+
+    /**
+     * Guardrail on the data disk usage on replicas, used at write time to verify the status of the involved replicas.
+     * See {@link org.apache.cassandra.service.disk.usage.DiskUsageMonitor} and {@link DiskUsageBroadcaster}.
+     */
+    public static final Predicates<InetAddressAndPort> replicaDiskUsage =
+    new Predicates<>("replica_disk_usage",
+                     null,
+                     state -> DiskUsageBroadcaster.instance::isStuffed,
+                     state -> DiskUsageBroadcaster.instance::isFull,
+                     // not using `value` because it represents replica address which should be hidden from client.
+                     (isWarning, value) ->
+                     isWarning ? "Replica disk usage exceeds warning threshold"
+                               : "Write request failed because disk usage exceeds failure threshold");
+
+    static
+    {
+        // Avoid spamming with notifications about stuffed/full disks
+        long minNotifyInterval = CassandraRelevantProperties.DISK_USAGE_NOTIFY_INTERVAL_MS.getLong();
+        localDataDiskUsage.minNotifyIntervalInMs(minNotifyInterval);
+        replicaDiskUsage.minNotifyIntervalInMs(minNotifyInterval);
+        collectionSize.minNotifyIntervalInMs(minNotifyInterval);
+        itemsPerCollection.minNotifyIntervalInMs(minNotifyInterval);
+    }
+
+    /**
+     * Guardrail on the minimum replication factor.
+     */
+    public static final MinThreshold minimumReplicationFactor =
+    new MinThreshold("minimum_replication_factor",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getMinimumReplicationFactorWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getMinimumReplicationFactorFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     format("The keyspace %s has a replication factor of %s, below the %s threshold of %s.",
+                            what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
+     * Guardrail on the maximum replication factor.
+     */
+    public static final MaxThreshold maximumReplicationFactor =
+    new MaxThreshold("maximum_replication_factor",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getMaximumReplicationFactorWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getMaximumReplicationFactorFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     format("The keyspace %s has a replication factor of %s, above the %s threshold of %s.",
+                            what, value, isWarning ? "warning" : "failure", threshold));
+
+    public static final MaxThreshold maximumAllowableTimestamp =
+    new MaxThreshold("maximum_timestamp",
+                     "Timestamps too far in the future can lead to data that can't be easily overwritten",
+                     state -> maximumTimestampAsRelativeMicros(CONFIG_PROVIDER.getOrCreate(state).getMaximumTimestampWarnThreshold()),
+                     state -> maximumTimestampAsRelativeMicros(CONFIG_PROVIDER.getOrCreate(state).getMaximumTimestampFailThreshold()),
+                     (isWarning, what, value, threshold) ->
+                    format("The modification to table %s has a timestamp %s after the maximum allowable %s threshold %s",
+                           what, value, isWarning ? "warning" : "failure", threshold));
+
+    public static final MinThreshold minimumAllowableTimestamp =
+    new MinThreshold("minimum_timestamp",
+                     "Timestamps too far in the past can cause writes can be unexpectedly lost",
+                     state -> minimumTimestampAsRelativeMicros(CONFIG_PROVIDER.getOrCreate(state).getMinimumTimestampWarnThreshold()),
+                     state -> minimumTimestampAsRelativeMicros(CONFIG_PROVIDER.getOrCreate(state).getMinimumTimestampFailThreshold()),
+                     (isWarning, what, value, threshold) ->
+                     format("The modification to table %s has a timestamp %s before the minimum allowable %s threshold %s",
+                            what, value, isWarning ? "warning" : "failure", threshold));
+
+    public static final MaxThreshold saiSSTableIndexesPerQuery =
+    new MaxThreshold("sai_sstable_indexes_per_query",
+                     "High number of referenced indexes per query may negatively effect performance",
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSaiSSTableIndexesPerQueryWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSaiSSTableIndexesPerQueryFailThreshold(),
+                     ((isWarning, what, value, threshold) ->
+                      format("The number of SSTable indexes queried on index %s violated %s threshold value %s with value %s",
+                             what, isWarning ? "warning" : "failure", threshold, value)));
+
+    /**
+     * Guardrail on the size of a string term written to SAI index.
+     */
+    public static final MaxThreshold saiStringTermSize =
+    new MaxThreshold("sai_string_term_size",
+                     null,
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getSaiStringTermSizeWarnThreshold()),
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getSaiStringTermSizeFailThreshold()),
+                     (isWarning, what, value, threshold) ->
+                     format("Value of column '%s' has size %s, this exceeds the %s threshold of %s.",
+                            what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
+     * Guardrail on the size of a frozen term written to SAI index.
+     */
+    public static final MaxThreshold saiFrozenTermSize =
+    new MaxThreshold("sai_frozen_term_size",
+                     null,
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getSaiFrozenTermSizeWarnThreshold()),
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getSaiFrozenTermSizeFailThreshold()),
+                     (isWarning, what, value, threshold) ->
+                     format("Value of column '%s' has size %s, this exceeds the %s threshold of %s.",
+                            what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
+     * Guardrail on the size of a vector term written to SAI index.
+     */
+    public static final MaxThreshold saiVectorTermSize =
+    new MaxThreshold("sai_vector_term_size",
+                     null,
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getSaiVectorTermSizeWarnThreshold()),
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getSaiVectorTermSizeFailThreshold()),
+                     (isWarning, what, value, threshold) ->
+                     format("Value of column '%s' has size %s, this exceeds the %s threshold of %s.",
+                            what, value, isWarning ? "warning" : "failure", threshold));
+
+    public static final EnableFlag nonPartitionRestrictedIndexQueryEnabled =
+    new EnableFlag("non_partition_restricted_index_query_enabled",
+                   "Executing a query on secondary indexes without partition key restriction might degrade performance",
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getNonPartitionRestrictedQueryEnabled(),
+                   "Non-partition key restricted query");
+    public static final Threshold scannedTombstones =
+    new MaxThreshold("scanned_tombstones",
+                      null,
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getTombstoneWarnThreshold(),
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getTombstoneFailThreshold(),
+                      (isWarning, what, v, t) -> isWarning ?
+                                                 format("Scanned over %s tombstone rows for query %1.512s - more than the warning threshold %s", v, what, t) :
+                                                 format("Scanned over %s tombstone rows during query %1.512s - more than the maximum allowed %s; query aborted", v, what, t));
+
+
+    public static final Threshold batchSize =
+    new MaxThreshold("batch_size",
+                      null,
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getBatchSizeWarnThreshold(),
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getBatchSizeFailThreshold(),
+                      (isWarning, what, v, t) -> isWarning
+                                                 ? format("Batch for %s is of size %s, exceeding specified warning threshold %s", what, v, t)
+                                                 : format("Batch for %s is of size %s, exceeding specified failure threshold %s", what, v, t));
+
+    public static final Threshold unloggedBatchAcrossPartitions =
+    new MaxThreshold("unlogged_batch_across_partitions",
+                      null,
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getUnloggedBatchAcrossPartitionsWarnThreshold(),
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getUnloggedBatchAcrossPartitionsFailThreshold(),
+                      (x, what, v, t) -> format("Unlogged batch covering %s partitions detected " +
+                                                "against table%s %s. You should use a logged batch for " +
+                                                "atomicity, or asynchronous writes for performance.",
+                                                v, what.contains(", ") ? "s" : "", what));
+
+    /**
+     * Guardrail on the number of rows that a SELECT query with LIMIT/OFFSET can skip.
+     */
+    public static final Threshold offsetRows =
+    new MaxThreshold("offset_rows",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getOffsetRowsWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getOffsetRowsFailThreshold(),
+                     (isWarning, what, v, t) -> isWarning
+                                                ? format("%s requested to skip %s rows, this exceeds the warning threshold of %s.", what, v, t)
+                                                : format("%s requested to skip %s rows, this exceeds the failure threshold of %s.", what, v, t));
+
+    /**
+     * Guardrail on the number of query filtering operations per SELECT query (after analysis).
+     */
+    public static final Threshold queryFilters =
+    new MaxThreshold("query_filters",
+                      null,
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getQueryFiltersWarnThreshold(),
+                      state -> CONFIG_PROVIDER.getOrCreate(state).getQueryFiltersFailThreshold(),
+                      (isWarning, what, v, t) -> isWarning
+                                                 ? format("%s has %s column value filters after analysis, this exceeds the warning threshold of %s.", what, v, t)
+                                                 : format("%s has %s column value filters after analysis, this exceeds the failure threshold of %s.", what, v, t));
+
+    private Guardrails()
+    {
+        MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
+    }
+
+    @Override
+    public int getKeyspacesWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getKeyspacesWarnThreshold();
+    }
+
+    @Override
+    public int getKeyspacesFailThreshold()
+    {
+        return DEFAULT_CONFIG.getKeyspacesFailThreshold();
+    }
+
+    @Override
+    public void setKeyspacesThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setKeyspacesThreshold(warn, fail);
+    }
+
+    @Override
+    public int getTablesWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getTablesWarnThreshold();
+    }
+
+    @Override
+    public int getTablesFailThreshold()
+    {
+        return DEFAULT_CONFIG.getTablesFailThreshold();
+    }
+
+    @Override
+    public void setTablesThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setTablesThreshold(warn, fail);
+    }
+
+    @Override
+    public int getColumnsPerTableWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getColumnsPerTableWarnThreshold();
+    }
+
+    @Override
+    public int getColumnsPerTableFailThreshold()
+    {
+        return DEFAULT_CONFIG.getColumnsPerTableFailThreshold();
+    }
+
+    @Override
+    public void setColumnsPerTableThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setColumnsPerTableThreshold(warn, fail);
+    }
+
+    @Override
+    public int getSecondaryIndexesPerTableWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getSecondaryIndexesPerTableWarnThreshold();
+    }
+
+    @Override
+    public int getSecondaryIndexesPerTableFailThreshold()
+    {
+        return DEFAULT_CONFIG.getSecondaryIndexesPerTableFailThreshold();
+    }
+
+    @Override
+    public void setSecondaryIndexesPerTableThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setSecondaryIndexesPerTableThreshold(warn, fail);
+    }
+
+    @Override
+    public boolean getSecondaryIndexesEnabled()
+    {
+        return DEFAULT_CONFIG.getSecondaryIndexesEnabled();
+    }
+
+    @Override
+    public int getStorageAttachedIndexesPerTableWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getStorageAttachedIndexesPerTableWarnThreshold();
+    }
+
+    @Override
+    public int getStorageAttachedIndexesPerTableFailThreshold()
+    {
+        return DEFAULT_CONFIG.getStorageAttachedIndexesPerTableFailThreshold();
+    }
+
+    @Override
+    public void setStorageAttachedIndexesPerTableThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setStorageAttachedIndexesPerTableThreshold(warn, fail);
+    }
+
+    @Override
+    public int getStorageAttachedIndexesTotalWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getStorageAttachedIndexesPerTableWarnThreshold();
+    }
+
+    @Override
+    public int getStorageAttachedIndexesTotalFailThreshold()
+    {
+        return DEFAULT_CONFIG.getStorageAttachedIndexesPerTableFailThreshold();
+    }
+
+    @Override
+    public void setStorageAttachedIndexesTotalThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setStorageAttachedIndexesTotalThreshold(warn, fail);
+    }
+
+    @Override
+    public int getTrustedIndexesPerTableWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getTrustedIndexesPerTableWarnThreshold();
+    }
+
+    @Override
+    public int getTrustedIndexesPerTableFailThreshold()
+    {
+        return DEFAULT_CONFIG.getTrustedIndexesPerTableFailThreshold();
+    }
+
+    @Override
+    public void setTrustedIndexesPerTableThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setTrustedIndexesPerTableThreshold(warn, fail);
+    }
+
+    @Override
+    public void setSecondaryIndexesEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setSecondaryIndexesEnabled(enabled);
+    }
+
+    @Override
+    public int getMaterializedViewsPerTableWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getMaterializedViewsPerTableWarnThreshold();
+    }
+
+    @Override
+    public int getMaterializedViewsPerTableFailThreshold()
+    {
+        return DEFAULT_CONFIG.getMaterializedViewsPerTableFailThreshold();
+    }
+
+    @Override
+    public void setMaterializedViewsPerTableThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setMaterializedViewsPerTableThreshold(warn, fail);
+    }
+
+    @Override
+    public Set<String> getTablePropertiesWarned()
+    {
+        return DEFAULT_CONFIG.getTablePropertiesWarned();
+    }
+
+    @Override
+    public String getTablePropertiesWarnedCSV()
+    {
+        return toCSV(DEFAULT_CONFIG.getTablePropertiesWarned());
+    }
+
+    public void setTablePropertiesWarned(String... properties)
+    {
+        setTablePropertiesWarned(ImmutableSet.copyOf(properties));
+    }
+
+    @Override
+    public void setTablePropertiesWarned(Set<String> properties)
+    {
+        DEFAULT_CONFIG.setTablePropertiesWarned(properties);
+    }
+
+    @Override
+    public void setTablePropertiesWarnedCSV(String properties)
+    {
+        setTablePropertiesWarned(fromCSV(properties));
+    }
+
+    @Override
+    public Set<String> getTablePropertiesDisallowed()
+    {
+        return DEFAULT_CONFIG.getTablePropertiesDisallowed();
+    }
+
+    @Override
+    public String getTablePropertiesDisallowedCSV()
+    {
+        return toCSV(DEFAULT_CONFIG.getTablePropertiesDisallowed());
+    }
+
+    public void setTablePropertiesDisallowed(String... properties)
+    {
+        setTablePropertiesDisallowed(ImmutableSet.copyOf(properties));
+    }
+
+    @Override
+    public void setTablePropertiesDisallowed(Set<String> properties)
+    {
+        DEFAULT_CONFIG.setTablePropertiesDisallowed(properties);
+    }
+
+    @Override
+    public void setTablePropertiesDisallowedCSV(String properties)
+    {
+        setTablePropertiesDisallowed(fromCSV(properties));
+    }
+
+    @Override
+    public Set<String> getTablePropertiesIgnored()
+    {
+        return DEFAULT_CONFIG.getTablePropertiesIgnored();
+    }
+
+    @Override
+    public String getTablePropertiesIgnoredCSV()
+    {
+        return toCSV(DEFAULT_CONFIG.getTablePropertiesIgnored());
+    }
+
+    public void setTablePropertiesIgnored(String... properties)
+    {
+        setTablePropertiesIgnored(ImmutableSet.copyOf(properties));
+    }
+
+    @Override
+    public void setTablePropertiesIgnored(Set<String> properties)
+    {
+        DEFAULT_CONFIG.setTablePropertiesIgnored(properties);
+    }
+
+    @Override
+    public void setTablePropertiesIgnoredCSV(String properties)
+    {
+        setTablePropertiesIgnored(fromCSV(properties));
+    }
+
+    @Override
+    public boolean getUserTimestampsEnabled()
+    {
+        return DEFAULT_CONFIG.getUserTimestampsEnabled();
+    }
+
+    @Override
+    public void setUserTimestampsEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setUserTimestampsEnabled(enabled);
+    }
+
+    @Override
+    public boolean getAlterTableEnabled()
+    {
+        return DEFAULT_CONFIG.getAlterTableEnabled();
+    }
+
+    @Override
+    public void setAlterTableEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setAlterTableEnabled(enabled);
+    }
+
+    @Override
+    public boolean getAllowFilteringEnabled()
+    {
+        return DEFAULT_CONFIG.getAllowFilteringEnabled();
+    }
+
+    @Override
+    public void setAllowFilteringEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setAllowFilteringEnabled(enabled);
+    }
+
+    @Override
+    public boolean getSimpleStrategyEnabled()
+    {
+        return DEFAULT_CONFIG.getSimpleStrategyEnabled();
+    }
+
+    @Override
+    public void setSimpleStrategyEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setSimpleStrategyEnabled(enabled);
+    }
+
+    @Override
+    public boolean getUncompressedTablesEnabled()
+    {
+        return DEFAULT_CONFIG.getUncompressedTablesEnabled();
+    }
+
+    @Override
+    public void setUncompressedTablesEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setUncompressedTablesEnabled(enabled);
+    }
+
+    @Override
+    public boolean getCompactTablesEnabled()
+    {
+        return DEFAULT_CONFIG.getCompactTablesEnabled();
+    }
+
+    @Override
+    public void setCompactTablesEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setCompactTablesEnabled(enabled);
+    }
+
+    @Override
+    public boolean getGroupByEnabled()
+    {
+        return DEFAULT_CONFIG.getGroupByEnabled();
+    }
+
+    @Override
+    public void setGroupByEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setGroupByEnabled(enabled);
+    }
+
+    @Override
+    public boolean getLoggedBatchEnabled()
+    {
+        return DEFAULT_CONFIG.getLoggedBatchEnabled();
+    }
+
+    @Override
+    public void setLoggedBatchEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setLoggedBatchEnabled(enabled);
+    }
+
+    @Override
+    public boolean getDropTruncateTableEnabled()
+    {
+        return DEFAULT_CONFIG.getDropTruncateTableEnabled();
+    }
+
+    @Override
+    public void setDropTruncateTableEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setDropTruncateTableEnabled(enabled);
+    }
+
+    @Override
+    public boolean getDropKeyspaceEnabled()
+    {
+        return DEFAULT_CONFIG.getDropKeyspaceEnabled();
+    }
+
+    @Override
+    public void setDropKeyspaceEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setDropKeyspaceEnabled(enabled);
+    }
+
+    @Override
+    public int getPageSizeWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getPageSizeWarnThreshold();
+    }
+
+    @Override
+    public int getPageSizeFailThreshold()
+    {
+        return DEFAULT_CONFIG.getPageSizeFailThreshold();
+    }
+
+    @Override
+    public void setPageSizeThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setPageSizeThreshold(warn, fail);
+    }
+
+    @Override
+    @Nullable
+    public String getPageWeightWarnThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getPageWeightWarnThreshold());
+    }
+
+    @Override
+    @Nullable
+    public String getPageWeightFailThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getPageWeightFailThreshold());
+    }
+
+    @Override
+    public void setPageWeightThreshold(@Nullable String warnSize, @Nullable String failSize)
+    {
+        DEFAULT_CONFIG.setPageWeightThreshold(intSizeFromString(warnSize), intSizeFromString(failSize));
+    }
+
+    @Override
+    public boolean getReadBeforeWriteListOperationsEnabled()
+    {
+        return DEFAULT_CONFIG.getReadBeforeWriteListOperationsEnabled();
+    }
+
+    @Override
+    public void setReadBeforeWriteListOperationsEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setReadBeforeWriteListOperationsEnabled(enabled);
+    }
+
+    @Override
+    public int getPartitionKeysInSelectWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getPartitionKeysInSelectWarnThreshold();
+    }
+
+    @Override
+    public int getPartitionKeysInSelectFailThreshold()
+    {
+        return DEFAULT_CONFIG.getPartitionKeysInSelectFailThreshold();
+    }
+
+    @Override
+    public void setPartitionKeysInSelectThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setPartitionKeysInSelectThreshold(warn, fail);
+    }
+
+    @Override
+    @Nullable
+    public String getPartitionSizeWarnThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getPartitionSizeWarnThreshold());
+    }
+
+    @Override
+    @Nullable
+    public String getPartitionSizeFailThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getPartitionSizeFailThreshold());
+    }
+
+    @Override
+    public void setPartitionSizeThreshold(@Nullable String warnSize, @Nullable String failSize)
+    {
+        DEFAULT_CONFIG.setPartitionSizeThreshold(sizeFromString(warnSize), sizeFromString(failSize));
+    }
+
+    @Override
+    public long getPartitionTombstonesWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getPartitionTombstonesWarnThreshold();
+    }
+
+    @Override
+    public long getPartitionTombstonesFailThreshold()
+    {
+        return DEFAULT_CONFIG.getPartitionTombstonesFailThreshold();
+    }
+
+    @Override
+    public void setPartitionTombstonesThreshold(long warn, long fail)
+    {
+        DEFAULT_CONFIG.setPartitionTombstonesThreshold(warn, fail);
+    }
+
+    @Override
+    @Nullable
+    public String getColumnValueSizeWarnThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getColumnValueSizeWarnThreshold());
+    }
+
+    @Override
+    @Nullable
+    public String getColumnValueSizeFailThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getColumnValueSizeFailThreshold());
+    }
+
+    @Override
+    public void setColumnValueSizeThreshold(@Nullable String warnSize, @Nullable String failSize)
+    {
+        DEFAULT_CONFIG.setColumnValueSizeThreshold(sizeFromString(warnSize), sizeFromString(failSize));
+    }
+
+    @Override
+    @Nullable
+    public String getCollectionSizeWarnThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getCollectionSizeWarnThreshold());
+    }
+
+    @Override
+    @Nullable
+    public String getCollectionSizeFailThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getCollectionSizeFailThreshold());
+    }
+
+    @Override
+    public void setCollectionSizeThreshold(@Nullable String warnSize, @Nullable String failSize)
+    {
+        DEFAULT_CONFIG.setCollectionSizeThreshold(sizeFromString(warnSize), sizeFromString(failSize));
+    }
+
+    @Override
+    public int getItemsPerCollectionWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getItemsPerCollectionWarnThreshold();
+    }
+
+    @Override
+    public int getItemsPerCollectionFailThreshold()
+    {
+        return DEFAULT_CONFIG.getItemsPerCollectionFailThreshold();
+    }
+
+    @Override
+    public void setItemsPerCollectionThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setItemsPerCollectionThreshold(warn, fail);
+    }
+
+    @Override
+    public int getInSelectCartesianProductWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getInSelectCartesianProductWarnThreshold();
+    }
+
+    @Override
+    public int getInSelectCartesianProductFailThreshold()
+    {
+        return DEFAULT_CONFIG.getInSelectCartesianProductFailThreshold();
+    }
+
+    @Override
+    public void setInSelectCartesianProductThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setInSelectCartesianProductThreshold(warn, fail);
+    }
+
+    @Override
+    public Set<String> getReadConsistencyLevelsWarned()
+    {
+        return toJmx(DEFAULT_CONFIG.getReadConsistencyLevelsWarned());
+    }
+
+    @Override
+    public String getReadConsistencyLevelsWarnedCSV()
+    {
+        return toCSV(DEFAULT_CONFIG.getReadConsistencyLevelsWarned(), ConsistencyLevel::toString);
+    }
+
+    @Override
+    public void setReadConsistencyLevelsWarned(Set<String> consistencyLevels)
+    {
+        DEFAULT_CONFIG.setReadConsistencyLevelsWarned(fromJmx(consistencyLevels));
+    }
+
+    @Override
+    public void setReadConsistencyLevelsWarnedCSV(String consistencyLevels)
+    {
+        DEFAULT_CONFIG.setReadConsistencyLevelsWarned(fromCSV(consistencyLevels, ConsistencyLevel::fromString));
+    }
+
+    @Override
+    public Set<String> getReadConsistencyLevelsDisallowed()
+    {
+        return toJmx(DEFAULT_CONFIG.getReadConsistencyLevelsDisallowed());
+    }
+
+    @Override
+    public String getReadConsistencyLevelsDisallowedCSV()
+    {
+        return toCSV(DEFAULT_CONFIG.getReadConsistencyLevelsDisallowed(), ConsistencyLevel::toString);
+    }
+
+    @Override
+    public void setReadConsistencyLevelsDisallowed(Set<String> consistencyLevels)
+    {
+        DEFAULT_CONFIG.setReadConsistencyLevelsDisallowed(fromJmx(consistencyLevels));
+    }
+
+    @Override
+    public void setReadConsistencyLevelsDisallowedCSV(String consistencyLevels)
+    {
+        DEFAULT_CONFIG.setReadConsistencyLevelsDisallowed(fromCSV(consistencyLevels, ConsistencyLevel::fromString));
+    }
+
+    @Override
+    public Set<String> getWriteConsistencyLevelsWarned()
+    {
+        return toJmx(DEFAULT_CONFIG.getWriteConsistencyLevelsWarned());
+    }
+
+    @Override
+    public String getWriteConsistencyLevelsWarnedCSV()
+    {
+        return toCSV(DEFAULT_CONFIG.getWriteConsistencyLevelsWarned(), ConsistencyLevel::toString);
+    }
+
+    @Override
+    public void setWriteConsistencyLevelsWarned(Set<String> consistencyLevels)
+    {
+        DEFAULT_CONFIG.setWriteConsistencyLevelsWarned(fromJmx(consistencyLevels));
+    }
+
+    @Override
+    public void setWriteConsistencyLevelsWarnedCSV(String consistencyLevels)
+    {
+        DEFAULT_CONFIG.setWriteConsistencyLevelsWarned(fromCSV(consistencyLevels, ConsistencyLevel::fromString));
+    }
+
+    @Override
+    public Set<String> getWriteConsistencyLevelsDisallowed()
+    {
+        return toJmx(DEFAULT_CONFIG.getWriteConsistencyLevelsDisallowed());
+    }
+
+    @Override
+    public String getWriteConsistencyLevelsDisallowedCSV()
+    {
+        return toCSV(DEFAULT_CONFIG.getWriteConsistencyLevelsDisallowed(), ConsistencyLevel::toString);
+    }
+
+    @Override
+    public void setWriteConsistencyLevelsDisallowed(Set<String> consistencyLevels)
+    {
+        DEFAULT_CONFIG.setWriteConsistencyLevelsDisallowed(fromJmx(consistencyLevels));
+    }
+
+    @Override
+    public void setWriteConsistencyLevelsDisallowedCSV(String consistencyLevels)
+    {
+        DEFAULT_CONFIG.setWriteConsistencyLevelsDisallowed(fromCSV(consistencyLevels, ConsistencyLevel::fromString));
+    }
+
+    @Override
+    public int getFieldsPerUDTWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getFieldsPerUDTWarnThreshold();
+    }
+
+    @Override
+    public int getFieldsPerUDTFailThreshold()
+    {
+        return DEFAULT_CONFIG.getFieldsPerUDTFailThreshold();
+    }
+
+    @Override
+    public void setFieldsPerUDTThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setFieldsPerUDTThreshold(warn, fail);
+    }
+
+    @Override
+    public int getVectorDimensionsWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getVectorDimensionsWarnThreshold();
+    }
+
+    @Override
+    public int getVectorDimensionsFailThreshold()
+    {
+        return DEFAULT_CONFIG.getVectorDimensionsFailThreshold();
+    }
+
+    @Override
+    public void setVectorDimensionsThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setVectorDimensionsThreshold(warn, fail);
+    }
+
+    @Override
+    public int getSaiAnnRerankKWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getSaiAnnRerankKWarnThreshold();
+    }
+
+    @Override
+    public int getSaiAnnRerankKFailThreshold()
+    {
+        return DEFAULT_CONFIG.getSaiAnnRerankKFailThreshold();
+    }
+
+    @Override
+    public void setSaiAnnRerankKThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setSaiAnnRerankKThreshold(warn, fail);
+    }
+
+    @Override
+    public void setVectorTypeEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setVectorTypeEnabled(enabled);
+    }
+
+    @Override
+    public boolean getVectorTypeEnabled()
+    {
+        return DEFAULT_CONFIG.getVectorTypeEnabled();
+    }
+
+    @Override
+    public int getMaximumReplicationFactorWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getMaximumReplicationFactorWarnThreshold();
+    }
+
+    @Override
+    public int getMaximumReplicationFactorFailThreshold()
+    {
+        return DEFAULT_CONFIG.getMaximumReplicationFactorFailThreshold();
+    }
+
+    @Override
+    public void setMaximumReplicationFactorThreshold (int warn, int fail)
+    {
+        DEFAULT_CONFIG.setMaximumReplicationFactorThreshold(warn, fail);
+    }
+
+    @Override
+    public int getDataDiskUsagePercentageWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getDataDiskUsagePercentageWarnThreshold();
+    }
+
+    @Override
+    public int getDataDiskUsagePercentageFailThreshold()
+    {
+        return DEFAULT_CONFIG.getDataDiskUsagePercentageFailThreshold();
+    }
+
+    @Override
+    public void setDataDiskUsagePercentageThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setDataDiskUsagePercentageThreshold(warn, fail);
+    }
+
+    @Override
+    @Nullable
+    public String getDataDiskUsageMaxDiskSize()
+    {
+        return sizeToString(DEFAULT_CONFIG.getDataDiskUsageMaxDiskSize());
+    }
+
+    @Override
+    public void setDataDiskUsageMaxDiskSize(@Nullable String size)
+    {
+        DEFAULT_CONFIG.setDataDiskUsageMaxDiskSize(sizeFromString(size));
+    }
+
+    @Override
+    public int getMinimumReplicationFactorWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getMinimumReplicationFactorWarnThreshold();
+    }
+
+    @Override
+    public int getMinimumReplicationFactorFailThreshold()
+    {
+        return DEFAULT_CONFIG.getMinimumReplicationFactorFailThreshold();
+    }
+
+    @Override
+    public void setMinimumReplicationFactorThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setMinimumReplicationFactorThreshold(warn, fail);
+    }
+
+    @Override
+    public boolean getZeroTTLOnTWCSEnabled()
+    {
+        return DEFAULT_CONFIG.getZeroTTLOnTWCSEnabled();
+    }
+
+    @Override
+    public void setZeroTTLOnTWCSEnabled(boolean value)
+    {
+        DEFAULT_CONFIG.setZeroTTLOnTWCSEnabled(value);
+    }
+
+    @Override
+    public boolean getZeroTTLOnTWCSWarned()
+    {
+        return DEFAULT_CONFIG.getZeroTTLOnTWCSWarned();
+    }
+
+    @Override
+    public void setZeroTTLOnTWCSWarned(boolean value)
+    {
+        DEFAULT_CONFIG.setZeroTTLOnTWCSWarned(value);
+    }
+
+    @Override
+    public String getMaximumTimestampWarnThreshold()
+    {
+        return durationToString(DEFAULT_CONFIG.getMaximumTimestampWarnThreshold());
+    }
+
+    @Override
+    public String getMaximumTimestampFailThreshold()
+    {
+        return durationToString(DEFAULT_CONFIG.getMaximumTimestampFailThreshold());
+    }
+
+    @Override
+    public void setMaximumTimestampThreshold(String warnSeconds, String failSeconds)
+    {
+        DEFAULT_CONFIG.setMaximumTimestampThreshold(durationFromString(warnSeconds), durationFromString(failSeconds));
+    }
+
+    @Override
+    public String getMinimumTimestampWarnThreshold()
+    {
+        return durationToString(DEFAULT_CONFIG.getMinimumTimestampWarnThreshold());
+    }
+
+    @Override
+    public String getMinimumTimestampFailThreshold()
+    {
+        return durationToString(DEFAULT_CONFIG.getMinimumTimestampFailThreshold());
+    }
+
+    @Override
+    public void setMinimumTimestampThreshold(String warnSeconds, String failSeconds)
+    {
+        DEFAULT_CONFIG.setMinimumTimestampThreshold(durationFromString(warnSeconds), durationFromString(failSeconds));
+    }
+
+    @Override
+    public int getSaiSSTableIndexesPerQueryWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getSaiSSTableIndexesPerQueryWarnThreshold();
+    }
+
+    @Override
+    public int getSaiSSTableIndexesPerQueryFailThreshold()
+    {
+        return DEFAULT_CONFIG.getSaiSSTableIndexesPerQueryFailThreshold();
+    }
+
+    @Override
+    public void setSaiSSTableIndexesPerQueryThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setSaiSSTableIndexesPerQueryThreshold(warn, fail);
+    }
+
+    @Override
+    @Nullable
+    public String getSaiStringTermSizeWarnThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getSaiStringTermSizeWarnThreshold());
+    }
+
+    @Override
+    @Nullable
+    public String getSaiStringTermSizeFailThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getSaiStringTermSizeFailThreshold());
+    }
+
+    @Override
+    public void setSaiStringTermSizeThreshold(@Nullable String warnSize, @Nullable String failSize)
+    {
+        DEFAULT_CONFIG.setSaiStringTermSizeThreshold(sizeFromString(warnSize), sizeFromString(failSize));
+    }
+
+    @Override
+    @Nullable
+    public String getSaiFrozenTermSizeWarnThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getSaiFrozenTermSizeWarnThreshold());
+    }
+
+    @Override
+    @Nullable
+    public String getSaiFrozenTermSizeFailThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getSaiFrozenTermSizeFailThreshold());
+    }
+
+    @Override
+    public void setSaiFrozenTermSizeThreshold(@Nullable String warnSize, @Nullable String failSize)
+    {
+        DEFAULT_CONFIG.setSaiFrozenTermSizeThreshold(sizeFromString(warnSize), sizeFromString(failSize));
+    }
+
+    @Override
+    @Nullable
+    public String getSaiVectorTermSizeWarnThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getSaiVectorTermSizeWarnThreshold());
+    }
+
+    @Override
+    @Nullable
+    public String getSaiVectorTermSizeFailThreshold()
+    {
+        return sizeToString(DEFAULT_CONFIG.getSaiVectorTermSizeFailThreshold());
+    }
+
+    @Override
+    public void setSaiVectorTermSizeThreshold(@Nullable String warnSize, @Nullable String failSize)
+    {
+        DEFAULT_CONFIG.setSaiVectorTermSizeThreshold(sizeFromString(warnSize), sizeFromString(failSize));
+    }
+
+    @Override
+    public boolean getNonPartitionRestrictedQueryEnabled()
+    {
+        return DEFAULT_CONFIG.getNonPartitionRestrictedQueryEnabled();
+    }
+
+    @Override
+    public void setNonPartitionRestrictedQueryEnabled(boolean enabled)
+    {
+        DEFAULT_CONFIG.setNonPartitionRestrictedQueryEnabled(enabled);
+    }
+
+    @Override
+    public boolean getIntersectFilteringQueryWarned()
+    {
+        return DEFAULT_CONFIG.getIntersectFilteringQueryWarned();
+    }
+
+    @Override
+    public void setIntersectFilteringQueryWarned(boolean value)
+    {
+        DEFAULT_CONFIG.setIntersectFilteringQueryWarned(value);
+    }
+
+    @Override
+    public boolean getIntersectFilteringQueryEnabled()
+    {
+        return DEFAULT_CONFIG.getIntersectFilteringQueryEnabled();
+    }
+
+    @Override
+    public void setIntersectFilteringQueryEnabled(boolean value)
+    {
+        DEFAULT_CONFIG.setIntersectFilteringQueryEnabled(value);
+    }
+
+    @Override
+    public int getOffsetRowsWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getOffsetRowsWarnThreshold();
+    }
+
+    @Override
+    public int getOffsetRowsFailThreshold()
+    {
+        return DEFAULT_CONFIG.getOffsetRowsFailThreshold();
+    }
+
+    @Override
+    public void setOffsetRowsThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setOffsetRowsThreshold(warn, fail);
+    }
+
+    @Override
+    public int getQueryFiltersWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getQueryFiltersWarnThreshold();
+    }
+
+    @Override
+    public int getQueryFiltersFailThreshold()
+    {
+        return DEFAULT_CONFIG.getQueryFiltersFailThreshold();
+    }
+
+    @Override
+    public void setQueryFiltersThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setQueryFiltersThreshold(warn, fail);
+    }
+
+    private static String toCSV(Set<String> values)
+    {
+        return values == null || values.isEmpty() ? "" : String.join(",", values);
+    }
+
+    private static <T> String toCSV(Set<T> values, Function<T, String> formatter)
+    {
+        return values == null || values.isEmpty() ? "" : values.stream().map(formatter).collect(Collectors.joining(","));
+    }
+
+    private static Set<String> fromCSV(String csv)
+    {
+        return StringUtils.isEmpty(csv) ? Collections.emptySet() : ImmutableSet.copyOf(csv.split(","));
+    }
+
+    private static <T> Set<T> fromCSV(String csv, Function<String, T> parser)
+    {
+        return StringUtils.isEmpty(csv) ? Collections.emptySet() : fromCSV(csv).stream().map(parser).collect(Collectors.toSet());
+    }
+
+    private static Set<String> toJmx(Set<ConsistencyLevel> set)
+    {
+        if (set == null)
+            return null;
+        return set.stream().map(ConsistencyLevel::name).collect(Collectors.toSet());
+    }
+
+    private static Set<ConsistencyLevel> fromJmx(Set<String> set)
+    {
+        if (set == null)
+            return null;
+        return set.stream().map(ConsistencyLevel::valueOf).collect(Collectors.toSet());
+    }
+
+    private static Long sizeToBytes(@Nullable DataStorageSpec.LongBytesBound size)
+    {
+        return size == null ? -1 : size.toBytes();
+    }
+
+    private static Integer sizeToBytes(@Nullable DataStorageSpec.IntBytesBound size)
+    {
+        return size == null ? -1 : size.toBytes();
+    }
+
+    private static String sizeToString(@Nullable DataStorageSpec size)
+    {
+        return size == null ? null : size.toString();
+    }
+
+    private static DataStorageSpec.LongBytesBound sizeFromString(@Nullable String size)
+    {
+        return StringUtils.isEmpty(size) ? null : new DataStorageSpec.LongBytesBound(size);
+    }
+
+    private static DataStorageSpec.IntBytesBound intSizeFromString(@Nullable String size)
+    {
+        return StringUtils.isEmpty(size) ? null : new DataStorageSpec.IntBytesBound(size);
+    }
+
+    private static String durationToString(@Nullable DurationSpec duration)
+    {
+        return duration == null ? null : duration.toString();
+    }
+
+    private static DurationSpec.LongMicrosecondsBound durationFromString(@Nullable String duration)
+    {
+        return StringUtils.isEmpty(duration) ? null : new DurationSpec.LongMicrosecondsBound(duration);
+    }
+
+    private static long maximumTimestampAsRelativeMicros(@Nullable DurationSpec.LongMicrosecondsBound duration)
+    {
+        return duration == null
+               ? Long.MAX_VALUE
+               : (ClientState.getLastTimestampMicros() + duration.toMicroseconds());
+    }
+
+    private static long minimumTimestampAsRelativeMicros(@Nullable DurationSpec.LongMicrosecondsBound duration)
+    {
+        return duration == null
+               ? Long.MIN_VALUE
+               : (ClientState.getLastTimestampMicros() - duration.toMicroseconds());
+    }
+}

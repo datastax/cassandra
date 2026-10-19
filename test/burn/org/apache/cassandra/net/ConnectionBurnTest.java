@@ -43,6 +43,7 @@ import java.util.stream.IntStream;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.cassandra.utils.concurrent.FutureCombiner;
 import org.junit.BeforeClass;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,8 +65,9 @@ import org.apache.cassandra.utils.memory.BufferPools;
 import static java.lang.Math.min;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.ConnectionType.LARGE_MESSAGES;
-import static org.apache.cassandra.utils.MonotonicClock.approxTime;
-import static org.apache.cassandra.utils.MonotonicClock.preciseTime;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
+import static org.apache.cassandra.utils.MonotonicClock.Global.preciseTime;
 
 public class ConnectionBurnTest
 {
@@ -84,10 +86,21 @@ public class ConnectionBurnTest
         static final NoGlobalInboundMetrics instance = new NoGlobalInboundMetrics();
         public LatencyConsumer internodeLatencyRecorder(InetAddressAndPort to)
         {
-            return (timeElapsed, timeUnit) -> {};
+            return (verb, timeElapsed, timeUnit) -> {};
         }
-        public void recordInternalLatency(Verb verb, long timeElapsed, TimeUnit timeUnit) {}
+        public void recordInternalLatency(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit timeUnit) {}
+
         public void recordInternodeDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit) {}
+
+        @Override
+        public void recordMessageStageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit)
+        {
+        }
+
+        @Override
+        public void recordTotalMessageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit)
+        {
+        }
     }
 
     static class Inbound
@@ -161,7 +174,7 @@ public class ConnectionBurnTest
 
             public long serializedSize(byte[] payload, int version)
             {
-                return MessageGenerator.serializedSize(payload, version);
+                return MessageGenerator.serializedSize(payload);
             }
         };
 
@@ -259,7 +272,7 @@ public class ConnectionBurnTest
             Reporters reporters = new Reporters(endpoints, connections);
             try
             {
-                long deadline = System.nanoTime() + runForNanos;
+                long deadline = nanoTime() + runForNanos;
                 Verb._TEST_2.unsafeSetHandler(() -> message -> {});
                 Verb._TEST_2.unsafeSetSerializer(() -> serializer);
                 inbound.sockets.open().get();
@@ -345,7 +358,7 @@ public class ConnectionBurnTest
                 executor.execute(() -> {
                     Thread.currentThread().setName("Test-Reconnect");
                     ThreadLocalRandom random = ThreadLocalRandom.current();
-                    while (deadline > System.nanoTime())
+                    while (deadline > nanoTime())
                     {
                         try
                         {
@@ -411,7 +424,7 @@ public class ConnectionBurnTest
                     };
 
                     int count = 0;
-                    while (deadline > System.nanoTime())
+                    while (deadline > nanoTime())
                     {
 
                         try
@@ -465,7 +478,7 @@ public class ConnectionBurnTest
                     }
                 });
 
-                while (deadline > System.nanoTime() && failed.getCount() > 0)
+                while (deadline > nanoTime() && failed.getCount() > 0)
                 {
                     reporters.update();
                     reporters.print();
@@ -473,7 +486,7 @@ public class ConnectionBurnTest
                 }
 
                 executor.shutdownNow();
-                ExecutorUtils.awaitTermination(1L, TimeUnit.MINUTES, executor);
+                ExecutorUtils.awaitTermination(5L, TimeUnit.MINUTES, executor);
             }
             finally
             {
@@ -481,7 +494,7 @@ public class ConnectionBurnTest
                 reporters.print();
 
                 inbound.sockets.close().get();
-                new FutureCombiner(Arrays.stream(connections)
+                FutureCombiner.allOf(Arrays.stream(connections)
                                          .map(c -> c.outbound.close(false))
                                          .collect(Collectors.toList()))
                 .get();
@@ -561,6 +574,13 @@ public class ConnectionBurnTest
             {
                 forId(header.id).onExecuted(messageSize, header, timeElapsed, unit);
                 wrapped.onExecuted(messageSize, header, timeElapsed, unit);
+            }
+
+            @Override
+            public void onMessageHandlingCompleted(Message.Header header, long timeElapsed, TimeUnit unit)
+            {
+                forId(header.id).onMessageHandlingCompleted(header, timeElapsed, unit);
+                wrapped.onMessageHandlingCompleted(header, timeElapsed, unit);
             }
         }
 

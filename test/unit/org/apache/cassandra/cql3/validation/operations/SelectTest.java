@@ -23,11 +23,14 @@ import java.util.UUID;
 import org.junit.Test;
 import org.junit.Assert;
 
+import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.internal.CassandraIndex;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -341,8 +344,11 @@ public class SelectTest extends CQLTester
             assertInvalidMessage("Unsupported unset value for column categories",
                                  "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS ?", "test", 5, unset());
 
-            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                                 "SELECT * FROM %s WHERE account = ? AND categories CONTAINS ? AND categories CONTAINS ?", "xyz", "lmn", "notPresent");
+            if (DatabaseDescriptor.getDefaultSecondaryIndex().equals(CassandraIndex.NAME))
+                assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                     "SELECT * FROM %s WHERE account = ? AND categories CONTAINS ? AND categories CONTAINS ?", "xyz", "lmn", "notPresent");
+            else
+                assertEmpty(execute("SELECT * FROM %s WHERE account = ? AND categories CONTAINS ? AND categories CONTAINS ?", "xyz", "lmn", "notPresent"));
             assertEmpty(execute("SELECT * FROM %s WHERE account = ? AND categories CONTAINS ? AND categories CONTAINS ? ALLOW FILTERING", "xyz", "lmn", "notPresent"));
         });
     }
@@ -375,9 +381,13 @@ public class SelectTest extends CQLTester
             assertInvalidMessage("Unsupported unset value for column categories",
                                  "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS ?", "test", 5, unset());
 
-            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                                 "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS ? AND categories CONTAINS ?",
-                                 "test", 5, "lmn", "notPresent");
+            if (DatabaseDescriptor.getDefaultSecondaryIndex().equals(CassandraIndex.NAME))
+                assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                     "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS ? AND categories CONTAINS ?",
+                                     "test", 5, "lmn", "notPresent");
+            else
+                assertEmpty(execute("SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS ? AND categories CONTAINS ?",
+                                    "test", 5, "lmn", "notPresent"));
             assertEmpty(execute("SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS ? AND categories CONTAINS ? ALLOW FILTERING",
                                 "test", 5, "lmn", "notPresent"));
         });
@@ -432,15 +442,24 @@ public class SelectTest extends CQLTester
             assertInvalidMessage("Unsupported unset value for column categories",
                                  "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS KEY ?", "test", 5, unset());
 
-            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                                 "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS KEY ? AND categories CONTAINS KEY ?",
-                                 "test", 5, "lmn", "notPresent");
+            if (DatabaseDescriptor.getDefaultSecondaryIndex().equals(CassandraIndex.NAME))
+                assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                     "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS KEY ? AND categories CONTAINS KEY ?",
+                                     "test", 5, "lmn", "notPresent");
+            else
+                assertEmpty(execute("SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS KEY ? AND categories CONTAINS KEY ?",
+                                    "test", 5, "lmn", "notPresent"));
             assertEmpty(execute("SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS KEY ? AND categories CONTAINS KEY ? ALLOW FILTERING",
                                 "test", 5, "lmn", "notPresent"));
 
-            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                                 "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS KEY ? AND categories CONTAINS ?",
-                                 "test", 5, "lmn", "foo");
+            if (DatabaseDescriptor.getDefaultSecondaryIndex().equals(CassandraIndex.NAME))
+                assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                     "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS KEY ? AND categories CONTAINS ?",
+                                     "test", 5, "lmn", "foo");
+            else
+                assertRows(execute("SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS KEY ? AND categories CONTAINS ?",
+                                    "test", 5, "lmn", "foo"),
+                           row("test", 5, map("lmn", "foo")));
         });
     }
 
@@ -473,9 +492,13 @@ public class SelectTest extends CQLTester
             assertInvalidMessage("Unsupported unset value for column categories",
                                  "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS ?", "test", 5, unset());
 
-            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
-                                 "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS ? AND categories CONTAINS ?",
-                                 "test", 5, "foo", "notPresent");
+            if (DatabaseDescriptor.getDefaultSecondaryIndex().equals(CassandraIndex.NAME))
+                assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                     "SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS ? AND categories CONTAINS ?",
+                                     "test", 5, "foo", "notPresent");
+            else
+                assertEmpty(execute("SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS ? AND categories CONTAINS ?",
+                                    "test", 5, "foo", "notPresent"));
 
             assertEmpty(execute("SELECT * FROM %s WHERE account = ? AND id = ? AND categories CONTAINS ? AND categories CONTAINS ? ALLOW FILTERING",
                                 "test", 5, "foo", "notPresent"));
@@ -568,7 +591,7 @@ public class SelectTest extends CQLTester
         execute("INSERT INTO %s (account, id , categories) VALUES (?, ?, ?)", "test", 6, map("lmn", "foo2"));
 
         beforeAndAfterFlush(() -> {
-            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+            assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "categories"),
                                  "SELECT * FROM %s WHERE account = ? AND categories CONTAINS ?", "test", "foo");
 
             assertRows(execute("SELECT * FROM %s WHERE account = ? AND categories CONTAINS KEY ?", "test", "lmn"),
@@ -593,7 +616,7 @@ public class SelectTest extends CQLTester
         execute("INSERT INTO %s (account, id , categories) VALUES (?, ?, ?)", "test", 6, map("lmn2", "foo"));
 
         beforeAndAfterFlush(() -> {
-            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+            assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "categories"),
                                  "SELECT * FROM %s WHERE account = ? AND categories CONTAINS KEY ?", "test", "lmn");
 
             assertRows(execute("SELECT * FROM %s WHERE account = ? AND categories CONTAINS ?", "test", "foo"),
@@ -923,7 +946,7 @@ public class SelectTest extends CQLTester
         for (int i = 0; i < 5; i++)
             execute("INSERT INTO %s (k, t) VALUES (?, now())", i);
 
-        execute("SELECT dateOf(t) FROM %s");
+        execute("SELECT to_timestamp(t) FROM %s");
     }
 
     /**
@@ -959,7 +982,7 @@ public class SelectTest extends CQLTester
         assertTrue(ttl == 9 || ttl == 10);
 
         // test aliasing a regular function
-        rs = execute("SELECT intAsBlob(id) AS id_blob FROM %s WHERE id = 0");
+        rs = execute("SELECT int_as_blob(id) AS id_blob FROM %s WHERE id = 0");
         assertEquals("id_blob", rs.metadata().get(0).name.toString());
         assertEquals(ByteBuffer.wrap(new byte[4]), rs.one().getBlob(rs.metadata().get(0).name.toString()));
 
@@ -1110,7 +1133,7 @@ public class SelectTest extends CQLTester
         createTable("CREATE TABLE %s ( k int, v int, PRIMARY KEY (k, v))");
 
         execute("INSERT INTO %s (k, v) VALUES (0, 0)");
-        
+
         flush();
 
         assertRows(execute("SELECT v FROM %s WHERE k=0 AND v IN (1, 0)"),
@@ -1255,7 +1278,7 @@ public class SelectTest extends CQLTester
         execute("DELETE FROM %s WHERE a = 2 AND b = 2");
 
         beforeAndAfterFlush(() -> {
-            
+
             // Checks filtering
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE c = 4 AND d = 8");
@@ -1276,11 +1299,12 @@ public class SelectTest extends CQLTester
             assertRows(execute("SELECT * FROM %s WHERE s = 1 AND d = 12 ALLOW FILTERING"),
                        row(1, 3, 1, 6, 12));
 
-            assertInvalidMessage("IN predicates on non-primary-key columns (c) is not yet supported",
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE a IN (1, 2) AND c IN (6, 7)");
 
-            assertInvalidMessage("IN predicates on non-primary-key columns (c) is not yet supported",
-                                 "SELECT * FROM %s WHERE a IN (1, 2) AND c IN (6, 7) ALLOW FILTERING");
+            assertRows(execute("SELECT * FROM %s WHERE a IN (1, 2) AND c IN (6, 7) ALLOW FILTERING"),
+                       row(1, 3, 1, 6, 12),
+                       row(2, 3, 2, 7, 12));
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE c > 4");
@@ -1357,6 +1381,9 @@ public class SelectTest extends CQLTester
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE c CONTAINS 2");
 
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE c NOT CONTAINS 2");
+
             assertRows(execute("SELECT * FROM %s WHERE c CONTAINS 2 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
@@ -1364,9 +1391,22 @@ public class SelectTest extends CQLTester
             assertRows(execute("SELECT * FROM %s WHERE c CONTAINS 2 AND c CONTAINS 3 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
 
+            assertRows(execute("SELECT * FROM %s WHERE c NOT CONTAINS 2 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)),
+                       row(2, 3, list(3, 6), set(6, 12), map(3, 6)));
+
+            assertRows(execute("SELECT * FROM %s WHERE c NOT CONTAINS 2 AND c NOT CONTAINS 3 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
+
+            assertRows(execute("SELECT * FROM %s WHERE c CONTAINS 2 AND c NOT CONTAINS 3 ALLOW FILTERING"),
+                       row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
+
             // Checks filtering for sets
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE d CONTAINS 4");
+
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE d NOT CONTAINS 4");
 
             assertRows(execute("SELECT * FROM %s WHERE d CONTAINS 4 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
@@ -1375,25 +1415,67 @@ public class SelectTest extends CQLTester
             assertRows(execute("SELECT * FROM %s WHERE d CONTAINS 4 AND d CONTAINS 6 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
 
+            assertRows(execute("SELECT * FROM %s WHERE d NOT CONTAINS 4 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)),
+                       row(2, 3, list(3, 6), set(6, 12), map(3, 6)));
+
+            assertRows(execute("SELECT * FROM %s WHERE d NOT CONTAINS 4 AND d NOT CONTAINS 6 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
+
+            assertRows(execute("SELECT * FROM %s WHERE d CONTAINS 4 AND d NOT CONTAINS 6 ALLOW FILTERING"),
+                       row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
+
             // Checks filtering for maps
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE e CONTAINS 2");
+
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE e NOT CONTAINS 2");
 
             assertRows(execute("SELECT * FROM %s WHERE e CONTAINS 2 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
+            assertRows(execute("SELECT * FROM %s WHERE e NOT CONTAINS 2 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)),
+                       row(2, 3, list(3, 6), set(6, 12), map(3, 6)));
+
             assertRows(execute("SELECT * FROM %s WHERE e CONTAINS KEY 1 ALLOW FILTERING"),
                        row(1, 2, list(1, 6), set(2, 12), map(1, 6)),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
+            assertRows(execute("SELECT * FROM %s WHERE e NOT CONTAINS KEY 1 ALLOW FILTERING"),
+                       row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
+                       row(2, 3, list(3, 6), set(6, 12), map(3, 6)));
+
+            assertRows(execute("SELECT * FROM %s WHERE e CONTAINS 2 AND e NOT CONTAINS KEY 1 ALLOW FILTERING"),
+                       row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
+
             assertRows(execute("SELECT * FROM %s WHERE e[1] = 6 ALLOW FILTERING"),
                        row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
+
+            assertRows(execute("SELECT * FROM %s WHERE e[1] != 6 ALLOW FILTERING"),
+                       row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
+                       row(1, 4, list(1, 2), set(2, 4), map(1, 2)),
+                       row(2, 3, list(3, 6), set(6, 12), map(3, 6)));
+
+            assertRows(execute("SELECT * FROM %s WHERE e[1] != 6 AND e[3] != 2 ALLOW FILTERING"),
+                       row(1, 4, list(1, 2), set(2, 4), map(1, 2)),
+                       row(2, 3, list(3, 6), set(6, 12), map(3, 6)));
+
+            assertRows(execute("SELECT * FROM %s WHERE e CONTAINS KEY 1 AND e[1] != 6 ALLOW FILTERING"),
+                       row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
             assertRows(execute("SELECT * FROM %s WHERE e CONTAINS KEY 1 AND e CONTAINS 2 ALLOW FILTERING"),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
+            assertRows(execute("SELECT * FROM %s WHERE e CONTAINS KEY 1 AND e NOT CONTAINS 2 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
+
             assertRows(execute("SELECT * FROM %s WHERE c CONTAINS 2 AND d CONTAINS 4 AND e CONTAINS KEY 3 ALLOW FILTERING"),
+                       row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
+
+            assertRows(execute("SELECT * FROM %s WHERE c CONTAINS 2 AND d CONTAINS 4 AND e NOT CONTAINS KEY 1 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
         });
 
@@ -1410,6 +1492,19 @@ public class SelectTest extends CQLTester
                              "SELECT * FROM %s WHERE e[null] = 2 ALLOW FILTERING");
         assertInvalidMessage("Unsupported null map value for column e",
                              "SELECT * FROM %s WHERE e[1] = null ALLOW FILTERING");
+
+        assertInvalidMessage("Unsupported null value for column c",
+                             "SELECT * FROM %s WHERE c NOT CONTAINS null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null value for column d",
+                             "SELECT * FROM %s WHERE d NOT CONTAINS null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null value for column e",
+                             "SELECT * FROM %s WHERE e NOT CONTAINS null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null value for column e",
+                             "SELECT * FROM %s WHERE e NOT CONTAINS KEY null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null map key for column e",
+                             "SELECT * FROM %s WHERE e[null] != 2 ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null map value for column e",
+                             "SELECT * FROM %s WHERE e[1] != null ALLOW FILTERING");
 
         // Checks filtering with unset
         assertInvalidMessage("Unsupported unset value for column c",
@@ -1430,6 +1525,26 @@ public class SelectTest extends CQLTester
         assertInvalidMessage("Unsupported unset map value for column e",
                              "SELECT * FROM %s WHERE e[1] = ? ALLOW FILTERING",
                              unset());
+
+        assertInvalidMessage("Unsupported unset value for column c",
+                             "SELECT * FROM %s WHERE c NOT CONTAINS ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset value for column d",
+                             "SELECT * FROM %s WHERE d NOT CONTAINS ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset value for column e",
+                             "SELECT * FROM %s WHERE e NOT CONTAINS ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset value for column e",
+                             "SELECT * FROM %s WHERE e NOT CONTAINS KEY ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset map key for column e",
+                             "SELECT * FROM %s WHERE e[?] != 2 ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset map value for column e",
+                             "SELECT * FROM %s WHERE e[1] != ? ALLOW FILTERING",
+                             unset());
+
     }
 
     @Test
@@ -1465,12 +1580,22 @@ public class SelectTest extends CQLTester
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE c CONTAINS 2");
 
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE c NOT CONTAINS 2");
+
             assertRows(execute("SELECT * FROM %s WHERE c CONTAINS 2 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
+            assertRows(execute("SELECT * FROM %s WHERE c NOT CONTAINS 2 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)),
+                       row(2, 3, list(3, 6), set(6, 12), map(3, 6)));
+
             assertRows(execute("SELECT * FROM %s WHERE c CONTAINS 2 AND c CONTAINS 3 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
+
+            assertRows(execute("SELECT * FROM %s WHERE c NOT CONTAINS 2 AND c NOT CONTAINS 3 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
 
             // Checks filtering for sets
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
@@ -1492,12 +1617,22 @@ public class SelectTest extends CQLTester
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE d CONTAINS 4");
 
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE d NOT CONTAINS 4");
+
             assertRows(execute("SELECT * FROM %s WHERE d CONTAINS 4 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
+            assertRows(execute("SELECT * FROM %s WHERE d NOT CONTAINS 4 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)),
+                       row(2, 3, list(3, 6), set(6, 12), map(3, 6)));
+
             assertRows(execute("SELECT * FROM %s WHERE d CONTAINS 4 AND d CONTAINS 6 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
+
+            assertRows(execute("SELECT * FROM %s WHERE d NOT CONTAINS 4 AND d NOT CONTAINS 6 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
 
             // Checks filtering for maps
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
@@ -1520,21 +1655,41 @@ public class SelectTest extends CQLTester
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE e CONTAINS 2");
 
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE e NOT CONTAINS 2");
+
             assertRows(execute("SELECT * FROM %s WHERE e CONTAINS 2 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
+
+            assertRows(execute("SELECT * FROM %s WHERE e NOT CONTAINS 2 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)),
+                       row(2, 3, list(3, 6), set(6, 12), map(3, 6)));
 
             assertRows(execute("SELECT * FROM %s WHERE e CONTAINS KEY 1 ALLOW FILTERING"),
                        row(1, 2, list(1, 6), set(2, 12), map(1, 6)),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
+            assertRows(execute("SELECT * FROM %s WHERE e NOT CONTAINS KEY 1 ALLOW FILTERING"),
+                       row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
+                       row(2, 3, list(3, 6), set(6, 12), map(3, 6)));
+
             assertInvalidMessage("Map-entry equality predicates on frozen map column e are not supported",
                                  "SELECT * FROM %s WHERE e[1] = 6 ALLOW FILTERING");
+
+            assertInvalidMessage("Map-entry equality predicates on frozen map column e are not supported",
+                                 "SELECT * FROM %s WHERE e[1] != 6 ALLOW FILTERING");
 
             assertRows(execute("SELECT * FROM %s WHERE e CONTAINS KEY 1 AND e CONTAINS 2 ALLOW FILTERING"),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
+            assertRows(execute("SELECT * FROM %s WHERE e CONTAINS KEY 1 AND e NOT CONTAINS 2 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
+
             assertRows(execute("SELECT * FROM %s WHERE c CONTAINS 2 AND d CONTAINS 4 AND e CONTAINS KEY 3 ALLOW FILTERING"),
+                       row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
+
+            assertRows(execute("SELECT * FROM %s WHERE c CONTAINS 2 AND d CONTAINS 4 AND e NOT CONTAINS KEY 1 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
         });
 
@@ -1557,6 +1712,19 @@ public class SelectTest extends CQLTester
                              "SELECT * FROM %s WHERE e[null] = 2 ALLOW FILTERING");
         assertInvalidMessage("Map-entry equality predicates on frozen map column e are not supported",
                              "SELECT * FROM %s WHERE e[1] = null ALLOW FILTERING");
+
+        assertInvalidMessage("Unsupported null value for column c",
+                             "SELECT * FROM %s WHERE c NOT CONTAINS null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null value for column d",
+                             "SELECT * FROM %s WHERE d NOT CONTAINS null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null value for column e",
+                             "SELECT * FROM %s WHERE e NOT CONTAINS null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null value for column e",
+                             "SELECT * FROM %s WHERE e NOT CONTAINS KEY null ALLOW FILTERING");
+        assertInvalidMessage("Map-entry equality predicates on frozen map column e are not supported",
+                             "SELECT * FROM %s WHERE e[null] != 2 ALLOW FILTERING");
+        assertInvalidMessage("Map-entry equality predicates on frozen map column e are not supported",
+                             "SELECT * FROM %s WHERE e[1] != null ALLOW FILTERING");
 
         // Checks filtering with unset
         assertInvalidMessage("Unsupported unset value for column c",
@@ -1586,12 +1754,32 @@ public class SelectTest extends CQLTester
         assertInvalidMessage("Map-entry equality predicates on frozen map column e are not supported",
                              "SELECT * FROM %s WHERE e[1] = ? ALLOW FILTERING",
                              unset());
+        assertInvalidMessage("Unsupported unset value for column c",
+                             "SELECT * FROM %s WHERE c NOT CONTAINS ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset value for column d",
+                             "SELECT * FROM %s WHERE d NOT CONTAINS ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset value for column e",
+                             "SELECT * FROM %s WHERE e NOT CONTAINS ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset value for column e",
+                             "SELECT * FROM %s WHERE e NOT CONTAINS KEY ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Map-entry equality predicates on frozen map column e are not supported",
+                             "SELECT * FROM %s WHERE e[?] != 2 ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Map-entry equality predicates on frozen map column e are not supported",
+                             "SELECT * FROM %s WHERE e[1] != ? ALLOW FILTERING",
+                             unset());
+
     }
 
 
     @Test
     public void testIndexQueryWithValueOver64K() throws Throwable
     {
+        Util.assumeLegacySecondaryIndex();
         createTable("CREATE TABLE %s (a int, b int, c blob, PRIMARY KEY (a, b))");
         String idx = createIndex("CREATE INDEX ON %s (c)");
 
@@ -1669,8 +1857,8 @@ public class SelectTest extends CQLTester
 
         beforeAndAfterFlush(() -> {
 
-            assertInvalidMessage("IN restrictions are not supported when the query involves filtering",
-                    "SELECT * FROM %s WHERE b in (11,12) ALLOW FILTERING");
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                    "SELECT * FROM %s WHERE b in (11,12)");
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                     "SELECT * FROM %s WHERE a = 11");
@@ -1745,8 +1933,8 @@ public class SelectTest extends CQLTester
 
         beforeAndAfterFlush(() -> {
 
-             assertInvalidMessage("IN restrictions are not supported when the query involves filtering",
-                    "SELECT * FROM %s WHERE b in (11,12) ALLOW FILTERING");
+             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                    "SELECT * FROM %s WHERE b in (11,12)");
 
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                     "SELECT * FROM %s WHERE a = 11");
@@ -1895,29 +2083,56 @@ public class SelectTest extends CQLTester
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                     "SELECT * FROM %s WHERE b < 0 AND c CONTAINS 2");
 
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE b < 0 AND c NOT CONTAINS 2");
+
             assertRows(execute("SELECT * FROM %s WHERE b >= 4 AND c CONTAINS 2 ALLOW FILTERING"),
+                       row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
+
+            assertRows(execute("SELECT * FROM %s WHERE b >= 4 AND c NOT CONTAINS 3 ALLOW FILTERING"),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
             assertRows(
                     execute("SELECT * FROM %s WHERE a > 0 AND b <= 3 AND c CONTAINS 2 AND c CONTAINS 3 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
 
+            assertRows(
+                    execute("SELECT * FROM %s WHERE a > 0 AND b <= 3 AND c NOT CONTAINS 1 AND c NOT CONTAINS 6 ALLOW FILTERING"),
+                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
+
             // Checks filtering for sets
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                     "SELECT * FROM %s WHERE a = 1 AND d CONTAINS 4");
+
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE a = 1 AND d NOT CONTAINS 4");
 
             assertRows(execute("SELECT * FROM %s WHERE d CONTAINS 4 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
+            assertRows(execute("SELECT * FROM %s WHERE d NOT CONTAINS 4 ALLOW FILTERING"),
+                       row(2, 3, list(3, 6), set(6, 12), map(3, 6)),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
+
             assertRows(execute("SELECT * FROM %s WHERE d CONTAINS 4 AND d CONTAINS 6 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
+
+            assertRows(execute("SELECT * FROM %s WHERE d NOT CONTAINS 4 AND d NOT CONTAINS 6 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
 
             // Checks filtering for maps
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE e CONTAINS 2");
 
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE e NOT CONTAINS 2");
+
             assertRows(execute("SELECT * FROM %s WHERE a < 2 AND b >= 3 AND e CONTAINS 2 ALLOW FILTERING"),
+                       row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
+                       row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
+
+            assertRows(execute("SELECT * FROM %s WHERE a < 2 AND b >= 3 AND e NOT CONTAINS 6 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
@@ -1925,15 +2140,29 @@ public class SelectTest extends CQLTester
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)),
                        row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
 
+            assertRows(execute("SELECT * FROM %s WHERE a = 1 AND e NOT CONTAINS KEY 3 ALLOW FILTERING"),
+                       row(1, 4, list(1, 2), set(2, 4), map(1, 2)),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
+
             assertRows(execute("SELECT * FROM %s WHERE a in (1) AND b in (2) AND e[1] = 6 ALLOW FILTERING"),
+                       row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
+
+            assertRows(execute("SELECT * FROM %s WHERE a in (1) AND b in (2) AND e[1] != 2 ALLOW FILTERING"),
                        row(1, 2, list(1, 6), set(2, 12), map(1, 6)));
 
             assertRows(execute("SELECT * FROM %s WHERE a = 1 AND e CONTAINS KEY 1 AND e CONTAINS 2 ALLOW FILTERING"),
                        row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
 
+            assertRows(execute("SELECT * FROM %s WHERE a = 1 AND e CONTAINS KEY 1 AND e NOT CONTAINS 6 ALLOW FILTERING"),
+                       row(1, 4, list(1, 2), set(2, 4), map(1, 2)));
+
             assertRows(
                     execute("SELECT * FROM %s WHERE a >= 1 AND b in (3) AND c CONTAINS 2 AND d CONTAINS 4 AND e CONTAINS KEY 3 ALLOW FILTERING"),
                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
+
+            assertRows(
+                    execute("SELECT * FROM %s WHERE a >= 1 AND b in (3) AND c CONTAINS 2 AND d CONTAINS 4 AND e NOT CONTAINS KEY 1 ALLOW FILTERING"),
+                        row(1, 3, list(3, 2), set(6, 4), map(3, 2)));
         });
 
         // Checks filtering with null
@@ -1949,6 +2178,18 @@ public class SelectTest extends CQLTester
                              "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND e[null] = 2 ALLOW FILTERING");
         assertInvalidMessage("Unsupported null map value for column e",
                              "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND e[1] = null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null value for column c",
+                             "SELECT * FROM %s WHERE a > 1 AND c NOT CONTAINS null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null value for column d",
+                             "SELECT * FROM %s WHERE b < 1 AND d NOT CONTAINS null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null value for column e",
+                             "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND e NOT CONTAINS null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null value for column e",
+                             "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND e NOT CONTAINS KEY null ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null map key for column e",
+                             "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND e[null] != 2 ALLOW FILTERING");
+        assertInvalidMessage("Unsupported null map value for column e",
+                             "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND e[1] != null ALLOW FILTERING");
 
         // Checks filtering with unset
         assertInvalidMessage("Unsupported unset value for column c",
@@ -1968,6 +2209,24 @@ public class SelectTest extends CQLTester
                              unset());
         assertInvalidMessage("Unsupported unset map value for column e",
                              "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND e[1] = ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset value for column c",
+                             "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND c NOT CONTAINS ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset value for column d",
+                             "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND d NOT CONTAINS ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset value for column e",
+                             "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND e NOT CONTAINS ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset value for column e",
+                             "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND e NOT CONTAINS KEY ? ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset map key for column e",
+                             "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND e[?] != 2 ALLOW FILTERING",
+                             unset());
+        assertInvalidMessage("Unsupported unset map value for column e",
+                             "SELECT * FROM %s WHERE a >= 1 AND b < 1 AND e[1] != ? ALLOW FILTERING",
                              unset());
     }
 
@@ -2133,18 +2392,32 @@ public class SelectTest extends CQLTester
 
             assertRows(execute("SELECT * FROM %s WHERE a = 21 AND b CONTAINS 2 ALLOW FILTERING"),
                        row(21, list(2, 3), 24));
+
+            assertRows(execute("SELECT * FROM %s WHERE a = 21 AND b NOT CONTAINS 2 ALLOW FILTERING"),
+                       row(21, list(3, 3), 34));
+
             assertInvalidMessage("Clustering columns can only be restricted with CONTAINS with a secondary index or filtering",
                                  "SELECT * FROM %s WHERE a = 21 AND b CONTAINS 2");
 
             assertRows(execute("SELECT * FROM %s WHERE b CONTAINS 2 ALLOW FILTERING"),
                        row(21, list(2, 3), 24));
+
+            assertRows(execute("SELECT * FROM %s WHERE b NOT CONTAINS 2 ALLOW FILTERING"),
+                       row(11, list(1, 3), 14),
+                       row(21, list(3, 3), 34));
+
             assertInvalidMessage("Clustering columns can only be restricted with CONTAINS with a secondary index or filtering",
                                  "SELECT * FROM %s WHERE b CONTAINS 2");
+
+            assertInvalidMessage("Clustering columns can only be restricted with CONTAINS with a secondary index or filtering",
+                                 "SELECT * FROM %s WHERE b NOT CONTAINS 2");
 
             assertRows(execute("SELECT * FROM %s WHERE b CONTAINS 3 ALLOW FILTERING"),
                        row(11, list(1, 3), 14),
                        row(21, list(2, 3), 24),
                        row(21, list(3, 3), 34));
+
+            assertRows(execute("SELECT * FROM %s WHERE b NOT CONTAINS 3 ALLOW FILTERING"));
         });
 
         // non-first clustering column
@@ -2158,18 +2431,34 @@ public class SelectTest extends CQLTester
 
             assertRows(execute("SELECT * FROM %s WHERE a = 21 AND c CONTAINS 2 ALLOW FILTERING"),
                        row(21, 22, list(2, 3), 24));
+
+            assertRows(execute("SELECT * FROM %s WHERE a = 21 AND c NOT CONTAINS 2 ALLOW FILTERING"),
+                       row(21, 22, list(3, 3), 34));
+
             assertInvalidMessage("Clustering columns can only be restricted with CONTAINS with a secondary index or filtering",
                                  "SELECT * FROM %s WHERE a = 21 AND c CONTAINS 2");
 
+            assertInvalidMessage("Clustering columns can only be restricted with CONTAINS with a secondary index or filtering",
+                                 "SELECT * FROM %s WHERE a = 21 AND c NOT CONTAINS 2");
+
             assertRows(execute("SELECT * FROM %s WHERE b > 20 AND c CONTAINS 2 ALLOW FILTERING"),
                        row(21, 22, list(2, 3), 24));
+
+            assertRows(execute("SELECT * FROM %s WHERE b > 20 AND c NOT CONTAINS 2 ALLOW FILTERING"),
+                       row(21, 22, list(3, 3), 34));
+
             assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
                                  "SELECT * FROM %s WHERE b > 20 AND c CONTAINS 2");
+
+            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+                                 "SELECT * FROM %s WHERE b > 20 AND c NOT CONTAINS 2");
 
             assertRows(execute("SELECT * FROM %s WHERE c CONTAINS 3 ALLOW FILTERING"),
                        row(11, 12, list(1, 3), 14),
                        row(21, 22, list(2, 3), 24),
                        row(21, 22, list(3, 3), 34));
+
+            assertEmpty(execute("SELECT * FROM %s WHERE c NOT CONTAINS 3 ALLOW FILTERING"));
         });
 
         createTable("CREATE TABLE %s (a int, b int, c frozen<map<text, text>>, d int, PRIMARY KEY (a, b, c))");
@@ -2181,8 +2470,15 @@ public class SelectTest extends CQLTester
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT * FROM %s WHERE b > 20 AND c CONTAINS KEY '2' ALLOW FILTERING"),
                        row(21, 22, map("2", "3"), 24));
+
+            assertRows(execute("SELECT * FROM %s WHERE b > 20 AND c NOT CONTAINS KEY '2' ALLOW FILTERING"),
+                       row(21, 22, map("3", "3"), 34));
+
             assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
                                  "SELECT * FROM %s WHERE b > 20 AND c CONTAINS KEY '2'");
+
+            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+                                 "SELECT * FROM %s WHERE b > 20 AND c NOT CONTAINS KEY '2'");
         });
     }
 
@@ -2214,6 +2510,9 @@ public class SelectTest extends CQLTester
         assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                              "SELECT * FROM %s WHERE pk CONTAINS KEY 1");
 
+        assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                             "SELECT * FROM %s WHERE pk NOT CONTAINS KEY 1");
+
         beforeAndAfterFlush(() -> {
             assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE pk CONTAINS KEY 1 ALLOW FILTERING"),
                                     row(map(1, 2), 1, 1),
@@ -2235,6 +2534,24 @@ public class SelectTest extends CQLTester
 
             assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE pk CONTAINS KEY 1 AND ck = 1 AND v = 3 ALLOW FILTERING"),
                                     row(map(1, 2, 3, 4), 1, 3));
+
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE pk NOT CONTAINS KEY 1 ALLOW FILTERING"),
+                                    row(map(5, 6), 5, 5),
+                                    row(map(7, 8), 6, 6));
+
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE pk CONTAINS KEY 1 AND pk NOT CONTAINS 4 ALLOW FILTERING"),
+                                    row(map(1, 2), 1, 1),
+                                    row(map(1, 2), 2, 2));
+
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE pk NOT CONTAINS KEY 1 AND pk CONTAINS 8 ALLOW FILTERING"),
+                                    row(map(7, 8), 6, 6));
+
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE pk NOT CONTAINS KEY 1 AND pk NOT CONTAINS 8 ALLOW FILTERING"),
+                                    row(map(5, 6), 5, 5));
+
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE pk NOT CONTAINS KEY 1 AND v = 5 ALLOW FILTERING"),
+                                    row(map(5, 6), 5, 5));
+
         });
     }
 
@@ -2302,6 +2619,36 @@ public class SelectTest extends CQLTester
     }
 
     @Test
+    public void filteringOnDeletedStaticColumnValue() throws Throwable
+    {
+        // Create table with int-only columns
+        createTable("CREATE TABLE %s (pk0 int, pk1 int, ck0 int, ck1 int, s0 tinyint static, v0 int, v1 int, PRIMARY KEY ((pk0, pk1), ck0, ck1))");
+
+        // Insert rows
+        execute("INSERT INTO %s (pk0, pk1, s0, ck0, ck1, v0, v1) VALUES (?, ?, ?, ?, ?, ?, ?)", 1000, 2000, (byte) 126, 100, 1, 20, 30);
+        execute("INSERT INTO %s (pk0, pk1, s0, ck0, ck1, v0, v1) VALUES (?, ?, ?, ?, ?, ?, ?)", 1000, 2000, (byte) 125, 200, 2, 40, 50);
+        execute("INSERT INTO %s (pk0, pk1, s0, ck0, ck1, v0, v1) VALUES (?, ?, ?, ?, ?, ?, ?)", 1000, 3000, (byte) 122, 300, 3, 60, 70);
+        execute("DELETE s0,v0,v1 FROM %s WHERE pk0=1000 AND pk1=2000 and ck0=100 and ck1=1");
+
+        beforeAndAfterFlush(() -> {
+            // Verify the columns are deleted
+            assertRows(execute("SELECT pk0, pk1, s0, ck0, ck1, v0, v1 FROM %s WHERE s0=? ALLOW FILTERING", (byte) 122),
+                    row(1000, 3000, (byte) 122, 300, 3, 60, 70));
+        });
+
+        execute("DELETE v0 FROM %s WHERE pk0=1000 AND pk1=3000 AND ck0=300 AND ck1=3");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk0, pk1, s0, ck0, ck1, v0, v1 FROM %s WHERE s0=? ALLOW FILTERING", (byte) 122),
+                    row(1000, 3000, (byte) 122, 300, 3, null, 70));
+
+            assertRows(execute("SELECT pk0, pk1, s0, ck0, ck1, v0, v1 FROM %s WHERE pk0=1000 AND pk1=3000 AND ck0=300 AND ck1=3"),
+                    row(1000, 3000, (byte) 122, 300, 3, null, 70));
+        });
+
+    }
+
+    @Test
     public void containsFilteringOnNonClusteringColumn() throws Throwable {
         createTable("CREATE TABLE %s (a int, b int, c int, d list<int>, PRIMARY KEY (a, b, c))");
 
@@ -2316,8 +2663,16 @@ public class SelectTest extends CQLTester
                        row(21, 22, 23, list(2, 4)),
                        row(21, 25, 26, list(2, 7)));
 
-            assertRows(executeFilteringOnly("SELECT a, b, c, d FROM %s WHERE b > 20 AND d CONTAINS 2 AND d contains 4"),
+            assertRows(executeFilteringOnly("SELECT a, b, c, d FROM %s WHERE b > 20 AND d NOT CONTAINS 2"),
+                       row(31, 32, 33, list(3, 4)));
+
+            assertRows(executeFilteringOnly("SELECT a, b, c, d FROM %s WHERE b > 20 AND d CONTAINS 2 AND d CONTAINS 4"),
                        row(21, 22, 23, list(2, 4)));
+
+            assertRows(executeFilteringOnly("SELECT a, b, c, d FROM %s WHERE b > 20 AND d NOT CONTAINS 2 AND d CONTAINS 4"),
+                       row(31, 32, 33, list(3, 4)));
+
+            assertRows(executeFilteringOnly("SELECT a, b, c, d FROM %s WHERE b > 20 AND d NOT CONTAINS 2 AND d NOT CONTAINS 4"));
         });
     }
 
@@ -2327,7 +2682,7 @@ public class SelectTest extends CQLTester
         // Test for CASSANDRA-11310 compatibility with 2i
         createTable("CREATE TABLE %s (a text, b int, c text, d int, PRIMARY KEY (a, b, c));");
         createIndex("CREATE INDEX ON %s(c)");
-        
+
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", "a", 0, "b", 1);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", "a", 1, "b", 2);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", "a", 2, "b", 3);
@@ -2512,49 +2867,49 @@ public class SelectTest extends CQLTester
 
         beforeAndAfterFlush(() -> {
 
-            assertInvalidMessage("Key may not be empty", "SELECT * FROM %s WHERE pk = textAsBlob('');");
-            assertInvalidMessage("Key may not be empty", "SELECT * FROM %s WHERE pk IN (textAsBlob(''), textAsBlob('1'));");
+            assertInvalidMessage("Key may not be empty", "SELECT * FROM %s WHERE pk = text_as_blob('');");
+            assertInvalidMessage("Key may not be empty", "SELECT * FROM %s WHERE pk IN (text_as_blob(''), text_as_blob('1'));");
 
             assertInvalidMessage("Key may not be empty",
                                  "INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)",
                                  EMPTY_BYTE_BUFFER, bytes("2"), bytes("2"));
 
             // Test clustering columns restrictions
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c = textAsBlob('');"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c = text_as_blob('');"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) = (textAsBlob(''));"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) = (text_as_blob(''));"));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c IN (textAsBlob(''), textAsBlob('1'));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c IN (text_as_blob(''), text_as_blob('1'));"),
                        row(bytes("foo123"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) IN ((textAsBlob('')), (textAsBlob('1')));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) IN ((text_as_blob('')), (text_as_blob('1')));"),
                        row(bytes("foo123"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c > textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c > text_as_blob('');"),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) > (textAsBlob(''));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) > (text_as_blob(''));"),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c >= textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c >= text_as_blob('');"),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) >= (textAsBlob(''));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) >= (text_as_blob(''));"),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("2")));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c <= textAsBlob('');"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c <= text_as_blob('');"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) <= (textAsBlob(''));"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) <= (text_as_blob(''));"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c < textAsBlob('');"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c < text_as_blob('');"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) < (textAsBlob(''));"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) < (text_as_blob(''));"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c > textAsBlob('') AND c < textAsBlob('');"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c > text_as_blob('') AND c < text_as_blob('');"));
         });
 
 
@@ -2562,59 +2917,59 @@ public class SelectTest extends CQLTester
                 bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4"));
 
         beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c = textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c = text_as_blob('');"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) = (textAsBlob(''));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) = (text_as_blob(''));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c IN (textAsBlob(''), textAsBlob('1'));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c IN (text_as_blob(''), text_as_blob('1'));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4")),
                        row(bytes("foo123"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) IN ((textAsBlob('')), (textAsBlob('1')));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) IN ((text_as_blob('')), (text_as_blob('1')));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4")),
                        row(bytes("foo123"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c > textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c > text_as_blob('');"),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) > (textAsBlob(''));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) > (text_as_blob(''));"),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c >= textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c >= text_as_blob('');"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4")),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) >= (textAsBlob(''));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) >= (text_as_blob(''));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4")),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c <= textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c <= text_as_blob('');"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) <= (textAsBlob(''));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) <= (text_as_blob(''));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4")));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c < textAsBlob('');"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c < text_as_blob('');"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) < (textAsBlob(''));"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) < (text_as_blob(''));"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c >= textAsBlob('') AND c < textAsBlob('');"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c >= text_as_blob('') AND c < text_as_blob('');"));
         });
 
         // Test restrictions on non-primary key value
-        assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND v = textAsBlob('') ALLOW FILTERING;"));
+        assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND v = text_as_blob('') ALLOW FILTERING;"));
 
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)",
                 bytes("foo123"), bytes("3"), EMPTY_BYTE_BUFFER);
 
         beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND v = textAsBlob('') ALLOW FILTERING;"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND v = text_as_blob('') ALLOW FILTERING;"),
                        row(bytes("foo123"), bytes("3"), EMPTY_BYTE_BUFFER));
         });
     }
@@ -2628,76 +2983,76 @@ public class SelectTest extends CQLTester
 
         beforeAndAfterFlush(() -> {
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 = textAsBlob('');"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 = text_as_blob('');"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 = textAsBlob('1') AND c2 = textAsBlob('');"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 = text_as_blob('1') AND c2 = text_as_blob('');"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) = (textAsBlob('1'), textAsBlob(''));"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) = (text_as_blob('1'), text_as_blob(''));"));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 IN (textAsBlob(''), textAsBlob('1')) AND c2 = textAsBlob('1');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 IN (text_as_blob(''), text_as_blob('1')) AND c2 = text_as_blob('1');"),
                        row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 = textAsBlob('1') AND c2 IN (textAsBlob(''), textAsBlob('1'));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 = text_as_blob('1') AND c2 IN (text_as_blob(''), text_as_blob('1'));"),
                        row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) IN ((textAsBlob(''), textAsBlob('1')), (textAsBlob('1'), textAsBlob('1')));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) IN ((text_as_blob(''), text_as_blob('1')), (text_as_blob('1'), text_as_blob('1')));"),
                        row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 > textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 > text_as_blob('');"),
                        row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 = textAsBlob('1') AND c2 > textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 = text_as_blob('1') AND c2 > text_as_blob('');"),
                        row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) > (textAsBlob(''), textAsBlob('1'));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) > (text_as_blob(''), text_as_blob('1'));"),
                        row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 = textAsBlob('1') AND c2 >= textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 = text_as_blob('1') AND c2 >= text_as_blob('');"),
                        row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 = textAsBlob('1') AND c2 <= textAsBlob('');"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 = text_as_blob('1') AND c2 <= text_as_blob('');"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) <= (textAsBlob('1'), textAsBlob(''));"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) <= (text_as_blob('1'), text_as_blob(''));"));
         });
 
         execute("INSERT INTO %s (pk, c1, c2, v) VALUES (?, ?, ?, ?)",
                 bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("4"));
 
         beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 = textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 = text_as_blob('');"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("4")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 = textAsBlob('') AND c2 = textAsBlob('1');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 = text_as_blob('') AND c2 = text_as_blob('1');"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("4")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) = (textAsBlob(''), textAsBlob('1'));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) = (text_as_blob(''), text_as_blob('1'));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("4")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 IN (textAsBlob(''), textAsBlob('1')) AND c2 = textAsBlob('1');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 IN (text_as_blob(''), text_as_blob('1')) AND c2 = text_as_blob('1');"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("4")),
                        row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) IN ((textAsBlob(''), textAsBlob('1')), (textAsBlob('1'), textAsBlob('1')));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) IN ((text_as_blob(''), text_as_blob('1')), (text_as_blob('1'), text_as_blob('1')));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("4")),
                        row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) > (textAsBlob(''), textAsBlob('1'));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) > (text_as_blob(''), text_as_blob('1'));"),
                        row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) >= (textAsBlob(''), textAsBlob('1'));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) >= (text_as_blob(''), text_as_blob('1'));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("4")),
                        row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) <= (textAsBlob(''), textAsBlob('1'));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) <= (text_as_blob(''), text_as_blob('1'));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("4")));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) < (textAsBlob(''), textAsBlob('1'));"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) < (text_as_blob(''), text_as_blob('1'));"));
         });
     }
 
@@ -2721,17 +3076,17 @@ public class SelectTest extends CQLTester
 
             beforeAndAfterFlush(() -> {
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c > textAsBlob('')" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c > text_as_blob('')" + orderingClause),
                            row(bytes("foo123"), bytes("2"), bytes("2")),
                            row(bytes("foo123"), bytes("1"), bytes("1")));
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c >= textAsBlob('')" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c >= text_as_blob('')" + orderingClause),
                            row(bytes("foo123"), bytes("2"), bytes("2")),
                            row(bytes("foo123"), bytes("1"), bytes("1")));
 
-                assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c < textAsBlob('')" + orderingClause));
+                assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c < text_as_blob('')" + orderingClause));
 
-                assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c <= textAsBlob('')" + orderingClause));
+                assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c <= text_as_blob('')" + orderingClause));
             });
 
             execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)",
@@ -2739,22 +3094,22 @@ public class SelectTest extends CQLTester
 
             beforeAndAfterFlush(() -> {
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c IN (textAsBlob(''), textAsBlob('1'))" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c IN (text_as_blob(''), text_as_blob('1'))" + orderingClause),
                            row(bytes("foo123"), bytes("1"), bytes("1")),
                            row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4")));
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c > textAsBlob('')" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c > text_as_blob('')" + orderingClause),
                            row(bytes("foo123"), bytes("2"), bytes("2")),
                            row(bytes("foo123"), bytes("1"), bytes("1")));
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c >= textAsBlob('')" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c >= text_as_blob('')" + orderingClause),
                            row(bytes("foo123"), bytes("2"), bytes("2")),
                            row(bytes("foo123"), bytes("1"), bytes("1")),
                            row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4")));
 
-                assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c < textAsBlob('')" + orderingClause));
+                assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c < text_as_blob('')" + orderingClause));
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c <= textAsBlob('')" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c <= text_as_blob('')" + orderingClause),
                            row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("4")));
             });
         }
@@ -2774,19 +3129,19 @@ public class SelectTest extends CQLTester
 
             beforeAndAfterFlush(() -> {
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 > textAsBlob('')" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 > text_as_blob('')" + orderingClause),
                            row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")),
                            row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")));
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 = textAsBlob('1') AND c2 > textAsBlob('')" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 = text_as_blob('1') AND c2 > text_as_blob('')" + orderingClause),
                            row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")),
                            row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")));
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) > (textAsBlob(''), textAsBlob('1'))" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) > (text_as_blob(''), text_as_blob('1'))" + orderingClause),
                            row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")),
                            row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")));
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 = textAsBlob('1') AND c2 >= textAsBlob('')" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 = text_as_blob('1') AND c2 >= text_as_blob('')" + orderingClause),
                            row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")),
                            row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")));
             });
@@ -2796,19 +3151,19 @@ public class SelectTest extends CQLTester
 
             beforeAndAfterFlush(() -> {
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c1 IN (textAsBlob(''), textAsBlob('1')) AND c2 = textAsBlob('1')" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c1 IN (text_as_blob(''), text_as_blob('1')) AND c2 = text_as_blob('1')" + orderingClause),
                            row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")),
                            row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("4")));
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) IN ((textAsBlob(''), textAsBlob('1')), (textAsBlob('1'), textAsBlob('1')))" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) IN ((text_as_blob(''), text_as_blob('1')), (text_as_blob('1'), text_as_blob('1')))" + orderingClause),
                            row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")),
                            row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("4")));
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) > (textAsBlob(''), textAsBlob('1'))" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) > (text_as_blob(''), text_as_blob('1'))" + orderingClause),
                            row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")),
                            row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")));
 
-                assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c1, c2) >= (textAsBlob(''), textAsBlob('1'))" + orderingClause),
+                assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c1, c2) >= (text_as_blob(''), text_as_blob('1'))" + orderingClause),
                            row(bytes("foo123"), bytes("1"), bytes("2"), bytes("2")),
                            row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")),
                            row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("4")));
@@ -2838,8 +3193,9 @@ public class SelectTest extends CQLTester
                    row(0, Duration.from("1s")),
                    row(2, Duration.from("1s")));
 
-        assertInvalidMessage("IN predicates on non-primary-key columns (d) is not yet supported",
-                             "SELECT * FROM %s WHERE d IN (1s, 2s) ALLOW FILTERING");
+        assertRows(execute("SELECT * FROM %s WHERE d IN (1s, 3s) ALLOW FILTERING"),
+                   row(0, Duration.from("1s")),
+                   row(2, Duration.from("1s")));
 
         assertInvalidMessage("Slice restrictions are not supported on duration columns",
                              "SELECT * FROM %s WHERE d > 1s ALLOW FILTERING");
@@ -2867,11 +3223,19 @@ public class SelectTest extends CQLTester
             execute("INSERT INTO %s (k, l) VALUES (2, [1s, 3s])");
 
             if (frozen)
+            {
                 assertRows(execute("SELECT * FROM %s WHERE l = [1s, 2s] ALLOW FILTERING"),
                            row(0, list(Duration.from("1s"), Duration.from("2s"))));
 
-            assertInvalidMessage("IN predicates on non-primary-key columns (l) is not yet supported",
-                                 "SELECT * FROM %s WHERE l IN ([1s, 2s], [2s, 3s]) ALLOW FILTERING");
+                assertRows(execute("SELECT * FROM %s WHERE l IN ([1s, 2s], [2s, 3s]) ALLOW FILTERING"),
+                           row(1, list(Duration.from("2s"), Duration.from("3s"))),
+                           row(0, list(Duration.from("1s"), Duration.from("2s"))));
+            }
+            else
+            {
+                assertInvalidMessage("Collection column 'l' (list<duration>) cannot be restricted by a 'IN' relation",
+                                     "SELECT * FROM %s WHERE l IN ([1s, 2s], [2s, 3s]) ALLOW FILTERING");
+            }
 
             assertInvalidMessage("Slice restrictions are not supported on collections containing durations",
                                  "SELECT * FROM %s WHERE l > [2s, 3s] ALLOW FILTERING");
@@ -2904,11 +3268,19 @@ public class SelectTest extends CQLTester
             execute("INSERT INTO %s (k, m) VALUES (2, {1:1s, 3:3s})");
 
             if (frozen)
+            {
                 assertRows(execute("SELECT * FROM %s WHERE m = {1:1s, 2:2s} ALLOW FILTERING"),
                            row(0, map(1, Duration.from("1s"), 2, Duration.from("2s"))));
 
-            assertInvalidMessage("IN predicates on non-primary-key columns (m) is not yet supported",
-                    "SELECT * FROM %s WHERE m IN ({1:1s, 2:2s}, {1:1s, 3:3s}) ALLOW FILTERING");
+                assertRows(execute("SELECT * FROM %s WHERE m IN ({1:1s, 2:2s}, {1:1s, 3:3s}) ALLOW FILTERING"),
+                           row(0, map(1, Duration.from("1s"), 2, Duration.from("2s"))),
+                           row(2, map(1, Duration.from("1s"), 3, Duration.from("3s"))));
+            }
+            else
+            {
+                assertInvalidMessage("Collection column 'm' (map<int, duration>) cannot be restricted by a 'IN' relation",
+                                     "SELECT * FROM %s WHERE m IN ({1:1s, 2:2s}, {1:1s, 3:3s}) ALLOW FILTERING");
+            }
 
             assertInvalidMessage("Slice restrictions are not supported on collections containing durations",
                     "SELECT * FROM %s WHERE m > {1:1s, 3:3s} ALLOW FILTERING");
@@ -2925,6 +3297,10 @@ public class SelectTest extends CQLTester
             assertRows(execute("SELECT * FROM %s WHERE m CONTAINS 1s ALLOW FILTERING"),
                        row(0, map(1, Duration.from("1s"), 2, Duration.from("2s"))),
                        row(2, map(1, Duration.from("1s"), 3, Duration.from("3s"))));
+
+            assertRows(execute("SELECT * FROM %s WHERE m NOT CONTAINS 1s ALLOW FILTERING"),
+                       row(1, map(2, Duration.from("2s"), 3, Duration.from("3s"))));
+
         }
     }
 
@@ -2939,8 +3315,9 @@ public class SelectTest extends CQLTester
         assertRows(execute("SELECT * FROM %s WHERE t = (1, 2s) ALLOW FILTERING"),
                    row(0, tuple(1, Duration.from("2s"))));
 
-        assertInvalidMessage("IN predicates on non-primary-key columns (t) is not yet supported",
-                "SELECT * FROM %s WHERE t IN ((1, 2s), (1, 3s)) ALLOW FILTERING");
+        assertRows(execute("SELECT * FROM %s WHERE t IN ((1, 2s), (1, 3s)) ALLOW FILTERING"),
+                   row(0, tuple(1, Duration.from("2s"))),
+                   row(2, tuple(1, Duration.from("3s"))));
 
         assertInvalidMessage("Slice restrictions are not supported on tuples containing durations",
                 "SELECT * FROM %s WHERE t > (1, 2s) ALLOW FILTERING");
@@ -2970,11 +3347,22 @@ public class SelectTest extends CQLTester
             execute("INSERT INTO %s (k, u) VALUES (2, {i: 1, d:3s})");
 
             if (frozen)
+            {
                 assertRows(execute("SELECT * FROM %s WHERE u = {i: 1, d:2s} ALLOW FILTERING"),
                            row(0, userType("i", 1, "d", Duration.from("2s"))));
 
-            assertInvalidMessage("IN predicates on non-primary-key columns (u) is not yet supported",
-                    "SELECT * FROM %s WHERE u IN ({i: 2, d:3s}, {i: 1, d:3s}) ALLOW FILTERING");
+                assertRows(execute("SELECT * FROM %s WHERE u IN ({i: 2, d:3s}, {i: 1, d:3s}) ALLOW FILTERING"),
+                           row(1, userType("i", 2, "d", Duration.from("3s"))),
+                           row(2, userType("i", 1, "d", Duration.from("3s"))));
+            }
+            else
+            {
+                assertInvalidMessage("Non-frozen UDT column 'u' (" + udt + ") cannot be restricted by any relation",
+                                     "SELECT * FROM %s WHERE u = {i: 1, d:2s} ALLOW FILTERING");
+
+                assertInvalidMessage("Non-frozen UDT column 'u' (" + udt + ") cannot be restricted by any relation",
+                                     "SELECT * FROM %s WHERE u IN ({i: 2, d:3s}, {i: 1, d:3s}) ALLOW FILTERING");
+            }
 
             assertInvalidMessage("Slice restrictions are not supported on UDTs containing durations",
                     "SELECT * FROM %s WHERE u > {i: 1, d:3s} ALLOW FILTERING");
@@ -3010,25 +3398,36 @@ public class SelectTest extends CQLTester
         beforeAndAfterFlush(() -> {
             // lists
             assertRows(execute("SELECT k, v FROM %s WHERE l CONTAINS 1 ALLOW FILTERING"), row(1, 0), row(0, 0), row(0, 2));
+            assertRows(execute("SELECT k, v FROM %s WHERE l NOT CONTAINS 4 ALLOW FILTERING"), row(1, 2), row(0, 0), row(0, 2));
             assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND l CONTAINS 1 ALLOW FILTERING"), row(0, 0), row(0, 2));
+            assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND l NOT CONTAINS 4 ALLOW FILTERING"), row(0, 0), row(0, 2));
             assertRows(execute("SELECT k, v FROM %s WHERE l CONTAINS 2 ALLOW FILTERING"), row(1, 0), row(0, 0));
             assertEmpty(execute("SELECT k, v FROM %s WHERE l CONTAINS 6 ALLOW FILTERING"));
 
             // sets
             assertRows(execute("SELECT k, v FROM %s WHERE s CONTAINS 'a' ALLOW FILTERING" ), row(0, 0), row(0, 2));
+            assertRowsIgnoringOrder(execute("SELECT k, v FROM %s WHERE s NOT CONTAINS 'a' ALLOW FILTERING" ),  row(1, 2), row(0, 1), row(1, 0), row(1, 1));
             assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND s CONTAINS 'a' ALLOW FILTERING"), row(0, 0), row(0, 2));
+            assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND s NOT CONTAINS 'a' ALLOW FILTERING" ), row(0, 1));
             assertRows(execute("SELECT k, v FROM %s WHERE s CONTAINS 'd' ALLOW FILTERING"), row(1, 1));
             assertEmpty(execute("SELECT k, v FROM %s  WHERE s CONTAINS 'e' ALLOW FILTERING"));
+            assertRows(execute("SELECT k, v FROM %s  WHERE s NOT CONTAINS 'a' AND s NOT CONTAINS 'c' ALLOW FILTERING"), row(1, 0), row(1, 1), row(1, 2));
 
             // maps
             assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS 1 ALLOW FILTERING"), row(1, 0), row(1, 1), row(0, 0), row(0, 1));
+            assertRows(execute("SELECT k, v FROM %s WHERE m NOT CONTAINS 1 ALLOW FILTERING"), row(1, 2), row(0, 2));
             assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m CONTAINS 1 ALLOW FILTERING"), row(0, 0), row(0, 1));
+            assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m NOT CONTAINS 1 ALLOW FILTERING"), row(0, 2));
             assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS 2 ALLOW FILTERING"), row(0, 1));
             assertEmpty(execute("SELECT k, v FROM %s  WHERE m CONTAINS 4 ALLOW FILTERING"));
+            assertRows(execute("SELECT k, v FROM %s  WHERE m NOT CONTAINS 1 AND m NOT CONTAINS 3 ALLOW FILTERING"), row(1, 2));
 
             assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS KEY 'a' ALLOW FILTERING"), row(1, 1), row(0, 0), row(0, 1));
+            assertRows(execute("SELECT k, v FROM %s WHERE m NOT CONTAINS KEY 'a' ALLOW FILTERING"), row(1, 0), row(1, 2), row(0, 2));
             assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m CONTAINS KEY 'a' ALLOW FILTERING"), row(0, 0), row(0, 1));
+            assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m NOT CONTAINS KEY 'a' ALLOW FILTERING"), row(0, 2));
             assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m CONTAINS KEY 'c' ALLOW FILTERING"), row(0, 2));
+            assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m NOT CONTAINS KEY 'c' ALLOW FILTERING"), row(0, 0), row(0, 1));
         });
     }
 
@@ -3161,4 +3560,49 @@ public class SelectTest extends CQLTester
         execute("INSERT INTO %s (k1, k2) VALUES (uuid(), 'k2')");
         assertRowCount(execute("SELECT system.token(k1, k2) FROM %s"), 1);
     }
+
+    @Test
+    public void testQuotedMapTextData() throws Throwable
+    {
+        createTable("CREATE TABLE " + KEYSPACE + ".t1 (id int, data text, PRIMARY KEY (id))");
+        createTable("CREATE TABLE " + KEYSPACE + ".t2 (id int, data map<int, text>, PRIMARY KEY (id))");
+
+        execute("INSERT INTO " + KEYSPACE + ".t1 (id, data) VALUES (1, 'I''m newb')");
+        execute("INSERT INTO " + KEYSPACE + ".t2 (id, data) VALUES (1, {1:'I''m newb'})");
+
+        assertRows(execute("SELECT data FROM " + KEYSPACE + ".t1"), row("I'm newb"));
+        assertRows(execute("SELECT data FROM " + KEYSPACE + ".t2"), row( map(1, "I'm newb")));
+    }
+
+    @Test
+    public void testQuotedSimpleCollectionsData() throws Throwable
+    {
+        createTable("CREATE TABLE " + KEYSPACE + ".t3 (id int, set_data set<text>, list_data list<text>, tuple_data tuple<int, text>, PRIMARY KEY (id))");
+
+        execute("INSERT INTO " + KEYSPACE + ".t3 (id, set_data, list_data, tuple_data) values(1, {'I''m newb'}, ['I''m newb'], (1, 'I''m newb'))");
+
+        assertRows(execute("SELECT set_data FROM " + KEYSPACE + ".t3"), row(set("I'm newb")));
+        assertRows(execute("SELECT list_data FROM " + KEYSPACE + ".t3"), row(list("I'm newb")));
+        assertRows(execute("SELECT tuple_data FROM " + KEYSPACE + ".t3"), row(tuple(1, "I'm newb")));
+    }
+
+    @Test
+    public void testQuotedUDTData() throws Throwable
+    {
+        createType("CREATE TYPE " + KEYSPACE + ".random (data text)");
+        createTable("CREATE TABLE " + KEYSPACE + ".t4 (id int, udt_data frozen<random>, PRIMARY KEY (id))");
+
+        execute("INSERT INTO " + KEYSPACE + ".t4 (id, udt_data) values(1, {data: 'I''m newb'})");
+
+        assertRows(execute("SELECT udt_data FROM " + KEYSPACE + ".t4"), row(userType("random", "I'm newb")));
+    }
+
+    // ensure that we can create composite types larger than signed short
+    @Test
+    public void compositeValuePk() throws Throwable
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (a blob, b blob, PRIMARY KEY ((a, b)))");
+        execute("INSERT INTO %s (a, b) VALUES (?, ?)", ByteBuffer.allocate(Short.MAX_VALUE + 1), EMPTY_BYTE_BUFFER);
+    }
+
 }

@@ -23,7 +23,6 @@ import java.util.Collections;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 
@@ -33,8 +32,9 @@ import com.sun.jna.Pointer;
  * using the Windows/Kernel32 library.</p>
  *
  * @see org.apache.cassandra.utils.NativeLibraryWrapper
- * @see NativeLibrary
+ * @see INativeLibrary
  */
+@Shared
 public class NativeLibraryWindows implements NativeLibraryWrapper
 {
     private static final Logger logger = LoggerFactory.getLogger(NativeLibraryWindows.class);
@@ -67,58 +67,76 @@ public class NativeLibraryWindows implements NativeLibraryWrapper
      *
      * @return the process identifier of the calling process
      */
-    private static native long GetCurrentProcessId() throws LastErrorException;
+    private static native long GetCurrentProcessId();
 
-    public int callMlockall(int flags) throws UnsatisfiedLinkError, RuntimeException
+    private void throwNativeError() throws NativeError
+    {
+        var errno = Native.getLastError();
+        // TODO figure out how to get a human-readable error message on Windows
+        throw new NativeError(String.valueOf(errno), errno);
+    }
+
+    @Override
+    public int callMlockall(int flags)
     {
         throw new UnsatisfiedLinkError();
     }
 
-    public int callMunlockall() throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public int callMunlockall()
     {
         throw new UnsatisfiedLinkError();
     }
 
-    public int callFcntl(int fd, int command, long flags) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public int callFcntl(int fd, int command, long flags)
     {
         throw new UnsatisfiedLinkError();
     }
 
-    public int callPosixFadvise(int fd, long offset, int len, int flag) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public int callPosixFadvise(int fd, long offset, int len, int flag)
     {
         throw new UnsatisfiedLinkError();
     }
 
-    public int callOpen(String path, int flags) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public int callPosixMadvise(Pointer addr, long length, int advice)
     {
         throw new UnsatisfiedLinkError();
     }
 
-    public int callFsync(int fd) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public int callOpen(String path, int flags)
     {
         throw new UnsatisfiedLinkError();
     }
 
-    public int callClose(int fd) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public int callFsync(int fd)
     {
         throw new UnsatisfiedLinkError();
     }
 
-    public Pointer callStrerror(int errnum) throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public int callClose(int fd)
     {
         throw new UnsatisfiedLinkError();
     }
 
     /**
      * @return the PID of the JVM running
-     * @throws UnsatisfiedLinkError if we fail to link against Sigar
-     * @throws RuntimeException if another unexpected error is thrown by Sigar
      */
-    public long callGetpid() throws UnsatisfiedLinkError, RuntimeException
+    @Override
+    public long callGetpid() throws NativeError
     {
-        return GetCurrentProcessId();
+        long r = GetCurrentProcessId();
+        if (r < 0)
+            throwNativeError();
+        return r;
     }
 
+    @Override
     public boolean isAvailable()
     {
         return available;

@@ -1,0 +1,24 @@
+. Monitor the progress of the startup with:
++
+[tabs]
+====
+Command::
++
+--
+[source,shell]
+----
+include::cassandra:example$BASH/tail_syslog.sh[]
+----
+--
+
+Result::
++
+--
+Cassandra is ready when you see an entry like this in the `system.log`:
++
+[source,plaintext]
+----
+include::cassandra:example$RESULTS/tail_syslog.result[]
+----
+--
+====

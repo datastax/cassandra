@@ -47,13 +47,13 @@ public class InetAddressAndPortTest
 
         //Test default port
         InetAddressAndPort address = InetAddressAndPort.getByName("127.0.0.1");
-        assertEquals(InetAddress.getByName("127.0.0.1"), address.address);
-        assertEquals(InetAddressAndPort.defaultPort, address.port);
+        assertEquals(InetAddress.getByName("127.0.0.1"), address.getAddress());
+        assertEquals(InetAddressAndPort.defaultPort, address.getPort());
 
         //Test overriding default port
         address = InetAddressAndPort.getByName("127.0.0.1:42");
-        assertEquals(InetAddress.getByName("127.0.0.1"), address.address);
-        assertEquals(42, address.port);
+        assertEquals(InetAddress.getByName("127.0.0.1"), address.getAddress());
+        assertEquals(42, address.getPort());
     }
 
     @Test
@@ -69,13 +69,13 @@ public class InetAddressAndPortTest
 
         //Test default port
         InetAddressAndPort address = InetAddressAndPort.getByName("2001:0db8:0000:0000:0000:ff00:0042:8329");
-        assertEquals(InetAddress.getByName("2001:0db8:0000:0000:0000:ff00:0042:8329"), address.address);
-        assertEquals(InetAddressAndPort.defaultPort, address.port);
+        assertEquals(InetAddress.getByName("2001:0db8:0000:0000:0000:ff00:0042:8329"), address.getAddress());
+        assertEquals(InetAddressAndPort.defaultPort, address.getPort());
 
         //Test overriding default port
         address = InetAddressAndPort.getByName("[2001:0db8:0000:0000:0000:ff00:0042:8329]:42");
-        assertEquals(InetAddress.getByName("2001:0db8:0000:0000:0000:ff00:0042:8329"), address.address);
-        assertEquals(42, address.port);
+        assertEquals(InetAddress.getByName("2001:0db8:0000:0000:0000:ff00:0042:8329"), address.getAddress());
+        assertEquals(42, address.getPort());
     }
 
     @Test
@@ -163,6 +163,41 @@ public class InetAddressAndPortTest
 
         assertEquals(ipv4forJMX, InetAddressAndPort.getByName(ipv4).getHostAddressAndPortForJMX());
         assertEquals(ipv6forJMX, InetAddressAndPort.getByName(ipv6).getHostAddressAndPortForJMX());
+    }
+
+    @Test
+    public void getHostNameForIPv4WithoutPortTest() throws Exception
+    {
+        byte[] ipBytes = new byte[] { 127, 0, 0, 1};
+        InetAddressAndPort obj = InetAddressAndPort.getByAddress(InetAddress.getByAddress("resolved4", ipBytes));
+        assertEquals("resolved4", obj.getHostName());
+        assertEquals("resolved4", obj.getHostName(false));
+    }
+
+    @Test
+    public void getHostNameForIPv6WithoutPortTest() throws Exception
+    {
+        byte[] ipBytes = new byte[] { 0x20, 0x01, 0xd, (byte) 0xb8, 0, 0, 0, 0, 0, 0, (byte) 0xff, 0, 0x00, 0x42, (byte) 0x83, 0x29};
+        InetAddressAndPort obj = InetAddressAndPort.getByAddress(InetAddress.getByAddress("resolved6", ipBytes));
+        assertEquals("resolved6", obj.getHostName());
+        assertEquals("resolved6", obj.getHostName(false));
+    }
+
+    @Test
+    public void getHostNameForIPv4WitPortTest() throws Exception
+    {
+        InetAddress ipv4 = InetAddress.getByAddress("resolved4", new byte[] { 127, 0, 0, 1});
+        InetAddressAndPort obj = InetAddressAndPort.getByAddressOverrideDefaults(ipv4, 42);
+        assertEquals("resolved4:42", obj.getHostName(true));
+    }
+
+    @Test
+    public void getHostNameForIPv6WithPortTest() throws Exception
+    {
+        byte[] ipBytes = new byte[] { 0x20, 0x01, 0xd, (byte) 0xb8, 0, 0, 0, 0, 0, 0, (byte) 0xff, 0, 0x00, 0x42, (byte) 0x83, 0x29 };
+        InetAddress ipv6 = InetAddress.getByAddress("resolved6", ipBytes);
+        InetAddressAndPort obj = InetAddressAndPort.getByAddressOverrideDefaults(ipv6, 42);
+        assertEquals("resolved6:42", obj.getHostName(true));
     }
 
     private void shouldThrow(ThrowingRunnable t, Class expectedClass)

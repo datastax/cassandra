@@ -34,7 +34,11 @@ public interface ChunkReader extends RebuffererFactory
      * Read the chunk at the given position, attempting to fill the capacity of the given buffer.
      * The filled buffer must be positioned at 0, with limit set at the size of the available data.
      * The source may have requirements for the positioning and/or size of the buffer (e.g. chunk-aligned and
-     * chunk-sized). These must be satisfied by the caller. 
+     * chunk-sized). These must be satisfied by the caller.
+     * <p/>
+     * If the reader is created for a partial file described by {@link SliceDescriptor}, the provided position refers
+     * to the original file, not the slice, that is, the caller can provide only the position from the range of the
+     * slice (i.e. {@link SliceDescriptor#sliceStart} (incl) ... {@link SliceDescriptor#sliceEnd} (excl)).
      */
     void readChunk(long position, ByteBuffer buffer);
 
@@ -48,4 +52,19 @@ public interface ChunkReader extends RebuffererFactory
      * This is not guaranteed to be fulfilled.
      */
     BufferType preferredBufferType();
+
+    default void releaseUnderlyingResources() {}
+
+    /**
+     * In some cases we may end up with both compressed and uncompressed data for the same file in
+     * the cache. This type is used to distinguish between them.
+     */
+    enum ReaderType
+    {
+        SIMPLE,
+        COMPRESSED;
+        /** The number of types. Declared as a constant to avoid allocating on values(). */
+        public static final int COUNT = ReaderType.values().length;
+    }
+    ReaderType type();
 }

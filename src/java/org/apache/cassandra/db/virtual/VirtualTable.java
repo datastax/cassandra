@@ -48,7 +48,7 @@ public interface VirtualTable
     TableMetadata metadata();
 
     /**
-     * Applies the specified update.
+     * Applies the specified update, if supported.
      * @param update the update to apply
      */
     void apply(PartitionUpdate update);
@@ -71,4 +71,20 @@ public interface VirtualTable
      * @return the rows corresponding to the requested data.
      */
     UnfilteredPartitionIterator select(DataRange dataRange, ColumnFilter columnFilter);
+
+    /**
+     * Truncates data from the underlying source, if supported.
+     */
+    void truncate();
+
+    /**
+     * Tells whether {@code ALLOW FILTERING} is implicitly added to select statement
+     * which requires it. Defaults to true.
+     *
+     * @return true if {@code ALLOW FILTERING} is implicitly added to select statements when required, false otherwise.
+     */
+    default boolean allowFilteringImplicitly()
+    {
+        return true;
+    }
 }

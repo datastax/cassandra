@@ -20,6 +20,8 @@ package org.apache.cassandra.cql3;
 import java.nio.ByteBuffer;
 import java.util.Map;
 
+import org.apache.cassandra.db.guardrails.Guardrails;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
@@ -27,6 +29,8 @@ import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * Groups the parameters of an update query, and make building updates easier.
@@ -35,9 +39,10 @@ public class UpdateParameters
 {
     public final TableMetadata metadata;
     public final RegularAndStaticColumns updatedColumns;
+    public final ClientState clientState;
     public final QueryOptions options;
 
-    private final int nowInSec;
+    private final long nowInSec;
     private final long timestamp;
     private final int ttl;
 
@@ -54,22 +59,24 @@ public class UpdateParameters
 
     public UpdateParameters(TableMetadata metadata,
                             RegularAndStaticColumns updatedColumns,
+                            ClientState clientState,
                             QueryOptions options,
                             long timestamp,
-                            int nowInSec,
+                            long nowInSec,
                             int ttl,
                             Map<DecoratedKey, Partition> prefetchedRows)
     throws InvalidRequestException
     {
         this.metadata = metadata;
         this.updatedColumns = updatedColumns;
+        this.clientState = clientState;
         this.options = options;
 
         this.nowInSec = nowInSec;
         this.timestamp = timestamp;
         this.ttl = ttl;
 
-        this.deletionTime = new DeletionTime(timestamp, nowInSec);
+        this.deletionTime = DeletionTime.build(timestamp, nowInSec);
 
         this.prefetchedRows = prefetchedRows;
 
@@ -97,13 +104,13 @@ public class UpdateParameters
         if (clustering == Clustering.STATIC_CLUSTERING)
         {
             if (staticBuilder == null)
-                staticBuilder = BTreeRow.unsortedBuilder();
+                staticBuilder = PartitionUpdate.rowBuilder(metadata, true, false);
             builder = staticBuilder;
         }
         else
         {
             if (regularBuilder == null)
-                regularBuilder = BTreeRow.unsortedBuilder();
+                regularBuilder = PartitionUpdate.rowBuilder(metadata, false, false);
             builder = regularBuilder;
         }
 
@@ -138,20 +145,35 @@ public class UpdateParameters
 
     public void addTombstone(ColumnMetadata column, CellPath path) throws InvalidRequestException
     {
+        // Deleting individual elements of non-frozen sets and maps involves creating tombstones that contain the value
+        // of the deleted element, independently on whether the element existed or not. That tombstone value is guarded
+        // by the columnValueSize guardrail, to prevent the insertion of tombstones over the threshold. The downside is
+        // that enabling or raising this threshold can prevent users from deleting set/map elements that were written
+        // when the guardrail was disabled or with a lower value. Deleting the entire column, row or partition is always
+        // allowed, since the tombstones created for those operations don't contain the CQL column values.
+        if (path != null && column.type.isMultiCell())
+            Guardrails.columnValueSize.guard(path.dataSize(), column.name.toString(), false, clientState);
+
         builder.addCell(BufferCell.tombstone(column, timestamp, nowInSec, path));
     }
 
-    public void addCell(ColumnMetadata column, ByteBuffer value) throws InvalidRequestException
+    public Cell<?> addCell(ColumnMetadata column, ByteBuffer value) throws InvalidRequestException
     {
-        addCell(column, null, value);
+        return addCell(column, null, value);
     }
 
-    public void addCell(ColumnMetadata column, CellPath path, ByteBuffer value) throws InvalidRequestException
+    public Cell<?> addCell(ColumnMetadata column, CellPath path, ByteBuffer value) throws InvalidRequestException
     {
+        Guardrails.columnValueSize.guard(value.remaining(), column.name.toString(), false, clientState);
+
+        if (path != null && column.type.isMultiCell())
+            Guardrails.columnValueSize.guard(path.dataSize(), column.name.toString(), false, clientState);
+
         Cell<?> cell = ttl == LivenessInfo.NO_TTL
                        ? BufferCell.live(column, timestamp, value, path)
                        : BufferCell.expiring(column, timestamp, ttl, nowInSec, value, path);
         builder.addCell(cell);
+        return cell;
     }
 
     public void addCounter(ColumnMetadata column, long increment) throws InvalidRequestException
@@ -180,7 +202,7 @@ public class UpdateParameters
 
     public void setComplexDeletionTimeForOverwrite(ColumnMetadata column)
     {
-        builder.addComplexDeletion(column, new DeletionTime(deletionTime.markedForDeleteAt() - 1, deletionTime.localDeletionTime()));
+        builder.addComplexDeletion(column, DeletionTime.build(deletionTime.markedForDeleteAt() - 1, deletionTime.localDeletionTime()));
     }
 
     public Row buildRow()
@@ -203,6 +225,11 @@ public class UpdateParameters
     public RangeTombstone makeRangeTombstone(Slice slice)
     {
         return new RangeTombstone(slice, deletionTime);
+    }
+
+    public byte[] nextTimeUUIDAsBytes()
+    {
+        return TimeUUID.Generator.nextTimeUUIDAsBytes();
     }
 
     /**

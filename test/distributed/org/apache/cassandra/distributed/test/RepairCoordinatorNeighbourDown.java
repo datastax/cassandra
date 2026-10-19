@@ -33,13 +33,14 @@ import org.junit.Test;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.distributed.test.DistributedRepairUtils.RepairParallelism;
 import org.apache.cassandra.distributed.test.DistributedRepairUtils.RepairType;
-import org.apache.cassandra.gms.FailureDetector;
+import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.distributed.api.IMessageFilters.Matcher.of;
+import static org.apache.cassandra.distributed.test.DistributedRepairUtils.assertNoSSTableLeak;
 import static org.apache.cassandra.distributed.test.DistributedRepairUtils.assertParentRepairFailedWithMessageContains;
 import static org.apache.cassandra.distributed.test.DistributedRepairUtils.assertParentRepairNotExist;
 import static org.apache.cassandra.distributed.test.DistributedRepairUtils.getRepairExceptions;
@@ -91,7 +92,7 @@ public abstract class RepairCoordinatorNeighbourDown extends RepairCoordinatorBa
                     {
                         throw new RuntimeException(e);
                     }
-                    while (FailureDetector.instance.isAlive(neighbor))
+                    while (IFailureDetector.instance.isAlive(neighbor))
                         Uninterruptibles.sleepUninterruptibly(500, TimeUnit.MILLISECONDS);
                 });
 
@@ -125,6 +126,7 @@ public abstract class RepairCoordinatorNeighbourDown extends RepairCoordinatorBa
             {
                 assertParentRepairNotExist(CLUSTER, KEYSPACE, table);
             }
+            assertNoSSTableLeak(CLUSTER, KEYSPACE, table);
         });
     }
 
@@ -184,6 +186,7 @@ public abstract class RepairCoordinatorNeighbourDown extends RepairCoordinatorBa
             {
                 assertParentRepairNotExist(CLUSTER, KEYSPACE, table);
             }
+            assertNoSSTableLeak(CLUSTER, KEYSPACE, table);
         });
     }
 }

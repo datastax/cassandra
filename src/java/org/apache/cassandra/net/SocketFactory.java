@@ -24,7 +24,6 @@ import java.nio.channels.ClosedChannelException;
 import java.nio.channels.spi.SelectorProvider;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeoutException;
 import javax.annotation.Nullable;
@@ -54,6 +53,7 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.channel.unix.Errors;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
+import io.netty.handler.ssl.SslClosedEngineException;
 import io.netty.util.concurrent.DefaultEventExecutorChooserFactory;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.RejectedExecutionHandlers;
@@ -61,7 +61,6 @@ import io.netty.util.concurrent.ThreadPerTaskExecutor;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.security.SSLFactory;
@@ -72,6 +71,8 @@ import org.apache.cassandra.utils.FBUtilities;
 import static io.netty.channel.unix.Errors.ERRNO_ECONNRESET_NEGATIVE;
 import static io.netty.channel.unix.Errors.ERROR_ECONNREFUSED_NEGATIVE;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_EVENT_THREADS;
 import static org.apache.cassandra.utils.Throwables.isCausedBy;
 
 /**
@@ -82,7 +83,7 @@ public final class SocketFactory
 {
     private static final Logger logger = LoggerFactory.getLogger(SocketFactory.class);
 
-    private static final int EVENT_THREADS = Integer.getInteger(Config.PROPERTY_PREFIX + "internode-event-threads", FBUtilities.getAvailableProcessors());
+    private static final int EVENT_THREADS = INTERNODE_EVENT_THREADS.getInt(FBUtilities.getAvailableProcessors());
 
     /**
      * The default task queue used by {@code NioEventLoop} and {@code EpollEventLoop} is {@code MpscUnboundedArrayQueue},
@@ -177,7 +178,7 @@ public final class SocketFactory
     private final EventLoopGroup defaultGroup;
     // we need a separate EventLoopGroup for outbound streaming because sendFile is blocking
     private final EventLoopGroup outboundStreamingGroup;
-    final ExecutorService synchronousWorkExecutor = Executors.newCachedThreadPool(new NamedThreadFactory("Messaging-SynchronousWork"));
+    final ExecutorService synchronousWorkExecutor = executorFactory().pooled("Messaging-SynchronousWork", Integer.MAX_VALUE);
 
     SocketFactory()
     {
@@ -214,7 +215,7 @@ public final class SocketFactory
      * Creates a new {@link SslHandler} from provided SslContext.
      * @param peer enables endpoint verification for remote address when not null
      */
-    static SslHandler newSslHandler(Channel channel, SslContext sslContext, @Nullable InetSocketAddress peer)
+    public static SslHandler newSslHandler(Channel channel, SslContext sslContext, @Nullable InetSocketAddress peer)
     {
         if (peer == null)
             return sslContext.newHandler(channel.alloc());
@@ -293,6 +294,8 @@ public final class SocketFactory
     {
         if (t instanceof ClosedChannelException)
             return true;
+        if (t instanceof SslClosedEngineException)
+            return true;
         if (t instanceof ConnectException)
             return true;
         if (t instanceof Errors.NativeIoException)
@@ -316,7 +319,7 @@ public final class SocketFactory
     static String addressId(InetAddressAndPort address, InetSocketAddress realAddress)
     {
         String str = address.toString();
-        if (!address.address.equals(realAddress.getAddress()) || address.port != realAddress.getPort())
+        if (!address.getAddress().equals(realAddress.getAddress()) || address.getPort() != realAddress.getPort())
             str += '(' + InetAddressAndPort.toString(realAddress.getAddress(), realAddress.getPort()) + ')';
         return str;
     }

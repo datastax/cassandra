@@ -19,13 +19,15 @@
 package org.apache.cassandra.locator;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.FailureDetector;
-import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.utils.FBUtilities;
 
 import java.util.Set;
@@ -169,13 +171,14 @@ public abstract class ReplicaLayout<E extends Endpoints<E>>
         @Override
         public Token token() { return natural().token(); }
 
-        public ReplicaLayout.ForTokenWrite filter(Predicate<Replica> filter)
+        public ForTokenWrite filter(Predicate<Replica> filter)
         {
             EndpointsForToken filtered = all().filter(filter);
             // AbstractReplicaCollection.filter returns itself if all elements match the filter
             if (filtered == all()) return this;
+            if (pending().isEmpty()) return new ForTokenWrite(replicationStrategy(), filtered, pending(), filtered);
             // unique by endpoint, so can for efficiency filter only on endpoint
-            return new ReplicaLayout.ForTokenWrite(
+            return new ForTokenWrite(
                     replicationStrategy(),
                     natural().keep(filtered.endpoints()),
                     pending().keep(filtered.endpoints()),
@@ -206,8 +209,8 @@ public abstract class ReplicaLayout<E extends Endpoints<E>>
         // TODO: these should be cached, not the natural replicas
         // TODO: race condition to fetch these. implications??
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
-        EndpointsForToken natural = replicationStrategy.getNaturalReplicasForToken(token);
-        EndpointsForToken pending = StorageService.instance.getTokenMetadata().pendingEndpointsForToken(token, keyspace.getName());
+        EndpointsForToken natural = EndpointsForToken.natural(replicationStrategy, token);
+        EndpointsForToken pending = EndpointsForToken.pending(keyspace, token);
         return forTokenWrite(replicationStrategy, natural, pending);
     }
 
@@ -325,11 +328,11 @@ public abstract class ReplicaLayout<E extends Endpoints<E>>
      * @return the read layout for a token - this includes only live natural replicas, i.e. those that are not pending
      * and not marked down by the failure detector. these are reverse sorted by the badness score of the configured snitch
      */
-    static ReplicaLayout.ForTokenRead forTokenReadLiveSorted(AbstractReplicationStrategy replicationStrategy, Token token)
+    public static ReplicaLayout.ForTokenRead forTokenReadLiveSorted(AbstractReplicationStrategy replicationStrategy, Token token)
     {
         EndpointsForToken replicas = replicationStrategy.getNaturalReplicasForToken(token);
         replicas = DatabaseDescriptor.getEndpointSnitch().sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), replicas);
-        replicas = replicas.filter(FailureDetector.isReplicaAlive);
+        replicas = replicas.filter(IFailureDetector.isReplicaAlive);
         return new ReplicaLayout.ForTokenRead(replicationStrategy, replicas);
     }
 
@@ -342,8 +345,19 @@ public abstract class ReplicaLayout<E extends Endpoints<E>>
     {
         EndpointsForRange replicas = replicationStrategy.getNaturalReplicas(range.right);
         replicas = DatabaseDescriptor.getEndpointSnitch().sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), replicas);
-        replicas = replicas.filter(FailureDetector.isReplicaAlive);
+        replicas = replicas.filter(IFailureDetector.isReplicaAlive);
         return new ReplicaLayout.ForRangeRead(replicationStrategy, range, replicas);
     }
 
+    // note that: range may span multiple vnodes
+    public static ReplicaLayout.ForRangeRead forFullRangeReadLiveSorted(AbstractReplicationStrategy replicationStrategy, AbstractBounds<PartitionPosition> range)
+    {
+        Preconditions.checkState(range.left.equals(DatabaseDescriptor.getPartitioner().getMinimumToken().minKeyBound()));
+        Preconditions.checkState(range.right.equals(DatabaseDescriptor.getPartitioner().getMinimumToken().minKeyBound()));
+
+        EndpointsForRange replicas = replicationStrategy.getEndpointsForFullRange();
+        replicas = DatabaseDescriptor.getEndpointSnitch().sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), replicas);
+        replicas = replicas.filter(FailureDetector.isReplicaAlive);
+        return new ReplicaLayout.ForRangeRead(replicationStrategy, range, replicas);
+    }
 }

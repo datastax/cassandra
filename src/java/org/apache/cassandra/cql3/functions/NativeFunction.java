@@ -19,7 +19,10 @@ package org.apache.cassandra.cql3.functions;
 
 import java.util.Arrays;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * Base class for our native/hardcoded functions.
@@ -31,8 +34,37 @@ public abstract class NativeFunction extends AbstractFunction
         super(FunctionName.nativeFunction(name), Arrays.asList(argTypes), returnType);
     }
 
-    public boolean isNative()
+    @Override
+    public final boolean isNative()
     {
         return true;
     }
+
+    @Override
+    public boolean isDeterministic()
+    {
+        // Most of our functions are deterministic, the other ones should override this
+        return true;
+    }
+
+    /**
+     * Returns a copy of this function using its old pre-5.0 name before the adoption of snake-cased function names.
+     * Those naming conventions were adopted in 5.0, but we still need to support the old names for
+     * compatibility. See CASSANDRA-18037 for further details.
+     *
+     * @return a copy of this function using its old pre-5.0 deprecated name, or {@code null} if the pre-5.0 function
+     * name already satisfied the naming conventions.
+     */
+    @Nullable
+    public NativeFunction withLegacyName()
+    {
+        return null;
+    }
+
+    @Override
+    public Arguments newArguments(ProtocolVersion version)
+    {
+        return FunctionArguments.newInstanceForNativeFunction(version, argTypes);
+    }
+
 }

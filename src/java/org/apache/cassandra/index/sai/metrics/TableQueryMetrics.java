@@ -1,0 +1,569 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.cassandra.index.sai.metrics;
+
+import java.util.EnumMap;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
+import java.util.regex.Pattern;
+
+import javax.annotation.Nullable;
+
+import com.codahale.metrics.Counter;
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.Timer;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.tracing.Tracing;
+
+import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
+
+/**
+ * Table query metrics for different kinds of query. The metrics for each type of query are divided into two groups:
+ * <ul>
+ *    <li>Per table counters ({@link PerTable}).</li>
+ *    <li>Per query timers and histograms ({@link PerQuery}).</li>
+ * </ul>
+ * The following kinds of query are tracked:
+ * <ul>
+ *    <li>All SAI queries.</li>
+ *    <li>Single-partition filter queries (filtering only, no top-k).</li>
+ *    <li>Multi-partition filter queries (filtering only, no top-k).</li>
+ *    <li>Single-partition top-k queries (top-k only, no filtering).</li>
+ *    <li>Multi-partition top-k queries (top-k only, no filtering).</li>
+ *    <li>Single-partition hybrid queries (both filtering and top-k).</li>
+ *    <li>Multi-partition hybrid queries (both filtering and top-k).</li>
+ * </ul>
+ * The general metrics for all SAI queries are always recorded. The other kinds of queries are recorded only if they are
+ * enabled via the {@link CassandraRelevantProperties#SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED} and
+ * {@link CassandraRelevantProperties#SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED} system properties.
+ */
+public class TableQueryMetrics
+{
+    /** Per table metrics for all kinds of queries (counters). */
+    public final EnumMap<QueryKind, PerTable> perTableMetrics = new EnumMap<>(QueryKind.class);
+
+    /** Per query metrics for all kinds of queries (timers and histograms). */
+    public final EnumMap<QueryKind, PerQuery> perQueryMetrics = new EnumMap<>(QueryKind.class);
+
+    public TableQueryMetrics(TableMetadata table)
+    {
+        addMetrics(table, QueryKind.ALL, cmd -> true);
+        addMetrics(table, QueryKind.SP_FILTER_ONLY, cmd -> !cmd.isTopK() && cmd.usesIndexFiltering() && cmd.isSinglePartition()); // single-partition-queries that are filtering only
+        addMetrics(table, QueryKind.MP_FILTER_ONLY, cmd -> !cmd.isTopK() && cmd.usesIndexFiltering() && !cmd.isSinglePartition()); // multi-partition queries that are filtering only
+        addMetrics(table, QueryKind.SP_TOPK_ONLY, cmd -> cmd.isTopK() && !cmd.usesIndexFiltering() && cmd.isSinglePartition()); // single-partition queries that are top-k only
+        addMetrics(table, QueryKind.MP_TOPK_ONLY, cmd -> cmd.isTopK() && !cmd.usesIndexFiltering() && !cmd.isSinglePartition()); // multi-partition queries that are top-k only
+        addMetrics(table, QueryKind.SP_HYBRID, cmd -> cmd.isTopK() && cmd.usesIndexFiltering() && cmd.isSinglePartition()); // single-partition queries that are both filtering and top-k
+        addMetrics(table, QueryKind.MP_HYBRID, cmd -> cmd.isTopK() && cmd.usesIndexFiltering() && !cmd.isSinglePartition()); // multi-partition queries that are both filtering and top-k
+    }
+
+    public enum QueryKind
+    {
+        ALL(""),
+        SP_FILTER_ONLY("SinglePartitionFilterOnly"),
+        MP_FILTER_ONLY("MultiPartitionFilterOnly"),
+        SP_TOPK_ONLY("SinglePartitionTopKOnly"),
+        MP_TOPK_ONLY("MultiPartitionTopKOnly"),
+        SP_HYBRID("SinglePartitionHybrid"),
+        MP_HYBRID("MultiPartitionHybrid");
+
+        private final String name;
+
+        QueryKind(String name)
+        {
+            this.name = name;
+        }
+    }
+
+    private void addMetrics(TableMetadata table, QueryKind queryKind, Predicate<ReadCommand> filter)
+    {
+        if (queryKind == QueryKind.ALL)
+        {
+            perTableMetrics.put(queryKind, new PerTableAll(table, queryKind, filter));
+            perQueryMetrics.put(queryKind, new PerQuery(table, queryKind, filter));
+        }
+        else
+        {
+            if (CassandraRelevantProperties.SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED.getBoolean())
+                perTableMetrics.put(queryKind, new PerTable(table, queryKind, filter));
+
+            if (CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.getBoolean())
+                perQueryMetrics.put(queryKind, new PerQuery(table, queryKind, filter));
+        }
+    }
+
+    /**
+     * Records metrics for a single query.
+     *
+     * @param context the stats relevant to the execution of a single query
+     * @param command the query command
+     */
+    public void record(QueryContext context, ReadCommand command)
+    {
+        QueryContext.Snapshot snapshot = context.snapshot();
+        perTableMetrics.values().forEach(m -> m.record(snapshot, command));
+        perQueryMetrics.values().forEach(m -> m.record(snapshot, command));
+
+        if (Tracing.isTracing())
+        {
+            final long queryLatencyMicros = TimeUnit.NANOSECONDS.toMicros(snapshot.totalQueryTimeNs);
+
+            if (snapshot.queryPlanInfo != null && snapshot.queryPlanInfo.searchExecutedBeforeOrder)
+            {
+                Tracing.trace("Index query accessed memtable indexes, {}, and {}, selected {} before ranking, " +
+                              "post-filtered {} in {}, and took {} microseconds.",
+                              pluralize(snapshot.sstablesHit, "SSTable index", "es"),
+                              pluralize(snapshot.segmentsHit, "segment", "s"),
+                              pluralize(snapshot.rowsFetched, "row", "s"),
+                              pluralize(snapshot.rowsReturned, "row", "s"),
+                              pluralize(snapshot.partitionsReturned, "partition", "s"),
+                              queryLatencyMicros);
+            }
+            else
+            {
+                Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, " +
+                              "and took {} microseconds.",
+                              pluralize(snapshot.sstablesHit, "SSTable index", "es"),
+                              pluralize(snapshot.segmentsHit, "segment", "s"),
+                              pluralize(snapshot.rowsReturned, "row", "s"),
+                              pluralize(snapshot.partitionsReturned, "partition", "s"),
+                              queryLatencyMicros);
+            }
+        }
+    }
+
+    /**
+     * Releases all the resources used by these metrics.
+     */
+    public void release()
+    {
+        perTableMetrics.values().forEach(PerTable::release);
+        perQueryMetrics.values().forEach(PerQuery::release);
+    }
+
+    private static String pluralize(long count, String root, String plural)
+    {
+        return count == 1 ? String.format("1 %s", root) : String.format("%d %s%s", count, root, plural);
+    }
+
+    /**
+     * Family of metrics for a specific kind of query.
+     */
+    public abstract static class AbstractQueryMetrics extends AbstractMetrics
+    {
+        private static final Pattern PATTERN = Pattern.compile("Query");
+
+        private final Predicate<ReadCommand> filter;
+
+        private AbstractQueryMetrics(String keyspace, String table, String scope, QueryKind queryKind, Predicate<ReadCommand> filter)
+        {
+            super(keyspace, table, makeName(scope, queryKind));
+            this.filter = filter;
+        }
+
+        public void record(QueryContext.Snapshot snapshot, ReadCommand command)
+        {
+            if (filter.test(command))
+                record(snapshot);
+        }
+
+        protected abstract void record(QueryContext.Snapshot snapshot);
+
+        public static String makeName(String scope, QueryKind queryKind)
+        {
+            return PATTERN.matcher(scope).replaceFirst(queryKind.name + "Query");
+        }
+    }
+
+    /**
+     * Per table metrics for a specific kind of query. These metrics are always counters.
+     */
+    public static class PerTable extends AbstractQueryMetrics
+    {
+        public static final String METRIC_TYPE = "TableQueryMetrics";
+
+        /** Total number of queries that have timed out. */
+        public final Counter totalQueryTimeouts;
+
+        /** Total number of partition/row keys fetched from the indexes. */
+        public final Counter totalKeysFetched;
+
+        /** Total number of live partitions fetched from the storage engine, before post-filtering. */
+        public final Counter totalPartitionsFetched;
+
+        /** Total number of live partitions returned to the coordinator, after post-filtering. */
+        public final Counter totalPartitionsReturned;
+
+        /** Total number of deleted partitions that are fetched. */
+        public final Counter totalPartitionTombstonesFetched;
+
+        /** Total number of live rows fetched from the storage engine, before post-filtering. */
+        public final Counter totalRowsFetched;
+
+        /** Total number of live rows returned to the coordinator, after post-filtering. */
+        public final Counter totalRowsReturned;
+
+        /** Total number of deleted individual rows or ranges of rows that are fetched. */
+        public final Counter totalRowTombstonesFetched;
+
+        /** Total number of cells fetched from the storage engine, regardless of liveness, before post-filtering. */
+        public final Counter totalCellsFetched;
+
+        /** Total number of cells returned to the coordinator, regardless of liveness, after post-filtering. */
+        public final Counter totalCellsReturned;
+
+        /** Total number of completed queries. */
+        public final Counter totalQueriesCompleted;
+
+        /**
+         * Aggregated metrics about the query plans, {@code null} if not enbaled in
+         * {@link CassandraRelevantProperties#SAI_QUERY_PLAN_METRICS_ENABLED}.
+         */
+        @Nullable
+        public final QueryPlanMetrics queryPlanMetrics;
+
+        /**
+         * @param table the table to measure metrics for
+         * @param queryKind an identifier for the kind of query which metrics are being recorded for
+         * @param filter a predicate that determines whether a given query should be recorded
+         */
+        public PerTable(TableMetadata table, QueryKind queryKind, Predicate<ReadCommand> filter)
+        {
+            super(table.keyspace, table.name, METRIC_TYPE, queryKind, filter);
+
+            totalKeysFetched = Metrics.counter(createMetricName("TotalKeysFetched"));
+            totalPartitionsFetched = Metrics.counter(createMetricName("TotalPartitionsFetched"));
+            totalPartitionsReturned = Metrics.counter(createMetricName("TotalPartitionsReturned"));
+            totalPartitionTombstonesFetched = Metrics.counter(createMetricName("TotalPartitionTombstonesFetched"));
+            totalRowsFetched = Metrics.counter(createMetricName("TotalRowsFetched"));
+            totalRowsReturned = Metrics.counter(createMetricName("TotalRowsReturned"));
+            totalRowTombstonesFetched = Metrics.counter(createMetricName("TotalRowTombstonesFetched"));
+            totalCellsFetched = Metrics.counter(createMetricName("TotalCellsFetched"));
+            totalCellsReturned = Metrics.counter(createMetricName("TotalCellsReturned"));
+            totalQueriesCompleted = Metrics.counter(createMetricName("TotalQueriesCompleted"));
+            totalQueryTimeouts = Metrics.counter(createMetricName("TotalQueryTimeouts"));
+            queryPlanMetrics = (CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean())
+                                 ? new QueryPlanMetrics()
+                                 : null;
+        }
+
+        @Override
+        public void record(QueryContext.Snapshot snapshot)
+        {
+            if (snapshot.queryTimedOut)
+            {
+                totalQueryTimeouts.inc();
+            }
+
+            totalQueriesCompleted.inc();
+            totalKeysFetched.inc(snapshot.keysFetched);
+            totalPartitionsFetched.inc(snapshot.partitionsFetched);
+            totalPartitionsReturned.inc(snapshot.partitionsReturned);
+            totalPartitionTombstonesFetched.inc(snapshot.partitionTombstonesFetched);
+            totalRowsFetched.inc(snapshot.rowsFetched);
+            totalRowsReturned.inc(snapshot.rowsReturned);
+            totalRowTombstonesFetched.inc(snapshot.rowTombstonesFetched);
+            totalCellsFetched.inc(snapshot.cellsFetched);
+            totalCellsReturned.inc(snapshot.cellsReturned);
+
+            QueryContext.PlanInfo queryPlanInfo = snapshot.queryPlanInfo;
+            if (queryPlanInfo != null && queryPlanMetrics != null)
+            {
+                queryPlanMetrics.totalCostEstimated.inc(queryPlanInfo.costEstimated);
+                queryPlanMetrics.totalRowsToReturnEstimated.inc(queryPlanInfo.rowsToReturnEstimated);
+                queryPlanMetrics.totalRowsToFetchEstimated.inc(queryPlanInfo.rowsToFetchEstimated);
+                queryPlanMetrics.totalKeysToIterateEstimated.inc(queryPlanInfo.keysToIterateEstimated);
+
+                if (queryPlanInfo.filterExecutedAfterOrderedScan)
+                    queryPlanMetrics.sortThenFilterQueriesCompleted.inc();
+                if (queryPlanInfo.searchExecutedBeforeOrder)
+                    queryPlanMetrics.filterThenSortQueriesCompleted.inc();
+            }
+        }
+
+        public class QueryPlanMetrics
+        {
+            public final Counter totalRowsToReturnEstimated;
+            public final Counter totalRowsToFetchEstimated;
+            public final Counter totalKeysToIterateEstimated;
+            public final Counter totalCostEstimated;
+
+            public final Counter sortThenFilterQueriesCompleted;
+            public final Counter filterThenSortQueriesCompleted;
+
+
+            public QueryPlanMetrics()
+            {
+                totalRowsToReturnEstimated = Metrics.counter(createMetricName("TotalRowsToReturnEstimated"));
+                totalRowsToFetchEstimated = Metrics.counter(createMetricName("TotalRowsToFetchEstimated"));
+                totalKeysToIterateEstimated = Metrics.counter(createMetricName("TotalKeysToIterateEstimated"));
+                totalCostEstimated = Metrics.counter(createMetricName("TotalCostEstimated"));
+
+                sortThenFilterQueriesCompleted = Metrics.counter(createMetricName("SortThenFilterQueriesCompleted"));
+                filterThenSortQueriesCompleted = Metrics.counter(createMetricName("FilterThenSortQueriesCompleted"));
+            }
+        }
+    }
+
+    public static class PerTableAll extends PerTable
+    {
+        /** Total number of completed BM25 queries. */
+        public final Counter totalBM25QueriesCompleted;
+
+        public PerTableAll(TableMetadata table, QueryKind queryKind, Predicate<ReadCommand> filter)
+        {
+            super(table, queryKind, filter);
+            totalBM25QueriesCompleted = Metrics.counter(createMetricName("TotalBM25QueriesCompleted"));
+        }
+
+        @Override
+        public void record(QueryContext.Snapshot snapshot)
+        {
+            super.record(snapshot);
+        }
+
+        @Override
+        public final void record(QueryContext.Snapshot snapshot, ReadCommand command)
+        {
+            super.record(snapshot, command);
+
+            if (command.isBM25())
+                totalBM25QueriesCompleted.inc();
+        }
+    }
+
+    /**
+     * Per query metrics for a specific kind of query. These metrics are always timers and histograms.
+     */
+    public static class PerQuery extends AbstractQueryMetrics
+    {
+        public static final String METRIC_TYPE = "PerQuery";
+
+        @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+        public final Optional<Timer> queryLatency;
+
+        /** Number of sstables visited by the query. */
+        public final Histogram sstablesHit;
+
+        /** Number of index segments having results for the query. */
+        public final Histogram segmentsHit;
+
+        /** Number of partition/row keys fetched from the indexes. */
+        public final Histogram keysFetched;
+
+        /** Number of live partitions fetched from the storage engine, before post-filtering. */
+        public final Histogram partitionsFetched;
+
+        /** Number of live partitions returned to the coordinator, after post-filtering. */
+        public final Histogram partitionsReturned;
+
+        /** Number of deleted partitions that have been fetched. */
+        public final Histogram partitionTombstonesFetched;
+
+        /** Number of live rows fetched from the storage engine, before post-filtering. */
+        public final Histogram rowsFetched;
+
+        /** Number of live rows returned to the coordinator, after post-filtering. */
+        public final Histogram rowsReturned;
+
+        /** Number of deleted individual rows or ranges of rows that have been fetched. */
+        public final Histogram rowTombstonesFetched;
+
+        /** Number of times the query has jumped to the position of a row ID within a trie (literal or key) posting list. */
+        public final Histogram postingsSkips;
+
+        /** Number of times the query has advanced into a trie (literal or key) posting list. */
+        public final Histogram postingsDecodes;
+
+        /** Number of BKD (numeric) merged posting lists visited by the query. */
+        public final Histogram kdTreePostingsNumPostings;
+
+        /** Number of times the query has jumped to the position of a row ID within a BKD (numeric) posting list. */
+        public final Histogram kdTreePostingsSkips;
+
+        /** Number of times the query has advanced into a BKD (numeric) posting list. */
+        public final Histogram kdTreePostingsDecodes;
+
+        /**
+         * Cumulative time spent searching ANN graph.
+         */
+        public final Timer annGraphSearchLatency;
+
+        public final Timer postFilteringReadLatency;
+
+        /**
+         * Aggregated metrics about the query plans, {@code null} if not enbaled in
+         * {@link CassandraRelevantProperties#SAI_QUERY_PLAN_METRICS_ENABLED}.
+         */
+        @Nullable
+        public final QueryPlanMetrics queryPlanMetrics;
+
+        /**
+         * @param table the table to measure metrics for
+         * @param queryKind an identifier for the kind of query which metrics are being recorded for
+         * @param filter a predicate that determines whether a given query should be recorded
+         */
+        public PerQuery(TableMetadata table, QueryKind queryKind, Predicate<ReadCommand> filter)
+        {
+            super(table.keyspace, table.name, METRIC_TYPE, queryKind, filter);
+
+            queryLatency = (CassandraRelevantProperties.SAI_HISTOGRAMS_ENABLED.getBoolean() ||
+                            (CassandraRelevantProperties.SAI_ALL_QUERIES_LATENCY_HISTOGRAM_ENABLED.getBoolean() && queryKind == QueryKind.ALL))
+                           ? Optional.of(Metrics.timer(createMetricName("QueryLatency")))
+                           : Optional.empty();
+
+            sstablesHit = Metrics.histogram(createMetricName("SSTableIndexesHit"), false);
+            segmentsHit = Metrics.histogram(createMetricName("IndexSegmentsHit"), false);
+            keysFetched = Metrics.histogram(createMetricName("KeysFetched"), false);
+            partitionsFetched = Metrics.histogram(createMetricName("PartitionsFetched"), false);
+            partitionsReturned = Metrics.histogram(createMetricName("PartitionsReturned"), false);
+            partitionTombstonesFetched = Metrics.histogram(createMetricName("PartitionTombstonesFetched"), false);
+            rowsFetched = Metrics.histogram(createMetricName("RowsFetched"), false);
+            rowsReturned = Metrics.histogram(createMetricName("RowsReturned"), false);
+            rowTombstonesFetched = Metrics.histogram(createMetricName("RowTombstonesFetched"), false);
+
+            postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), true);
+            postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
+
+            kdTreePostingsSkips = Metrics.histogram(createMetricName("KDTreePostingsSkips"), true);
+            kdTreePostingsNumPostings = Metrics.histogram(createMetricName("KDTreePostingsNumPostings"), false);
+            kdTreePostingsDecodes = Metrics.histogram(createMetricName("KDTreePostingsDecodes"), false);
+
+            // Key vector metrics that translate to performance
+            annGraphSearchLatency = Metrics.timer(createMetricName("ANNGraphSearchLatency"));
+            postFilteringReadLatency = Metrics.timer(createMetricName("PostFilteringReadLatency"));
+
+            queryPlanMetrics = CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean()
+                                 ? new QueryPlanMetrics()
+                                 : null;
+        }
+
+        @Override
+        public void record(QueryContext.Snapshot snapshot)
+        {
+            queryLatency.ifPresent(timer -> timer.update(snapshot.totalQueryTimeNs, TimeUnit.NANOSECONDS));
+            sstablesHit.update(snapshot.sstablesHit);
+            segmentsHit.update(snapshot.segmentsHit);
+            keysFetched.update(snapshot.keysFetched);
+            partitionsFetched.update(snapshot.partitionsFetched);
+            partitionsReturned.update(snapshot.partitionsReturned);
+            partitionTombstonesFetched.update(snapshot.partitionTombstonesFetched);
+            rowsFetched.update(snapshot.rowsFetched);
+            rowsReturned.update(snapshot.rowsReturned);
+            rowTombstonesFetched.update(snapshot.rowTombstonesFetched);
+
+            // Record literal index cache metrics.
+            if (snapshot.trieSegmentsHit > 0)
+            {
+                postingsSkips.update(snapshot.triePostingsSkips);
+                postingsDecodes.update(snapshot.triePostingsDecodes);
+            }
+
+            // Record numeric index cache metrics.
+            if (snapshot.bkdSegmentsHit > 0)
+            {
+                kdTreePostingsNumPostings.update(snapshot.bkdPostingListsHit);
+                kdTreePostingsSkips.update(snapshot.bkdPostingsSkips);
+                kdTreePostingsDecodes.update(snapshot.bkdPostingsDecodes);
+            }
+
+            // Record vector index metrics.
+            // If ann brute forced the whole search, this is 0. We don't measure brute force latency. Maybe we should?
+            // At the very least, we collect brute force comparison metrics, which should give a reasonable indicator
+            // of work done.
+            if (snapshot.annGraphSearchLatency > 0)
+            {
+                annGraphSearchLatency.update(snapshot.annGraphSearchLatency, TimeUnit.NANOSECONDS);
+            }
+            postFilteringReadLatency.update(snapshot.postFilteringReadLatency, TimeUnit.NANOSECONDS);
+
+            QueryContext.PlanInfo queryPlanInfo = snapshot.queryPlanInfo;
+            if (queryPlanInfo != null && queryPlanMetrics != null)
+            {
+                queryPlanMetrics.costEstimated.update(queryPlanInfo.costEstimated);
+                queryPlanMetrics.rowsToReturnEstimated.update(queryPlanInfo.rowsToReturnEstimated);
+                queryPlanMetrics.rowsToFetchEstimated.update(queryPlanInfo.rowsToFetchEstimated);
+                queryPlanMetrics.keysToIterateEstimated.update(queryPlanInfo.keysToIterateEstimated);
+                queryPlanMetrics.logSelectivityEstimated.update(queryPlanInfo.logSelectivityEstimated);
+                queryPlanMetrics.indexReferencesInQuery.update(queryPlanInfo.indexReferencesInQuery);
+                queryPlanMetrics.indexReferencesInPlan.update(queryPlanInfo.indexReferencesInPlan);
+            }
+        }
+
+        /// Metrics related to query planning.
+        /// Moved to separate class so they can be enabled/disabled as a group.
+        public class QueryPlanMetrics
+        {
+            /**
+             * Query execution cost as estimated by the planner
+             */
+            public final Histogram costEstimated;
+
+            /**
+             * Number of rows to be returned from the query as estimated by the planner
+             */
+            public final Histogram rowsToReturnEstimated;
+
+            /**
+             * Number of rows to be fetched by the query as estimated by the planner
+             */
+            public final Histogram rowsToFetchEstimated;
+
+            /**
+             * Number of keys to be iterated by the query as estimated by the planner
+             */
+            public final Histogram keysToIterateEstimated;
+
+            /**
+             * Negative decimal logarithm of selectivity of the query, before applying the LIMIT clause.
+             * We use logarithm because selectivity values can be very small (e.g. 10^-9).
+             */
+            public final Histogram logSelectivityEstimated;
+
+            /**
+             * Number of indexes referenced by the optimized query plan.
+             * The same index referenced from unrelated query clauses,
+             * leading to separate index searches, are counted separately.
+             */
+            public final Histogram indexReferencesInPlan;
+
+            /**
+             * Number of indexes referenced by the original query plan before optimization (as stated in the query text)
+             */
+            public final Histogram indexReferencesInQuery;
+
+            QueryPlanMetrics()
+            {
+                costEstimated = Metrics.histogram(createMetricName("CostEstimated"), false);
+                rowsToReturnEstimated = Metrics.histogram(createMetricName("RowsToReturnEstimated"), true);
+                rowsToFetchEstimated = Metrics.histogram(createMetricName("RowsToFetchEstimated"), true);
+                keysToIterateEstimated = Metrics.histogram(createMetricName("KeysToIterateEstimated"), true);
+                logSelectivityEstimated = Metrics.histogram(createMetricName("LogSelectivityEstimated"), true);
+                indexReferencesInPlan = Metrics.histogram(createMetricName("IndexReferencesInPlan"), true);
+                indexReferencesInQuery = Metrics.histogram(createMetricName("IndexReferencesInQuery"), false);
+            }
+        }
+
+    }
+
+
+}

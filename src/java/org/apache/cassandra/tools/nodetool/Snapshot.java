@@ -17,12 +17,6 @@
  */
 package org.apache.cassandra.tools.nodetool;
 
-import static com.google.common.collect.Iterables.toArray;
-import static org.apache.commons.lang3.StringUtils.join;
-import io.airlift.airline.Arguments;
-import io.airlift.airline.Command;
-import io.airlift.airline.Option;
-
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.ArrayList;
@@ -30,8 +24,17 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import io.airlift.airline.Arguments;
+import io.airlift.airline.Command;
+import io.airlift.airline.Option;
+import org.apache.cassandra.config.DurationSpec;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
+
+import static com.google.common.collect.Iterables.toArray;
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import static org.apache.commons.lang3.StringUtils.join;
 
 @Command(name = "snapshot", description = "Take a snapshot of specified keyspaces or a snapshot of the specified table")
 public class Snapshot extends NodeToolCmd
@@ -43,13 +46,16 @@ public class Snapshot extends NodeToolCmd
     private String table = null;
 
     @Option(title = "tag", name = {"-t", "--tag"}, description = "The name of the snapshot")
-    private String snapshotName = Long.toString(System.currentTimeMillis());
+    private String snapshotName = Long.toString(currentTimeMillis());
 
     @Option(title = "ktlist", name = { "-kt", "--kt-list", "-kc", "--kc.list" }, description = "The list of Keyspace.table to take snapshot.(you must not specify only keyspace)")
     private String ktList = null;
 
     @Option(title = "skip-flush", name = {"-sf", "--skip-flush"}, description = "Do not flush memtables before snapshotting (snapshot will not contain unflushed data)")
     private boolean skipFlush = false;
+
+    @Option(title = "ttl", name = {"--ttl"}, description = "Specify a TTL of created snapshot")
+    private String ttl = null;
 
     @Override
     public void execute(NodeProbe probe)
@@ -63,7 +69,15 @@ public class Snapshot extends NodeToolCmd
 
             Map<String, String> options = new HashMap<String,String>();
             options.put("skipFlush", Boolean.toString(skipFlush));
+            if (null != ttl) {
+                DurationSpec.LongNanosecondsBound d = new DurationSpec.LongNanosecondsBound(ttl);
+                options.put("ttl", d.toString());
+            }
 
+            if (!snapshotName.isEmpty() && snapshotName.contains(File.pathSeparator()))
+            {
+                throw new IOException("Snapshot name cannot contain " + File.pathSeparator());
+            }
             // Create a separate path for kclist to avoid breaking of already existing scripts
             if (null != ktList && !ktList.isEmpty())
             {

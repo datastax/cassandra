@@ -17,16 +17,20 @@
  */
 package org.apache.cassandra.io.util;
 
-import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.StandardOpenOption;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
 
@@ -41,6 +45,8 @@ import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
  */
 public final class ChannelProxy extends SharedCloseableImpl
 {
+    private static final Logger log = LoggerFactory.getLogger(ChannelProxy.class);
+    private final File file;
     private final String filePath;
     private final FileChannel channel;
 
@@ -52,25 +58,21 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
         catch (IOException e)
         {
-            throw new RuntimeException(e);
+            throw new UncheckedIOException(e);
         }
-    }
-
-    public ChannelProxy(String path)
-    {
-        this (new File(path));
     }
 
     public ChannelProxy(File file)
     {
-        this(file.getPath(), openChannel(file));
+        this(file, openChannel(file));
     }
 
-    public ChannelProxy(String filePath, FileChannel channel)
+    public ChannelProxy(File file, FileChannel channel)
     {
-        super(new Cleanup(filePath, channel));
+        super(new Cleanup(file.path(), channel));
 
-        this.filePath = filePath;
+        this.file = file;
+        this.filePath = file.path();
         this.channel = channel;
     }
 
@@ -78,6 +80,7 @@ public final class ChannelProxy extends SharedCloseableImpl
     {
         super(copy);
 
+        this.file = copy.file;
         this.filePath = copy.filePath;
         this.channel = copy.channel;
     }
@@ -118,7 +121,7 @@ public final class ChannelProxy extends SharedCloseableImpl
      */
     public final ChannelProxy newChannel()
     {
-        return new ChannelProxy(filePath);
+        return new ChannelProxy(file);
     }
 
     public ChannelProxy sharedCopy()
@@ -128,7 +131,17 @@ public final class ChannelProxy extends SharedCloseableImpl
 
     public String filePath()
     {
-        return filePath;
+        return file.path();
+    }
+
+    public File getFile()
+    {
+        return file;
+    }
+
+    public File file()
+    {
+        return file;
     }
 
     public int read(ByteBuffer buffer, long position)
@@ -138,9 +151,10 @@ public final class ChannelProxy extends SharedCloseableImpl
             // FIXME: consider wrapping in a while loop
             return channel.read(buffer, position);
         }
-        catch (IOException e)
+        catch (Throwable e)
         {
-            throw new FSReadError(e, filePath);
+            JVMStabilityInspector.inspectThrowable(e);
+            throw new FSReadError(e, filePath());
         }
     }
 
@@ -150,9 +164,10 @@ public final class ChannelProxy extends SharedCloseableImpl
         {
             return channel.transferTo(position, count, target);
         }
-        catch (IOException e)
+        catch (Throwable e)
         {
-            throw new FSReadError(e, filePath);
+            JVMStabilityInspector.inspectThrowable(e);
+            throw new FSReadError(e, filePath());
         }
     }
 
@@ -162,9 +177,10 @@ public final class ChannelProxy extends SharedCloseableImpl
         {
             return channel.map(mode, position, size);
         }
-        catch (IOException e)
+        catch (Throwable e)
         {
-            throw new FSReadError(e, filePath);
+            JVMStabilityInspector.inspectThrowable(e);
+            throw new FSReadError(e, filePath());
         }
     }
 
@@ -176,13 +192,17 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, filePath);
+            throw new FSReadError(e, filePath());
         }
     }
 
-    public int getFileDescriptor()
+    /**
+     * Apply FADV_DONTNEED to the file region.
+     */
+    public void trySkipCache(long offset, long length)
     {
-        return NativeLibrary.getfd(channel);
+        int fd = INativeLibrary.instance.getfd(channel);
+        INativeLibrary.instance.trySkipCache(fd, offset, length, file.absolutePath());
     }
 
     @Override

@@ -18,20 +18,22 @@
 
 package org.apache.cassandra.db.lifecycle;
 
-import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.io.IOException;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.IGNORE_MISSING_NATIVE_FILE_HINTS;
 
 /**
  * Because a column family may have sstables on different disks and disks can
@@ -42,11 +44,14 @@ import org.apache.cassandra.utils.NativeLibrary;
  * partial records in case we crashed after writing to one replica but
  * before compliting the write to another replica.
  *
+ * Note: this is used by {@link LogTransaction}
+ *
  * @see LogFile
  */
 final class LogReplica implements AutoCloseable
 {
     private static final Logger logger = LoggerFactory.getLogger(LogReplica.class);
+    private static final boolean REQUIRE_FD = !IGNORE_MISSING_NATIVE_FILE_HINTS.getBoolean();
 
     private final File file;
     private int directoryDescriptor;
@@ -54,18 +59,36 @@ final class LogReplica implements AutoCloseable
 
     static LogReplica create(File directory, String fileName)
     {
-        int folderFD = NativeLibrary.tryOpenDirectory(directory.getPath());
-        if (folderFD == -1 && !FBUtilities.isWindows)
-            throw new FSReadError(new IOException(String.format("Invalid folder descriptor trying to create log replica %s", directory.getPath())), directory.getPath());
+        int folderFD = INativeLibrary.instance.tryOpenDirectory(directory);
+        if (folderFD == -1  && REQUIRE_FD)
+        {
+            if (DatabaseDescriptor.isClientInitialized())
+            {
+                logger.warn("Invalid folder descriptor trying to create log replica {}. Continuing without Native I/O support.", directory.path());
+            }
+            else
+            {
+                throw new FSReadError(new IOException(String.format("Invalid folder descriptor trying to create log replica %s", directory.path())), directory.path());
+            }
+        }
 
-        return new LogReplica(new File(fileName), folderFD);
+        return new LogReplica(directory.resolve(fileName), folderFD);
     }
 
     static LogReplica open(File file)
     {
-        int folderFD = NativeLibrary.tryOpenDirectory(file.getParentFile().getPath());
-        if (folderFD == -1 && !FBUtilities.isWindows)
-            throw new FSReadError(new IOException(String.format("Invalid folder descriptor trying to create log replica %s", file.getParentFile().getPath())), file.getParentFile().getPath());
+        int folderFD = INativeLibrary.instance.tryOpenDirectory(file.parent());
+        if (folderFD == -1)
+        {
+            if (DatabaseDescriptor.isClientInitialized())
+            {
+                logger.warn("Invalid folder descriptor trying to create log replica {}. Continuing without Native I/O support.", file.parentPath());
+            }
+            else
+            {
+                throw new FSReadError(new IOException(String.format("Invalid folder descriptor trying to create log replica %s", file.parent().path())), file.parent().path());
+            }
+        }
 
         return new LogReplica(file, folderFD);
     }
@@ -88,12 +111,12 @@ final class LogReplica implements AutoCloseable
 
     String getFileName()
     {
-        return file.getName();
+        return file.name();
     }
 
     String getDirectory()
     {
-        return file.getParent();
+        return file.parentPath();
     }
 
     void append(LogRecord record)
@@ -120,7 +143,7 @@ final class LogReplica implements AutoCloseable
         try
         {
             if (directoryDescriptor >= 0)
-                NativeLibrary.trySync(directoryDescriptor);
+                INativeLibrary.instance.trySync(directoryDescriptor);
         }
         catch (FSError e)
         {
@@ -144,7 +167,7 @@ final class LogReplica implements AutoCloseable
     {
         if (directoryDescriptor >= 0)
         {
-            NativeLibrary.tryCloseFD(directoryDescriptor);
+            INativeLibrary.instance.tryCloseFD(directoryDescriptor);
             directoryDescriptor = -1;
         }
     }
@@ -162,7 +185,7 @@ final class LogReplica implements AutoCloseable
 
     void printContentsWithAnyErrors(StringBuilder str)
     {
-        str.append(file.getPath());
+        str.append(file.path());
         str.append(System.lineSeparator());
         FileUtils.readLines(file).forEach(line -> printLineWithAnyError(str, line));
     }
@@ -180,5 +203,10 @@ final class LogReplica implements AutoCloseable
             str.append(error);
             str.append(System.lineSeparator());
         }
+    }
+
+    public int hashCode()
+    {
+        return file.hashCode();
     }
 }

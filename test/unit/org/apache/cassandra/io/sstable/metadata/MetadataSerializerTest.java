@@ -17,57 +17,141 @@
  */
 package org.apache.cassandra.io.sstable.metadata;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
+import com.google.common.primitives.Bytes;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.RandomPartitioner;
-import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.io.compress.Encryptor;
+import org.apache.cassandra.io.compress.EncryptorTest;
+import org.apache.cassandra.io.compress.ICompressor;
+import org.apache.cassandra.io.compress.RotatingKeyProviderFactory;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.Version;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
-import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
+import org.apache.cassandra.io.util.FileOutputStreamPlus;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.Throwables;
+import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
+
+import static org.apache.cassandra.io.compress.EncryptionConfig.CIPHER_ALGORITHM;
+import static org.apache.cassandra.io.compress.EncryptionConfig.KEY_PROVIDER;
+import static org.apache.cassandra.io.compress.EncryptionConfig.SECRET_KEY_STRENGTH;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(BMUnitRunner.class)
+@BMRule(name = "Return specified encryptor",
+        targetClass = "MetadataSerializer",
+        targetMethod = "getEncryptor",
+        condition = "org.apache.cassandra.io.sstable.metadata.MetadataSerializerTest.testCompressor != null",
+        targetLocation = "AT ENTRY",
+        action = "return org.apache.cassandra.io.sstable.metadata.MetadataSerializerTest.testCompressor")
 public class MetadataSerializerTest
 {
+    private final static Logger logger = LoggerFactory.getLogger(MetadataSerializerTest.class);
+
+    private static SSTableFormat<?, ?> format;
+    private static CompressionParams compressionParams;
+    
+    final static String sensitiveKey = "Key with sensitive information";
+
+    static ICompressor testCompressor = null;
+
     @BeforeClass
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
+        format = DatabaseDescriptor.getSelectedSSTableFormat();
+        
+        // Initialize compression params after DatabaseDescriptor is initialized
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CompressionParams.CLASS, Encryptor.class.getName());
+        opts.put(CIPHER_ALGORITHM, "AES/CBC/PKCS5Padding");
+        opts.put(SECRET_KEY_STRENGTH, Integer.toString(128));
+        opts.put(KEY_PROVIDER, EncryptorTest.KeyProviderFactoryStub.class.getName());
+        
+        compressionParams = CompressionParams.fromMap(opts);
     }
 
     @Test
     public void testSerialization() throws IOException
     {
-        Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata();
+        Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(false);
 
         MetadataSerializer serializer = new MetadataSerializer();
-        File statsFile = serialize(originalMetadata, serializer, BigFormat.latestVersion);
+        Version latestVersion = format.getLatestVersion();
+        Descriptor desc = new Descriptor(latestVersion, FileUtils.getTempDir(), "test", "test", new SequenceBasedSSTableId(0));
+        File statsFile = serialize(originalMetadata, serializer, desc);
 
-        Descriptor desc = new Descriptor(statsFile.getParentFile(), "", "", 0, SSTableFormat.Type.BIG);
-        try (RandomAccessReader in = RandomAccessReader.open(statsFile))
+        try (FileInputStreamPlus in = new FileInputStreamPlus(statsFile))
         {
             Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, in, EnumSet.allOf(MetadataType.class));
+
+            for (MetadataType type : MetadataType.values())
+            {
+                if ((type != MetadataType.STATS) || latestVersion.hasImprovedMinMax())
+                    assertEquals(type.name(), originalMetadata.get(type), deserialized.get(type));
+            }
+        }
+    }
+
+    @Test
+    public void testSerializationWithEncryption() throws IOException
+    {
+        Version version = format.getLatestVersion();
+
+        // Skip this test if metadata encryption is not supported
+        if (!version.metadataIsEncrypted())
+        {
+            logger.info("Skipping testEncryption - metadata encryption not supported in version {}", version);
+            return;
+        }
+
+        Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(false);
+
+        MetadataSerializer serializer = new MetadataSerializer();
+        Descriptor desc = new Descriptor(format.getLatestVersion(), FileUtils.getTempDir(), "test", "test", new SequenceBasedSSTableId(0));
+        File statsFile = serializeWithEncryption(originalMetadata, serializer, desc);
+
+        try (FileInputStreamPlus in = new FileInputStreamPlus(statsFile))
+        {
+            Map<MetadataType, MetadataComponent> deserialized = deserializeWithEncryption(serializer, desc, in);
 
             for (MetadataType type : MetadataType.values())
             {
@@ -77,9 +161,187 @@ public class MetadataSerializerTest
     }
 
     @Test
+    public void testEncryption() throws IOException
+    {
+        Version version = format.getLatestVersion();
+        
+        // Skip this test if metadata encryption is not supported
+        if (!version.metadataIsEncrypted())
+        {
+            logger.info("Skipping testEncryption - metadata encryption not supported in version {}", version);
+            return;
+        }
+        
+        Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(false);
+
+        MetadataSerializer serializer = new MetadataSerializer();
+        Descriptor descriptor = new Descriptor(version, FileUtils.getTempDir(), "test", "test", new SequenceBasedSSTableId(0));
+        File statsFile = serializeWithEncryption(originalMetadata, serializer, descriptor);
+
+        byte[] contents = com.google.common.io.Files.toByteArray(statsFile.toJavaIOFile());
+        byte[] sought = sensitiveKey.getBytes(StandardCharsets.UTF_8);
+
+        // When encryption is enabled, the sensitive key should NOT be found in the file
+        assertTrue("Sensitive data should be encrypted", Bytes.indexOf(contents, sought) == -1);
+    }
+
+    /**
+     * Without the Byteman rule (the test compressor is not set): the metadata is encrypted, if the version encrypts
+     * metadata, with the encryptor of the compression parameters the writer passes, or else with the one of the
+     * compression info file written next to it; the reader takes it from the compression info file. BIG versions do
+     * not encrypt metadata, BTI ones do.
+     */
+    @Test
+    public void testEncryptionWithCompressionInfo() throws IOException
+    {
+        assertTrue(testCompressor == null);
+        for (String formatName : new String[]{ "big", "bti" })
+        {
+            SSTableFormat<?, ?> sstableFormat = DatabaseDescriptor.getSSTableFormats().get(formatName);
+            Version version = sstableFormat.getLatestVersion();
+            assertEquals(formatName, formatName.equals("bti"), version.metadataIsEncrypted());
+
+            for (boolean withParams : new boolean[]{ true, false })
+            {
+                String description = formatName + (withParams ? " with compression parameters" : " with compression info file");
+                Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(false, version);
+                MetadataSerializer serializer = new MetadataSerializer();
+                File directory = new File(Files.createTempDirectory("MetadataSerializerTest"));
+                try
+                {
+                    Descriptor desc = new Descriptor(version, directory, "test", "test", new SequenceBasedSSTableId(0));
+                    File statsFile = desc.fileFor(Components.STATS);
+                    if (withParams)
+                    {
+                        // the compression info file is not needed to write, only to read
+                        try (DataOutputStreamPlus out = new FileOutputStreamPlus(statsFile))
+                        {
+                            serializer.serialize(originalMetadata, out, desc, compressionParams);
+                        }
+                        writeCompressionInfo(desc, compressionParams);
+                    }
+                    else
+                    {
+                        writeCompressionInfo(desc, compressionParams);
+                        serialize(originalMetadata, serializer, desc);
+                    }
+
+                    byte[] contents = com.google.common.io.Files.toByteArray(statsFile.toJavaIOFile());
+                    byte[] sought = sensitiveKey.getBytes(StandardCharsets.UTF_8);
+                    assertEquals(description, version.metadataIsEncrypted(), Bytes.indexOf(contents, sought) == -1);
+
+                    Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, EnumSet.allOf(MetadataType.class));
+                    for (MetadataType type : MetadataType.values())
+                    {
+                        if ((type != MetadataType.STATS) || version.hasImprovedMinMax())
+                            assertEquals(description + ' ' + type.name(), originalMetadata.get(type), deserialized.get(type));
+                    }
+                }
+                finally
+                {
+                    directory.deleteRecursive();
+                }
+            }
+        }
+    }
+
+    /**
+     * With a multi-key provider each metadata component is encrypted with the key named in its own header: the
+     * serializer sizes every component with the key of {@code getSecretKey} right before encrypting it.
+     */
+    @Test
+    public void testEncryptionWithRotatingKeys() throws IOException
+    {
+        assertTrue(testCompressor == null);
+        Version version = DatabaseDescriptor.getSSTableFormats().get("bti").getLatestVersion();
+        assertTrue(version.metadataIsEncrypted());
+
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CompressionParams.CLASS, Encryptor.class.getName());
+        opts.put(CIPHER_ALGORITHM, "AES/CBC/PKCS5Padding");
+        opts.put(SECRET_KEY_STRENGTH, Integer.toString(128));
+        opts.put(KEY_PROVIDER, RotatingKeyProviderFactory.class.getName());
+        CompressionParams rotatingParams = CompressionParams.fromMap(opts);
+
+        Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(false, version);
+        MetadataSerializer serializer = new MetadataSerializer();
+        File directory = new File(Files.createTempDirectory("MetadataSerializerTest"));
+        try
+        {
+            Descriptor desc = new Descriptor(version, directory, "test", "test", new SequenceBasedSSTableId(0));
+            File statsFile = desc.fileFor(Components.STATS);
+            int headersBefore = RotatingKeyProviderFactory.provider().headersWritten();
+            try (DataOutputStreamPlus out = new FileOutputStreamPlus(statsFile))
+            {
+                serializer.serialize(originalMetadata, out, desc, rotatingParams);
+            }
+            assertEquals(originalMetadata.size(), RotatingKeyProviderFactory.provider().headersWritten() - headersBefore);
+            writeCompressionInfo(desc, rotatingParams);
+
+            byte[] contents = com.google.common.io.Files.toByteArray(statsFile.toJavaIOFile());
+            assertEquals(-1, Bytes.indexOf(contents, sensitiveKey.getBytes(StandardCharsets.UTF_8)));
+
+            Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, EnumSet.allOf(MetadataType.class));
+            for (MetadataType type : MetadataType.values())
+            {
+                if ((type != MetadataType.STATS) || version.hasImprovedMinMax())
+                    assertEquals(type.name(), originalMetadata.get(type), deserialized.get(type));
+            }
+        }
+        finally
+        {
+            directory.deleteRecursive();
+        }
+    }
+
+    /**
+     * Compression parameters without encryption leave the metadata in plaintext, whatever the version.
+     */
+    @Test
+    public void testNoEncryptionWithCompressionParams() throws IOException
+    {
+        for (String formatName : new String[]{ "big", "bti" })
+        {
+            Version version = DatabaseDescriptor.getSSTableFormats().get(formatName).getLatestVersion();
+            for (CompressionParams params : new CompressionParams[]{ CompressionParams.noCompression(), CompressionParams.lz4() })
+            {
+                Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(false, version);
+                MetadataSerializer serializer = new MetadataSerializer();
+                File directory = new File(Files.createTempDirectory("MetadataSerializerTest"));
+                try
+                {
+                    Descriptor desc = new Descriptor(version, directory, "test", "test", new SequenceBasedSSTableId(0));
+                    File statsFile = desc.fileFor(Components.STATS);
+                    try (DataOutputStreamPlus out = new FileOutputStreamPlus(statsFile))
+                    {
+                        serializer.serialize(originalMetadata, out, desc, params);
+                    }
+                    byte[] contents = com.google.common.io.Files.toByteArray(statsFile.toJavaIOFile());
+                    assertTrue(formatName + ' ' + params, Bytes.indexOf(contents, sensitiveKey.getBytes(StandardCharsets.UTF_8)) != -1);
+                }
+                finally
+                {
+                    directory.deleteRecursive();
+                }
+            }
+        }
+    }
+
+    private static void writeCompressionInfo(Descriptor desc, CompressionParams params)
+    {
+        try (CompressionMetadata.Writer writer = CompressionMetadata.Writer.open(params, desc.fileFor(Components.COMPRESSION_INFO)))
+        {
+            writer.finalizeLength(0, 0).prepareToCommit();
+            Throwable t = writer.commit(null);
+            if (t != null)
+                throw new AssertionError(t);
+        }
+    }
+
+    @Test
     public void testHistogramSterilization() throws IOException
     {
-        Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata();
+        Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(false);
 
         // Modify the histograms to overflow:
         StatsMetadata originalStats = (StatsMetadata) originalMetadata.get(MetadataType.STATS);
@@ -90,100 +352,155 @@ public class MetadataSerializerTest
 
         // Serialize w/ overflowed histograms:
         MetadataSerializer serializer = new MetadataSerializer();
-        File statsFile = serialize(originalMetadata, serializer, BigFormat.latestVersion);
-        Descriptor desc = new Descriptor(statsFile.getParentFile(), "", "", 0, SSTableFormat.Type.BIG);
+        Descriptor desc = new Descriptor(format.getLatestVersion(), FileUtils.getTempDir(), "test", "test", new SequenceBasedSSTableId(0));
+        File statsFile = serialize(originalMetadata, serializer, desc);
 
-        try (RandomAccessReader in = RandomAccessReader.open(statsFile))
+        try (FileInputStreamPlus in = new FileInputStreamPlus(statsFile))
         {
-            // Deserialie and verify that the two histograms have had their overflow buckets cleared:
+            // Deserialize and verify that the two histograms have had their overflow buckets cleared:
             Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, in, EnumSet.allOf(MetadataType.class));
-            StatsMetadata deserializedStats = (StatsMetadata)deserialized.get(MetadataType.STATS);
+            StatsMetadata deserializedStats = (StatsMetadata) deserialized.get(MetadataType.STATS);
             assertFalse(deserializedStats.estimatedCellPerPartitionCount.isOverflowed());
             assertFalse(deserializedStats.estimatedPartitionSize.isOverflowed());
         }
     }
 
-    public File serialize(Map<MetadataType, MetadataComponent> metadata, MetadataSerializer serializer, Version version)
-            throws IOException
+    public File serialize(Map<MetadataType, MetadataComponent> metadata, MetadataSerializer serializer, Descriptor descriptor)
+    throws IOException
     {
-        // Serialize to tmp file
-        File statsFile = FileUtils.createTempFile(Component.STATS.name, null);
-        try (DataOutputStreamPlus out = new BufferedDataOutputStreamPlus(new FileOutputStream(statsFile)))
+        // Serialize to temp file
+        File statsFile = descriptor.fileFor(Components.STATS);
+        statsFile.parent().createDirectoriesIfNotExists();
+        try (DataOutputStreamPlus out = new FileOutputStreamPlus(statsFile))
         {
-            serializer.serialize(metadata, out, version);
+            serializer.serialize(metadata, out, descriptor);
         }
         return statsFile;
     }
+    
+    public File serializeWithEncryption(Map<MetadataType, MetadataComponent> metadata, MetadataSerializer serializer, Descriptor descriptor)
+    throws IOException
+    {
+        testCompressor = compressionParams.getSstableCompressor();
+        try
+        {
+            File statsFile = descriptor.fileFor(Components.STATS);
+            statsFile.parent().createDirectoriesIfNotExists();
+            
+            try (DataOutputStreamPlus out = new FileOutputStreamPlus(statsFile))
+            {
+                serializer.serialize(metadata, out, descriptor);
+            }
+            return statsFile;
+        }
+        finally
+        {
+            testCompressor = null;
+        }
+    }
 
-    public Map<MetadataType, MetadataComponent> constructMetadata()
+    private Map<MetadataType, MetadataComponent> deserializeWithEncryption(MetadataSerializer serializer, Descriptor desc, FileInputStreamPlus in) throws IOException
+    {
+        testCompressor = compressionParams.getSstableCompressor();
+        try
+        {
+            return serializer.deserialize(desc, in, EnumSet.allOf(MetadataType.class));
+        }
+        finally
+        {
+            testCompressor = null;
+        }
+    }
+
+    public Map<MetadataType, MetadataComponent> constructMetadata(boolean withNulls)
+    {
+        return constructMetadata(withNulls, format.getLatestVersion());
+    }
+
+    public Map<MetadataType, MetadataComponent> constructMetadata(boolean withNulls, Version version)
     {
         CommitLogPosition club = new CommitLogPosition(11L, 12);
         CommitLogPosition cllb = new CommitLogPosition(9L, 12);
 
-        TableMetadata cfm = SchemaLoader.standardCFMD("ks1", "cf1").build();
+        TableMetadata cfm = TableMetadata.builder("ks1", "cf1")
+                                         .addPartitionKeyColumn("k", AsciiType.instance)
+                                         .addClusteringColumn("c1", UTF8Type.instance)
+                                         .addClusteringColumn("c2", Int32Type.instance)
+                                         .addRegularColumn("v", Int32Type.instance)
+                                         .build();
         MetadataCollector collector = new MetadataCollector(cfm.comparator)
-                                          .commitLogIntervals(new IntervalSet<>(cllb, club));
+                                      .commitLogIntervals(new IntervalSet<>(cllb, club));
+        if (version.hasTokenSpaceCoverage())
+            collector.tokenSpaceCoverage(0.7);
 
         String partitioner = RandomPartitioner.class.getCanonicalName();
         double bfFpChance = 0.1;
-        return collector.finalizeMetadata(partitioner, bfFpChance, 0, null, false, SerializationHeader.make(cfm, Collections.emptyList()));
+        collector.updateClusteringValues(Clustering.make(UTF8Type.instance.decompose("abc"), Int32Type.instance.decompose(123)));
+        collector.updateClusteringValues(Clustering.make(UTF8Type.instance.decompose("cba"), withNulls ? null : Int32Type.instance.decompose(234)));
+        collector.updateClusteringValues(Clustering.make(UTF8Type.instance.decompose(sensitiveKey)));
+        ByteBuffer first = version.hasKeyRange() ? AsciiType.instance.decompose("a") : null;
+        ByteBuffer last = version.hasKeyRange() ? AsciiType.instance.decompose("b") : null;
+        return collector.finalizeMetadata(partitioner, bfFpChance, 0, null, false, SerializationHeader.make(cfm, Collections.emptyList()), first, last);
+    }
+
+    private void testVersions(List<String> versions) throws Throwable
+    {
+        logger.info("Testing minor versions {} compatibility for sstable format {}", versions, format.getClass().getName());
+        Throwable t = null;
+        for (int oldIdx = 0; oldIdx < versions.size(); oldIdx++)
+        {
+            for (int newIdx = oldIdx; newIdx < versions.size(); newIdx++)
+            {
+                try
+                {
+                    testOldReadsNew(versions.get(oldIdx), versions.get(newIdx));
+                }
+                catch (Exception | AssertionError e)
+                {
+                    t = Throwables.merge(t, new AssertionError("Failed to test " + versions.get(oldIdx) + " -> " + versions.get(newIdx), e));
+                }
+            }
+        }
+        if (t != null)
+        {
+            throw t;
+        }
     }
 
     @Test
-    public void testMaReadMa() throws IOException
+    public void testMinorVersionsCompatibilty() throws Throwable
     {
-        testOldReadsNew("ma", "ma");
-    }
+        Map<Character, List<String>> supportedVersions = new LinkedHashMap<>();
 
-    @Test
-    public void testMaReadMb() throws IOException
-    {
-        testOldReadsNew("ma", "mb");
-    }
+        for (char major = 'a'; major <= 'z'; major++){
+            for (char minor = 'a'; minor <= 'z'; minor++){
+                Version version = format.getVersion(String.format("%s%s", major, minor));
+                // BTI 'ab' has the features of 'ba' (see BtiFormat.BtiVersion), so it is minor-compatible with the
+                // 'b' versions rather than with the 'a' ones
+                char group = format instanceof BtiFormat && version.version.equals("ab") ? 'b' : major;
+                if (version.isCompatible())
+                    supportedVersions.computeIfAbsent(group, ignored -> new ArrayList<>()).add(version.version);
+            }
+        }
 
-    @Test
-    public void testMaReadMc() throws IOException
-    {
-        testOldReadsNew("ma", "mc");
-    }
-
-    @Test
-    public void testMbReadMb() throws IOException
-    {
-        testOldReadsNew("mb", "mb");
-    }
-
-    @Test
-    public void testMbReadMc() throws IOException
-    {
-        testOldReadsNew("mb", "mc");
-    }
-
-    @Test
-    public void testMcReadMc() throws IOException
-    {
-        testOldReadsNew("mc", "mc");
-    }
-
-    @Test
-    public void testNaReadNa() throws IOException
-    {
-        testOldReadsNew("na", "na");
+        for (List<String> minorVersions : supportedVersions.values())
+            testVersions(minorVersions);
     }
 
     public void testOldReadsNew(String oldV, String newV) throws IOException
     {
-        Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata();
+        Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(true);
 
         MetadataSerializer serializer = new MetadataSerializer();
         // Write metadata in two minor formats.
-        File statsFileLb = serialize(originalMetadata, serializer, BigFormat.instance.getVersion(newV));
-        File statsFileLa = serialize(originalMetadata, serializer, BigFormat.instance.getVersion(oldV));
+        Descriptor descNew = new Descriptor(format.getVersion(newV), FileUtils.getTempDir(), "test", "test_new", new SequenceBasedSSTableId(0));
+        Descriptor descOld = new Descriptor(format.getVersion(oldV), FileUtils.getTempDir(), "test", "test_old", new SequenceBasedSSTableId(1));
+        File statsFileLb = serialize(originalMetadata, serializer, descNew);
+        File statsFileLa = serialize(originalMetadata, serializer, descOld);
         // Reading both as earlier version should yield identical results.
-        SSTableFormat.Type stype = SSTableFormat.Type.current();
-        Descriptor desc = new Descriptor(stype.info.getVersion(oldV), statsFileLb.getParentFile(), "", "", 0, stype);
-        try (RandomAccessReader inLb = RandomAccessReader.open(statsFileLb);
-             RandomAccessReader inLa = RandomAccessReader.open(statsFileLa))
+        Descriptor desc = new Descriptor(format.getVersion(oldV), statsFileLb.parent(), "", "", new SequenceBasedSSTableId(0));
+        try (FileInputStreamPlus inLb = new FileInputStreamPlus(statsFileLb);
+             FileInputStreamPlus inLa = new FileInputStreamPlus(statsFileLa))
         {
             Map<MetadataType, MetadataComponent> deserializedLb = serializer.deserialize(desc, inLb, EnumSet.allOf(MetadataType.class));
             Map<MetadataType, MetadataComponent> deserializedLa = serializer.deserialize(desc, inLa, EnumSet.allOf(MetadataType.class));
@@ -198,12 +515,4 @@ public class MetadataSerializerTest
         }
     }
 
-    @Test
-    public void pendingRepairCompatibility()
-    {
-        Version mc = BigFormat.instance.getVersion("mc");
-        assertFalse(mc.hasPendingRepair());
-        Version na = BigFormat.instance.getVersion("na");
-        assertTrue(na.hasPendingRepair());
-    }
 }

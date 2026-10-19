@@ -19,10 +19,13 @@
 package org.apache.cassandra.hints;
 
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.IVerbHandler;
@@ -31,25 +34,33 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.FBUtilities;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_HINTS_HANDLER;
 
 /**
  * Verb handler used both for hint dispatch and streaming.
- *
+ * <p>
  * With the non-sstable format, we cannot just stream hint sstables on node decommission. So sometimes, at decommission
  * time, we might have to stream hints to a non-owning host (say, if the owning host B is down during decommission of host A).
  * In that case the handler just stores the received hint in its local hint store.
  */
 public final class HintVerbHandler implements IVerbHandler<HintMessage>
 {
-    public static final HintVerbHandler instance = new HintVerbHandler();
+    public static final IVerbHandler<HintMessage> instance = CUSTOM_HINTS_HANDLER.isPresent()
+                                                             ? FBUtilities.construct(CUSTOM_HINTS_HANDLER.getString(),
+                                                                                     "Custom Hint Verb Handler")
+                                                             : new HintVerbHandler();
 
     private static final Logger logger = LoggerFactory.getLogger(HintVerbHandler.class);
 
+    @Override
     public void doVerb(Message<HintMessage> message)
     {
         UUID hostId = message.payload.hostId;
         Hint hint = message.payload.hint;
-        InetAddressAndPort address = StorageService.instance.getEndpointForHostId(hostId);
+        InetAddressAndPort address = HintsEndpointProvider.instance.endpointForHost(hostId);
 
         // If we see an unknown table id, it means the table, or one of the tables in the mutation, had been dropped.
         // In that case there is nothing we can really do, or should do, other than log it go on.
@@ -89,12 +100,32 @@ public final class HintVerbHandler implements IVerbHandler<HintMessage>
             // the topology has changed, and we are no longer a replica of the mutation - since we don't know which node(s)
             // it has been handed over to, re-address the hint to all replicas; see CASSANDRA-5902.
             HintsService.instance.writeForAllReplicas(hint);
+
+            HintsService.instance.metrics.incrHintsReceivedForUnownedRanges();
+            if (DatabaseDescriptor.getLogOutOfTokenRangeRequests())
+            {
+                // Log at most 1 message per second
+                NoSpamLogger.log(logger,
+                                 NoSpamLogger.Level.WARN,
+                                 1,
+                                 TimeUnit.SECONDS,
+                                 "Receiving hint(s) for token(s) neither owned nor pending. Example: from {} for token {} in {}.{}",
+                                 message.from(),
+                                 hint.mutation.key().getToken(),
+                                 hint.mutation.getKeyspaceName(),
+                                 hint.mutation.getPartitionUpdates().iterator().next().metadata().name);
+            }
+
             respond(message);
         }
         else
         {
             // the common path - the node is both the destination and a valid replica for the hint.
-            hint.applyFuture().thenAccept(o -> respond(message)).exceptionally(e -> {logger.debug("Failed to apply hint", e); return null;});
+            // The origin of a replayed hint is the node that held it, which is where the write was
+            // coordinated from and so may well be another datacenter; Mutation.without preserves it across
+            // the truncation filtering Hint.applyFuture does.
+            hint.mutation.withOrigin(WriteOrigin.fromMessage(message));
+            hint.applyFuture().addCallback(o -> respond(message), e -> logger.debug("Failed to apply hint", e));
         }
     }
 

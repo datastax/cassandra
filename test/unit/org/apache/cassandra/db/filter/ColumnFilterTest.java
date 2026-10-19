@@ -20,21 +20,19 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.function.Consumer;
 
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -47,17 +45,15 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.Throwables;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 
-@RunWith(Parameterized.class)
 public class ColumnFilterTest
 {
     private static final ColumnFilter.Serializer serializer = new ColumnFilter.Serializer();
-
-    @Parameterized.Parameter
-    public String clusterMinVersion;
 
     private final TableMetadata metadata = TableMetadata.builder("ks", "table")
                                                         .partitioner(Murmur3Partitioner.instance)
@@ -81,25 +77,22 @@ public class ColumnFilterTest
     private final CellPath path3 = CellPath.create(ByteBufferUtil.bytes(3));
     private final CellPath path4 = CellPath.create(ByteBufferUtil.bytes(4));
 
-
-    @Parameterized.Parameters(name = "{index}: clusterMinVersion={0}")
-    public static Collection<Object[]> data()
-    {
-        return Arrays.asList(new Object[]{ "3.0" }, new Object[]{ "3.11" }, new Object[]{ "4.0" });
-    }
-
     @BeforeClass
     public static void beforeClass()
     {
+        // Gossiper touches StorageService which touches StreamManager which requires configs be setup
+        DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.setSeedProvider(Arrays::asList);
         DatabaseDescriptor.setEndpointSnitch(new SimpleSnitch());
+        DatabaseDescriptor.setDefaultFailureDetector();
         Gossiper.instance.start(0);
     }
 
     @Before
     public void before()
     {
-        Util.setUpgradeFromVersion(clusterMinVersion);
+        Util.setUpgradeFromVersion("4.0");
+        assertThat(Gossiper.instance.getMinVersion()).isEqualTo(new CassandraVersion("4.0"));
     }
 
     // Select all
@@ -110,14 +103,16 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("*/*", filter.toString());
-            assertEquals("*", filter.toCQLString());
+            assertEquals("*", filter.toCQLString(Redaction.NONE));
+            assertEquals("*", filter.toCQLString(Redaction.REDACT));
             assertFetchedQueried(true, true, filter, v1, v2, s1, s2);
             assertCellFetchedQueried(true, true, filter, v2, path0, path1, path2, path3, path4);
             assertCellFetchedQueried(true, true, filter, s2, path0, path1, path2, path3, path4);
         };
 
         check.accept(ColumnFilter.all(metadata));
-        check.accept(ColumnFilter.allRegularColumnsBuilder(metadata).build());
+        check.accept(ColumnFilter.allRegularColumnsBuilder(metadata, false).build());
+        check.accept(ColumnFilter.allRegularColumnsBuilder(metadata, true).build());
     }
 
     // Selections
@@ -128,7 +123,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[]", filter.toString());
-            assertEquals("*", filter.toCQLString());
+            assertEquals("*", filter.toCQLString(Redaction.REDACT));
+            assertEquals("*", filter.toCQLString(Redaction.NONE));
             assertFetchedQueried(false, false, filter, v1, v2, s1, s2);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
             assertCellFetchedQueried(false, false, filter, s2, path0, path1, path2, path3, path4);
@@ -144,7 +140,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[v1]", filter.toString());
-            assertEquals("v1", filter.toCQLString());
+            assertEquals("v1", filter.toCQLString(Redaction.REDACT));
+            assertEquals("v1", filter.toCQLString(Redaction.NONE));
             assertFetchedQueried(true, true, filter, v1);
             assertFetchedQueried(false, false, filter, v2, s1, s2);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -161,7 +158,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[Escaped Name]", filter.toString());
-            assertEquals("\"Escaped Name\"", filter.toCQLString());
+            assertEquals("\"Escaped Name\"", filter.toCQLString(Redaction.NONE));
+            assertEquals("\"Escaped Name\"", filter.toCQLString(Redaction.REDACT));
             assertFetchedQueried(true, true, filter, escaped);
             assertFetchedQueried(false, false, filter, v2, s1, s2);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -178,7 +176,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[v2]", filter.toString());
-            assertEquals("v2", filter.toCQLString());
+            assertEquals("v2", filter.toCQLString(Redaction.NONE));
+            assertEquals("v2", filter.toCQLString(Redaction.REDACT));
             assertFetchedQueried(true, true, filter, v2);
             assertFetchedQueried(false, false, filter, v1, s1, s2);
             assertCellFetchedQueried(true, true, filter, v2, path0, path1, path2, path3, path4);
@@ -195,7 +194,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[s1]", filter.toString());
-            assertEquals("s1", filter.toCQLString());
+            assertEquals("s1", filter.toCQLString(Redaction.NONE));
+            assertEquals("s1", filter.toCQLString(Redaction.REDACT));
             assertFetchedQueried(true, true, filter, s1);
             assertFetchedQueried(false, false, filter, v1, v2, s2);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -212,7 +212,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[s2]", filter.toString());
-            assertEquals("s2", filter.toCQLString());
+            assertEquals("s2", filter.toCQLString(Redaction.NONE));
+            assertEquals("s2", filter.toCQLString(Redaction.REDACT));
             assertFetchedQueried(true, true, filter, s2);
             assertFetchedQueried(false, false, filter, v1, v2, s1);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -229,7 +230,8 @@ public class ColumnFilterTest
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertEquals("[s1, s2, v1, v2]", filter.toString());
-            assertEquals("s1, s2, v1, v2", filter.toCQLString());
+            assertEquals("s1, s2, v1, v2", filter.toCQLString(Redaction.NONE));
+            assertEquals("s1, s2, v1, v2", filter.toCQLString(Redaction.REDACT));
             assertFetchedQueried(true, true, filter, v1, v2, s1, s2);
             assertCellFetchedQueried(true, true, filter, v2, path0, path1, path2, path3, path4);
             assertCellFetchedQueried(true, true, filter, s2, path0, path1, path2, path3, path4);
@@ -245,7 +247,8 @@ public class ColumnFilterTest
         ColumnFilter filter = ColumnFilter.selectionBuilder().select(v2, path1).select(v2, path3).build();
         testRoundTrips(filter);
         assertEquals("[v2[1], v2[3]]", filter.toString());
-        assertEquals("v2[1], v2[3]", filter.toCQLString());
+        assertEquals("v2[1], v2[3]", filter.toCQLString(Redaction.NONE));
+        assertEquals("v2[?], v2[?]", filter.toCQLString(Redaction.REDACT));
         assertFetchedQueried(true, true, filter, v2);
         assertFetchedQueried(false, false, filter, v1, s1, s2);
         assertCellFetchedQueried(true, true, filter, v2, path1, path3);
@@ -259,7 +262,8 @@ public class ColumnFilterTest
         ColumnFilter filter = ColumnFilter.selectionBuilder().select(s2, path1).select(s2, path3).build();
         testRoundTrips(filter);
         assertEquals("[s2[1], s2[3]]", filter.toString());
-        assertEquals("s2[1], s2[3]", filter.toCQLString());
+        assertEquals("s2[1], s2[3]", filter.toCQLString(Redaction.NONE));
+        assertEquals("s2[?], s2[?]", filter.toCQLString(Redaction.REDACT));
         assertFetchedQueried(true, true, filter, s2);
         assertFetchedQueried(false, false, filter, v1, v2, s1);
         assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -273,7 +277,8 @@ public class ColumnFilterTest
         ColumnFilter filter = ColumnFilter.selectionBuilder().slice(v2, path1, path3).build();
         testRoundTrips(filter);
         assertEquals("[v2[1:3]]", filter.toString());
-        assertEquals("v2[1:3]", filter.toCQLString());
+        assertEquals("v2[1:3]", filter.toCQLString(Redaction.NONE));
+        assertEquals("v2[?:?]", filter.toCQLString(Redaction.REDACT));
         assertFetchedQueried(true, true, filter, v2);
         assertFetchedQueried(false, false, filter, v1, s1, s2);
         assertCellFetchedQueried(true, true, filter, v2, path1, path2, path3);
@@ -287,7 +292,8 @@ public class ColumnFilterTest
         ColumnFilter filter = ColumnFilter.selectionBuilder().slice(s2, path1, path3).build();
         testRoundTrips(filter);
         assertEquals("[s2[1:3]]", filter.toString());
-        assertEquals("s2[1:3]", filter.toCQLString());
+        assertEquals("s2[1:3]", filter.toCQLString(Redaction.NONE));
+        assertEquals("s2[?:?]", filter.toCQLString(Redaction.REDACT));
         assertFetchedQueried(true, true, filter, s2);
         assertFetchedQueried(false, false, filter, v1, v2, s1);
         assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -308,7 +314,8 @@ public class ColumnFilterTest
                                           .build();
         testRoundTrips(filter);
         assertEquals("[s1, s2[0], s2[2:4], v1, v2[0:2], v2[4]]", filter.toString());
-        assertEquals("s1, s2[0], s2[2:4], v1, v2[0:2], v2[4]", filter.toCQLString());
+        assertEquals("s1, s2[0], s2[2:4], v1, v2[0:2], v2[4]", filter.toCQLString(Redaction.NONE));
+        assertEquals("s1, s2[?], s2[?:?], v1, v2[?:?], v2[?]", filter.toCQLString(Redaction.REDACT));
         assertFetchedQueried(true, true, filter, v1, v2, s1, s2);
         assertCellFetchedQueried(true, true, filter, v2, path0, path1, path2, path4);
         assertCellFetchedQueried(false, false, filter, v2, path3);
@@ -321,21 +328,25 @@ public class ColumnFilterTest
     @Test
     public void testSelectSimpleColumnWithMetadata()
     {
+        testSelectSimpleColumnWithMetadata(false);
+    }
+
+    @Test
+    public void testSelectSimpleColumnWithMetadataAndReturnStaticContentOnPartitionWithNoRows()
+    {
+        testSelectSimpleColumnWithMetadata(true);
+    }
+
+    private void testSelectSimpleColumnWithMetadata(boolean returnStaticContentOnPartitionWithNoRows)
+    {
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertFetchedQueried(true, true, filter, v1);
-            if ("3.0".equals(clusterMinVersion))
-            {
-                assertEquals("*/*", filter.toString());
-                assertEquals("*", filter.toCQLString());
-                assertFetchedQueried(true, true, filter, s1, s2, v2);
-                assertCellFetchedQueried(true, true, filter, v2, path0, path1, path2, path3, path4);
-                assertCellFetchedQueried(true, true, filter, s2, path0, path1, path2, path3, path4);
-            }
-            else if ("3.11".equals(clusterMinVersion))
-            {
+            if (returnStaticContentOnPartitionWithNoRows)
+        {
                 assertEquals("*/[v1]", filter.toString());
-                assertEquals("v1", filter.toCQLString());
+                assertEquals("v1", filter.toCQLString(Redaction.NONE));
+                assertEquals("v1", filter.toCQLString(Redaction.REDACT));
                 assertFetchedQueried(true, false, filter, s1, s2, v2);
                 assertCellFetchedQueried(true, false, filter, v2, path0, path1, path2, path3, path4);
                 assertCellFetchedQueried(true, false, filter, s2, path0, path1, path2, path3, path4);
@@ -343,7 +354,8 @@ public class ColumnFilterTest
             else
             {
                 assertEquals("<all regulars>/[v1]", filter.toString());
-                assertEquals("v1", filter.toCQLString());
+                assertEquals("v1", filter.toCQLString(Redaction.NONE));
+                assertEquals("v1", filter.toCQLString(Redaction.REDACT));
                 assertFetchedQueried(true, false, filter, v2);
                 assertFetchedQueried(false, false, filter, s1, s2);
                 assertCellFetchedQueried(true, false, filter, v2, path0, path1, path2, path3, path4);
@@ -351,28 +363,32 @@ public class ColumnFilterTest
             }
         };
 
-        check.accept(ColumnFilter.selection(metadata, RegularAndStaticColumns.builder().add(v1).build()));
-        check.accept(ColumnFilter.allRegularColumnsBuilder(metadata).add(v1).build());
+        check.accept(ColumnFilter.selection(metadata, RegularAndStaticColumns.builder().add(v1).build(), returnStaticContentOnPartitionWithNoRows));
+        check.accept(ColumnFilter.allRegularColumnsBuilder(metadata, returnStaticContentOnPartitionWithNoRows).add(v1).build());
     }
 
     @Test
     public void testSelectStaticColumnWithMetadata()
     {
+        testSelectStaticColumnWithMetadata(false);
+    }
+
+    @Test
+    public void testSelectStaticColumnWithMetadataAndReturnStaticContentOnPartitionWithNoRows()
+    {
+        testSelectStaticColumnWithMetadata(true);
+    }
+
+    private void testSelectStaticColumnWithMetadata(boolean returnStaticContentOnPartitionWithNoRows)
+    {
         Consumer<ColumnFilter> check = filter -> {
             testRoundTrips(filter);
             assertFetchedQueried(true, true, filter, s1);
-            if ("3.0".equals(clusterMinVersion))
-            {
-                assertEquals("*/*", filter.toString());
-                assertEquals("*", filter.toCQLString());
-                assertFetchedQueried(true, true, filter, v1, v2, s2);
-                assertCellFetchedQueried(true, true, filter, v2, path0, path1, path2, path3, path4);
-                assertCellFetchedQueried(true, true, filter, s2, path0, path1, path2, path3, path4);
-            }
-            else if ("3.11".equals(clusterMinVersion))
-            {
+            if (returnStaticContentOnPartitionWithNoRows)
+        {
                 assertEquals("*/[s1]", filter.toString());
-                assertEquals("s1", filter.toCQLString());
+                assertEquals("s1", filter.toCQLString(Redaction.NONE));
+                assertEquals("s1", filter.toCQLString(Redaction.REDACT));
                 assertFetchedQueried(true, false, filter, v1, v2, s2);
                 assertCellFetchedQueried(true, false, filter, v2, path0, path1, path2, path3, path4);
                 assertCellFetchedQueried(false, false, filter, s2, path0, path1, path2, path3, path4);
@@ -380,7 +396,8 @@ public class ColumnFilterTest
             else
             {
                 assertEquals("<all regulars>+[s1]/[s1]", filter.toString());
-                assertEquals("s1", filter.toCQLString());
+                assertEquals("s1", filter.toCQLString(Redaction.NONE));
+                assertEquals("s1", filter.toCQLString(Redaction.REDACT));
                 assertFetchedQueried(true, false, filter, v1, v2);
                 assertFetchedQueried(false, false, filter, s2);
                 assertCellFetchedQueried(true, false, filter, v2, path0, path1, path2, path3, path4);
@@ -388,29 +405,34 @@ public class ColumnFilterTest
             }
         };
 
-        check.accept(ColumnFilter.selection(metadata, RegularAndStaticColumns.builder().add(s1).build()));
-        check.accept(ColumnFilter.allRegularColumnsBuilder(metadata).add(s1).build());
+        check.accept(ColumnFilter.selection(metadata, RegularAndStaticColumns.builder().add(s1).build(), returnStaticContentOnPartitionWithNoRows));
+        check.accept(ColumnFilter.allRegularColumnsBuilder(metadata, returnStaticContentOnPartitionWithNoRows).add(s1).build());
     }
 
     @Test
     public void testSelectCellWithMetadata()
     {
-        ColumnFilter filter = ColumnFilter.allRegularColumnsBuilder(metadata).select(v2, path1).build();
+        testSelectCellWithMetadata(false);
+    }
+
+    @Test
+    public void testSelectCellWithMetadataAndReturnStaticContentOnPartitionWithNoRows()
+    {
+        testSelectCellWithMetadata(true);
+    }
+
+    private void testSelectCellWithMetadata(boolean returnStaticContentOnPartitionWithNoRows)
+    {
+        ColumnFilter filter = ColumnFilter.allRegularColumnsBuilder(metadata, returnStaticContentOnPartitionWithNoRows)
+                                          .select(v2, path1)
+                                          .build();
         testRoundTrips(filter);
         assertFetchedQueried(true, true, filter, v2);
-        if ("3.0".equals(clusterMinVersion))
-        {
-            assertEquals("*/*", filter.toString());
-            assertEquals("*", filter.toCQLString());
-            assertFetchedQueried(true, true, filter, s1, s2, v1);
-            assertCellFetchedQueried(true, true, filter, v2, path1);
-            assertCellFetchedQueried(true, false, filter, v2, path0, path2, path3, path4);
-            assertCellFetchedQueried(true, true, filter, s2, path0, path1, path2, path3, path4);
-        }
-        else if ("3.11".equals(clusterMinVersion))
+        if (returnStaticContentOnPartitionWithNoRows)
         {
             assertEquals("*/[v2[1]]", filter.toString());
-            assertEquals("v2[1]", filter.toCQLString());
+            assertEquals("v2[1]", filter.toCQLString(Redaction.NONE));
+            assertEquals("v2[?]", filter.toCQLString(Redaction.REDACT));
             assertFetchedQueried(true, false, filter, s1, s2, v1);
             assertCellFetchedQueried(true, true, filter, v2, path1);
             assertCellFetchedQueried(true, false, filter, v2, path0, path2, path3, path4);
@@ -419,7 +441,8 @@ public class ColumnFilterTest
         else
         {
             assertEquals("<all regulars>/[v2[1]]", filter.toString());
-            assertEquals("v2[1]", filter.toCQLString());
+            assertEquals("v2[1]", filter.toCQLString(Redaction.NONE));
+            assertEquals("v2[?]", filter.toCQLString(Redaction.REDACT));
             assertFetchedQueried(true, false, filter, v1);
             assertFetchedQueried(false, false, filter, s1, s2);
             assertCellFetchedQueried(true, true, filter, v2, path1);
@@ -431,22 +454,27 @@ public class ColumnFilterTest
     @Test
     public void testSelectStaticColumnCellWithMetadata()
     {
-        ColumnFilter filter = ColumnFilter.allRegularColumnsBuilder(metadata).select(s2, path1).build();
+        testSelectStaticColumnCellWithMetadata(false);
+    }
+
+    @Test
+    public void testSelectStaticColumnCellWithMetadataAndReturnStaticContentOnPartitionWithNoRows()
+    {
+        testSelectStaticColumnCellWithMetadata(true);
+    }
+
+    private void testSelectStaticColumnCellWithMetadata(boolean returnStaticContentOnPartitionWithNoRows)
+    {
+        ColumnFilter filter = ColumnFilter.allRegularColumnsBuilder(metadata, returnStaticContentOnPartitionWithNoRows)
+                                          .select(s2, path1)
+                                          .build();
         testRoundTrips(filter);
         assertFetchedQueried(true, true, filter, s2);
-        if ("3.0".equals(clusterMinVersion))
-        {
-            assertEquals("*/*", filter.toString());
-            assertEquals("*", filter.toCQLString());
-            assertFetchedQueried(true, true, filter, v1, v2, s1);
-            assertCellFetchedQueried(true, true, filter, v2, path0, path1, path2, path3, path4);
-            assertCellFetchedQueried(true, true, filter, s2, path1);
-            assertCellFetchedQueried(true, false, filter, s2, path0, path2, path3, path4);  // TODO ???
-        }
-        else if ("3.11".equals(clusterMinVersion))
+        if (returnStaticContentOnPartitionWithNoRows)
         {
             assertEquals("*/[s2[1]]", filter.toString());
-            assertEquals("s2[1]", filter.toCQLString());
+            assertEquals("s2[1]", filter.toCQLString(Redaction.NONE));
+            assertEquals("s2[?]", filter.toCQLString(Redaction.REDACT));
             assertFetchedQueried(true, false, filter, v1, v2, s1);
             assertCellFetchedQueried(true, false, filter, v2, path0, path1, path2, path3, path4);
             assertCellFetchedQueried(true, true, filter, s2, path1);
@@ -455,7 +483,8 @@ public class ColumnFilterTest
         else
         {
             assertEquals("<all regulars>+[s2[1]]/[s2[1]]", filter.toString());
-            assertEquals("s2[1]", filter.toCQLString());
+            assertEquals("s2[1]", filter.toCQLString(Redaction.NONE));
+            assertEquals("s2[?]", filter.toCQLString(Redaction.REDACT));
             assertFetchedQueried(true, false, filter, v1, v2);
             assertFetchedQueried(false, false, filter, s1);
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
@@ -466,8 +495,6 @@ public class ColumnFilterTest
 
     private void testRoundTrips(ColumnFilter cf)
     {
-        testRoundTrip(cf, MessagingService.VERSION_30);
-        testRoundTrip(cf, MessagingService.VERSION_3014);
         testRoundTrip(cf, MessagingService.VERSION_40);
     }
 
@@ -481,14 +508,7 @@ public class ColumnFilterTest
             DataInputPlus input = new DataInputBuffer(output.buffer(), false);
             ColumnFilter deserialized = serializer.deserialize(input, version, metadata);
 
-            if (!clusterMinVersion.equals("4.0") || version != MessagingService.VERSION_30 || !columnFilter.fetchAllRegulars)
-            {
-                Assert.assertEquals(deserialized, columnFilter);
-            }
-            else
-            {
-                Assert.assertEquals(deserialized.fetched, metadata.regularAndStaticColumns());
-            }
+            Assert.assertEquals(deserialized, columnFilter);
         }
         catch (IOException e)
         {

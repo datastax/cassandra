@@ -17,21 +17,32 @@
  */
 package org.apache.cassandra.utils.memory;
 
+import java.nio.ByteOrder;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.NativeClustering;
+import org.apache.cassandra.db.NativeDecoratedKey;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.NativeCell;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder.Group;
+import org.apache.cassandra.utils.concurrent.Semaphore;
+
+import static org.apache.cassandra.utils.concurrent.Semaphore.newSemaphore;
 
 /**
  * This NativeAllocator uses global slab allocation strategy
- * with slab size that scales exponentially from 8kb to 1Mb to
- * serve allocation of up to 128kb.
+ * with slab size that scales exponentially from 8KiB to 1MiB to
+ * serve allocation of up to 128KiB.
  * <p>
  * </p>
  * The slab allocation reduces heap fragmentation from small
@@ -76,7 +87,7 @@ public class NativeAllocator extends MemtableAllocator
         @Override
         public void newRow(Clustering<?> clustering)
         {
-            if (clustering != Clustering.STATIC_CLUSTERING)
+            if (clustering != Clustering.EMPTY && clustering != Clustering.STATIC_CLUSTERING)
                 clustering = new NativeClustering(allocator, writeOp, clustering);
             super.newRow(clustering);
         }
@@ -96,6 +107,35 @@ public class NativeAllocator extends MemtableAllocator
     public DecoratedKey clone(DecoratedKey key, OpOrder.Group writeOp)
     {
         return new NativeDecoratedKey(key.getToken(), this, writeOp, key.getKey());
+    }
+
+    @Override
+    public Cloner cloner(Group opGroup)
+    {
+        return new Cloner()
+                {
+
+                    @Override
+                    public DecoratedKey clone(DecoratedKey key)
+                    {
+                        return NativeAllocator.this.clone(key, opGroup);
+                    }
+
+                    @Override
+                    public Clustering<?> clone(Clustering<?> clustering)
+                    {
+                        if (clustering != Clustering.STATIC_CLUSTERING)
+                            return new NativeClustering(NativeAllocator.this, opGroup, clustering);
+
+                        return Clustering.STATIC_CLUSTERING;
+                    }
+
+                    @Override
+                    public Cell<?> clone(Cell<?> cell)
+                    {
+                        return new NativeCell(NativeAllocator.this, opGroup, cell);
+                    }
+                };
     }
 
     public EnsureOnHeap ensureOnHeap()
@@ -148,7 +188,7 @@ public class NativeAllocator extends MemtableAllocator
         if (currentRegion.compareAndSet(current, next))
             regions.add(next);
         else if (!raceAllocated.stash(next))
-            MemoryUtil.free(next.peer);
+            MemoryUtil.free(next.peer, next.capacity);
     }
 
     private long allocateOversize(int size)
@@ -168,19 +208,27 @@ public class NativeAllocator extends MemtableAllocator
     public void setDiscarded()
     {
         for (Region region : regions)
-            MemoryUtil.free(region.peer);
+            MemoryUtil.free(region.peer, region.capacity);
 
         super.setDiscarded();
+    }
+
+    @Override
+    public void overwriteAllData()
+    {
+        assert !isLive();
+        for (Region region : regions)
+            ByteBufferUtil.overwriteWithRandomBytes(MemoryUtil.getByteBuffer(region.peer, region.capacity, ByteOrder.BIG_ENDIAN));
     }
 
     // used to ensure we don't keep loads of race allocated regions around indefinitely. keeps the total bound on wasted memory low.
     private static class RaceAllocated
     {
         final ConcurrentLinkedQueue<Region> stash = new ConcurrentLinkedQueue<>();
-        final Semaphore permits = new Semaphore(8);
+        final Semaphore permits = newSemaphore(8);
         boolean stash(Region region)
         {
-            if (!permits.tryAcquire())
+            if (!permits.tryAcquire(1))
                 return false;
             stash.add(region);
             return true;
@@ -189,7 +237,7 @@ public class NativeAllocator extends MemtableAllocator
         {
             Region next = stash.poll();
             if (next != null)
-                permits.release();
+                permits.release(1);
             return next;
         }
     }
@@ -252,5 +300,4 @@ public class NativeAllocator extends MemtableAllocator
                     "waste=" + Math.max(0, capacity - nextFreeOffset.get());
         }
     }
-
 }

@@ -19,6 +19,13 @@ package org.apache.cassandra.db.virtual;
 
 import com.google.common.collect.ImmutableList;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.index.sai.virtual.IndexesSystemView;
+import org.apache.cassandra.index.sai.virtual.SSTablesSystemView;
+import org.apache.cassandra.index.sai.virtual.StorageAttachedIndexTables;
+
+import java.util.Collection;
+
 import static org.apache.cassandra.schema.SchemaConstants.VIRTUAL_VIEWS;
 
 public final class SystemViewsKeyspace extends VirtualKeyspace
@@ -27,8 +34,14 @@ public final class SystemViewsKeyspace extends VirtualKeyspace
 
     private SystemViewsKeyspace()
     {
-        super(VIRTUAL_VIEWS, new ImmutableList.Builder<VirtualTable>()
-                    .add(new CachesTable(VIRTUAL_VIEWS))
+        super(VIRTUAL_VIEWS, buildTables());
+    }
+
+    private static Collection<VirtualTable> buildTables()
+    {
+        ImmutableList.Builder<VirtualTable> tables = new ImmutableList.Builder<>();
+        if (CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_ALL.getBoolean())
+            tables.add(new CachesTable(VIRTUAL_VIEWS))
                     .add(new ClientsTable(VIRTUAL_VIEWS))
                     .add(new SettingsTable(VIRTUAL_VIEWS))
                     .add(new SystemPropertiesTable(VIRTUAL_VIEWS))
@@ -36,7 +49,28 @@ public final class SystemViewsKeyspace extends VirtualKeyspace
                     .add(new ThreadPoolsTable(VIRTUAL_VIEWS))
                     .add(new InternodeOutboundTable(VIRTUAL_VIEWS))
                     .add(new InternodeInboundTable(VIRTUAL_VIEWS))
+                    .add(new PendingHintsTable(VIRTUAL_VIEWS))
+                    .add(new SSTablesSystemView(VIRTUAL_VIEWS))
                     .addAll(TableMetricTables.getAll(VIRTUAL_VIEWS))
-                    .build());
+                    .add(new CredentialsCacheKeysTable(VIRTUAL_VIEWS))
+                    .add(new JmxPermissionsCacheKeysTable(VIRTUAL_VIEWS))
+                    .add(new NetworkPermissionsCacheKeysTable(VIRTUAL_VIEWS))
+                    .add(new PermissionsCacheKeysTable(VIRTUAL_VIEWS))
+                    .add(new RolesCacheKeysTable(VIRTUAL_VIEWS))
+                    .add(new CQLMetricsTable(VIRTUAL_VIEWS))
+                    .add(new BatchMetricsTable(VIRTUAL_VIEWS))
+                    .add(new StreamingVirtualTable(VIRTUAL_VIEWS))
+                    .add(new GossipInfoTable(VIRTUAL_VIEWS))
+                    .add(new QueriesTable(VIRTUAL_VIEWS))
+                    .add(new LogMessagesTable(VIRTUAL_VIEWS))
+                    .add(new SnapshotsTable(VIRTUAL_VIEWS))
+                    .addAll(LocalRepairTables.getAll(VIRTUAL_VIEWS))
+                    .addAll(CIDRFilteringMetricsTable.getAll(VIRTUAL_VIEWS))
+                    .addAll(StorageAttachedIndexTables.getAll(VIRTUAL_VIEWS));
+        if (CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_ALL.getBoolean()
+            || CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_INDEXES.getBoolean())
+            tables.add(new IndexesSystemView(VIRTUAL_VIEWS));
+
+        return tables.build();
     }
 }

@@ -18,7 +18,15 @@
 package org.apache.cassandra.dht;
 
 import java.io.Serializable;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import com.google.common.collect.Iterables;
@@ -70,7 +78,7 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         }
     }
 
-    public boolean contains(Range<T> that)
+    public boolean contains(AbstractBounds<T> that)
     {
         if (this.left.equals(this.right))
         {
@@ -125,7 +133,34 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
             return intersects((Range<T>) that);
         if (that instanceof Bounds)
             return intersects((Bounds<T>) that);
+        if (that instanceof ExcludingBounds)
+            return intersects((ExcludingBounds<T>) that);
+        if (that instanceof IncludingExcludingBounds)
+            return intersects((IncludingExcludingBounds<T>) that);
+
         throw new UnsupportedOperationException("Intersection is only supported for Bounds and Range objects; found " + that.getClass());
+    }
+
+    public boolean intersects(IncludingExcludingBounds<T> that)
+    {
+        if (!isWrapAround() && !that.right.isMinimum() && (this.left.compareTo(that.right) == 0))
+            return false;
+        else if (isWrapAround() && !that.right.isMinimum() && (this.right.compareTo(that.right) == 0))
+            return false;
+        return contains(that.left) || (!that.left.equals(that.right) && intersects(new Range<T>(that.left, that.right)));
+    }
+
+    public boolean intersects(ExcludingBounds<T> that)
+    {
+        if (!isWrapAround() &&
+            ((!that.right.isMinimum() && (this.left.compareTo(that.right) == 0)) ||
+             (this.right.compareTo(that.left) == 0)))
+            return false;
+        else if (isWrapAround() &&
+                 ((this.left.compareTo(that.left) == 0) ||
+                  (!that.right.isMinimum() && (this.right.compareTo(that.right) == 0))))
+            return false;
+        return contains(that.left) || (!that.left.equals(that.right) && intersects(new Range<T>(that.left, that.right)));
     }
 
     /**
@@ -221,6 +256,39 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         return Collections.unmodifiableSet(intersection);
     }
 
+    /**
+     * Returns the intersection of this range with the provided one, assuming neither are wrapping.
+     *
+     * @param that the other range to return the intersection with. It must not be wrapping.
+     * @return the intersection of {@code this} and {@code that}, or {@code null} if both ranges don't intersect.
+     */
+    public Range<T> intersectionNonWrapping(Range<T> that)
+    {
+        assert !isTrulyWrapAround() : "wraparound " + this;
+        assert !that.isTrulyWrapAround() : "wraparound " + that;
+
+        if (left.compareTo(that.left) < 0)
+        {
+            if (right.isMinimum() || (!that.right.isMinimum() && right.compareTo(that.right) >= 0))
+                return that;  // this contains that.
+
+            if (right.compareTo(that.left) <= 0)
+                return null;  // this is fully before that.
+
+            return new Range<>(that.left, right);
+        }
+        else
+        {
+            if (that.right.isMinimum() || (!right.isMinimum() && that.right.compareTo(right) >= 0))
+                return this;  // that contains this.
+
+            if (that.right.compareTo(left) <= 0)
+                return null;  // that is fully before this.
+
+            return new Range<>(left, that.right);
+        }
+    }
+
     public Pair<AbstractBounds<T>, AbstractBounds<T>> split(T position)
     {
         assert contains(position) || left.equals(position);
@@ -260,6 +328,29 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
     public static <T extends RingPosition<T>> boolean isWrapAround(T left, T right)
     {
        return left.compareTo(right) >= 0;
+    }
+
+    /**
+     * Checks if the range truly wraps around.
+     *
+     * This exists only because {@link #isWrapAround()} is a tad dumb and return true if right is the minimum token,
+     * no matter what left is, but for most intent and purposes, such range doesn't truly warp around (unwrap produces
+     * the identity in this case).
+     * <p>
+     * Also note that it could be that the remaining uses of {@link #isWrapAround()} could be replaced by this method,
+     * but that is to be checked carefully at some other time (Sylvain).
+     * <p>
+     * The one thing this method guarantees is that if it's true, then {@link #unwrap()} will return a list with
+     * exactly 2 ranges, never one.
+     */
+    public boolean isTrulyWrapAround()
+    {
+        return isTrulyWrapAround(left, right);
+    }
+
+    public static <T extends RingPosition<T>> boolean isTrulyWrapAround(T left, T right)
+    {
+        return isWrapAround(left, right) && !right.isMinimum();
     }
 
     /**
@@ -351,6 +442,21 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         }
         return result;
     }
+
+    public static <T extends RingPosition<T>> List<Range<T>> intersect(Collection<Range<T>> ranges1, Collection<Range<T>> ranges2)
+    {
+        Set<Range<T>> result = new HashSet<>();
+        // note: O(n^2), simple but not very efficient
+        for (Range<T> range1 : ranges1)
+        {
+            for (Range<T> range2 : ranges2)
+            {
+                result.addAll(range1.intersectionWith(range2));
+            }
+        }
+        return normalize(result);
+    }
+
 
     /**
      * Calculate set of the difference ranges of given two ranges
@@ -483,7 +589,7 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
      * Given a list of unwrapped ranges sorted by left position, return an
      * equivalent list of ranges but with no overlapping ranges.
      */
-    private static <T extends RingPosition<T>> List<Range<T>> deoverlap(List<Range<T>> ranges)
+    public static <T extends RingPosition<T>> List<Range<T>> deoverlap(List<Range<T>> ranges)
     {
         if (ranges.isEmpty())
             return ranges;

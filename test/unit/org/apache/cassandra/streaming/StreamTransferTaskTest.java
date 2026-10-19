@@ -17,12 +17,12 @@
  */
 package org.apache.cassandra.streaming;
 
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -31,9 +31,9 @@ import org.junit.BeforeClass;
 import org.junit.After;
 import org.junit.Test;
 
-import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.Assert;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.Util;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -43,12 +43,17 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.TestChannel;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.streaming.async.NettyStreamingChannel;
+import org.apache.cassandra.streaming.async.NettyStreamingConnectionFactory;
 import org.apache.cassandra.streaming.messages.OutgoingStreamMessage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Ref;
 
+import static org.apache.cassandra.net.MessagingService.current_version;
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
@@ -56,6 +61,15 @@ public class StreamTransferTaskTest
 {
     public static final String KEYSPACE1 = "StreamTransferTaskTest";
     public static final String CF_STANDARD = "Standard1";
+
+    static final StreamingChannel.Factory FACTORY = new NettyStreamingConnectionFactory()
+    {
+        @Override
+        public NettyStreamingChannel create(InetSocketAddress to, int messagingVersion, StreamingChannel.Kind kind)
+        {
+            return new NettyStreamingChannel(new TestChannel(), kind);
+        }
+    };
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -77,14 +91,15 @@ public class StreamTransferTaskTest
     public void testScheduleTimeout() throws Exception
     {
         InetAddressAndPort peer = FBUtilities.getBroadcastAddressAndPort();
-        StreamSession session = new StreamSession(StreamOperation.BOOTSTRAP, peer, (template, messagingVersion) -> new EmbeddedChannel(), false, 0, UUID.randomUUID(), PreviewKind.ALL);
+        StreamSession session = new StreamSession(StreamOperation.BOOTSTRAP, peer, FACTORY, null, current_version, false, 0, nextTimeUUID(), PreviewKind.ALL);
+        session.init(new StreamResultFuture(nextTimeUUID(), StreamOperation.OTHER, nextTimeUUID(), PreviewKind.NONE));
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD);
 
         // create two sstables
         for (int i = 0; i < 2; i++)
         {
             SchemaLoader.insertData(KEYSPACE1, CF_STANDARD, i, 1);
-            cfs.forceBlockingFlush();
+            Util.flush(cfs);
         }
 
         // create streaming task that streams those two sstables
@@ -93,7 +108,7 @@ public class StreamTransferTaskTest
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
             List<Range<Token>> ranges = new ArrayList<>();
-            ranges.add(new Range<>(sstable.first.getToken(), sstable.last.getToken()));
+            ranges.add(new Range<>(sstable.getFirst().getToken(), sstable.getLast().getToken()));
             task.addTransferStream(new CassandraOutgoingFile(StreamOperation.BOOTSTRAP, sstable.selfRef(), sstable.getPositionsForRanges(ranges), ranges, 1));
         }
         assertEquals(14, task.getTotalNumberOfFiles());
@@ -125,9 +140,9 @@ public class StreamTransferTaskTest
     public void testFailSessionDuringTransferShouldNotReleaseReferences() throws Exception
     {
         InetAddressAndPort peer = FBUtilities.getBroadcastAddressAndPort();
-        StreamCoordinator streamCoordinator = new StreamCoordinator(StreamOperation.BOOTSTRAP, 1, new DefaultConnectionFactory(), false, false, null, PreviewKind.NONE);
-        StreamResultFuture future = StreamResultFuture.createInitiator(UUID.randomUUID(), StreamOperation.OTHER, Collections.<StreamEventHandler>emptyList(), streamCoordinator);
-        StreamSession session = new StreamSession(StreamOperation.BOOTSTRAP, peer, null, false, 0, null, PreviewKind.NONE);
+        StreamCoordinator streamCoordinator = new StreamCoordinator(StreamOperation.BOOTSTRAP, 1, new NettyStreamingConnectionFactory(), false, false, null, PreviewKind.NONE);
+        StreamResultFuture future = StreamResultFuture.createInitiator(nextTimeUUID(), StreamOperation.OTHER, Collections.<StreamEventHandler>emptyList(), streamCoordinator);
+        StreamSession session = new StreamSession(StreamOperation.BOOTSTRAP, peer, FACTORY, null, current_version, false, 0, null, PreviewKind.NONE);
         session.init(future);
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD);
 
@@ -135,16 +150,16 @@ public class StreamTransferTaskTest
         for (int i = 0; i < 2; i++)
         {
             SchemaLoader.insertData(KEYSPACE1, CF_STANDARD, i, 1);
-            cfs.forceBlockingFlush();
+            Util.flush(cfs);
         }
 
         // create streaming task that streams those two sstables
         StreamTransferTask task = new StreamTransferTask(session, cfs.metadata.id);
-        List<Ref<SSTableReader>> refs = new ArrayList<>(cfs.getLiveSSTables().size());
+        List<Ref<? extends SSTableReader>> refs = new ArrayList<>(cfs.getLiveSSTables().size());
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
             List<Range<Token>> ranges = new ArrayList<>();
-            ranges.add(new Range<>(sstable.first.getToken(), sstable.last.getToken()));
+            ranges.add(new Range<>(sstable.getFirst().getToken(), sstable.getLast().getToken()));
             Ref<SSTableReader> ref = sstable.selfRef();
             refs.add(ref);
             task.addTransferStream(new CassandraOutgoingFile(StreamOperation.BOOTSTRAP, ref, sstable.getPositionsForRanges(ranges), ranges, 1));
@@ -167,14 +182,14 @@ public class StreamTransferTaskTest
         session.onError(new Exception("Fake exception")).get(5, TimeUnit.SECONDS);
 
         //make sure reference was not released
-        for (Ref<SSTableReader> ref : refs)
+        for (Ref<? extends SSTableReader> ref : refs)
         {
             assertEquals(1, ref.globalCount());
         }
 
         //wait for stream to abort asynchronously
         int tries = 10;
-        while (ScheduledExecutors.nonPeriodicTasks.getActiveCount() > 0)
+        while (ScheduledExecutors.nonPeriodicTasks.getActiveTaskCount() > 0)
         {
             if(tries < 1)
                 throw new RuntimeException("test did not complete in time");
@@ -189,7 +204,7 @@ public class StreamTransferTaskTest
         }
 
         //now reference should be released
-        for (Ref<SSTableReader> ref : refs)
+        for (Ref<? extends SSTableReader> ref : refs)
         {
             assertEquals(0, ref.globalCount());
         }

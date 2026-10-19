@@ -18,108 +18,150 @@
 
 package org.apache.cassandra.service;
 
-import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
-import org.apache.cassandra.concurrent.NamedThreadFactory;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.locator.AbstractReplicationStrategy;
-import org.apache.cassandra.utils.ExecutorUtils;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.cassandra.concurrent.SequentialExecutorPlus;
+import org.apache.cassandra.concurrent.SequentialExecutorPlus.AtLeastOnceTrigger;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.TokenMetadataProvider;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.utils.ExecutorUtils;
 
-import com.google.common.annotations.VisibleForTesting;
+import static java.util.Objects.requireNonNull;
+import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
 public class PendingRangeCalculatorService
 {
     public static final PendingRangeCalculatorService instance = new PendingRangeCalculatorService();
 
-    private static Logger logger = LoggerFactory.getLogger(PendingRangeCalculatorService.class);
+    private static final Logger logger = LoggerFactory.getLogger(PendingRangeCalculatorService.class);
 
     // the executor will only run a single range calculation at a time while keeping at most one task queued in order
     // to trigger an update only after the most recent state change and not for each update individually
-    private final JMXEnabledThreadPoolExecutor executor = new JMXEnabledThreadPoolExecutor(1, Integer.MAX_VALUE, TimeUnit.SECONDS,
-            new LinkedBlockingQueue<>(1), new NamedThreadFactory("PendingRangeCalculator"), "internal");
+    private final SequentialExecutorPlus executor;
 
-    private AtomicInteger updateJobs = new AtomicInteger(0);
+    private final Schema schema;
 
-    public PendingRangeCalculatorService()
+    private final AtLeastOnceTrigger update;
+
+    private final Set<String> keyspacesWithPendingRanges = new CopyOnWriteArraySet<>();
+
+    private final TokenMetadataProvider tokenMetadataProvider;
+
+    private void doUpdate()
     {
-        executor.setRejectedExecutionHandler((r, e) ->
-            {
-                PendingRangeCalculatorServiceDiagnostics.taskRejected(instance, updateJobs);
-                PendingRangeCalculatorService.instance.finishUpdate();
-            }
-        );
-    }
-
-    private static class PendingRangeTask implements Runnable
-    {
-        private final AtomicInteger updateJobs;
-
-        PendingRangeTask(AtomicInteger updateJobs)
+        // repeat until all keyspaced are consumed
+        while (!keyspacesWithPendingRanges.isEmpty())
         {
-            this.updateJobs = updateJobs;
-        }
+            long start = currentTimeMillis();
 
-        public void run()
-        {
+            int updated = 0;
+            int total = 0;
+            PendingRangeCalculatorServiceDiagnostics.taskStarted(1);
             try
             {
-                PendingRangeCalculatorServiceDiagnostics.taskStarted(instance, updateJobs);
-                long start = System.currentTimeMillis();
-                List<String> keyspaces = Schema.instance.getNonLocalStrategyKeyspaces();
-                for (String keyspaceName : keyspaces)
-                    calculatePendingRanges(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName);
-                if (logger.isTraceEnabled())
-                    logger.trace("Finished PendingRangeTask for {} keyspaces in {}ms", keyspaces.size(), System.currentTimeMillis() - start);
-                PendingRangeCalculatorServiceDiagnostics.taskFinished(instance, updateJobs);
+                Set<String> keyspaces = new HashSet<>(keyspacesWithPendingRanges);
+                total = keyspaces.size();
+                keyspacesWithPendingRanges.removeAll(keyspaces); // only remove those which were consumed
+
+                Iterator<String> it = keyspaces.iterator();
+                while (it.hasNext())
+                {
+                    String keyspaceName = it.next();
+                    try
+                    {
+                        calculatePendingRanges(keyspaceName);
+                        it.remove();
+                        updated++;
+                    }
+                    catch (RuntimeException | Error ex)
+                    {
+                        logger.error("Error calculating pending ranges for keyspace {}", keyspaceName, ex);
+                    }
+                }
             }
             finally
             {
-                PendingRangeCalculatorService.instance.finishUpdate();
+                PendingRangeCalculatorServiceDiagnostics.taskFinished();
+                if (logger.isTraceEnabled())
+                    logger.trace("Finished PendingRangeTask for {} keyspaces out of {} in {}ms", updated, total, currentTimeMillis() - start);
             }
         }
     }
 
-    private void finishUpdate()
+    public PendingRangeCalculatorService()
     {
-        int jobs = updateJobs.decrementAndGet();
-        PendingRangeCalculatorServiceDiagnostics.taskCountChanged(instance, jobs);
+        this("PendingRangeCalculator", Schema.instance);
+    }
+
+    public PendingRangeCalculatorService(String executorName, Schema schema)
+    {
+        this(executorFactory().withJmxInternal()
+                              .configureSequential(executorName)
+                              .withRejectedExecutionHandler((r, e) -> {})  // silently handle rejected tasks, this::update takes care of bookkeeping
+                              .build(),
+             TokenMetadataProvider.instance,
+             schema);
+    }
+
+    public PendingRangeCalculatorService(SequentialExecutorPlus executor, TokenMetadataProvider tokenMetadataProvider, Schema schema)
+    {
+        this.executor = requireNonNull(executor);
+        this.tokenMetadataProvider = requireNonNull(tokenMetadataProvider);
+        this.schema = requireNonNull(schema);
+        this.update = executor.atLeastOnceTrigger(this::doUpdate);
     }
 
     public void update()
     {
-        int jobs = updateJobs.incrementAndGet();
-        PendingRangeCalculatorServiceDiagnostics.taskCountChanged(instance, jobs);
-        executor.execute(new PendingRangeTask(updateJobs));
+        update(keyspaceName -> true);
+    }
+
+    public void update(Predicate<String> keyspaceNamePredicate)
+    {
+        Collection<String> affectedKeyspaces = schema.distributedKeyspaces().names().stream().filter(keyspaceNamePredicate).collect(Collectors.toList());
+        keyspacesWithPendingRanges.addAll(affectedKeyspaces);
+        boolean success = update.trigger();
+        if (!success) PendingRangeCalculatorServiceDiagnostics.taskRejected(1);
+        else PendingRangeCalculatorServiceDiagnostics.taskCountChanged(1);
     }
 
     public void blockUntilFinished()
     {
-        // We want to be sure the job we're blocking for is actually finished and we can't trust the TPE's active job count
-        while (updateJobs.get() > 0)
-        {
-            try
-            {
-                Thread.sleep(100);
-            }
-            catch (InterruptedException e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
+        update.sync();
     }
 
-
-    // public & static for testing purposes
-    public static void calculatePendingRanges(AbstractReplicationStrategy strategy, String keyspaceName)
+    public void executeWhenFinished(Runnable runnable)
     {
-        StorageService.instance.getTokenMetadata().calculatePendingRanges(strategy, keyspaceName);
+        update.runAfter(runnable);
+    }
+
+    @VisibleForTesting
+    protected void calculatePendingRanges(String keyspaceName)
+    {
+        Keyspace keyspace = Keyspace.open(keyspaceName);
+        AbstractReplicationStrategy strategy = keyspace.getReplicationStrategy();
+        calculatePendingRanges(strategy, keyspaceName);
+    }
+
+    @VisibleForTesting
+    public void calculatePendingRanges(AbstractReplicationStrategy strategy, String keyspaceName)
+    {
+        tokenMetadataProvider.getTokenMetadataForKeyspace(keyspaceName).calculatePendingRanges(strategy, keyspaceName);
     }
 
     @VisibleForTesting
@@ -127,4 +169,5 @@ public class PendingRangeCalculatorService
     {
         ExecutorUtils.shutdownNowAndWait(timeout, unit, executor);
     }
+
 }

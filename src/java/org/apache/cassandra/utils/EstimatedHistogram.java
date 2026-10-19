@@ -20,6 +20,7 @@ package org.apache.cassandra.utils;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.function.DoubleToLongFunction;
 
 import com.google.common.base.Objects;
 import org.slf4j.Logger;
@@ -30,9 +31,11 @@ import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 
-public class EstimatedHistogram
+public class EstimatedHistogram implements DoubleToLongFunction
 {
     public static final EstimatedHistogramSerializer serializer = new EstimatedHistogramSerializer();
+
+    public static final int DEFAULT_BUCKET_COUNT = 90;
 
     /**
      * The series of values to which the counts in `buckets` correspond:
@@ -52,7 +55,7 @@ public class EstimatedHistogram
 
     public EstimatedHistogram()
     {
-        this(90);
+        this(DEFAULT_BUCKET_COUNT);
     }
 
     public EstimatedHistogram(int bucketCount)
@@ -86,6 +89,11 @@ public class EstimatedHistogram
     }
 
     public static long[] newOffsets(int size, boolean considerZeroes)
+    {
+        return newCassandraOffsets(size, considerZeroes);
+    }
+
+    public static long[] newCassandraOffsets(int size, boolean considerZeroes)
     {
         long[] result = new long[size + (considerZeroes ? 1 : 0)];
         int i = 0;
@@ -380,6 +388,12 @@ public class EstimatedHistogram
     public int hashCode()
     {
         return Objects.hashCode(getBucketOffsets(), getBuckets(false));
+    }
+
+    @Override
+    public long applyAsLong(double value)
+    {
+        return percentile(value);
     }
 
     public static class EstimatedHistogramSerializer implements ISerializer<EstimatedHistogram>

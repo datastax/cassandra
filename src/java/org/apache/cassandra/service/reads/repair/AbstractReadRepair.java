@@ -21,10 +21,10 @@ package org.apache.cassandra.service.reads.repair;
 import java.util.function.Consumer;
 
 import com.google.common.base.Preconditions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Meter;
-import com.google.common.base.Predicates;
-
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -45,26 +45,29 @@ import org.apache.cassandra.service.reads.DataResolver;
 import org.apache.cassandra.service.reads.DigestResolver;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.Dispatcher;
 
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static java.util.concurrent.TimeUnit.MICROSECONDS;
 
-public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>>
+public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
         implements ReadRepair<E, P>
 {
+    protected static final Logger logger = LoggerFactory.getLogger(AbstractReadRepair.class);
+
     protected final ReadCommand command;
-    protected final long queryStartNanoTime;
+    protected final Dispatcher.RequestTime requestTime;
     protected final ReplicaPlan.Shared<E, P> replicaPlan;
     protected final ColumnFamilyStore cfs;
 
-    private volatile DigestRepair digestRepair = null;
+    private volatile DigestRepair<E, P> digestRepair = null;
 
-    private static class DigestRepair
+    private static class DigestRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
     {
-        private final DataResolver dataResolver;
-        private final ReadCallback readCallback;
+        private final DataResolver<E, P> dataResolver;
+        private final ReadCallback<E, P> readCallback;
         private final Consumer<PartitionIterator> resultConsumer;
 
-        public DigestRepair(DataResolver dataResolver, ReadCallback readCallback, Consumer<PartitionIterator> resultConsumer)
+        public DigestRepair(DataResolver<E, P> dataResolver, ReadCallback<E, P> readCallback, Consumer<PartitionIterator> resultConsumer)
         {
             this.dataResolver = dataResolver;
             this.readCallback = readCallback;
@@ -74,10 +77,10 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
 
     public AbstractReadRepair(ReadCommand command,
                               ReplicaPlan.Shared<E, P> replicaPlan,
-                              long queryStartNanoTime)
+                              Dispatcher.RequestTime requestTime)
     {
         this.command = command;
-        this.queryStartNanoTime = queryStartNanoTime;
+        this.requestTime = requestTime;
         this.replicaPlan = replicaPlan;
         this.cfs = Keyspace.openAndGetStore(command.metadata());
     }
@@ -87,13 +90,13 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
         return replicaPlan.get();
     }
 
-    void sendReadCommand(Replica to, ReadCallback readCallback, boolean speculative)
+    void sendReadCommand(Replica to, ReadCallback<E, P> readCallback, boolean speculative, boolean trackRepairedStatus)
     {
         ReadCommand command = this.command;
-
+        
         if (to.isSelf())
         {
-            Stage.READ.maybeExecuteImmediately(new StorageProxy.LocalReadRunnable(command, readCallback));
+            Stage.READ.maybeExecuteImmediately(new StorageProxy.LocalReadRunnable(command, readCallback, requestTime, trackRepairedStatus));
             return;
         }
 
@@ -112,8 +115,8 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
             else type = to.isFull() ? "full" : "transient";
             Tracing.trace("Enqueuing {} data read to {}", type, to);
         }
-        // if enabled, request additional info about repaired data from any full replicas
-        Message<ReadCommand> message = command.createMessage(command.isTrackingRepairedStatus() && to.isFull());
+
+        Message<ReadCommand> message = command.createMessage(trackRepairedStatus && to.isFull(), requestTime);
         MessagingService.instance().sendWithCallback(message, to.endpoint(), readCallback);
     }
 
@@ -124,29 +127,49 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
     {
         getRepairMeter().mark();
 
-        // Do a full data read to resolve the correct response (and repair node that need be)
-        DataResolver<E, P> resolver = new DataResolver<>(command, replicaPlan, this, queryStartNanoTime);
-        ReadCallback<E, P> readCallback = new ReadCallback<>(resolver, command, replicaPlan, queryStartNanoTime);
+        /*
+         * When repaired data tracking is enabled, a digest will be created from data reads from repaired SSTables.
+         * The digests from each replica can then be compared on the coordinator to detect any divergence in their
+         * repaired datasets. In this context, an SSTable is considered repaired if it is marked repaired or has a 
+         * pending repair session which has been committed. In addition to the digest, a set of ids for any pending but 
+         * as yet uncommitted repair sessions is recorded and returned to the coordinator. This is to help reduce false 
+         * positives caused by compaction lagging which can leave sstables from committed sessions in the pending state
+         * for a time.
+         */
+        boolean trackRepairedStatus = DatabaseDescriptor.getRepairedDataTrackingForPartitionReadsEnabled();
 
-        digestRepair = new DigestRepair(resolver, readCallback, resultConsumer);
+        // Do a full data read to resolve the correct response (and repair node that need be)
+        DataResolver<E, P> resolver = new DataResolver<>(command, replicaPlan, this, requestTime, trackRepairedStatus, digestResolver.getReadTracker());
+        ReadCallback<E, P> readCallback = new ReadCallback<>(resolver, command, replicaPlan, requestTime);
+
+        digestRepair = new DigestRepair<>(resolver, readCallback, resultConsumer);
 
         // if enabled, request additional info about repaired data from any full replicas
-        if (DatabaseDescriptor.getRepairedDataTrackingForPartitionReadsEnabled())
-            command.trackRepairedStatus();
-
         for (Replica replica : replicaPlan().contacts())
-            sendReadCommand(replica, readCallback, false);
+        {
+            sendReadCommand(replica, readCallback, false, trackRepairedStatus);
+        }
 
         ReadRepairDiagnostics.startRepair(this, replicaPlan(), digestResolver);
     }
 
     public void awaitReads() throws ReadTimeoutException
     {
-        DigestRepair repair = digestRepair;
+        DigestRepair<E, P> repair = digestRepair;
         if (repair == null)
             return;
 
-        repair.readCallback.awaitResults();
+        try
+        {
+            repair.readCallback.awaitResults();
+        }
+        catch (ReadTimeoutException e)
+        {
+            ReadRepairMetrics.timedOut.mark();
+            if (logger.isDebugEnabled() )
+                logger.debug("Timed out merging read repair responses", e);
+            throw e;
+        }
         repair.resultConsumer.accept(digestRepair.dataResolver.resolve());
     }
 
@@ -156,25 +179,25 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
         ConsistencyLevel speculativeCL = consistency.isDatacenterLocal() ? ConsistencyLevel.LOCAL_QUORUM : ConsistencyLevel.QUORUM;
         return  consistency != ConsistencyLevel.EACH_QUORUM
                 && consistency.satisfies(speculativeCL, replicaPlan.get().replicationStrategy())
-                && cfs.sampleReadLatencyNanos <= command.getTimeout(NANOSECONDS);
+                && cfs.sampleReadLatencyMicros <= command.getTimeout(MICROSECONDS);
     }
 
     public void maybeSendAdditionalReads()
     {
         Preconditions.checkState(command instanceof SinglePartitionReadCommand,
                                  "maybeSendAdditionalReads can only be called for SinglePartitionReadCommand");
-        DigestRepair repair = digestRepair;
+        DigestRepair<E, P> repair = digestRepair;
         if (repair == null)
             return;
 
-        if (shouldSpeculate() && !repair.readCallback.await(cfs.sampleReadLatencyNanos, NANOSECONDS))
+        if (shouldSpeculate() && !repair.readCallback.awaitUntil(requestTime.startedAtNanos() + MICROSECONDS.toNanos(cfs.sampleReadLatencyMicros)))
         {
-            Replica uncontacted = replicaPlan().firstUncontactedCandidate(Predicates.alwaysTrue());
+            Replica uncontacted = replicaPlan().firstUncontactedCandidate(replica -> true);
             if (uncontacted == null)
                 return;
 
             replicaPlan.addToContacts(uncontacted);
-            sendReadCommand(uncontacted, repair.readCallback, true);
+            sendReadCommand(uncontacted, repair.readCallback, true, false);
             ReadRepairMetrics.speculatedRead.mark();
             ReadRepairDiagnostics.speculatedRead(this, uncontacted.endpoint(), replicaPlan());
         }

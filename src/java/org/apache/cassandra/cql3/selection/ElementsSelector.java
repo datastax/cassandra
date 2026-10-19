@@ -17,17 +17,28 @@
  */
 package org.apache.cassandra.cql3.selection;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+
+import com.google.common.base.Objects;
+import com.google.common.collect.Range;
 
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.selection.SimpleSelector.SimpleSelectorFactory;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -36,11 +47,19 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  */
 abstract class ElementsSelector extends Selector
 {
-    protected final Selector selected;
+    /**
+     * An empty collection is composed of an int size of zero.
+     */
+    private static final ByteBuffer EMPTY_FROZEN_COLLECTION = ByteBufferUtil.bytes(0);
 
-    protected ElementsSelector(Selector selected)
+    protected final Selector selected;
+    protected final CollectionType<?> type;
+
+    protected ElementsSelector(Kind kind,Selector selected)
     {
+        super(kind);
         this.selected = selected;
+        this.type = getCollectionType(selected);
     }
 
     private static boolean isUnset(ByteBuffer bb)
@@ -58,6 +77,15 @@ abstract class ElementsSelector extends Selector
     public static AbstractType<?> valueType(CollectionType<?> type)
     {
         return type instanceof MapType ? type.valueComparator() : type.nameComparator();
+    }
+
+    private static CollectionType<?> getCollectionType(Selector selected)
+    {
+        AbstractType<?> type = selected.getType().unwrap();
+
+        assert type instanceof MapType || type instanceof SetType : "this shouldn't have passed validation in Selectable";
+
+        return (CollectionType<?>) type;
     }
 
     private static abstract class AbstractFactory extends Factory
@@ -210,7 +238,7 @@ abstract class ElementsSelector extends Selector
         };
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion) throws InvalidRequestException
+    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
     {
         ByteBuffer value = selected.getOutput(protocolVersion);
         return value == null ? null : extractSelection(value);
@@ -218,9 +246,14 @@ abstract class ElementsSelector extends Selector
 
     protected abstract ByteBuffer extractSelection(ByteBuffer collection);
 
-    public void addInput(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
+    public void addInput(InputRow input)
     {
-        selected.addInput(protocolVersion, rs);
+        selected.addInput(input);
+    }
+
+    protected Range<Integer> getIndexRange(ByteBuffer output, ByteBuffer fromKey, ByteBuffer toKey)
+    {
+        return type.getSerializer().getIndexesRangeFromSerialized(output, fromKey, toKey, keyType(type));
     }
 
     public void reset()
@@ -228,16 +261,30 @@ abstract class ElementsSelector extends Selector
         selected.reset();
     }
 
-    private static class ElementSelector extends ElementsSelector
+    @Override
+    public boolean isTerminal()
     {
-        private final CollectionType<?> type;
+        return selected.isTerminal();
+    }
+
+    static class ElementSelector extends ElementsSelector
+    {
+        protected static final SelectorDeserializer deserializer = new SelectorDeserializer()
+        {
+            protected Selector deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+            {
+                Selector selected = Selector.serializer.deserialize(in, version, metadata);
+                ByteBuffer key = ByteBufferUtil.readWithVIntLength(in);
+
+                return new ElementSelector(selected, key);
+            }
+        };
+
         private final ByteBuffer key;
 
         private ElementSelector(Selector selected, ByteBuffer key)
         {
-            super(selected);
-            assert selected.getType() instanceof MapType || selected.getType() instanceof SetType : "this shouldn't have passed validation in Selectable";
-            this.type = (CollectionType<?>) selected.getType();
+            super(Kind.ELEMENT_SELECTOR, selected);
             this.key = key;
         }
 
@@ -259,6 +306,31 @@ abstract class ElementsSelector extends Selector
             return type.getSerializer().getSerializedValue(collection, key, keyType(type));
         }
 
+        protected int getElementIndex(ProtocolVersion protocolVersion, ByteBuffer key)
+        {
+            ByteBuffer output = selected.getOutput(protocolVersion);
+            return output == null ? -1 : type.getSerializer().getIndexFromSerialized(output, key, keyType(type));
+        }
+
+        @Override
+        protected ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+        {
+            return getElementTimestamps(protocolVersion, selected.getWritetimes(protocolVersion));
+        }
+
+        @Override
+        protected ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+        {
+            return getElementTimestamps(protocolVersion, selected.getTTLs(protocolVersion));
+        }
+
+        private ColumnTimestamps getElementTimestamps(ProtocolVersion protocolVersion,
+                                                      ColumnTimestamps timestamps)
+        {
+            int index = getElementIndex(protocolVersion, key);
+            return index == -1 ? ColumnTimestamps.NO_TIMESTAMP : timestamps.get(index);
+        }
+
         public AbstractType<?> getType()
         {
             return valueType(type);
@@ -269,11 +341,59 @@ abstract class ElementsSelector extends Selector
         {
             return String.format("%s[%s]", selected, keyType(type).getString(key));
         }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o)
+                return true;
+
+            if (!(o instanceof ElementSelector))
+                return false;
+
+            ElementSelector s = (ElementSelector) o;
+
+            return Objects.equal(selected, s.selected)
+                && Objects.equal(key, s.key);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hashCode(selected, key);
+        }
+
+        @Override
+        protected int serializedSize(int version)
+        {
+            return TypeSizes.sizeofWithVIntLength(key) + serializer.serializedSize(selected, version);
+        }
+
+        @Override
+        protected void serialize(DataOutputPlus out, int version) throws IOException
+        {
+            serializer.serialize(selected, out, version);
+            ByteBufferUtil.serializedSizeWithVIntLength(key);
+        }
     }
 
-    private static class SliceSelector extends ElementsSelector
+    static class SliceSelector extends ElementsSelector
     {
-        private final CollectionType<?> type;
+        protected static final SelectorDeserializer deserializer = new SelectorDeserializer()
+        {
+            protected Selector deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+            {
+                Selector selected = Selector.serializer.deserialize(in, version, metadata);
+
+                boolean isFromUnset = in.readBoolean();
+                ByteBuffer from = isFromUnset ? ByteBufferUtil.UNSET_BYTE_BUFFER : ByteBufferUtil.readWithVIntLength(in);
+
+                boolean isToUnset = in.readBoolean();
+                ByteBuffer to = isToUnset ? ByteBufferUtil.UNSET_BYTE_BUFFER : ByteBufferUtil.readWithVIntLength(in);
+
+                return new SliceSelector(selected, from, to);
+            }
+        };
 
         // Note that neither from nor to can be null, but they can both be ByteBufferUtil.UNSET_BYTE_BUFFER to represent no particular bound
         private final ByteBuffer from;
@@ -281,10 +401,8 @@ abstract class ElementsSelector extends Selector
 
         private SliceSelector(Selector selected, ByteBuffer from, ByteBuffer to)
         {
-            super(selected);
-            assert selected.getType() instanceof MapType || selected.getType() instanceof SetType : "this shouldn't have passed validation in Selectable";
+            super(Kind.SLICE_SELECTOR, selected);
             assert from != null && to != null : "We can have unset buffers, but not nulls";
-            this.type = (CollectionType<?>) selected.getType();
             this.from = from;
             this.to = to;
         }
@@ -304,7 +422,37 @@ abstract class ElementsSelector extends Selector
 
         protected ByteBuffer extractSelection(ByteBuffer collection)
         {
-            return type.getSerializer().getSliceFromSerialized(collection, from, to, type.nameComparator(), type.isFrozenCollection());
+            return type.getSerializer().getSliceFromSerialized(collection, from, to, type.nameComparator(), !type.isMultiCell());
+        }
+
+        @Override
+        protected ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+        {
+            return getTimestampsSlice(protocolVersion, selected.getWritetimes(protocolVersion));
+        }
+
+        @Override
+        protected ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+        {
+            return getTimestampsSlice(protocolVersion, selected.getTTLs(protocolVersion));
+        }
+
+        protected ColumnTimestamps getTimestampsSlice(ProtocolVersion protocolVersion, ColumnTimestamps timestamps)
+        {
+            ByteBuffer output = selected.getOutput(protocolVersion);
+            return (output == null || isCollectionEmpty(output))
+                   ? ColumnTimestamps.NO_TIMESTAMP
+                   : timestamps.slice(getIndexRange(output, from, to) );
+        }
+
+        /**
+         * Checks if the collection is empty. Only frozen collection can be empty.
+         * @param output the serialized collection
+         * @return {@code true} if the collection is empty {@code false} otherwise.
+         */
+        private boolean isCollectionEmpty(ByteBuffer output)
+        {
+            return EMPTY_FROZEN_COLLECTION.equals(output);
         }
 
         public AbstractType<?> getType()
@@ -320,6 +468,58 @@ abstract class ElementsSelector extends Selector
             return fromUnset && toUnset
                  ? selected.toString()
                  : String.format("%s[%s..%s]", selected, fromUnset ? "" : keyType(type).getString(from), toUnset ? "" : keyType(type).getString(to));
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o)
+                return true;
+
+            if (!(o instanceof SliceSelector))
+                return false;
+
+            SliceSelector s = (SliceSelector) o;
+
+            return Objects.equal(selected, s.selected)
+                && Objects.equal(from, s.from)
+                && Objects.equal(to, s.to);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hashCode(selected, from, to);
+        }
+
+        @Override
+        protected int serializedSize(int version)
+        {
+            int size = serializer.serializedSize(selected, version) + 2;
+
+            if (!isUnset(from))
+                size += TypeSizes.sizeofWithVIntLength(from);
+
+            if (!isUnset(to))
+                size += TypeSizes.sizeofWithVIntLength(to);
+
+            return size;
+        }
+
+        @Override
+        protected void serialize(DataOutputPlus out, int version) throws IOException
+        {
+            serializer.serialize(selected, out, version);
+
+            boolean isFromUnset = isUnset(from);
+            out.writeBoolean(isFromUnset);
+            if (!isFromUnset)
+                ByteBufferUtil.serializedSizeWithVIntLength(from);
+
+            boolean isToUnset = isUnset(to);
+            out.writeBoolean(isToUnset);
+            if (!isToUnset)
+                ByteBufferUtil.serializedSizeWithVIntLength(to);
         }
     }
 }

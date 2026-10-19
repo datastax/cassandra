@@ -21,6 +21,9 @@ import org.hyperic.sigar.*;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+
+@Shared
 public class SigarLibrary
 {
     private Logger logger = LoggerFactory.getLogger(SigarLibrary.class);
@@ -41,7 +44,7 @@ public class SigarLibrary
 
     private SigarLibrary()
     {
-        logger.info("Initializing SIGAR library");
+        logger.debug("Initializing SIGAR library");
         try
         {
             sigar = new Sigar();
@@ -111,10 +114,6 @@ public class SigarLibrary
 
     private boolean hasAcceptableAddressSpace()
     {
-        // Check is invalid on Windows
-        if (FBUtilities.isWindows)
-            return true;
-
         try
         {
             long fileMax = sigar.getResourceLimit().getVirtualMemoryMax();
@@ -169,7 +168,7 @@ public class SigarLibrary
             boolean goodAddressSpace = hasAcceptableAddressSpace();
             boolean goodFileLimits = hasAcceptableFileLimits();
             boolean goodProcNumber = hasAcceptableProcNumber();
-            if (swapEnabled || !goodAddressSpace || !goodFileLimits || !goodProcNumber)
+            if (swapEnabled || !goodAddressSpace || !goodFileLimits || !goodProcNumber || CassandraRelevantProperties.TEST_IGNORE_SIGAR.getBoolean())
             {
                 logger.warn("Cassandra server running in degraded mode. Is swap disabled? : {},  Address space adequate? : {}, " +
                             " nofile limit adequate? : {}, nproc limit adequate? : {} ", !swapEnabled, goodAddressSpace,

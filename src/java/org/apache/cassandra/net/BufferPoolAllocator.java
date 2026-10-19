@@ -19,6 +19,8 @@ package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import io.netty.buffer.AbstractByteBufAllocator;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -26,7 +28,6 @@ import io.netty.buffer.UnpooledUnsafeDirectByteBuf;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
-import org.assertj.core.util.VisibleForTesting;
 
 import static java.lang.Integer.max;
 
@@ -90,6 +91,12 @@ public abstract class BufferPoolAllocator extends AbstractByteBufAllocator
         return bufferPool.usedSizeInBytes();
     }
 
+    @VisibleForTesting
+    long overflowMemoryInBytes()
+    {
+        return bufferPool.overflowMemoryInBytes();
+    }
+
     void release()
     {
     }
@@ -116,6 +123,7 @@ public abstract class BufferPoolAllocator extends AbstractByteBufAllocator
 
             ByteBuf newBuffer = super.capacity(newCapacity);
             ByteBuffer nioBuffer = newBuffer.nioBuffer(0, newBuffer.capacity());
+            nioBuffer = bufferPool.unwrapBufferPoolManagedBuffer(nioBuffer);
 
             bufferPool.put(wrapped);
             wrapped = nioBuffer;

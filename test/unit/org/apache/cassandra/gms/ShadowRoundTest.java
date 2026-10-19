@@ -33,11 +33,11 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -49,6 +49,8 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.AUTO_BOOTSTRAP;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CASSANDRA_CONFIG;
 import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -61,7 +63,7 @@ public class ShadowRoundTest
     @BeforeClass
     public static void setUp() throws ConfigurationException
     {
-        System.setProperty("cassandra.config", "cassandra-seeds.yaml");
+        CASSANDRA_CONFIG.setString("cassandra-seeds.yaml");
 
         DatabaseDescriptor.daemonInitialization();
         CommitLog.instance.start();
@@ -120,8 +122,11 @@ public class ShadowRoundTest
             assertThat(e.getMessage()).startsWith("Unable to contact any seeds");
         }
 
-        // we expect one SYN for each seed during shadow round + additional SYNs after gossiper has been enabled
-        assertTrue(spySyn.messagesIntercepted() > noOfSeeds);
+        // We expect one SYN for each seed during shadow round +
+        // there may be some additional SYNs after gossiper has been enabled
+        int messagesIntercepted = spySyn.messagesIntercepted();
+        assertTrue(String.format("Intercepted messages count should be >= number of seeds %d, but got %d instead",
+                                 noOfSeeds, messagesIntercepted), messagesIntercepted >= noOfSeeds);
 
         // we don't expect to emit any GOSSIP_DIGEST_ACK2 or SCHEMA_PULL messages
         assertEquals(0, spyAck2.messagesIntercepted());
@@ -171,16 +176,14 @@ public class ShadowRoundTest
                 }, 1);
 
 
-        System.setProperty(Config.PROPERTY_PREFIX + "auto_bootstrap", "false");
-        try
+        try (WithProperties properties = new WithProperties().set(AUTO_BOOTSTRAP, false))
         {
-            StorageService.instance.checkForEndpointCollision(SystemKeyspace.getLocalHostId(), SystemKeyspace.loadHostIds().keySet());
+            StorageService.instance.checkForEndpointCollision(SystemKeyspace.getOrInitializeLocalHostId(), SystemKeyspace.loadHostIds().keySet());
         }
         catch (Exception e)
         {
             assertEquals("Unable to gossip with any peers", e.getMessage());
         }
-        System.clearProperty(Config.PROPERTY_PREFIX + "auto_bootstrap");
     }
 
     @Test
@@ -209,9 +212,10 @@ public class ShadowRoundTest
                 }, 1);
 
 
-        System.setProperty(Config.PROPERTY_PREFIX + "auto_bootstrap", "false");
-        StorageService.instance.checkForEndpointCollision(SystemKeyspace.getLocalHostId(), SystemKeyspace.loadHostIds().keySet());
-        System.clearProperty(Config.PROPERTY_PREFIX + "auto_bootstrap");
+        try (WithProperties properties = new WithProperties().set(AUTO_BOOTSTRAP, false))
+        {
+            StorageService.instance.checkForEndpointCollision(SystemKeyspace.getOrInitializeLocalHostId(), SystemKeyspace.loadHostIds().keySet());
+        }
     }
 
 }

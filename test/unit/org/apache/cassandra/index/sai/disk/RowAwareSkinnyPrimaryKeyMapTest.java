@@ -1,0 +1,182 @@
+/*
+ * Copyright DataStax, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.index.sai.disk;
+
+import java.util.Set;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Skinny-table tests (no clustering columns) for
+ * {@link PrimaryKeyMap} using the row-aware on-disk format.
+ */
+public class RowAwareSkinnyPrimaryKeyMapTest extends SAITester.Versioned.RowAware
+{
+    private final IndexContext intContext = SAITester.createIndexContext("int_index", Int32Type.instance);
+    private final IndexContext textContext = SAITester.createIndexContext("text_index", UTF8Type.instance);
+
+    private PrimaryKey.Factory pkFactory;
+    private IPartitioner partitioner;
+    private PrimaryKeyMap.Factory factory;
+    private PrimaryKeyMap map;
+
+    @Before
+    public void setup() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, int_value int, text_value text)");
+        execute("CREATE CUSTOM INDEX int_index ON %s(int_value) USING 'StorageAttachedIndex'");
+        execute("CREATE CUSTOM INDEX text_index ON %s(text_value) USING 'StorageAttachedIndex'");
+
+        // Insert a few rows to have first/middle/last and token gaps
+        execute("INSERT INTO %s (pk, int_value, text_value) VALUES (?, ?, ?)", 1, 10, "a");
+        execute("INSERT INTO %s (pk, int_value, text_value) VALUES (?, ?, ?)", 1000, 20, "b");
+        execute("INSERT INTO %s (pk, int_value, text_value) VALUES (?, ?, ?)", 2, 30, "c");
+        execute("INSERT INTO %s (pk, int_value, text_value) VALUES (?, ?, ?)", 50000, 40, "d");
+
+        // Flush to generate SSTable and SAI components
+        flush();
+
+        // Obtain the just-flushed SSTable
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+
+        IndexDescriptor indexDescriptor = IndexDescriptor.load(sstable, Set.of(intContext, textContext));
+        this.pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(cfs.metadata.get().comparator);
+
+        IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
+        this.partitioner = sstable.metadata().partitioner;
+        this.factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
+        this.map = factory.newPerSSTablePrimaryKeyMap();
+    }
+
+    @After
+    public void tearDown() throws Exception
+    {
+        if (map != null)
+            map.close();
+        if (factory != null)
+            factory.close();
+    }
+
+    @Test
+    public void testExactRowIdOrInvertedCeiling()
+    {
+        assertThat(map.exactRowIdOrInvertedCeiling(beforeFirst(map))).as("before first expects the inverted first")
+                                                                     .isEqualTo(~0);
+
+        assertThat(map.exactRowIdOrInvertedCeiling(exactFirstRow(map))).as("exact first")
+                                                                       .isEqualTo(0);
+
+        assertThat(map.exactRowIdOrInvertedCeiling(betweenFirstAndSecond(map))).as("between first and second expects the inverted second")
+                                                                               .isEqualTo(~1);
+
+        assertThat(map.exactRowIdOrInvertedCeiling(exactLastRow(map))).as("exact last")
+                                                                      .isEqualTo(map.count() - 1);
+
+        assertThat(map.exactRowIdOrInvertedCeiling(afterLastToken(map))).as("after last expects out of range")
+                                                                        .isEqualTo(Long.MIN_VALUE);
+    }
+
+    @Test
+    public void testCeiling()
+    {
+        assertThat(map.ceiling(beforeFirst(map))).as("before first expects the first")
+                                                 .isEqualTo(0);
+
+        assertThat(map.ceiling(exactFirstRow(map))).as("exact first")
+                                                   .isEqualTo(0);
+
+        assertThat(map.ceiling(betweenFirstAndSecond(map))).as("between first and second expects the second")
+                                                           .isEqualTo(1);
+
+        assertThat(map.ceiling(exactLastRow(map))).as("exact last")
+                                                  .isEqualTo(map.count() - 1);
+
+        assertThat(map.ceiling(afterLastToken(map))).as("after last expects out of range")
+                                                    .isEqualTo(-1);
+    }
+
+    @Test
+    public void testFloor()
+    {
+        assertThat(map.floor(beforeFirst(map))).as("before first expects out of range")
+                                               .isEqualTo(-1);
+
+        assertThat(map.floor(exactFirstRow(map))).as("exact first")
+                                                 .isEqualTo(0);
+
+        assertThat(map.floor(betweenFirstAndSecond(map))).as("between first and second expects the first")
+                                                         .isEqualTo(0);
+
+        assertThat(map.floor(exactLastRow(map))).as("exact last")
+                                                .isEqualTo(map.count() - 1);
+
+        assertThat(map.floor(afterLastToken(map))).as("after last expects the last")
+                                                  .isEqualTo(map.count() - 1);
+    }
+
+    private PrimaryKey beforeFirst(PrimaryKeyMap map)
+    {
+        PrimaryKey firstPk = map.primaryKeyFromRowId(0);
+        long firstToken = firstPk.token().getLongValue();
+        return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(firstToken - 1));
+    }
+
+    private PrimaryKey exactFirstRow(PrimaryKeyMap map)
+    {
+        PrimaryKey firstPk = map.primaryKeyFromRowId(0);
+        return pkFactory.createTokenOnly(firstPk.token());
+    }
+
+    private PrimaryKey betweenFirstAndSecond(PrimaryKeyMap map)
+    {
+        PrimaryKey firstPk = map.primaryKeyFromRowId(0);
+        PrimaryKey secondPk = map.primaryKeyFromRowId(1);
+        long firstToken = firstPk.token().getLongValue();
+        long secondToken = secondPk.token().getLongValue();
+        long midToken = firstToken + ((secondToken - firstToken) / 2);
+        return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(midToken));
+    }
+
+    private PrimaryKey exactLastRow(PrimaryKeyMap map)
+    {
+        PrimaryKey lastPk = map.primaryKeyFromRowId(map.count() - 1);
+        return pkFactory.createTokenOnly(lastPk.token());
+    }
+
+    private PrimaryKey afterLastToken(PrimaryKeyMap map)
+    {
+        PrimaryKey lastPk = map.primaryKeyFromRowId(map.count() - 1);
+        long lastToken = lastPk.token().getLongValue();
+        return pkFactory.createTokenOnly(partitioner.getTokenFactory().fromLongValue(lastToken + 1));
+    }
+}

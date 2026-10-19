@@ -17,10 +17,8 @@
  */
 package org.apache.cassandra.fql;
 
-import java.io.File;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -31,6 +29,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 
+import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,8 +48,10 @@ import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.binlog.BinLog;
 import org.apache.cassandra.utils.binlog.BinLogOptions;
+import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 import org.apache.cassandra.utils.concurrent.WeightedQueue;
-import org.github.jamm.MemoryLayoutSpecification;
+
+import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
  * A logger that logs entire query contents after the query finishes (or times out).
@@ -80,13 +81,8 @@ public class FullQueryLogger implements QueryEvents.Listener
     public static final String QUERIES = "queries";
     public static final String VALUES = "values";
 
-    private static final int EMPTY_BYTEBUFFER_SIZE = Ints.checkedCast(ObjectSizes.sizeOnHeapExcludingData(ByteBuffer.allocate(0)));
-
-    private static final int EMPTY_LIST_SIZE = Ints.checkedCast(ObjectSizes.measureDeep(new ArrayList(0)));
+    private static final int EMPTY_LIST_SIZE = Ints.checkedCast(ObjectSizes.measureDeep(new ArrayList<>(0)));
     private static final int EMPTY_BYTEBUF_SIZE;
-
-    private static final int OBJECT_HEADER_SIZE = MemoryLayoutSpecification.SPEC.getObjectHeaderSize();
-    private static final int OBJECT_REFERENCE_SIZE = MemoryLayoutSpecification.SPEC.getReferenceSize();
 
     public static final FullQueryLogger instance = new FullQueryLogger();
 
@@ -106,6 +102,22 @@ public class FullQueryLogger implements QueryEvents.Listener
                                           .build(true);
         QueryEvents.instance.registerListener(this);
     }
+
+    public synchronized void enableWithoutClean(Path path, String rollCycle, boolean blocking, int maxQueueWeight, long maxLogSize, String archiveCommand, int maxArchiveRetries)
+    {
+        if (this.binLog != null)
+            throw new IllegalStateException("Binlog is already configured");
+        this.binLog = new BinLog.Builder().path(path)
+                                          .rollCycle(rollCycle)
+                                          .blocking(blocking)
+                                          .maxQueueWeight(maxQueueWeight)
+                                          .maxLogSize(maxLogSize)
+                                          .archiveCommand(archiveCommand)
+                                          .maxArchiveRetries(maxArchiveRetries)
+                                          .build(false);
+        QueryEvents.instance.registerListener(this);
+    }
+
 
     static
     {
@@ -161,7 +173,7 @@ public class FullQueryLogger implements QueryEvents.Listener
         }
         catch (InterruptedException e)
         {
-            throw new RuntimeException(e);
+            throw new UncheckedInterruptedException(e);
         }
         finally
         {
@@ -194,7 +206,7 @@ public class FullQueryLogger implements QueryEvents.Listener
             //Then decide whether to clean the last used path, possibly configured by JMX
             if (binLog != null && binLog.path != null)
             {
-                File pathFile = binLog.path.toFile();
+                File pathFile = new File(binLog.path);
                 if (pathFile.exists())
                 {
                     pathsToClean.add(pathFile);
@@ -262,11 +274,11 @@ public class FullQueryLogger implements QueryEvents.Listener
                              long batchTimeMillis,
                              Message.Response response)
     {
-        Preconditions.checkNotNull(type, "type was null");
-        Preconditions.checkNotNull(queries, "queries was null");
-        Preconditions.checkNotNull(values, "value was null");
-        Preconditions.checkNotNull(queryOptions, "queryOptions was null");
-        Preconditions.checkNotNull(queryState, "queryState was null");
+        checkNotNull(type, "type was null");
+        checkNotNull(queries, "queries was null");
+        checkNotNull(values, "value was null");
+        checkNotNull(queryOptions, "queryOptions was null");
+        checkNotNull(queryState, "queryState was null");
         Preconditions.checkArgument(batchTimeMillis > 0, "batchTimeMillis must be > 0");
 
         //Don't construct the wrapper if the log is disabled
@@ -295,9 +307,9 @@ public class FullQueryLogger implements QueryEvents.Listener
                              long queryTimeMillis,
                              Message.Response response)
     {
-        Preconditions.checkNotNull(query, "query was null");
-        Preconditions.checkNotNull(queryOptions, "queryOptions was null");
-        Preconditions.checkNotNull(queryState, "queryState was null");
+        checkNotNull(query, "query was null");
+        checkNotNull(queryOptions, "queryOptions was null");
+        checkNotNull(queryState, "queryState was null");
         Preconditions.checkArgument(queryTimeMillis > 0, "queryTimeMillis must be > 0");
 
         //Don't construct the wrapper if the log is disabled
@@ -316,12 +328,25 @@ public class FullQueryLogger implements QueryEvents.Listener
 
     public static class Query extends AbstractLogEntry
     {
+        /**
+         * The shallow size of a {@code Query} object.
+         */
+        private static final long EMPTY_SIZE = ObjectSizes.measure(new Query());
+
         private final String query;
 
         public Query(String query, QueryOptions queryOptions, QueryState queryState, long queryStartTime)
         {
             super(queryOptions, queryState, queryStartTime);
             this.query = query;
+        }
+
+        /**
+         * Constructor only use to compute this class shallow size.
+         */
+        private Query()
+        {
+            this.query = null;
         }
 
         @Override
@@ -340,12 +365,21 @@ public class FullQueryLogger implements QueryEvents.Listener
         @Override
         public int weight()
         {
-            return Ints.checkedCast(ObjectSizes.sizeOf(query)) + super.weight();
+            // Object deep size = Object' shallow size + query field deep size + deep size of the parent fields
+            return Ints.checkedCast(EMPTY_SIZE + ObjectSizes.sizeOf(query) + super.fieldsSize());
         }
     }
 
     public static class Batch extends AbstractLogEntry
     {
+        /**
+         * The shallow size of a {@code Batch} object (which includes primitive fields).
+         */
+        private static final long EMPTY_SIZE = ObjectSizes.measure(new Batch());
+
+        /**
+         * The weight is pre-computed in the constructor and represent the object deep size.
+         */
         private final int weight;
         private final BatchStatement.Type batchType;
         private final List<String> queries;
@@ -364,24 +398,37 @@ public class FullQueryLogger implements QueryEvents.Listener
             this.values = values;
             this.batchType = batchType;
 
-            int weight = super.weight();
-
-            // weight, queries, values, batch type
-            weight += 4 +                    // cached weight
-                      2 * EMPTY_LIST_SIZE +  // queries + values lists
-                      OBJECT_REFERENCE_SIZE; // batchType reference, worst case
+            // We assume that all the lists are ArrayLists and that the size of each underlying array is the one of the list 
+            // (which is obviously wrong but not worst than the previous computation that was ignoring part of the arrays size in the computation).
+            long queriesSize = EMPTY_LIST_SIZE + ObjectSizes.sizeOfReferenceArray(queries.size());
 
             for (String query : queries)
-                weight += ObjectSizes.sizeOf(query);
+                queriesSize += ObjectSizes.sizeOf(checkNotNull(query));
 
+            long valuesSize = EMPTY_LIST_SIZE + ObjectSizes.sizeOfReferenceArray(values.size());
             for (List<ByteBuffer> subValues : values)
             {
-                weight += EMPTY_LIST_SIZE;
-                for (ByteBuffer value : subValues)
-                    weight += EMPTY_BYTEBUFFER_SIZE + value.capacity();
+                valuesSize += EMPTY_LIST_SIZE + ObjectSizes.sizeOfReferenceArray(subValues.size());
+                for (ByteBuffer subValue : subValues)
+                    valuesSize += ObjectSizes.sizeOnHeapOf(subValue);
             }
 
-            this.weight = weight;
+            // No need to add the batch type which is an enum.
+            this.weight = Ints.checkedCast(EMPTY_SIZE            // Shallow size object
+                                            + super.fieldsSize() // deep size of the parent fields (non-primitives as they are included in the shallow size) 
+                                            + queriesSize        // deep size queries field
+                                            + valuesSize);       // deep size values field
+        }
+
+        /**
+         * Constructor only use to compute this class shallow size.
+         */
+        private Batch()
+        {
+            this.weight = 0;
+            this.batchType = null;
+            this.queries = null;
+            this.values = null;
         }
 
         @Override
@@ -407,9 +454,7 @@ public class FullQueryLogger implements QueryEvents.Listener
             {
                 valueOut.int32(subValues.size());
                 for (ByteBuffer value : subValues)
-                {
-                    valueOut.bytes(BytesStore.wrap(value));
-                }
+                    valueOut.bytes(value == null ? null : BytesStore.wrap(value));
             }
         }
 
@@ -427,7 +472,7 @@ public class FullQueryLogger implements QueryEvents.Listener
         private final ByteBuf queryOptionsBuffer;
 
         private final long generatedTimestamp;
-        private final int generatedNowInSeconds;
+        private final long generatedNowInSeconds;
         @Nullable
         private final String keyspace;
 
@@ -466,6 +511,19 @@ public class FullQueryLogger implements QueryEvents.Listener
             }
         }
 
+        /**
+         * Constructor only use to compute sub-classes shallow size.
+         */
+        private AbstractLogEntry()
+        {
+            this.queryStartTime = 0;
+            this.protocolVersion = 0;
+            this.queryOptionsBuffer = null;
+            this.generatedTimestamp = 0;
+            this.generatedNowInSeconds = 0;
+            this.keyspace = null;
+        }
+
         @Override
         protected long version()
         {
@@ -480,7 +538,7 @@ public class FullQueryLogger implements QueryEvents.Listener
             wire.write(QUERY_OPTIONS).bytes(BytesStore.wrap(queryOptionsBuffer.nioBuffer()));
 
             wire.write(GENERATED_TIMESTAMP).int64(generatedTimestamp);
-            wire.write(GENERATED_NOW_IN_SECONDS).int32(generatedNowInSeconds);
+            wire.write(GENERATED_NOW_IN_SECONDS).int64(generatedNowInSeconds);
 
             wire.write(KEYSPACE).text(keyspace);
         }
@@ -491,18 +549,14 @@ public class FullQueryLogger implements QueryEvents.Listener
             queryOptionsBuffer.release();
         }
 
-        @Override
-        public int weight()
+        /**
+         * Returns the sum of the non-primitive fields' deep sizes.
+         * @return the sum of the non-primitive fields' deep sizes.
+         */
+        protected long fieldsSize()
         {
-            return OBJECT_HEADER_SIZE
-                 + 8                                                  // queryStartTime
-                 + 4                                                  // protocolVersion
-                 + EMPTY_BYTEBUF_SIZE + queryOptionsBuffer.capacity() // queryOptionsBuffer
-                 + 8                                                  // generatedTimestamp
-                 + 4                                                  // generatedNowInSeconds
-                 + (keyspace != null
-                    ? Ints.checkedCast(ObjectSizes.sizeOf(keyspace))  // keyspace
-                    : OBJECT_REFERENCE_SIZE);                         // null
+            return EMPTY_BYTEBUF_SIZE + queryOptionsBuffer.capacity() // queryOptionsBuffer
+                   + ObjectSizes.sizeOf(keyspace);                    // keyspace
         }
     }
 

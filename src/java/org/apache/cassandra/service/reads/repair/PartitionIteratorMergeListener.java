@@ -21,7 +21,6 @@ package org.apache.cassandra.service.reads.repair;
 import java.util.List;
 
 import org.apache.cassandra.db.Columns;
-import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.RegularAndStaticColumns;
@@ -34,11 +33,11 @@ import org.apache.cassandra.locator.ReplicaPlan;
 public class PartitionIteratorMergeListener<E extends Endpoints<E>>
         implements UnfilteredPartitionIterators.MergeListener
 {
-    private final ReplicaPlan.ForRead<E> replicaPlan;
+    private final ReplicaPlan.ForRead<E, ?> replicaPlan;
     private final ReadCommand command;
     private final ReadRepair readRepair;
 
-    public PartitionIteratorMergeListener(ReplicaPlan.ForRead<E> replicaPlan, ReadCommand command, ReadRepair readRepair)
+    public PartitionIteratorMergeListener(ReplicaPlan.ForRead<E, ?> replicaPlan, ReadCommand command, ReadRepair readRepair)
     {
         this.replicaPlan = replicaPlan;
         this.command = command;
@@ -50,7 +49,7 @@ public class PartitionIteratorMergeListener<E extends Endpoints<E>>
         return new RowIteratorMergeListener<>(partitionKey, columns(versions), isReversed(versions), replicaPlan, command, readRepair);
     }
 
-    protected RegularAndStaticColumns columns(List<UnfilteredRowIterator> versions)
+    public static RegularAndStaticColumns columns(List<UnfilteredRowIterator> versions)
     {
         Columns statics = Columns.NONE;
         Columns regulars = Columns.NONE;

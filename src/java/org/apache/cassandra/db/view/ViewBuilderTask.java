@@ -21,7 +21,6 @@ package org.apache.cassandra.db.view;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -29,10 +28,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
-import com.google.common.util.concurrent.Futures;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,10 +41,11 @@ import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.ReadQuery;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.compaction.CompactionInfo;
-import org.apache.cassandra.db.compaction.CompactionInfo.Unit;
+import org.apache.cassandra.db.WriteOptions;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.Rows;
@@ -59,11 +57,14 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Refs;
 
-public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<Long>
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
+
+public class ViewBuilderTask extends AbstractTableOperation implements Callable<Long>
 {
     private static final Logger logger = LoggerFactory.getLogger(ViewBuilderTask.class);
 
@@ -72,7 +73,7 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
     private final ColumnFamilyStore baseCfs;
     private final View view;
     private final Range<Token> range;
-    private final UUID compactionId;
+    private final TimeUUID compactionId;
     private volatile Token prevToken;
     private volatile long keysBuilt = 0;
     private volatile boolean isStopped = false;
@@ -84,12 +85,11 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
         this.baseCfs = baseCfs;
         this.view = view;
         this.range = range;
-        this.compactionId = UUIDGen.getTimeUUID();
+        this.compactionId = nextTimeUUID();
         this.prevToken = lastToken;
         this.keysBuilt = keysBuilt;
     }
 
-    @SuppressWarnings("resource")
     private void buildKey(DecoratedKey key)
     {
         ReadQuery selectQuery = view.getReadQuery();
@@ -100,7 +100,7 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
             return;
         }
 
-        int nowInSec = FBUtilities.nowInSeconds();
+        long nowInSec = FBUtilities.nowInSeconds();
         SinglePartitionReadCommand command = view.getSelectStatement().internalReadForView(key, nowInSec);
 
         // We're rebuilding everything from what's on disk, so we read everything, consider that as new updates
@@ -115,7 +115,7 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
                                                        .generateViewUpdates(Collections.singleton(view), data, empty, nowInSec, true);
 
             AtomicLong noBase = new AtomicLong(Long.MAX_VALUE);
-            mutations.forEachRemaining(m -> StorageProxy.mutateMV(key.getKey(), m, true, noBase, System.nanoTime()));
+            mutations.forEachRemaining(m -> StorageProxy.mutateMV(key.getKey(), m, WriteOptions.FOR_VIEW_BUILD, noBase, Dispatcher.RequestTime.forImmediateExecution()));
         }
     }
 
@@ -135,7 +135,7 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
          */
         boolean schemaConverged = Gossiper.instance.waitForSchemaAgreement(10, TimeUnit.SECONDS, () -> this.isStopped);
         if (!schemaConverged)
-            logger.warn("Failed to get schema to converge before building view {}.{}", baseCfs.keyspace.getName(), view.name);
+            logger.warn("Failed to get schema to converge before building view {}.{}", baseCfs.getKeyspaceName(), view.name);
 
         Function<org.apache.cassandra.db.lifecycle.View, Iterable<SSTableReader>> function;
         function = org.apache.cassandra.db.lifecycle.View.select(SSTableSet.CANONICAL, s -> range.intersects(s.getBounds()));
@@ -175,7 +175,7 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
 
     private void finish()
     {
-        String ksName = baseCfs.keyspace.getName();
+        String ksName = baseCfs.getKeyspaceName();
         if (!isStopped)
         {
             // Save the completed status using the end of the range as last token. This way it will be possible for
@@ -191,12 +191,12 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
             // If it's stopped due to a compaction interruption we should throw that exception.
             // Otherwise we assume that the task has been stopped due to a schema update and we can finish successfully.
             if (isCompactionInterrupted)
-                throw new StoppedException(ksName, view.name, getCompactionInfo());
+                throw new StoppedException(ksName, view.name, getProgress(), trigger());
         }
     }
 
     @Override
-    public CompactionInfo getCompactionInfo()
+    public OperationProgress getProgress()
     {
         // we don't know the sstables at construction of ViewBuilderTask and we could change this to return once we know the
         // but since we basically only cancel view builds on truncation where we cancel all compactions anyway, this seems reasonable
@@ -205,17 +205,17 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
         if (range.left.getPartitioner().splitter().isPresent())
         {
             long progress = prevToken == null ? 0 : Math.round(prevToken.getPartitioner().splitter().get().positionInRange(prevToken, range) * 1000);
-            return CompactionInfo.withoutSSTables(baseCfs.metadata(), OperationType.VIEW_BUILD, progress, 1000, Unit.RANGES, compactionId);
+            return OperationProgress.withoutSSTables(baseCfs.metadata(), OperationType.VIEW_BUILD, progress, 1000, Unit.RANGES, compactionId);
         }
 
         // When there is no splitter, estimate based on number of total keys but
         // take the max with keysBuilt + 1 to avoid having more completed than total
         long keysTotal = Math.max(keysBuilt + 1, baseCfs.estimatedKeysForRange(range));
-        return CompactionInfo.withoutSSTables(baseCfs.metadata(), OperationType.VIEW_BUILD, keysBuilt, keysTotal, Unit.KEYS, compactionId);
+        return OperationProgress.withoutSSTables(baseCfs.metadata(), OperationType.VIEW_BUILD, keysBuilt, keysTotal, Unit.KEYS, compactionId);
     }
 
     @Override
-    public void stop()
+    public void stop(StopTrigger trigger)
     {
         stop(true);
     }
@@ -248,9 +248,9 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
     {
         private final String ksName, viewName;
 
-        private StoppedException(String ksName, String viewName, CompactionInfo info)
+        private StoppedException(String ksName, String viewName, OperationProgress info, TableOperation.StopTrigger trigger)
         {
-            super(info);
+            super(info, trigger);
             this.ksName = ksName;
             this.viewName = viewName;
         }

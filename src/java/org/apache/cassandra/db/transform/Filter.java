@@ -25,22 +25,22 @@ import org.apache.cassandra.db.rows.*;
 
 public final class Filter extends Transformation
 {
-    private final int nowInSec;
+    private final long nowInSec;
     private final boolean enforceStrictLiveness;
 
-    public Filter(int nowInSec, boolean enforceStrictLiveness)
+    public Filter(long nowInSec, boolean enforceStrictLiveness)
     {
         this.nowInSec = nowInSec;
         this.enforceStrictLiveness = enforceStrictLiveness;
     }
 
     @Override
-    @SuppressWarnings("resource")
     protected RowIterator applyToPartition(BaseRowIterator iterator)
     {
+        ((UnfilteredRowIterator) iterator).stopIssuingTombstones();
         return iterator instanceof UnfilteredRows
              ? new FilteredRows(this, (UnfilteredRows) iterator)
-             : new FilteredRows((UnfilteredRowIterator) iterator, this);
+             : new FilteredRows(((UnfilteredRowIterator) iterator), this);
     }
 
     @Override

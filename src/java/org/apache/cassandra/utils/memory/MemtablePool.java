@@ -25,12 +25,15 @@ import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
+import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Timer;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.apache.cassandra.utils.ExecutorUtils;
+
+import static org.apache.cassandra.utils.concurrent.WaitQueue.newWaitQueue;
 
 
 /**
@@ -46,9 +49,14 @@ public abstract class MemtablePool
     public final SubPool offHeap;
 
     public final Timer blockedOnAllocating;
+    /**
+     * Counter metric that registers blocked write immediately in contrast to Timer blockedOnAllocating that waits for
+     * allocation to register wait duration.
+     */
+    public final Counter blockedOnAllocatingCount;
     public final Gauge<Long> numPendingTasks;
 
-    final WaitQueue hasRoom = new WaitQueue();
+    final WaitQueue hasRoom = newWaitQueue();
 
     MemtablePool(long maxOnHeapMemory, long maxOffHeapMemory, float cleanThreshold, MemtableCleaner cleaner)
     {
@@ -57,9 +65,9 @@ public abstract class MemtablePool
         this.onHeap = getSubPool(maxOnHeapMemory, cleanThreshold);
         this.offHeap = getSubPool(maxOffHeapMemory, cleanThreshold);
         this.cleaner = getCleaner(cleaner);
-        this.cleaner.start();
         DefaultNameFactory nameFactory = new DefaultNameFactory("MemtablePool");
         blockedOnAllocating = CassandraMetricsRegistry.Metrics.timer(nameFactory.createMetricName("BlockedOnAllocation"));
+        blockedOnAllocatingCount = CassandraMetricsRegistry.Metrics.counter(nameFactory.createMetricName("BlockedOnAllocationTotal"));
         numPendingTasks = CassandraMetricsRegistry.Metrics.register(nameFactory.createMetricName("PendingFlushTasks"),
                                                                     () -> (long) this.cleaner.numPendingTasks());
     }
@@ -80,7 +88,7 @@ public abstract class MemtablePool
         ExecutorUtils.shutdownNowAndWait(timeout, unit, cleaner);
     }
 
-    public abstract MemtableAllocator newAllocator();
+    public abstract MemtableAllocator newAllocator(String table);
 
     public boolean needsCleaning()
     {
@@ -93,14 +101,15 @@ public abstract class MemtablePool
     }
 
     /**
-     * Note the difference between acquire() and allocate(); allocate() makes more resources available to all owners,
-     * and acquire() makes shared resources unavailable but still recorded. An Owner must always acquire resources,
-     * but only needs to allocate if there are none already available. This distinction is not always meaningful.
+     * Tracks the memory attributed to one purpose. Allocations only record usage and drive cleaning; the
+     * limit is enforced before a mutation starts, in {@link MemtableAllocator.SubAllocator#awaitRoom}
+     * (CASSANDRA-21019), so the recorded total may overshoot the limit by the mutations in flight.
      */
     public class SubPool
     {
 
-        // total memory/resource permitted to allocate
+        // total memory/resource permitted to allocate; 0 marks a sub-pool the configured allocation type
+        // does not allocate from, and is not enforced, see MemtableAllocator.SubAllocator.awaitRoom
         public final long limit;
 
         // ratio of used to spare (both excluding 'reclaiming') at which to trigger a clean
@@ -115,6 +124,7 @@ public abstract class MemtablePool
 
         public SubPool(long limit, float cleanThreshold)
         {
+            Preconditions.checkArgument(limit >= 0, "Negative limit: %s", limit);
             this.limit = limit;
             this.cleanThreshold = cleanThreshold;
         }
@@ -147,16 +157,10 @@ public abstract class MemtablePool
 
         /** Methods to allocate space **/
 
-        boolean tryAllocate(long size)
+        /** True if the pool is under its limit; reserves nothing. */
+        boolean belowLimit()
         {
-            while (true)
-            {
-                long cur;
-                if ((cur = allocated) + size > limit)
-                    return false;
-                if (allocatedUpdater.compareAndSet(this, cur, cur + size))
-                    return true;
-            }
+            return allocated < limit;
         }
 
         /**
@@ -183,14 +187,9 @@ public abstract class MemtablePool
             maybeClean();
         }
 
-        void acquired()
-        {
-            maybeClean();
-        }
-
         void released(long size)
         {
-            assert size >= 0;
+            assert size >= 0 : "Negative released: " + size;
             adjustAllocated(-size);
             hasRoom.signalAll();
         }
@@ -248,8 +247,9 @@ public abstract class MemtablePool
             return hasRoom;
         }
 
-        public Timer.Context blockedTimerContext()
+        public Timer.Context markMemoryBlockedOnAllocating()
         {
+            blockedOnAllocatingCount.inc();
             return blockedOnAllocating.time();
         }
     }

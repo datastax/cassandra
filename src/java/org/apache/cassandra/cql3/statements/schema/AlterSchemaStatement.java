@@ -17,7 +17,9 @@
  */
 package org.apache.cassandra.cql3.statements.schema;
 
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import com.google.common.collect.ImmutableSet;
 
@@ -26,32 +28,61 @@ import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
-abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformation
-{
-    protected final String keyspaceName; // name of the keyspace affected by the statement
+import static org.apache.cassandra.schema.KeyspaceMetadata.validateKeyspaceName;
 
-    protected AlterSchemaStatement(String keyspaceName)
+public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspaceCqlStatement, SchemaTransformation
+{
+    private final String rawCQLStatement;
+    protected String keyspaceName; // name of the keyspace affected by the statement
+    protected ClientState state;
+
+    protected AlterSchemaStatement(String queryString, String keyspaceName)
     {
+        this.rawCQLStatement = queryString;
         this.keyspaceName = keyspaceName;
     }
 
-    public final void validate(ClientState state)
+    @Override
+    public String getRawCQLStatement()
     {
-        // no-op; validation is performed while executing the statement, in apply()
+        return rawCQLStatement;
     }
 
-    public ResultMessage execute(QueryState state, QueryOptions options, long queryStartNanoTime)
+    public void validate(ClientState state)
+    {
+        // validation is performed while executing the statement, in apply()
+
+        // Cache our ClientState for use by guardrails
+        this.state = state;
+    }
+
+    @Override
+    public ResultMessage execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime)
     {
         return execute(state, false);
+    }
+
+    @Override
+    public String keyspace()
+    {
+        return keyspaceName;
+    }
+
+    public void overrideKeyspace(Function<String, String> overrideKeyspace)
+    {
+        this.keyspaceName = overrideKeyspace.apply(keyspaceName);
     }
 
     public ResultMessage executeLocally(QueryState state, QueryOptions options)
@@ -97,13 +128,13 @@ abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformatio
         if (null != keyspace && keyspace.isVirtual())
             throw ire("Virtual keyspace '%s' is not user-modifiable", keyspaceName);
 
-        validateKeyspaceName();
+        validateKeyspaceName(keyspaceName, AlterSchemaStatement::ire);
 
-        KeyspacesDiff diff = MigrationManager.announce(this, locally);
+        SchemaTransformationResult result = Schema.instance.transform(this, locally);
 
-        clientWarnings(diff).forEach(ClientWarn.instance::warn);
+        clientWarnings(result.diff).forEach(ClientWarn.instance::warn);
 
-        if (diff.isEmpty())
+        if (result.diff.isEmpty())
             return new ResultMessage.Void();
 
         /*
@@ -115,19 +146,17 @@ abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformatio
          */
         AuthenticatedUser user = state.getClientState().getUser();
         if (null != user && !user.isAnonymous())
-            createdResources(diff).forEach(r -> grantPermissionsOnResource(r, user));
+            createdResources(result.diff).forEach(r -> grantPermissionsOnResource(r, user));
 
-        return new ResultMessage.SchemaChange(schemaChangeEvent(diff));
+        return new ResultMessage.SchemaChange(schemaChangeEvent(result.diff));
     }
 
-    private void validateKeyspaceName()
+    protected void validateDefaultTimeToLive(TableParams params)
     {
-        if (!SchemaConstants.isValidName(keyspaceName))
-        {
-            throw ire("Keyspace name must not be empty, more than %d characters long, " +
-                      "or contain non-alphanumeric-underscore characters (got '%s')",
-                      SchemaConstants.NAME_LENGTH, keyspaceName);
-        }
+        if (params.defaultTimeToLive == 0
+            && !SchemaConstants.isSystemKeyspace(keyspaceName)
+            && TimeWindowCompactionStrategy.class.isAssignableFrom(params.compaction.klass()))
+            Guardrails.zeroTTLOnTWCSEnabled.ensureEnabled(state);
     }
 
     private void grantPermissionsOnResource(IResource resource, AuthenticatedUser user)
@@ -149,5 +178,14 @@ abstract class AlterSchemaStatement implements CQLStatement, SchemaTransformatio
     static InvalidRequestException ire(String format, Object... args)
     {
         return new InvalidRequestException(String.format(format, args));
+    }
+
+    public static interface WithKeyspaceAttributes
+    {
+        Object getAttribute(String key);
+
+        void overrideAttribute(String oldKey, String newKey, String newValue);
+
+        void overrideAttribute(String oldKey, String newKey, Map<String, String> newValue);
     }
 }

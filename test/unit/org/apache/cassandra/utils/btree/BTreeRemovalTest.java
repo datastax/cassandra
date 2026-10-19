@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.utils.btree;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.BTREE_BRANCH_SHIFT;
 import static org.apache.cassandra.utils.btree.BTreeRemoval.remove;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -37,7 +38,7 @@ public class BTreeRemovalTest
 {
     static
     {
-        System.setProperty("cassandra.btree.fanfactor", "8");
+        BTREE_BRANCH_SHIFT.setInt(3);
     }
 
     private static final Comparator<Integer> CMP = new Comparator<Integer>()
@@ -101,7 +102,7 @@ public class BTreeRemovalTest
 
     private static Object[] generateLeaf(int from, int size)
     {
-        final Object[] result = new Object[(size & 1) == 1 ? size : size + 1];
+        final Object[] result = new Object[size | 1];
         for (int i = 0; i < size; ++i)
             result[i] = from + i;
         return result;
@@ -112,16 +113,21 @@ public class BTreeRemovalTest
         assert keys.length > 0;
         assert children.length > 1;
         assert children.length == keys.length + 1;
+
         final Object[] result = new Object[keys.length + children.length + 1];
         for (int i = 0; i < keys.length; ++i)
             result[i] = keys[i];
+
         for (int i = 0; i < children.length; ++i)
             result[keys.length + i] = children[i];
+
         final int[] sizeMap = new int[children.length];
         sizeMap[0] = BTree.size(children[0]);
         for (int i = 1; i < children.length; ++i)
             sizeMap[i] = sizeMap[i - 1] + BTree.size(children[i]) + 1;
+
         result[result.length - 1] = sizeMap;
+
         return result;
     }
 
@@ -131,9 +137,11 @@ public class BTreeRemovalTest
         final Object[][] leaves = new Object[leafSizes.length][];
         for (int i = 0; i < leaves.length; ++i)
             leaves[i] = generateLeaf(10 * i + 1, leafSizes[i]);
+
         final int[] keys = new int[leafSizes.length - 1];
         for (int i = 0; i < keys.length; ++i)
             keys[i] = 10 * (i + 1);
+
         final Object[] btree = generateBranch(keys, leaves);
         assertTrue(BTree.isWellFormed(btree, CMP));
         return btree;
@@ -184,7 +192,7 @@ public class BTreeRemovalTest
     @Test
     public void testRemoveFromRootWhichIsALeaf()
     {
-        for (int size = 1; size < 9; ++size)
+        for (int size = 1; size <= BTree.MAX_KEYS; ++size)
         {
             final Object[] btree = new Object[(size & 1) == 1 ? size : size + 1];
             for (int i = 0; i < size; ++i)
@@ -218,7 +226,7 @@ public class BTreeRemovalTest
     @Test
     public void testRemoveFromNonMinimalLeaf()
     {
-        for (int size = 5; size < 9; ++size)
+        for (int size = 5; size <= BTree.MAX_KEYS; ++size)
         {
             final Object[] btree = generateSampleTwoLevelsTree(new int[] {size, 4, 4, 4, 4});
 
@@ -370,7 +378,7 @@ public class BTreeRemovalTest
         SortedSet<Integer> data = new TreeSet<>();
         for (int i = 0; i < 1000; ++i)
             data.add(rand.nextInt());
-        Object[] btree = BTree.build(data, UpdateFunction.<Integer>noOp());
+        Object[] btree = BTree.build(data);
 
         assertTrue(BTree.isWellFormed(btree, CMP));
         assertTrue(Iterables.elementsEqual(data, BTree.iterable(btree)));

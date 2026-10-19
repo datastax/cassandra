@@ -22,14 +22,13 @@ import java.util.Set;
 
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.locator.ReplicaLayout;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.service.reads.ReadCallback;
 
-public interface InstrumentedReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>>
+public interface InstrumentedReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
         extends ReadRepair<E, P>
 {
     Set<InetAddressAndPort> getReadRecipients();
 
-    ReadCallback getReadCallback();
+    ReadCallback<E, P> getReadCallback();
 }

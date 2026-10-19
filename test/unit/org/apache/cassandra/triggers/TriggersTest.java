@@ -29,8 +29,6 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -38,6 +36,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.toInt;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -53,13 +52,12 @@ public class TriggersTest
     public static void beforeTest() throws ConfigurationException
     {
         SchemaLoader.loadSchema();
+        StorageService.instance.initServer(0);
     }
 
     @Before
     public void setup() throws Exception
     {
-        StorageService.instance.initServer(0);
-
         String cql = String.format("CREATE KEYSPACE IF NOT EXISTS %s " +
                                    "WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}",
                                    ksName);
@@ -123,7 +121,7 @@ public class TriggersTest
     @Test(expected=org.apache.cassandra.exceptions.InvalidRequestException.class)
     public void onCqlUpdateWithConditionsRejectGeneratedUpdatesForDifferentPartition() throws Exception
     {
-        String cf = "cf" + System.nanoTime();
+        String cf = "cf" + nanoTime();
         try
         {
             setupTableWithTrigger(cf, CrossPartitionTrigger.class);
@@ -139,7 +137,7 @@ public class TriggersTest
     @Test(expected=org.apache.cassandra.exceptions.InvalidRequestException.class)
     public void onCqlUpdateWithConditionsRejectGeneratedUpdatesForDifferentTable() throws Exception
     {
-        String cf = "cf" + System.nanoTime();
+        String cf = "cf" + nanoTime();
         try
         {
             setupTableWithTrigger(cf, CrossTableTrigger.class);
@@ -155,7 +153,7 @@ public class TriggersTest
     @Test(expected=org.apache.cassandra.exceptions.InvalidRequestException.class)
     public void ifTriggerThrowsErrorNoMutationsAreApplied() throws Exception
     {
-        String cf = "cf" + System.nanoTime();
+        String cf = "cf" + nanoTime();
         try
         {
             setupTableWithTrigger(cf, ErrorTrigger.class);

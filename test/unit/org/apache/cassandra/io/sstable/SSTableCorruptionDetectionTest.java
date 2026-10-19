@@ -18,35 +18,46 @@
 
 package org.apache.cassandra.io.sstable;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.function.*;
+import java.nio.channels.FileChannel;
+import java.util.Random;
+import java.util.function.Consumer;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.*;
-import org.apache.cassandra.cache.*;
-import org.apache.cassandra.config.*;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.UpdateBuilder;
+import org.apache.cassandra.Util;
+import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DataRange;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.filter.*;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
-import org.apache.cassandra.io.util.*;
-import org.apache.cassandra.schema.*;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadata;
 
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -95,13 +106,13 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
         maxValueSize = DatabaseDescriptor.getMaxValueSize();
         DatabaseDescriptor.setMaxValueSize(1024 * 1024);
 
-        long seed = System.nanoTime();
+        long seed = nanoTime();
         logger.info("Seed {}", seed);
         random = new Random(seed);
 
         truncate(cfs);
         File dir = cfs.getDirectories().getDirectoryForNewSSTables();
-        txn = LifecycleTransaction.offline(OperationType.WRITE);
+        txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata);
 
         // Setting up/writing large values is an expensive operation, we only want to do it once per run
         writer = getWriter(cfs, dir, txn);
@@ -117,9 +128,9 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
                    .add("reg2", ByteBuffer.wrap(reg2));
             writer.append(builder.build().unfilteredIterator());
         }
-        cfs.forceBlockingFlush();
+        Util.flush(cfs);
 
-        ssTableReader = writer.finish(true);
+        ssTableReader = writer.finish(true, null);
         txn.update(ssTableReader, false);
         LifecycleTransaction.waitForDeletions();
     }
@@ -146,20 +157,26 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
         bruteForceCorruptionTest(ssTableReader, sstableScanner());
     }
 
+    @Test
+    public void testSSTableSimpleScanner() throws Throwable
+    {
+        bruteForceCorruptionTest(ssTableReader, sstableSimpleScanner());
+    }
+
     private void bruteForceCorruptionTest(SSTableReader ssTableReader, Consumer<SSTableReader> walker) throws Throwable
     {
-        RandomAccessFile raf = new RandomAccessFile(ssTableReader.getFilename(), "rw");
+        FileChannel fc = new File(ssTableReader.getFilename()).newReadWriteChannel();
 
         int corruptedCounter = 0;
 
-        int fileLength = (int)raf.length(); // in current test, it does fit into int
+        int fileLength = (int)fc.size(); // in current test, it does fit into int
         for (int i = 0; i < numberOfRuns; i++)
         {
             final int corruptionPosition = random.nextInt(fileLength - 1); //ensure at least one byte will be corrupted
             // corrupt max from position to end of file
             final int corruptionSize = Math.min(maxCorruptionSize, random.nextInt(fileLength - corruptionPosition));
 
-            byte[] backup = corruptSstable(raf, corruptionPosition, corruptionSize);
+            byte[] backup = corruptSstable(fc, corruptionPosition, corruptionSize);
 
             try
             {
@@ -172,17 +189,43 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
             finally
             {
                 if (ChunkCache.instance != null)
-                    ChunkCache.instance.invalidateFile(ssTableReader.getFilename());
+                    ChunkCache.instance.invalidateFileNow(ssTableReader.getDataFile());
 
-                restore(raf, corruptionPosition, backup);
+                restore(fc, corruptionPosition, backup);
             }
         }
 
         assertTrue(corruptedCounter > 0);
-        FileUtils.closeQuietly(raf);
+        FileUtils.closeQuietly(fc);
     }
 
     private Consumer<SSTableReader> sstableScanner()
+    {
+        return (SSTableReader sstable) -> {
+            try (var scanner = sstable.partitionIterator(ColumnFilter.NONE, DataRange.allData(sstable.getPartitioner()), SSTableReadsListener.NOOP_LISTENER))
+            {
+                while (scanner.hasNext())
+                {
+                    try (UnfilteredRowIterator rowIter = scanner.next())
+                    {
+                        if (rowIter.hasNext())
+                        {
+                            Unfiltered unfiltered = rowIter.next();
+                            if (unfiltered.isRow())
+                            {
+                                Row row = (Row) unfiltered;
+                                assertEquals(2, row.clustering().size());
+                                // no-op read
+                            }
+                        }
+                    }
+
+                }
+            }
+        };
+    }
+
+    private Consumer<SSTableReader> sstableSimpleScanner()
     {
         return (SSTableReader sstable) -> {
             try (ISSTableScanner scanner = sstable.getScanner())
@@ -214,11 +257,11 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
             for (int i = 0; i < numberOfPks; i++)
             {
                 DecoratedKey dk = Util.dk(String.format("pkvalue_%07d", i));
-                try (UnfilteredRowIterator rowIter = sstable.iterator(dk,
-                                                                      Slices.ALL,
-                                                                      ColumnFilter.all(cfs.metadata()),
-                                                                      false,
-                                                                      SSTableReadsListener.NOOP_LISTENER))
+                try (UnfilteredRowIterator rowIter = sstable.rowIterator(dk,
+                                                                         Slices.ALL,
+                                                                         ColumnFilter.all(cfs.metadata()),
+                                                                         false,
+                                                                         SSTableReadsListener.NOOP_LISTENER))
                 {
                     while (rowIter.hasNext())
                     {
@@ -230,29 +273,28 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
                             // no-op read
                         }
                     }
-                    rowIter.close();
                 }
             }
         };
     }
 
-    private byte[] corruptSstable(RandomAccessFile raf, int position, int corruptionSize) throws IOException
+    private byte[] corruptSstable(FileChannel fc, int position, int corruptionSize) throws IOException
     {
         byte[] backup = new byte[corruptionSize];
-        raf.seek(position);
-        raf.read(backup);
+        fc.position(position);
+        fc.read(ByteBuffer.wrap(backup));
 
-        raf.seek(position);
+        fc.position(position);
         byte[] corruption = new byte[corruptionSize];
         random.nextBytes(corruption);
-        raf.write(corruption);
+        fc.write(ByteBuffer.wrap(corruption));
 
         return backup;
     }
 
-    private void restore(RandomAccessFile raf, int position, byte[] backup) throws IOException
+    private void restore(FileChannel fc, int position, byte[] backup) throws IOException
     {
-        raf.seek(position);
-        raf.write(backup);
+        fc.position(position);
+        fc.write(ByteBuffer.wrap(backup));
     }
 }

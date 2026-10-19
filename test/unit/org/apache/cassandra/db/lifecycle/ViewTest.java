@@ -28,15 +28,15 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.junit.Assert;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.MockSchema;
@@ -46,6 +46,7 @@ import static com.google.common.collect.ImmutableSet.of;
 import static com.google.common.collect.Iterables.concat;
 import static java.util.Collections.singleton;
 import static org.apache.cassandra.db.lifecycle.Helpers.emptySet;
+import static org.apache.cassandra.db.lifecycle.SSTableIntervalTree.buildSSTableIntervalTree;
 
 public class ViewTest
 {
@@ -103,8 +104,8 @@ public class ViewTest
         Assert.assertFalse(View.permitCompacting(readers.subList(0, 2)).apply(cur));
         Assert.assertFalse(View.permitCompacting(readers.subList(0, 1)).apply(cur));
         Assert.assertFalse(View.permitCompacting(readers.subList(1, 2)).apply(cur));
-        Assert.assertTrue(readers.subList(2, 5).containsAll(copyOf(cur.getUncompacting(readers))));
-        Assert.assertEquals(3, copyOf(cur.getUncompacting(readers)).size());
+        Assert.assertTrue(readers.subList(2, 5).containsAll(copyOf(cur.getNoncompacting(readers))));
+        Assert.assertEquals(3, copyOf(cur.getNoncompacting(readers)).size());
         Assert.assertTrue(ImmutableSet.copyOf(cur.select(SSTableSet.NONCOMPACTING)).containsAll(readers.subList(2, 5)));
         Assert.assertEquals(3, ImmutableSet.copyOf(cur.select(SSTableSet.NONCOMPACTING)).size());
 
@@ -132,8 +133,8 @@ public class ViewTest
         Assert.assertFalse(View.permitCompacting(readers.subList(1, 2)).apply(cur));
         testFailure(View.updateCompacting(emptySet(), readers.subList(1, 2)), cur);
         testFailure(View.updateCompacting(copyOf(readers.subList(0, 2)), emptySet()), cur);
-        Assert.assertTrue(copyOf(concat(readers.subList(0, 1), readers.subList(2, 5))).containsAll(copyOf(cur.getUncompacting(readers))));
-        Assert.assertEquals(4, copyOf(cur.getUncompacting(readers)).size());
+        Assert.assertTrue(copyOf(concat(readers.subList(0, 1), readers.subList(2, 5))).containsAll(copyOf(cur.getNoncompacting(readers))));
+        Assert.assertEquals(4, copyOf(cur.getNoncompacting(readers)).size());
         Set<SSTableReader> nonCompacting = ImmutableSet.copyOf(cur.select(SSTableSet.NONCOMPACTING));
         Assert.assertTrue(nonCompacting.containsAll(readers.subList(2, 5)));
         Assert.assertTrue(nonCompacting.containsAll(readers.subList(0, 1)));
@@ -225,6 +226,6 @@ public class ViewTest
         for (int i = 0 ; i < sstableCount ; i++)
             sstables.add(MockSchema.sstable(i, keepRef, cfs));
         return new View(ImmutableList.copyOf(memtables), Collections.<Memtable>emptyList(), Helpers.identityMap(sstables),
-                        Collections.<SSTableReader, SSTableReader>emptyMap(), SSTableIntervalTree.build(sstables));
+                        Collections.<SSTableReader, SSTableReader>emptyMap(), buildSSTableIntervalTree(sstables));
     }
 }

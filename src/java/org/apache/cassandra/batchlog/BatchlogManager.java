@@ -22,41 +22,44 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.Collections2;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
+import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
+import org.apache.cassandra.transport.Dispatcher;
+import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.concurrent.Future;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.WriteOptions;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.db.marshal.BytesType;
-import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
-import org.apache.cassandra.gms.FailureDetector;
+import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -75,14 +78,18 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.WriteResponseHandler;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MBeanWrapper;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
-import static com.google.common.collect.Iterables.transform;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
+import static org.apache.cassandra.config.CassandraRelevantProperties.BATCHLOG_REPLAY_TIMEOUT_IN_MS;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternalWithPaging;
 import static org.apache.cassandra.net.Verb.MUTATION_REQ;
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
 public class BatchlogManager implements BatchlogManagerMBean
 {
@@ -92,29 +99,41 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     private static final Logger logger = LoggerFactory.getLogger(BatchlogManager.class);
     public static final BatchlogManager instance = new BatchlogManager();
-    public static final long BATCHLOG_REPLAY_TIMEOUT = Long.getLong("cassandra.batchlog.replay_timeout_in_ms", DatabaseDescriptor.getWriteRpcTimeout(MILLISECONDS) * 2);
+    public static final long BATCHLOG_REPLAY_TIMEOUT = BATCHLOG_REPLAY_TIMEOUT_IN_MS.getLong(DatabaseDescriptor.getWriteRpcTimeout(MILLISECONDS) * 2);
 
     private volatile long totalBatchesReplayed = 0; // no concurrency protection necessary as only written by replay thread.
-    private volatile UUID lastReplayedUuid = UUIDGen.minTimeUUID(0);
+    private volatile TimeUUID lastReplayedUuid = TimeUUID.minAtUnixMillis(0);
+
+    // Batches whose mutations have completed (applied locally, acknowledged by remote replicas, or
+    // hinted) in an earlier replay cycle but whose interceptor callback failed, mapped to the hosts
+    // hinted for them. On later cycles only the callback is retried, via a point read of the batch:
+    // the mutations are not re-sent and no new hints are written for them, and the hinted hosts are
+    // fsynced again before the batch is finally deleted. Only accessed by the replay thread. Lost
+    // on restart, in which case the batch (whose row sits behind lastReplayedUuid, itself reset by
+    // the restart) is replayed from scratch, which the at-least-once contract already tolerates.
+    private final Map<TimeUUID, Set<UUID>> batchesAwaitingInterceptor = new HashMap<>();
 
     // Single-thread executor service for scheduling and serializing log replay.
-    private final ScheduledExecutorService batchlogTasks;
+    private final ScheduledExecutorPlus batchlogTasks;
 
     private final RateLimiter rateLimiter = RateLimiter.create(Double.MAX_VALUE);
 
     public BatchlogManager()
     {
-        ScheduledThreadPoolExecutor executor = new DebuggableScheduledThreadPoolExecutor("BatchlogTasks");
-        executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
-        batchlogTasks = executor;
+        batchlogTasks = executorFactory().scheduled(false, "BatchlogTasks");
     }
 
     public void start()
     {
         MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
 
+        // Resolve the interceptor eagerly: a misconfigured custom class fails the node at
+        // startup rather than at the first replay, and operators can see what is installed.
+        BatchlogManagerInterceptor interceptor = BatchlogManagerInterceptor.instance;
+        logger.info("Batchlog interceptor: {}", interceptor.getClass().getName());
+
         batchlogTasks.scheduleWithFixedDelay(this::replayFailedBatches,
-                                             StorageService.RING_DELAY,
+                                             StorageService.RING_DELAY_MILLIS,
                                              REPLAY_INTERVAL,
                                              MILLISECONDS);
     }
@@ -124,10 +143,10 @@ public class BatchlogManager implements BatchlogManagerMBean
         ExecutorUtils.shutdownAndWait(timeout, unit, batchlogTasks);
     }
 
-    public static void remove(UUID id)
+    public static void remove(TimeUUID id)
     {
         new Mutation(PartitionUpdate.fullPartitionDelete(SystemKeyspace.Batches,
-                                                         UUIDType.instance.decompose(id),
+                                                         id.toBytes(),
                                                          FBUtilities.timestampMicros(),
                                                          FBUtilities.nowInSeconds()))
             .apply();
@@ -135,11 +154,16 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static void store(Batch batch)
     {
-        store(batch, true);
+        /**
+         * by default writes are durable, see
+         * {@link org.apache.cassandra.schema.KeyspaceParams#DEFAULT_DURABLE_WRITES}
+         */
+        store(batch, WriteOptions.DEFAULT);
     }
 
-    public static void store(Batch batch, boolean durableWrites)
+    public static void store(Batch batch, WriteOptions writeOptions)
     {
+        int storageVersion = StorageCompatibilityMode.current().storageMessagingVersion();
         List<ByteBuffer> mutations = new ArrayList<>(batch.encodedMutations.size() + batch.decodedMutations.size());
         mutations.addAll(batch.encodedMutations);
 
@@ -147,7 +171,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         {
             try (DataOutputBuffer buffer = new DataOutputBuffer())
             {
-                Mutation.serializer.serialize(mutation, buffer, MessagingService.current_version);
+                Mutation.serializer.serialize(mutation, buffer, storageVersion);
                 mutations.add(buffer.buffer());
             }
             catch (IOException e)
@@ -160,10 +184,10 @@ public class BatchlogManager implements BatchlogManagerMBean
         PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(SystemKeyspace.Batches, batch.id);
         builder.row()
                .timestamp(batch.creationTime)
-               .add("version", MessagingService.current_version)
+               .add("version", storageVersion)
                .appendAll("mutations", mutations);
 
-        builder.buildAsMutation().apply(durableWrites);
+        builder.buildAsMutation().apply(writeOptions);
     }
 
     @VisibleForTesting
@@ -180,6 +204,23 @@ public class BatchlogManager implements BatchlogManagerMBean
     public long getTotalBatchesReplayed()
     {
         return totalBatchesReplayed;
+    }
+
+    @VisibleForTesting
+    int countBatchesAwaitingInterceptor()
+    {
+        return batchesAwaitingInterceptor.size();
+    }
+
+    /**
+     * Simulates the effect of a replay cycle that aborted before advancing the scan lower bound:
+     * the next scan covers already-processed rows again, including those of batches awaiting their
+     * interceptor.
+     */
+    @VisibleForTesting
+    void resetLastReplayedUuid()
+    {
+        lastReplayedUuid = TimeUUID.minAtUnixMillis(0);
     }
 
     public void forceBatchlogReplay() throws Exception
@@ -211,20 +252,26 @@ public class BatchlogManager implements BatchlogManagerMBean
             logger.trace("Replay cancelled as there are no peers in the ring.");
             return;
         }
-        setRate(DatabaseDescriptor.getBatchlogReplayThrottleInKB());
+        setRate(DatabaseDescriptor.getBatchlogReplayThrottleInKiB());
 
-        UUID limitUuid = UUIDGen.maxTimeUUID(System.currentTimeMillis() - getBatchlogTimeout());
+        TimeUUID limitUuid = TimeUUID.maxAtUnixMillis(currentTimeMillis() - getBatchlogTimeout());
         ColumnFamilyStore store = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES);
         int pageSize = calculatePageSize(store);
-        // There cannot be any live content where token(id) <= token(lastReplayedUuid) as every processed batch is
-        // deleted, but the tombstoned content may still be present in the tables. To avoid walking over it we specify
-        // token(id) > token(lastReplayedUuid) as part of the query.
+        // The only live content where token(id) <= token(lastReplayedUuid) are batches retained because
+        // their interceptor callback failed, and those are retried through point reads, not through this
+        // scan; every other processed batch is deleted, but the tombstoned content may still be present
+        // in the tables. To avoid walking over it we specify token(id) > token(lastReplayedUuid) as part
+        // of the query.
         String query = String.format("SELECT id, mutations, version FROM %s.%s WHERE token(id) > token(?) AND token(id) <= token(?)",
                                      SchemaConstants.SYSTEM_KEYSPACE_NAME,
                                      SystemKeyspace.BATCHES);
-        UntypedResultSet batches = executeInternalWithPaging(query, pageSize, lastReplayedUuid, limitUuid);
+        UntypedResultSet batches = executeInternalWithPaging(query, PageSize.inRows(pageSize), lastReplayedUuid, limitUuid);
         processBatchlogEntries(batches, pageSize, rateLimiter);
         lastReplayedUuid = limitUuid;
+        if (!batchesAwaitingInterceptor.isEmpty())
+            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                             "{} batches whose mutations were replayed are retained in the batchlog awaiting successful interceptor callbacks",
+                             batchesAwaitingInterceptor.size());
         logger.trace("Finished replayFailedBatches");
     }
 
@@ -232,18 +279,18 @@ public class BatchlogManager implements BatchlogManagerMBean
      * Sets the rate for the current rate limiter. When {@code throttleInKB} is 0, this sets the rate to
      * {@link Double#MAX_VALUE} bytes per second.
      *
-     * @param throttleInKB throughput to set in KB per second
+     * @param throttleInKB throughput to set in KiB per second
      */
     public void setRate(final int throttleInKB)
     {
         int endpointsCount = StorageService.instance.getTokenMetadata().getSizeOfAllEndpoints();
         if (endpointsCount > 0)
         {
-            int endpointThrottleInKB = throttleInKB / endpointsCount;
-            double throughput = endpointThrottleInKB == 0 ? Double.MAX_VALUE : endpointThrottleInKB * 1024.0;
+            int endpointThrottleInKiB = throttleInKB / endpointsCount;
+            double throughput = endpointThrottleInKiB == 0 ? Double.MAX_VALUE : endpointThrottleInKiB * 1024.0;
             if (rateLimiter.getRate() != throughput)
             {
-                logger.debug("Updating batchlog replay throttle to {} KB/s, {} KB/s per endpoint", throttleInKB, endpointThrottleInKB);
+                logger.debug("Updating batchlog replay throttle to {} KB/s, {} KB/s per endpoint", throttleInKB, endpointThrottleInKiB);
                 rateLimiter.setRate(throughput);
             }
         }
@@ -264,20 +311,32 @@ public class BatchlogManager implements BatchlogManagerMBean
         int positionInPage = 0;
         ArrayList<ReplayingBatch> unfinishedBatches = new ArrayList<>(pageSize);
 
-        Set<InetAddressAndPort> hintedNodes = new HashSet<>();
-        Set<UUID> replayedBatches = new HashSet<>();
+        Set<UUID> hintedNodes = new HashSet<>();
+        Set<TimeUUID> replayedBatches = new HashSet<>();
         Exception caughtException = null;
         int skipped = 0;
+
+        // Snapshot before the scan: only batches memoized by EARLIER cycles get their callbacks
+        // retried in this cycle. A callback failing during this cycle's scan is retried on the
+        // next cycle, per the interceptor contract, not immediately.
+        List<Map.Entry<TimeUUID, Set<UUID>>> awaitingInterceptorRetry = new ArrayList<>(batchesAwaitingInterceptor.entrySet());
 
         // Sending out batches for replay without waiting for them, so that one stuck batch doesn't affect others
         for (UntypedResultSet.Row row : batches)
         {
-            UUID id = row.getUUID("id");
+            TimeUUID id = row.getTimeUUID("id");
             int version = row.getInt("version");
+
+            // If a cycle aborts before advancing lastReplayedUuid, the next scan still covers the
+            // batches it left awaiting their interceptor; those are handled by
+            // retryBatchesAwaitingInterceptor later in this cycle, so don't replay them here.
+            if (batchesAwaitingInterceptor.containsKey(id))
+                continue;
+
             try
             {
                 ReplayingBatch batch = new ReplayingBatch(id, version, row.getList("mutations", BytesType.instance));
-                if (batch.replay(rateLimiter, hintedNodes) > 0)
+                if (batch.replay(rateLimiter) > 0)
                 {
                     unfinishedBatches.add(batch);
                 }
@@ -304,29 +363,145 @@ public class BatchlogManager implements BatchlogManagerMBean
             }
         }
 
-        finishAndClearBatches(unfinishedBatches, hintedNodes, replayedBatches);
+        // finalize the incomplete last page of batches
+        if (positionInPage > 0)
+            finishAndClearBatches(unfinishedBatches, hintedNodes, replayedBatches);
+
+        // Retry the callbacks of batches retained by earlier cycles. This runs after the scan, so
+        // replay of new content is not starved by retries, and before the hint fsync barrier below,
+        // which the deferred deletion of the retried batches must share.
+        retryBatchesAwaitingInterceptor(awaitingInterceptorRetry, rateLimiter, hintedNodes, replayedBatches);
 
         if (caughtException != null)
             logger.warn(String.format("Encountered %d unexpected exceptions while sending out batches", skipped), caughtException);
 
         // to preserve batch guarantees, we must ensure that hints (if any) have made it to disk, before deleting the batches
-        HintsService.instance.flushAndFsyncBlockingly(transform(hintedNodes, StorageService.instance::getHostIdForEndpoint));
+        HintsService.instance.flushAndFsyncBlockingly(hintedNodes);
 
-        // once all generated hints are fsynced, actually delete the batches
-        replayedBatches.forEach(BatchlogManager::remove);
+        // Once all generated hints are fsynced, actually delete the batches. A batch awaiting its
+        // interceptor is forgotten right when its row is deleted (and only counts as replayed now):
+        // had the cycle aborted before its deletion, the batch must go through the callback-only
+        // retry again — not through a full (mutation re-sending, hint re-writing) replay, and
+        // without being counted twice.
+        for (TimeUUID id : replayedBatches)
+        {
+            remove(id);
+            if (batchesAwaitingInterceptor.remove(id) != null)
+                ++totalBatchesReplayed;
+        }
     }
 
-    private void finishAndClearBatches(ArrayList<ReplayingBatch> batches, Set<InetAddressAndPort> hintedNodes, Set<UUID> replayedBatches)
+    /**
+     * Retries the interceptor callbacks of batches whose mutations completed in an earlier cycle.
+     * Batches are looked up individually — their rows sit behind {@code lastReplayedUuid}, outside
+     * the ranges scanned by {@link #replayFailedBatches} — and their mutations are not re-delivered:
+     * on callback success the batch joins {@code replayedBatches}, its previously hinted hosts join
+     * {@code hintedNodes} so the hints are fsynced (again) before the caller deletes the batch, and
+     * the memoized entry itself is dropped (and the batch counted as replayed) by the caller once
+     * the deletion has happened. Re-reads are throttled by the replay rate limiter.
+     */
+    private void retryBatchesAwaitingInterceptor(List<Map.Entry<TimeUUID, Set<UUID>>> awaitingRetry,
+                                                 RateLimiter rateLimiter,
+                                                 Set<UUID> hintedNodes,
+                                                 Set<TimeUUID> replayedBatches)
+    {
+        if (awaitingRetry.isEmpty())
+            return;
+
+        String query = String.format("SELECT id, mutations, version FROM %s.%s WHERE id = ?",
+                                     SchemaConstants.SYSTEM_KEYSPACE_NAME,
+                                     SystemKeyspace.BATCHES);
+        for (Map.Entry<TimeUUID, Set<UUID>> entry : awaitingRetry)
+        {
+            TimeUUID id = entry.getKey();
+            try
+            {
+                UntypedResultSet result = executeInternal(query, id);
+                if (result == null || result.isEmpty())
+                {
+                    // The batch was removed from the batchlog by another path (e.g. its coordinator
+                    // completing the batch): there is no row left to retry the callbacks from.
+                    logger.warn("Batch {} was removed from the batchlog before its interceptor callbacks completed; dropping them", id);
+                    batchesAwaitingInterceptor.remove(id);
+                    ++totalBatchesReplayed;
+                    continue;
+                }
+
+                UntypedResultSet.Row row = result.one();
+                ReplayingBatch batch = new ReplayingBatch(id, row.getInt("version"), row.getList("mutations", BytesType.instance));
+                rateLimiter.acquire(batch.replayedBytes);
+                if (tryNotifyInterceptor(batch))
+                {
+                    hintedNodes.addAll(entry.getValue());
+                    replayedBatches.add(id);
+                }
+            }
+            catch (IOException e)
+            {
+                logger.error("Batch {} was replayed but can no longer be deserialized; its remaining interceptor callbacks are dropped", id, e);
+                // let the deletion share the hint fsync barrier below, like any other replayed batch
+                hintedNodes.addAll(entry.getValue());
+                replayedBatches.add(id);
+            }
+            catch (Throwable t)
+            {
+                // Failing to read one batch back (e.g. a transient local read error) must wedge
+                // neither the other retries nor the scan of new batchlog content: keep the entry
+                // and let a later cycle retry the read. Deliberately, an error we cannot classify
+                // is never grounds for deleting the batch (a corrupt row that keeps failing with
+                // a RuntimeException is retried, and warned about, indefinitely).
+                JVMStabilityInspector.inspectThrowable(t);
+                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                                 "Failed to read batch {} back for its interceptor retry; it will be retried", id, t);
+            }
+        }
+    }
+
+    private void finishAndClearBatches(ArrayList<ReplayingBatch> batches, Set<UUID> hintedNodes, Set<TimeUUID> replayedBatches)
     {
         // schedule hints for timed out deliveries
         for (ReplayingBatch batch : batches)
         {
-            batch.finish(hintedNodes);
-            replayedBatches.add(batch.id);
+            batch.finish();
+            hintedNodes.addAll(batch.hintedNodes());
+            if (tryNotifyInterceptor(batch))
+            {
+                replayedBatches.add(batch.id);
+                ++totalBatchesReplayed;
+            }
+            else
+            {
+                // Don't mark the batch replayed: its batchlog row survives. Its mutations have
+                // completed though, so remember that (along with the hosts hinted for it) and let
+                // later cycles retry the callback alone instead of replaying the whole batch
+                // (and writing another round of hints).
+                batchesAwaitingInterceptor.put(batch.id, batch.hintedNodes());
+            }
         }
 
-        totalBatchesReplayed += batches.size();
         batches.clear();
+    }
+
+    /**
+     * Invokes {@link BatchlogManagerInterceptor#instance} with the batch and all of its mutations.
+     *
+     * @return true if the callback completed, false if the interceptor threw and the batch must be
+     *         retained in the batchlog so the callback is retried on the next replay cycle
+     */
+    private static boolean tryNotifyInterceptor(ReplayingBatch batch)
+    {
+        try
+        {
+            batch.notifyInterceptor();
+            return true;
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                             "Batchlog interceptor failed for batch {}; the callback will be retried", batch.id, t);
+            return false;
+        }
     }
 
     public static long getBatchlogTimeout()
@@ -336,22 +511,32 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     private static class ReplayingBatch
     {
-        private final UUID id;
+        private final TimeUUID id;
         private final long writtenAt;
         private final List<Mutation> mutations;
         private final int replayedBytes;
+        private final Set<UUID> hintedNodes = new HashSet<>();
 
         private List<ReplayWriteResponseHandler<Mutation>> replayHandlers;
 
-        ReplayingBatch(UUID id, int version, List<ByteBuffer> serializedMutations) throws IOException
+        ReplayingBatch(TimeUUID id, int version, List<ByteBuffer> serializedMutations) throws IOException
         {
             this.id = id;
-            this.writtenAt = UUIDGen.unixTimestamp(id);
+            this.writtenAt = id.unix(MILLISECONDS);
             this.mutations = new ArrayList<>(serializedMutations.size());
             this.replayedBytes = addMutations(version, serializedMutations);
         }
 
-        public int replay(RateLimiter rateLimiter, Set<InetAddressAndPort> hintedNodes) throws IOException
+        /**
+         * @return the hosts hinted while replaying this batch, both for replicas that were down when
+         *         the mutations were sent and for replicas that did not acknowledge them in time
+         */
+        Set<UUID> hintedNodes()
+        {
+            return hintedNodes;
+        }
+
+        public int replay(RateLimiter rateLimiter) throws IOException
         {
             logger.trace("Replaying batch {}", id);
 
@@ -369,7 +554,7 @@ public class BatchlogManager implements BatchlogManagerMBean
             return replayHandlers.size();
         }
 
-        public void finish(Set<InetAddressAndPort> hintedNodes)
+        public void finish()
         {
             for (int i = 0; i < replayHandlers.size(); i++)
             {
@@ -383,10 +568,20 @@ public class BatchlogManager implements BatchlogManagerMBean
                     logger.trace("Failed replaying a batched mutation to a node, will write a hint");
                     logger.trace("Failure was : {}", e.getMessage());
                     // writing hints for the rest to hints, starting from i
-                    writeHintsForUndeliveredEndpoints(i, hintedNodes);
+                    writeHintsForUndeliveredEndpoints(i);
                     return;
                 }
             }
+        }
+
+        /**
+         * Notifies {@link BatchlogManagerInterceptor#instance} of the replayed batch, with all of
+         * its mutations. Exceptions propagate to the caller, which keeps the batch in the batchlog
+         * so its recovery is retried.
+         */
+        void notifyInterceptor()
+        {
+            BatchlogManagerInterceptor.instance.onReplayedBatch(id, writtenAt, Collections.unmodifiableList(mutations));
         }
 
         private int addMutations(int version, List<ByteBuffer> serializedMutations) throws IOException
@@ -417,7 +612,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 mutations.add(mutation);
         }
 
-        private void writeHintsForUndeliveredEndpoints(int startFrom, Set<InetAddressAndPort> hintedNodes)
+        private void writeHintsForUndeliveredEndpoints(int startFrom)
         {
             int gcgs = gcgs(mutations);
 
@@ -425,6 +620,7 @@ public class BatchlogManager implements BatchlogManagerMBean
             if (MILLISECONDS.toSeconds(writtenAt) + gcgs <= FBUtilities.nowInSeconds())
                 return;
 
+            Set<UUID> nodesToHint = new HashSet<>();
             for (int i = startFrom; i < replayHandlers.size(); i++)
             {
                 ReplayWriteResponseHandler<Mutation> handler = replayHandlers.get(i);
@@ -432,16 +628,23 @@ public class BatchlogManager implements BatchlogManagerMBean
 
                 if (handler != null)
                 {
-                    hintedNodes.addAll(handler.undelivered);
-                    HintsService.instance.write(Collections2.transform(handler.undelivered, StorageService.instance::getHostIdForEndpoint),
-                                                Hint.create(undeliveredMutation, writtenAt));
+                    for (InetAddressAndPort address : handler.undelivered)
+                    {
+                        UUID hostId = StorageService.instance.getHostIdForEndpoint(address);
+                        if (null != hostId)
+                            nodesToHint.add(hostId);
+                    }
+                    if (!nodesToHint.isEmpty())
+                        HintsService.instance.write(nodesToHint, Hint.create(undeliveredMutation, writtenAt));
+                    hintedNodes.addAll(nodesToHint);
+                    nodesToHint.clear();
                 }
             }
         }
 
         private static List<ReplayWriteResponseHandler<Mutation>> sendReplays(List<Mutation> mutations,
                                                                               long writtenAt,
-                                                                              Set<InetAddressAndPort> hintedNodes)
+                                                                              Set<UUID> hintedNodes)
         {
             List<ReplayWriteResponseHandler<Mutation>> handlers = new ArrayList<>(mutations.size());
             for (Mutation mutation : mutations)
@@ -460,7 +663,7 @@ public class BatchlogManager implements BatchlogManagerMBean
          */
         private static ReplayWriteResponseHandler<Mutation> sendSingleReplayMutation(final Mutation mutation,
                                                                                      long writtenAt,
-                                                                                     Set<InetAddressAndPort> hintedNodes)
+                                                                                     Set<UUID> hintedNodes)
         {
             String ks = mutation.getKeyspaceName();
             Keyspace keyspace = Keyspace.open(ks);
@@ -475,26 +678,30 @@ public class BatchlogManager implements BatchlogManagerMBean
 
             Replica selfReplica = liveAndDown.all().selfIfPresent();
             if (selfReplica != null)
-                mutation.apply();
+                mutation.apply(WriteOptions.FOR_BATCH_REPLAY);
 
             ReplicaLayout.ForTokenWrite liveRemoteOnly = liveAndDown.filter(
-                    r -> FailureDetector.isReplicaAlive.test(r) && r != selfReplica);
+                    r -> IFailureDetector.isReplicaAlive.test(r) && r != selfReplica);
 
             for (Replica replica : liveAndDown.all())
             {
                 if (replica == selfReplica || liveRemoteOnly.all().contains(replica))
                     continue;
-                hintedNodes.add(replica.endpoint());
-                HintsService.instance.write(StorageService.instance.getHostIdForEndpoint(replica.endpoint()),
-                        Hint.create(mutation, writtenAt));
+
+                UUID hostId = StorageService.instance.getHostIdForEndpoint(replica.endpoint());
+                if (null != hostId)
+                {
+                    HintsService.instance.write(hostId, Hint.create(mutation, writtenAt));
+                    hintedNodes.add(hostId);
+                }
             }
 
-            ReplicaPlan.ForTokenWrite replicaPlan = new ReplicaPlan.ForTokenWrite(keyspace, liveAndDown.replicationStrategy(),
-                    ConsistencyLevel.ONE, liveRemoteOnly.pending(), liveRemoteOnly.all(), liveRemoteOnly.all(), liveRemoteOnly.all());
-            ReplayWriteResponseHandler<Mutation> handler = new ReplayWriteResponseHandler<>(replicaPlan, System.nanoTime());
+            ReplicaPlan.ForWrite replicaPlan = new ReplicaPlan.ForWrite(keyspace, liveAndDown.replicationStrategy(),
+                                                                        ConsistencyLevel.ONE, liveRemoteOnly.pending(), liveRemoteOnly.all(), liveRemoteOnly.all(), liveRemoteOnly.all());
+            ReplayWriteResponseHandler<Mutation> handler = new ReplayWriteResponseHandler<>(replicaPlan, mutation, Dispatcher.RequestTime.forImmediateExecution());
             Message<Mutation> message = Message.outWithFlag(MUTATION_REQ, mutation, MessageFlag.CALL_BACK_ON_FAILURE);
             for (Replica replica : liveRemoteOnly.all())
-                MessagingService.instance().sendWriteWithCallback(message, replica, handler, false);
+                MessagingService.instance().sendWriteWithCallback(message, replica, handler);
             return handler;
         }
 
@@ -514,14 +721,15 @@ public class BatchlogManager implements BatchlogManagerMBean
         {
             private final Set<InetAddressAndPort> undelivered = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-            ReplayWriteResponseHandler(ReplicaPlan.ForTokenWrite replicaPlan, long queryStartNanoTime)
+            // TODO: should we be hinting here, since presumably batch log will retry? Maintaining historical behaviour for the moment.
+            ReplayWriteResponseHandler(ReplicaPlan.ForWrite replicaPlan, Supplier<Mutation> hintOnFailure, Dispatcher.RequestTime requestTime)
             {
-                super(replicaPlan, null, WriteType.UNLOGGED_BATCH, queryStartNanoTime);
+                super(replicaPlan, null, WriteType.UNLOGGED_BATCH, hintOnFailure, requestTime);
                 Iterables.addAll(undelivered, replicaPlan.contacts().endpoints());
             }
 
             @Override
-            protected int blockFor()
+            public int blockFor()
             {
                 return this.replicaPlan.contacts().size();
             }

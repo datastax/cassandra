@@ -44,6 +44,9 @@ public class ClientStats extends NodeToolCmd
     @Option(title = "clear_history", name = "--clear-history", description = "Clear the history of connected clients")
     private boolean clearConnectionHistory = false;
 
+    @Option(title = "list_connections_with_client_options", name = "--client-options", description = "Lists all connections and the client options")
+    private boolean clientOptions = false;
+
     @Override
     public void execute(NodeProbe probe)
     {
@@ -102,6 +105,32 @@ public class ClientStats extends NodeToolCmd
                               conn.get(ConnectedClient.REQUESTS),
                               conn.get(ConnectedClient.DRIVER_NAME),
                               conn.get(ConnectedClient.DRIVER_VERSION));
+                }
+                table.printTo(out);
+                out.println();
+            }
+        }
+
+        if (clientOptions)
+        {
+            List<Map<String, String>> clients = (List<Map<String, String>>) probe.getClientMetric("connections");
+            if (!clients.isEmpty())
+            {
+                TableBuilder table = new TableBuilder();
+                table.add("Address", "SSL", "Cipher", "Protocol", "Version", "User", "Keyspace", "Requests", "Driver-Name", "Driver-Version", "Client-Options");
+                for (Map<String, String> conn : clients)
+                {
+                    table.add(conn.get(ConnectedClient.ADDRESS),
+                              conn.get(ConnectedClient.SSL),
+                              conn.get(ConnectedClient.CIPHER),
+                              conn.get(ConnectedClient.PROTOCOL),
+                              conn.get(ConnectedClient.VERSION),
+                              conn.get(ConnectedClient.USER),
+                              conn.get(ConnectedClient.KEYSPACE),
+                              conn.get(ConnectedClient.REQUESTS),
+                              conn.get(ConnectedClient.DRIVER_NAME),
+                              conn.get(ConnectedClient.DRIVER_VERSION),
+                              conn.get(ConnectedClient.CLIENT_OPTIONS));
                 }
                 table.printTo(out);
                 out.println();

@@ -28,8 +28,8 @@ import java.util.List;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
+import org.apache.cassandra.io.util.File;
 import org.apache.commons.io.FileUtils;
-
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -37,9 +37,9 @@ import org.junit.Test;
 
 import net.openhft.chronicle.core.io.IORuntimeException;
 import net.openhft.chronicle.queue.ChronicleQueue;
-import net.openhft.chronicle.queue.impl.single.SingleChronicleQueueBuilder;
 import net.openhft.chronicle.queue.ExcerptAppender;
 import net.openhft.chronicle.queue.RollCycles;
+import net.openhft.chronicle.queue.impl.single.SingleChronicleQueueBuilder;
 import net.openhft.chronicle.wire.WireOut;
 import org.apache.cassandra.audit.BinAuditLogger;
 import org.apache.cassandra.tools.ToolRunner.ObservableTool;
@@ -65,10 +65,10 @@ public class AuditLogViewerTest
     @After
     public void tearDown() throws IOException
     {
-        if (path.toFile().exists() && path.toFile().isDirectory())
+        if (new File(path).exists() && new File(path).isDirectory())
         {
             //Deletes directory and all of it's contents
-            FileUtils.deleteDirectory(path.toFile());
+            FileUtils.deleteDirectory(new File(path).toJavaIOFile());
         }
     }
 
@@ -95,9 +95,9 @@ public class AuditLogViewerTest
                        "                         indefinitely waiting for more records\n" + 
                        " -h,--help               display this help message\n" + 
                        " -i,--ignore             Silently ignore unsupported records\n" + 
-                       " -r,--roll_cycle <arg>   How often to roll the log file was rolled. May be\n" + 
-                       "                         necessary for Chronicle to correctly parse file names. (MINUTELY, HOURLY,\n" + 
-                       "                         DAILY). Default HOURLY.\n";
+                       " -r,--roll_cycle <arg>   How often to roll the log file was rolled. May be\n" +
+                       "                         necessary for Chronicle to correctly parse file\n" +
+                       "                         names. (MINUTELY, HOURLY, DAILY). Default HOURLY.\n";
         Assertions.assertThat(tool.getStdout()).isEqualTo(help);
     }
 

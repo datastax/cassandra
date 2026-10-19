@@ -1,5 +1,5 @@
 /*
- * 
+ *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -7,22 +7,31 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
- * 
+ *
  */
 package org.apache.cassandra.service.paxos;
 
+import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.NoPayload;
+import org.apache.cassandra.sensors.SensorsCustomParams;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsFactory;
+import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.service.MutatorProvider;
 import org.apache.cassandra.tracing.Tracing;
 
 public class CommitVerbHandler implements IVerbHandler<Commit>
@@ -31,9 +40,25 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
 
     public void doVerb(Message<Commit> message)
     {
-        PaxosState.commit(message.payload);
+        // Initialize the sensor and set ExecutorLocals
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
+        Context context = Context.from(message.payload.update.metadata());
+
+        // Commit phase reads from the Paxos table and writes the proposal to the user table
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.INTERNODE_BYTES);
+        sensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+        RequestTracker.instance.set(sensors);
+
+        PaxosState.commitDirect(message.payload, WriteOrigin.fromMessage(message), p -> MutatorProvider.instance.onAppliedProposal(p));
 
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
-        MessagingService.instance().send(message.emptyResponse(), message.from());
+        Message.Builder<NoPayload> reply = message.emptyResponseBuilder();
+
+        // No need to calculate outbound internode bytes for NoPayload response
+        sensors.syncAllSensors();
+        SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
+        MessagingService.instance().send(reply.build(), message.from());
     }
 }

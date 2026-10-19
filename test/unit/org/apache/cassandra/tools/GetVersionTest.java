@@ -19,12 +19,9 @@
 package org.apache.cassandra.tools;
 
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 
-@RunWith(OrderedJUnit4ClassRunner.class)
 public class GetVersionTest extends OfflineToolUtils
 {
     @Test
@@ -32,7 +29,7 @@ public class GetVersionTest extends OfflineToolUtils
     {
         ToolResult tool = ToolRunner.invokeClass(GetVersion.class);
         tool.assertOnCleanExit();
-        assertNoUnexpectedThreadsStarted(null, null);
+        assertNoUnexpectedThreadsStarted(null, false);
         assertSchemaNotLoaded();
         assertCLSMNotLoaded();
         assertSystemKSNotLoaded();

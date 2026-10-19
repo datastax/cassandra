@@ -25,13 +25,15 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.COMMITLOG_STOP_ON_ERRORS;
 
 public class CommitLogFailurePolicyTest
 {
@@ -39,7 +41,7 @@ public class CommitLogFailurePolicyTest
     public static void defineSchema() throws ConfigurationException
     {
         SchemaLoader.prepareServer();
-        System.setProperty("cassandra.commitlog.stop_on_errors", "true");
+        COMMITLOG_STOP_ON_ERRORS.setBoolean(true);
     }
 
     @Test
@@ -74,7 +76,7 @@ public class CommitLogFailurePolicyTest
         StorageService.instance.registerDaemon(daemon);
 
         KillerForTests killerForTests = new KillerForTests();
-        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
         Config.CommitFailurePolicy oldPolicy = DatabaseDescriptor.getCommitFailurePolicy();
         try
         {
@@ -98,7 +100,7 @@ public class CommitLogFailurePolicyTest
         StorageService.instance.registerDaemon(daemon);
 
         KillerForTests killerForTests = new KillerForTests();
-        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
         Config.CommitFailurePolicy oldPolicy = DatabaseDescriptor.getCommitFailurePolicy();
         try
         {
@@ -123,13 +125,37 @@ public class CommitLogFailurePolicyTest
         StorageService.instance.registerDaemon(daemon);
 
         KillerForTests killerForTests = new KillerForTests();
-        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
         Config.CommitFailurePolicy oldPolicy = DatabaseDescriptor.getCommitFailurePolicy();
         try
         {
             DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.ignore);
             CommitLog.handleCommitError("Testing ignore policy", new Throwable());
             //error policy is set to IGNORE, so JVM must not be killed if error ocurs after startup
+            Assert.assertFalse(killerForTests.wasKilled());
+        }
+        finally
+        {
+            DatabaseDescriptor.setCommitFailurePolicy(oldPolicy);
+            JVMStabilityInspector.replaceKiller(originalKiller);
+        }
+    }
+
+    @Test
+    public void testCommitFailurePolicy_fail_writes()
+    {
+        CassandraDaemon daemon = new CassandraDaemon();
+        daemon.completeSetup(); //startup must be completed, otherwise commit log failure must kill JVM regardless of failure policy
+        StorageService.instance.registerDaemon(daemon);
+
+        KillerForTests killerForTests = new KillerForTests();
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
+        Config.CommitFailurePolicy oldPolicy = DatabaseDescriptor.getCommitFailurePolicy();
+        try
+        {
+            DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.fail_writes);
+            CommitLog.handleCommitError("Testing fail writes policy", new Throwable());
+            //error policy is set to fail_writes, so JVM must not be killed if error occurs after startup
             Assert.assertFalse(killerForTests.wasKilled());
         }
         finally

@@ -36,6 +36,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.any;
 import static com.google.common.collect.Iterables.transform;
 
@@ -107,6 +108,37 @@ public final class Types implements Iterable<UserType>
     public Iterable<UserType> referencingUserType(ByteBuffer name)
     {
         return Iterables.filter(types.values(), t -> t.referencesUserType(name) && !t.name.equals(name));
+    }
+
+    /**
+     * Returns the types ordered by dependencies.
+     *
+     * @return the types ordered by dependencies.
+     */
+    private Set<UserType> getTypesOrderedByDependencies()
+    {
+        Set<UserType> orderedTypesByDependencies = new LinkedHashSet<>();
+        for (UserType type : this)
+        {
+            recordNestedTypes(type, orderedTypesByDependencies);
+        }
+        return orderedTypesByDependencies;
+    }
+
+    private void recordNestedTypes(AbstractType<?> userType, Set<UserType> userTypes)
+    {
+        for (AbstractType<?> subType : userType.subTypes())
+        {
+            recordNestedTypes(subType, userTypes);
+        }
+
+        if (userType.isUDT())
+            userTypes.add((UserType) userType);
+    }
+
+    public boolean isEmpty()
+    {
+        return types.isEmpty();
     }
 
     /**
@@ -249,6 +281,33 @@ public final class Types implements Iterable<UserType>
             types.add(((UserType) type).name);
     }
 
+    /**
+     * Changes the keyspace of all the types.
+     *
+     * @param newKeyspace the name of the new keyspace
+     * @return the new types
+     */
+    public Types withNewKeyspace(String newKeyspace)
+    {
+        Map<ByteBuffer, UserType> updatedTypes = new HashMap<>();
+
+        for (UserType originalType : getTypesOrderedByDependencies())
+        {
+            UserType type = new UserType(newKeyspace,
+                                         originalType.name,
+                                         originalType.fieldNames(),
+                                         originalType.fieldTypes()
+                                                     .stream()
+                                                     .map(t -> t.withUpdatedUserTypes(updatedTypes.values()))
+                                                     .collect(ImmutableList.toImmutableList()),
+                                         true);
+
+            updatedTypes.put(type.name, type);
+        }
+
+        return new Types(ImmutableSortedMap.copyOf(updatedTypes));
+    }
+
     public static final class Builder
     {
         final ImmutableSortedMap.Builder<ByteBuffer, UserType> types = ImmutableSortedMap.naturalOrder();
@@ -379,15 +438,15 @@ public final class Types implements Iterable<UserType>
 
             UserType prepare(String keyspace, Types types)
             {
-                List<FieldIdentifier> preparedFieldNames =
-                    fieldNames.stream()
-                              .map(FieldIdentifier::forInternalString)
-                              .collect(toList());
+                ImmutableList<FieldIdentifier> preparedFieldNames =
+                fieldNames.stream()
+                          .map(FieldIdentifier::forInternalString)
+                          .collect(toImmutableList());
 
-                List<AbstractType<?>> preparedFieldTypes =
-                    fieldTypes.stream()
-                              .map(t -> t.prepareInternal(keyspace, types).getType())
-                              .collect(toList());
+                ImmutableList<AbstractType<?>> preparedFieldTypes =
+                fieldTypes.stream()
+                          .map(t -> t.prepare(keyspace, types).getType())
+                          .collect(toImmutableList());
 
                 return new UserType(keyspace, bytes(name), preparedFieldNames, preparedFieldTypes, true);
             }

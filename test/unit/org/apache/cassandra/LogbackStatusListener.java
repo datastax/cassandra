@@ -22,6 +22,8 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 
 import org.slf4j.ILoggerFactory;
@@ -33,14 +35,17 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.LoggerContextListener;
 import ch.qos.logback.core.status.Status;
 import ch.qos.logback.core.status.StatusListener;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.distributed.shared.InstanceClassLoader;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.SUN_STDERR_ENCODING;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SUN_STDOUT_ENCODING;
 
 /*
  * Listen for logback readiness and then redirect stdout/stderr to logback
  */
 public class LogbackStatusListener implements StatusListener, LoggerContextListener
 {
-
     public static final PrintStream originalOut = System.out;
     public static final PrintStream originalErr = System.err;
 
@@ -50,6 +55,23 @@ public class LogbackStatusListener implements StatusListener, LoggerContextListe
 
     private PrintStream replacementOut;
     private PrintStream replacementErr;
+
+    /*
+     * Set the property for the test suite name so that log configuration can pick it up
+     * and log to a file specific to this test suite
+     */
+    static
+    {
+        // checkstyle: suppress below 'blockSystemPropertyUsage'
+        String command = System.getProperty("sun.java.command");
+        List<String> args = Arrays.asList(command.split(" "));
+        int idx = args.lastIndexOf("-junit4");
+
+        if (idx > 0 && (idx + 1) < args.size())
+            System.setProperty("suitename", args.get(idx + 1));
+        else
+            System.setProperty("suitename", args.get(1));
+    }
 
     @Override
     public void addStatusEvent(Status s)
@@ -84,9 +106,9 @@ public class LogbackStatusListener implements StatusListener, LoggerContextListe
         }
     }
 
-    private static PrintStream wrapLogger(Logger logger, PrintStream original, String encodingProperty, boolean error) throws Exception
+    private static PrintStream wrapLogger(Logger logger, PrintStream original, CassandraRelevantProperties encodingProperty, boolean error) throws Exception
     {
-        final String encoding = System.getProperty(encodingProperty);
+        final String encoding = encodingProperty.getString();
         OutputStream os = new ToLoggerOutputStream(logger, encoding, error);
         return encoding != null ? new WrappedPrintStream(os, true, encoding, original)
                                 : new WrappedPrintStream(os, true, original);
@@ -121,14 +143,6 @@ public class LogbackStatusListener implements StatusListener, LoggerContextListe
                         return;
                 }
 
-                //Filter out Windows newline
-                if (size() == 2)
-                {
-                    byte[] bytes = toByteArray();
-                    if (bytes[0] == 0xD && bytes[1] == 0xA)
-                        return;
-                }
-
                 String statement;
                 if (encoding != null)
                     statement = new String(toByteArray(), encoding);
@@ -145,7 +159,7 @@ public class LogbackStatusListener implements StatusListener, LoggerContextListe
                 reset();
             }
         }
-    };
+    }
 
     private static class WrappedPrintStream extends PrintStream
     {
@@ -285,7 +299,7 @@ public class LogbackStatusListener implements StatusListener, LoggerContextListe
         @Override
         public void print(char[] s)
         {
-            if(isAsyncAppender())
+            if (isAsyncAppender())
                 original.println(s);
             else
                 super.print(s);
@@ -460,7 +474,8 @@ public class LogbackStatusListener implements StatusListener, LoggerContextListe
                 return original.append(c);
             else
                 return super.append(c);
-        }    }
+        }
+    }
 
     public boolean isResetResistant()
     {
@@ -483,9 +498,9 @@ public class LogbackStatusListener implements StatusListener, LoggerContextListe
                 Logger stdoutLogger = LoggerFactory.getLogger("stdout");
                 Logger stderrLogger = LoggerFactory.getLogger("stderr");
 
-                replacementOut = wrapLogger(stdoutLogger, originalOut, "sun.stdout.encoding", false);
+                replacementOut = wrapLogger(stdoutLogger, originalOut, SUN_STDOUT_ENCODING, false);
                 System.setOut(replacementOut);
-                replacementErr = wrapLogger(stderrLogger, originalErr, "sun.stderr.encoding", true);
+                replacementErr = wrapLogger(stderrLogger, originalErr, SUN_STDERR_ENCODING, true);
                 System.setErr(replacementErr);
             }
             catch (Exception e)
@@ -514,7 +529,7 @@ public class LogbackStatusListener implements StatusListener, LoggerContextListe
             haveRegisteredListener = false;
             if (haveRegisteredListener)
             {
-                ((LoggerContext)LoggerFactory.getILoggerFactory()).removeListener(this);
+                ((LoggerContext) LoggerFactory.getILoggerFactory()).removeListener(this);
             }
         }
     }

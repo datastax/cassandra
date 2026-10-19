@@ -18,21 +18,28 @@
  */
 package org.apache.cassandra.triggers;
 
-import java.io.File;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.collect.ListMultimap;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.CounterMutation;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.IMutation;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.CassandraException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TriggerMetadata;
 import org.apache.cassandra.schema.Triggers;
@@ -44,7 +51,7 @@ public class TriggerExecutor
     public static final TriggerExecutor instance = new TriggerExecutor();
 
     private final Map<String, ITrigger> cachedTriggers = Maps.newConcurrentMap();
-    private final ClassLoader parent = Thread.currentThread().getContextClassLoader();
+    private final ClassLoader parent = TriggerExecutor.class.getClassLoader();
     private volatile ClassLoader customClassLoader;
 
     private TriggerExecutor()

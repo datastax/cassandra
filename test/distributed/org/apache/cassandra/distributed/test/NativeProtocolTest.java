@@ -18,7 +18,11 @@
 
 package org.apache.cassandra.distributed.test;
 
-import org.apache.cassandra.distributed.impl.RowUtil;
+import org.apache.cassandra.distributed.Cluster;
+import org.apache.cassandra.distributed.api.IInstanceConfig;
+import org.apache.cassandra.distributed.api.IInvokableInstance;
+import org.apache.cassandra.distributed.api.IIsolatedExecutor;
+import org.apache.cassandra.service.StorageService;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -28,16 +32,24 @@ import com.datastax.driver.core.Session;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.Statement;
 import org.apache.cassandra.distributed.api.ICluster;
+import org.apache.cassandra.distributed.impl.RowUtil;
+import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.JOIN_RING;
+import static org.apache.cassandra.distributed.action.GossipHelper.withProperty;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
-import static org.apache.cassandra.distributed.shared.AssertUtils.*;
+import static org.apache.cassandra.distributed.api.TokenSupplier.evenlyDistributedTokens;
+import static org.apache.cassandra.distributed.shared.AssertUtils.assertRows;
+import static org.apache.cassandra.distributed.shared.AssertUtils.row;
+import static org.apache.cassandra.distributed.shared.NetworkTopology.singleDcNetworkTopology;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 // TODO: this test should be removed after running in-jvm dtests is set up via the shared API repository
 public class NativeProtocolTest extends TestBaseImpl
 {
-
     @Test
     public void withClientRequests() throws Throwable
     {
@@ -78,4 +90,61 @@ public class NativeProtocolTest extends TestBaseImpl
             cluster.close();
         }
     }
+
+    @Test
+    public void restartTransportOnGossippingOnlyMember() throws Throwable
+    {
+        int originalNodeCount = 1;
+        int expandedNodeCount = originalNodeCount + 1;
+
+        try (Cluster cluster = builder().withNodes(originalNodeCount)
+                                        .withTokenSupplier(evenlyDistributedTokens(expandedNodeCount, 1))
+                                        .withNodeIdTopology(singleDcNetworkTopology(expandedNodeCount, "dc0", "rack0"))
+                                        .withConfig(config -> config.with(NETWORK, GOSSIP, NATIVE_PROTOCOL))
+                                        .start())
+        {
+            IInstanceConfig config = cluster.newInstanceConfig();
+            IInvokableInstance gossippingOnlyMember = cluster.bootstrap(config);
+            withProperty(JOIN_RING, false, () -> gossippingOnlyMember.startup(cluster));
+
+            assertTrue(gossippingOnlyMember.callOnInstance((IIsolatedExecutor.SerializableCallable<Boolean>)
+                                                           () -> StorageService.instance.isNativeTransportRunning()));
+
+            gossippingOnlyMember.runOnInstance((IIsolatedExecutor.SerializableRunnable) () -> StorageService.instance.stopNativeTransport());
+
+            assertFalse(gossippingOnlyMember.callOnInstance((IIsolatedExecutor.SerializableCallable<Boolean>)
+                                                            () -> StorageService.instance.isNativeTransportRunning()));
+
+            gossippingOnlyMember.runOnInstance((IIsolatedExecutor.SerializableRunnable) () -> StorageService.instance.startNativeTransport());
+
+            assertTrue(gossippingOnlyMember.callOnInstance((IIsolatedExecutor.SerializableCallable<Boolean>)
+                                                           () -> StorageService.instance.isNativeTransportRunning()));
+        }
+    }
+
+    @Test
+    public void testBinaryReflectsRpcReadiness() throws Throwable
+    {
+        try (Cluster cluster = builder().withNodes(1)
+                                        .withConfig(config -> config.with(NETWORK, GOSSIP, NATIVE_PROTOCOL)
+                                                                    .set("start_native_transport", "false"))
+                                        .start())
+        {
+            IInvokableInstance i = cluster.get(1);
+
+            // rpc is false when native transport is not enabled
+            assertFalse(i.callOnInstance((IIsolatedExecutor.SerializableCallable<Boolean>) () -> StorageService.instance.isNativeTransportRunning()));
+            assertFalse(i.callOnInstance((IIsolatedExecutor.SerializableCallable<Boolean>) () -> StorageService.instance.isRpcReady(FBUtilities.getBroadcastAddressAndPort())));
+
+            // but if we enable it, e.g. by nodetool enablebinary, rpc will be enabled
+            i.runOnInstance((IIsolatedExecutor.SerializableRunnable) () -> StorageService.instance.startNativeTransport());
+            assertTrue(i.callOnInstance((IIsolatedExecutor.SerializableCallable<Boolean>) () -> StorageService.instance.isRpcReady(FBUtilities.getBroadcastAddressAndPort())));
+
+            // by calling e.g. nodetool disablebinary, rpc will NOT be set to false again
+            // please read CASSANDRA-18935 for in-depth explanation why it is so
+            i.runOnInstance((IIsolatedExecutor.SerializableRunnable) () -> StorageService.instance.stopNativeTransport());
+            assertTrue(i.callOnInstance((IIsolatedExecutor.SerializableCallable<Boolean>) () -> StorageService.instance.isRpcReady(FBUtilities.getBroadcastAddressAndPort())));
+        }
+    }
 }
+

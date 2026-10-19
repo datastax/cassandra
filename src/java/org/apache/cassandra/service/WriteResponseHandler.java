@@ -18,13 +18,18 @@
 package org.apache.cassandra.service;
 
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.function.Supplier;
 
-import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.net.Message;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.transport.Dispatcher;
+import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Verb;
 
 /**
  * Handles blocking writes for ONE, ANY, TWO, THREE, QUORUM, and ALL consistency levels.
@@ -33,26 +38,37 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
 {
     protected static final Logger logger = LoggerFactory.getLogger(WriteResponseHandler.class);
 
+    private static final boolean useDynamicSnitchForCounterLeader = CassandraRelevantProperties.USE_DYNAMIC_SNITCH_FOR_COUNTER_LEADER.getBoolean();
+
     protected volatile int responses;
     private static final AtomicIntegerFieldUpdater<WriteResponseHandler> responsesUpdater
             = AtomicIntegerFieldUpdater.newUpdater(WriteResponseHandler.class, "responses");
 
-    public WriteResponseHandler(ReplicaPlan.ForTokenWrite replicaPlan,
+    public WriteResponseHandler(ReplicaPlan.ForWrite replicaPlan,
                                 Runnable callback,
                                 WriteType writeType,
-                                long queryStartNanoTime)
+                                Supplier<Mutation> hintOnFailure,
+                                Dispatcher.RequestTime requestTime)
     {
-        super(replicaPlan, callback, writeType, queryStartNanoTime);
+        super(replicaPlan, callback, writeType, hintOnFailure, requestTime);
         responses = blockFor();
     }
 
-    public WriteResponseHandler(ReplicaPlan.ForTokenWrite replicaPlan, WriteType writeType, long queryStartNanoTime)
+    public WriteResponseHandler(ReplicaPlan.ForWrite replicaPlan, WriteType writeType, Supplier<Mutation> hintOnFailure, Dispatcher.RequestTime requestTime)
     {
-        this(replicaPlan, null, writeType, queryStartNanoTime);
+        this(replicaPlan, null, writeType, hintOnFailure, requestTime);
     }
 
+    @Override
+    public boolean trackLatencyForSnitch(Verb responseVerb, boolean isTimeout)
+    {
+        return useDynamicSnitchForCounterLeader && responseVerb == Verb.COUNTER_MUTATION_RSP && isTimeout;
+    }
+
+    @Override
     public void onResponse(Message<T> m)
     {
+        trackReplicaResponseSize(m);
         if (responsesUpdater.decrementAndGet(this) == 0)
             signal();
         //Must be last after all subclass processing
@@ -61,7 +77,7 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
         logResponseToIdealCLDelegate(m);
     }
 
-    protected int ackCount()
+    public int ackCount()
     {
         return blockFor() - responses;
     }

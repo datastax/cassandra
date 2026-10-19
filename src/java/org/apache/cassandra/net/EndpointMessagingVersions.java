@@ -18,7 +18,9 @@
 package org.apache.cassandra.net;
 
 import java.net.UnknownHostException;
+import java.util.Collections;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
@@ -26,16 +28,28 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 /**
  * Map of hosts to their known current messaging versions.
  */
 public class EndpointMessagingVersions
 {
+    public volatile int minClusterVersion = MessagingService.current_version;
     private static final Logger logger = LoggerFactory.getLogger(EndpointMessagingVersions.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 60L, TimeUnit.SECONDS);
 
     // protocol versions of the other nodes in the cluster
     private final ConcurrentMap<InetAddressAndPort, Integer> versions = new NonBlockingHashMap<>();
+
+    public EndpointMessagingVersions()
+    {
+    }
+
+    private EndpointMessagingVersions(EndpointMessagingVersions versions)
+    {
+        this.versions.putAll(versions.versions);
+    }
 
     /**
      * @return the last version associated with address, or @param version if this is the first such version
@@ -45,6 +59,7 @@ public class EndpointMessagingVersions
         logger.trace("Setting version {} for {}", version, endpoint);
 
         Integer v = versions.put(endpoint, version);
+        minClusterVersion = Collections.min(versions.values());
         return v == null ? version : v;
     }
 
@@ -52,6 +67,8 @@ public class EndpointMessagingVersions
     {
         logger.trace("Resetting version for {}", endpoint);
         versions.remove(endpoint);
+        if (!versions.values().isEmpty())
+            minClusterVersion = Collections.min(versions.values());
     }
 
     /**
@@ -64,7 +81,7 @@ public class EndpointMessagingVersions
         if (v == null)
         {
             // we don't know the version. assume current. we'll know soon enough if that was incorrect.
-            logger.trace("Assuming current protocol version for {}", endpoint);
+            noSpamLogger.debug("Assuming current protocol version for {}", endpoint);
             return MessagingService.current_version;
         }
         else
@@ -90,5 +107,10 @@ public class EndpointMessagingVersions
     public boolean knows(InetAddressAndPort endpoint)
     {
         return versions.containsKey(endpoint);
+    }
+
+    public EndpointMessagingVersions copy()
+    {
+        return new EndpointMessagingVersions(this);
     }
 }

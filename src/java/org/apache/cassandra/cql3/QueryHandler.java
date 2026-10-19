@@ -25,6 +25,7 @@ import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.MD5Digest;
 
@@ -36,7 +37,7 @@ public interface QueryHandler
                           QueryState state,
                           QueryOptions options,
                           Map<String, ByteBuffer> customPayload,
-                          long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
+                          Dispatcher.RequestTime requestTime) throws RequestExecutionException, RequestValidationException;
 
     ResultMessage.Prepared prepare(String query,
                                    ClientState clientState,
@@ -48,37 +49,39 @@ public interface QueryHandler
                                   QueryState state,
                                   QueryOptions options,
                                   Map<String, ByteBuffer> customPayload,
-                                  long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
+                                  Dispatcher.RequestTime requestTime) throws RequestExecutionException, RequestValidationException;
 
     ResultMessage processBatch(BatchStatement statement,
                                QueryState state,
                                BatchQueryOptions options,
                                Map<String, ByteBuffer> customPayload,
-                               long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
+                               Dispatcher.RequestTime requestTime) throws RequestExecutionException, RequestValidationException;
 
     public static class Prepared
     {
+        // CASSANDRA-19986 Precomputed size might be available
+        public volatile int pstmntSize = -1;
+
         public final CQLStatement statement;
 
         public final MD5Digest resultMetadataId;
 
         /**
-         * Contains the CQL statement source if the statement has been "regularly" perpared via
-         * {@link QueryHandler#prepare(String, ClientState, Map)}.
-         * Other usages of this class may or may not contain the CQL statement source.
+         * Timestamp of when this prepared statement was created.  Used in QueryProcessor.preparedStatements cache
+         * to ensure that the deletion timestamp always succeeds the insert timestamp.
          */
-        public final String rawCQLStatement;
+        public final long timestamp;
 
-        public Prepared(CQLStatement statement)
-        {
-            this(statement, "");
-        }
+        public final String keyspace;
+        public final boolean fullyQualified;
 
-        public Prepared(CQLStatement statement, String rawCQLStatement)
+        public Prepared(CQLStatement statement, boolean fullyQualified, String keyspace)
         {
             this.statement = statement;
-            this.rawCQLStatement = rawCQLStatement;
             this.resultMetadataId = ResultSet.ResultMetadata.fromPrepared(statement).getResultMetadataId();
+            this.fullyQualified = fullyQualified;
+            this.keyspace = keyspace;
+            this.timestamp = ClientState.getTimestamp();
         }
     }
 }

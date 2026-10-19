@@ -23,19 +23,25 @@ import java.util.stream.Collectors;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 
-public class RolesCache extends AuthCache<RoleResource, Set<Role>>
+public class RolesCache extends AuthCache<RoleResource, Set<Role>> implements RolesCacheMBean
 {
+    private final IRoleManager roleManager;
+
     public RolesCache(IRoleManager roleManager, BooleanSupplier enableCache)
     {
-        super("RolesCache",
+        super(CACHE_NAME,
               DatabaseDescriptor::setRolesValidity,
               DatabaseDescriptor::getRolesValidity,
               DatabaseDescriptor::setRolesUpdateInterval,
               DatabaseDescriptor::getRolesUpdateInterval,
               DatabaseDescriptor::setRolesCacheMaxEntries,
               DatabaseDescriptor::getRolesCacheMaxEntries,
+              DatabaseDescriptor::setRolesCacheActiveUpdate,
+              DatabaseDescriptor::getRolesCacheActiveUpdate,
               roleManager::getRoleDetails,
+              roleManager.bulkLoader(),
               enableCache);
+        this.roleManager = roleManager;
     }
 
     /**
@@ -61,5 +67,19 @@ public class RolesCache extends AuthCache<RoleResource, Set<Role>>
     Set<Role> getRoles(RoleResource primaryRole)
     {
         return get(primaryRole);
+    }
+
+    Set<RoleResource> getAllRoles()
+    {
+        // This method seems kind of unnecessary as it is only called from Roles::getAllRoles,
+        // but we are able to inject the RoleManager to this class, making testing possible. If
+        // we lose this method and did everything in Roles, we'd be dependent on the IRM impl
+        // supplied by DatabaseDescriptor
+        return roleManager.getAllRoles();
+    }
+
+    public void invalidateRoles(String roleName)
+    {
+        invalidate(RoleResource.role(roleName));
     }
 }

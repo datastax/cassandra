@@ -19,6 +19,7 @@ package org.apache.cassandra.locator;
 
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -28,6 +29,7 @@ import java.util.UUID;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.Sets;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
@@ -49,6 +51,7 @@ import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.StorageService;
@@ -159,7 +162,7 @@ public class SimpleStrategyTest
     {
         TokenMetadata tmd;
         AbstractReplicationStrategy strategy;
-        for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
+        for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
         {
             tmd = new TokenMetadata();
             strategy = getStrategy(keyspaceName, tmd, new SimpleSnitch());
@@ -181,6 +184,15 @@ public class SimpleStrategyTest
                 assertEquals(new HashSet<>(correctEndpoints), replicas.endpoints());
             }
         }
+    }
+
+    @Test
+    public void testSimpleStrategyKeyspacesArePartitioned()
+    {
+        //local strategy keyspaces should not be returned here since they are not partitioned
+        Keyspaces partitionedKeyspaces = Schema.instance.getPartitionedKeyspaces();
+        assertEquals(2, partitionedKeyspaces.size());
+        assertEquals(Sets.newHashSet(KEYSPACE1, MULTIDC), Sets.newHashSet(partitionedKeyspaces.names()));
     }
 
     @Test
@@ -211,14 +223,14 @@ public class SimpleStrategyTest
         // bootstrap at the end of the ring
         Token bsToken = new BigIntegerToken(String.valueOf(210));
         InetAddressAndPort bootstrapEndpoint = InetAddressAndPort.getByName("127.0.0.11");
-        tmd.addBootstrapToken(bsToken, bootstrapEndpoint);
+        tmd.addBootstrapTokens(Collections.singleton(bsToken), bootstrapEndpoint);
 
         AbstractReplicationStrategy strategy = null;
-        for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
+        for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
         {
             strategy = getStrategy(keyspaceName, tmd, new SimpleSnitch());
 
-            PendingRangeCalculatorService.calculatePendingRanges(strategy, keyspaceName);
+            PendingRangeCalculatorService.instance.calculatePendingRanges(strategy, keyspaceName);
 
             int replicationFactor = strategy.getReplicationFactor().allReplicas;
 
@@ -348,7 +360,7 @@ public class SimpleStrategyTest
         StorageService.instance.getTokenMetadata().updateHostId(UUID.randomUUID(), FBUtilities.getBroadcastAddressAndPort());
         
         ClientWarn.instance.captureWarnings();
-        strategy.maybeWarnOnOptions();
+        strategy.maybeWarnOnOptions(null);
         assertTrue(ClientWarn.instance.getWarnings().stream().anyMatch(s -> s.contains("Your replication factor")));
     }
 

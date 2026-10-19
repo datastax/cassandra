@@ -49,11 +49,11 @@ public class KeysIndex extends CassandraIndex
         return builder;
     }
 
-    protected <T> CBuilder buildIndexClusteringPrefix(ByteBuffer partitionKey,
-                                                      ClusteringPrefix<T> prefix,
-                                                      CellPath path)
+    protected <T> ClusteringBuilder buildIndexClusteringPrefix(ByteBuffer partitionKey,
+                                                               ClusteringPrefix<T> prefix,
+                                                               CellPath path)
     {
-        CBuilder builder = CBuilder.create(getIndexComparator());
+        ClusteringBuilder builder = ClusteringBuilder.create(getIndexComparator());
         builder.add(partitionKey, ByteBufferAccessor.instance);
         return builder;
     }
@@ -75,7 +75,7 @@ public class KeysIndex extends CassandraIndex
         return indexedColumn.type.compare(left, ByteBufferAccessor.instance, right.value(), right.accessor());
     }
 
-    public boolean isStale(Row row, ByteBuffer indexValue, int nowInSec)
+    public boolean isStale(Row row, ByteBuffer indexValue, long nowInSec)
     {
         if (row == null)
             return true;

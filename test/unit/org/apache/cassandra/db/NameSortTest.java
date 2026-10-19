@@ -84,7 +84,7 @@ public class NameSortTest
             rub.build().applyUnsafe();
         }
         validateNameSort(cfs);
-        keyspace.getColumnFamilyStore("Standard1").forceBlockingFlush();
+        keyspace.getColumnFamilyStore("Standard1").forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         validateNameSort(cfs);
     }
 
@@ -92,7 +92,7 @@ public class NameSortTest
     {
         for (FilteredPartition partition : Util.getAll(Util.cmd(cfs).build()))
         {
-            for (Row r : partition)
+            for (Row r : partition.rows())
             {
                 for (ColumnMetadata cd : r.columns())
                 {

@@ -24,6 +24,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.distributed.test.DistributedRepairUtils.RepairParallelism;
 import org.apache.cassandra.distributed.test.DistributedRepairUtils.RepairType;
@@ -46,6 +47,12 @@ public abstract class RepairCoordinatorTimeout extends RepairCoordinatorBase
     public void beforeTest()
     {
         CLUSTER.filters().reset();
+
+        CLUSTER.forEach(node -> node.runOnInstance(() -> {
+            // Set a larger PREPARE_MSG timeout for these tests to avoid faulure callbacks from being triggered, 
+            // causing IllegalStateException errors.
+            DatabaseDescriptor.setRepairPrepareMessageTimeout(120_000L);
+        }));
     }
 
     @Test

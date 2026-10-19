@@ -19,32 +19,31 @@
 
 package org.apache.cassandra.service;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.io.PrintWriter;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.*;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.io.util.File;
 import org.junit.Assert;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.audit.AuditLogManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.WindowsFailedSnapshotTracker;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner.LongToken;
 import org.apache.cassandra.dht.OrderPreservingPartitioner.StringToken;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
@@ -59,40 +58,45 @@ import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.ServerTestUtils.cleanup;
 import static org.apache.cassandra.ServerTestUtils.mkdirs;
+import static org.apache.cassandra.config.CassandraRelevantProperties.GOSSIP_DISABLE_THREAD_VALIDATION;
+import static org.apache.cassandra.config.CassandraRelevantProperties.REPLACE_ADDRESS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assume.assumeTrue;
 
-@RunWith(OrderedJUnit4ClassRunner.class)
 public class StorageServiceServerTest
 {
     @BeforeClass
     public static void setUp() throws ConfigurationException
     {
-        System.setProperty(Gossiper.Props.DISABLE_THREAD_VALIDATION, "true");
+        GOSSIP_DISABLE_THREAD_VALIDATION.setBoolean(true);
         DatabaseDescriptor.daemonInitialization();
         CommitLog.instance.start();
         IEndpointSnitch snitch = new PropertyFileSnitch();
         DatabaseDescriptor.setEndpointSnitch(snitch);
         Keyspace.setInitialized();
-    }
-
-    @Test
-    public void testRegularMode() throws ConfigurationException
-    {
         mkdirs();
         cleanup();
         StorageService.instance.initServer(0);
-        for (String path : DatabaseDescriptor.getAllDataFileLocations())
-        {
-            // verify that storage directories are there.
-            assertTrue(new File(path).exists());
-        }
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
         // a proper test would be to call decommission here, but decommission() mixes both shutdown and datatransfer
         // calls.  This test is only interested in the shutdown-related items which a properly handled by just
         // stopping the client.
         //StorageService.instance.decommission();
         StorageService.instance.stopClient();
+    }
+
+    @Test
+    public void testRegularMode() throws ConfigurationException
+    {
+        for (File path : DatabaseDescriptor.getAllDataFileLocations())
+        {
+            // verify that storage directories are there.
+            assertTrue(path.exists());
+        }
     }
 
     @Test
@@ -109,80 +113,11 @@ public class StorageServiceServerTest
         StorageService.instance.takeSnapshot(UUID.randomUUID().toString());
     }
 
-    private void checkTempFilePresence(File f, boolean exist)
-    {
-        for (int i = 0; i < 5; i++)
-        {
-            File subdir = new File(f, Integer.toString(i));
-            subdir.mkdir();
-            for (int j = 0; j < 5; j++)
-            {
-                File subF = new File(subdir, Integer.toString(j));
-                assert(exist ? subF.exists() : !subF.exists());
-            }
-        }
-    }
-
-    @Test
-    public void testSnapshotFailureHandler() throws IOException
-    {
-        assumeTrue(FBUtilities.isWindows);
-
-        // Initial "run" of Cassandra, nothing in failed snapshot file
-        WindowsFailedSnapshotTracker.deleteOldSnapshots();
-
-        File f = new File(System.getenv("TEMP") + File.separator + Integer.toString(new Random().nextInt()));
-        f.mkdir();
-        f.deleteOnExit();
-        for (int i = 0; i < 5; i++)
-        {
-            File subdir = new File(f, Integer.toString(i));
-            subdir.mkdir();
-            for (int j = 0; j < 5; j++)
-                new File(subdir, Integer.toString(j)).createNewFile();
-        }
-
-        checkTempFilePresence(f, true);
-
-        // Confirm deletion is recursive
-        for (int i = 0; i < 5; i++)
-            WindowsFailedSnapshotTracker.handleFailedSnapshot(new File(f, Integer.toString(i)));
-
-        assertTrue(new File(WindowsFailedSnapshotTracker.TODELETEFILE).exists());
-
-        // Simulate shutdown and restart of C* node, closing out the list of failed snapshots.
-        WindowsFailedSnapshotTracker.resetForTests();
-
-        // Perform new run, mimicking behavior of C* at startup
-        WindowsFailedSnapshotTracker.deleteOldSnapshots();
-        checkTempFilePresence(f, false);
-
-        // Check to make sure we don't delete non-temp, non-datafile locations
-        WindowsFailedSnapshotTracker.resetForTests();
-        PrintWriter tempPrinter = new PrintWriter(new FileWriter(WindowsFailedSnapshotTracker.TODELETEFILE, true));
-        tempPrinter.println(".safeDir");
-        tempPrinter.close();
-
-        File protectedDir = new File(".safeDir");
-        protectedDir.mkdir();
-        File protectedFile = new File(protectedDir, ".safeFile");
-        protectedFile.createNewFile();
-
-        WindowsFailedSnapshotTracker.handleFailedSnapshot(protectedDir);
-        WindowsFailedSnapshotTracker.deleteOldSnapshots();
-
-        assertTrue(protectedDir.exists());
-        assertTrue(protectedFile.exists());
-
-        protectedFile.delete();
-        protectedDir.delete();
-    }
-
     @Test
     public void testTableSnapshot() throws IOException
     {
         // no need to insert extra data, even an "empty" database will have a little information in the system keyspace
-        StorageService.instance.takeTableSnapshot(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.KEYSPACES, UUID.randomUUID().toString());
+        StorageService.instance.takeTableSnapshot(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.KEYSPACES, UUID.randomUUID().toString());
     }
 
     @Test
@@ -211,9 +146,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        Schema.instance.load(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getLocalPrimaryRangeForEndpoint(InetAddressAndPort.getByName("127.0.0.1"));
         Assertions.assertThat(primaryRanges.size()).as(primaryRanges.toString()).isEqualTo(1);
@@ -251,9 +186,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "1");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        Schema.instance.load(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangeForEndpointWithinDC(meta.name,
                                                                                                             InetAddressAndPort.getByName("127.0.0.1"));
@@ -294,9 +229,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "1");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        Schema.instance.load(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangesForEndpoint(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
         Assertions.assertThat(primaryRanges.size()).as(primaryRanges.toString()).isEqualTo(1);
@@ -331,9 +266,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        Schema.instance.load(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         // endpoints in DC1 should not have primary range
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangesForEndpoint(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
@@ -370,9 +305,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        Schema.instance.load(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         // endpoints in DC1 should not have primary range
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangeForEndpointWithinDC(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
@@ -422,9 +357,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        Schema.instance.load(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         // endpoints in DC1 should not have primary range
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangesForEndpoint(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
@@ -489,9 +424,9 @@ public class StorageServiceServerTest
         configOptions.put("DC2", "2");
         configOptions.put(ReplicationParams.CLASS, "NetworkTopologyStrategy");
 
-        Keyspace.clear("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.create(false, configOptions));
-        Schema.instance.load(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         // endpoints in DC1 should have primary ranges which also cover DC2
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangeForEndpointWithinDC(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
@@ -548,9 +483,9 @@ public class StorageServiceServerTest
         metadata.updateNormalToken(new StringToken("B"), InetAddressAndPort.getByName("127.0.0.2"));
         metadata.updateNormalToken(new StringToken("C"), InetAddressAndPort.getByName("127.0.0.3"));
 
-        Keyspace.clear("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.simpleTransient(2));
-        Schema.instance.load(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangesForEndpoint(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
         Assertions.assertThat(primaryRanges.size()).as(primaryRanges.toString()).isEqualTo(1);
@@ -579,9 +514,9 @@ public class StorageServiceServerTest
         Map<String, String> configOptions = new HashMap<>();
         configOptions.put("replication_factor", "2");
 
-        Keyspace.clear("Keyspace1");
+        SchemaTestUtil.dropKeyspaceIfExist("Keyspace1", false);
         KeyspaceMetadata meta = KeyspaceMetadata.create("Keyspace1", KeyspaceParams.simpleTransient(2));
-        Schema.instance.load(meta);
+        SchemaTestUtil.addOrUpdateKeyspace(meta, false);
 
         Collection<Range<Token>> primaryRanges = StorageService.instance.getPrimaryRangeForEndpointWithinDC(meta.name, InetAddressAndPort.getByName("127.0.0.1"));
         Assertions.assertThat(primaryRanges.size()).as(primaryRanges.toString()).isEqualTo(1);
@@ -651,15 +586,37 @@ public class StorageServiceServerTest
         InetAddressAndPort internalAddress = InetAddressAndPort.getByName(internalAddressString);
         Gossiper.instance.addSavedEndpoint(internalAddress);
         //Default to using the provided address with the configured port
-        assertEquals("127.0.0.2:" + DatabaseDescriptor.getNativeTransportPort(), StorageService.instance.getNativeaddress(internalAddress, true));
+        assertEquals("127.0.0.2:" + DatabaseDescriptor.getNativeTransportPort(), StorageService.instance.getNativeAddress(internalAddress, true));
 
         VersionedValue.VersionedValueFactory valueFactory =  new VersionedValue.VersionedValueFactory(Murmur3Partitioner.instance);
         //If we don't have the port use the gossip address, but with the configured port
         Gossiper.instance.getEndpointStateForEndpoint(internalAddress).addApplicationState(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(InetAddress.getByName("127.0.0.3")));
-        assertEquals("127.0.0.3:" + DatabaseDescriptor.getNativeTransportPort(), StorageService.instance.getNativeaddress(internalAddress, true));
+        assertEquals("127.0.0.3:" + DatabaseDescriptor.getNativeTransportPort(), StorageService.instance.getNativeAddress(internalAddress, true));
         //If we have the address and port in gossip use that
         Gossiper.instance.getEndpointStateForEndpoint(internalAddress).addApplicationState(ApplicationState.NATIVE_ADDRESS_AND_PORT, valueFactory.nativeaddressAndPort(InetAddressAndPort.getByName("127.0.0.3:666")));
-        assertEquals("127.0.0.3:666", StorageService.instance.getNativeaddress(internalAddress, true));
+        assertEquals("127.0.0.3:666", StorageService.instance.getNativeAddress(internalAddress, true));
+    }
+
+    @Test
+    public void testGetNativeAddressIPV6() throws Exception
+    {
+        // Ensure IPv6 addresses are properly bracketed in RFC2732 (https://datatracker.ietf.org/doc/html/rfc2732) format when including ports.
+        // See https://issues.apache.org/jira/browse/CASSANDRA-17945 for more context.
+        String internalAddressIPV6String = "[0:0:0:0:0:0:0:3]:666";
+        InetAddressAndPort internalAddressIPV6 = InetAddressAndPort.getByName(internalAddressIPV6String);
+        Gossiper.instance.addSavedEndpoint(internalAddressIPV6);
+
+        //Default to using the provided address with the configured port
+        assertEquals("[0:0:0:0:0:0:0:3]:" + DatabaseDescriptor.getNativeTransportPort(), StorageService.instance.getNativeAddress(internalAddressIPV6, true));
+
+        VersionedValue.VersionedValueFactory valueFactory =  new VersionedValue.VersionedValueFactory(Murmur3Partitioner.instance);
+        //If RPC_ADDRESS is present with an IPv6 address, we should properly bracket encode the IP with the configured port.
+        Gossiper.instance.getEndpointStateForEndpoint(internalAddressIPV6).addApplicationState(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(InetAddress.getByName("0:0:0:0:0:0:5a:3")));
+        assertEquals("[0:0:0:0:0:0:5a:3]:" + DatabaseDescriptor.getNativeTransportPort(), StorageService.instance.getNativeAddress(internalAddressIPV6, true));
+
+        //If we have the address and port in gossip use that
+        Gossiper.instance.getEndpointStateForEndpoint(internalAddressIPV6).addApplicationState(ApplicationState.NATIVE_ADDRESS_AND_PORT, valueFactory.nativeaddressAndPort(InetAddressAndPort.getByName("[0:0:0:0:0:0:5c:3]:8675")));
+        assertEquals("[0:0:0:0:0:0:5c:3]:8675", StorageService.instance.getNativeAddress(internalAddressIPV6, true));
     }
 
     @Test
@@ -672,7 +629,7 @@ public class StorageServiceServerTest
             StorageService.instance.enableAuditLog("foobar", null, null, null, null, null, null, null);
             Assert.fail();
         }
-        catch (IllegalStateException ex)
+        catch (ConfigurationException | IllegalStateException ex)
         {
             StorageService.instance.disableAuditLog();
         }
@@ -696,5 +653,31 @@ public class StorageServiceServerTest
         StorageService.instance.enableAuditLog(null, null, null, null, null, null, null, null);
         assertTrue(AuditLogManager.instance.isEnabled());
         StorageService.instance.disableAuditLog();
+    }
+
+    @Test
+    public void isReplacingSameHostAddressAndHostIdTest() throws UnknownHostException
+    {
+        try (WithProperties properties = new WithProperties())
+        {
+            UUID differentHostId = UUID.randomUUID();
+            Assert.assertFalse(StorageService.instance.isReplacingSameHostAddressAndHostId(differentHostId));
+
+            final String hostAddress = FBUtilities.getBroadcastAddressAndPort().getHostAddress(false);
+            UUID localHostId = SystemKeyspace.getOrInitializeLocalHostId();
+            Gossiper.instance.initializeNodeUnsafe(FBUtilities.getBroadcastAddressAndPort(), localHostId, 1);
+
+            // Check detects replacing the same host address with the same hostid
+            REPLACE_ADDRESS.setString(hostAddress);
+            Assert.assertTrue(StorageService.instance.isReplacingSameHostAddressAndHostId(localHostId));
+
+            // Check detects replacing the same host address with a different host id
+            REPLACE_ADDRESS.setString(hostAddress);
+            Assert.assertFalse(StorageService.instance.isReplacingSameHostAddressAndHostId(differentHostId));
+
+            // Check tolerates the DNS entry going away for the replace_address
+            REPLACE_ADDRESS.setString("unresolvable.host.local.");
+            Assert.assertFalse(StorageService.instance.isReplacingSameHostAddressAndHostId(differentHostId));
+        }
     }
 }

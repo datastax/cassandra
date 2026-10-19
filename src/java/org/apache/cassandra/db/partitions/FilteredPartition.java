@@ -29,7 +29,7 @@ public class FilteredPartition extends ImmutableBTreePartition
 {
     public FilteredPartition(RowIterator rows)
     {
-        super(rows.metadata(), rows.partitionKey(), build(rows, DeletionInfo.LIVE, false, 16));
+        super(rows.metadata(), rows.partitionKey(), build(rows, DeletionInfo.LIVE, false));
     }
 
     /**
@@ -43,9 +43,10 @@ public class FilteredPartition extends ImmutableBTreePartition
         return new FilteredPartition(iterator);
     }
 
+    @Override
     public RowIterator rowIterator()
     {
-        final Iterator<Row> iter = iterator();
+        final Iterator<Row> iter = super.rowIterator();
         return new RowIterator()
         {
             public TableMetadata metadata()

@@ -1,0 +1,292 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.db.compaction;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Predicate;
+
+import javax.annotation.Nullable;
+
+import com.google.common.base.Joiner;
+
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.Shared;
+import org.apache.cassandra.utils.TimeUUID;
+
+/**
+ * This is a table operation that must be able to report the operation progress and to
+ * interrupt the operation when requested.
+ * <p/>
+ * Any operation defined by {@link OperationType} is normally implementing this interface,
+ * for example index building, view building, cache saving, anti-compaction, compaction,
+ * scrubbing, verifying, tombstone collection and others.
+ * <p/>
+ * These operations have in common that they run on the compaction executor and used to be
+ * known as "compaction".
+ * */
+public interface TableOperation
+{
+    /**
+     * @return the progress of the operation, see {@link Progress}.
+     */
+    TableOperation.Progress getProgress();
+
+    /**
+     * Interrupt the current operation if possible.
+     *
+     * @param trigger cause of compaction interruption
+     */
+    void stop(StopTrigger trigger);
+
+    /**
+     * @return true if the operation has been requested to be interrupted.
+     */
+    boolean isStopRequested();
+
+    default void throwIfStopRequested()
+    {
+        if (isStopRequested())
+            throw new CompactionInterruptedException(getProgress(), trigger());
+    }
+
+    /**
+     * Return true if the predicate for the given sstables holds, or if the operation
+     * does not consider any sstables, in which case it will always return true (the
+     * default behaviour).
+     * <p/>
+     *
+     * @param predicate the predicate to be applied to the operation sstables
+     *
+     * @return true by default, see overrides for different behaviors
+     */
+    boolean shouldStop(Predicate<SSTableReader> predicate);
+
+    /**
+     * @return cause of compaction interruption.
+     */
+    StopTrigger trigger();
+
+    /**
+     * if this compaction involves several/all tables we can safely check globalCompactionsPaused
+     * in isStopRequested() below
+     */
+    boolean isGlobal();
+
+    /**
+     * The unit for the {@link Progress} report.
+     */
+    enum Unit
+    {
+        BYTES("bytes"), RANGES("token range parts"), KEYS("keys");
+
+        private final String name;
+
+        Unit(String name)
+        {
+            this.name = name;
+        }
+
+        @Override
+        public String toString()
+        {
+            return this.name;
+        }
+
+        public static boolean isFileSize(String unit)
+        {
+            return BYTES.toString().equals(unit);
+        }
+    }
+
+    @Shared
+    enum StopTrigger
+    {
+        NONE("Unknown reason", false),
+        TRUNCATE("Truncated table", true),
+        DROP_TABLE("Dropped table", true),
+        INVALIDATE_INDEX("Index invalidation", true),
+        SHUTDOWN("Shutdown", true),
+        USER_STOP("User request", true),
+        COMPACTION("Compaction", true),
+        CLEANUP("Cleanup", true),
+        ANTICOMPACTION("Anticompaction after repair", true),
+        INDEX_BUILD("Secondary index build", true),
+        SCRUB("Scrub", true),
+        VERIFY("Verify", true),
+        RELOCATE("Relocation", true),
+        GARBAGE_COLLECT("Garbage collection", true),
+        UPGRADE_SSTABLES("SStable upgrade", true),
+        UNIT_TESTS("Unit tests", true);
+
+        private final String name;
+        private final boolean isFinal;
+
+        StopTrigger(String name, boolean isFinal)
+        {
+            this.name = name;
+            this.isFinal = isFinal;
+        }
+
+        // A stop trigger marked as final should not be overwritten. So a table operation that is
+        // marked with a final stop trigger cannot have its stop trigger changed to another value.
+        public boolean isFinal()
+        {
+            return isFinal;
+        }
+
+        @Override
+        public String toString()
+        {
+            return name;
+        }
+    }
+
+    /**
+     * The progress of a table operation.
+     */
+    interface Progress
+    {
+        String ID = "id";
+        String KEYSPACE = "keyspace";
+        String COLUMNFAMILY = "columnfamily";
+        String COMPLETED = "completed";
+        String TOTAL = "total";
+        String OPERATION_TYPE = "operationType";
+        String UNIT = "unit";
+        String OPERATION_ID = "operationId";
+        String SSTABLES = "sstables";
+        String TARGET_DIRECTORY = "targetDirectory";
+
+        /**
+         * @return the keyspace name, if the metadata is not null.
+         */
+        Optional<String> keyspace();
+
+        /**
+         * @return the table name, if the metadata is not null.
+         */
+        Optional<String> table();
+
+        /**
+         * @return the table metadata, this may be null if the operation has no metadata.
+         */
+        @Nullable TableMetadata metadata();
+
+        /**
+         * @return the number of units completed, see {@link this#unit()}.
+         */
+        long completed();
+
+        /**
+         * @return the total number of units that must be processed by the operation, see {@link this#unit()}.
+         */
+        long total();
+
+        /**
+         * @return the type of operation, see {@link OperationType}.
+         */
+        OperationType operationType();
+
+        /**
+         * @return a unique identifier for this operation.
+         */
+        TimeUUID operationId();
+
+        /**
+         * @return the unit to be used for {@link this#completed()} and {@link this#total()}, see {@link Unit}.
+         */
+        Unit unit();
+
+        /**
+         * @return a set of SSTables participating in this operation
+         */
+        Set<SSTableReader> sstables();
+
+        default String targetDirectory()
+        {
+            return "";
+        }
+
+        /**
+         * Note that this estimate is based on the amount of data we have left to read - it assumes input
+         * size == output size for a compaction, which is not really true, but should most often provide a worst case
+         * remaining write size.
+         */
+        default long estimatedRemainingWriteBytes()
+        {
+            if (unit() == Unit.BYTES && operationType().writesData)
+                return total() - completed();
+            return 0;
+        }
+
+        /**
+         * Get the directories this compaction could possibly write to.
+         *
+         * @return the directories that we might write to, or empty list if we don't know the metadata
+         * (like for index summary redistribution), or null if we don't have any disk boundaries
+         */
+        default List<File> getTargetDirectories()
+        {
+            if (metadata() != null && !metadata().isIndex())
+            {
+                ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(metadata().id);
+                if (cfs != null)
+                    return cfs.getDirectoriesForFiles(sstables());
+            }
+            return Collections.emptyList();
+        }
+
+        default String progressToString()
+        {
+            StringBuilder buff = new StringBuilder();
+            buff.append(String.format("%s(%s, %s / %s %s)", operationType(), operationId(), completed(), total(), unit()));
+            TableMetadata metadata = metadata();
+            if (metadata != null)
+            {
+                buff.append(String.format("@%s(%s, %s)", metadata.id, metadata.keyspace, metadata.name));
+            }
+            return buff.toString();
+        }
+
+        default Map<String, String> asMap()
+        {
+            Map<String, String> ret = new HashMap<>(8);
+            TableMetadata metadata = metadata();
+            ret.put(ID, metadata != null ? metadata.id.toString() : "");
+            ret.put(KEYSPACE, keyspace().orElse(null));
+            ret.put(COLUMNFAMILY, table().orElse(null));
+            ret.put(COMPLETED, Long.toString(completed()));
+            ret.put(TOTAL, Long.toString(total()));
+            ret.put(OPERATION_TYPE, operationType().toString());
+            ret.put(UNIT, unit().toString());
+            ret.put(OPERATION_ID, operationId() == null ? "" : operationId().toString());
+            ret.put(SSTABLES, Joiner.on(',').join(sstables()));
+            ret.put(TARGET_DIRECTORY, targetDirectory());
+            return ret;
+        }
+    }
+}

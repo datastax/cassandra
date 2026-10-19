@@ -23,13 +23,18 @@ import java.util.Objects;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.utils.memory.AbstractAllocator;
+
+import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.memory.ByteBufferCloner;
+
 
 /**
  * A range tombstone marker that represents a boundary between 2 range tombstones (i.e. it closes one range and open another).
  */
 public class RangeTombstoneBoundaryMarker extends AbstractRangeTombstoneMarker<ClusteringBoundary<?>>
 {
+    private static final long EMPTY_SIZE = ObjectSizes.measure(new RangeTombstoneBoundaryMarker(new ArrayClusteringBoundary(ClusteringPrefix.Kind.INCL_END_EXCL_START_BOUNDARY, new byte[][] { new byte[0]}), null, null));
+
     private final DeletionTime endDeletion;
     private final DeletionTime startDeletion;
 
@@ -145,9 +150,10 @@ public class RangeTombstoneBoundaryMarker extends AbstractRangeTombstoneMarker<C
         return !startDeletion.validate() || !endDeletion.validate();
     }
 
-    public RangeTombstoneBoundaryMarker copy(AbstractAllocator allocator)
+    @Override
+    public RangeTombstoneBoundaryMarker clone(ByteBufferCloner cloner)
     {
-        return new RangeTombstoneBoundaryMarker((ClusteringBoundary<ByteBuffer>) clustering().copy(allocator), endDeletion, startDeletion);
+        return new RangeTombstoneBoundaryMarker((ClusteringBoundary<ByteBuffer>) clustering().clone(cloner), endDeletion, startDeletion);
     }
 
     public RangeTombstoneBoundaryMarker withNewOpeningDeletionTime(boolean reversed, DeletionTime newDeletionTime)
@@ -185,6 +191,24 @@ public class RangeTombstoneBoundaryMarker extends AbstractRangeTombstoneMarker<C
         bound.digest(digest);
         endDeletion.digest(digest);
         startDeletion.digest(digest);
+    }
+
+    @Override
+    public long unsharedHeapSize()
+    {
+        return EMPTY_SIZE + startDeletion.unsharedHeapSize() + endDeletion.unsharedHeapSize();
+    }
+
+    @Override
+    public long minTimestamp()
+    {
+        return Math.min(startDeletion.markedForDeleteAt(), endDeletion.markedForDeleteAt());
+    }
+
+    @Override
+    public long maxTimestamp()
+    {
+        return Math.max(startDeletion.markedForDeleteAt(), endDeletion.markedForDeleteAt());
     }
 
     public String toString(TableMetadata metadata)

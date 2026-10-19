@@ -20,13 +20,13 @@ package org.apache.cassandra.streaming;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.utils.TimeUUID;
 
 public abstract class StreamEvent
 {
@@ -38,9 +38,9 @@ public abstract class StreamEvent
     }
 
     public final Type eventType;
-    public final UUID planId;
+    public final TimeUUID planId;
 
-    protected StreamEvent(Type eventType, UUID planId)
+    protected StreamEvent(Type eventType, TimeUUID planId)
     {
         this.eventType = eventType;
         this.planId = planId;
@@ -71,7 +71,7 @@ public abstract class StreamEvent
     {
         public final ProgressInfo progress;
 
-        public ProgressEvent(UUID planId, ProgressInfo progress)
+        public ProgressEvent(TimeUUID planId, ProgressInfo progress)
         {
             super(Type.FILE_PROGRESS, planId);
             this.progress = progress;
@@ -87,11 +87,13 @@ public abstract class StreamEvent
     public static class SessionPreparedEvent extends StreamEvent
     {
         public final SessionInfo session;
+        public final StreamSession.PrepareDirection prepareDirection;
 
-        public SessionPreparedEvent(UUID planId, SessionInfo session)
+        public SessionPreparedEvent(TimeUUID planId, SessionInfo session, StreamSession.PrepareDirection prepareDirection)
         {
             super(Type.STREAM_PREPARED, planId);
             this.session = session;
+            this.prepareDirection = prepareDirection;
         }
     }
 }

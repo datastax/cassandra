@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -25,12 +26,20 @@ import java.util.Objects;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.io.sstable.format.big.IndexInfo;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
-import org.apache.cassandra.io.sstable.IndexInfo;
+import static org.apache.cassandra.utils.bytecomparable.ByteSource.EXCLUDED;
+import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT;
+import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT_NULL;
+import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT_NULL_REVERSED;
+import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_CLUSTERING_NULL;
+import static org.apache.cassandra.utils.bytecomparable.ByteSource.TERMINATOR;
 
 /**
  * A comparator of clustering prefixes (or more generally of {@link Clusterable}}.
@@ -47,8 +56,15 @@ public class ClusteringComparator implements Comparator<Clusterable>
     private final Comparator<IndexInfo> indexReverseComparator;
     private final Comparator<Clusterable> reverseComparator;
 
-    private final Comparator<Row> rowComparator = (r1, r2) -> compare((ClusteringPrefix<?>) r1.clustering(),
-                                                                      (ClusteringPrefix<?>) r2.clustering());
+    private final Comparator<Row> rowComparator = new Comparator<>()
+    {
+        @Override
+        public int compare(Row r1, Row r2)
+        {
+            return ClusteringComparator.this.compare((ClusteringPrefix<?>) r1.clustering(),
+                           (ClusteringPrefix<?>) r2.clustering());
+        }
+    };
 
     public ClusteringComparator(AbstractType<?>... clusteringTypes)
     {
@@ -60,11 +76,34 @@ public class ClusteringComparator implements Comparator<Clusterable>
         // copy the list to ensure despatch is monomorphic
         this.clusteringTypes = ImmutableList.copyOf(clusteringTypes);
 
-        this.indexComparator = (o1, o2) -> ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.lastName,
-                                                                             (ClusteringPrefix<?>) o2.lastName);
-        this.indexReverseComparator = (o1, o2) -> ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.firstName,
-                                                                                    (ClusteringPrefix<?>) o2.firstName);
-        this.reverseComparator = (c1, c2) -> ClusteringComparator.this.compare(c2, c1);
+        this.indexComparator = new Comparator<>()
+        {
+            @Override
+            public int compare(IndexInfo o1, IndexInfo o2)
+            {
+                return ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.lastName,
+                               (ClusteringPrefix<?>) o2.lastName);
+            }
+        };
+
+        this.indexReverseComparator = new Comparator<>()
+        {
+            @Override
+            public int compare(IndexInfo o1, IndexInfo o2)
+            {
+                return ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.firstName,
+                               (ClusteringPrefix<?>) o2.firstName);
+            }
+        };
+
+        this.reverseComparator = new Comparator<>()
+        {
+            @Override
+            public int compare(Clusterable o1, Clusterable o2)
+            {
+                return ClusteringComparator.this.compare(o2, o1);
+            }
+        };
         for (AbstractType<?> type : clusteringTypes)
             type.checkComparable(); // this should already be enforced by TableMetadata.Builder.addColumn, but we check again for other constructors
     }
@@ -111,7 +150,7 @@ public class ClusteringComparator implements Comparator<Clusterable>
         if (values.length != size())
             throw new IllegalArgumentException(String.format("Invalid number of components, expecting %d but got %d", size(), values.length));
 
-        CBuilder builder = CBuilder.create(this);
+        ClusteringBuilder builder = ClusteringBuilder.create(this);
         for (Object val : values)
         {
             if (val instanceof ByteBuffer)
@@ -187,34 +226,6 @@ public class ClusteringComparator implements Comparator<Clusterable>
     }
 
     /**
-     * Returns whether this clustering comparator is compatible with the provided one,
-     * that is if the provided one can be safely replaced by this new one.
-     *
-     * @param previous the previous comparator that we want to replace and test
-     * compatibility with.
-     *
-     * @return whether {@code previous} can be safely replaced by this comparator.
-     */
-    public boolean isCompatibleWith(ClusteringComparator previous)
-    {
-        if (this == previous)
-            return true;
-
-        // Extending with new components is fine, shrinking is not
-        if (size() < previous.size())
-            return false;
-
-        for (int i = 0; i < previous.size(); i++)
-        {
-            AbstractType<?> tprev = previous.subtype(i);
-            AbstractType<?> tnew = subtype(i);
-            if (!tnew.isCompatibleWith(tprev))
-                return false;
-        }
-        return true;
-    }
-
-    /**
      * Validates the provided prefix for corrupted data.
      *
      * @param clustering the clustering prefix to validate.
@@ -229,6 +240,299 @@ public class ClusteringComparator implements Comparator<Clusterable>
             T value = clustering.get(i);
             if (value != null)
                 subtype(i).validate(value, accessor);
+        }
+    }
+
+    /**
+     * Produce a prefix-free byte-comparable representation of the given value, i.e. such a sequence of bytes that any
+     * pair x, y of valid values of this type
+     *   compare(x, y) == compareLexicographicallyUnsigned(asByteComparable(x), asByteComparable(y))
+     * and
+     *   asByteComparable(x) is not a prefix of asByteComparable(y)
+     */
+    public <V> ByteComparable asByteComparable(ClusteringPrefix<V> clustering)
+    {
+        return new ByteComparableClustering<>(clustering);
+    }
+
+    /**
+     * A prefix-free byte-comparable representation for a clustering or prefix.
+     *
+     * Adds a NEXT_COMPONENT byte before each component (allowing inclusive/exclusive bounds over incomplete prefixes
+     * of that length) and finishes with a suitable byte for the clustering kind. Also deals with null entries.
+     *
+     * Since all types' encodings are weakly prefix-free, this is guaranteed to be prefix-free as long as the
+     * bound/ClusteringPrefix terminators are different from the separator byte. It is okay for the terminator for
+     * Clustering to be the same as the separator, as all Clusterings must be completely specified.
+     *
+     * See also {@link AbstractType#asComparableBytes}.
+     *
+     * Some examples:
+     *    "A", 0005, Clustering     -> 40 4100 40 0005 40
+     *    "B", 0006, InclusiveEnd   -> 40 4200 40 0006 60
+     *    "A", ExclusiveStart       -> 40 4100 60
+     *    "", null, Clustering      -> 40 00 3F 40
+     *    "", 0000, Clustering      -> 40 00 40 0000 40
+     *    BOTTOM                    -> 20
+     */
+    private class ByteComparableClustering<V> implements ByteComparable
+    {
+        private final ClusteringPrefix<V> src;
+
+        ByteComparableClustering(ClusteringPrefix<V> src)
+        {
+            this.src = src;
+        }
+
+        @Override
+        public ByteSource asComparableBytes(Version version)
+        {
+            return new ByteSource()
+            {
+                private ByteSource current = null;
+                private int srcnum = -1;
+
+                @Override
+                public int next()
+                {
+                    if (current != null)
+                    {
+                        // Process bytes of the current component.
+                        int b = current.next();
+                        if (b > END_OF_STREAM)
+                            return b;
+                        current = null;
+                    }
+
+                    int sz = src.size();
+                    if (srcnum == sz) // already produced the Kind byte, we are done
+                        return END_OF_STREAM;
+
+                    ++srcnum;
+                    if (srcnum == sz)
+                        return src.kind().asByteComparableValue(version);
+                    else
+                        return advanceToComponent(src.get(srcnum));
+                }
+
+                private int advanceToComponent(V nextComponent)
+                {
+                    if (nextComponent == null)
+                    {
+                        if (version == Version.OSS50)
+                            return NEXT_CLUSTERING_NULL; // always sorts before non-nulls, including for reversed types
+                        else
+                        {
+                            // legacy version did not permit nulls in clustering keys and treated these as null values
+                            return nextComponentNull(subtype(srcnum).isReversed());
+                        }
+                    }
+
+                    current = subtype(srcnum).asComparableBytes(src.accessor(), nextComponent, version);
+                    // and also null values for some types (e.g. int, varint but not text) that are encoded as empty
+                    // buffers.
+                    if (current == null)
+                        return nextComponentNull(subtype(srcnum).isReversed());
+
+                    return NEXT_COMPONENT;
+                }
+            };
+        }
+
+        private int nextComponentNull(boolean isReversed)
+        {
+            return isReversed ? NEXT_COMPONENT_NULL_REVERSED : NEXT_COMPONENT_NULL;
+        }
+
+        public String toString()
+        {
+            return src.clusteringString(subtypes());
+        }
+    }
+
+    /**
+     * Produces a clustering from the given byte-comparable value. The method will throw an exception if the value
+     * does not correctly encode a clustering of this type, including if it encodes a position before or after a
+     * clustering (i.e. a bound/boundary). Uses the OSS50 version of the byte-comparable encoding.
+     *
+     * @param accessor Accessor to use to construct components.
+     * @param comparable The clustering encoded as a byte-comparable sequence.
+     */
+    public <V> Clustering<?> clusteringFromByteComparable(ValueAccessor<V> accessor, ByteComparable comparable)
+    {
+        return clusteringFromByteComparable(accessor, comparable, ByteComparable.Version.OSS50);
+    }
+
+    /**
+     * Produces a clustering from the given byte-comparable value. The method will throw an exception if the value
+     * does not correctly encode a clustering of this type, including if it encodes a position before or after a
+     * clustering (i.e. a bound/boundary). Uses the OSS50 version of the byte-comparable encoding.
+     *
+     * @param accessor Accessor to use to construct components. Because this will be used to construct individual
+     *                 arrays/buffers for each component, it may be sensible to use an accessor that allocates larger
+     *                 buffers in advance.
+     * @param comparable The clustering encoded as a byte-comparable sequence.
+     * @param version The version of the byte-comparable encoding.
+     */
+    public <V> Clustering<?> clusteringFromByteComparable(ValueAccessor<V> accessor,
+                                                          ByteComparable comparable,
+                                                          ByteComparable.Version version)
+    {
+        ByteSource.Peekable orderedBytes = ByteSource.peekable(comparable.asComparableBytes(version));
+        if (orderedBytes == null)
+            return null;
+
+        // First check for special cases (partition key only, static clustering) that can do without buffers.
+        int sep = orderedBytes.next();
+        switch (sep)
+        {
+        case TERMINATOR:
+            assert size() == 0 : "Terminator should be after " + size() + " components, got 0";
+            return accessor.factory().clustering();
+        case EXCLUDED:
+            return Clustering.STATIC_CLUSTERING;
+        default:
+            // continue with processing
+        }
+
+        int cc = 0;
+        V[] components = accessor.createArray(size());
+
+        while (true)
+        {
+            switch (sep)
+            {
+            case NEXT_CLUSTERING_NULL:
+                components[cc] = null;
+                break;
+            case NEXT_COMPONENT_NULL:
+            case NEXT_COMPONENT_NULL_REVERSED:
+                components[cc] = subtype(cc).fromComparableBytes(accessor, null, version);
+                break;
+            case NEXT_COMPONENT:
+                // Decode the next component, consuming bytes from orderedBytes.
+                components[cc] = subtype(cc).fromComparableBytes(accessor, orderedBytes, version);
+                break;
+            case TERMINATOR:
+                assert cc == size() : "Terminator should be after " + size() + " components, got " + cc;
+                return accessor.factory().clustering(components);
+            case EXCLUDED:
+                throw new AssertionError("Unexpected static terminator after the first component");
+            default:
+                throw new AssertionError("Unexpected separator " + Integer.toHexString(sep) + " in Clustering encoding");
+            }
+            ++cc;
+            sep = orderedBytes.next();
+        }
+    }
+
+    /**
+     * Produces a clustering bound from the given byte-comparable value. The method will throw an exception if the value
+     * does not correctly encode a bound position of this type, including if it encodes an exact clustering.
+     *
+     * Note that the encoded clustering position cannot specify the type of bound (i.e. start/end/boundary) because to
+     * correctly compare clustering positions the encoding must be the same for the different types (e.g. the position
+     * for a exclusive end and an inclusive start is the same, before the exact clustering). The type must be supplied
+     * separately (in the bound... vs boundary... call and isEnd argument).
+     *
+     * @param accessor Accessor to use to construct components.
+     * @param comparable The clustering position encoded as a byte-comparable sequence.
+     * @param isEnd true if the bound marks the end of a range, false is it marks the start.
+     */
+    public <V> ClusteringBound<V> boundFromByteComparable(ValueAccessor<V> accessor,
+                                                          ByteComparable comparable,
+                                                          boolean isEnd)
+    {
+        ByteComparable.Version version = ByteComparable.Version.OSS50;
+        ByteSource.Peekable orderedBytes = ByteSource.peekable(comparable.asComparableBytes(version));
+
+        int sep = orderedBytes.next();
+        int cc = 0;
+        V[] components = accessor.createArray(size());
+
+        while (true)
+        {
+            switch (sep)
+            {
+            case NEXT_CLUSTERING_NULL:
+                components[cc] = null;
+                break;
+            case NEXT_COMPONENT_NULL:
+            case NEXT_COMPONENT_NULL_REVERSED:
+                components[cc] = subtype(cc).fromComparableBytes(accessor, null, version);
+                break;
+            case NEXT_COMPONENT:
+                // Decode the next component, consuming bytes from orderedBytes.
+                components[cc] = subtype(cc).fromComparableBytes(accessor, orderedBytes, version);
+                break;
+            case ByteSource.LT_NEXT_COMPONENT:
+                return accessor.factory().bound(isEnd ? ClusteringPrefix.Kind.EXCL_END_BOUND
+                                                      : ClusteringPrefix.Kind.INCL_START_BOUND,
+                                                Arrays.copyOf(components, cc));
+            case ByteSource.GT_NEXT_COMPONENT:
+                return accessor.factory().bound(isEnd ? ClusteringPrefix.Kind.INCL_END_BOUND
+                                                      : ClusteringPrefix.Kind.EXCL_START_BOUND,
+                                                Arrays.copyOf(components, cc));
+
+            case ByteSource.LTLT_NEXT_COMPONENT:
+            case ByteSource.GTGT_NEXT_COMPONENT:
+                throw new AssertionError("Unexpected sstable lower/upper bound - byte comparable representation of artificial sstable bounds is not supported");
+
+            default:
+                throw new AssertionError("Unexpected separator " + Integer.toHexString(sep) + " in ClusteringBound encoding");
+            }
+            ++cc;
+            sep = orderedBytes.next();
+        }
+    }
+
+    /**
+     * Produces a clustering boundary from the given byte-comparable value. The method will throw an exception if the
+     * value does not correctly encode a bound position of this type, including if it encodes an exact clustering.
+     *
+     * Note that the encoded clustering position cannot specify the type of bound (i.e. start/end/boundary) because to
+     * correctly compare clustering positions the encoding must be the same for the different types (e.g. the position
+     * for a exclusive end and an inclusive start is the same, before the exact clustering). The type must be supplied
+     * separately (in the bound... vs boundary... call and isEnd argument).
+     *
+     * @param accessor Accessor to use to construct components.
+     * @param comparable The clustering position encoded as a byte-comparable sequence.
+     */
+    public <V> ClusteringBoundary<V> boundaryFromByteComparable(ValueAccessor<V> accessor, ByteComparable comparable)
+    {
+        ByteComparable.Version version = ByteComparable.Version.OSS50;
+        ByteSource.Peekable orderedBytes = ByteSource.peekable(comparable.asComparableBytes(version));
+
+        int sep = orderedBytes.next();
+        int cc = 0;
+        V[] components = accessor.createArray(size());
+
+        while (true)
+        {
+            switch (sep)
+            {
+            case NEXT_CLUSTERING_NULL:
+                components[cc] = null;
+                break;
+            case NEXT_COMPONENT_NULL:
+            case NEXT_COMPONENT_NULL_REVERSED:
+                components[cc] = subtype(cc).fromComparableBytes(accessor, null, version);
+                break;
+            case NEXT_COMPONENT:
+                // Decode the next component, consuming bytes from orderedBytes.
+                components[cc] = subtype(cc).fromComparableBytes(accessor, orderedBytes, version);
+                break;
+            case ByteSource.LT_NEXT_COMPONENT:
+                return accessor.factory().boundary(ClusteringPrefix.Kind.EXCL_END_INCL_START_BOUNDARY,
+                                                   Arrays.copyOf(components, cc));
+            case ByteSource.GT_NEXT_COMPONENT:
+                return accessor.factory().boundary(ClusteringPrefix.Kind.INCL_END_EXCL_START_BOUNDARY,
+                                                   Arrays.copyOf(components, cc));
+            default:
+                throw new AssertionError("Unexpected separator " + Integer.toHexString(sep) + " in ClusteringBoundary encoding");
+            }
+            ++cc;
+            sep = orderedBytes.next();
         }
     }
 

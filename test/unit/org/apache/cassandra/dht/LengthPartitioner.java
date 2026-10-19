@@ -22,23 +22,37 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
-import org.apache.cassandra.dht.KeyCollisionTest.BigIntegerToken;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 public class LengthPartitioner implements IPartitioner
 {
-    public static final BigInteger ZERO = new BigInteger("0");
-    public static final BigIntegerToken MINIMUM = new BigIntegerToken("-1");
+    public static final Long ZERO = 0L;
+    public static final BigIntegerToken MINIMUM = new BigIntegerToken(-1L);
+    public static final BigIntegerToken MAXIMUM = new BigIntegerToken(Long.MAX_VALUE);
+
+    private final Splitter splitter = new Splitter(this)
+    {
+        public Token tokenForValue(BigInteger value)
+        {
+            return new BigIntegerToken(value.longValue());
+        }
+
+        public BigInteger valueForToken(Token token)
+        {
+            return BigInteger.valueOf(((BigIntegerToken) token).getTokenValue());
+        }
+    };
 
     public static LengthPartitioner instance = new LengthPartitioner();
 
@@ -50,16 +64,31 @@ public class LengthPartitioner implements IPartitioner
     public BigIntegerToken midpoint(Token ltoken, Token rtoken)
     {
         // the symbolic MINIMUM token should act as ZERO: the empty bit array
-        BigInteger left = ltoken.equals(MINIMUM) ? ZERO : ((BigIntegerToken)ltoken).token;
-        BigInteger right = rtoken.equals(MINIMUM) ? ZERO : ((BigIntegerToken)rtoken).token;
-        Pair<BigInteger,Boolean> midpair = FBUtilities.midpoint(left, right, 127);
+        Long left = ltoken.equals(MINIMUM) ? ZERO : ((BigIntegerToken) ltoken).token;
+        Long right = rtoken.equals(MINIMUM) ? ZERO : ((BigIntegerToken) rtoken).token;
+        Pair<BigInteger, Boolean> midpair = FBUtilities.midpoint(BigInteger.valueOf(left), BigInteger.valueOf(right), 127);
         // discard the remainder
-        return new BigIntegerToken(midpair.left);
+        return new BigIntegerToken(midpair.left.longValue());
     }
 
-    public Token split(Token left, Token right, double ratioToLeft)
+    public Token split(Token tleft, Token tright, double ratio)
     {
-        throw new UnsupportedOperationException();
+        assert ratio >= 0.0 && ratio <= 1.0;
+        BigIntegerToken ltoken = (BigIntegerToken) tleft;
+        BigIntegerToken rtoken = (BigIntegerToken) tright;
+
+        long left = ltoken.token;
+        long right = rtoken.token;
+
+        if (left < right)
+        {
+            return new BigIntegerToken((long) (((right - left) * ratio) + left));
+        }
+        else
+        {  // wrapping case
+            Long max = MAXIMUM.token;
+            return new BigIntegerToken((long) (((max + right) - left) * ratio) + left);
+        }
     }
 
     public BigIntegerToken getMinimumToken()
@@ -70,7 +99,7 @@ public class LengthPartitioner implements IPartitioner
     @Override
     public Token getMaximumToken()
     {
-        return null;
+        return MAXIMUM;
     }
 
     public BigIntegerToken getRandomToken()
@@ -80,19 +109,40 @@ public class LengthPartitioner implements IPartitioner
 
     public BigIntegerToken getRandomToken(Random random)
     {
-        return new BigIntegerToken(BigInteger.valueOf(random.nextInt(15)));
+        return new BigIntegerToken((long) random.nextInt(15));
     }
 
-    private final Token.TokenFactory tokenFactory = new Token.TokenFactory() {
+    private final Token.TokenFactory tokenFactory = new Token.TokenFactory()
+    {
         public ByteBuffer toByteArray(Token token)
         {
             BigIntegerToken bigIntegerToken = (BigIntegerToken) token;
-            return ByteBuffer.wrap(bigIntegerToken.token.toByteArray());
+            return ByteBufferUtil.bytes(bigIntegerToken.token);
         }
 
         public Token fromByteArray(ByteBuffer bytes)
         {
-            return new BigIntegerToken(new BigInteger(ByteBufferUtil.getArray(bytes)));
+            return new BigIntegerToken(ByteBufferUtil.toLong(bytes));
+        }
+
+        public Token fromLongValue(long longValue)
+        {
+            return new BigIntegerToken(longValue);
+        }
+
+        @Override
+        public Token fromComparableBytes(ByteSource.Peekable comparableBytes, ByteComparable.Version version)
+        {
+            switch (version)
+            {
+                case LEGACY:
+                case OSS41:
+                    return new BigIntegerToken(ByteSourceInverse.getSignedLong(comparableBytes));
+                case OSS50:
+                    return new BigIntegerToken(ByteSourceInverse.getVariableLengthInteger(comparableBytes));
+                default:
+                    throw new AssertionError();
+            }
         }
 
         public String toString(Token token)
@@ -103,10 +153,12 @@ public class LengthPartitioner implements IPartitioner
 
         public Token fromString(String string)
         {
-            return new BigIntegerToken(new BigInteger(string));
+            return new BigIntegerToken(Long.valueOf(string));
         }
 
-        public void validate(String token) {}
+        public void validate(String token)
+        {
+        }
     };
 
     public Token.TokenFactory getTokenFactory()
@@ -123,21 +175,21 @@ public class LengthPartitioner implements IPartitioner
     {
         if (key.remaining() == 0)
             return MINIMUM;
-        return new BigIntegerToken(BigInteger.valueOf(key.remaining()));
+        return new BigIntegerToken((long) key.remaining());
     }
 
     public Map<Token, Float> describeOwnership(List<Token> sortedTokens)
     {
         // allTokens will contain the count and be returned, sorted_ranges is shorthand for token<->token math.
-        Map<Token, Float> allTokens = new HashMap<Token, Float>();
-        List<Range<Token>> sortedRanges = new ArrayList<Range<Token>>();
+        Map<Token, Float> allTokens = new HashMap<>();
+        List<Range<Token>> sortedRanges = new ArrayList<>();
 
         // this initializes the counts to 0 and calcs the ranges in order.
         Token lastToken = sortedTokens.get(sortedTokens.size() - 1);
         for (Token node : sortedTokens)
         {
-            allTokens.put(node, new Float(0.0));
-            sortedRanges.add(new Range<Token>(lastToken, node));
+            allTokens.put(node, 0.0F);
+            sortedRanges.add(new Range<>(lastToken, node));
             lastToken = node;
         }
 
@@ -154,7 +206,7 @@ public class LengthPartitioner implements IPartitioner
         }
 
         // Sum every count up and divide count/total for the fractional ownership.
-        Float total = new Float(0.0);
+        Float total = 0.0F;
         for (Float f : allTokens.values())
             total += f;
         for (Map.Entry<Token, Float> row : allTokens.entrySet())
@@ -171,5 +223,74 @@ public class LengthPartitioner implements IPartitioner
     public AbstractType<?> partitionOrdering()
     {
         return new PartitionerDefinedOrder(this);
+    }
+
+    public Optional<Splitter> splitter()
+    {
+        return Optional.of(splitter);
+    }
+
+    static class BigIntegerToken extends ComparableObjectToken<Long>
+    {
+        private static final long serialVersionUID = 1L;
+
+        public BigIntegerToken(Long token)
+        {
+            super(token);
+        }
+
+        // convenience method for testing
+        public BigIntegerToken(String token) {
+            this(Long.valueOf(token));
+        }
+
+        public ByteSource asComparableBytes(ByteComparable.Version version)
+        {
+            switch (version)
+            {
+                case LEGACY:
+                case OSS41:
+                    return ByteSource.of(token);
+                case OSS50:
+                    return ByteSource.variableLengthInteger(token);
+                default:
+                    throw new AssertionError();
+            }
+        }
+
+        @Override
+        public IPartitioner getPartitioner()
+        {
+            return LengthPartitioner.instance;
+        }
+
+        @Override
+        public long getHeapSize()
+        {
+            return 0;
+        }
+
+        @Override
+        public Token nextValidToken()
+        {
+            Long next = token.equals(Long.MAX_VALUE) ? ZERO
+                    : token + 1;
+            return new BigIntegerToken(next);
+        }
+
+        @Override
+        public long getLongValue()
+        {
+            return token;
+        }
+
+        @Override
+        public double size(Token next)
+        {
+            BigIntegerToken n = (BigIntegerToken) next;
+            long v = n.token - token;  // Overflow acceptable and desired.
+            double d = Math.scalb((double)v, -127); // Scale so that the full range is 1.
+            return d > 0.0 ? d : (d + 1.0); // Adjust for signed long, also making sure t.size(t) == 1.
+        }
     }
 }

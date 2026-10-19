@@ -41,17 +41,28 @@ public class Compact extends NodeToolCmd
     @Option(title = "user-defined", name = {"--user-defined"}, description = "Use --user-defined to submit listed files for user-defined compaction")
     private boolean userDefined = false;
 
-    @Option(title = "start_token", name = {"-st", "--start-token"}, description = "Use -st to specify a token at which the compaction range starts")
+    @Option(title = "start_token", name = {"-st", "--start-token"}, description = "Use -st to specify a token at which the compaction range starts (inclusive)")
     private String startToken = EMPTY;
 
-    @Option(title = "end_token", name = {"-et", "--end-token"}, description = "Use -et to specify a token at which compaction range ends")
+    @Option(title = "end_token", name = {"-et", "--end-token"}, description = "Use -et to specify a token at which compaction range ends (inclusive)")
     private String endToken = EMPTY;
 
+    @Option(title = "partition_key", name = {"--partition"}, description = "String representation of the partition key")
+    private String partitionKey = EMPTY;
+
+    @Option(title = "jobs",
+            name = {"-j", "--jobs"},
+            description = "Use -j to specify the maximum number of threads to use for parallel compaction. " +
+                          "If not set, up to half the compaction threads will be used. " +
+                          "If set to 0, the major compaction will use all threads and will not permit other compactions to run until it completes (use with caution).")
+    private Integer parallelism = null;
 
     @Override
     public void execute(NodeProbe probe)
     {
-        final boolean tokenProvided = !(startToken.isEmpty() && endToken.isEmpty());
+        final boolean startEndTokenProvided = !(startToken.isEmpty() && endToken.isEmpty());
+        final boolean partitionKeyProvided = !partitionKey.isEmpty();
+        final boolean tokenProvided = startEndTokenProvided || partitionKeyProvided;
         if (splitOutput && (userDefined || tokenProvided))
         {
             throw new RuntimeException("Invalid option combination: Can not use split-output here");
@@ -80,13 +91,20 @@ public class Compact extends NodeToolCmd
         {
             try
             {
-                if (tokenProvided)
+                if (startEndTokenProvided)
                 {
                     probe.forceKeyspaceCompactionForTokenRange(keyspace, startToken, endToken, tableNames);
                 }
+                else if (partitionKeyProvided)
+                {
+                    probe.forceKeyspaceCompactionForPartitionKey(keyspace, partitionKey, tableNames);
+                }
                 else
                 {
-                    probe.forceKeyspaceCompaction(splitOutput, keyspace, tableNames);
+                    if (parallelism != null)
+                        probe.forceKeyspaceCompaction(splitOutput, parallelism, keyspace, tableNames);
+                    else // avoid referring to the new method to work with older versions
+                        probe.forceKeyspaceCompaction(splitOutput, keyspace, tableNames);
                 }
             } catch (Exception e)
             {

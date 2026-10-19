@@ -23,12 +23,13 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -37,7 +38,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
  * CompactionAwareWriter that splits input in differently sized sstables
  *
  * Biggest sstable will be total_compaction_size / 2, second biggest total_compaction_size / 4 etc until
- * the result would be sub 50MB, all those are put in the same
+ * the result would be sub 50MiB, all those are put in the same
  */
 public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
 {
@@ -49,18 +50,17 @@ public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
     private final Set<SSTableReader> allSSTables;
     private long currentBytesToWrite;
     private int currentRatioIndex = 0;
-    private Directories.DataDirectory location;
 
-    public SplittingSizeTieredCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
+    public SplittingSizeTieredCompactionWriter(CompactionRealm realm, Directories directories, ILifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
     {
-        this(cfs, directories, txn, nonExpiredSSTables, DEFAULT_SMALLEST_SSTABLE_BYTES);
+        this(realm, directories, txn, nonExpiredSSTables, DEFAULT_SMALLEST_SSTABLE_BYTES);
     }
 
-    public SplittingSizeTieredCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables, long smallestSSTable)
+    public SplittingSizeTieredCompactionWriter(CompactionRealm realm, Directories directories, ILifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables, long smallestSSTable)
     {
-        super(cfs, directories, txn, nonExpiredSSTables, false);
+        super(realm, directories, txn, nonExpiredSSTables, false);
         this.allSSTables = txn.originals();
-        totalSize = cfs.getExpectedCompactedFileSize(nonExpiredSSTables, txn.opType());
+        totalSize = realm.getExpectedCompactedFileSize(nonExpiredSSTables, txn.opType());
         double[] potentialRatios = new double[20];
         double currentRatio = 1;
         for (int i = 0; i < potentialRatios.length; i++)
@@ -70,7 +70,7 @@ public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
         }
 
         int noPointIndex = 0;
-        // find how many sstables we should create - 50MB min sstable size
+        // find how many sstables we should create - 50MiB min sstable size
         for (double ratio : potentialRatios)
         {
             noPointIndex++;
@@ -84,36 +84,41 @@ public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
     }
 
     @Override
-    public boolean realAppend(UnfilteredRowIterator partition)
+    protected boolean shouldSwitchWriterInCurrentLocation(DecoratedKey key)
     {
-        RowIndexEntry rie = sstableWriter.append(partition);
         if (sstableWriter.currentWriter().getEstimatedOnDiskBytesWritten() > currentBytesToWrite && currentRatioIndex < ratios.length - 1) // if we underestimate how many keys we have, the last sstable might get more than we expect
         {
             currentRatioIndex++;
-            currentBytesToWrite = Math.round(totalSize * ratios[currentRatioIndex]);
-            switchCompactionLocation(location);
+            currentBytesToWrite = getExpectedWriteSize();
             logger.debug("Switching writer, currentBytesToWrite = {}", currentBytesToWrite);
+            return true;
         }
-        return rie != null;
+        return false;
     }
 
     @Override
-    public void switchCompactionLocation(Directories.DataDirectory location)
+    protected SSTableWriter sstableWriter(Directories.DataDirectory directory, Token diskBoundary)
     {
-        this.location = location;
         long currentPartitionsToWrite = Math.round(ratios[currentRatioIndex] * estimatedTotalKeys);
-        @SuppressWarnings("resource")
-        SSTableWriter writer = SSTableWriter.create(cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(location)),
-                                                    currentPartitionsToWrite,
-                                                    minRepairedAt,
-                                                    pendingRepair,
-                                                    isTransient,
-                                                    cfs.metadata,
-                                                    new MetadataCollector(allSSTables, cfs.metadata().comparator, 0),
-                                                    SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
-                                                    cfs.indexManager.listIndexes(),
-                                                    txn);
         logger.trace("Switching writer, currentPartitionsToWrite = {}", currentPartitionsToWrite);
-        sstableWriter.switchWriter(writer);
+
+        Descriptor descriptor = realm.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
+        return descriptor.getFormat().getWriterFactory().builder(descriptor)
+                         .setKeyCount(currentPartitionsToWrite)
+                         .setRepairedAt(minRepairedAt)
+                         .setPendingRepair(pendingRepair)
+                         .setTransientSSTable(isTransient)
+                         .setTableMetadataRef(realm.metadataRef())
+                         .setMetadataCollector(new MetadataCollector(allSSTables, realm.metadata().comparator))
+                         .setSerializationHeader(SerializationHeader.make(realm.metadata(), nonExpiredSSTables))
+                         .addDefaultComponents(realm.getIndexManager().listIndexGroups())
+                         .setSecondaryIndexGroups(realm.getIndexManager().listIndexGroups())
+                         .build(txn, realm);
+    }
+
+    @Override
+    protected long getExpectedWriteSize()
+    {
+        return Math.round(totalSize * ratios[currentRatioIndex]);
     }
 }

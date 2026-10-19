@@ -19,25 +19,27 @@ package org.apache.cassandra.cql3.validation.entities;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 
-import com.google.common.reflect.TypeToken;
 import org.junit.Assert;
 import org.junit.Test;
 
-import com.datastax.driver.core.*;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.functions.FunctionName;
-import org.apache.cassandra.cql3.functions.JavaBasedUDFunction;
 import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
@@ -45,17 +47,10 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 public class UFTest extends CQLTester
 {
-    @Test
-    public void testJavaSourceName()
-    {
-        Assert.assertEquals("String", JavaBasedUDFunction.javaSourceName(TypeToken.of(String.class)));
-        Assert.assertEquals("java.util.Map<Integer, String>", JavaBasedUDFunction.javaSourceName(TypeTokens.mapOf(Integer.class, String.class)));
-        Assert.assertEquals("com.datastax.driver.core.UDTValue", JavaBasedUDFunction.javaSourceName(TypeToken.of(UDTValue.class)));
-        Assert.assertEquals("java.util.Set<com.datastax.driver.core.UDTValue>", JavaBasedUDFunction.javaSourceName(TypeTokens.setOf(UDTValue.class)));
-    }
-
     @Test
     public void testNonExistingOnes() throws Throwable
     {
@@ -82,17 +77,17 @@ public class UFTest extends CQLTester
     }
 
     @Test
-    public void testSchemaChange() throws Throwable
+    public void testSchemaChange()
     {
         String f = createFunctionName(KEYSPACE);
         String functionName = shortFunctionName(f);
         registerFunction(f, "double, double");
 
-        assertSchemaChange("CREATE OR REPLACE FUNCTION " + f + "(state double, val double) " +
+        assertSchemaChange("CREATE OR REPLACE FUNCTION " + f + "(state double, val double)" +
                            "RETURNS NULL ON NULL INPUT " +
                            "RETURNS double " +
-                           "LANGUAGE javascript " +
-                           "AS '\"string\";';",
+                           "LANGUAGE java " +
+                           "AS ' return Double.valueOf(Math.max(state, val)); ';",
                            Change.CREATED,
                            Target.FUNCTION,
                            KEYSPACE, functionName,
@@ -103,8 +98,8 @@ public class UFTest extends CQLTester
         assertSchemaChange("CREATE OR REPLACE FUNCTION " + f + "(state int, val int) " +
                            "RETURNS NULL ON NULL INPUT " +
                            "RETURNS int " +
-                           "LANGUAGE javascript " +
-                           "AS '\"string\";';",
+                           "LANGUAGE java " +
+                           "AS ' return Integer.valueOf(Math.max(state, val));';",
                            Change.CREATED,
                            Target.FUNCTION,
                            KEYSPACE, functionName,
@@ -113,8 +108,8 @@ public class UFTest extends CQLTester
         assertSchemaChange("CREATE OR REPLACE FUNCTION " + f + "(state int, val int) " +
                            "RETURNS NULL ON NULL INPUT " +
                            "RETURNS int " +
-                           "LANGUAGE javascript " +
-                           "AS '\"string1\";';",
+                           "LANGUAGE java " +
+                           "AS ' return Integer.valueOf(Math.min(state, val));';",
                            Change.UPDATED,
                            Target.FUNCTION,
                            KEYSPACE, functionName,
@@ -132,8 +127,8 @@ public class UFTest extends CQLTester
         assertSchemaChange("CREATE OR REPLACE FUNCTION " + fl + "(state list<tuple<int, int>>, val double) " +
                            "RETURNS NULL ON NULL INPUT " +
                            "RETURNS double " +
-                           "LANGUAGE javascript " +
-                           "AS '\"string\";';",
+                           "LANGUAGE java " +
+                           "AS ' return val;';",
                            Change.CREATED, Target.FUNCTION,
                            KEYSPACE, shortFunctionName(fl),
                            "list<tuple<int, int>>", "double");
@@ -151,7 +146,7 @@ public class UFTest extends CQLTester
 
         FunctionName fSinName = parseFunctionName(fSin);
 
-        Assert.assertEquals(1, Schema.instance.getFunctions(parseFunctionName(fSin)).size());
+        Assert.assertEquals(1, Schema.instance.getUserFunctions(parseFunctionName(fSin)).size());
 
         assertRows(execute("SELECT function_name, language FROM system_schema.functions WHERE keyspace_name=?", KEYSPACE_PER_TEST),
                    row(fSinName.name, "java"));
@@ -160,7 +155,7 @@ public class UFTest extends CQLTester
 
         assertRows(execute("SELECT function_name, language FROM system_schema.functions WHERE keyspace_name=?", KEYSPACE_PER_TEST));
 
-        Assert.assertEquals(0, Schema.instance.getFunctions(fSinName).size());
+        Assert.assertEquals(0, Schema.instance.getUserFunctions(fSinName).size());
     }
 
     @Test
@@ -177,22 +172,22 @@ public class UFTest extends CQLTester
 
         FunctionName fSinName = parseFunctionName(fSin);
 
-        Assert.assertEquals(1, Schema.instance.getFunctions(parseFunctionName(fSin)).size());
+        Assert.assertEquals(1, Schema.instance.getUserFunctions(parseFunctionName(fSin)).size());
 
         // create a pairs of Select and Inserts. One statement in each pair uses the function so when we
         // drop it those statements should be removed from the cache in QueryProcessor. The other statements
         // should be unaffected.
 
-        ResultMessage.Prepared preparedSelect1 = QueryProcessor.prepare(
+        ResultMessage.Prepared preparedSelect1 = QueryProcessor.instance.prepare(
                                                                        String.format("SELECT key, %s(d) FROM %s.%s", fSin, KEYSPACE, currentTable()),
                                                                        ClientState.forInternalCalls());
-        ResultMessage.Prepared preparedSelect2 = QueryProcessor.prepare(
+        ResultMessage.Prepared preparedSelect2 = QueryProcessor.instance.prepare(
                                                     String.format("SELECT key FROM %s.%s", KEYSPACE, currentTable()),
                                                     ClientState.forInternalCalls());
-        ResultMessage.Prepared preparedInsert1 = QueryProcessor.prepare(
+        ResultMessage.Prepared preparedInsert1 = QueryProcessor.instance.prepare(
                                                       String.format("INSERT INTO %s.%s (key, d) VALUES (?, %s(?))", KEYSPACE, currentTable(), fSin),
                                                       ClientState.forInternalCalls());
-        ResultMessage.Prepared preparedInsert2 = QueryProcessor.prepare(
+        ResultMessage.Prepared preparedInsert2 = QueryProcessor.instance.prepare(
                                                       String.format("INSERT INTO %s.%s (key, d) VALUES (?, ?)", KEYSPACE, currentTable()),
                                                       ClientState.forInternalCalls());
 
@@ -215,12 +210,12 @@ public class UFTest extends CQLTester
                 "LANGUAGE java " +
                 "AS 'return Double.valueOf(Math.sin(input));'");
 
-        Assert.assertEquals(1, Schema.instance.getFunctions(fSinName).size());
+        Assert.assertEquals(1, Schema.instance.getUserFunctions(fSinName).size());
 
-        preparedSelect1= QueryProcessor.prepare(
+        preparedSelect1= QueryProcessor.instance.prepare(
                                          String.format("SELECT key, %s(d) FROM %s.%s", fSin, KEYSPACE, currentTable()),
                                          ClientState.forInternalCalls());
-        preparedInsert1 = QueryProcessor.prepare(
+        preparedInsert1 = QueryProcessor.instance.prepare(
                                          String.format("INSERT INTO %s.%s (key, d) VALUES (?, %s(?))", KEYSPACE, currentTable(), fSin),
                                          ClientState.forInternalCalls());
         Assert.assertNotNull(QueryProcessor.instance.getPrepared(preparedSelect1.statementId));
@@ -283,7 +278,7 @@ public class UFTest extends CQLTester
                     " key int PRIMARY KEY," +
                     " val " + collectionType + ')');
 
-        ResultMessage.Prepared prepared = QueryProcessor.prepare(
+        ResultMessage.Prepared prepared = QueryProcessor.instance.prepare(
                                                                 String.format("INSERT INTO %s.%s (key, val) VALUES (?, %s)",
                                                                              KEYSPACE,
                                                                              currentTable(),
@@ -299,7 +294,7 @@ public class UFTest extends CQLTester
                     " key int PRIMARY KEY," +
                     " val tuple<double> )");
 
-        ResultMessage.Prepared prepared = QueryProcessor.prepare(
+        ResultMessage.Prepared prepared = QueryProcessor.instance.prepare(
                                                                 String.format("INSERT INTO %s.%s (key, val) VALUES (?, (%s(0.0)))",
                                                                              KEYSPACE,
                                                                              currentTable(),
@@ -315,7 +310,7 @@ public class UFTest extends CQLTester
         createTable("CREATE TABLE %s (" +
                     " key int PRIMARY KEY," +
                     " val double)");
-        ResultMessage.Prepared control = QueryProcessor.prepare(
+        ResultMessage.Prepared control = QueryProcessor.instance.prepare(
                                                                String.format("INSERT INTO %s.%s (key, val) VALUES (?, ?)",
                                                                             KEYSPACE,
                                                                             currentTable()),
@@ -328,9 +323,9 @@ public class UFTest extends CQLTester
                                         "CREATE FUNCTION %s ( input double ) " +
                                         "CALLED ON NULL INPUT " +
                                         "RETURNS double " +
-                                        "LANGUAGE javascript " +
-                                        "AS 'input'");
-        Assert.assertEquals(1, Schema.instance.getFunctions(parseFunctionName(function)).size());
+                                        "LANGUAGE java " +
+                                        "AS 'return Double.valueOf(Math.log(input.doubleValue()));'");
+        Assert.assertEquals(1, Schema.instance.getUserFunctions(parseFunctionName(function)).size());
 
         List<ResultMessage.Prepared> prepared = new ArrayList<>();
         // prepare statements which use the function to provide a DelayedValue
@@ -433,7 +428,7 @@ public class UFTest extends CQLTester
         execute("DROP FUNCTION IF EXISTS " + fSin);
 
         // can't drop native functions
-        assertInvalidMessage("System keyspace 'system' is not user-modifiable", "DROP FUNCTION totimestamp");
+        assertInvalidMessage("System keyspace 'system' is not user-modifiable", "DROP FUNCTION to_timestamp");
         assertInvalidMessage("System keyspace 'system' is not user-modifiable", "DROP FUNCTION uuid");
 
         // sin() no longer exists
@@ -660,7 +655,7 @@ public class UFTest extends CQLTester
     @Test
     public void testFunctionInSystemKS() throws Throwable
     {
-        execute("CREATE OR REPLACE FUNCTION " + KEYSPACE + ".totimestamp(val timeuuid) " +
+        execute("CREATE OR REPLACE FUNCTION " + KEYSPACE + ".to_timestamp(val timeuuid) " +
                 "RETURNS NULL ON NULL INPUT " +
                 "RETURNS timestamp " +
                 "LANGUAGE JAVA\n" +
@@ -674,7 +669,7 @@ public class UFTest extends CQLTester
                              "LANGUAGE JAVA\n" +
                              "AS 'return null;';");
         assertInvalidMessage("System keyspace 'system' is not user-modifiable",
-                             "CREATE OR REPLACE FUNCTION system.totimestamp(val timeuuid) " +
+                             "CREATE OR REPLACE FUNCTION system.to_timestamp(val timeuuid) " +
                              "RETURNS NULL ON NULL INPUT " +
                              "RETURNS timestamp " +
                              "LANGUAGE JAVA\n" +
@@ -691,7 +686,7 @@ public class UFTest extends CQLTester
                              "LANGUAGE JAVA\n" +
                              "AS 'return null;';");
         assertInvalidMessage("System keyspace 'system' is not user-modifiable",
-                             "CREATE OR REPLACE FUNCTION totimestamp(val timeuuid) " +
+                             "CREATE OR REPLACE FUNCTION to_timestamp(val timeuuid) " +
                              "RETURNS NULL ON NULL INPUT " +
                              "RETURNS timestamp " +
                              "LANGUAGE JAVA\n" +
@@ -764,9 +759,9 @@ public class UFTest extends CQLTester
 
         FunctionName fNameName = parseFunctionName(fName);
 
-        Assert.assertEquals(1, Schema.instance.getFunctions(fNameName).size());
+        Assert.assertEquals(1, Schema.instance.getUserFunctions(fNameName).size());
 
-        ResultMessage.Prepared prepared = QueryProcessor.prepare(String.format("SELECT key, %s(udt) FROM %s.%s", fName, KEYSPACE, currentTable()),
+        ResultMessage.Prepared prepared = QueryProcessor.instance.prepare(String.format("SELECT key, %s(udt) FROM %s.%s", fName, KEYSPACE, currentTable()),
                                                                  ClientState.forInternalCalls());
         Assert.assertNotNull(QueryProcessor.instance.getPrepared(prepared.statementId));
 
@@ -781,18 +776,17 @@ public class UFTest extends CQLTester
         Assert.assertNull(QueryProcessor.instance.getPrepared(prepared.statementId));
 
         // function stays
-        Assert.assertEquals(1, Schema.instance.getFunctions(fNameName).size());
+        Assert.assertEquals(1, Schema.instance.getUserFunctions(fNameName).size());
     }
 
     @Test
     public void testDuplicateArgNames() throws Throwable
     {
         assertInvalidMessage("Duplicate argument names for given function",
-                             "CREATE OR REPLACE FUNCTION " + KEYSPACE + ".scrinv(val double, val text) " +
-                             "RETURNS NULL ON NULL INPUT " +
-                             "RETURNS text " +
-                             "LANGUAGE javascript\n" +
-                             "AS '\"foo bar\";';");
+                             "CREATE OR REPLACE FUNCTION " + KEYSPACE + ".scrinv(input double, input int) " +
+                             "CALLED ON NULL INPUT " +
+                             "RETURNS double " +
+                             "LANGUAGE java AS 'return Math.max(input, input)';");
     }
 
     @Test
@@ -850,7 +844,7 @@ public class UFTest extends CQLTester
                                       "AS 'throw new RuntimeException();';");
 
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(KEYSPACE_PER_TEST);
-        UDFunction f = (UDFunction) ksm.functions.get(parseFunctionName(fName)).iterator().next();
+        UDFunction f = (UDFunction) ksm.userFunctions.get(parseFunctionName(fName)).iterator().next();
 
         UDFunction broken = UDFunction.createBrokenFunction(f.name(),
                                                             f.argNames(),
@@ -859,8 +853,11 @@ public class UFTest extends CQLTester
                                                             true,
                                                             "java",
                                                             f.body(),
+                                                            false,
+                                                            false,
+                                                            Collections.emptyList(),
                                                             new InvalidRequestException("foo bar is broken"));
-        Schema.instance.load(ksm.withSwapped(ksm.functions.without(f.name(), f.argTypes()).with(broken)));
+        SchemaTestUtil.addOrUpdateKeyspace(ksm.withSwapped(ksm.userFunctions.without(f.name(), f.argTypes()).with(broken)), false);
 
         assertInvalidThrowMessage("foo bar is broken", InvalidRequestException.class,
                                   "SELECT key, " + fName + "(dval) FROM %s");
@@ -903,7 +900,7 @@ public class UFTest extends CQLTester
     public void testEmptyString() throws Throwable
     {
         createTable("CREATE TABLE %s (key int primary key, sval text, aval ascii, bval blob, empty_int int)");
-        execute("INSERT INTO %s (key, sval, aval, bval, empty_int) VALUES (?, ?, ?, ?, blobAsInt(0x))", 1, "", "", ByteBuffer.allocate(0));
+        execute("INSERT INTO %s (key, sval, aval, bval, empty_int) VALUES (?, ?, ?, ?, blob_as_int(0x))", 1, "", "", ByteBuffer.allocate(0));
 
         String fNameSRC = createFunction(KEYSPACE_PER_TEST, "text",
                                          "CREATE OR REPLACE FUNCTION %s(val text) " +
@@ -1005,5 +1002,233 @@ public class UFTest extends CQLTester
         assertRows(execute("SELECT " + fNameIRN + "(empty_int) FROM %s"), row(new Object[]{ null }));
         assertRows(execute("SELECT " + fNameICC + "(empty_int) FROM %s"), row(0));
         assertRows(execute("SELECT " + fNameICN + "(empty_int) FROM %s"), row(new Object[]{ null }));
+    }
+
+    @Test
+    public void testRejectInvalidFunctionNamesOnCreation()
+    {
+        for (String funcName : Arrays.asList("my/fancy/func", "my_other[fancy]func"))
+        {
+            assertThatThrownBy(() -> {
+                createFunctionOverload(String.format("%s.\"%s\"", KEYSPACE_PER_TEST, funcName), "int",
+                                       "CREATE OR REPLACE FUNCTION %s(val int) " +
+                                       "RETURNS NULL ON NULL INPUT " +
+                                       "RETURNS int " +
+                                       "LANGUAGE JAVA\n" +
+                                       "AS 'return val;'");
+            }).isInstanceOf(InvalidRequestException.class)
+              .hasMessageContaining("Function name '%s' is invalid", funcName);
+        }
+    }
+
+    @Test
+    public void testRejectInvalidLanguageOnCreation()
+    {
+        for (String funcName : Arrays.asList("my/fancy/func", "my_other[fancy]func"))
+        {
+            assertThatThrownBy(() -> createFunctionOverload(String.format("%s.\"%s\"", KEYSPACE_PER_TEST, funcName),
+                                                            "int",
+                                                            "CREATE OR REPLACE FUNCTION %s(val int) " +
+                                                            "RETURNS NULL ON NULL INPUT " +
+                                                            "RETURNS int " +
+                                                            "LANGUAGE javascript\n" +
+                                                            "AS 'return val;'"))
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining("Currently only Java UDFs are available in Cassandra. " +
+                                  "For more information - CASSANDRA-18252");
+
+            assertThatThrownBy(() -> createFunctionOverload(String.format("%s.\"%s\"", KEYSPACE_PER_TEST, funcName),
+                                                            "int",
+                                                            "CREATE OR REPLACE FUNCTION %s(val int) " +
+                                                            "RETURNS NULL ON NULL INPUT " +
+                                                            "RETURNS int " +
+                                                            "LANGUAGE JAVASCRIPT\n" +
+                                                            "AS 'return val;'"))
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining("Currently only Java UDFs are available in Cassandra. " +
+                                  "For more information - CASSANDRA-18252");
+
+            // test with weird made up word for language
+            assertThatThrownBy(() -> createFunctionOverload(String.format("%s.\"%s\"", KEYSPACE_PER_TEST, funcName),
+                                                            "int",
+                                                            "CREATE OR REPLACE FUNCTION %s(val int) " +
+                                                            "RETURNS NULL ON NULL INPUT " +
+                                                            "RETURNS int " +
+                                                            "LANGUAGE JAVASCRI\n" +
+                                                            "AS 'return val;'"))
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining("Currently only Java UDFs are available in Cassandra. " +
+                                  "For more information - CASSANDRA-18252");
+        }
+    }
+
+    @Test
+    public void testParseDeterministic() throws Throwable
+    {
+        testParseDeterministic("", false);
+        testParseDeterministic("DETERMINISTIC", true);
+    }
+
+    private void testParseMonotonic(String arguments,
+                                    String monotonicModifier,
+                                    boolean expectedMonotonic,
+                                    String... expectedMonotonicOn) throws Throwable
+    {
+        String fName = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (" +
+                                                       arguments +
+                                                       ") CALLED ON NULL INPUT " +
+                                                       "RETURNS int " +
+                                                       monotonicModifier +
+                                                       " LANGUAGE java " +
+                                                       "AS 'return 1;'");
+
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(KEYSPACE);
+        Assert.assertNotNull(ksm);
+        UDFunction f = (UDFunction) ksm.userFunctions.get(parseFunctionName(fName)).iterator().next();
+        Assert.assertEquals(expectedMonotonic, f.isMonotonic());
+        Assert.assertArrayEquals(expectedMonotonicOn, f.monotonicOn().stream().map(Object::toString).toArray());
+    }
+
+    private void testParseDeterministic(String deterministicModifier, boolean expectedDeterministic) throws Throwable
+    {
+        String fName = createFunction(KEYSPACE, "double", "CREATE FUNCTION %s (input double) " +
+                                                          "CALLED ON NULL INPUT " +
+                                                          "RETURNS double " +
+                                                          deterministicModifier +
+                                                          " LANGUAGE java " +
+                                                          "AS 'return Math.sin(input);'");
+
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(KEYSPACE);
+        Assert.assertNotNull(ksm);
+        UDFunction f = (UDFunction) ksm.userFunctions.get(parseFunctionName(fName)).iterator().next();
+        Assert.assertEquals(expectedDeterministic, f.isDeterministic());
+    }
+
+    @Test
+    public void testParseMonotonic() throws Throwable
+    {
+        testParseMonotonic("a int", "", false);
+        testParseMonotonic("a int", "MONOTONIC", true, "a");
+        testParseMonotonic("a int", "MONOTONIC ON a", true, "a");
+        testParseMonotonic("a int",
+                           "MONOTONIC ON b",
+                           "Monotony should be declared on one of the arguments, 'b' is not an argument");
+
+        testParseMonotonic("a int, b int", "", false);
+        testParseMonotonic("a int, b int", "MONOTONIC", true, "a", "b");
+        testParseMonotonic("a int, b int", "MONOTONIC ON a", false, "a");
+        testParseMonotonic("a int, b int", "MONOTONIC ON b", false, "b");
+        testParseMonotonic("a int, b int",
+                           "MONOTONIC ON c",
+                           "Monotony should be declared on one of the arguments, 'c' is not an argument");
+    }
+
+    private void testParseMonotonic(String parameters, String monotonicModifier, String expectedMessage)
+    {
+        assertThatThrownBy(() -> createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (" +
+                                                                 parameters +
+                                                                 ") CALLED ON NULL INPUT " +
+                                                                 "RETURNS int " +
+                                                                 monotonicModifier +
+                                                                 " LANGUAGE java " +
+                                                                 "AS 'return 1;'"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(expectedMessage);
+    }
+
+    @Test
+    public void testUDFOnGroupByClause() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, PRIMARY KEY (pk, ck))");
+        execute("INSERT into %s (pk, ck) values (0, 0)");
+        execute("INSERT into %s (pk, ck) values (0, 1)");
+        execute("INSERT into %s (pk, ck) values (0, 2)");
+        execute("INSERT into %s (pk, ck) values (0, 3)");
+        execute("INSERT into %s (pk, ck) values (0, 4)");
+        execute("INSERT into %s (pk, ck) values (0, 5)");
+
+        // Verify that asynchronous UDF execution is enabled by default
+        Assert.assertTrue(DatabaseDescriptor.enableUserDefinedFunctionsThreads());
+
+        // Test that UDFs in GROUP BY clause are rejected due to the asynchronous UDF execution
+        String f = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (x int) " +
+                                                   "CALLED ON NULL INPUT " +
+                                                   "RETURNS int " +
+                                                   "MONOTONIC " +
+                                                   "LANGUAGE java " +
+                                                   "AS 'return x / 2;'");
+        assertInvalidMessage("User defined functions are not supported in the GROUP BY clause when asynchronous",
+                             String.format("SELECT pk, ck, %s(ck) FROM %%s GROUP BY pk, %<s(ck)", f));
+
+        // Test that native functions in GROUP BY clause are not rejected
+        assertRows(execute(String.format("SELECT pk, ck FROM %%s GROUP BY pk, %s(ck)", "tounixtimestamp")),
+                   row(0, 0), row(0, 1), row(0, 2), row(0, 3), row(0, 4), row(0, 5));
+
+        // Test with asynchronous UDF execution disabled
+        try
+        {
+            DatabaseDescriptor.enableUserDefinedFunctionsThreads(false);
+
+            // Test non-monotonic function
+            String f1 = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (x int) " +
+                                                        "CALLED ON NULL INPUT " +
+                                                        "RETURNS int " +
+                                                        "LANGUAGE java " +
+                                                        "AS 'return -1 * x;'");
+            assertInvalidMessage("Only monotonic functions are supported in the GROUP BY clause.",
+                                 String.format("SELECT pk, ck, %s(ck) FROM %%s GROUP BY pk, %<s(ck)", f1));
+
+            // Test fully monotonic function
+            String f2 = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (x int) " +
+                                                        "CALLED ON NULL INPUT " +
+                                                        "RETURNS int " +
+                                                        "MONOTONIC " +
+                                                        "LANGUAGE java " +
+                                                        "AS 'return x / 2;'");
+            assertRows(execute(String.format("SELECT pk, ck, %s(ck) FROM %%s GROUP BY pk, %<s(ck)", f2)),
+                       row(0, 0, 0),
+                       row(0, 2, 1),
+                       row(0, 4, 2));
+
+            // Test partially monotonic function
+            String f3 = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (dividend int, divisor int) " +
+                                                        "CALLED ON NULL INPUT " +
+                                                        "RETURNS int " +
+                                                        "MONOTONIC ON dividend " +
+                                                        "LANGUAGE java " +
+                                                        "AS 'return dividend / divisor;'");
+            assertRows(execute(String.format("SELECT pk, ck, %s(ck, 2) FROM %%s GROUP BY pk, %<s(ck, 2)", f3)),
+                       row(0, 0, 0),
+                       row(0, 2, 1),
+                       row(0, 4, 2));
+            assertRows(execute(String.format("SELECT pk, ck, %s(ck, 3) FROM %%s GROUP BY pk, %<s(ck, 3)", f3)),
+                       row(0, 0, 0),
+                       row(0, 3, 1));
+            assertInvalidMessage("Only monotonic functions are supported in the GROUP BY clause.",
+                                 String.format("SELECT pk, ck, %s(2, ck) FROM %%s GROUP BY pk, %<s(2, ck)", f3));
+        }
+        finally
+        {
+            DatabaseDescriptor.enableUserDefinedFunctionsThreads(true);
+        }
+    }
+
+    @Test
+    public void testFunctionsAreNonMonotonicAndNonDeterministicByDefault() throws Throwable
+    {
+        String name = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (x int) " +
+                                                      "CALLED ON NULL INPUT " +
+                                                      "RETURNS int " +
+                                                      "LANGUAGE java " +
+                                                      "AS 'return x / 2;'");
+
+        UntypedResultSet functions = execute("SELECT * FROM system_schema.functions " +
+                                             "WHERE keyspace_name=? AND function_name=?",
+                                             KEYSPACE, shortFunctionName(name));
+
+        Assert.assertEquals(1, functions.size());
+        Assert.assertFalse(functions.one().getBoolean("monotonic"));
+        Assert.assertFalse(functions.one().getBoolean("deterministic"));
+        Assert.assertEquals(Collections.emptyList(), functions.one().getList("monotonic_on", UTF8Type.instance));
     }
 }

@@ -1,0 +1,251 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.db.compaction;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Predicate;
+
+import javax.annotation.concurrent.ThreadSafe;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.utils.NonThrowingCloseable;
+
+@ThreadSafe
+public class ActiveOperations implements TableOperationObserver
+{
+    private static final Logger logger = LoggerFactory.getLogger(ActiveOperations.class);
+
+    // The operations ordered by keyspace.table for all the operations that are currently in progress.
+    private static final Set<TableOperation> operations = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+
+    // Compaction tasks that have been created but aren't executing yet.
+    private static final Set<AbstractCompactionTask> scheduledTasks = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+
+    // Keep registered listeners to be called onStart and close
+    private final List<CompactionProgressListener> listeners = new CopyOnWriteArrayList<>();
+
+    public interface CompactionProgressListener
+    {
+        /**
+         * Called when compaction started
+         */
+        default void onStarted(TableOperation.Progress progress) {}
+
+        /**
+         * Called when compaction completed
+         */
+        default void onCompleted(TableOperation.Progress progressOnCompleted) {}
+    }
+
+    public void registerListener(CompactionProgressListener listener)
+    {
+        listeners.add(listener);
+    }
+
+    public void unregisterListener(CompactionProgressListener listener)
+    {
+        listeners.remove(listener);
+    }
+
+    /**
+     * @return all the table operations currently in progress. This is mostly compactions but it can include other
+     *         operations too, basically any operation that calls {@link this#onOperationStart(TableOperation)}.
+     */
+    public List<TableOperation> getTableOperations()
+    {
+        ImmutableList.Builder<TableOperation> builder = ImmutableList.builder();
+        synchronized (operations)
+        {
+            builder.addAll(operations);
+        }
+        return builder.build();
+    }
+
+    @Override
+    public NonThrowingCloseable onOperationStart(TableOperation op)
+    {
+        TableOperation.Progress progress = op.getProgress();
+        for (CompactionProgressListener listener : listeners)
+        {
+            try
+            {
+                listener.onStarted(progress);
+            }
+            catch (Throwable t)
+            {
+                String listenerName = listener.getClass().getName();
+                logger.error("Unable to notify listener {} while trying to start compaction {} on table {}",
+                             listenerName, progress.operationType(), progress.metadata(), t);
+            }
+        }
+        operations.add(op);
+        return () -> completeOperation(op);
+    }
+
+    private void completeOperation(TableOperation op)
+    {
+        operations.remove(op);
+        TableOperation.Progress progressOnCompleted = op.getProgress();
+        CompactionManager.instance.getMetrics().bytesCompacted.inc(progressOnCompleted.total());
+        CompactionManager.instance.getMetrics().totalCompactionsCompleted.mark();
+
+        for (CompactionProgressListener listener : listeners)
+        {
+            try
+            {
+                listener.onCompleted(progressOnCompleted);
+            }
+            catch (Throwable t)
+            {
+                String listenerName = listener.getClass().getName();
+                logger.error("Unable to notify listener {} while trying to complete compaction {} on table {}",
+                             listenerName, progressOnCompleted.operationType(), progressOnCompleted.metadata(), t);
+            }
+        }
+    }
+
+    /**
+     * Get the estimated number of bytes remaining to write per sstable directory
+     */
+    public Map<File, Long> estimatedRemainingWriteBytes()
+    {
+        synchronized (operations)
+        {
+            Map<File, Long> writeBytesPerSSTableDir = new HashMap<>();
+            for (TableOperation holder : operations)
+            {
+                TableOperation.Progress compactionInfo = holder.getProgress();
+                List<File> directories = compactionInfo.getTargetDirectories();
+                if (directories == null || directories.isEmpty())
+                    continue;
+                long remainingWriteBytesPerDataDir = compactionInfo.estimatedRemainingWriteBytes() / directories.size();
+                for (File directory : directories)
+                    writeBytesPerSSTableDir.merge(directory, remainingWriteBytesPerDataDir, Long::sum);
+            }
+            return writeBytesPerSSTableDir;
+        }
+    }
+
+    /**
+     * Iterates over the active operations and tries to find OperationProgresses with the given operation type for the given sstable
+     *
+     * Number of entries in operations should be small (< 10) but avoid calling in any time-sensitive context
+     */
+    public Collection<TableOperation.Progress> getOperationsForSSTable(SSTableReader sstable, OperationType operationType)
+    {
+        List<TableOperation.Progress> toReturn = null;
+
+        synchronized (operations)
+        {
+            for (TableOperation op : operations)
+            {
+                TableOperation.Progress progress = op.getProgress();
+                if (progress.sstables().contains(sstable) && progress.operationType() == operationType)
+                {
+                    if (toReturn == null)
+                        toReturn = new ArrayList<>();
+                    toReturn.add(progress);
+                }
+            }
+        }
+        return toReturn;
+    }
+
+    /**
+     * @return true if given table operation is still active
+     */
+    public boolean isActive(TableOperation op)
+    {
+        return getTableOperations().contains(op);
+    }
+
+    public void addTaskToScheduled(AbstractCompactionTask task)
+    {
+        scheduledTasks.add(task);
+    }
+
+    public void removeTaskFromScheduled(AbstractCompactionTask task)
+    {
+        scheduledTasks.remove(task);
+    }
+
+    public Collection<AbstractCompactionTask> getScheduledTasksMatching(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> predicate, Predicate<AbstractCompactionTask> taskPredicate)
+    {
+        List<AbstractCompactionTask> tasksCopy;
+        synchronized (scheduledTasks)
+        {
+            tasksCopy = new ArrayList<>(scheduledTasks);
+        }
+
+        List<AbstractCompactionTask> matching = new ArrayList<>(tasksCopy.size());
+        for (AbstractCompactionTask task : tasksCopy)
+        {
+            if (taskPredicate.test(task))
+            {
+                for (ColumnFamilyStore cfs : cfss)
+                {
+                    if (task.affectsAny(cfs, predicate))
+                    {
+                        matching.add(task);
+                        break;
+                    }
+                }
+            }
+        }
+        return matching;
+    }
+
+    public void cancelScheduledTasksAffecting(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> predicate, TableOperation.StopTrigger trigger)
+    {
+        Iterable<AbstractCompactionTask> tasksCopy;
+        synchronized (scheduledTasks)
+        {
+            tasksCopy = new ArrayList<>(scheduledTasks);
+        }
+
+        for (AbstractCompactionTask task : tasksCopy)
+            for (ColumnFamilyStore cfs : cfss)
+                task.cancelIfAffects(cfs, predicate, trigger);
+    }
+
+    @VisibleForTesting
+    List<AbstractCompactionTask> getScheduledTasks()
+    {
+        synchronized (scheduledTasks)
+        {
+            return new ArrayList<>(scheduledTasks);
+        }
+    }
+}

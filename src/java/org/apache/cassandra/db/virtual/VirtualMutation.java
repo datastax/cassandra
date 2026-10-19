@@ -19,6 +19,7 @@ package org.apache.cassandra.db.virtual;
 
 import java.util.Collection;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
@@ -26,8 +27,11 @@ import com.google.common.collect.ImmutableMap;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.IMutation;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.service.ClientState;
 
 /**
  * A specialised IMutation implementation for virtual keyspaces.
@@ -62,6 +66,12 @@ public final class VirtualMutation implements IMutation
     public String getKeyspaceName()
     {
         return keyspaceName;
+    }
+
+    @Override
+    public Keyspace getKeyspace()
+    {
+        return Keyspace.open(keyspaceName);
     }
 
     @Override
@@ -105,7 +115,13 @@ public final class VirtualMutation implements IMutation
     }
 
     @Override
-    public void validateIndexedColumns()
+    public Supplier<Mutation> hintOnFailure()
+    {
+        return null;
+    }
+
+    @Override
+    public void validateIndexedColumns(ClientState state)
     {
         // no-op
     }

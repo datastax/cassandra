@@ -1,0 +1,9 @@
+= Compaction
+
+* xref:managing/operating/compaction/overview.adoc[Compaction overview]  
+** xref:managing/operating/compaction/tombstones.adoc[Tombstones]
+** Compaction strategies:
+*** xref:managing/operating/compaction/ucs.adoc[Unified Compaction Strategy (UCS)]
+*** xref:managing/operating/compaction/stcs.adoc[Size-Tiered Compaction Strategy (STCS)] 
+*** xref:managing/operating/compaction/lcs.adoc[Leveled Compaction Strategy (LCS)]
+*** xref:managing/operating/compaction/twcs.adoc[Time Window Compaction Strategy (TWCS)] 

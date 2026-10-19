@@ -20,7 +20,7 @@
  */
 package org.apache.cassandra.io.util;
 
-import java.io.File;
+import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -30,24 +30,31 @@ import java.nio.channels.FileLock;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import static org.junit.Assert.*;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteBufferUtil;
+
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class RandomAccessReaderTest
 {
@@ -138,21 +145,367 @@ public class RandomAccessReaderTest
     @Test
     public void testVeryLarge() throws IOException
     {
-        final long SIZE = 1L << 32; // 2GB
-        Parameters params = new Parameters(SIZE, 1 << 20); // 1MB
+        final long SIZE = 1L << 32; // 2GiB
+        Parameters params = new Parameters(SIZE, 1 << 20); // 1MiB
 
 
-        try (ChannelProxy channel = new ChannelProxy("abc", new FakeFileChannel(SIZE));
-             FileHandle.Builder builder = new FileHandle.Builder(channel)
-                                                     .bufferType(params.bufferType).bufferSize(params.bufferSize);
-             FileHandle fh = builder.complete();
+        try (FileHandle fh = new FileHandle.Builder(new File("abc")).bufferType(params.bufferType)
+                                                                    .bufferSize(params.bufferSize)
+                                                                    .complete(f -> new ChannelProxy(f, new FakeFileChannel(SIZE)));
+             RandomAccessReader reader = fh.createReader())
+        {
+            assertEquals(fh.channel.size(), reader.length());
+            assertEquals(fh.channel.size(), reader.bytesRemaining());
+            assertEquals(Integer.MAX_VALUE, reader.available());
+
+            assertEquals(fh.channel.size(), reader.skip(fh.channel.size()));
+
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.bytesRemaining());
+        }
+    }
+
+    // readFully array tests - floats
+
+    private static final class FloatReadArrayCase
+    {
+        private final float[] expected;
+        static int counter;
+
+        FloatReadArrayCase(int numElements)
+        {
+            this.expected = new float[numElements];
+            for (int i = 0; i < numElements; i++)
+            {
+                this.expected[i] = counter++;
+            }
+        }
+    }
+
+    @Test
+    public void testReadFullyFloatArrayAligned() throws IOException
+    {
+        testReadFullyFloatArray(0, ByteOrder.BIG_ENDIAN);
+        testReadFullyFloatArray(0, ByteOrder.LITTLE_ENDIAN);
+    }
+
+    @Test
+    public void testReadFullyFloatArrayNotAligned() throws IOException
+    {
+        testReadFullyFloatArray(1, ByteOrder.BIG_ENDIAN);
+        testReadFullyFloatArray(1, ByteOrder.LITTLE_ENDIAN);
+    }
+
+    @Test
+    public void testReadFullyFloatArrayAligned2() throws IOException
+    {
+        testReadFullyFloatArray(Float.BYTES, ByteOrder.BIG_ENDIAN);
+        testReadFullyFloatArray(Float.BYTES, ByteOrder.LITTLE_ENDIAN);
+    }
+
+    private void testReadFullyFloatArray(int shift, ByteOrder order) throws IOException
+    {
+        int bufferSize = 2048;
+
+        List<FloatReadArrayCase> cases = new ArrayList<>();
+        cases.add(new FloatReadArrayCase(0));
+        cases.add(new FloatReadArrayCase(10));
+        cases.add(new FloatReadArrayCase(17));
+        cases.add(new FloatReadArrayCase(100));
+        cases.add(new FloatReadArrayCase(121));
+        cases.add(new FloatReadArrayCase(1000));
+        cases.add(new FloatReadArrayCase(1000));
+        cases.add(new FloatReadArrayCase(2000));
+        cases.add(new FloatReadArrayCase(2000));
+
+        int bigArraySize = 1 + (bufferSize / Float.BYTES);
+        // ensure that in the test case we have a least one array that is bigger than the buffer size
+        cases.add(new FloatReadArrayCase(bigArraySize));
+        cases.add(new FloatReadArrayCase(bigArraySize));
+        cases.add(new FloatReadArrayCase(bigArraySize / 2));
+        cases.add(new FloatReadArrayCase(bigArraySize));
+        cases.add(new FloatReadArrayCase(bigArraySize));
+
+        File file = writeFile(writer -> {
+            try
+            {
+                writer.order(order);
+                // write some garbage in the beginning, in order to not have aligned reads
+                for (int i = 0; i < shift; i++)
+                    writer.writeByte(0);
+
+                for (FloatReadArrayCase array : cases)
+                {
+                    for (float f : array.expected)
+                        writer.writeFloat(f);
+                }
+                return false;
+            } catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        });
+
+
+        try (ChannelProxy channel = new ChannelProxy(file);
+             FileHandle fh = new FileHandle.Builder(channel.file())
+                             .order(order)
+                             .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize)
+                             .complete();
              RandomAccessReader reader = fh.createReader())
         {
             assertEquals(channel.size(), reader.length());
             assertEquals(channel.size(), reader.bytesRemaining());
-            assertEquals(Integer.MAX_VALUE, reader.available());
+            assertEquals(file.length(), reader.available());
 
-            assertEquals(channel.size(), reader.skip(channel.size()));
+            reader.seek(shift);
+
+            for (FloatReadArrayCase array : cases)
+            {
+                float[] readArray = new float[array.expected.length];
+                reader.readFully(readArray);
+                assertArrayEquals(array.expected, readArray, 0.0f);
+            }
+
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.bytesRemaining());
+        }
+    }
+
+    // readFully array tests - longs
+
+    private static final class LongReadArrayCase
+    {
+        private final long[] expected;
+        static int counter;
+
+        LongReadArrayCase(int numElements)
+        {
+            this.expected = new long[numElements];
+            for (int i = 0; i < numElements; i++)
+            {
+                this.expected[i] = counter++;
+            }
+        }
+    }
+
+    @Test
+    public void testReadFullyLongArrayAligned() throws IOException
+    {
+        testReadFullyLongArray(0, ByteOrder.BIG_ENDIAN);
+        testReadFullyLongArray(0, ByteOrder.LITTLE_ENDIAN);
+    }
+
+    @Test
+    public void testReadFullyLongArrayNotAligned() throws IOException
+    {
+        testReadFullyLongArray(1, ByteOrder.BIG_ENDIAN);
+        testReadFullyLongArray(1, ByteOrder.LITTLE_ENDIAN);
+    }
+
+    @Test
+    public void testReadFullyLongArrayAligned2() throws IOException
+    {
+        testReadFullyLongArray(Long.BYTES, ByteOrder.BIG_ENDIAN);
+        testReadFullyLongArray(Long.BYTES, ByteOrder.LITTLE_ENDIAN);
+    }
+
+    private void testReadFullyLongArray(int shift, ByteOrder order) throws IOException
+    {
+        int bufferSize = 2048;
+
+        List<LongReadArrayCase> cases = new ArrayList<>();
+        cases.add(new LongReadArrayCase(0));
+        cases.add(new LongReadArrayCase(10));
+        cases.add(new LongReadArrayCase(17));
+        cases.add(new LongReadArrayCase(100));
+        cases.add(new LongReadArrayCase(121));
+        cases.add(new LongReadArrayCase(1000));
+        cases.add(new LongReadArrayCase(1000));
+        cases.add(new LongReadArrayCase(2000));
+        cases.add(new LongReadArrayCase(2000));
+
+        int bigArraySize = 1 + (bufferSize / Float.BYTES);
+        // ensure that in the test case we have a least one array that is bigger than the buffer size
+        cases.add(new LongReadArrayCase(bigArraySize));
+        cases.add(new LongReadArrayCase(bigArraySize));
+        cases.add(new LongReadArrayCase(bigArraySize / 2));
+        cases.add(new LongReadArrayCase(bigArraySize));
+        cases.add(new LongReadArrayCase(bigArraySize));
+
+        File file = writeFile(writer -> {
+            try
+            {
+                writer.order(order);
+                // write some garbage in the beginning, in order to not have aligned reads
+                for (int i = 0; i < shift; i++)
+                    writer.writeByte(0);
+
+                for (LongReadArrayCase array : cases)
+                {
+                    for (long f : array.expected)
+                        writer.writeLong(f);
+                }
+                return false;
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        });
+
+
+        try (ChannelProxy channel = new ChannelProxy(file);
+             FileHandle fh = new FileHandle.Builder(channel.file())
+                             .order(order)
+                             .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize)
+                             .complete();
+             RandomAccessReader reader = fh.createReader())
+        {
+            assertEquals(channel.size(), reader.length());
+            assertEquals(channel.size(), reader.bytesRemaining());
+            assertEquals(file.length(), reader.available());
+
+            reader.seek(shift);
+
+            for (LongReadArrayCase array : cases)
+            {
+                long[] readArray = new long[array.expected.length];
+                reader.readFully(readArray);
+                assertArrayEquals(array.expected, readArray);
+            }
+
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.bytesRemaining());
+        }
+    }
+
+
+    // readFully array tests - ints
+
+    private static final class IntReadArrayCase
+    {
+        private final int[] expected;
+        static int counter;
+
+        IntReadArrayCase(int numElements)
+        {
+            this.expected = new int[numElements];
+            for (int i = 0; i < numElements; i++)
+            {
+                this.expected[i] = counter++;
+            }
+        }
+    }
+
+    @Test
+    public void testReadFullyIntArrayAligned() throws IOException
+    {
+        testReadFullyIntArray(0, ByteOrder.BIG_ENDIAN);
+        testReadFullyIntArray(0, ByteOrder.LITTLE_ENDIAN);
+    }
+
+    @Test
+    public void testReadFullyIntArrayNotAligned() throws IOException
+    {
+        testReadFullyIntArray(1, ByteOrder.BIG_ENDIAN);
+        testReadFullyIntArray(1, ByteOrder.LITTLE_ENDIAN);
+    }
+
+    @Test
+    public void testReadFullyIntArrayAligned2() throws IOException
+    {
+        testReadFullyIntArray(Integer.BYTES, ByteOrder.BIG_ENDIAN);
+        testReadFullyIntArray(Integer.BYTES, ByteOrder.LITTLE_ENDIAN);
+    }
+
+    private void testReadFullyIntArray(int shift, ByteOrder order) throws IOException
+    {
+        int bufferSize = 2048;
+
+        List<IntReadArrayCase> cases = new ArrayList<>();
+        cases.add(new IntReadArrayCase(0));
+        cases.add(new IntReadArrayCase(10));
+        cases.add(new IntReadArrayCase(17));
+        cases.add(new IntReadArrayCase(100));
+        cases.add(new IntReadArrayCase(121));
+        cases.add(new IntReadArrayCase(1000));
+        cases.add(new IntReadArrayCase(1000));
+        cases.add(new IntReadArrayCase(2000));
+        cases.add(new IntReadArrayCase(2000));
+
+        int bigArraySize = 1 + (bufferSize / Integer.BYTES);
+        // ensure that in the test case we have a least one array that is bigger than the buffer size
+        cases.add(new IntReadArrayCase(bigArraySize));
+        cases.add(new IntReadArrayCase(bigArraySize));
+        cases.add(new IntReadArrayCase(bigArraySize / 2));
+        cases.add(new IntReadArrayCase(bigArraySize));
+        cases.add(new IntReadArrayCase(bigArraySize));
+
+        File file = writeFile(writer -> {
+            try
+            {
+                writer.order(order);
+                // write some garbage in the beginning, in order to not have aligned reads
+                for (int i = 0; i < shift; i++)
+                    writer.writeByte(0);
+
+                for (IntReadArrayCase array : cases)
+                {
+                    for (int f : array.expected)
+                        writer.writeInt(f);
+                }
+                return false;
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        });
+
+
+        try (ChannelProxy channel = new ChannelProxy(file);
+             FileHandle fh = new FileHandle.Builder(channel.file())
+                             .order(order)
+                             .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize)
+                             .complete();
+             RandomAccessReader reader = fh.createReader())
+        {
+            assertEquals(channel.size(), reader.length());
+            assertEquals(channel.size(), reader.bytesRemaining());
+            assertEquals(file.length(), reader.available());
+
+            reader.seek(shift);
+
+            for (IntReadArrayCase array : cases)
+            {
+                long position = reader.getPosition();
+
+                int[] readArray = new int[array.expected.length];
+                reader.read(readArray, 0, readArray.length);
+                assertArrayEquals(array.expected, readArray);
+
+                reader.seek(position);
+
+                int[] readArrayHalf = new int[array.expected.length / 2];
+                reader.read(readArrayHalf, 0, readArray.length / 2);
+                int[] expectedHalf = Arrays.copyOf(array.expected, array.expected.length / 2);
+                assertArrayEquals(expectedHalf, readArrayHalf);
+
+                if (array.expected.length > 0)
+                {
+                    System.out.println("expected.length: " + array.expected.length);
+                    // second half
+                    int halfStart = array.expected.length / 2;
+                    int secondHalfLength = array.expected.length - halfStart;
+                    // we allocate an array that is bigger, because we want to test read with offset > 0
+                    int[] readArraySecondHalfFromOffset = new int[array.expected.length];
+                    reader.read(readArraySecondHalfFromOffset, halfStart, secondHalfLength);
+                    int[] expectedSecondHalf = new int[array.expected.length];
+                    System.arraycopy(array.expected, halfStart, expectedSecondHalf, halfStart, secondHalfLength);
+                    assertArrayEquals(expectedSecondHalf, readArraySecondHalfFromOffset);
+                }
+            }
 
             assertTrue(reader.isEOF());
             assertEquals(0, reader.bytesRemaining());
@@ -267,53 +620,71 @@ public class RandomAccessReaderTest
 
     private static File writeFile(Parameters params) throws IOException
     {
+        File f = writeFile(new Function<>()
+        {
+            long numWritten = 0;
+            @Override
+            public Boolean apply(SequentialWriter writer)
+            {
+                if (numWritten >= params.fileLength) {
+                    return false;
+                }
+                try
+                {
+                    writer.write(params.expected);
+                }
+                catch (IOException e)
+                {
+                    throw new RuntimeException(e);
+                }
+                numWritten += params.expected.length;
+                return true;
+            }
+        });
+
+        assert f.length() >= params.fileLength;
+        return f;
+    }
+
+    private static File writeFile(Function<SequentialWriter, Boolean> writeNextElement)
+    {
         final File f = FileUtils.createTempFile("testReadFully", "1");
         f.deleteOnExit();
 
-        try(SequentialWriter writer = new SequentialWriter(f))
+        try (SequentialWriter writer = new SequentialWriter(f))
         {
-            long numWritten = 0;
-            while (numWritten < params.fileLength)
-            {
-                writer.write(params.expected);
-                numWritten += params.expected.length;
-            }
-
+            while (writeNextElement.apply(writer)) ;
             writer.finish();
         }
-
         assert f.exists();
-        assert f.length() >= params.fileLength;
         return f;
     }
 
     private static void testReadFully(Parameters params) throws IOException
     {
         final File f = writeFile(params);
-        try (FileHandle.Builder builder = new FileHandle.Builder(f.getPath())
-                                                     .bufferType(params.bufferType).bufferSize(params.bufferSize))
+        FileHandle.Builder builder = new FileHandle.Builder(f).bufferType(params.bufferType)
+                                                              .bufferSize(params.bufferSize);
+        builder.mmapped(params.mmappedRegions);
+        try (FileHandle fh = builder.complete();
+             RandomAccessReader reader = fh.createReader())
         {
-            builder.mmapped(params.mmappedRegions);
-            try (FileHandle fh = builder.complete();
-                 RandomAccessReader reader = fh.createReader())
+            assertEquals(f.absolutePath(), reader.getFile().path());
+            assertEquals(f.length(), reader.length());
+            assertEquals(f.length(), reader.bytesRemaining());
+            assertEquals(Math.min(Integer.MAX_VALUE, f.length()), reader.available());
+
+            byte[] b = new byte[params.expected.length];
+            long numRead = 0;
+            while (numRead < params.fileLength)
             {
-                assertEquals(f.getAbsolutePath(), reader.getPath());
-                assertEquals(f.length(), reader.length());
-                assertEquals(f.length(), reader.bytesRemaining());
-                assertEquals(Math.min(Integer.MAX_VALUE, f.length()), reader.available());
-
-                byte[] b = new byte[params.expected.length];
-                long numRead = 0;
-                while (numRead < params.fileLength)
-                {
-                    reader.readFully(b);
-                    assertTrue(Arrays.equals(params.expected, b));
-                    numRead += b.length;
-                }
-
-                assertTrue(reader.isEOF());
-                assertEquals(0, reader.bytesRemaining());
+                reader.readFully(b);
+                assertTrue(Arrays.equals(params.expected, b));
+                numRead += b.length;
             }
+
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.bytesRemaining());
         }
     }
 
@@ -331,11 +702,10 @@ public class RandomAccessReaderTest
 
         assert f.exists();
 
-        try (FileHandle.Builder builder = new FileHandle.Builder(f.getPath());
-             FileHandle fh = builder.complete();
+        try (FileHandle fh = new FileHandle.Builder(f).complete();
              RandomAccessReader reader = fh.createReader())
         {
-            assertEquals(f.getAbsolutePath(), reader.getPath());
+            assertEquals(f.absolutePath(), reader.getFile().path());
             assertEquals(expected.length(), reader.length());
 
             ByteBuffer b = ByteBufferUtil.read(reader, expected.length());
@@ -362,8 +732,7 @@ public class RandomAccessReaderTest
 
         assert f.exists();
 
-        try (FileHandle.Builder builder = new FileHandle.Builder(f.getPath());
-             FileHandle fh = builder.complete();
+        try (FileHandle fh = new FileHandle.Builder(f).complete();
              RandomAccessReader reader = fh.createReader())
         {
             assertEquals(expected.length() * numIterations, reader.length());
@@ -428,7 +797,7 @@ public class RandomAccessReaderTest
         final File f = FileUtils.createTempFile("testMark", "1");
         final byte[] expected = new byte[1 << 16];
 
-        long seed = System.nanoTime();
+        long seed = nanoTime();
         //seed = 365238103404423L;
         logger.info("Seed {}", seed);
         Random r = new Random(seed);
@@ -442,60 +811,393 @@ public class RandomAccessReaderTest
 
         assert f.exists();
 
-        try (FileHandle.Builder builder = new FileHandle.Builder(f.getPath()))
+        FileHandle.Builder builder = new FileHandle.Builder(f);
+        final Runnable worker = () ->
         {
-            final Runnable worker = () ->
+            try (FileHandle fh = builder.complete();
+                 RandomAccessReader reader = fh.createReader())
             {
-                try (FileHandle fh = builder.complete();
-                     RandomAccessReader reader = fh.createReader())
+                assertEquals(expected.length, reader.length());
+
+                ByteBuffer b = ByteBufferUtil.read(reader, expected.length);
+                assertTrue(Arrays.equals(expected, b.array()));
+                assertTrue(reader.isEOF());
+                assertEquals(0, reader.bytesRemaining());
+
+                reader.seek(0);
+                b = ByteBufferUtil.read(reader, expected.length);
+                assertTrue(Arrays.equals(expected, b.array()));
+                assertTrue(reader.isEOF());
+                assertEquals(0, reader.bytesRemaining());
+
+                for (int i = 0; i < 10; i++)
                 {
-                    assertEquals(expected.length, reader.length());
+                    int pos = r.nextInt(expected.length);
+                    reader.seek(pos);
+                    assertEquals(pos, reader.getPosition());
 
-                    ByteBuffer b = ByteBufferUtil.read(reader, expected.length);
-                    assertTrue(Arrays.equals(expected, b.array()));
-                    assertTrue(reader.isEOF());
-                    assertEquals(0, reader.bytesRemaining());
+                    ByteBuffer buf = ByteBuffer.wrap(expected, pos, expected.length - pos)
+                                               .order(ByteOrder.BIG_ENDIAN);
 
-                    reader.seek(0);
-                    b = ByteBufferUtil.read(reader, expected.length);
-                    assertTrue(Arrays.equals(expected, b.array()));
-                    assertTrue(reader.isEOF());
-                    assertEquals(0, reader.bytesRemaining());
-
-                    for (int i = 0; i < 10; i++)
-                    {
-                        int pos = r.nextInt(expected.length);
-                        reader.seek(pos);
-                        assertEquals(pos, reader.getPosition());
-
-                        ByteBuffer buf = ByteBuffer.wrap(expected, pos, expected.length - pos)
-                                                   .order(ByteOrder.BIG_ENDIAN);
-
-                        while (reader.bytesRemaining() > 4)
-                            assertEquals(buf.getInt(), reader.readInt());
-                    }
-
-                    reader.close();
+                    while (reader.bytesRemaining() > 4)
+                        assertEquals(buf.getInt(), reader.readInt());
                 }
-                catch (Exception ex)
-                {
-                    ex.printStackTrace();
-                    fail(ex.getMessage());
-                }
-            };
 
-            if (numThreads == 1)
-            {
-                worker.run();
+                reader.close();
             }
-            else
+            catch (Exception ex)
             {
-                ExecutorService executor = Executors.newFixedThreadPool(numThreads);
-                for (int i = 0; i < numThreads; i++)
-                    executor.submit(worker);
+                ex.printStackTrace();
+                fail(ex.getMessage());
+            }
+        };
 
-                executor.shutdown();
-                Assert.assertTrue(executor.awaitTermination(1, TimeUnit.MINUTES));
+        if (numThreads == 1)
+        {
+            worker.run();
+        }
+        else
+        {
+            ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+            for (int i = 0; i < numThreads; i++)
+                executor.submit(worker);
+
+            executor.shutdown();
+            Assert.assertTrue(executor.awaitTermination(1, TimeUnit.MINUTES));
+        }
+    }
+
+    @Test
+    public void testSkipBytesLessThanBufferSize() throws IOException
+    {
+        testSkipBytes(new Parameters(8192, 1024), 1);
+    }
+
+    @Test
+    public void testSkipBytesGreaterThanBufferSize() throws IOException
+    {
+        int bufferSize = 16;
+        Parameters params = new Parameters(8192, bufferSize);
+        int numberOfExpectationsInBufferSize = bufferSize / params.expected.length;
+        testSkipBytes(params, numberOfExpectationsInBufferSize + 1);
+    }
+
+    @Test
+    public void testSkipBytesNonPositive() throws IOException
+    {
+        Parameters params = new Parameters(8192, 4096);
+        final File f = writeFile(params);
+        FileHandle.Builder builder = new FileHandle.Builder(f).bufferType(params.bufferType)
+                                                                     .bufferSize(params.bufferSize)
+                                                                     .mmapped(params.mmappedRegions);
+        try (FileHandle fh = builder.complete();
+             RandomAccessReader reader = fh.createReader())
+        {
+            assertEquals(0, reader.skipBytes(0));
+            assertEquals(0, reader.skipBytes(-1));
+        }
+    }
+
+    @Test(expected = IOException.class)
+    public void testSkipBytesClosed() throws IOException
+    {
+        Parameters params = new Parameters(8192, 4096);
+        final File f = writeFile(params);
+        FileHandle.Builder builder = new FileHandle.Builder(f).bufferType(params.bufferType)
+                                                              .bufferSize(params.bufferSize);
+        try (FileHandle fh = builder.complete();
+             RandomAccessReader reader = fh.createReader())
+        {
+            reader.close();
+            reader.skipBytes(31415);
+        }
+    }
+
+    /**
+     * A skip that leaves the current buffer must stop at length(), also when it is a length override (as for
+     * early-open readers).
+     */
+    @Test
+    public void testSkipBytesStopsAtLengthOverride() throws IOException
+    {
+        int bufferSize = 4096;
+        final File f = writeFile(writer -> {
+            try
+            {
+                for (int i = 0; i < 3 * bufferSize; ++i)
+                    writer.writeByte(i);
+            }
+            catch (IOException e)
+            {
+                throw new AssertionError(e);
+            }
+            return false;
+        });
+
+        long lengthOverride = bufferSize + 50;
+        int available = (int) (lengthOverride - 100);
+        for (boolean mmapped : new boolean[]{ false, true })
+        {
+            FileHandle.Builder builder = new FileHandle.Builder(f).bufferSize(bufferSize)
+                                                                  .mmapped(mmapped)
+                                                                  .withLengthOverride(lengthOverride);
+            try (FileHandle fh = builder.complete();
+                 RandomAccessReader reader = fh.createReader())
+            {
+                assertEquals(lengthOverride, reader.length());
+                reader.seek(100);
+                assertEquals(available, reader.skipBytes(available + 20));
+                assertEquals(lengthOverride, reader.getFilePointer());
+                assertTrue(reader.isEOF());
+                assertEquals(0, reader.bytesRemaining());
+                assertEquals(0, reader.skipBytes(1));
+
+                reader.seek(100);
+                try
+                {
+                    reader.skipBytesFully(available + 1);
+                    fail("Expected EOFException");
+                }
+                catch (EOFException e)
+                {
+                    // expected
+                }
+                assertEquals(lengthOverride, reader.getFilePointer());
+
+                reader.seek(100);
+                assertEquals(available, reader.skipBytes(available));
+                assertEquals(lengthOverride, reader.getFilePointer());
+            }
+        }
+    }
+
+    /**
+     * A reader with a length override in the middle of a buffer (as for early-open readers) stops at it, although the
+     * buffer holds data after it: reads and skips end there, bytesRemaining() is the number of bytes reads return,
+     * and seeking past length() is an error. This also holds when the handle shares its mapped regions (through a
+     * MmappedRegionsCache) with a handle of the same file with a longer length, opened before or after it.
+     */
+    @Test
+    public void testReadsStopAtLengthOverride() throws IOException
+    {
+        int bufferSize = 4096;
+        final File f = writeFile(writer -> {
+            try
+            {
+                for (int i = 0; i < 3 * bufferSize; ++i)
+                    writer.writeByte(i);
+            }
+            catch (IOException e)
+            {
+                throw new AssertionError(e);
+            }
+            return false;
+        });
+
+        long lengthOverride = bufferSize + 50;
+        for (boolean mmapped : new boolean[]{ false, true })
+        {
+            for (boolean shortFirst : new boolean[]{ false, true })
+            {
+                try (MmappedRegionsCache regionsCache = new MmappedRegionsCache())
+                {
+                    FileHandle.Builder builder = new FileHandle.Builder(f).bufferSize(bufferSize)
+                                                                          .mmapped(mmapped)
+                                                                          .withMmappedRegionsCache(regionsCache);
+                    FileHandle longHandle = null;
+                    if (!shortFirst)
+                        longHandle = builder.withLengthOverride(-1).complete();
+                    try (FileHandle fh = builder.withLengthOverride(lengthOverride).complete())
+                    {
+                        if (shortFirst)
+                            longHandle = builder.withLengthOverride(-1).complete();
+                        assertEquals(3 * bufferSize, longHandle.dataLength());
+                        assertReadsStopAtLength(fh, lengthOverride, bufferSize);
+                    }
+                    finally
+                    {
+                        if (longHandle != null)
+                            longHandle.close();
+                    }
+                }
+            }
+        }
+    }
+
+    private static void assertReadsStopAtLength(FileHandle fh, long lengthOverride, int bufferSize) throws IOException
+    {
+        try (RandomAccessReader reader = fh.createReader())
+        {
+            assertEquals(lengthOverride, reader.length());
+
+            reader.seek(lengthOverride - 10);
+            assertEquals(10, reader.bytesRemaining());
+            byte[] read = new byte[20];
+            assertEquals(10, reader.read(read, 0, 20));
+            for (int i = 0; i < 10; ++i)
+                assertEquals((byte) (lengthOverride - 10 + i), read[i]);
+            assertEquals(lengthOverride, reader.getFilePointer());
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.bytesRemaining());
+            assertEquals(0, reader.available());
+            assertEquals(-1, reader.read());
+
+            reader.seek(lengthOverride - 10);
+            try
+            {
+                reader.readFully(new byte[11]);
+                fail("Expected EOFException");
+            }
+            catch (EOFException e)
+            {
+                // expected
+            }
+
+            reader.seek(lengthOverride - 10);
+            assertEquals(10, reader.skipBytes(bufferSize));
+            assertEquals(lengthOverride, reader.getFilePointer());
+
+            reader.seek(lengthOverride - 10);
+            try
+            {
+                reader.seek(lengthOverride + 1);
+                fail("Expected IllegalArgumentException");
+            }
+            catch (IllegalArgumentException e)
+            {
+                // expected
+            }
+        }
+    }
+
+    /**
+     * A reader of an empty file (served by an EmptyRebufferer), and a reader created at a position after length(), are
+     * at EOF with no bytes remaining, and reads report EOF.
+     */
+    @Test
+    public void testEmptyFileAndReaderCreatedPastLength() throws IOException
+    {
+        File empty = writeFile(writer -> false);
+        try (FileHandle fh = new FileHandle.Builder(empty).complete();
+             RandomAccessReader reader = fh.createReader())
+        {
+            assertTrue(fh.rebuffererFactory() instanceof EmptyRebufferer);
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.bytesRemaining());
+            assertEquals(0, reader.available());
+            assertEquals(-1, reader.read());
+            assertEquals(0, reader.skipBytes(1));
+        }
+
+        File f = writeFile(writer -> {
+            try
+            {
+                writer.write(new byte[100]);
+            }
+            catch (IOException e)
+            {
+                throw new AssertionError(e);
+            }
+            return false;
+        });
+        try (FileHandle fh = new FileHandle.Builder(f).complete();
+             RandomAccessReader reader = fh.createReader(110))
+        {
+            assertEquals(110, reader.getFilePointer());
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.bytesRemaining());
+            assertEquals(-1, reader.read());
+            assertEquals(0, reader.skipBytes(1));
+            assertEquals(110, reader.getFilePointer());
+        }
+    }
+
+    /**
+     * Counts the rebuffers (i.e. the chunks loaded) of the wrapped rebufferer.
+     */
+    static class CountingRebufferer extends WrappingRebufferer
+    {
+        int rebuffers;
+
+        CountingRebufferer(Rebufferer wrapped)
+        {
+            super(wrapped);
+        }
+
+        @Override
+        public BufferHolder rebuffer(long position)
+        {
+            ++rebuffers;
+            return super.rebuffer(position);
+        }
+    }
+
+    /**
+     * A skip over a file without holes must not load more chunks than a seek to its end: exactly one when it ends
+     * on a chunk boundary (the chunk the next read needs), none when it ends at length().
+     */
+    @Test
+    public void testSkipBytesLoadsNoExtraChunk() throws IOException
+    {
+        int chunkSize = 4096;
+        final File f = writeFile(writer -> {
+            try
+            {
+                for (int i = 0; i < 3 * chunkSize; ++i)
+                    writer.writeByte(i);
+            }
+            catch (IOException e)
+            {
+                throw new AssertionError(e);
+            }
+            return false;
+        });
+
+        try (ChannelProxy channel = new ChannelProxy(f);
+             SimpleChunkReader chunkReader = new SimpleChunkReader(channel, f.length(), BufferType.ON_HEAP, chunkSize))
+        {
+            CountingRebufferer rebufferer = new CountingRebufferer(chunkReader.instantiateRebufferer(false));
+            try (RandomAccessReader reader = new RandomAccessReader(rebufferer, ByteOrder.BIG_ENDIAN, Rebufferer.EMPTY))
+            {
+                reader.seek(100);
+                rebufferer.rebuffers = 0;
+                assertEquals(2 * chunkSize - 100, reader.skipBytes(2 * chunkSize - 100));
+                assertEquals(2 * chunkSize, reader.getFilePointer());
+                assertEquals((byte) (2 * chunkSize), reader.readByte());
+                assertEquals(1, rebufferer.rebuffers);
+
+                reader.seek(100);
+                rebufferer.rebuffers = 0;
+                assertEquals(3 * chunkSize - 100, reader.skipBytes(3 * chunkSize - 100));
+                assertEquals(3 * chunkSize, reader.getFilePointer());
+                assertTrue(reader.isEOF());
+                assertEquals(0, rebufferer.rebuffers);
+            }
+        }
+    }
+
+    private static void testSkipBytes(Parameters params, int expectationMultiples) throws IOException
+    {
+        final File f = writeFile(params);
+        FileHandle.Builder builder = new FileHandle.Builder(f).bufferType(params.bufferType)
+                                                              .bufferSize(params.bufferSize)
+                                                              .mmapped(params.mmappedRegions);
+        try (FileHandle fh = builder.complete();
+             RandomAccessReader reader = fh.createReader())
+        {
+            int toSkip = expectationMultiples * params.expected.length;
+            byte[] b = new byte[params.expected.length];
+            long numRead = 0;
+
+            while (numRead < params.fileLength)
+            {
+                reader.readFully(b);
+                assertTrue(Arrays.equals(params.expected, b));
+                numRead += b.length;
+                int skipped = reader.skipBytes(toSkip);
+                long expectedSkipped = Math.max(Math.min(toSkip, params.fileLength - numRead), 0);
+                assertEquals(expectedSkipped, skipped);
+                numRead += skipped;
             }
         }
     }

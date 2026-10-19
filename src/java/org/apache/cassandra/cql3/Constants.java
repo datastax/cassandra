@@ -20,29 +20,60 @@ package org.apache.cassandra.cql3;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.function.UnaryOperator;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.ByteType;
+import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.CounterColumnType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.DoubleType;
+import org.apache.cassandra.db.marshal.DurationType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.NumberType;
+import org.apache.cassandra.db.marshal.StringType;
+import org.apache.cassandra.db.marshal.TimeUUIDType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FastByteOperations;
 
 /**
  * Static helper methods and classes for constants.
  */
 public abstract class Constants
 {
-    private static final Logger logger = LoggerFactory.getLogger(Constants.class);
-
     public enum Type
     {
-        STRING,
+        STRING
+        {
+            @Override
+            public AbstractType<?> getPreferedTypeFor(String text)
+            {
+                 if (StandardCharsets.US_ASCII.newEncoder().canEncode(text))
+                 {
+                     return AsciiType.instance;
+                 }
+
+                 return UTF8Type.instance;
+            }
+        },
         INTEGER
         {
+            @Override
             public AbstractType<?> getPreferedTypeFor(String text)
             {
                 // We only try to determine the smallest possible type between int, long and BigInteger
@@ -57,9 +88,19 @@ public abstract class Constants
                 return IntegerType.instance;
             }
         },
-        UUID,
+        UUID
+        {
+            @Override
+            public AbstractType<?> getPreferedTypeFor(String text)
+            {
+                return java.util.UUID.fromString(text).version() == 1
+                       ? TimeUUIDType.instance
+                       : UUIDType.instance;
+            }
+        },
         FLOAT
         {
+            @Override
             public AbstractType<?> getPreferedTypeFor(String text)
             {
                 if ("NaN".equals(text) || "-NaN".equals(text) || "Infinity".equals(text) || "-Infinity".equals(text))
@@ -74,9 +115,30 @@ public abstract class Constants
                 return DecimalType.instance;
             }
         },
-        BOOLEAN,
-        HEX,
-        DURATION;
+        BOOLEAN
+        {
+            @Override
+            public AbstractType<?> getPreferedTypeFor(String text)
+            {
+                return BooleanType.instance;
+            }
+        },
+        HEX
+        {
+            @Override
+            public AbstractType<?> getPreferedTypeFor(String text)
+            {
+                return ByteType.instance;
+            }
+        },
+        DURATION
+        {
+            @Override
+            public AbstractType<?> getPreferedTypeFor(String text)
+            {
+                return DurationType.instance;
+            }
+        };
 
         /**
          * Returns the exact type for the specified text
@@ -117,6 +179,8 @@ public abstract class Constants
     public static final UnsetLiteral UNSET_LITERAL = new UnsetLiteral();
 
     public static final Value UNSET_VALUE = new Value(ByteBufferUtil.UNSET_BYTE_BUFFER);
+
+    public static final UnaryOperator<String> IDENTITY_STRING_MAPPER = id -> id;
 
     private static class NullLiteral extends Term.Raw
     {
@@ -166,7 +230,7 @@ public abstract class Constants
 
     public static class Literal extends Term.Raw
     {
-        private final Type type;
+        public final Type type;
         private final String text;
         private final AbstractType<?> preferedType;
 
@@ -223,8 +287,7 @@ public abstract class Constants
 
         private ByteBuffer parsedValue(AbstractType<?> validator) throws InvalidRequestException
         {
-            if (validator instanceof ReversedType<?>)
-                validator = ((ReversedType<?>) validator).baseType;
+            validator = validator.unwrap();
             try
             {
                 if (type == Type.HEX)
@@ -247,7 +310,7 @@ public abstract class Constants
         public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
         {
             CQL3Type receiverType = receiver.type.asCQL3Type();
-            if (receiverType.isCollection() || receiverType.isUDT())
+            if (receiverType.isCollection() || receiverType.isUDT() || receiverType.isVector())
                 return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
 
             if (!(receiverType instanceof CQL3Type.Native))
@@ -346,6 +409,12 @@ public abstract class Constants
             return null;
         }
 
+        @Override
+        public AbstractType<?> getCompatibleTypeIfKnown(String keyspace)
+        {
+            return preferedType;
+        }
+
         public String getRawText()
         {
             return text;
@@ -369,7 +438,7 @@ public abstract class Constants
             this.bytes = bytes;
         }
 
-        public ByteBuffer get(ProtocolVersion protocolVersion)
+        public ByteBuffer get(ProtocolVersion version)
         {
             return bytes;
         }
@@ -446,16 +515,52 @@ public abstract class Constants
             super(column, t);
         }
 
+        public boolean requiresRead()
+        {
+            return !(column.type instanceof CounterColumnType);
+        }
+
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
-            ByteBuffer bytes = t.bindAndGet(params.options);
-            if (bytes == null)
-                throw new InvalidRequestException("Invalid null value for counter increment");
-            if (bytes == ByteBufferUtil.UNSET_BYTE_BUFFER)
-                return;
+            if (column.type instanceof CounterColumnType)
+            {
+                ByteBuffer bytes = t.bindAndGet(params.options);
+                if (bytes == null)
+                    throw new InvalidRequestException("Invalid null value for counter increment");
+                if (bytes == ByteBufferUtil.UNSET_BYTE_BUFFER)
+                    return;
 
-            long increment = ByteBufferUtil.toLong(bytes);
-            params.addCounter(column, increment);
+                long increment = ByteBufferUtil.toLong(bytes);
+                params.addCounter(column, increment);
+            }
+            else if (column.type instanceof NumberType<?>)
+            {
+                @SuppressWarnings("unchecked") NumberType<Number> type = (NumberType<Number>) column.type;
+                ByteBuffer increment = t.bindAndGet(params.options);
+                ByteBuffer current = getCurrentCellBuffer(partitionKey, params);
+                if (current == null)
+                    return;
+                ByteBuffer newValue = type.add(type.compose(current), type.compose(increment));
+                params.addCell(column, newValue);
+            }
+            else if (column.type instanceof StringType)
+            {
+                ByteBuffer append = t.bindAndGet(params.options);
+                ByteBuffer current = getCurrentCellBuffer(partitionKey, params);
+                if (current == null)
+                    return;
+                ByteBuffer newValue = ByteBuffer.allocate(current.remaining() + append.remaining());
+                FastByteOperations.copy(current, current.position(), newValue, newValue.position(), current.remaining());
+                FastByteOperations.copy(append, append.position(), newValue, newValue.position() + current.remaining(), append.remaining());
+                params.addCell(column, newValue);
+            }
+        }
+
+        private ByteBuffer getCurrentCellBuffer(DecoratedKey key, UpdateParameters params)
+        {
+            Row currentRow = params.getPrefetchedRow(key, column.isStatic() ? Clustering.STATIC_CLUSTERING : params.currentClustering());
+            Cell<?> currentCell = currentRow == null ? null : currentRow.getCell(column);
+            return currentCell == null ? null : currentCell.buffer();
         }
     }
 

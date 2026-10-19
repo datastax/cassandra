@@ -21,13 +21,13 @@ import java.io.Closeable;
 import java.io.DataInputStream;
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 import com.google.common.base.Preconditions;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
+import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
@@ -36,16 +36,23 @@ import static java.lang.Math.min;
 /**
  * Rough equivalent of BufferedInputStream and DataInputStream wrapping a ByteBuffer that can be refilled
  * via rebuffer. Implementations provide this buffer from various channels (socket, file, memory, etc).
- *
+ * <p>
  * RebufferingInputStream is not thread safe.
  */
-public abstract class RebufferingInputStream extends InputStream implements DataInputPlus, Closeable
+public abstract class RebufferingInputStream extends DataInputStreamPlus implements DataInputPlus, Closeable
 {
     protected ByteBuffer buffer;
 
     protected RebufferingInputStream(ByteBuffer buffer)
     {
-        Preconditions.checkArgument(buffer == null || buffer.order() == ByteOrder.BIG_ENDIAN, "Buffer must have BIG ENDIAN byte ordering");
+        this(buffer, true);
+    }
+
+    protected RebufferingInputStream(ByteBuffer buffer, boolean validateByteOrder)
+    {
+        if (validateByteOrder)
+            Preconditions.checkArgument(buffer == null || buffer.order() == ByteOrder.BIG_ENDIAN,
+                                        "Buffer must have BIG ENDIAN byte ordering");
         this.buffer = buffer;
     }
 
@@ -135,7 +142,7 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     }
 
     @DontInline
-    protected long readPrimitiveSlowly(int bytes) throws IOException
+    protected long readBigEndianPrimitiveSlowly(int bytes) throws IOException
     {
         long result = 0;
         for (int i = 0; i < bytes; i++)
@@ -146,6 +153,8 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     @Override
     public int skipBytes(int n) throws IOException
     {
+        // Note: This implementation works correctly with files that may have holes between buffers
+        // (see EncryptedChunkReader). If changing this code, make sure to account for that.
         if (n <= 0)
             return 0;
         int requested = n;
@@ -194,8 +203,10 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     {
         if (buffer.remaining() >= 2)
             return buffer.getShort();
-        else
-            return (short) readPrimitiveSlowly(2);
+        var result = (short) readBigEndianPrimitiveSlowly(2);
+        if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
+            return Short.reverseBytes(result);
+        return result;
     }
 
     @Override
@@ -209,8 +220,10 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     {
         if (buffer.remaining() >= 2)
             return buffer.getChar();
-        else
-            return (char) readPrimitiveSlowly(2);
+        var result = (char) readBigEndianPrimitiveSlowly(2);
+        if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
+            return Character.reverseBytes(result);
+        return result;
     }
 
     @Override
@@ -218,8 +231,10 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     {
         if (buffer.remaining() >= 4)
             return buffer.getInt();
-        else
-            return (int) readPrimitiveSlowly(4);
+        var result = (int) readBigEndianPrimitiveSlowly(4);
+        if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
+            return Integer.reverseBytes(result);
+        return result;
     }
 
     @Override
@@ -227,15 +242,25 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     {
         if (buffer.remaining() >= 8)
             return buffer.getLong();
-        else
-            return readPrimitiveSlowly(8);
+        var result = readBigEndianPrimitiveSlowly(8);
+        if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
+            return Long.reverseBytes(result);
+        return result;
     }
 
+    @Override
     public long readVInt() throws IOException
     {
         return VIntCoding.decodeZigZag64(readUnsignedVInt());
     }
 
+    @Override
+    public int readVInt32() throws IOException
+    {
+        return VIntCoding.checkedCast(VIntCoding.decodeZigZag64(readUnsignedVInt()));
+    }
+
+    @Override
     public long readUnsignedVInt() throws IOException
     {
         //If 9 bytes aren't available use the slow path in VIntCoding
@@ -268,12 +293,20 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     }
 
     @Override
+    public int readUnsignedVInt32() throws IOException
+    {
+        return VIntCoding.checkedCast(readUnsignedVInt());
+    }
+
+    @Override
     public float readFloat() throws IOException
     {
         if (buffer.remaining() >= 4)
             return buffer.getFloat();
-        else
-            return Float.intBitsToFloat((int)readPrimitiveSlowly(4));
+        var intBits = (int) readBigEndianPrimitiveSlowly(4);
+        if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
+            intBits = Integer.reverseBytes(intBits);
+        return Float.intBitsToFloat(intBits);
     }
 
     @Override
@@ -281,8 +314,10 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     {
         if (buffer.remaining() >= 8)
             return buffer.getDouble();
-        else
-            return Double.longBitsToDouble(readPrimitiveSlowly(8));
+        var longBits = readBigEndianPrimitiveSlowly(8);
+        if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
+            longBits = Long.reverseBytes(longBits);
+        return Double.longBitsToDouble(longBits);
     }
 
     @Override

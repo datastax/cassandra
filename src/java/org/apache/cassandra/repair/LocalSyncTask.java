@@ -19,7 +19,7 @@ package org.apache.cassandra.repair;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -36,11 +36,14 @@ import org.apache.cassandra.streaming.StreamEvent;
 import org.apache.cassandra.streaming.StreamEventHandler;
 import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.streaming.StreamPlan;
+import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MerkleTrees;
+import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
+import org.apache.cassandra.utils.concurrent.Promise;
 
 /**
  * LocalSyncTask performs streaming between local(coordinator) node and remote replica.
@@ -51,20 +54,23 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
 
     private static final Logger logger = LoggerFactory.getLogger(LocalSyncTask.class);
 
-    private final UUID pendingRepair;
+    private final TimeUUID pendingRepair;
 
     @VisibleForTesting
     public final boolean requestRanges;
     @VisibleForTesting
     public final boolean transferRanges;
 
-    public LocalSyncTask(RepairJobDesc desc, InetAddressAndPort local, InetAddressAndPort remote,
-                         List<Range<Token>> diff, UUID pendingRepair,
+    private final AtomicBoolean active = new AtomicBoolean(true);
+    private final Promise<StreamPlan> planPromise = new AsyncPromise<>();
+
+    public LocalSyncTask(SharedContext ctx, RepairJobDesc desc, InetAddressAndPort local, InetAddressAndPort remote,
+                         List<Range<Token>> diff, TimeUUID pendingRepair,
                          boolean requestRanges, boolean transferRanges, PreviewKind previewKind)
     {
-        super(desc, local, remote, diff, previewKind);
+        super(ctx, desc, local, remote, diff, previewKind);
         Preconditions.checkArgument(requestRanges || transferRanges, "Nothing to do in a sync job");
-        Preconditions.checkArgument(local.equals(FBUtilities.getBroadcastAddressAndPort()));
+        Preconditions.checkArgument(local.equals(ctx.broadcastAddressAndPort()));
 
         this.pendingRepair = pendingRepair;
         this.requestRanges = requestRanges;
@@ -104,13 +110,19 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
     @Override
     protected void startSync()
     {
-        InetAddressAndPort remote = nodePair.peer;
+        if (active.get())
+        {
+            InetAddressAndPort remote = nodePair.peer;
 
-        String message = String.format("Performing streaming repair of %d ranges with %s", rangesToSync.size(), remote);
-        logger.info("{} {}", previewKind.logPrefix(desc.sessionId), message);
-        Tracing.traceRepair(message);
+            String message = String.format("Performing streaming repair of %d ranges with %s", rangesToSync.size(), remote);
+            logger.info("{} parentSession={} {}", previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message);
+            Tracing.traceRepair(message);
 
-        createStreamPlan().execute();
+            StreamPlan plan = createStreamPlan();
+            logger.info("{} parentSession={} Starting streaming plan with id {}", previewKind.logPrefix(desc.sessionId), desc.parentSessionId, plan.getPlanId());
+            ctx.streamExecutor().execute(plan);
+            planPromise.setSuccess(plan);
+        }
     }
 
     @Override
@@ -119,6 +131,7 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
         return true;
     }
 
+    @Override
     public void handleStreamEvent(StreamEvent event)
     {
         if (state == null)
@@ -138,26 +151,39 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
                 state.trace("{}/{} ({}%) {} idx:{}{}",
                             new Object[] { FBUtilities.prettyPrintMemory(pi.currentBytes),
                                            FBUtilities.prettyPrintMemory(pi.totalBytes),
-                                           pi.currentBytes * 100 / pi.totalBytes,
+                                           pi.progressPercentage(),
                                            pi.direction == ProgressInfo.Direction.OUT ? "sent to" : "received from",
                                            pi.sessionIndex,
                                            pi.peer });
         }
     }
 
+    @Override
     public void onSuccess(StreamState result)
     {
-        String message = String.format("Sync complete using session %s between %s and %s on %s", desc.sessionId, nodePair.coordinator, nodePair.peer, desc.columnFamily);
-        logger.info("{} {}", previewKind.logPrefix(desc.sessionId), message);
-        Tracing.traceRepair(message);
-        set(stat.withSummaries(result.createSummaries()));
-        finished();
+        if (active.compareAndSet(true, false))
+        {
+            String status = result.hasAbortedSession() ? "aborted" : "complete";
+            String message = String.format("Sync %s using session %s between %s and %s on %s",
+                                           status, desc.sessionId, nodePair.coordinator, nodePair.peer, desc.columnFamily);
+            logger.info("{} parentSession={} {}", previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message);
+            Tracing.traceRepair(message);
+            trySuccess(result.hasAbortedSession() ? stat : stat.withSummaries(result.createSummaries()));
+            finished();
+        }
     }
 
+    @Override
     public void onFailure(Throwable t)
     {
-        setException(t);
-        finished();
+        if (active.compareAndSet(true, false))
+        {
+            logger.error("{} parentSession={} sync {} <-> {} failed: {}",
+                         previewKind.logPrefix(desc.sessionId), desc.parentSessionId,
+                         nodePair.coordinator, nodePair.peer, t.getMessage(), t);
+            tryFailure(t);
+            finished();
+        }
     }
 
     @Override
@@ -169,5 +195,16 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
                ", rangesToSync=" + rangesToSync +
                ", nodePair=" + nodePair +
                '}';
+    }
+
+    @Override
+    public void abort(Throwable reason)
+    {
+        super.abort(reason);
+        planPromise.addCallback((plan, cause) ->
+        {
+            assert plan != null : "StreamPlan future should never be completed exceptionally";
+            plan.getCoordinator().getAllStreamSessions().forEach(StreamSession::abort);
+        });
     }
 }

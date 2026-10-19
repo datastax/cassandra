@@ -19,52 +19,95 @@ package org.apache.cassandra.config;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import javax.annotation.Nullable;
 
 import com.google.common.base.Joiner;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
-
+import org.apache.cassandra.utils.JsonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.audit.AuditLogOptions;
-import org.apache.cassandra.fql.FullQueryLoggerOptions;
+import org.apache.cassandra.config.DataStorageSpec.IntBytesBound;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.fql.FullQueryLoggerOptions;
+import org.apache.cassandra.index.internal.CassandraIndex;
+import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.service.StartupChecks.StartupCheckType;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.AUTOCOMPACTION_ON_STARTUP_ENABLED;
+import static org.apache.cassandra.config.CassandraRelevantProperties.FILE_CACHE_ENABLED;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SKIP_PAXOS_REPAIR_ON_TOPOLOGY_CHANGE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SKIP_PAXOS_REPAIR_ON_TOPOLOGY_CHANGE_KEYSPACES;
 
 /**
  * A class that contains configuration properties for the cassandra node it runs within.
- *
+ * <p>
  * Properties declared as volatile can be mutated via JMX.
  */
 public class Config
 {
     private static final Logger logger = LoggerFactory.getLogger(Config.class);
 
+    // Tracks the set of config keys set by the user.  See CNDB-15137
+    public final Set<String> userSetConfigKeys = new HashSet<>();
+
+    public static Set<String> splitCommaDelimited(String src)
+    {
+        if (src == null)
+            return ImmutableSet.of();
+        String[] split = src.split(",\\s*");
+        ImmutableSet.Builder<String> builder = ImmutableSet.builder();
+        for (String s : split)
+        {
+            s = s.trim();
+            if (!s.isEmpty())
+                builder.add(s);
+        }
+        return builder.build();
+    }
     /*
      * Prefix for Java properties for internal Cassandra configuration options
      */
     public static final String PROPERTY_PREFIX = "cassandra.";
 
     public String cluster_name = "Test Cluster";
-    public String authenticator;
-    public String authorizer;
-    public String role_manager;
-    public String network_authorizer;
-    public volatile int permissions_validity_in_ms = 2000;
+    public ParameterizedClass authenticator;
+    public ParameterizedClass authorizer;
+    public ParameterizedClass role_manager;
+    public ParameterizedClass crypto_provider;
+    public ParameterizedClass network_authorizer;
+    public ParameterizedClass cidr_authorizer;
+
+    @Replaces(oldName = "permissions_validity_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound permissions_validity = new DurationSpec.IntMillisecondsBound("2s");
     public volatile int permissions_cache_max_entries = 1000;
-    public volatile int permissions_update_interval_in_ms = -1;
-    public volatile int roles_validity_in_ms = 2000;
+    @Replaces(oldName = "permissions_update_interval_in_ms", converter = Converters.MILLIS_CUSTOM_DURATION, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound permissions_update_interval = null;
+    public volatile boolean permissions_cache_active_update = false;
+    @Replaces(oldName = "roles_validity_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound roles_validity = new DurationSpec.IntMillisecondsBound("2s");
     public volatile int roles_cache_max_entries = 1000;
-    public volatile int roles_update_interval_in_ms = -1;
-    public volatile int credentials_validity_in_ms = 2000;
+    @Replaces(oldName = "roles_update_interval_in_ms", converter = Converters.MILLIS_CUSTOM_DURATION, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound roles_update_interval = null;
+    public volatile boolean roles_cache_active_update = false;
+    @Replaces(oldName = "credentials_validity_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound credentials_validity = new DurationSpec.IntMillisecondsBound("2s");
     public volatile int credentials_cache_max_entries = 1000;
-    public volatile int credentials_update_interval_in_ms = -1;
+    @Replaces(oldName = "credentials_update_interval_in_ms", converter = Converters.MILLIS_CUSTOM_DURATION, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound credentials_update_interval = null;
+    public volatile boolean credentials_cache_active_update = false;
 
     /* Hashing strategy Random or OPHF */
     public String partitioner;
@@ -72,14 +115,21 @@ public class Config
     public boolean auto_bootstrap = true;
     public volatile boolean hinted_handoff_enabled = true;
     public Set<String> hinted_handoff_disabled_datacenters = Sets.newConcurrentHashSet();
-    public volatile int max_hint_window_in_ms = 3 * 3600 * 1000; // three hours
+    @Replaces(oldName = "max_hint_window_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound max_hint_window = new DurationSpec.IntMillisecondsBound("3h");
     public String hints_directory;
+    public boolean hint_window_persistent_enabled = true;
+
+    public volatile boolean force_new_prepared_statement_behaviour = false;
 
     public ParameterizedClass seed_provider;
-    public DiskAccessMode disk_access_mode = DiskAccessMode.auto;
+    public DiskAccessMode disk_access_mode = DiskAccessMode.mmap_index_only;
 
     public DiskFailurePolicy disk_failure_policy = DiskFailurePolicy.ignore;
     public CommitFailurePolicy commit_failure_policy = CommitFailurePolicy.stop;
+
+    @Deprecated(since = "5.0.1")
+    public volatile boolean use_deterministic_table_id = false;
 
     /* initial token in the ring */
     public String initial_token;
@@ -89,48 +139,88 @@ public class Config
     /** Triggers automatic allocation of tokens if set, based on the provided replica count for a datacenter */
     public Integer allocate_tokens_for_local_replication_factor = null;
 
-    public long native_transport_idle_timeout_in_ms = 0L;
+    @Replaces(oldName = "native_transport_idle_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public DurationSpec.LongMillisecondsBound native_transport_idle_timeout = new DurationSpec.LongMillisecondsBound("0ms");
 
-    public volatile long request_timeout_in_ms = 10000L;
+    @Replaces(oldName = "request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound request_timeout = new DurationSpec.LongMillisecondsBound("10000ms");
 
-    public volatile long read_request_timeout_in_ms = 5000L;
+    @Replaces(oldName = "read_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound read_request_timeout = new DurationSpec.LongMillisecondsBound("5000ms");
 
-    public volatile long range_request_timeout_in_ms = 10000L;
+    @Replaces(oldName = "range_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound range_request_timeout = new DurationSpec.LongMillisecondsBound("10000ms");
 
-    public volatile long write_request_timeout_in_ms = 2000L;
+    @Replaces(oldName = "aggregation_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound aggregation_request_timeout = new DurationSpec.LongMillisecondsBound("120000ms");
 
-    public volatile long counter_write_request_timeout_in_ms = 5000L;
+    @Replaces(oldName = "write_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound write_request_timeout = new DurationSpec.LongMillisecondsBound("2000ms");
+    
+    public volatile DurationSpec.LongMillisecondsBound hints_request_timeout = new DurationSpec.LongMillisecondsBound("2000ms");
 
-    public volatile long cas_contention_timeout_in_ms = 1000L;
+    @Replaces(oldName = "counter_write_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound counter_write_request_timeout = new DurationSpec.LongMillisecondsBound("5000ms");
 
-    public volatile long truncate_request_timeout_in_ms = 60000L;
+    @Replaces(oldName = "cas_contention_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound cas_contention_timeout = new DurationSpec.LongMillisecondsBound("1800ms");
+
+    @Replaces(oldName = "truncate_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound truncate_request_timeout = new DurationSpec.LongMillisecondsBound("60000ms");
+
+    @Replaces(oldName = "repair_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound repair_request_timeout = new DurationSpec.LongMillisecondsBound("120000ms");
+
+    public volatile DurationSpec.LongMillisecondsBound repair_prepare_message_timeout_in_ms = new DurationSpec.LongMillisecondsBound("10000ms");
 
     public Integer streaming_connections_per_host = 1;
-    public Integer streaming_keep_alive_period_in_secs = 300; //5 minutes
+    @Replaces(oldName = "streaming_keep_alive_period_in_secs", converter = Converters.SECONDS_DURATION, deprecated = true)
+    public DurationSpec.IntSecondsBound streaming_keep_alive_period = new DurationSpec.IntSecondsBound("300s");
 
-    public boolean cross_node_timeout = true;
+    @Replaces(oldName = "cross_node_timeout", converter = Converters.IDENTITY, deprecated = true)
+    public boolean internode_timeout = true;
 
-    public volatile long slow_query_log_timeout_in_ms = 500L;
+    @Replaces(oldName = "slow_query_log_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound slow_query_log_timeout = new DurationSpec.LongMillisecondsBound("500ms");
+
+    public volatile DurationSpec.LongMillisecondsBound stream_transfer_task_timeout = new DurationSpec.LongMillisecondsBound("12h");
 
     public volatile double phi_convict_threshold = 8.0;
 
     public int concurrent_reads = 32;
     public int concurrent_writes = 32;
+    public int concurrent_coordinator_reads = 32;
+    public int concurrent_coordinator_writes = 32;
     public int concurrent_counter_writes = 32;
     public int concurrent_materialized_view_writes = 32;
-
-    @Deprecated
-    public Integer concurrent_replicates = null;
+    public int available_processors = -1;
 
     public int memtable_flush_writers = 0;
-    public Integer memtable_heap_space_in_mb;
-    public Integer memtable_offheap_space_in_mb;
+    @Replaces(oldName = "memtable_heap_space_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound memtable_heap_space;
+    @Replaces(oldName = "memtable_offheap_space_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound memtable_offheap_space;
     public Float memtable_cleanup_threshold = null;
 
+    public static class MemtableOptions
+    {
+        public LinkedHashMap<String, InheritingClass> configurations; // order must be preserved
+
+        public MemtableOptions()
+        {
+        }
+    }
+
+    public MemtableOptions memtable;
+
     // Limit the maximum depth of repair session merkle trees
-    @Deprecated
+    /** @deprecated See  */
+    @Deprecated(since = "4.0")
     public volatile Integer repair_session_max_tree_depth = null;
-    public volatile Integer repair_session_space_in_mb = null;
+    @Replaces(oldName = "repair_session_space_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public volatile DataStorageSpec.IntMebibytesBound repair_session_space = null;
+
+    public volatile int concurrent_merkle_tree_requests = 0;
 
     public volatile boolean use_offheap_merkle_trees = true;
 
@@ -141,7 +231,9 @@ public class Config
     public boolean listen_interface_prefer_ipv6 = false;
     public String broadcast_address;
     public boolean listen_on_broadcast_address = false;
-    public String internode_authenticator;
+    public ParameterizedClass internode_authenticator;
+
+    public boolean traverse_auth_from_root = false;
 
     /*
      * RPC address and interface refer to the address/interface used for the native protocol used to communicate with
@@ -156,83 +248,144 @@ public class Config
     public String broadcast_rpc_address;
     public boolean rpc_keepalive = true;
 
-    public Integer internode_max_message_size_in_bytes;
+    @Replaces(oldName = "internode_max_message_size_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated=true)
+    public IntBytesBound internode_max_message_size;
 
-    public int internode_socket_send_buffer_size_in_bytes = 0;
-    public int internode_socket_receive_buffer_size_in_bytes = 0;
+    @Replaces(oldName = "internode_socket_send_buffer_size_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
+    @Replaces(oldName = "internode_send_buff_size_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
+    public IntBytesBound internode_socket_send_buffer_size = new IntBytesBound("0B");
+    @Replaces(oldName = "internode_socket_receive_buffer_size_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
+    @Replaces(oldName = "internode_recv_buff_size_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
+    public IntBytesBound internode_socket_receive_buffer_size = new IntBytesBound("0B");
 
     // TODO: derive defaults from system memory settings?
-    public int internode_application_send_queue_capacity_in_bytes = 1 << 22; // 4MiB
-    public int internode_application_send_queue_reserve_endpoint_capacity_in_bytes = 1 << 27; // 128MiB
-    public int internode_application_send_queue_reserve_global_capacity_in_bytes = 1 << 29; // 512MiB
+    @Replaces(oldName = "internode_application_send_queue_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
+    public IntBytesBound internode_application_send_queue_capacity = new IntBytesBound("4MiB");
+    @Replaces(oldName = "internode_application_send_queue_reserve_endpoint_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
+    public IntBytesBound internode_application_send_queue_reserve_endpoint_capacity = new IntBytesBound("128MiB");
+    @Replaces(oldName = "internode_application_send_queue_reserve_global_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
+    public IntBytesBound internode_application_send_queue_reserve_global_capacity = new IntBytesBound("512MiB");
 
-    public int internode_application_receive_queue_capacity_in_bytes = 1 << 22; // 4MiB
-    public int internode_application_receive_queue_reserve_endpoint_capacity_in_bytes = 1 << 27; // 128MiB
-    public int internode_application_receive_queue_reserve_global_capacity_in_bytes = 1 << 29; // 512MiB
+    @Replaces(oldName = "internode_application_receive_queue_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
+    public IntBytesBound internode_application_receive_queue_capacity = new IntBytesBound("4MiB");
+    @Replaces(oldName = "internode_application_receive_queue_reserve_endpoint_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
+    public IntBytesBound internode_application_receive_queue_reserve_endpoint_capacity = new IntBytesBound("128MiB");
+    @Replaces(oldName = "internode_application_receive_queue_reserve_global_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
+    public IntBytesBound internode_application_receive_queue_reserve_global_capacity = new IntBytesBound("512MiB");
 
     // Defensive settings for protecting Cassandra from true network partitions. See (CASSANDRA-14358) for details.
     // The amount of time to wait for internode tcp connections to establish.
-    public volatile int internode_tcp_connect_timeout_in_ms = 2000;
+    @Replaces(oldName = "internode_tcp_connect_timeout_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound internode_tcp_connect_timeout = new DurationSpec.IntMillisecondsBound("2s");
     // The amount of time unacknowledged data is allowed on a connection before we throw out the connection
     // Note this is only supported on Linux + epoll, and it appears to behave oddly above a setting of 30000
     // (it takes much longer than 30s) as of Linux 4.12. If you want something that high set this to 0
     // (which picks up the OS default) and configure the net.ipv4.tcp_retries2 sysctl to be ~8.
-    public volatile int internode_tcp_user_timeout_in_ms = 30000;
-    // Similar to internode_tcp_user_timeout_in_ms but used specifically for streaming connection.
+    @Replaces(oldName = "internode_tcp_user_timeout_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound internode_tcp_user_timeout = new DurationSpec.IntMillisecondsBound("30s");
+    // Similar to internode_tcp_user_timeout but used specifically for streaming connection.
     // The default is 5 minutes. Increase it or set it to 0 in order to increase the timeout.
-    public volatile int internode_streaming_tcp_user_timeout_in_ms = 300_000; // 5 minutes
+    @Replaces(oldName = "internode_streaming_tcp_user_timeout_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound internode_streaming_tcp_user_timeout = new DurationSpec.IntMillisecondsBound("300s"); // 5 minutes
 
     public boolean start_native_transport = true;
     public int native_transport_port = 9042;
+    /** @deprecated See CASSANDRA-19392 */
+    @Deprecated(since = "5.0")
     public Integer native_transport_port_ssl = null;
     public int native_transport_max_threads = 128;
-    public int native_transport_max_frame_size_in_mb = 256;
+    @Replaces(oldName = "native_transport_max_frame_size_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound native_transport_max_frame_size = new DataStorageSpec.IntMebibytesBound("16MiB");
+    /** do bcrypt hashing in a limited pool to prevent cpu load spikes; note: any value < 1 will be set to 1 on init **/
+    public int native_transport_max_auth_threads = 4;
+    public volatile DataStorageSpec.LongBytesBound native_transport_max_message_size = null;
     public volatile long native_transport_max_concurrent_connections = -1L;
     public volatile long native_transport_max_concurrent_connections_per_ip = -1L;
     public boolean native_transport_flush_in_batches_legacy = false;
     public volatile boolean native_transport_allow_older_protocols = true;
-    public volatile long native_transport_max_concurrent_requests_in_bytes_per_ip = -1L;
-    public volatile long native_transport_max_concurrent_requests_in_bytes = -1L;
-    public int native_transport_receive_queue_capacity_in_bytes = 1 << 20; // 1MiB
-
-    @Deprecated
-    public Integer native_transport_max_negotiable_protocol_version = null;
+    // Below 2 parameters were fixed in 4.0 + to get default value when ==-1 (old name and value format) or ==null(new name and value format),
+    // not <=0 as it is in previous versions. Throwing config exceptions on < -1
+    @Replaces(oldName = "native_transport_max_concurrent_requests_in_bytes_per_ip", converter = Converters.BYTES_CUSTOM_DATASTORAGE, deprecated = true)
+    public volatile DataStorageSpec.LongBytesBound native_transport_max_request_data_in_flight_per_ip = null;
+    @Replaces(oldName = "native_transport_max_concurrent_requests_in_bytes", converter = Converters.BYTES_CUSTOM_DATASTORAGE, deprecated = true)
+    public volatile DataStorageSpec.LongBytesBound native_transport_max_request_data_in_flight = null;
+    public volatile boolean native_transport_rate_limiting_enabled = false;
+    public volatile int native_transport_max_requests_per_second = 1000000;
+    @Replaces(oldName = "native_transport_receive_queue_capacity_in_bytes", converter = Converters.BYTES_DATASTORAGE, deprecated = true)
+    public IntBytesBound native_transport_receive_queue_capacity = new IntBytesBound("1MiB");
 
     /**
-     * Max size of values in SSTables, in MegaBytes.
-     * Default is the same as the native protocol frame limit: 256Mb.
+     * Max size of values in SSTables, in MebiBytes.
+     * Default is the same as the native protocol frame limit: 256MiB.
      * See AbstractType for how it is used.
      */
-    public int max_value_size_in_mb = 256;
+    @Replaces(oldName = "max_value_size_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound max_value_size = new DataStorageSpec.IntMebibytesBound("256MiB");
 
     public boolean snapshot_before_compaction = false;
     public boolean auto_snapshot = true;
+
+    /**
+     * When auto_snapshot is true and this property
+     * is set, snapshots created by truncation or
+     * drop use this TTL.
+     */
+    public String auto_snapshot_ttl;
+
     public volatile long snapshot_links_per_second = 0;
 
     /* if the size of columns or super-columns are more than this, indexing will kick in */
-    public int column_index_size_in_kb = 64;
-    public volatile int column_index_cache_size_in_kb = 2;
-    public volatile int batch_size_warn_threshold_in_kb = 5;
-    public volatile int batch_size_fail_threshold_in_kb = 50;
+    @Replaces(oldName = "column_index_size_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
+    public volatile DataStorageSpec.IntKibibytesBound column_index_size;
+    @Replaces(oldName = "column_index_cache_size_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
+    public volatile DataStorageSpec.IntKibibytesBound column_index_cache_size = new DataStorageSpec.IntKibibytesBound("2KiB");
+    @Replaces(oldName = "batch_size_warn_threshold_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
+    public volatile DataStorageSpec.IntKibibytesBound batch_size_warn_threshold = new DataStorageSpec.IntKibibytesBound("5KiB");
+    @Replaces(oldName = "batch_size_fail_threshold_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
+    public volatile DataStorageSpec.IntKibibytesBound batch_size_fail_threshold = new DataStorageSpec.IntKibibytesBound("50KiB");
+
     public Integer unlogged_batch_across_partitions_warn_threshold = 10;
     public volatile Integer concurrent_compactors;
-    public volatile int compaction_throughput_mb_per_sec = 16;
-    public volatile int compaction_large_partition_warning_threshold_mb = 100;
-    public int min_free_space_per_drive_in_mb = 50;
+    @Replaces(oldName = "compaction_throughput_mb_per_sec", converter = Converters.MEBIBYTES_PER_SECOND_DATA_RATE, deprecated = true)
+    public volatile DataRateSpec.LongBytesPerSecondBound compaction_throughput = new DataRateSpec.LongBytesPerSecondBound("64MiB/s");
+    @Replaces(oldName = "min_free_space_per_drive_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound min_free_space_per_drive = new DataStorageSpec.IntMebibytesBound("50MiB");
+
+    public DataStorageSpec.IntKibibytesBound compressed_read_ahead_buffer_size = new DataStorageSpec.IntKibibytesBound("256KiB");
+
+    // fraction of free disk space available for compaction after min free space is subtracted
+    public volatile Double max_space_usable_for_compactions_in_percentage = .95;
 
     public volatile int concurrent_materialized_view_builders = 1;
     public volatile int reject_repair_compaction_threshold = Integer.MAX_VALUE;
 
+    // The number of executors to use for building secondary indexes
+    public volatile int concurrent_index_builders = 2;
+
     /**
      * @deprecated retry support removed on CASSANDRA-10992
      */
-    @Deprecated
+    /** @deprecated See CASSANDRA-17378 */
+    @Deprecated(since = "4.1")
     public int max_streaming_retries = 3;
 
-    public volatile int stream_throughput_outbound_megabits_per_sec = 200;
-    public volatile int inter_dc_stream_throughput_outbound_megabits_per_sec = 200;
+    @Replaces(oldName = "stream_throughput_outbound_megabits_per_sec", converter = Converters.MEGABITS_TO_BYTES_PER_SECOND_DATA_RATE, deprecated = true)
+    public volatile DataRateSpec.LongBytesPerSecondBound stream_throughput_outbound = new DataRateSpec.LongBytesPerSecondBound("24MiB/s");
+    @Replaces(oldName = "inter_dc_stream_throughput_outbound_megabits_per_sec", converter = Converters.MEGABITS_TO_BYTES_PER_SECOND_DATA_RATE, deprecated = true)
+    public volatile DataRateSpec.LongBytesPerSecondBound inter_dc_stream_throughput_outbound = new DataRateSpec.LongBytesPerSecondBound("24MiB/s");
+
+    public volatile DataRateSpec.LongBytesPerSecondBound entire_sstable_stream_throughput_outbound = new DataRateSpec.LongBytesPerSecondBound("24MiB/s");
+    public volatile DataRateSpec.LongBytesPerSecondBound entire_sstable_inter_dc_stream_throughput_outbound = new DataRateSpec.LongBytesPerSecondBound("24MiB/s");
 
     public String[] data_file_directories = new String[0];
+
+    public static class SSTableConfig
+    {
+        public String selected_format = BtiFormat.NAME;
+        public Map<String, Map<String, String>> format = new HashMap<>();
+    }
+
+    public final SSTableConfig sstable = new SSTableConfig();
 
     /**
      * The directory to use for storing the system keyspaces data.
@@ -242,94 +395,139 @@ public class Config
 
     public String saved_caches_directory;
 
+    public String metadata_directory;
+
     // Commit Log
     public String commitlog_directory;
-    public Integer commitlog_total_space_in_mb;
+    @Replaces(oldName = "commitlog_total_space_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound commitlog_total_space;
     public CommitLogSync commitlog_sync;
-
-    /**
-     * @deprecated since 4.0 This value was near useless, and we're not using it anymore
-     */
-    public double commitlog_sync_batch_window_in_ms = Double.NaN;
-    public double commitlog_sync_group_window_in_ms = Double.NaN;
-    public int commitlog_sync_period_in_ms;
-    public int commitlog_segment_size_in_mb = 32;
+    @Replaces(oldName = "commitlog_sync_group_window_in_ms", converter = Converters.MILLIS_DURATION_DOUBLE, deprecated = true)
+    public DurationSpec.IntMillisecondsBound commitlog_sync_group_window = new DurationSpec.IntMillisecondsBound("0ms");
+    @Replaces(oldName = "commitlog_sync_period_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public DurationSpec.IntMillisecondsBound commitlog_sync_period = new DurationSpec.IntMillisecondsBound("0ms");
+    @Replaces(oldName = "commitlog_segment_size_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound commitlog_segment_size = new DataStorageSpec.IntMebibytesBound("32MiB");
     public ParameterizedClass commitlog_compression;
-    public FlushCompression flush_compression = FlushCompression.fast;
+    public FlushCompression flush_compression;
     public int commitlog_max_compression_buffers_in_pool = 3;
-    public Integer periodic_commitlog_sync_lag_block_in_ms;
+    public DiskAccessMode commitlog_disk_access_mode = DiskAccessMode.legacy;
+    @Replaces(oldName = "periodic_commitlog_sync_lag_block_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public DurationSpec.IntMillisecondsBound periodic_commitlog_sync_lag_block;
     public TransparentDataEncryptionOptions transparent_data_encryption_options = new TransparentDataEncryptionOptions();
 
-    public Integer max_mutation_size_in_kb;
+    @Replaces(oldName = "max_mutation_size_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
+    public DataStorageSpec.IntKibibytesBound max_mutation_size;
+
+    public StorageFlagsConfig storage_flags = new StorageFlagsConfig();
 
     // Change-data-capture logs
     public boolean cdc_enabled = false;
+    // When true, new CDC mutations are rejected/blocked when reaching max CDC storage.
+    // When false, new CDC mutations can always be added. But it will remove the oldest CDC commit log segment on full.
+    public volatile boolean cdc_block_writes = true;
+    // When true, CDC data in SSTable go through commit logs during internodes streaming, e.g. repair
+    // When false, it behaves the same as normal streaming.
+    public volatile boolean cdc_on_repair_enabled = true;
     public String cdc_raw_directory;
-    public int cdc_total_space_in_mb = 0;
-    public int cdc_free_space_check_interval_ms = 250;
-
-    @Deprecated
-    public int commitlog_periodic_queue_size = -1;
+    @Replaces(oldName = "cdc_total_space_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound cdc_total_space = new DataStorageSpec.IntMebibytesBound("0MiB");
+    @Replaces(oldName = "cdc_free_space_check_interval_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public DurationSpec.IntMillisecondsBound cdc_free_space_check_interval = new DurationSpec.IntMillisecondsBound("250ms");
 
     public String endpoint_snitch;
     public boolean dynamic_snitch = true;
-    public int dynamic_snitch_update_interval_in_ms = 100;
-    public int dynamic_snitch_reset_interval_in_ms = 600000;
+    @Replaces(oldName = "dynamic_snitch_update_interval_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public DurationSpec.IntMillisecondsBound dynamic_snitch_update_interval = new DurationSpec.IntMillisecondsBound("100ms");
+    @Replaces(oldName = "dynamic_snitch_reset_interval_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public DurationSpec.IntMillisecondsBound dynamic_snitch_reset_interval = new DurationSpec.IntMillisecondsBound("10m");
     public double dynamic_snitch_badness_threshold = 1.0;
+
+    public String failure_detector = "FailureDetector";
 
     public EncryptionOptions.ServerEncryptionOptions server_encryption_options = new EncryptionOptions.ServerEncryptionOptions();
     public EncryptionOptions client_encryption_options = new EncryptionOptions();
 
     public InternodeCompression internode_compression = InternodeCompression.none;
 
-    public int hinted_handoff_throttle_in_kb = 1024;
-    public int batchlog_replay_throttle_in_kb = 1024;
+    @Replaces(oldName = "hinted_handoff_throttle_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
+    public DataStorageSpec.IntKibibytesBound hinted_handoff_throttle = new DataStorageSpec.IntKibibytesBound("1024KiB");
+    @Replaces(oldName = "batchlog_replay_throttle_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
+    public DataStorageSpec.IntKibibytesBound batchlog_replay_throttle = new DataStorageSpec.IntKibibytesBound("1024KiB");
+    public BatchlogEndpointStrategy batchlog_endpoint_strategy = BatchlogEndpointStrategy.random_remote;
     public int max_hints_delivery_threads = 2;
-    public int hints_flush_period_in_ms = 10000;
-    public int max_hints_file_size_in_mb = 128;
+    @Replaces(oldName = "hints_flush_period_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public DurationSpec.IntMillisecondsBound hints_flush_period = new DurationSpec.IntMillisecondsBound("10s");
+    @Replaces(oldName = "max_hints_file_size_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound max_hints_file_size = new DataStorageSpec.IntMebibytesBound("128MiB");
+    public volatile DataStorageSpec.LongBytesBound max_hints_size_per_host = new DataStorageSpec.LongBytesBound("0B"); // 0 means disabled
+
     public ParameterizedClass hints_compression;
+    public volatile boolean auto_hints_cleanup_enabled = false;
+    public volatile boolean transfer_hints_on_decommission = true;
+    public volatile boolean use_creation_time_for_hint_ttl = true;
 
     public volatile boolean incremental_backups = false;
-    public boolean trickle_fsync = false;
-    public int trickle_fsync_interval_in_kb = 10240;
+    public boolean trickle_fsync = true;
+    @Replaces(oldName = "trickle_fsync_interval_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
+    public DataStorageSpec.IntKibibytesBound trickle_fsync_interval = new DataStorageSpec.IntKibibytesBound("10240KiB");
 
-    public volatile int sstable_preemptive_open_interval_in_mb = 50;
+    @Nullable
+    @Replaces(oldName = "sstable_preemptive_open_interval_in_mb", converter = Converters.NEGATIVE_MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public volatile DataStorageSpec.IntMebibytesBound sstable_preemptive_open_interval = new DataStorageSpec.IntMebibytesBound("50MiB");
 
+    /** @deprecated CPU-intensive optimization that visibly slows down compaction but does not provide a clear benefit (see STAR-782) */
+    @Deprecated(since = "CC 4.0")
     public volatile boolean key_cache_migrate_during_compaction = true;
-    public Long key_cache_size_in_mb = null;
-    public volatile int key_cache_save_period = 14400;
+    public volatile boolean key_cache_invalidate_after_sstable_deletion = false;
     public volatile int key_cache_keys_to_save = Integer.MAX_VALUE;
+    @Replaces(oldName = "key_cache_size_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_LONG, deprecated = true)
+    public DataStorageSpec.LongMebibytesBound key_cache_size = null;
+    @Replaces(oldName = "key_cache_save_period", converter = Converters.SECONDS_CUSTOM_DURATION)
+    public volatile DurationSpec.IntSecondsBound key_cache_save_period = new DurationSpec.IntSecondsBound("4h");
 
     public String row_cache_class_name = "org.apache.cassandra.cache.OHCProvider";
-    public long row_cache_size_in_mb = 0;
-    public volatile int row_cache_save_period = 0;
+    @Replaces(oldName = "row_cache_size_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_LONG, deprecated = true)
+    public DataStorageSpec.LongMebibytesBound row_cache_size = new DataStorageSpec.LongMebibytesBound("0MiB");
+    @Replaces(oldName = "row_cache_save_period", converter = Converters.SECONDS_CUSTOM_DURATION)
+    public volatile DurationSpec.IntSecondsBound row_cache_save_period = new DurationSpec.IntSecondsBound("0s");
     public volatile int row_cache_keys_to_save = Integer.MAX_VALUE;
 
-    public Long counter_cache_size_in_mb = null;
-    public volatile int counter_cache_save_period = 7200;
+    @Replaces(oldName = "counter_cache_size_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_LONG, deprecated = true)
+    public DataStorageSpec.LongMebibytesBound counter_cache_size = null;
+    @Replaces(oldName = "counter_cache_save_period", converter = Converters.SECONDS_CUSTOM_DURATION)
+    public volatile DurationSpec.IntSecondsBound counter_cache_save_period = new DurationSpec.IntSecondsBound("7200s");
     public volatile int counter_cache_keys_to_save = Integer.MAX_VALUE;
+
+    public DataStorageSpec.LongMebibytesBound paxos_cache_size = null;
+
+    @Replaces(oldName = "cache_load_timeout_seconds", converter = Converters.NEGATIVE_SECONDS_DURATION, deprecated = true)
+    public DurationSpec.IntSecondsBound cache_load_timeout = new DurationSpec.IntSecondsBound("30s");
 
     private static boolean isClientMode = false;
     private static Supplier<Config> overrideLoadConfig = null;
 
-    public Integer networking_cache_size_in_mb;
+    @Replaces(oldName = "networking_cache_size_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound networking_cache_size;
 
-    public Integer file_cache_size_in_mb;
+    @Replaces(oldName = "file_cache_size_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound file_cache_size;
 
-    public boolean file_cache_enabled = Boolean.getBoolean("cassandra.file_cache_enabled");
+    public boolean file_cache_enabled = FILE_CACHE_ENABLED.getBoolean();
 
     /**
-     * Because of the current {@link org.apache.cassandra.utils.memory.BufferPool} slab sizes of 64 kb, we
-     * store in the file cache buffers that divide 64 kb, so we need to round the buffer sizes to powers of two.
+     * Because of the current {@link org.apache.cassandra.utils.memory.BufferPool} slab sizes of 64 KiB, we
+     * store in the file cache buffers that divide 64 KiB, so we need to round the buffer sizes to powers of two.
      * This boolean controls weather they are rounded up or down. Set it to true to round up to the
      * next power of two, set it to false to round down to the previous power of two. Note that buffer sizes are
-     * already rounded to 4 kb and capped between 4 kb minimum and 64 kb maximum by the {@link DiskOptimizationStrategy}.
+     * already rounded to 4 KiB and capped between 4 KiB minimum and 64 kb maximum by the {@link DiskOptimizationStrategy}.
      * By default, this boolean is set to round down when {@link #disk_optimization_strategy} is {@code ssd},
      * and to round up when it is {@code spinning}.
      */
     public Boolean file_cache_round_up;
 
-    @Deprecated
+    /** @deprecated See CASSANDRA-15358 */
+    @Deprecated(since = "4.0")
     public boolean buffer_pool_use_heap_if_exhausted;
 
     public DiskOptimizationStrategy disk_optimization_strategy = DiskOptimizationStrategy.ssd;
@@ -340,22 +538,37 @@ public class Config
 
     public boolean inter_dc_tcp_nodelay = true;
 
-    public MemtableAllocationType memtable_allocation_type = MemtableAllocationType.heap_buffers;
+    public MemtableAllocationType memtable_allocation_type = MemtableAllocationType.offheap_objects;
+
+    public volatile boolean read_thresholds_enabled = false;
+    public volatile DataStorageSpec.LongBytesBound coordinator_read_size_warn_threshold = null;
+    public volatile DataStorageSpec.LongBytesBound coordinator_read_size_fail_threshold = null;
+    public volatile DataStorageSpec.LongBytesBound local_read_size_warn_threshold = null;
+    public volatile DataStorageSpec.LongBytesBound local_read_size_fail_threshold = null;
+    public volatile DataStorageSpec.LongBytesBound row_index_read_size_warn_threshold = null;
+    public volatile DataStorageSpec.LongBytesBound row_index_read_size_fail_threshold = null;
 
     public volatile int tombstone_warn_threshold = 1000;
     public volatile int tombstone_failure_threshold = 100000;
 
     public final ReplicaFilteringProtectionOptions replica_filtering_protection = new ReplicaFilteringProtectionOptions();
 
-    public volatile Long index_summary_capacity_in_mb;
-    public volatile int index_summary_resize_interval_in_minutes = 60;
+    @Replaces(oldName = "index_summary_capacity_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_LONG, deprecated = true)
+    public volatile DataStorageSpec.LongMebibytesBound index_summary_capacity;
+    @Nullable
+    @Replaces(oldName = "index_summary_resize_interval_in_minutes", converter = Converters.MINUTES_CUSTOM_DURATION, deprecated = true)
+    public volatile DurationSpec.IntMinutesBound index_summary_resize_interval = new DurationSpec.IntMinutesBound("60m");
 
-    public int gc_log_threshold_in_ms = 200;
-    public int gc_warn_threshold_in_ms = 1000;
+    @Replaces(oldName = "gc_log_threshold_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound gc_log_threshold = new DurationSpec.IntMillisecondsBound("200ms");
+    @Replaces(oldName = "gc_warn_threshold_in_ms", converter = Converters.MILLIS_DURATION_INT, deprecated = true)
+    public volatile DurationSpec.IntMillisecondsBound gc_warn_threshold = new DurationSpec.IntMillisecondsBound("1s");
 
     // TTL for different types of trace events.
-    public int tracetype_query_ttl = (int) TimeUnit.DAYS.toSeconds(1);
-    public int tracetype_repair_ttl = (int) TimeUnit.DAYS.toSeconds(7);
+    @Replaces(oldName = "tracetype_query_ttl", converter = Converters.SECONDS_DURATION, deprecated=true)
+    public DurationSpec.IntSecondsBound trace_type_query_ttl = new DurationSpec.IntSecondsBound("1d");
+    @Replaces(oldName = "tracetype_repair_ttl", converter = Converters.SECONDS_DURATION, deprecated=true)
+    public DurationSpec.IntSecondsBound trace_type_repair_ttl = new DurationSpec.IntSecondsBound("7d");
 
     /**
      * Maintain statistics on whether writes achieve the ideal consistency level
@@ -363,40 +576,53 @@ public class Config
      */
     public volatile ConsistencyLevel ideal_consistency_level = null;
 
-    /*
-     * Strategy to use for coalescing messages in {@link OutboundConnections}.
-     * Can be fixed, movingaverage, timehorizon, disabled. Setting is case and leading/trailing
-     * whitespace insensitive. You can also specify a subclass of
-     * {@link org.apache.cassandra.utils.CoalescingStrategies.CoalescingStrategy} by name.
-     */
-    public String otc_coalescing_strategy = "DISABLED";
-
-    /*
-     * How many microseconds to wait for coalescing. For fixed strategy this is the amount of time after the first
-     * message is received before it will be sent with any accompanying messages. For moving average this is the
-     * maximum amount of time that will be waited as well as the interval at which messages must arrive on average
-     * for coalescing to be enabled.
-     */
-    public static final int otc_coalescing_window_us_default = 200;
-    public int otc_coalescing_window_us = otc_coalescing_window_us_default;
-    public int otc_coalescing_enough_coalesced_messages = 8;
-
+    /** @deprecated See CASSANDRA-17404 */
+    @Deprecated(since = "4.1")
     public int windows_timer_interval = 0;
 
+    @Deprecated(since = "4.0")
+    public String otc_coalescing_strategy = "DISABLED";
+
+    @Deprecated(since = "4.0")
+    public static final int otc_coalescing_window_us_default = 200;
+    @Deprecated(since = "4.0")
+    public int otc_coalescing_window_us = otc_coalescing_window_us_default;
+    @Deprecated(since = "4.0")
+    public int otc_coalescing_enough_coalesced_messages = 8;
+    @Deprecated(since = "4.0")
+    public static final int otc_backlog_expiration_interval_ms_default = 200;
+    @Deprecated(since = "4.0")
+    public volatile int otc_backlog_expiration_interval_ms = otc_backlog_expiration_interval_ms_default;
+
     /**
-     * Size of the CQL prepared statements cache in MB.
-     * Defaults to 1/256th of the heap size or 10MB, whichever is greater.
+     * Size of the CQL prepared statements cache in MiB.
+     * Defaults to 1/256th of the heap size or 10MiB, whichever is greater.
      */
-    public Long prepared_statements_cache_size_mb = null;
+    @Replaces(oldName = "prepared_statements_cache_size_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_LONG, deprecated = true)
+    public DataStorageSpec.LongMebibytesBound prepared_statements_cache_size = null;
 
-    public boolean enable_user_defined_functions = false;
-    public boolean enable_scripted_user_defined_functions = false;
+    @Replaces(oldName = "enable_user_defined_functions", converter = Converters.IDENTITY, deprecated = true)
+    public boolean user_defined_functions_enabled = false;
 
-    public boolean enable_materialized_views = false;
+    /** @deprecated See CASSANDRA-18252 */
+    @Deprecated(since = "5.0")
+    @Replaces(oldName = "enable_scripted_user_defined_functions", converter = Converters.IDENTITY, deprecated = true)
+    public boolean scripted_user_defined_functions_enabled = false;
 
-    public boolean enable_transient_replication = false;
+    @Replaces(oldName = "enable_materialized_views", converter = Converters.IDENTITY, deprecated = true)
+    public boolean materialized_views_enabled = false;
 
-    public boolean enable_sasi_indexes = false;
+    @Replaces(oldName = "enable_transient_replication", converter = Converters.IDENTITY, deprecated = true)
+    public boolean transient_replication_enabled = false;
+
+    @Deprecated(since = "CC5") // SASI has been removed altogether, StartupChecks fail if this is true
+    @Replaces(oldName = "enable_sasi_indexes", converter = Converters.IDENTITY, deprecated = true)
+    public boolean sasi_indexes_enabled = false;
+
+    @Replaces(oldName = "enable_drop_compact_storage", converter = Converters.IDENTITY, deprecated = true)
+    public volatile boolean drop_compact_storage_enabled = false;
+
+    public volatile boolean use_statements_enabled = true;
 
     /**
      * Optionally disable asynchronous UDF execution.
@@ -406,32 +632,54 @@ public class Config
      * "tell" a user that there's something really wrong with the UDF.
      * When you disable async UDF execution, users MUST pay attention to read-timeouts since these may indicate
      * UDFs that run too long or forever - and this can destabilize the cluster.
+     *
+     * This requires allow_insecure_udfs to be true
      */
-    public boolean enable_user_defined_functions_threads = true;
+    // Below parameter is not presented in cassandra.yaml but to be on the safe side that no one was directly using it
+    // I still added backward compatibility (CASSANDRA-15234)
+    @Replaces(oldName = "enable_user_defined_functions_threads", converter = Converters.IDENTITY, deprecated = true)
+    public boolean user_defined_functions_threads_enabled = true;
+
+    /**
+     * Set this to true to allow running insecure UDFs.
+     */
+    public boolean allow_insecure_udfs = false;
+
+    /**
+     * Set this to allow UDFs accessing java.lang.System.* methods, which basically allows UDFs to execute any arbitrary code on the system.
+     */
+    public boolean allow_extra_insecure_udfs = false;
+
+    public boolean dynamic_data_masking_enabled = false;
+
     /**
      * Time in milliseconds after a warning will be emitted to the log and to the client that a UDF runs too long.
-     * (Only valid, if enable_user_defined_functions_threads==true)
+     * (Only valid, if user_defined_functions_threads_enabled==true)
      */
-    public long user_defined_function_warn_timeout = 500;
+    @Replaces(oldName = "user_defined_function_warn_timeout", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public DurationSpec.LongMillisecondsBound user_defined_functions_warn_timeout = new DurationSpec.LongMillisecondsBound("500ms");
     /**
      * Time in milliseconds after a fatal UDF run-time situation is detected and action according to
      * user_function_timeout_policy will take place.
-     * (Only valid, if enable_user_defined_functions_threads==true)
+     * (Only valid, if user_defined_functions_threads_enabled==true)
      */
-    public long user_defined_function_fail_timeout = 1500;
+    @Replaces(oldName = "user_defined_function_fail_timeout", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public DurationSpec.LongMillisecondsBound user_defined_functions_fail_timeout = new DurationSpec.LongMillisecondsBound("1500ms");
     /**
-     * Defines what to do when a UDF ran longer than user_defined_function_fail_timeout.
+     * Defines what to do when a UDF ran longer than user_defined_functions_fail_timeout.
      * Possible options are:
      * - 'die' - i.e. it is able to emit a warning to the client before the Cassandra Daemon will shut down.
      * - 'die_immediate' - shut down C* daemon immediately (effectively prevent the chance that the client will receive a warning).
      * - 'ignore' - just log - the most dangerous option.
-     * (Only valid, if enable_user_defined_functions_threads==true)
+     * (Only valid, if user_defined_functions_threads_enabled==true)
      */
     public UserFunctionTimeoutPolicy user_function_timeout_policy = UserFunctionTimeoutPolicy.die;
 
-    @Deprecated
+    /** @deprecated See CASSANDRA-15375 */
+    @Deprecated(since = "4.0")
     public volatile boolean back_pressure_enabled = false;
-    @Deprecated
+    /** @deprecated See CASSANDRA-15375 */
+    @Deprecated(since = "4.0")
     public volatile ParameterizedClass back_pressure_strategy;
 
     public volatile int concurrent_validations;
@@ -463,6 +711,9 @@ public class Config
     public volatile boolean automatic_sstable_upgrade = false;
     public volatile int max_concurrent_automatic_sstable_upgrades = 1;
     public boolean stream_entire_sstables = true;
+    public boolean netty_zerocopy_enabled = true;
+
+    public volatile boolean skip_stream_disk_space_check = false;
 
     public volatile AuditLogOptions audit_logging_options = new AuditLogOptions();
     public volatile FullQueryLoggerOptions full_query_logging_options = new FullQueryLoggerOptions();
@@ -470,6 +721,10 @@ public class Config
     public CorruptedTombstoneStrategy corrupted_tombstone_strategy = CorruptedTombstoneStrategy.disabled;
 
     public volatile boolean diagnostic_events_enabled = false;
+
+    // Default keyspace replication factors allow validation of newly created keyspaces
+    // and good defaults if no replication factor is provided by the user
+    public volatile int default_keyspace_rf = 1;
 
     /**
      * flags for enabling tracking repaired state of data during reads
@@ -498,11 +753,61 @@ public class Config
     public volatile boolean snapshot_on_repaired_data_mismatch = false;
 
     /**
-     * number of seconds to set nowInSec into the future when performing validation previews against repaired data
+     * Number of seconds to set nowInSec into the future when performing validation previews against repaired data
      * this (attempts) to prevent a race where validations on different machines are started on different sides of
      * a tombstone being compacted away
      */
-    public volatile int validation_preview_purge_head_start_in_sec = 60 * 60;
+
+    @Replaces(oldName = "validation_preview_purge_head_start_in_sec", converter = Converters.NEGATIVE_SECONDS_DURATION, deprecated = true)
+    public volatile DurationSpec.IntSecondsBound validation_preview_purge_head_start = new DurationSpec.IntSecondsBound("3600s");
+
+    public boolean auth_cache_warming_enabled = false;
+
+    // Using String instead of ConsistencyLevel here to keep static initialization from cascading and starting
+    // threads during tool usage mode. See CASSANDRA-12988 and DatabaseDescriptorRefTest for details
+    public volatile String auth_read_consistency_level = "LOCAL_QUORUM";
+    public volatile String auth_write_consistency_level = "EACH_QUORUM";
+
+    /** This feature allows denying access to operations on certain key partitions, intended for use by operators to
+     * provide another tool to manage cluster health vs application access. See CASSANDRA-12106 and CEP-13 for more details.
+     */
+    public volatile boolean partition_denylist_enabled = false;
+
+    public volatile boolean denylist_writes_enabled = true;
+
+    public volatile boolean denylist_reads_enabled = true;
+
+    public volatile boolean denylist_range_reads_enabled = true;
+
+    public DurationSpec.IntSecondsBound denylist_refresh = new DurationSpec.IntSecondsBound("600s");
+
+    public DurationSpec.IntSecondsBound denylist_initial_load_retry = new DurationSpec.IntSecondsBound("5s");
+
+    /** We cap the number of denylisted keys allowed per table to keep things from growing unbounded. Operators will
+     * receive warnings and only denylist_max_keys_per_table in natural query ordering will be processed on overflow.
+     */
+    public volatile int denylist_max_keys_per_table = 1000;
+
+    /** We cap the total number of denylisted keys allowed in the cluster to keep things from growing unbounded.
+     * Operators will receive warnings on initial cache load that there are too many keys and be directed to trim
+     * down the entries to within the configured limits.
+     */
+    public volatile int denylist_max_keys_total = 10000;
+
+    /** Since the denylist in many ways serves to protect the health of the cluster from partitions operators have identified
+     * as being in a bad state, we usually want more robustness than just CL.ONE on operations to/from these tables to
+     * ensure that these safeguards are in place. That said, we allow users to configure this if they're so inclined.
+     */
+    public ConsistencyLevel denylist_consistency_level = ConsistencyLevel.QUORUM;
+
+    /*
+     * Toggles to turn on the logging or rejection of operations for token ranges that the node does not own,
+     * or is not about to acquire.
+     */
+    public volatile boolean log_out_of_token_range_requests = true;
+    public volatile boolean reject_out_of_token_range_requests = false;
+    public boolean emulate_dbaas_defaults = false;
+    public boolean hcd_guardrail_defaults = false;
 
     /**
      * The intial capacity for creating RangeTombstoneList.
@@ -513,10 +818,14 @@ public class Config
      */
     public volatile double range_tombstone_list_growth_factor = 1.5;
 
+    public StorageAttachedIndexOptions sai_options = new StorageAttachedIndexOptions();
+
+    public volatile int aggregation_subpage_size_in_kb = 2048;
+
     /**
-     * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}
+     * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()} See CASSANDRA-12550
      */
-    @Deprecated
+    @Deprecated(since = "3.10")
     public static boolean isClientMode()
     {
         return isClientMode;
@@ -540,27 +849,358 @@ public class Config
     public volatile boolean check_for_duplicate_rows_during_reads = true;
     public volatile boolean check_for_duplicate_rows_during_compaction = true;
 
-    public boolean autocompaction_on_startup_enabled = Boolean.parseBoolean(System.getProperty("cassandra.autocompaction_on_startup_enabled", "true"));
+    public boolean autocompaction_on_startup_enabled = AUTOCOMPACTION_ON_STARTUP_ENABLED.getBoolean();
 
     // see CASSANDRA-3200 / CASSANDRA-16274
     public volatile boolean auto_optimise_inc_repair_streams = false;
     public volatile boolean auto_optimise_full_repair_streams = false;
     public volatile boolean auto_optimise_preview_repair_streams = false;
 
+    // see CASSANDRA-17048 and the comment in cassandra.yaml
+    public boolean uuid_sstable_identifiers_enabled = true;
+
     /**
      * Client mode means that the process is a pure client, that uses C* code base but does
      * not read or write local C* database files.
      *
-     * @deprecated migrate to {@link DatabaseDescriptor#clientInitialization(boolean)}
+     * @deprecated migrate to {@link DatabaseDescriptor#clientInitialization(boolean)} See CASSANDRA-12550
      */
-    @Deprecated
+    @Deprecated(since = "3.10")
     public static void setClientMode(boolean clientMode)
     {
         isClientMode = clientMode;
     }
 
-    public volatile int table_count_warn_threshold = 150;
-    public volatile int keyspace_count_warn_threshold = 40;
+    public volatile int consecutive_message_errors_threshold = 1;
+
+    public volatile SubnetGroups client_error_reporting_exclusions = new SubnetGroups();
+    public volatile SubnetGroups internode_error_reporting_exclusions = new SubnetGroups();
+    public volatile boolean invalid_legacy_protocol_magic_no_spam_enabled = false;
+
+    @Replaces(oldName = "keyspace_count_warn_threshold", converter = Converters.KEYSPACE_COUNT_THRESHOLD_TO_GUARDRAIL, deprecated = true)
+    public volatile int keyspaces_warn_threshold = -1;
+    public volatile int keyspaces_fail_threshold = -1;
+    @Replaces(oldName = "table_count_warn_threshold", converter = Converters.TABLE_COUNT_THRESHOLD_TO_GUARDRAIL, deprecated = true)
+    public volatile int tables_warn_threshold = -1;
+    public volatile int tables_fail_threshold = -1;
+    public volatile int columns_per_table_warn_threshold = -1;
+    public volatile int columns_per_table_fail_threshold = -1;
+    // Legacy 2i guardrail
+    public volatile int secondary_indexes_per_table_warn_threshold = -1;
+    public volatile int secondary_indexes_per_table_fail_threshold = -1;
+    public volatile int sasi_indexes_per_table_warn_threshold = -1;
+    public volatile int sasi_indexes_per_table_fail_threshold = -1;
+    // SAI indexes guardrail
+    public volatile int sai_indexes_per_table_warn_threshold = -1;
+    public volatile int sai_indexes_per_table_fail_threshold = -1;
+    public volatile int sai_indexes_total_warn_threshold = -1;
+    public volatile int sai_indexes_total_fail_threshold = -1;
+    // Trusted custom index implementations guardrail (cassandra.trusted_index_implementations)
+    public volatile int trusted_indexes_per_table_warn_threshold = -1;
+    public volatile int trusted_indexes_per_table_fail_threshold = -1;
+    public volatile int materialized_views_per_table_warn_threshold = -1;
+    public volatile int materialized_views_per_table_fail_threshold = -1;
+    public volatile int page_size_warn_threshold = -1;
+    public volatile int page_size_fail_threshold = -1;
+    public volatile DataStorageSpec.IntBytesBound page_weight_warn_threshold = null;
+    public volatile DataStorageSpec.IntBytesBound page_weight_fail_threshold = null;
+    public volatile int partition_keys_in_select_warn_threshold = -1;
+    public volatile int partition_keys_in_select_fail_threshold = -1;
+    public volatile int in_select_cartesian_product_warn_threshold = -1;
+    public volatile int in_select_cartesian_product_fail_threshold = -1;
+    public volatile Set<String> table_properties_warned = Collections.emptySet();
+    public volatile Set<String> table_properties_ignored = Collections.emptySet();
+    public volatile Set<String> table_properties_disallowed = Collections.emptySet();
+    public volatile Set<ConsistencyLevel> read_consistency_levels_warned = Collections.emptySet();
+    public volatile Set<ConsistencyLevel> read_consistency_levels_disallowed = Collections.emptySet();
+    public volatile Set<ConsistencyLevel> write_consistency_levels_warned = Collections.emptySet();
+    public volatile Set<ConsistencyLevel> write_consistency_levels_disallowed = Collections.emptySet();
+    public volatile boolean user_timestamps_enabled = true;
+    public volatile boolean alter_table_enabled = true;
+    public volatile boolean group_by_enabled = true;
+    public volatile boolean logged_batch_enabled = true;
+    public volatile boolean drop_truncate_table_enabled = true;
+    public volatile boolean drop_keyspace_enabled = true;
+    public volatile boolean secondary_indexes_enabled = true;
+
+    /**
+     * If we encounter a Gossip bug where {@link org.apache.cassandra.gms.Gossiper#getMinVersion} is
+     * unable to accurately report a minimum version for the cluster, optionally force the optimized
+     * index status format added in CASSANDRA-20058.
+     */
+    public volatile boolean force_optimized_index_status_format = false;
+
+    public volatile String default_secondary_index = CassandraIndex.NAME;
+    public volatile boolean default_secondary_index_enabled = true;
+
+    public volatile boolean uncompressed_tables_enabled = true;
+    public volatile boolean compact_tables_enabled = true;
+    public volatile boolean read_before_write_list_operations_enabled = true;
+    public volatile boolean allow_filtering_enabled = true;
+    public volatile boolean simplestrategy_enabled = true;
+    public volatile boolean counter_enabled = true;
+    @Replaces(oldName = "compaction_large_partition_warning_threshold_mb", converter = Converters.LONG_BYTES_DATASTORAGE_MEBIBYTES_INT, deprecated = true)
+    @Replaces(oldName = "compaction_large_partition_warning_threshold", converter = Converters.LONG_BYTES_DATASTORAGE_MEBIBYTES_DATASTORAGE, deprecated = true)
+    public volatile DataStorageSpec.LongBytesBound partition_size_warn_threshold = null;
+    public volatile DataStorageSpec.LongBytesBound partition_size_fail_threshold = null;
+    @Replaces(oldName = "compaction_tombstone_warning_threshold", converter = Converters.INTEGER_PRIMITIVE_LONG, deprecated = true)
+    public volatile long partition_tombstones_warn_threshold = -1;
+    public volatile long partition_tombstones_fail_threshold = -1;
+    public volatile DataStorageSpec.LongBytesBound column_value_size_warn_threshold = null;
+    public volatile DataStorageSpec.LongBytesBound column_value_size_fail_threshold = null;
+    public volatile DataStorageSpec.LongBytesBound collection_size_warn_threshold = null;
+    public volatile DataStorageSpec.LongBytesBound collection_size_fail_threshold = null;
+    public volatile int items_per_collection_warn_threshold = -1;
+    public volatile int items_per_collection_fail_threshold = -1;
+    public volatile int fields_per_udt_warn_threshold = -1;
+    public volatile int fields_per_udt_fail_threshold = -1;
+    public volatile boolean vector_type_enabled = true;
+    public volatile int vector_dimensions_warn_threshold = -1;
+    public volatile int vector_dimensions_fail_threshold = -1;
+    public volatile int sai_ann_rerank_k_warn_threshold = -1;
+    public volatile int sai_ann_rerank_k_fail_threshold = 4 * CassandraRelevantProperties.SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
+    public volatile int data_disk_usage_percentage_warn_threshold = -1;
+    public volatile int data_disk_usage_percentage_fail_threshold = -1;
+    public volatile DataStorageSpec.LongBytesBound data_disk_usage_max_disk_size = null;
+    public volatile int minimum_replication_factor_warn_threshold = -1;
+    public volatile int minimum_replication_factor_fail_threshold = -1;
+    public volatile int maximum_replication_factor_warn_threshold = -1;
+    public volatile int maximum_replication_factor_fail_threshold = -1;
+    public volatile boolean zero_ttl_on_twcs_warned = true;
+    public volatile boolean zero_ttl_on_twcs_enabled = true;
+    public volatile boolean non_partition_restricted_index_query_enabled = true;
+    public volatile boolean intersect_filtering_query_warned = true;
+    public volatile boolean intersect_filtering_query_enabled = true;
+
+    public volatile int sai_sstable_indexes_per_query_warn_threshold = 32;
+    public volatile int sai_sstable_indexes_per_query_fail_threshold = -1;
+    public volatile DataStorageSpec.LongBytesBound sai_string_term_size_warn_threshold = new DataStorageSpec.LongBytesBound("1KiB");
+    public volatile DataStorageSpec.LongBytesBound sai_string_term_size_fail_threshold = new DataStorageSpec.LongBytesBound("8KiB");
+    public volatile DataStorageSpec.LongBytesBound sai_frozen_term_size_warn_threshold = new DataStorageSpec.LongBytesBound("1KiB");
+    public volatile DataStorageSpec.LongBytesBound sai_frozen_term_size_fail_threshold = new DataStorageSpec.LongBytesBound("8KiB");
+    public volatile DataStorageSpec.LongBytesBound sai_vector_term_size_warn_threshold = new DataStorageSpec.LongBytesBound("16KiB");
+    public volatile DataStorageSpec.LongBytesBound sai_vector_term_size_fail_threshold = new DataStorageSpec.LongBytesBound("32KiB");
+
+    public volatile DurationSpec.LongNanosecondsBound streaming_state_expires = new DurationSpec.LongNanosecondsBound("3d");
+    public volatile DataStorageSpec.LongBytesBound streaming_state_size = new DataStorageSpec.LongBytesBound("40MiB");
+
+    public volatile boolean streaming_stats_enabled = true;
+    public volatile DurationSpec.IntSecondsBound streaming_slow_events_log_timeout = new DurationSpec.IntSecondsBound("10s");
+
+    /** The configuration of startup checks. */
+    public volatile Map<StartupCheckType, Map<String, Object>> startup_checks = new HashMap<>();
+
+    public volatile DurationSpec.LongNanosecondsBound repair_state_expires = new DurationSpec.LongNanosecondsBound("3d");
+    public volatile int repair_state_size = 100_000;
+
+    /** The configuration of timestamp bounds */
+    public volatile DurationSpec.LongMicrosecondsBound maximum_timestamp_warn_threshold = null;
+    public volatile DurationSpec.LongMicrosecondsBound maximum_timestamp_fail_threshold = null;
+    public volatile DurationSpec.LongMicrosecondsBound minimum_timestamp_warn_threshold = null;
+    public volatile DurationSpec.LongMicrosecondsBound minimum_timestamp_fail_threshold = null;
+
+    // Limit the offset used in SELECT queries
+    public volatile int offset_rows_warn_threshold = -1;
+    public volatile int offset_rows_fail_threshold = -1;
+
+    // Limit the number of column value filters per SELECT query (after applying analyzers, in case they are used)
+    public volatile int query_filters_warn_threshold = -1;
+    public volatile int query_filters_fail_threshold = -1;
+
+    /**
+     * The variants of paxos implementation and semantics supported by Cassandra.
+     */
+    public enum PaxosVariant
+    {
+        /**
+         * v1 Paxos lacks most optimisations. Expect 4RTs for a write and 2RTs for a read.
+         *
+         * With legacy semantics for read/read and rejected write linearizability, i.e. not guaranteed.
+         */
+        v1_without_linearizable_reads_or_rejected_writes,
+
+        /**
+         * v1 Paxos lacks most optimisations. Expect 4RTs for a write and 3RTs for a read.
+         */
+        v1,
+
+        /**
+         * v2 Paxos. With PaxosStatePurging.repaired safe to use ANY Commit consistency.
+         * Expect 2RTs for a write and 1RT for a read.
+         *
+         * With legacy semantics for read/read linearizability, i.e. not guaranteed.
+         */
+        v2_without_linearizable_reads,
+
+        /**
+         * v2 Paxos. With PaxosStatePurging.repaired safe to use ANY Commit consistency.
+         * Expect 2RTs for a write and 1RT for a read.
+         *
+         * With legacy semantics for read/read and rejected write linearizability, i.e. not guaranteed.
+         */
+        v2_without_linearizable_reads_or_rejected_writes,
+
+        /**
+         * v2 Paxos. With PaxosStatePurging.repaired safe to use ANY Commit consistency.
+         * Expect 2RTs for a write, and either 1RT or 2RT for a read.
+         */
+        v2
+    }
+
+    /**
+     * Select the kind of paxos state purging to use. Migration to repaired is recommended, but requires that
+     * regular paxos repairs are performed (which by default run as part of incremental repair).
+     *
+     * Once migrated from legacy it is unsafe to return to legacy, but gc_grace mode may be used in its place
+     * and performs a very similar cleanup process.
+     *
+     * Should only be modified once paxos_variant = v2.
+     */
+    public enum PaxosStatePurging
+    {
+        /**
+         * system.paxos records are written and garbage collected with TTLs. Unsafe to use with Commit consistency ANY.
+         * Once migrated from, cannot be migrated back to safely. Must use gc_grace or repaired instead, as TTLs
+         * will not have been set.
+         */
+        legacy,
+
+        /**
+         * Functionally similar to legacy, but the gc_grace expiry is applied at compaction and read time rather than
+         * using TTLs, so may be safely enabled at any point.
+         */
+        gc_grace,
+
+        /**
+         * Clears system.paxos records only once they are known to be persisted to a quorum of replica's base tables
+         * through the use of paxos repair. Requires that regular paxos repairs are performed on the cluster
+         * (which by default are included in incremental repairs if paxos_variant = v2).
+         *
+         * This setting permits the use of Commit consistency ANY or LOCAL_QUORUM without any loss of durability or consistency,
+         * saving 1 RT.
+         */
+        repaired;
+
+        public static PaxosStatePurging fromBoolean(boolean enabled)
+        {
+            return enabled ? repaired : gc_grace;
+        }
+    }
+
+    /**
+     * See {@link PaxosVariant}. Defaults to v1, recommend upgrading to v2 at earliest opportunity.
+     */
+    public volatile PaxosVariant paxos_variant = PaxosVariant.v1;
+
+    /**
+     * If true, paxos topology change repair will not run on a topology change - this option should only be used in
+     * rare operation circumstances e.g. where for some reason the repair is impossible to perform (e.g. too few replicas)
+     * and an unsafe topology change must be made
+     */
+    public volatile boolean skip_paxos_repair_on_topology_change = SKIP_PAXOS_REPAIR_ON_TOPOLOGY_CHANGE.getBoolean();
+
+    /**
+     * A safety margin when purging paxos state information that has been safely replicated to a quorum.
+     * Data for transactions initiated within this grace period will not be expunged.
+     */
+    public volatile DurationSpec.LongSecondsBound paxos_purge_grace_period = new DurationSpec.LongSecondsBound("60s");
+
+    /**
+     * A safety mechanism for detecting incorrect paxos state, that may be down either to a bug or incorrect usage of LWTs
+     * (most likely due to unsafe mixing of SERIAL and LOCAL_SERIAL operations), and rejecting
+     */
+    public enum PaxosOnLinearizabilityViolation
+    {
+        // reject an operation when a linearizability violation is detected.
+        // note this does not guarantee a violation has been averted,
+        // as it may be a prior operation that invalidated the state.
+        fail,
+        // log any detected linearizability violation
+        log,
+        // ignore any detected linearizability violation
+        ignore
+    }
+
+    /**
+     * See {@link PaxosOnLinearizabilityViolation}.
+     *
+     * Default is to ignore, as applications may readily mix SERIAL and LOCAL_SERIAL and this is the most likely source
+     * of linearizability violations. this facility should be activated only for debugging Cassandra or by power users
+     * who are investigating their own application behaviour.
+     */
+    public volatile PaxosOnLinearizabilityViolation paxos_on_linearizability_violations = PaxosOnLinearizabilityViolation.ignore;
+
+    /**
+     * See {@link PaxosStatePurging} default is legacy.
+     */
+    public volatile PaxosStatePurging paxos_state_purging;
+
+    /**
+     * Enable/disable paxos repair. This is a global flag that not only determines default behaviour but overrides
+     * explicit paxos repair requests, paxos repair on topology changes and paxos auto repairs.
+     */
+    public volatile boolean paxos_repair_enabled = true;
+
+    /**
+     * If true, paxos topology change repair only requires a global quorum of live nodes. If false,
+     * it requires a global quorum as well as a local quorum for each dc (EACH_QUORUM), with the
+     * exception explained in paxos_topology_repair_strict_each_quorum
+     */
+    public boolean paxos_topology_repair_no_dc_checks = false;
+
+    /**
+     * If true, a quorum will be required for the global and local quorum checks. If false, we will
+     * accept a quorum OR n - 1 live nodes. This is to allow for topologies like 2:2:2, where paxos queries
+     * always use SERIAL, and a single node down in a dc should not preclude a paxos repair
+     */
+    public boolean paxos_topology_repair_strict_each_quorum = false;
+
+    /**
+     * If necessary for operational purposes, permit certain keyspaces to be ignored for paxos topology repairs
+     */
+    public volatile Set<String> skip_paxos_repair_on_topology_change_keyspaces = splitCommaDelimited(SKIP_PAXOS_REPAIR_ON_TOPOLOGY_CHANGE_KEYSPACES.getString());
+
+    /**
+     * See {@link org.apache.cassandra.service.paxos.ContentionStrategy}
+     */
+    public String paxos_contention_wait_randomizer;
+
+    /**
+     * See {@link org.apache.cassandra.service.paxos.ContentionStrategy}
+     */
+    public String paxos_contention_min_wait;
+
+    /**
+     * See {@link org.apache.cassandra.service.paxos.ContentionStrategy}
+     */
+    public String paxos_contention_max_wait;
+
+    /**
+     * See {@link org.apache.cassandra.service.paxos.ContentionStrategy}
+     */
+    public String paxos_contention_min_delta;
+
+    /**
+     * The number of keys we may simultaneously attempt to finish incomplete paxos operations for.
+     */
+    public volatile int paxos_repair_parallelism = -1;
+
+    public volatile boolean sstable_read_rate_persistence_enabled = false;
+
+    public volatile boolean client_request_size_metrics_enabled = true;
+
+    public volatile int max_top_size_partition_count = 10;
+    public volatile int max_top_tombstone_partition_count = 10;
+    public volatile DataStorageSpec.LongBytesBound min_tracked_partition_size = new DataStorageSpec.LongBytesBound("1MiB");
+    public volatile long min_tracked_partition_tombstone_count = 5000;
+    public volatile boolean top_partitions_enabled = true;
+
+    public final RepairConfig repair = new RepairConfig();
+
+    /**
+     * Default compaction configuration, used if a table does not specify any.
+     */
+    public ParameterizedClass default_compaction = null;
 
     public static Supplier<Config> getOverrideLoadConfig()
     {
@@ -583,6 +1223,7 @@ public class Config
     {
         none,
         fast,
+        adaptive,
         table
     }
 
@@ -597,14 +1238,38 @@ public class Config
         mmap,
         mmap_index_only,
         standard,
+        legacy,
+
+        /**
+         * Direct-I/O is enabled for commitlog disk only.
+         * When adding support for direct IO, update {@link org.apache.cassandra.service.StartupChecks#checkKernelBug1057843}
+         */
+        direct
     }
 
     public enum MemtableAllocationType
     {
         unslabbed_heap_buffers,
+        unslabbed_heap_buffers_logged,
         heap_buffers,
         offheap_buffers,
-        offheap_objects
+        offheap_objects;
+
+        public BufferType toBufferType()
+        {
+            switch (this)
+            {
+                case unslabbed_heap_buffers:
+                case unslabbed_heap_buffers_logged:
+                case heap_buffers:
+                    return BufferType.ON_HEAP;
+                case offheap_buffers:
+                case offheap_objects:
+                    return BufferType.OFF_HEAP;
+                default:
+                    throw new AssertionError();
+            }
+        }
     }
 
     public enum DiskFailurePolicy
@@ -618,9 +1283,27 @@ public class Config
 
     public enum CommitFailurePolicy
     {
+        /**
+         * This will stop Gossip and the inter-node transports, and kill the syncing thread.
+         */
         stop,
+        /**
+         * This will kill the syncing thread.
+         */
         stop_commit,
+        /**
+         * This will set a flag that will reject all mutations that require the CL. This flag
+         * will be cleared after a successful sync. This flag is only set for errors when sync-ing
+         * the CL segments, it is identical to ignore for other errors.
+         */
+        fail_writes,
+        /**
+         * This will ignore the error, a new sync will be attempted after a full polling period.
+         */
         ignore,
+        /**
+         * This will kill the process.
+         */
         die,
     }
 
@@ -650,12 +1333,79 @@ public class Config
         exception
     }
 
-    private static final List<String> SENSITIVE_KEYS = new ArrayList<String>() {{
+    public enum BatchlogEndpointStrategy
+    {
+        /**
+         * Old, conventional strategy to select batchlog storage endpoints.
+         * Purely random, prevents the local rack, if possible.
+         */
+        random_remote(false, false),
+
+        /**
+         * Random, except that one of the replications will go to the local rack.
+         * Which means this strategy offers lower availability guarantees than
+         * {@link #random_remote} or {@link #dynamic_remote}.
+         */
+        prefer_local(false, true),
+
+        /**
+         * Strategy using {@link Config#dynamic_snitch} ({@link org.apache.cassandra.locator.DynamicEndpointSnitch})
+         * to select batchlog storage endpoints. Prevents the local rack, if possible.
+         *
+         * This strategy offers the same availability guarantees as {@link #random_remote} but selects the
+         * fastest endpoints according to the {@link org.apache.cassandra.locator.DynamicEndpointSnitch}.
+         *
+         * Hint: {@link org.apache.cassandra.locator.DynamicEndpointSnitch} tracks reads and not writes - i.e.
+         * write-only (or mostly-write) workloads might not benefit from this strategy.
+         *
+         * Note: this strategy will fall back to {@link #random_remote}, if {@link #dynamic_snitch} is not enabled.
+         */
+        dynamic_remote(true, false),
+
+        /**
+         * Strategy using {@link Config#dynamic_snitch} ({@link org.apache.cassandra.locator.DynamicEndpointSnitch})
+         * to select batchlog storage endpoints. Does not prevent the local rack.
+         *
+         * Since the local rack is not excluded, this strategy offers lower availability guarantees than
+         * {@link #random_remote} or {@link #dynamic_remote}.
+         *
+         * Hint: {@link org.apache.cassandra.locator.DynamicEndpointSnitch} tracks reads and not writes - i.e.
+         * write-only (or mostly-write) workloads might not benefit from this strategy.
+         *
+         * Note: this strategy will fall back to {@link #random_remote}, if {@link #dynamic_snitch} is not enabled.
+         */
+        dynamic(true, true);
+
+        /**
+         * If true, dynamic snitch response times will be used to select more responsive nodes to write the batchlog to.
+         * If false, nodes will be randomly selected.
+         */
+        public final boolean useDynamicSnitchScores;
+
+        /**
+         * If true, one of the selected nodes will come from the local rack.
+         * If false, the local rack will not be used except as a last resort with no other racks available.
+         */
+        public final boolean preferLocalRack;
+
+        BatchlogEndpointStrategy(boolean useDynamicSnitchScores, boolean preferLocalRack)
+        {
+            this.useDynamicSnitchScores = useDynamicSnitchScores;
+            this.preferLocalRack = preferLocalRack;
+        }
+    }
+
+    private static final Set<String> SENSITIVE_KEYS = new HashSet<String>() {{
         add("client_encryption_options");
         add("server_encryption_options");
     }};
 
     public static void log(Config config)
+    {
+        logger.info("Node configuration:[{}]", config.toDebugString(false));
+    }
+
+    public String toDebugString(boolean json)
     {
         Map<String, String> configMap = new TreeMap<>();
         for (Field field : Config.class.getFields())
@@ -675,7 +1425,7 @@ public class Config
             try
             {
                 // Field.get() can throw NPE if the value of the field is null
-                value = field.get(config).toString();
+                value = field.get(this).toString();
             }
             catch (NullPointerException | IllegalAccessException npe)
             {
@@ -683,7 +1433,41 @@ public class Config
             }
             configMap.put(name, value);
         }
-
-        logger.info("Node configuration:[{}]", Joiner.on("; ").join(configMap.entrySet()));
+        if (json)
+        {
+            return JsonUtils.writeAsJsonString(configMap);
+        }
+        return Joiner.on("; ").join(configMap.entrySet());
     }
+
+    public volatile boolean dump_heap_on_uncaught_exception = false;
+    public String heap_dump_path = "heapdump";
+
+
+    public double severity_during_decommission = 0;
+
+    public StorageCompatibilityMode storage_compatibility_mode;
+
+    /**
+     * Which timestamp should be used to represent a base for replica-side timeouts.
+     * Client-side timeout is always based on the QUEUE, and is controlled by native_transport_timeout.
+     */
+    public enum CQLStartTime
+    {
+        REQUEST, // uses a timestamp that represent the start of processing of the request
+        QUEUE    // uses a timestamp that represents when the request was enqueued
+    }
+    public volatile CQLStartTime cql_start_time = CQLStartTime.REQUEST;
+
+    public boolean native_transport_throw_on_overload = false;
+    public double native_transport_queue_max_item_age_threshold = Double.MAX_VALUE;
+    public DurationSpec.LongMillisecondsBound native_transport_min_backoff_on_queue_overload = new DurationSpec.LongMillisecondsBound("10ms");
+    public DurationSpec.LongMillisecondsBound native_transport_max_backoff_on_queue_overload = new DurationSpec.LongMillisecondsBound("200ms");
+
+    // 3.x Cassandra Driver has its "read" timeout set to 12 seconds, default matches this.
+    @Replaces(oldName = "native_transport_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound native_transport_timeout = new DurationSpec.LongMillisecondsBound("12s");
+    public boolean enforce_native_deadline_for_hints = false;
+
+    public boolean paxos_repair_race_wait = true;
 }

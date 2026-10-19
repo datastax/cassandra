@@ -22,20 +22,26 @@ import java.util.*;
 
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.serializers.UUIDSerializer;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 public abstract class UuidFcts
 {
-    public static Collection<Function> all()
+    public static void addFunctionsTo(NativeFunctions functions)
     {
-        return Collections.singleton(uuidFct);
+        functions.add(uuidFct);
     }
 
-    public static final Function uuidFct = new NativeScalarFunction("uuid", UUIDType.instance)
+    public static final NativeFunction uuidFct = new NativeScalarFunction("uuid", UUIDType.instance)
     {
-        public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters)
+        @Override
+        public ByteBuffer execute(Arguments arguments)
         {
             return UUIDSerializer.instance.serialize(UUID.randomUUID());
+        }
+
+        @Override
+        public boolean isDeterministic()
+        {
+            return false; // since UUIDs are generated randomly and so function calls are not deterministic
         }
     };
 }

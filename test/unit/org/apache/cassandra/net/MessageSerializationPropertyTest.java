@@ -35,11 +35,14 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.SchemaProvider;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraGenerators;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FixedMonotonicClock;
 import org.assertj.core.api.Assertions;
 import org.mockito.Mockito;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CLOCK_MONOTONIC_APPROX;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CLOCK_MONOTONIC_PRECISE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.ORG_APACHE_CASSANDRA_DISABLE_MBEAN_REGISTRATION;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 import static org.apache.cassandra.net.Message.serializer;
 import static org.apache.cassandra.utils.CassandraGenerators.MESSAGE_GEN;
 import static org.apache.cassandra.utils.FailingConsumer.orFail;
@@ -50,10 +53,11 @@ public class MessageSerializationPropertyTest implements Serializable
     @BeforeClass
     public static void beforeClass()
     {
-        System.setProperty("org.apache.cassandra.disable_mbean_registration", "true");
+        ORG_APACHE_CASSANDRA_DISABLE_MBEAN_REGISTRATION.setBoolean(true);
         // message serialization uses the MonotonicClock class for precise and approx timestamps, so mock it out
-        System.setProperty("cassandra.monotonic_clock.precise", FixedMonotonicClock.class.getName());
-        System.setProperty("cassandra.monotonic_clock.approx", FixedMonotonicClock.class.getName());
+        CLOCK_MONOTONIC_PRECISE.setString(FixedMonotonicClock.class.getName());
+        CLOCK_MONOTONIC_APPROX.setString(FixedMonotonicClock.class.getName());
+        VECTOR_FLOAT_ONLY.setBoolean(false);
 
         DatabaseDescriptor.daemonInitialization();
     }
@@ -66,8 +70,8 @@ public class MessageSerializationPropertyTest implements Serializable
     {
         try (DataOutputBuffer out = new DataOutputBuffer(1024))
         {
-            qt().forAll(MESSAGE_GEN).checkAssert(orFail(message -> {
-                for (MessagingService.Version version : MessagingService.Version.values())
+            qt().withShrinkCycles(0).forAll(MESSAGE_GEN).checkAssert(orFail(message -> {
+                for (MessagingService.Version version : MessagingService.Version.supportedVersions())
                 {
                     out.clear();
                     serializer.serialize(message, out, version.value);
@@ -94,9 +98,9 @@ public class MessageSerializationPropertyTest implements Serializable
         try (DataOutputBuffer first = new DataOutputBuffer(1024);
              DataOutputBuffer second = new DataOutputBuffer(1024))
         {
-            qt().forAll(MESSAGE_GEN).checkAssert(orFail(message -> {
+            qt().withShrinkCycles(0).forAll(MESSAGE_GEN).checkAssert(orFail(message -> {
                 withTable(schema, message, orFail(ignore -> {
-                    for (MessagingService.Version version : MessagingService.Version.values())
+                    for (MessagingService.Version version : MessagingService.Version.supportedVersions())
                     {
                         first.clear();
                         second.clear();
@@ -105,7 +109,7 @@ public class MessageSerializationPropertyTest implements Serializable
                         FixedMonotonicClock.setNowInNanos(message.createdAtNanos());
 
                         serializer.serialize(message, first, version.value);
-                        Message<Object> read = serializer.deserialize(new DataInputBuffer(first.buffer(), true), FBUtilities.getBroadcastAddressAndPort(), version.value);
+                        Message<Object> read = serializer.deserialize(new DataInputBuffer(first.buffer(), true), message.from(), version.value);
                         serializer.serialize(read, second, version.value);
                         // using hex as byte buffer equality kept failing, and was harder to debug difference
                         // using hex means the specific section of the string that is different will be shown

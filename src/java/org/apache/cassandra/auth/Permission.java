@@ -31,11 +31,6 @@ import com.google.common.collect.Sets;
  */
 public enum Permission
 {
-    @Deprecated
-    READ,
-    @Deprecated
-    WRITE,
-
     // schema and role management
     // CREATE, ALTER and DROP permissions granted on an appropriate DataResource are required for
     // CREATE KEYSPACE and CREATE TABLE.
@@ -61,9 +56,20 @@ public enum Permission
     DESCRIBE, // required on the root-level RoleResource to list all Roles
 
     // UDF permissions
-    EXECUTE;  // required to invoke any user defined function or aggregate
+    EXECUTE,  // required to invoke any user defined function or aggregate
+
+    UNMASK, // required to see masked data
+
+    SELECT_MASKED; // required for SELECT on a table with restictions on masked columns
 
     public static final Set<Permission> ALL =
-            Sets.immutableEnumSet(EnumSet.range(Permission.CREATE, Permission.EXECUTE));
+            Sets.immutableEnumSet(EnumSet.range(Permission.CREATE, Permission.SELECT_MASKED));
     public static final Set<Permission> NONE = ImmutableSet.of();
+
+    /**
+     * Set of Permissions which may never be granted on any system keyspace, or table in a system keyspace, to any role.
+     * (Only SELECT, DESCRIBE and ALTER may ever be granted).
+     */
+    public static final Set<Permission> INVALID_FOR_SYSTEM_KEYSPACES =
+            Sets.immutableEnumSet(EnumSet.complementOf(EnumSet.of(Permission.SELECT, Permission.DESCRIBE, Permission.ALTER)));
 }

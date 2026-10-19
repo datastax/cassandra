@@ -18,48 +18,48 @@
 
 package org.apache.cassandra.tools;
 
-import static java.lang.String.format;
-import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
-import static org.junit.Assert.assertEquals;
-
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import javax.management.openmbean.CompositeData;
-import javax.management.openmbean.TabularDataSupport;
-
-import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.service.StorageService;
-import org.junit.BeforeClass;
-import org.junit.Test;
 
 import com.google.common.collect.Lists;
+import org.junit.Test;
 
-public class TopPartitionsTest
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.metrics.Sampler;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.Util;
+
+
+import static java.lang.String.format;
+import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
+import static org.hamcrest.Matchers.greaterThan;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+public class TopPartitionsTest extends CQLTester
 {
-    @BeforeClass
-    public static void loadSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-    }
-
     @Test
     public void testServiceTopPartitionsNoArg() throws Exception
     {
         BlockingQueue<Map<String, List<CompositeData>>> q = new ArrayBlockingQueue<>(1);
         ColumnFamilyStore.all();
-        Executors.newCachedThreadPool().execute(() ->
-        {
+        Executors.newCachedThreadPool().execute(() -> {
             try
             {
-                q.put(StorageService.instance.samplePartitions(1000, 100, 10, Lists.newArrayList("READS", "WRITES")));
+                q.put(StorageService.instance.samplePartitions(null, 1000, 100, 10, Lists.newArrayList("READS", "WRITES")));
             }
             catch (Exception e)
             {
@@ -69,17 +69,169 @@ public class TopPartitionsTest
         Thread.sleep(100);
         SystemKeyspace.persistLocalMetadata();
         Map<String, List<CompositeData>> result = q.poll(5, TimeUnit.SECONDS);
-        List<CompositeData> cd = result.get("WRITES");
-        assertEquals(1, cd.size());
+        List<CompositeData> cds = result.get("WRITES").stream().filter(cd -> Objects.equals(cd.get("table"), "system." + SystemKeyspace.LOCAL)).collect(Collectors.toList());
+        assertEquals(1, cds.size());
     }
 
     @Test
     public void testServiceTopPartitionsSingleTable() throws Exception
     {
-        ColumnFamilyStore.getIfExists("system", "local").beginLocalSampling("READS", 5, 100000);
+        ColumnFamilyStore columnFamilyStore = ColumnFamilyStore.getIfExists("system", "local");
+        String samplerName = "READS";
+        long executedBefore = Sampler.samplerExecutor.getCompletedTaskCount();
+        columnFamilyStore.beginLocalSampling(samplerName, 5, 240_000);
+
         String req = "SELECT * FROM system.%s WHERE key='%s'";
         executeInternal(format(req, SystemKeyspace.LOCAL, SystemKeyspace.LOCAL));
-        List<CompositeData> result = ColumnFamilyStore.getIfExists("system", "local").finishLocalSampling("READS", 5);
-        assertEquals(1, result.size());
+        ensureThatSamplerExecutorProcessedAllSamples(executedBefore);
+
+        List<CompositeData> result = columnFamilyStore.finishLocalSampling(samplerName, 5);
+        assertEquals("If this failed you probably have to raise the beginLocalSampling duration", 1, result.size());
+    }
+
+    @Test
+    public void testTopPartitionsRowTombstoneAndSSTableCount() throws Exception
+    {
+        createTable("CREATE TABLE %s (k text, c text, v text, PRIMARY KEY (k, c))");
+        int count = 10;
+        ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(KEYSPACE, currentTable());
+        cfs.disableAutoCompaction();
+
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('a', 'a', 'a')", KEYSPACE, currentTable()));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('a', 'b', 'a')", KEYSPACE, currentTable()));
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('a', 'c', 'a')", KEYSPACE, currentTable()));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('b', 'b', 'b')", KEYSPACE, currentTable()));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('c', 'c', 'c')", KEYSPACE, currentTable()));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('c', 'd', 'a')", KEYSPACE, currentTable()));
+        executeInternal(format("INSERT INTO %s.%s(k,c,v) VALUES ('c', 'e', 'a')", KEYSPACE, currentTable()));
+        executeInternal(format("DELETE FROM %s.%s WHERE k='a' AND c='a'", KEYSPACE, currentTable()));
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+        long executedBefore = Sampler.samplerExecutor.getCompletedTaskCount();
+        // test multi-partition read
+        cfs.beginLocalSampling("READ_ROW_COUNT", count, 240000);
+        cfs.beginLocalSampling("READ_TOMBSTONE_COUNT", count, 240000);
+        cfs.beginLocalSampling("READ_SSTABLE_COUNT", count, 240000);
+
+        executeInternal(format("SELECT * FROM %s.%s", KEYSPACE, currentTable()));
+        ensureThatSamplerExecutorProcessedAllSamples(executedBefore);
+
+        List<CompositeData> rowCounts = cfs.finishLocalSampling("READ_ROW_COUNT", count);
+        List<CompositeData> tsCounts = cfs.finishLocalSampling("READ_TOMBSTONE_COUNT", count);
+        List<CompositeData> sstCounts = cfs.finishLocalSampling("READ_SSTABLE_COUNT", count);
+
+        assertEquals(0, sstCounts.size()); // not tracked on range reads
+        assertEquals(3, rowCounts.size()); // 3 partitions read (a, b, c)
+        assertEquals(1, tsCounts.size()); // 1 partition w tombstones (a)
+
+        for (CompositeData data : rowCounts)
+        {
+            String partitionKey = (String) data.get("value");
+            long numRows = (long) data.get("count");
+            if (partitionKey.equalsIgnoreCase("a"))
+            {
+                assertEquals(2, numRows);
+            }
+            else if (partitionKey.equalsIgnoreCase("b"))
+                assertEquals(1, numRows);
+            else if (partitionKey.equalsIgnoreCase("c"))
+                assertEquals(3, numRows);
+        }
+
+        assertEquals("a", tsCounts.get(0).get("value"));
+        assertEquals(1, (long) tsCounts.get(0).get("count"));
+
+        executedBefore = Sampler.samplerExecutor.getCompletedTaskCount();
+        // test single partition read
+        cfs.beginLocalSampling("READ_ROW_COUNT", count, 240000);
+        cfs.beginLocalSampling("READ_TOMBSTONE_COUNT", count, 240000);
+        cfs.beginLocalSampling("READ_SSTABLE_COUNT", count, 240000);
+
+        executeInternal(format("SELECT * FROM %s.%s WHERE k='a'", KEYSPACE, currentTable()));
+        executeInternal(format("SELECT * FROM %s.%s WHERE k='b'", KEYSPACE, currentTable()));
+        executeInternal(format("SELECT * FROM %s.%s WHERE k='c'", KEYSPACE, currentTable()));
+        ensureThatSamplerExecutorProcessedAllSamples(executedBefore);
+
+        rowCounts = cfs.finishLocalSampling("READ_ROW_COUNT", count);
+        tsCounts = cfs.finishLocalSampling("READ_TOMBSTONE_COUNT", count);
+        sstCounts = cfs.finishLocalSampling("READ_SSTABLE_COUNT", count);
+
+        assertEquals(3, sstCounts.size()); // 3 partitions read
+        assertEquals(3, rowCounts.size()); // 3 partitions read
+        assertEquals(1, tsCounts.size());  // 3 partitions read only one containing tombstones
+
+        for (CompositeData data : sstCounts)
+        {
+            String partitionKey = (String) data.get("value");
+            long numRows = (long) data.get("count");
+            if (partitionKey.equalsIgnoreCase("a"))
+            {
+                assertEquals(2, numRows);
+            }
+            else if (partitionKey.equalsIgnoreCase("b"))
+                assertEquals(1, numRows);
+            else if (partitionKey.equalsIgnoreCase("c"))
+                assertEquals(1, numRows);
+        }
+
+        for (CompositeData data : rowCounts)
+        {
+            String partitionKey = (String) data.get("value");
+            long numRows = (long) data.get("count");
+            if (partitionKey.equalsIgnoreCase("a"))
+            {
+                assertEquals(2, numRows);
+            }
+            else if (partitionKey.equalsIgnoreCase("b"))
+                assertEquals(1, numRows);
+            else if (partitionKey.equalsIgnoreCase("c"))
+                assertEquals(3, numRows);
+        }
+
+        assertEquals("a", tsCounts.get(0).get("value"));
+        assertEquals(1, (long) tsCounts.get(0).get("count"));
+    }
+
+    @Test
+    public void testStartAndStopScheduledSampling()
+    {
+        List<String> allSamplers = Arrays.stream(Sampler.SamplerType.values()).map(Enum::toString).collect(Collectors.toList());
+        StorageService ss = StorageService.instance;
+
+        assertTrue("Scheduling new sampled tasks should be allowed",
+                   ss.startSamplingPartitions(null, null, 10, 10, 100, 10, allSamplers));
+
+        assertEquals(Collections.singletonList("*.*"), ss.getSampleTasks());
+
+        assertFalse("Sampling with duplicate keys should be disallowed",
+                    ss.startSamplingPartitions(null, null, 20, 20, 100, 10, allSamplers));
+
+        assertTrue("Existing scheduled sampling tasks should be cancellable", ss.stopSamplingPartitions(null, null));
+
+        Util.spinAssertEquals(Collections.emptyList(), ss::getSampleTasks, 30);
+
+        assertTrue("When nothing is scheduled, you should be able to stop all scheduled sampling tasks",
+                   ss.stopSamplingPartitions(null, null));
+    }
+
+    private static void ensureThatSamplerExecutorProcessedAllSamples(long executedBefore)
+    {
+        Util.spinAssertEquals("samplerExecutor should not have pending tasks",
+                              0,
+                              Sampler.samplerExecutor::getPendingTaskCount,
+                              60,
+                              TimeUnit.SECONDS);
+        Util.spinAssertEquals("samplerExecutor should not have active tasks",
+                              0,
+                              Sampler.samplerExecutor::getActiveTaskCount,
+                              60,
+                              TimeUnit.SECONDS);
+        Util.spinAssert("samplerExecutor has not completed any new tasks after beginLocalSampling",
+                        greaterThan(executedBefore),
+                        Sampler.samplerExecutor::getCompletedTaskCount,
+                        60,
+                        TimeUnit.SECONDS);
     }
 }

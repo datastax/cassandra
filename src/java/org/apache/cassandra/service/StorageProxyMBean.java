@@ -32,6 +32,8 @@ public interface StorageProxyMBean
     public Set<String> getHintedHandoffDisabledDCs();
     public int getMaxHintWindow();
     public void setMaxHintWindow(int ms);
+    public int getMaxHintsSizePerHostInMiB();
+    public void setMaxHintsSizePerHostInMiB(int value);
     public int getMaxHintsInProgress();
     public void setMaxHintsInProgress(int qs);
     public int getHintsInProgress();
@@ -54,25 +56,71 @@ public interface StorageProxyMBean
     public void setNativeTransportMaxConcurrentConnections(Long nativeTransportMaxConcurrentConnections);
     public Long getNativeTransportMaxConcurrentConnections();
 
+    public void setNativeTransportMaxConcurrentConnectionsPerIp(Long nativeTransportMaxConcurrentConnections);
+    public Long getNativeTransportMaxConcurrentConnectionsPerIp();
+
     public void reloadTriggerClasses();
 
     public long getReadRepairAttempted();
     public long getReadRepairRepairedBlocking();
     public long getReadRepairRepairedBackground();
+    public long getReadRepairRepairTimedOut();
 
-    @Deprecated
+    /** @deprecated See CASSANDRA-15066 */
+    @Deprecated(since = "4.0")
     public int getOtcBacklogExpirationInterval();
-    @Deprecated
+
+    public void loadPartitionDenylist();
+    public int getPartitionDenylistLoadAttempts();
+    public int getPartitionDenylistLoadSuccesses();
+    public void setEnablePartitionDenylist(boolean enabled);
+    public void setEnableDenylistWrites(boolean enabled);
+    public void setEnableDenylistReads(boolean enabled);
+    public void setEnableDenylistRangeReads(boolean enabled);
+    public boolean denylistKey(String keyspace, String table, String partitionKeyAsString);
+    public boolean removeDenylistKey(String keyspace, String table, String partitionKeyAsString);
+    public void setDenylistMaxKeysPerTable(int value);
+    public void setDenylistMaxKeysTotal(int value);
+    public boolean isKeyDenylisted(String keyspace, String table, String partitionKeyAsString);
+
+    /** @deprecated See CASSANDRA-15066 */
+    @Deprecated(since = "4.0")
     public void setOtcBacklogExpirationInterval(int intervalInMillis);
 
-    /** Returns each live node's schema version */
-    @Deprecated public Map<String, List<String>> getSchemaVersions();
+    /**
+     * Returns each live node's schema version.
+     * @deprecated See CASSANDRA-7544
+     */
+    @Deprecated(since = "4.0") public Map<String, List<String>> getSchemaVersions();
     public Map<String, List<String>> getSchemaVersionsWithPort();
 
     public int getNumberOfTables();
 
     public String getIdealConsistencyLevel();
     public String setIdealConsistencyLevel(String cl);
+
+    // Default memtable flush period for tables without indexes. New value will take effect when new memtable is created
+    public int getNonIndexMemtableFlushPeriodInSeconds();
+    public void setNonIndexMemtableFlushPeriodInSeconds(int flushPeriodInSeconds);
+
+    // Default memtable flush period for tables with vector SAI indexes. New value will take effect when new memtable is created
+    public int getVectorIndexMemtableFlushPeriodInSecond();
+    public void setVectorMemtableFlushPeriodInSecond(int flushPeriodInSecond);
+
+    // Default memtable flush period for tables with non-vector SAI indexes. New value will take effect when new index memtable is created
+    public int getNonVectorIndexMemtableFlushPeriodInSecond();
+    public void setNonVectorMemtableFlushPeriodInSecond(int flushPeriodInSecond);
+
+    // When num of rows in SAI vector memtable index reaches the threshold, it triggers flush. New value will take effect when new memtable index is created
+    public int getVectorIndexMemtableFlushMaxRows();
+    public void setVectorMemtableFlushMaxRows(int threshold);
+
+    // When num of rows in SAI non-vector memtable index reaches the threshold, it triggers flush. New value will take effect when new memtable index is created
+    public int getNonVectorIndexMemtableFlushMaxRows();
+    public void setNonVectorMemtableFlushPeriodMaxRows(int threshold);
+
+    public void logBlockingReadRepairAttemptsForNSeconds(int seconds);
+    public boolean isLoggingReadRepairs();
 
     /**
      * Tracking and reporting of variances in the repaired data set across replicas at read time
@@ -103,4 +151,25 @@ public interface StorageProxyMBean
     boolean getCheckForDuplicateRowsDuringCompaction();
     void enableCheckForDuplicateRowsDuringCompaction();
     void disableCheckForDuplicateRowsDuringCompaction();
+
+    void setPaxosVariant(String variant);
+    String getPaxosVariant();
+
+    boolean getUseStatementsEnabled();
+    void setUseStatementsEnabled(boolean enabled);
+
+    void setPaxosContentionStrategy(String variant);
+    String getPaxosContentionStrategy();
+
+    void setPaxosCoordinatorLockingDisabled(boolean disabled);
+    boolean getPaxosCoordinatorLockingDisabled();
+
+    public boolean getDumpHeapOnUncaughtException();
+    public void setDumpHeapOnUncaughtException(boolean enabled);
+
+    boolean getSStableReadRatePersistenceEnabled();
+    void setSStableReadRatePersistenceEnabled(boolean enabled);
+
+    boolean getClientRequestSizeMetricsEnabled();
+    void setClientRequestSizeMetricsEnabled(boolean enabled);
 }

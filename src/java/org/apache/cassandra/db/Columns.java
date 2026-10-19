@@ -18,30 +18,36 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
-import java.util.*;
+import java.nio.ByteBuffer;
+import java.util.AbstractCollection;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
-import java.nio.ByteBuffer;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
-import org.apache.cassandra.exceptions.UnknownColumnException;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.rows.ColumnData;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.serializers.AbstractTypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
-import org.apache.cassandra.utils.btree.BTreeSearchIterator;
 import org.apache.cassandra.utils.btree.BTreeRemoval;
-import org.apache.cassandra.utils.btree.UpdateFunction;
+import org.apache.cassandra.utils.btree.BTreeSearchIterator;
 
 /**
  * An immutable and sorted list of (non-PK) columns for a given table.
@@ -61,7 +67,8 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                            ColumnIdentifier.getInterned(ByteBufferUtil.EMPTY_BYTE_BUFFER, UTF8Type.instance),
                            SetType.getInstance(UTF8Type.instance, true),
                            ColumnMetadata.NO_POSITION,
-                           ColumnMetadata.Kind.STATIC);
+                           ColumnMetadata.Kind.STATIC,
+                           null);
 
     public static final ColumnMetadata FIRST_COMPLEX_REGULAR =
         new ColumnMetadata("",
@@ -69,11 +76,17 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                            ColumnIdentifier.getInterned(ByteBufferUtil.EMPTY_BYTE_BUFFER, UTF8Type.instance),
                            SetType.getInstance(UTF8Type.instance, true),
                            ColumnMetadata.NO_POSITION,
-                           ColumnMetadata.Kind.REGULAR);
+                           ColumnMetadata.Kind.REGULAR,
+                           null);
 
     private final Object[] columns;
     private final int complexIdx; // Index of the first complex column
 
+    /**
+     * The columns passed to this constructor MUST BE SORTED with natural order - this is not checked in the constructor!
+     * The constructor remains private to ensure that this invariant is maintained - all the methods that call it
+     * ensure that the columns are properly sorted.
+     */
     private Columns(Object[] columns, int complexIdx)
     {
         assert complexIdx <= BTree.size(columns);
@@ -98,8 +111,32 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
         return new Columns(BTree.singleton(c), c.isComplex() ? 0 : 1);
     }
 
+   /**
+    * Returns a new {@code Columns} object holing the same columns as the provided Row.
+    *
+    * @param row the row from which to create the new {@code Columns}.
+    * @return the newly created {@code Columns} containing the columns from {@code row}.
+    */
+   public static Columns from(Row row)
+   {
+       try (BTree.FastBuilder<ColumnMetadata> builder = BTree.fastBuilder())
+       {
+           for (ColumnData cd : row)
+               builder.add(cd.column());
+           Object[] tree = builder.build();
+           return new Columns(tree, findFirstComplexIdx(tree));
+       }
+   }
+
+   public static Columns from(BTree.Builder<ColumnMetadata> builder)
+   {
+       Object[] tree = builder.build();
+       return new Columns(tree, findFirstComplexIdx(tree));
+   }
+
     /**
-     * Returns a new {@code Columns} object holing the same columns than the provided set.
+    * Returns a new {@code Columns} object holding the same columns than the provided set.
+     * This method assumes nothing about the order of {@code s}.
      *
      * @param s the set from which to create the new {@code Columns}.
      * @return the newly created {@code Columns} containing the columns from {@code s}.
@@ -265,8 +302,7 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
         if (this == NONE)
             return other;
 
-        Object[] tree = BTree.<ColumnMetadata>merge(this.columns, other.columns, Comparator.naturalOrder(),
-                                                    UpdateFunction.noOp());
+        Object[] tree = BTree.update(this.columns, other.columns, Comparator.naturalOrder());
         if (tree == this.columns)
             return this;
         if (tree == other.columns)
@@ -413,7 +449,7 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
         if(this == NONE)
             return 0;
 
-        return EMPTY_SIZE;
+        return EMPTY_SIZE + BTree.sizeOfStructureOnHeap(columns);
     }
 
     @Override
@@ -431,57 +467,126 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
 
     public static class Serializer
     {
+        AbstractTypeSerializer typeSerializer = new AbstractTypeSerializer();
+
         public void serialize(Columns columns, DataOutputPlus out) throws IOException
         {
-            out.writeUnsignedVInt(columns.size());
+            int regularCount = 0;
+            int syntheticCount = 0;
+
+            // Count regular and synthetic columns
             for (ColumnMetadata column : columns)
-                ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
+            {
+                if (column.isSynthetic())
+                    syntheticCount++;
+                else
+                    regularCount++;
+            }
+
+            // Jam the two counts into a single value to avoid massive backwards compatibility issues
+            long packedCount = getPackedCount(syntheticCount, regularCount);
+            out.writeUnsignedVInt(packedCount);
+
+            // First pass - write synthetic columns with their full metadata
+            for (ColumnMetadata column : columns)
+            {
+                if (column.isSynthetic())
+                {
+                    ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
+                    ByteBufferUtil.writeWithVIntLength(column.sythenticSourceColumn.bytes, out);
+                    typeSerializer.serialize(column.type, out);
+                }
+            }
+
+            // Second pass - write regular columns
+            for (ColumnMetadata column : columns)
+            {
+                if (!column.isSynthetic())
+                    ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
+            }
+        }
+
+        private static long getPackedCount(int syntheticCount, int regularCount)
+        {
+            // Left shift of 20 gives us over 1M regular columns, and up to 4 synthetic columns
+            // before overflowing to a 4th byte.
+            return ((long) syntheticCount << 20) | regularCount;
         }
 
         public long serializedSize(Columns columns)
         {
-            long size = TypeSizes.sizeofUnsignedVInt(columns.size());
+            int regularCount = 0;
+            int syntheticCount = 0;
+            long size = 0;
+
+            // Count and calculate sizes
             for (ColumnMetadata column : columns)
-                size += ByteBufferUtil.serializedSizeWithVIntLength(column.name.bytes);
-            return size;
-        }
-
-        private Columns deserialize(DataInputPlus in, TableMetadata metadata, boolean isStatic) throws IOException
-        {
-            int length = (int)in.readUnsignedVInt();
-            BTree.Builder<ColumnMetadata> builder = BTree.builder(Comparator.naturalOrder());
-            builder.auto(false);
-            for (int i = 0; i < length; i++)
             {
-                ByteBuffer name = ByteBufferUtil.readWithVIntLength(in);
-                ColumnMetadata column = metadata.getColumn(name);
-                if (column == null)
+                if (column.isSynthetic())
                 {
-                    // If we don't find the definition, it could be we have data for a dropped column, and we shouldn't
-                    // fail deserialization because of that. So we grab a "fake" ColumnMetadata that ensure proper
-                    // deserialization. The column will be ignore later on anyway.
-                    column = metadata.getDroppedColumn(name);
-
-                    // If there's no dropped column, it may be for a column we haven't received a schema update for yet
-                    // so we create a placeholder column. If this is a read, the placeholder column will let the response
-                    // serializer know we're not serializing all requested columns when it writes the row flags, but it
-                    // will cause mutations that try to write values for this column to fail.
-                    if (column == null)
-                        column = ColumnMetadata.placeholder(metadata, name, isStatic);
+                    syntheticCount++;
+                    size += ByteBufferUtil.serializedSizeWithVIntLength(column.name.bytes);
+                    size += ByteBufferUtil.serializedSizeWithVIntLength(column.sythenticSourceColumn.bytes);
+                    size += typeSerializer.serializedSize(column.type);
                 }
-                builder.add(column);
+                else
+                {
+                    regularCount++;
+                    size += ByteBufferUtil.serializedSizeWithVIntLength(column.name.bytes);
+                }
             }
-            return new Columns(builder.build());
+
+            return TypeSizes.sizeofUnsignedVInt(getPackedCount(syntheticCount, regularCount)) +
+                   size;
         }
 
-        public Columns deserializeStatics(DataInputPlus in, TableMetadata metadata) throws IOException
+        public Columns deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
         {
-            return deserialize(in, metadata, true);
-        }
+            try (BTree.FastBuilder<ColumnMetadata> builder = BTree.fastBuilder())
+            {
+                long packedCount = in.readUnsignedVInt() ;
+                int regularCount = (int) (packedCount & 0xFFFFF);
+                int syntheticCount = (int) (packedCount >> 20);
 
-        public Columns deserializeRegulars(DataInputPlus in, TableMetadata metadata) throws IOException
-        {
-            return deserialize(in, metadata, false);
+                // First pass - synthetic columns
+                for (int i = 0; i < syntheticCount; i++)
+                {
+                    ByteBuffer name = ByteBufferUtil.readWithVIntLength(in);
+                    ByteBuffer sourceColumnName = ByteBufferUtil.readWithVIntLength(in);
+                    AbstractType<?> type = typeSerializer.deserialize(in);
+
+                    if (!name.equals(ColumnMetadata.SYNTHETIC_SCORE_ID.bytes))
+                        throw new IllegalStateException("Unknown synthetic column " + UTF8Type.instance.getString(name));
+
+                    ColumnMetadata sourceColumn = metadata.getColumn(sourceColumnName);
+                    if (sourceColumn == null)
+                    {
+                        // If we don't find the definition, it could be we have data for a dropped column
+                        sourceColumn = metadata.getDroppedColumn(name);
+                        if (sourceColumn == null)
+                            throw new RuntimeException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization of " + metadata.keyspace + '.' + metadata.name);
+                    }
+
+                    ColumnMetadata column = ColumnMetadata.syntheticScoreColumn(sourceColumn, type);
+                    builder.add(column);
+                }
+
+                // Second pass - regular columns
+                for (int i = 0; i < regularCount; i++)
+                {
+                    ByteBuffer name = ByteBufferUtil.readWithVIntLength(in);
+                    ColumnMetadata column = metadata.getColumn(name);
+                    if (column == null)
+                    {
+                        // If we don't find the definition, it could be we have data for a dropped column
+                        column = metadata.getDroppedColumn(name);
+                        if (column == null)
+                            throw new RuntimeException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization of " + metadata.keyspace + '.' + metadata.name);
+                    }
+                    builder.add(column);
+                }
+                return new Columns(builder.build());
+            }
         }
 
         /**
@@ -490,7 +595,7 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
          */
         public void serializeSubset(Collection<ColumnMetadata> columns, Columns superset, DataOutputPlus out) throws IOException
         {
-            /**
+            /*
              * We weight this towards small sets, and sets where the majority of items are present, since
              * we expect this to mostly be used for serializing result sets.
              *
@@ -506,7 +611,7 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
             int supersetCount = superset.size();
             if (columnCount == supersetCount)
             {
-                out.writeUnsignedVInt(0);
+                out.writeUnsignedVInt32(0);
             }
             else if (supersetCount < 64)
             {
@@ -549,21 +654,67 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
             }
             else
             {
-                BTree.Builder<ColumnMetadata> builder = BTree.builder(Comparator.naturalOrder());
-                int firstComplexIdx = 0;
+                try (BTree.FastBuilder<ColumnMetadata> builder = BTree.fastBuilder())
+                {
+                    int firstComplexIdx = 0;
+                    for (ColumnMetadata column : superset)
+                    {
+                        if ((encoded & 1) == 0)
+                        {
+                            builder.add(column);
+                            if (column.isSimple())
+                                ++firstComplexIdx;
+                        }
+                        encoded >>>= 1;
+                    }
+                    if (encoded != 0)
+                        throw new IOException("Invalid Columns subset bytes; too many bits set:" + Long.toBinaryString(encoded));
+                    return new Columns(builder.build(), firstComplexIdx);
+                }
+            }
+        }
+
+        /**
+         * Deserialize a columns subset, placing the selected columns in the given array and returning the number of
+         * columns.
+         *
+         * @param superset the full list of columns
+         * @param in file from which the subset should be read
+         * @param placeInto An array where the selected columns will be placed, in the same order as superset. Must
+         *                  be at least superset.length long.
+         * @return the number of items placed in the target array, <= superset.length.
+         * @throws IOException
+         */
+        public int deserializeSubset(ColumnMetadata[] superset,
+                                     DataInputPlus in,
+                                     ColumnMetadata[] placeInto)
+        throws IOException
+        {
+            long encoded = in.readUnsignedVInt();
+            if (encoded == 0L)
+            {
+                // this is wasteful, but we don't expect to be called in this case (rows will have a flag set that
+                // bypasses this path).
+                System.arraycopy(superset, 0, placeInto, 0, superset.length);
+                return superset.length;
+            }
+            else if (superset.length >= 64)
+            {
+                return deserializeLargeSubset(in, superset, (int) encoded, placeInto);
+            }
+            else
+            {
+                int count = 0;
                 for (ColumnMetadata column : superset)
                 {
                     if ((encoded & 1) == 0)
-                    {
-                        builder.add(column);
-                        if (column.isSimple())
-                            ++firstComplexIdx;
-                    }
+                        placeInto[count++] = column;
+
                     encoded >>>= 1;
                 }
                 if (encoded != 0)
                     throw new IOException("Invalid Columns subset bytes; too many bits set:" + Long.toBinaryString(encoded));
-                return new Columns(builder.build(), firstComplexIdx);
+                return count;
             }
         }
 
@@ -597,7 +748,7 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
         private void serializeLargeSubset(Collection<ColumnMetadata> columns, int columnCount, Columns superset, int supersetCount, DataOutputPlus out) throws IOException
         {
             // write flag indicating we're in lengthy mode
-            out.writeUnsignedVInt(supersetCount - columnCount);
+            out.writeUnsignedVInt32(supersetCount - columnCount);
             BTreeSearchIterator<ColumnMetadata, ColumnMetadata> iter = superset.iterator();
             if (columnCount < supersetCount / 2)
             {
@@ -606,7 +757,7 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                 {
                     if (iter.next(column) == null)
                         throw new IllegalStateException();
-                    out.writeUnsignedVInt(iter.indexOfCurrent());
+                    out.writeUnsignedVInt32(iter.indexOfCurrent());
                 }
             }
             else
@@ -619,10 +770,10 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                         throw new IllegalStateException();
                     int cur = iter.indexOfCurrent();
                     while (++prev != cur)
-                        out.writeUnsignedVInt(prev);
+                        out.writeUnsignedVInt32(prev);
                 }
                 while (++prev != supersetCount)
-                    out.writeUnsignedVInt(prev);
+                    out.writeUnsignedVInt32(prev);
             }
         }
 
@@ -632,37 +783,88 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
             int supersetCount = superset.size();
             int columnCount = supersetCount - delta;
 
-            BTree.Builder<ColumnMetadata> builder = BTree.builder(Comparator.naturalOrder());
+            try (BTree.FastBuilder<ColumnMetadata> builder = BTree.fastBuilder())
+            {
+                if (columnCount < supersetCount / 2)
+                {
+                    for (int i = 0 ; i < columnCount ; i++)
+                    {
+                        int idx = in.readUnsignedVInt32();
+                        builder.add(BTree.findByIndex(superset.columns, idx));
+                    }
+                }
+                else
+                {
+                    Iterator<ColumnMetadata> iter = superset.iterator();
+                    int idx = 0;
+                    int skipped = 0;
+                    while (true)
+                    {
+                        int nextMissingIndex;
+                        if (skipped < delta)
+                        {
+                            nextMissingIndex = (int) in.readUnsignedVInt32();
+                            if (nextMissingIndex >= supersetCount)
+                                throw new IOException("Invalid Columns subset bytes; encoded not existing column: " + nextMissingIndex);
+                        }
+                        else
+                        {
+                            nextMissingIndex = supersetCount;
+                        }
+
+                        while (idx < nextMissingIndex)
+                        {
+                            ColumnMetadata def = iter.next();
+                            builder.add(def);
+                            idx++;
+                        }
+                        if (idx == supersetCount)
+                            break;
+                        iter.next();
+                        idx++;
+                        skipped++;
+                    }
+                }
+                return new Columns(builder.build());
+            }
+        }
+
+        @DontInline
+        private int deserializeLargeSubset(DataInputPlus in,
+                                           ColumnMetadata[] superset,
+                                           int delta,
+                                           ColumnMetadata[] placeInto)
+        throws IOException
+        {
+            int supersetCount = superset.length;
+            int columnCount = supersetCount - delta;
+
+            int count = 0;
             if (columnCount < supersetCount / 2)
             {
                 for (int i = 0 ; i < columnCount ; i++)
                 {
                     int idx = (int) in.readUnsignedVInt();
-                    builder.add(BTree.findByIndex(superset.columns, idx));
+                    placeInto[count++] = superset[idx];
                 }
             }
             else
             {
-                Iterator<ColumnMetadata> iter = superset.iterator();
                 int idx = 0;
                 int skipped = 0;
                 while (true)
                 {
                     int nextMissingIndex = skipped < delta ? (int)in.readUnsignedVInt() : supersetCount;
                     while (idx < nextMissingIndex)
-                    {
-                        ColumnMetadata def = iter.next();
-                        builder.add(def);
-                        idx++;
-                    }
+                        placeInto[count++] = superset[idx++];
+
                     if (idx == supersetCount)
                         break;
-                    iter.next();
                     idx++;
                     skipped++;
                 }
             }
-            return new Columns(builder.build());
+            return count;
         }
 
         @DontInline
@@ -698,6 +900,5 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
             }
             return size;
         }
-
     }
 }

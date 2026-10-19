@@ -17,15 +17,20 @@
  */
 package org.apache.cassandra.db;
 
+import javax.annotation.Nullable;
+
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.service.pager.PagingState;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -48,7 +53,7 @@ public interface ReadQuery
                 return ReadExecutionController.empty();
             }
 
-            public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
+            public PartitionIterator execute(ConsistencyLevel consistency, ClientState state, Dispatcher.RequestTime requestTime) throws RequestExecutionException
             {
                 return EmptyIterators.partition();
             }
@@ -87,7 +92,7 @@ public interface ReadQuery
             }
 
             @Override
-            public int nowInSec()
+            public long nowInSec()
             {
                 return FBUtilities.nowInSeconds();
             }
@@ -107,7 +112,7 @@ public interface ReadQuery
             @Override
             public RowFilter rowFilter()
             {
-                return RowFilter.NONE;
+                return RowFilter.none();
             }
 
             @Override
@@ -125,11 +130,16 @@ public interface ReadQuery
      */
     public TableMetadata metadata();
 
+    default DataRange dataRange()
+    {
+        throw new UnsupportedOperationException("dataRange() must be implemented by implementation class");
+    }
+
     /**
      * Starts a new read operation.
      * <p>
-     * This must be called before {@link executeInternal} and passed to it to protect the read.
-     * The returned object <b>must</b> be closed on all path and it is thus strongly advised to
+     * This must be called before {@link #executeInternal(ReadExecutionController)} and passed to it to protect the read.
+     * The returned object <b>must</b> be closed on all paths, and it is thus strongly advised to
      * use it in a try-with-ressource construction.
      *
      * @return a newly started execution controller for this {@code ReadQuery}.
@@ -140,12 +150,11 @@ public interface ReadQuery
      * Executes the query at the provided consistency level.
      *
      * @param consistency the consistency level to achieve for the query.
-     * @param clientState the {@code ClientState} for the query. In practice, this can be null unless
-     * {@code consistency} is a serial consistency.
-     *
+     * @param state client state
+     * @param requestTime request enqueue / and start times
      * @return the result of the query.
      */
-    public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException;
+    public PartitionIterator execute(ConsistencyLevel consistency, ClientState state, Dispatcher.RequestTime requestTime) throws RequestExecutionException;
 
     /**
      * Execute the query for internal queries (that is, it basically executes the query locally).
@@ -203,7 +212,7 @@ public interface ReadQuery
      *
      * @return the time (in seconds) to use as "now".
      */
-    public int nowInSec();
+    public long nowInSec();
 
     /**
      * Checks if this {@code ReadQuery} selects full partitions, that is it has no filtering on clustering or regular columns.
@@ -251,7 +260,37 @@ public interface ReadQuery
      * validation method to check that nothing in this query's parameters
      * violates the implementation specific validation rules.
      */
-    default void maybeValidateIndex()
+    default void maybeValidateIndexes()
     {
+    }
+
+    default void trackWarnings()
+    {
+    }
+
+    /**
+     * Validates the specified {@link SelectOptions} against this query.
+     */
+    default void validateSelectOptions(SelectOptions selectOptions, ClientState state)
+    {
+    }
+
+    /**
+     * @return true given read query is a top-k request
+     */
+    default boolean isTopK()
+    {
+        return false;
+    }
+
+    /**
+     * Index query plan chosen for this query. Can be null.
+     *
+     * @return index query plan chosen for this query
+     */
+    @Nullable
+    default Index.QueryPlan indexQueryPlan()
+    {
+        return null;
     }
 }

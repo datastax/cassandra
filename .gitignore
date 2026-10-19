@@ -1,17 +1,23 @@
 .gitignore
 
 # C*
+.build/.run-ci.env
+build
 build/
 src/gen-java/
 src/resources/org/apache/cassandra/config/
 logs/
 data/
+!test/data
 conf/hotspot_compiler
 doc/cql3/CQL.html
 doc/build/
 lib/
 pylib/src/
+**/cqlshlib.xml
+pylib/cqlshlib/serverversion.py
 !lib/cassandra-driver-internal-only-*.zip
+!lib/puresasl-*.zip
 
 # C* debs
 build-stamp
@@ -51,26 +57,40 @@ ide/nbproject/private
 nb-configuration.xml
 nbactions.xml
 
+#VS code
+.vscode/
+
+# Aider (aider.chat)
+.aider*
+
 # Maven, etc.
 out/
 target/
+
+# AI agents
+.ai/
 
 # General
 **/__pycache__
 *.pyc
 *~
 *.bak
+*.log
 *.sw[o,p]
 *.tmp
 .DS_Store
 Thumbs.db
+.ccm/
 
-/.ant-targets-build.xml
+**/.ant-targets-build.xml
 .ant_targets
 
 # Generated files from the documentation
-doc/source/configuration/cassandra_config_file.rst
-doc/source/tools/nodetool
+doc/modules/cassandra/pages/managing/configuration/cass_yaml_file.adoc
+doc/modules/cassandra/pages/reference/native-protocol.adoc
+doc/modules/cassandra/attachments/native_protocol_v*.html
+doc/modules/cassandra/pages/managing/tools/nodetool/
+doc/modules/cassandra/examples/TEXT/NODETOOL/
 
 # Python virtual environment
 venv/
@@ -78,3 +98,5 @@ venv/
 # build-scripts will put cassandra-builds into the directory
 cassandra-builds/
 cassandra-dtest/
+
+conf/triggers/trigger-example.jar

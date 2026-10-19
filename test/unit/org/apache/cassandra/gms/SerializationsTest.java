@@ -22,8 +22,8 @@ import org.apache.cassandra.AbstractSerializationsTester;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -68,7 +68,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         if (EXECUTE_WRITES)
             testEndpointStateWrite();
 
-        DataInputStreamPlus in = getInput("gms.EndpointState.bin");
+        FileInputStreamPlus in = getInput("gms.EndpointState.bin");
         assert HeartBeatState.serializer.deserialize(in, getVersion()) != null;
         assert EndpointState.serializer.deserialize(in, getVersion()) != null;
         assert VersionedValue.serializer.deserialize(in, getVersion()) != null;
@@ -110,7 +110,7 @@ public class SerializationsTest extends AbstractSerializationsTester
             testGossipDigestWrite();
 
         int count = 0;
-        DataInputStreamPlus in = getInput("gms.Gossip.bin");
+        FileInputStreamPlus in = getInput("gms.Gossip.bin");
         while (count < Statics.Digests.size())
             assert GossipDigestAck2.serializer.deserialize(in, getVersion()) != null;
         assert GossipDigestAck.serializer.deserialize(in, getVersion()) != null;
@@ -130,7 +130,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         private static List<GossipDigest> Digests = new ArrayList<GossipDigest>();
 
         {
-            HeartbeatSt.updateHeartBeat();
+            EndpointSt.updateHeartBeat();
             EndpointSt.addApplicationState(ApplicationState.LOAD, vv0);
             EndpointSt.addApplicationState(ApplicationState.STATUS_WITH_PORT, vv1);
             for (int i = 0; i < 100; i++)

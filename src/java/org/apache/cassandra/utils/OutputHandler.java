@@ -26,18 +26,50 @@ import org.slf4j.LoggerFactory;
 public interface OutputHandler
 {
     // called when an important info need to be displayed
-    public void output(String msg);
+    void output(String msg);
+    default void output(String msg, Object ... args)
+    {
+        output(String.format(msg, args));
+    }
 
     // called when a less important info need to be displayed
-    public void debug(String msg);
+    void debug(String msg);
+    default void debug(String msg, Object ... args)
+    {
+        debug(String.format(msg, args));
+    }
 
     // called when the user needs to be warn
-    public void warn(String msg);
-    public void warn(String msg, Throwable th);
-
-    public static class LogOutput implements OutputHandler
+    void warn(String msg);
+    void warn(Throwable th, String msg);
+    default void warn(Throwable th)
     {
-        private static Logger logger = LoggerFactory.getLogger(LogOutput.class);
+        warn(th, th.getMessage());
+    }
+    default void warn(Throwable th, String msg, Object... args)
+    {
+        warn(th, String.format(msg, args));
+    }
+    default void warn(String msg, Object ... args)
+    {
+        warn(String.format(msg, args));
+    }
+
+    class LogOutput implements OutputHandler
+    {
+        private static final Logger LOGGER_LOGOUTPUT = LoggerFactory.getLogger(LogOutput.class);
+
+        private final Logger logger;
+
+        public LogOutput(Logger logger)
+        {
+            this.logger = logger;
+        }
+
+        public LogOutput()
+        {
+            this(LOGGER_LOGOUTPUT);
+        }
 
         public void output(String msg)
         {
@@ -54,13 +86,22 @@ public interface OutputHandler
             logger.warn(msg);
         }
 
-        public void warn(String msg, Throwable th)
+        public void warn(Throwable th, String msg)
         {
             logger.warn(msg, th);
         }
     }
 
-    public static class SystemOutput implements OutputHandler
+    @DseLegacy
+    class CustomLogOutput extends LogOutput
+    {
+        public CustomLogOutput(Logger customLogger)
+        {
+            super(customLogger);
+        }
+    }
+
+    class SystemOutput implements OutputHandler
     {
         public final boolean debug;
         public final boolean printStack;
@@ -91,10 +132,10 @@ public interface OutputHandler
 
         public void warn(String msg)
         {
-            warn(msg, null);
+            warn((Throwable) null, msg);
         }
 
-        public void warn(String msg, Throwable th)
+        public void warn(Throwable th, String msg)
         {
             warnOut.println("WARNING: " + msg);
             if (printStack && th != null)

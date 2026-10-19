@@ -31,7 +31,6 @@ import javax.crypto.NoSuchPaddingException;
 import javax.crypto.spec.IvParameterSpec;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.MoreExecutors;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
@@ -40,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.concurrent.ImmediateExecutor;
 import org.apache.cassandra.config.TransparentDataEncryptionOptions;
 
 /**
@@ -81,7 +81,7 @@ public class CipherFactory
 
         cache = Caffeine.newBuilder() // by default cache is unbounded
                 .maximumSize(64) // a value large enough that we should never even get close (so nothing gets evicted)
-                .executor(MoreExecutors.directExecutor())
+                .executor(ImmediateExecutor.INSTANCE)
                 .removalListener((key, value, cause) ->
                 {
                     // maybe reload the key? (to avoid the reload being on the user's dime)

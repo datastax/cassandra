@@ -25,10 +25,10 @@ import java.util.Iterator;
 import java.util.List;
 
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
-import com.google.monitoring.runtime.instrumentation.common.collect.Lists;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.distributed.api.QueryResults;
@@ -42,7 +42,7 @@ public class RowUtil
         if (res != null && res.kind == ResultMessage.Kind.ROWS)
         {
             ResultMessage.Rows rows = (ResultMessage.Rows) res;
-            String[] names = getColumnNames(rows.result.metadata.names);
+            String[] names = getColumnNames(rows.result.metadata.requestNames());
             Object[][] results = toObjects(rows);
             
             // Warnings may be null here, due to ClientWarn#getWarnings() handling of empty warning lists.
@@ -52,7 +52,13 @@ public class RowUtil
         }
         else
         {
-            return QueryResults.empty();
+            if (res != null)
+            {
+                List<String> warnings = res.getWarnings();
+                return new SimpleQueryResult(new String[0], null, warnings == null ? Collections.emptyList() : warnings);
+            }
+            else
+                return QueryResults.empty();
         }
     }
 
@@ -63,7 +69,7 @@ public class RowUtil
 
     public static Object[][] toObjects(ResultMessage.Rows rows)
     {
-        return toObjects(rows.result.metadata.names, rows.result.rows);
+        return toObjects(rows.result.metadata.requestNames(), rows.result.rows);
     }
 
     public static Object[][] toObjects(List<ColumnSpecification> specs, List<List<ByteBuffer>> rows)
@@ -72,8 +78,8 @@ public class RowUtil
         for (int i = 0; i < rows.size(); i++)
         {
             List<ByteBuffer> row = rows.get(i);
-            result[i] = new Object[row.size()];
-            for (int j = 0; j < row.size(); j++)
+            result[i] = new Object[specs.size()];
+            for (int j = 0; j < specs.size(); j++)
             {
                 ByteBuffer bb = row.get(j);
 

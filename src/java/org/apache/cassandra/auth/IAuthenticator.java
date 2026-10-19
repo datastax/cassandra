@@ -18,13 +18,14 @@
 package org.apache.cassandra.auth;
 
 import java.net.InetAddress;
+import java.security.cert.Certificate;
 import java.util.Map;
 import java.util.Set;
 
-import javax.security.cert.X509Certificate;
-
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.transport.messages.AuthenticateMessage;
 
 public interface IAuthenticator
 {
@@ -56,6 +57,17 @@ public interface IAuthenticator
     void setup();
 
     /**
+     * Allows custom authenticators to return their own {@link AuthenticateMessage} based on
+     * {@link ClientState} information. For example, this allows returning the FQCN of a driver's
+     * known authenticator (e.g. "com.datastax.bdp.cassandra.auth.DseAuthenticator") to enable
+     * SASL scheme negotiation.
+     */
+    default AuthenticateMessage getAuthenticateMessage(ClientState clientState)
+    {
+        return new AuthenticateMessage(getClass().getName());
+    }
+
+    /**
      * Provide a SASL handler to perform authentication for an single connection. SASL
      * is a stateful protocol, so a new instance must be used for each authentication
      * attempt.
@@ -73,11 +85,14 @@ public interface IAuthenticator
      * override this method to gain access to client's certificate chain, if present.
      * @param clientAddress the IP address of the client whom we wish to authenticate, or null
      *                      if an internal client (one not connected over the remote transport).
-     * @param certificates the peer's X509 Certificate chain, if present.
+     * @param certificates the peer's Certificate chain, if present.
+     *                     It is expected that these will all be instances of {@link java.security.cert.X509Certificate},
+     *                     but we pass them as the base {@link Certificate} in case future implementations leverage
+     *                     other certificate types.
      * @return org.apache.cassandra.auth.IAuthenticator.SaslNegotiator implementation
      * (see {@link org.apache.cassandra.auth.PasswordAuthenticator.PlainTextSaslAuthenticator})
      */
-    default SaslNegotiator newSaslNegotiator(InetAddress clientAddress, X509Certificate[] certificates)
+    default SaslNegotiator newSaslNegotiator(InetAddress clientAddress, Certificate[] certificates)
     {
         return newSaslNegotiator(clientAddress);
     }
@@ -109,8 +124,8 @@ public interface IAuthenticator
          * informational in the case that the negotiation is completed on this round.
          *
          * This method is called each time a {@link org.apache.cassandra.transport.messages.AuthResponse} is received
-         * from a client. After it is called, {@link isComplete()} is checked to determine whether the negotiation has
-         * finished. If so, an AuthenticatedUser is obtained by calling {@link getAuthenticatedUser()} and that user
+         * from a client. After it is called, {@link #isComplete()} is checked to determine whether the negotiation has
+         * finished. If so, an AuthenticatedUser is obtained by calling {@link #getAuthenticatedUser()} and that user
          * associated with the active connection and the byte[] sent back to the client via an
          * {@link org.apache.cassandra.transport.messages.AuthSuccess} message. If the negotiation is not yet complete,
          * the byte[] is returned to the client as a further challenge in an
@@ -125,7 +140,7 @@ public interface IAuthenticator
         public byte[] evaluateResponse(byte[] clientResponse) throws AuthenticationException;
 
         /**
-         * Called after each invocation of {@link evaluateResponse(byte[])} to determine whether the  authentication has
+         * Called after each invocation of {@link #evaluateResponse(byte[])} to determine whether the  authentication has
          * completed successfully or should be continued.
          *
          * @return true if the authentication exchange has completed; false otherwise.
@@ -135,7 +150,7 @@ public interface IAuthenticator
 
         /**
          * Following a sucessful negotiation, get the AuthenticatedUser representing the logged in subject.
-         * This method should only be called if {@link isComplete()} returns true.
+         * This method should only be called if {@link #isComplete()} returns true.
          * Should never return null - always throw AuthenticationException instead.
          * Returning AuthenticatedUser.ANONYMOUS_USER is an option if authentication is not required.
          *

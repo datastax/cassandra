@@ -17,26 +17,50 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Collection;
+import java.util.stream.Collectors;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.net.IVerbHandler;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsFactory;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.transport.Dispatcher;
 
-public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
+public class CounterMutationVerbHandler extends AbstractMutationVerbHandler<CounterMutation>
 {
     public static final CounterMutationVerbHandler instance = new CounterMutationVerbHandler();
 
     private static final Logger logger = LoggerFactory.getLogger(CounterMutationVerbHandler.class);
 
-    public void doVerb(final Message<CounterMutation> message)
+    @Override
+    protected void applyMutation(final Message<CounterMutation> message, InetAddressAndPort respondToAddress)
     {
-        long queryStartNanoTime = System.nanoTime();
         final CounterMutation cm = message.payload;
         logger.trace("Applying forwarded {}", cm);
+
+        // Initialize the sensor and set ExecutorLocals
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(message.payload.getKeyspaceName());
+        Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toSet());
+        RequestTracker.instance.set(requestSensors);
+
+        // Initialize internode bytes with the inbound message size:
+        for (TableMetadata tm : tables)
+        {
+            Context context = Context.from(tm);
+            requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
+            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
+        }
 
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
         // We should not wait for the result of the write in this thread,
@@ -48,7 +72,7 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         // it's own in that case.
         StorageProxy.applyCounterMutationOnLeader(cm,
                                                   localDataCenter,
-                                                  () -> MessagingService.instance().send(message.emptyResponse(), message.from()),
-                                                  queryStartNanoTime);
+                                                  new CounterMutationCallback(message, message.from(), requestSensors),
+                                                  Dispatcher.RequestTime.forImmediateExecution());
     }
 }

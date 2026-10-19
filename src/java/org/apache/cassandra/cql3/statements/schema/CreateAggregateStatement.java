@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements.schema;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableSet;
@@ -30,29 +31,35 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.cql3.functions.*;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.Terms;
+import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.cql3.functions.ScalarFunction;
+import org.apache.cassandra.cql3.functions.UDAggregate;
+import org.apache.cassandra.cql3.functions.UDFunction;
+import org.apache.cassandra.cql3.functions.UserFunction;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.schema.Functions.FunctionsDiff;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.UserFunctions.FunctionsDiff;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
-import org.apache.cassandra.transport.ProtocolVersion;
 
+import static com.google.common.collect.Iterables.concat;
+import static com.google.common.collect.Iterables.transform;
 import static java.lang.String.format;
 import static java.lang.String.join;
 import static java.util.Collections.singleton;
 import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.toList;
-
-import static com.google.common.collect.Iterables.concat;
-import static com.google.common.collect.Iterables.transform;
 
 public final class CreateAggregateStatement extends AlterSchemaStatement
 {
@@ -64,8 +71,10 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
     private final Term.Raw rawInitialValue;
     private final boolean orReplace;
     private final boolean ifNotExists;
+    private final boolean deterministic;
 
-    public CreateAggregateStatement(String keyspaceName,
+    public CreateAggregateStatement(String queryString,
+                                    String keyspaceName,
                                     String aggregateName,
                                     List<CQL3Type.Raw> rawArgumentTypes,
                                     CQL3Type.Raw rawStateType,
@@ -73,9 +82,10 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                                     FunctionName finalFunctionName,
                                     Term.Raw rawInitialValue,
                                     boolean orReplace,
-                                    boolean ifNotExists)
+                                    boolean ifNotExists,
+                                    boolean deterministic)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.aggregateName = aggregateName;
         this.rawArgumentTypes = rawArgumentTypes;
         this.rawStateType = rawStateType;
@@ -84,6 +94,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         this.rawInitialValue = rawInitialValue;
         this.orReplace = orReplace;
         this.ifNotExists = ifNotExists;
+        this.deterministic = deterministic;
     }
 
     public Keyspaces apply(Keyspaces schema)
@@ -91,12 +102,15 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         if (ifNotExists && orReplace)
             throw ire("Cannot use both 'OR REPLACE' and 'IF NOT EXISTS' directives");
 
+        if (!FunctionName.isNameValid(aggregateName))
+            throw ire("Aggregate name '%s' is invalid", aggregateName);
+
         rawArgumentTypes.stream()
-                        .filter(raw -> !raw.isTuple() && raw.isFrozen())
+                        .filter(raw -> !raw.isImplicitlyFrozen() && raw.isFrozen())
                         .findFirst()
                         .ifPresent(t -> { throw ire("Argument '%s' cannot be frozen; remove frozen<> modifier from '%s'", t, t); });
 
-        if (!rawStateType.isTuple() && rawStateType.isFrozen())
+        if (!rawStateType.isImplicitlyFrozen() && rawStateType.isFrozen())
             throw ire("State type '%s' cannot be frozen; remove frozen<> modifier from '%s'", rawStateType, rawStateType);
 
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
@@ -109,13 +123,13 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
 
         List<AbstractType<?>> argumentTypes =
             rawArgumentTypes.stream()
-                            .map(t -> t.prepare(keyspaceName, keyspace.types).getType())
+                            .map(t -> t.prepare(keyspaceName, keyspace.types).getType().udfType())
                             .collect(toList());
-        AbstractType<?> stateType = rawStateType.prepare(keyspaceName, keyspace.types).getType();
+        AbstractType<?> stateType = rawStateType.prepare(keyspaceName, keyspace.types).getType().udfType();
         List<AbstractType<?>> stateFunctionArguments = Lists.newArrayList(concat(singleton(stateType), argumentTypes));
 
-        Function stateFunction =
-            keyspace.functions
+        UserFunction stateFunction =
+            keyspace.userFunctions
                     .find(stateFunctionName, stateFunctionArguments)
                     .orElseThrow(() -> ire("State function %s doesn't exist", stateFunctionString()));
 
@@ -132,12 +146,12 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
          * Resolve the final function and return type
          */
 
-        Function finalFunction = null;
+        UserFunction finalFunction = null;
         AbstractType<?> returnType = stateFunction.returnType();
 
         if (null != finalFunctionName)
         {
-            finalFunction = keyspace.functions.find(finalFunctionName, singletonList(stateType)).orElse(null);
+            finalFunction = keyspace.userFunctions.find(finalFunctionName, singletonList(stateType)).orElse(null);
             if (null == finalFunction)
                 throw ire("Final function %s doesn't exist", finalFunctionString());
 
@@ -170,10 +184,11 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
             }
 
             // Converts initcond to a CQL literal and parse it back to avoid another CASSANDRA-11064
-            String initialValueString = stateType.asCQL3Type().toCQLLiteral(initialValue, ProtocolVersion.CURRENT);
-            assert Objects.equal(initialValue, Terms.asBytes(keyspaceName, initialValueString, stateType));
+            String initialValueString = stateType.asCQL3Type().toCQLLiteral(initialValue);
+            if (!Objects.equal(initialValue, stateType.asCQL3Type().fromCQLLiteral(keyspaceName, initialValueString)))
+                throw new AssertionError(String.format("CQL literal '%s' (from type %s) parsed with a different value", initialValueString, stateType.asCQL3Type()));
 
-            if (Constants.NULL_LITERAL != rawInitialValue && UDHelper.isNullOrEmpty(stateType, initialValue))
+            if (Constants.NULL_LITERAL != rawInitialValue && isNullOrEmpty(stateType, initialValue))
                 throw ire("INITCOND must not be empty for all types except TEXT, ASCII, BLOB");
         }
 
@@ -194,9 +209,10 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                             returnType,
                             (ScalarFunction) stateFunction,
                             (ScalarFunction) finalFunction,
-                            initialValue);
+                            initialValue,
+                            deterministic);
 
-        Function existingAggregate = keyspace.functions.find(aggregate.name(), argumentTypes).orElse(null);
+        UserFunction existingAggregate = keyspace.userFunctions.find(aggregate.name(), argumentTypes).orElse(null);
         if (null != existingAggregate)
         {
             if (!existingAggregate.isAggregate())
@@ -208,7 +224,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
             if (!orReplace)
                 throw ire("Aggregate '%s' already exists", aggregateName);
 
-            if (!returnType.isCompatibleWith(existingAggregate.returnType()))
+            if (!returnType.isCompatibleWith(existingAggregate.returnType())) // shouldn't this condition be opposite direction? existingAggregate.returnType().isCompatibleWith(returnType)?
             {
                 throw ire("Cannot replace aggregate '%s', the new return type %s isn't compatible with the return type %s of existing function",
                           aggregateName,
@@ -217,7 +233,13 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
             }
         }
 
-        return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.functions.withAddedOrUpdated(aggregate)));
+        return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.userFunctions.withAddedOrUpdated(aggregate)));
+    }
+
+    private static boolean isNullOrEmpty(AbstractType<?> type, ByteBuffer bb)
+    {
+        return bb == null ||
+               (bb.remaining() == 0 && type.isEmptyValueMeaningless());
     }
 
     SchemaChange schemaChangeEvent(KeyspacesDiff diff)
@@ -239,7 +261,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
     {
         FunctionName name = new FunctionName(keyspaceName, aggregateName);
 
-        if (Schema.instance.findFunction(name, Lists.transform(rawArgumentTypes, t -> t.prepare(keyspaceName).getType())).isPresent() && orReplace)
+        if (Schema.instance.findUserFunction(name, Lists.transform(rawArgumentTypes, t -> t.prepare(keyspaceName).getType())).isPresent() && orReplace)
             client.ensurePermission(Permission.ALTER, FunctionResource.functionFromCql(keyspaceName, aggregateName, rawArgumentTypes));
         else
             client.ensurePermission(Permission.CREATE, FunctionResource.keyspace(keyspaceName));
@@ -286,7 +308,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         return format("%s(%s)", finalFunctionName, rawStateType);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<CreateAggregateStatement>
     {
         private final FunctionName aggregateName;
         private final List<CQL3Type.Raw> rawArgumentTypes;
@@ -296,6 +318,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         private final Term.Raw rawInitialValue;
         private final boolean orReplace;
         private final boolean ifNotExists;
+        private final boolean deterministic;
 
         public Raw(FunctionName aggregateName,
                    List<CQL3Type.Raw> rawArgumentTypes,
@@ -304,7 +327,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                    String finalFunctionName,
                    Term.Raw rawInitialValue,
                    boolean orReplace,
-                   boolean ifNotExists)
+                   boolean ifNotExists,
+                   boolean deterministic)
         {
             this.aggregateName = aggregateName;
             this.rawArgumentTypes = rawArgumentTypes;
@@ -314,13 +338,21 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
             this.rawInitialValue = rawInitialValue;
             this.orReplace = orReplace;
             this.ifNotExists = ifNotExists;
+            this.deterministic = deterministic;
         }
 
-        public CreateAggregateStatement prepare(ClientState state)
+        @Override
+        public CreateAggregateStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            String keyspaceName = aggregateName.hasKeyspace() ? aggregateName.keyspace : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(aggregateName.hasKeyspace() ? aggregateName.keyspace : state.getKeyspace());
+            if (keyspaceMapper != Constants.IDENTITY_STRING_MAPPER)
+            {
+                rawArgumentTypes.forEach(t -> t.forEachUserType(name -> name.updateKeyspaceIfDefined(keyspaceMapper)));
+                rawStateType.forEachUserType(name -> name.updateKeyspaceIfDefined(keyspaceMapper));
+            }
 
-            return new CreateAggregateStatement(keyspaceName,
+            return new CreateAggregateStatement(rawCQLStatement,
+                                                keyspaceName,
                                                 aggregateName.name,
                                                 rawArgumentTypes,
                                                 rawStateType,
@@ -328,7 +360,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                                                 null != finalFunctionName ? new FunctionName(keyspaceName, finalFunctionName) : null,
                                                 rawInitialValue,
                                                 orReplace,
-                                                ifNotExists);
+                                                ifNotExists,
+                                                deterministic);
         }
     }
 }

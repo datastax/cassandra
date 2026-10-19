@@ -17,23 +17,29 @@
  */
 package org.apache.cassandra.auth;
 
+import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import org.apache.commons.lang3.StringUtils;
+import org.mindrot.jbcrypt.BCrypt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.*;
@@ -42,11 +48,17 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.mindrot.jbcrypt.BCrypt;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.utils.CassandraVersion;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.AUTH_BCRYPT_GENSALT_LOG2_ROUNDS;
+import static org.apache.cassandra.service.QueryState.forInternalCalls;
 
 /**
  * Responsible for the creation, maintenance and deletion of roles
@@ -76,9 +88,23 @@ import org.mindrot.jbcrypt.BCrypt;
 public class CassandraRoleManager implements IRoleManager
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraRoleManager.class);
+    private static final NoSpamLogger nospamLogger = NoSpamLogger.getLogger(logger, 1L, TimeUnit.MINUTES);
 
-    static final String DEFAULT_SUPERUSER_NAME = "cassandra";
-    static final String DEFAULT_SUPERUSER_PASSWORD = "cassandra";
+    public static final String DEFAULT_SUPERUSER_NAME = "cassandra";
+    public static final String DEFAULT_SUPERUSER_PASSWORD = "cassandra";
+
+    /**
+     * We need to treat the default superuser as a special case since during initial node startup, we may end up with
+     * duplicate creation or deletion + re-creation of this user on different nodes unless we check at quorum to see if
+     * it's already been done.
+     */
+    static final ConsistencyLevel DEFAULT_SUPERUSER_CONSISTENCY_LEVEL = ConsistencyLevel.QUORUM;
+
+    // In some cases we want to avoid creating default super user accounts (for security purposes). For example CNDB
+    // can create roles without requiring default SU account. So we need a flag to tell C* to skip creating this role.
+    // Even though this says SKIP it's actually safer to create the user as non super user with no login creds
+    // and a timestamp of 1 in case a user forgets the flag on another node.
+    private static final boolean SKIP_DEFAULT_ROLE_SETUP = CassandraRelevantProperties.SKIP_DEFAULT_ROLE_SETUP.getBoolean();
 
     // Transform a row in the AuthKeyspace.ROLES to a Role instance
     private static final Function<UntypedResultSet.Row, Role> ROW_TO_ROLE = row ->
@@ -102,47 +128,139 @@ public class CassandraRoleManager implements IRoleManager
         }
     };
 
-    // 2 ** GENSALT_LOG2_ROUNDS rounds of hashing will be performed.
-    private static final String GENSALT_LOG2_ROUNDS_PROPERTY = Config.PROPERTY_PREFIX + "auth_bcrypt_gensalt_log2_rounds";
     private static final int GENSALT_LOG2_ROUNDS = getGensaltLogRounds();
+
+    private static int PASSWORD_UPDATE_MIN_INTERVAL_MS = CassandraRelevantProperties.ROLE_PASSWORD_UPDATE_MIN_INTERVAL_MS.getInt();
+    // in-memory protection against excessive loadRoleWithWritetimeStatement queries
+    private static Cache<String, Boolean> recentPasswordUpdates = Caffeine.newBuilder()
+                                        .expireAfterWrite(PASSWORD_UPDATE_MIN_INTERVAL_MS, TimeUnit.MILLISECONDS)
+                                        .build();
+
+    @VisibleForTesting
+    public static synchronized void updatePasswordUpdateMinInterval(int newInterval)
+    {
+        recentPasswordUpdates = Caffeine.newBuilder().expireAfterWrite(newInterval, TimeUnit.MILLISECONDS).build();
+        PASSWORD_UPDATE_MIN_INTERVAL_MS = newInterval;
+    }
 
     static int getGensaltLogRounds()
     {
-         int rounds = Integer.getInteger(GENSALT_LOG2_ROUNDS_PROPERTY, 10);
-         if (rounds < 4 || rounds > 31)
-         throw new ConfigurationException(String.format("Bad value for system property -D%s." +
-                                                        "Please use a value between 4 and 31 inclusively",
-                                                        GENSALT_LOG2_ROUNDS_PROPERTY));
-         return rounds;
+        int rounds = AUTH_BCRYPT_GENSALT_LOG2_ROUNDS.getInt(10);
+        if (rounds < 4 || rounds > 30)
+            throw new ConfigurationException(String.format("Bad value for system property %s." +
+                                                           "Please use a value between 4 and 30 inclusively", AUTH_BCRYPT_GENSALT_LOG2_ROUNDS.getKey()));
+        return rounds;
     }
 
     private SelectStatement loadRoleStatement;
+    private SelectStatement loadIdentityStatement;
+    private SelectStatement loadRoleWithWritetimeStatement;
+    private SelectStatement loadRoleMembersStatement;
 
     private final Set<Option> supportedOptions;
     private final Set<Option> alterableOptions;
 
-    // Will be set to true when all nodes in the cluster are on a version which supports roles (i.e. 2.2+)
-    private volatile boolean isClusterReady = false;
-
     public CassandraRoleManager()
     {
-        supportedOptions = DatabaseDescriptor.getAuthenticator().getClass() == PasswordAuthenticator.class
-                         ? ImmutableSet.of(Option.LOGIN, Option.SUPERUSER, Option.PASSWORD)
+        supportedOptions = DatabaseDescriptor.getAuthenticator() instanceof PasswordAuthenticator
+                         ? ImmutableSet.of(Option.LOGIN, Option.SUPERUSER, Option.PASSWORD, Option.HASHED_PASSWORD)
                          : ImmutableSet.of(Option.LOGIN, Option.SUPERUSER);
-        alterableOptions = DatabaseDescriptor.getAuthenticator().getClass().equals(PasswordAuthenticator.class)
-                         ? ImmutableSet.of(Option.PASSWORD)
+        alterableOptions = DatabaseDescriptor.getAuthenticator() instanceof PasswordAuthenticator
+                         ? ImmutableSet.of(Option.PASSWORD, Option.HASHED_PASSWORD)
                          : ImmutableSet.<Option>of();
     }
 
+    @Override
     public void setup()
     {
-        loadRoleStatement = (SelectStatement) prepare("SELECT * from %s.%s WHERE role = ?",
+        loadRoleStatement();
+        if (DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
+            loadIdentityStatement();
+        loadRoleMembersStatement = (SelectStatement) prepare("SELECT member FROM %s.%s WHERE role = ?",
                                                       SchemaConstants.AUTH_KEYSPACE_NAME,
-                                                      AuthKeyspace.ROLES);
+                                                      AuthKeyspace.ROLE_MEMBERS);
         scheduleSetupTask(() -> {
             setupDefaultRole();
             return null;
         });
+    }
+
+    @Override
+    public String roleForIdentity(String identity)
+    {
+        QueryOptions options = QueryOptions.forInternalCalls(CassandraAuthorizer.authReadConsistencyLevel(),
+                                                             Collections.singletonList(byteBuf(identity)));
+        ResultMessage.Rows rows = select(loadIdentityStatement, options);
+        if (rows.result.isEmpty())
+        {
+            nospamLogger.warn("No such identity {} in the identity_to_roles table", identity);
+            return null;
+        }
+        return UntypedResultSet.create(rows.result).one().getString("role");
+    }
+
+    @Override
+    public Map<String, String> authorizedIdentities()
+    {
+        Map<String, String> validIdentities = new HashMap<>();
+        String query = String.format("SELECT identity, role from %s.%s",
+                                     SchemaConstants.AUTH_KEYSPACE_NAME,
+                                     AuthKeyspace.IDENTITY_TO_ROLES);
+        UntypedResultSet rows = process(query, CassandraAuthorizer.authReadConsistencyLevel());
+        rows.forEach(row -> validIdentities.put(row.getString("identity"), row.getString("role")));
+        return validIdentities;
+    }
+
+    @Override
+    public void addIdentity(String identity, String role)
+    {
+        if (isExistingIdentity(identity))
+        {
+            throw new IllegalStateException("Identity is already associated with another role, cannot associate it with role " + role);
+        }
+
+        String query = String.format("INSERT INTO %s.%s (identity, role) VALUES (?, ?)",
+                                     SchemaConstants.AUTH_KEYSPACE_NAME,
+                                     AuthKeyspace.IDENTITY_TO_ROLES);
+        process(query, CassandraAuthorizer.authWriteConsistencyLevel(), byteBuf(identity), byteBuf(role));
+    }
+
+    @Override
+    public boolean isExistingIdentity(String identity)
+    {
+        String query = String.format("SELECT identity from %s.%s where identity=?",
+                                     SchemaConstants.AUTH_KEYSPACE_NAME,
+                                     AuthKeyspace.IDENTITY_TO_ROLES);
+        UntypedResultSet rows = process(query, CassandraAuthorizer.authReadConsistencyLevel(), byteBuf(identity));
+        return !rows.isEmpty();
+    }
+
+    @Override
+    public void dropIdentity(String identity)
+    {
+        String query = String.format("DELETE FROM %s.%s WHERE identity = ?",
+                                     SchemaConstants.AUTH_KEYSPACE_NAME,
+                                     AuthKeyspace.IDENTITY_TO_ROLES);
+        process(query, CassandraAuthorizer.authWriteConsistencyLevel(), byteBuf(identity));
+    }
+
+    protected final void loadRoleStatement()
+    {
+        loadRoleStatement = (SelectStatement) prepare("SELECT * from %s.%s WHERE role = ?",
+                                                      SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                      AuthKeyspace.ROLES);
+
+        loadRoleWithWritetimeStatement = (SelectStatement) prepare("SELECT writetime(salted_hash) AS salted_hash_writetime from %s.%s WHERE role = ?",
+                                                                   SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                                   AuthKeyspace.ROLES);
+    }
+
+
+    protected void loadIdentityStatement()
+    {
+        loadIdentityStatement = (SelectStatement) prepare("SELECT role from %s.%s where identity=?",
+                                                          SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                          AuthKeyspace.IDENTITY_TO_ROLES);
     }
 
     public Set<Option> supportedOptions()
@@ -158,21 +276,29 @@ public class CassandraRoleManager implements IRoleManager
     public void createRole(AuthenticatedUser performer, RoleResource role, RoleOptions options)
     throws RequestValidationException, RequestExecutionException
     {
-        String insertCql = options.getPassword().isPresent()
+        if (DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
+        {
+            List<String> identitiesOfRole = identitiesForRole(role.getRoleName());
+            if (!identitiesOfRole.isEmpty())
+            {
+                throw new IllegalStateException(String.format("Cannot create a role '%s' when identities already exists for it", role.getRoleName()));
+            }
+        }
+        String insertCql = options.getPassword().isPresent() || options.getHashedPassword().isPresent()
                          ? String.format("INSERT INTO %s.%s (role, is_superuser, can_login, salted_hash) VALUES ('%s', %s, %s, '%s')",
                                          SchemaConstants.AUTH_KEYSPACE_NAME,
                                          AuthKeyspace.ROLES,
                                          escape(role.getRoleName()),
-                                         options.getSuperuser().or(false),
-                                         options.getLogin().or(false),
-                                         escape(hashpw(options.getPassword().get())))
+                                         options.getSuperuser().orElse(false),
+                                         options.getLogin().orElse(false),
+                                         options.getHashedPassword().orElseGet(() -> escape(hashpw(options.getPassword().get()))))
                          : String.format("INSERT INTO %s.%s (role, is_superuser, can_login) VALUES ('%s', %s, %s)",
                                          SchemaConstants.AUTH_KEYSPACE_NAME,
                                          AuthKeyspace.ROLES,
                                          escape(role.getRoleName()),
-                                         options.getSuperuser().or(false),
-                                         options.getLogin().or(false));
-        process(insertCql, consistencyForRole(role.getRoleName()));
+                                         options.getSuperuser().orElse(false),
+                                         options.getLogin().orElse(false));
+        process(insertCql, consistencyForRoleWrite(role.getRoleName()));
     }
 
     public void dropRole(AuthenticatedUser performer, RoleResource role) throws RequestValidationException, RequestExecutionException
@@ -181,12 +307,17 @@ public class CassandraRoleManager implements IRoleManager
                               SchemaConstants.AUTH_KEYSPACE_NAME,
                               AuthKeyspace.ROLES,
                               escape(role.getRoleName())),
-                consistencyForRole(role.getRoleName()));
+                consistencyForRoleWrite(role.getRoleName()));
         removeAllMembers(role.getRoleName());
+        if (DatabaseDescriptor.getStorageCompatibilityMode().major >= CassandraVersion.CASSANDRA_5_0.major)
+            removeAllIdentitiesOfRole(role.getRoleName());
     }
 
     public void alterRole(AuthenticatedUser performer, RoleResource role, RoleOptions options)
     {
+        if (options.getPassword().isPresent())
+            enforcePasswordUpdateRateLimit(performer, role.getRoleName());
+
         // Unlike most of the other data access methods here, this does not use a
         // prepared statement in order to allow the set of assignments to be variable.
         String assignments = optionsToAssignments(options.getOptions());
@@ -197,7 +328,7 @@ public class CassandraRoleManager implements IRoleManager
                                   AuthKeyspace.ROLES,
                                   assignments,
                                   escape(role.getRoleName())),
-                    consistencyForRole(role.getRoleName()));
+                    consistencyForRoleWrite(role.getRoleName()));
         }
     }
 
@@ -219,7 +350,7 @@ public class CassandraRoleManager implements IRoleManager
                               AuthKeyspace.ROLE_MEMBERS,
                               escape(role.getRoleName()),
                               escape(grantee.getRoleName())),
-                consistencyForRole(role.getRoleName()));
+                consistencyForRoleWrite(role.getRoleName()));
     }
 
     public void revokeRole(AuthenticatedUser performer, RoleResource role, RoleResource revokee)
@@ -236,7 +367,7 @@ public class CassandraRoleManager implements IRoleManager
                               AuthKeyspace.ROLE_MEMBERS,
                               escape(role.getRoleName()),
                               escape(revokee.getRoleName())),
-                consistencyForRole(role.getRoleName()));
+                consistencyForRoleWrite(role.getRoleName()));
     }
 
     public Set<RoleResource> getRoles(RoleResource grantee, boolean includeInherited)
@@ -244,7 +375,8 @@ public class CassandraRoleManager implements IRoleManager
     {
         return collectRoles(getRole(grantee.getRoleName()),
                             includeInherited,
-                            filter())
+                            filter(),
+                            this::getRole)
                .map(r -> r.resource)
                .collect(Collectors.toSet());
     }
@@ -253,10 +385,29 @@ public class CassandraRoleManager implements IRoleManager
     {
         return collectRoles(getRole(grantee.getRoleName()),
                             true,
-                            filter())
+                            filter(),
+                            this::getRole)
                .collect(Collectors.toSet());
     }
 
+    public Set<RoleResource> getMembersOf(RoleResource role)
+    {
+        // Get the membership list of the given role
+        QueryOptions options = QueryOptions.forInternalCalls(consistencyForRoleRead(role.getRoleName()),
+                                                             Collections.singletonList(ByteBufferUtil.bytes(role.getRoleName())));
+        ResultMessage.Rows rows = select(loadRoleMembersStatement, options);
+        UntypedResultSet resultSet = UntypedResultSet.create(rows.result);
+
+        return StreamSupport.stream(resultSet.spliterator(), false)
+               .map(row -> RoleResource.role(row.getString("member")))
+               .collect(Collectors.toSet());
+    }
+
+    /**
+     * We hard-code this query to Quorum regardless of the role or auth credentials of the queryer given the nature of
+     * this query: we expect to know *all* roles across the entire cluster when we query this, not just local quorum or
+     * on a single node.
+     */
     public Set<RoleResource> getAllRoles() throws RequestValidationException, RequestExecutionException
     {
         ImmutableSet.Builder<RoleResource> builder = ImmutableSet.builder();
@@ -328,13 +479,8 @@ public class CassandraRoleManager implements IRoleManager
         {
             if (!hasExistingRoles())
             {
-                QueryProcessor.process(String.format("INSERT INTO %s.%s (role, is_superuser, can_login, salted_hash) " +
-                                                     "VALUES ('%s', true, true, '%s')",
-                                                     SchemaConstants.AUTH_KEYSPACE_NAME,
-                                                     AuthKeyspace.ROLES,
-                                                     DEFAULT_SUPERUSER_NAME,
-                                                     escape(hashpw(DEFAULT_SUPERUSER_PASSWORD))),
-                                       consistencyForRole(DEFAULT_SUPERUSER_NAME));
+                QueryProcessor.process(createDefaultRoleQuery(),
+                                       consistencyForRoleWrite(DEFAULT_SUPERUSER_NAME));
                 logger.info("Created default superuser role '{}'", DEFAULT_SUPERUSER_NAME);
             }
         }
@@ -345,7 +491,22 @@ public class CassandraRoleManager implements IRoleManager
         }
     }
 
-    private static boolean hasExistingRoles() throws RequestExecutionException
+    @VisibleForTesting
+    public static String createDefaultRoleQuery()
+    {
+        return String.format("INSERT INTO %s.%s (role, is_superuser, can_login, salted_hash) " +
+                             "VALUES ('%s', %s, %s, '%s') USING TIMESTAMP %s",
+                             SchemaConstants.AUTH_KEYSPACE_NAME,
+                             AuthKeyspace.ROLES,
+                             DEFAULT_SUPERUSER_NAME,
+                             SKIP_DEFAULT_ROLE_SETUP ? "false" : "true",
+                             SKIP_DEFAULT_ROLE_SETUP ? "false" : "true",
+                             SKIP_DEFAULT_ROLE_SETUP ? "" : escape(hashpw(DEFAULT_SUPERUSER_PASSWORD)),
+                             SKIP_DEFAULT_ROLE_SETUP ? "1" : "0");
+    }
+
+    @VisibleForTesting
+    public static boolean hasExistingRoles() throws RequestExecutionException
     {
         // Try looking up the 'cassandra' default role first, to avoid the range query if possible.
         String defaultSUQuery = String.format("SELECT * FROM %s.%s WHERE role = '%s'", SchemaConstants.AUTH_KEYSPACE_NAME, AuthKeyspace.ROLES, DEFAULT_SUPERUSER_NAME);
@@ -358,15 +519,20 @@ public class CassandraRoleManager implements IRoleManager
     protected void scheduleSetupTask(final Callable<Void> setupTask)
     {
         // The delay is to give the node a chance to see its peers before attempting the operation
-        ScheduledExecutors.optionalTasks.schedule(() -> {
-            isClusterReady = true;
+        ScheduledExecutors.optionalTasks.scheduleSelfRecurring(() -> {
+            if (!StorageProxy.isSafeToPerformRead())
+            {
+                logger.trace("Setup task may not run due to it not being safe to perform reads... rescheduling");
+                scheduleSetupTask(setupTask);
+                return;
+            }
             try
             {
                 setupTask.call();
             }
             catch (Exception e)
             {
-                logger.info("Setup task failed with error, rescheduling");
+                logger.info("Setup task failed with error, rescheduling", e);
                 scheduleSetupTask(setupTask);
             }
         }, AuthKeyspace.SUPERUSER_SETUP_DELAY, TimeUnit.MILLISECONDS);
@@ -384,19 +550,22 @@ public class CassandraRoleManager implements IRoleManager
         }
     }
 
-    private Stream<Role> collectRoles(Role role, boolean includeInherited, Predicate<String> distinctFilter)
+    // Providing a function to fetch the details of granted roles allows us to read from the underlying tables during
+    // normal usage and fetch from a prepopulated in memory structure when building an initial set of roles to warm
+    // the RolesCache at startup
+    private Stream<Role> collectRoles(Role role, boolean includeInherited, Predicate<String> distinctFilter, Function<String, Role> loaderFunction)
     {
         if (Roles.isNullRole(role))
             return Stream.empty();
 
         if (!includeInherited)
-            return Stream.concat(Stream.of(role), role.memberOf.stream().map(this::getRole));
+            return Stream.concat(Stream.of(role), role.memberOf.stream().map(loaderFunction));
 
 
         return Stream.concat(Stream.of(role),
                              role.memberOf.stream()
                                           .filter(distinctFilter)
-                                          .flatMap(r -> collectRoles(getRole(r), true, distinctFilter)));
+                                          .flatMap(r -> collectRoles(loaderFunction.apply(r), true, distinctFilter, loaderFunction)));
     }
 
     // Used as a stateful filtering function when recursively collecting granted roles
@@ -413,7 +582,7 @@ public class CassandraRoleManager implements IRoleManager
      */
     private Role getRole(String name)
     {
-        QueryOptions options = QueryOptions.forInternalCalls(consistencyForRole(name),
+        QueryOptions options = QueryOptions.forInternalCalls(consistencyForRoleRead(name),
                                                              Collections.singletonList(ByteBufferUtil.bytes(name)));
         ResultMessage.Rows rows = select(loadRoleStatement, options);
         if (rows.result.isEmpty())
@@ -435,7 +604,32 @@ public class CassandraRoleManager implements IRoleManager
                               op,
                               escape(role),
                               escape(grantee)),
-                consistencyForRole(grantee));
+                consistencyForRoleWrite(grantee));
+    }
+
+    private List<String> identitiesForRole(String role)
+    {
+        // Get all identities associated with a given role
+        String query = String.format("SELECT identity FROM %s.%s WHERE role = ? ALLOW FILTERING",
+                                     SchemaConstants.AUTH_KEYSPACE_NAME,
+                                     AuthKeyspace.IDENTITY_TO_ROLES);
+        UntypedResultSet rows = process(query, consistencyForRoleRead(role), byteBuf(role));
+        List<String> identities = new ArrayList<>();
+        rows.forEach(row -> identities.add(row.getString("identity")));
+        return identities;
+    }
+
+    private void removeAllIdentitiesOfRole(String role)
+    {
+        List<String> identities = identitiesForRole(role);
+        String query = String.format("DELETE FROM %s.%s WHERE identity = ?",
+                                     SchemaConstants.AUTH_KEYSPACE_NAME,
+                                     AuthKeyspace.IDENTITY_TO_ROLES);
+        // Remove all the identities associated with the role from the table
+        for (String identity : identities)
+        {
+            process(query, consistencyForRoleWrite(role), byteBuf(identity));
+        }
     }
 
     /*
@@ -448,7 +642,7 @@ public class CassandraRoleManager implements IRoleManager
                                                       SchemaConstants.AUTH_KEYSPACE_NAME,
                                                       AuthKeyspace.ROLE_MEMBERS,
                                                       escape(role)),
-                                        consistencyForRole(role));
+                                        consistencyForRoleRead(role));
         if (rows.isEmpty())
             return;
 
@@ -461,7 +655,7 @@ public class CassandraRoleManager implements IRoleManager
                               SchemaConstants.AUTH_KEYSPACE_NAME,
                               AuthKeyspace.ROLE_MEMBERS,
                               escape(role)),
-                consistencyForRole(role));
+                consistencyForRoleWrite(role));
     }
 
     /*
@@ -482,12 +676,49 @@ public class CassandraRoleManager implements IRoleManager
                                        return String.format("is_superuser = %s", entry.getValue());
                                    case PASSWORD:
                                        return String.format("salted_hash = '%s'", escape(hashpw((String) entry.getValue())));
+                                   case HASHED_PASSWORD:
+                                       return String.format("salted_hash = '%s'", (String) entry.getValue());
                                    default:
                                        return null;
                                }
                            })
                       .filter(Objects::nonNull)
                       .collect(Collectors.joining(","));
+    }
+
+    /**
+     * Rate limit password updates on each role.
+     * @throws OverloadedException if the password was changed within ROLE_PASSWORD_UPDATE_INTERVAL
+     */
+    private void enforcePasswordUpdateRateLimit(AuthenticatedUser performer, String roleName)
+    {
+        if (PASSWORD_UPDATE_MIN_INTERVAL_MS <= 0)
+            return;
+
+        if (Boolean.TRUE != recentPasswordUpdates.getIfPresent(roleName))
+        {
+            QueryOptions options = QueryOptions.forInternalCalls(consistencyForRole(roleName),
+                                                                 Collections.singletonList(ByteBufferUtil.bytes(roleName)));
+
+            ResultMessage.Rows rows = select(loadRoleWithWritetimeStatement, options);
+            boolean hasRecentPasswordUpdates = !rows.result.isEmpty();
+            if (hasRecentPasswordUpdates)
+            {
+                UntypedResultSet.Row row = UntypedResultSet.create(rows.result).one();
+
+                hasRecentPasswordUpdates = row.has("salted_hash_writetime")
+                                           && PASSWORD_UPDATE_MIN_INTERVAL_MS >= (Clock.Global.currentTimeMillis() - TimeUnit.MICROSECONDS.toMillis(row.getLong("salted_hash_writetime")));
+            }
+            if (!hasRecentPasswordUpdates)
+            {
+                recentPasswordUpdates.put(roleName, Boolean.TRUE);
+                logger.info(String.format("Password changing for role %s by %s", roleName, performer.getName()));
+                return;
+            }
+        }
+        String failure = String.format("Password for role %s can only be changed every %sms.", roleName, PASSWORD_UPDATE_MIN_INTERVAL_MS);
+        logger.warn(String.format("%s [performer: %s]", failure, performer.getName()));
+        throw new OverloadedException(failure);
     }
 
     protected static ConsistencyLevel consistencyForRole(String role)
@@ -508,6 +739,26 @@ public class CassandraRoleManager implements IRoleManager
         return StringUtils.replace(name, "'", "''");
     }
 
+    private static ByteBuffer byteBuf(String str)
+    {
+        return UTF8Type.instance.decompose(str);
+    }
+
+    /** Allows selective overriding of the consistency level for specific roles. */
+    protected static ConsistencyLevel consistencyForRoleWrite(String role)
+    {
+        return role.equals(DEFAULT_SUPERUSER_NAME) ?
+               DEFAULT_SUPERUSER_CONSISTENCY_LEVEL :
+               CassandraAuthorizer.authWriteConsistencyLevel();
+    }
+
+    protected static ConsistencyLevel consistencyForRoleRead(String role)
+    {
+        return role.equals(DEFAULT_SUPERUSER_NAME) ?
+               DEFAULT_SUPERUSER_CONSISTENCY_LEVEL :
+               CassandraAuthorizer.authReadConsistencyLevel();
+    }
+
     /**
      * Executes the provided query.
      * This shouldn't be used during setup as this will directly return an error if the manager is not setup yet. Setup tasks
@@ -517,18 +768,41 @@ public class CassandraRoleManager implements IRoleManager
     UntypedResultSet process(String query, ConsistencyLevel consistencyLevel)
     throws RequestValidationException, RequestExecutionException
     {
-        if (!isClusterReady)
-            throw new InvalidRequestException("Cannot process role related query as the role manager isn't yet setup. "
-                                            + "This is likely because some of nodes in the cluster are on version 2.1 or earlier. "
-                                            + "You need to upgrade all nodes to Cassandra 2.2 or more to use roles.");
-
         return QueryProcessor.process(query, consistencyLevel);
+    }
+
+    UntypedResultSet process(String query, ConsistencyLevel consistencyLevel, ByteBuffer... values)
+    throws RequestValidationException, RequestExecutionException
+    {
+        return QueryProcessor.process(query, consistencyLevel, Arrays.asList(values));
     }
 
     @VisibleForTesting
     ResultMessage.Rows select(SelectStatement statement, QueryOptions options)
     {
-        return statement.execute(QueryState.forInternalCalls(), options, System.nanoTime());
+        return statement.execute(forInternalCalls(), options, Dispatcher.RequestTime.forImmediateExecution());
     }
 
+    @Override
+    public Supplier<Map<RoleResource, Set<Role>>> bulkLoader()
+    {
+        return () ->
+        {
+            Map<RoleResource, Set<Role>> entries = new HashMap<>();
+
+            logger.info("Warming roles cache from roles table");
+            UntypedResultSet results = process("SELECT * FROM system_auth.roles", CassandraAuthorizer.authReadConsistencyLevel());
+
+            // Create flat temporary lookup of name -> role mappings
+            Map<String, Role> roles = new HashMap<>();
+            results.forEach(row -> roles.put(row.getString("role"), ROW_TO_ROLE.apply(row)));
+
+            // Iterate the flat structure and populate the fully hierarchical one
+            roles.forEach((key, value) ->
+                          entries.put(RoleResource.role(key),
+                                      collectRoles(value, true, filter(), roles::get).collect(Collectors.toSet()))
+            );
+            return entries;
+        };
+    }
 }

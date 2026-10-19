@@ -19,12 +19,20 @@
 package org.apache.cassandra.cql3.selection;
 
 import java.math.BigDecimal;
-import java.util.*;
+import java.util.List;
+import java.util.UUID;
 
 import org.junit.Test;
 
-import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.Duration;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.TypeParser;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static org.junit.Assert.assertEquals;
@@ -134,6 +142,10 @@ public class TermSelectionTest extends CQLTester
                    row(list(set(1), set(3))),
                    row(list(set(1), set(2))),
                    row(list(set(1), set(1))));
+        assertInvalidMessage("Invalid collection literal: all selectors must have the same CQL type inside collection literals",
+                             "SELECT [{pk, t}, {ck}] FROM %s WHERE pk = 1");
+        assertInvalidMessage("Invalid collection literal: all selectors must have the same CQL type inside collection literals",
+                             "SELECT [{pk}, {t}] FROM %s WHERE pk = 1");
 
         // Test Maps nested within Lists
         assertRows(execute("SELECT [{}, (map<text, int>){'min' : min(ck), 'max' : max(ck)}] FROM %s"),
@@ -154,10 +166,50 @@ public class TermSelectionTest extends CQLTester
                    row(list(tuple(1, 3, timestampInMicros))));
         assertRows(execute("SELECT [(min(ck), max(ck))] FROM %s"),
                    row(list(tuple(1, 3))));
-        assertRows(execute("SELECT [(CAST(pk AS BIGINT), CAST(ck AS BIGINT)), (t, WRITETIME(t))] FROM %s"),
-                   row(list(tuple(1L, 1L), tuple("one", timestampInMicros))),
-                   row(list(tuple(1L, 2L), tuple("two", timestampInMicros))),
-                   row(list(tuple(1L, 3L), tuple("three", timestampInMicros))));
+        assertInvalidMessage("Invalid collection literal: all selectors must have the same CQL type inside collection literals",
+                             "SELECT [(CAST(pk AS BIGINT), CAST(ck AS BIGINT)), (t, writetime(t))] FROM %s");
+
+        assertRows(execute("SELECT [(CAST(pk AS BIGINT), CAST(ck AS BIGINT), t), (CAST(pk AS BIGINT), CAST(ck AS BIGINT))] FROM %s"),
+                   row(list(tuple(1L, 1L, "one"), tuple(1L, 1L))),
+                   row(list(tuple(1L, 2L, "two"), tuple(1L, 2L))),
+                   row(list(tuple(1L, 3L, "three"), tuple(1L, 3L))));
+
+        assertRows(execute("SELECT [(CAST(pk AS BIGINT), CAST(ck AS BIGINT)), (CAST(pk AS BIGINT), CAST(ck AS BIGINT), t)] FROM %s"),
+                   row(list(tuple(1L, 1L), tuple(1L, 1L, "one"))),
+                   row(list(tuple(1L, 2L), tuple(1L, 2L, "two"))),
+                   row(list(tuple(1L, 3L), tuple(1L, 3L, "three"))));
+        assertInvalidMessage("Invalid collection literal: all selectors must have the same CQL type inside collection literals",
+                             "SELECT [(CAST(pk AS BIGINT), t, CAST(ck AS BIGINT)), (CAST(pk AS BIGINT), CAST(ck AS BIGINT))] FROM %s");
+
+        // list of tuples of tuples
+        assertRows(execute("SELECT [((t,t, t), (t,t,CAST(ck AS BIGINT))), ((t,t), (t,t,CAST(ck AS BIGINT)))] FROM %s"),
+                   row(list(tuple(tuple("one", "one", "one"), tuple("one", "one", 1L)),
+                            tuple(tuple("one", "one"), tuple("one", "one", 1L)))),
+                   row(list(tuple(tuple("two", "two", "two"), tuple("two", "two", 2L)),
+                            tuple(tuple("two", "two"), tuple("two", "two", 2L)))),
+                   row(list(tuple(tuple("three", "three", "three"), tuple("three", "three", 3L)),
+                            tuple(tuple("three", "three"), tuple("three", "three", 3L)))));
+
+        assertRows(execute("SELECT [((t,t), (t,t,CAST(ck AS BIGINT))), ((t,t), (t,t,CAST(ck AS BIGINT),t))] FROM %s"),
+                   row(list(tuple(tuple("one", "one"), tuple("one", "one", 1L)),
+                            tuple(tuple("one", "one"), tuple("one", "one", 1L, "one")))),
+                   row(list(tuple(tuple("two", "two"), tuple("two", "two", 2L)),
+                            tuple(tuple("two", "two"), tuple("two", "two", 2L, "two")))),
+                   row(list(tuple(tuple("three", "three"), tuple("three", "three", 3L)),
+                            tuple(tuple("three", "three"), tuple("three", "three", 3L, "three")))));
+
+        // single element tuple: tuple(t) incompatible with tuple(long, long)
+        assertInvalidMessage("(t) is not of the expected type: tuple<bigint, bigint>",
+                             "SELECT [(CAST(pk AS BIGINT), CAST(ck AS BIGINT)), (t)] FROM %s");
+
+        assertInvalidMessage("(cast(ck as bigint)) is not of the expected type: tuple<text, text>",
+                             "SELECT [(t, t), (CAST(ck AS BIGINT))] FROM %s");
+
+        // single element tuple: tuple(long) compatible with tuple(long, long)
+        assertRows(execute("SELECT [(CAST(pk AS BIGINT), CAST(ck AS BIGINT)), (CAST(ck AS BIGINT))] FROM %s"),
+                   row(list(tuple(1L, 1L), tuple(1L))),
+                   row(list(tuple(1L, 2L), tuple(2L))),
+                   row(list(tuple(1L, 3L), tuple(3L))));
 
         // Test UDTs nested within Lists
         String type = createType("CREATE TYPE %s(a int, b int, c bigint)");
@@ -189,6 +241,10 @@ public class TermSelectionTest extends CQLTester
                    row(set(list(1), list(3))));
         assertRows(execute("SELECT {([min(ck)]), [max(ck)]} FROM %s"),
                    row(set(list(1), list(3))));
+        assertInvalidMessage("Invalid collection literal: all selectors must have the same CQL type inside collection literals",
+                             "SELECT {[min(ck), writetime(t)], [max(ck)]} FROM %s");
+        assertInvalidMessage("Invalid collection literal: all selectors must have the same CQL type inside collection literals",
+                             "SELECT {[writetime(t)], [max(ck)]} FROM %s");
 
         // Test Sets nested within Sets
         assertRows(execute("SELECT {{}, {min(ck), max(ck)}} FROM %s"),
@@ -223,6 +279,45 @@ public class TermSelectionTest extends CQLTester
                    row(set(tuple(1, 3, timestampInMicros))));
         assertRows(execute("SELECT {(min(ck), max(ck))} FROM %s"),
                    row(set(tuple(1, 3))));
+        assertInvalidMessage("Invalid collection literal: all selectors must have the same CQL type inside collection literals",
+                             "SELECT {(min(ck), max(ck)), (t, writetime(t))} FROM %s");
+
+        assertRows(execute("SELECT {(CAST(pk AS BIGINT), CAST(ck AS BIGINT), t), (CAST(pk AS BIGINT), CAST(ck AS BIGINT))} FROM %s"),
+                   row(set(tuple(1L, 1L, "one"), tuple(1L, 1L))),
+                   row(set(tuple(1L, 2L, "two"), tuple(1L, 2L))),
+                   row(set(tuple(1L, 3L, "three"), tuple(1L, 3L))));
+
+        assertRows(execute("SELECT {(CAST(pk AS BIGINT), CAST(ck AS BIGINT)), (CAST(pk AS BIGINT), CAST(ck AS BIGINT), t)} FROM %s"),
+                   row(set(tuple(1L, 1L), tuple(1L, 1L, "one"))),
+                   row(set(tuple(1L, 2L), tuple(1L, 2L, "two"))),
+                   row(set(tuple(1L, 3L), tuple(1L, 3L, "three"))));
+
+        assertInvalidMessage("Invalid collection literal: all selectors must have the same CQL type inside collection literals",
+                             "SELECT {(CAST(pk AS BIGINT), t, CAST(ck AS BIGINT)), (CAST(pk AS BIGINT), CAST(ck AS BIGINT))} FROM %s");
+
+        assertInvalidMessage("Invalid collection literal: all selectors must have the same CQL type inside collection literals",
+                             "SELECT {(CAST(pk AS BIGINT), t, CAST(ck AS BIGINT)), (CAST(pk AS BIGINT), CAST(ck AS BIGINT))} FROM %s");
+
+        // set of tuples of tuples
+        assertRows(execute("SELECT {((t,t, t), (t,t,CAST(ck AS BIGINT))), ((t,t), (t,t,CAST(ck AS BIGINT)))} FROM %s"),
+                   row(set(tuple(tuple("one", "one", "one"), tuple("one", "one", 1L)),
+                           tuple(tuple("one", "one"), tuple("one", "one", 1L)))),
+                   row(set(tuple(tuple("two", "two", "two"), tuple("two", "two", 2L)),
+                           tuple(tuple("two", "two"), tuple("two", "two", 2L)))),
+                   row(set(tuple(tuple("three", "three", "three"), tuple("three", "three", 3L)),
+                           tuple(tuple("three", "three"), tuple("three", "three", 3L)))));
+
+        assertRows(execute("SELECT {((t,t), (t,t,CAST(ck AS BIGINT))), ((t,t), (t,t,CAST(ck AS BIGINT),t))} FROM %s"),
+                   row(set(tuple(tuple("one", "one"), tuple("one", "one", 1L)),
+                           tuple(tuple("one", "one"), tuple("one", "one", 1L, "one")))),
+                   row(set(tuple(tuple("two", "two"), tuple("two", "two", 2L)),
+                           tuple(tuple("two", "two"), tuple("two", "two", 2L, "two")))),
+                   row(set(tuple(tuple("three", "three"), tuple("three", "three", 3L)),
+                           tuple(tuple("three", "three"), tuple("three", "three", 3L, "three")))));
+
+        // getExactType for (t) is null
+        assertInvalidMessage("(t) is not of the expected type: tuple<bigint, bigint>",
+                             "SELECT {(CAST(pk AS BIGINT), CAST(ck AS BIGINT)), (t), (CAST(pk AS BIGINT), CAST(ck AS BIGINT))} FROM %s");
 
         // Test UDTs nested within Sets
         assertRows(execute("SELECT {(" + type + "){a : min(ck), b: max(ck)}} FROM %s"),
@@ -378,7 +473,7 @@ public class TermSelectionTest extends CQLTester
 
 
         // Test Litteral Set with Duration elements
-        assertInvalidMessage("Durations are not allowed inside sets: set<duration>",
+        assertInvalidMessage("Durations are not allowed inside sets: frozen<set<duration>>",
                              "SELECT pk, ck, (set<duration>){2d, 1mo} FROM %s");
 
         assertInvalidMessage("Invalid field selection: system.min(ck) of type int is not a user type",
@@ -407,7 +502,7 @@ public class TermSelectionTest extends CQLTester
                    row(map(2, Duration.from("10h"))),
                    row(map(3, Duration.from("11h"))));
 
-        assertInvalidMessage("Durations are not allowed as map keys: map<duration, int>",
+        assertInvalidMessage("Durations are not allowed as map keys: frozen<map<duration, int>>",
                              "SELECT (map<duration, int>){d1 : ck, d2 :ck} FROM %s");
     }
 
@@ -415,7 +510,7 @@ public class TermSelectionTest extends CQLTester
     public void testSelectUDTLiteral() throws Throwable
     {
         String type = createType("CREATE TYPE %s(a int, b text)");
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v " + type + ")");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v " + type + ')');
 
         execute("INSERT INTO %s(k, v) VALUES (?, ?)", 0, userType("a", 3, "b", "foo"));
 
@@ -492,7 +587,7 @@ public class TermSelectionTest extends CQLTester
         assertColumnSpec(boundNames.get(0), "[selection]", Int32Type.instance);
         assertColumnSpec(boundNames.get(1), "adecimal", DecimalType.instance);
         assertColumnSpec(boundNames.get(2), "[selection]", UTF8Type.instance);
-        assertColumnSpec(boundNames.get(3), "atuple", TypeParser.parse("TupleType(Int32Type,UTF8Type)"));
+        assertColumnSpec(boundNames.get(3), "atuple", TypeParser.parse("TupleType(Int32Type,UTF8Type)").freeze());
         assertColumnSpec(boundNames.get(4), "pk", Int32Type.instance);
 
 
@@ -503,7 +598,7 @@ public class TermSelectionTest extends CQLTester
         assertColumnSpec(resultNames.get(0), "(int)?", Int32Type.instance);
         assertColumnSpec(resultNames.get(1), "(decimal)?", DecimalType.instance);
         assertColumnSpec(resultNames.get(2), "(text)?", UTF8Type.instance);
-        assertColumnSpec(resultNames.get(3), "(tuple<int, text>)?", TypeParser.parse("TupleType(Int32Type,UTF8Type)"));
+        assertColumnSpec(resultNames.get(3), "(tuple<int, text>)?", TypeParser.parse("TupleType(Int32Type,UTF8Type)").freeze());
         assertColumnSpec(resultNames.get(4), "pk", Int32Type.instance);
         assertColumnSpec(resultNames.get(5), "ck", Int32Type.instance);
         assertColumnSpec(resultNames.get(6), "t", UTF8Type.instance);

@@ -26,7 +26,7 @@ public class NativePool extends MemtablePool
     }
 
     @Override
-    public NativeAllocator newAllocator()
+    public NativeAllocator newAllocator(String table)
     {
         return new NativeAllocator(this);
     }

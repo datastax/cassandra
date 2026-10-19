@@ -18,24 +18,23 @@
 */
 package org.apache.cassandra.net;
 
-import java.util.UUID;
-
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.junit.Assert;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.CounterMutation;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.utils.ByteBufferUtil;
-
-import static org.apache.cassandra.locator.ReplicaUtils.full;
 
 public class WriteCallbackInfoTest
 {
@@ -57,31 +56,46 @@ public class WriteCallbackInfoTest
         }
     }
 
+    @Test
+    public void testIMutation() throws Exception
+    {
+        for (Verb verb : new Verb[]{ Verb.PAXOS_COMMIT_REQ, Verb.MUTATION_REQ })
+        {
+            testIMutation(verb, true);
+            testIMutation(verb, false);
+        }
+    }
+
     private void testShouldHint(Verb verb, ConsistencyLevel cl, boolean allowHints, boolean expectHint) throws Exception
     {
         TableMetadata metadata = MockSchema.newTableMetadata("", "");
         Object payload = verb == Verb.PAXOS_COMMIT_REQ
-                         ? new Commit(UUID.randomUUID(), new PartitionUpdate.Builder(metadata, ByteBufferUtil.EMPTY_BYTE_BUFFER, RegularAndStaticColumns.NONE, 1).build())
+                         ? new Commit(Ballot.none(), PartitionUpdate.builder(metadata, ByteBufferUtil.EMPTY_BYTE_BUFFER, RegularAndStaticColumns.NONE, 1).build())
                          : new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
 
-        RequestCallbacks.WriteCallbackInfo wcbi = new RequestCallbacks.WriteCallbackInfo(Message.out(verb, payload), full(InetAddressAndPort.getByName("192.168.1.1")), null, cl, allowHints);
-        Assert.assertEquals(expectHint, wcbi.shouldHint());
-        if (expectHint)
+        RequestCallbacks.WriteCallbackInfo wcbi = new RequestCallbacks.WriteCallbackInfo(Message.out(verb, payload), InetAddressAndPort.getByName("192.168.1.1"), null);
+        Assert.assertNotNull(wcbi.iMutation());
+    }
+
+    private void testIMutation(Verb verb, boolean allowHints) throws Exception
+    {
+        TableMetadata metadata = MockSchema.newTableMetadata("", "");
+        Object payload;
+        if (verb == Verb.PAXOS_COMMIT_REQ)
         {
-            Assert.assertNotNull(wcbi.mutation());
+            //            UUID uuid = UUID.randomUUID();
+            PartitionUpdate update = PartitionUpdate.builder(metadata, ByteBufferUtil.EMPTY_BYTE_BUFFER, RegularAndStaticColumns.NONE, 1).build();
+            payload = new Commit(Ballot.none(), update);
+        }
+        else if (verb == Verb.COUNTER_MUTATION_REQ)
+        {
+            Mutation mutation = new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
+            payload = new CounterMutation(mutation, null);
         }
         else
-        {
-            boolean fail = false;
-            try
-            {
-                wcbi.mutation();
-            }
-            catch (Throwable t)
-            {
-                fail = true;
-            }
-            Assert.assertTrue(fail);
-        }
+            payload = new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
+
+        RequestCallbacks.WriteCallbackInfo wcbi = new RequestCallbacks.WriteCallbackInfo(Message.out(verb, payload), InetAddressAndPort.getByName("192.168.1.1"), null);
+        Assert.assertNotNull(wcbi.iMutation());
     }
 }

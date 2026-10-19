@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.commitlog;
 
+import java.io.IOError;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.io.*;
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.apache.cassandra.io.util.File;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,7 +57,8 @@ public class CommitLogReader
     @VisibleForTesting
     public static final int ALL_MUTATIONS = -1;
     private final CRC32 checksum;
-    private final Map<TableId, AtomicInteger> invalidMutations;
+    private final Map<TableId, AtomicInteger> invalidMutations; // if we can't find a table for a mutation, we count it here
+    private final Set<String> segmentsWithInvalidMutations;
 
     private byte[] buffer;
 
@@ -63,7 +66,13 @@ public class CommitLogReader
     {
         checksum = new CRC32();
         invalidMutations = new HashMap<>();
+        segmentsWithInvalidMutations = new HashSet<>();
         buffer = new byte[4096];
+    }
+
+    public Set<String> getSegmentsWithInvalidMutations()
+    {
+        return segmentsWithInvalidMutations;
     }
 
     public Set<Map.Entry<TableId, AtomicInteger>> getInvalidMutations()
@@ -99,7 +108,7 @@ public class CommitLogReader
             {
                 if (shouldSkip(file))
                 {
-                    logger.info("Skipping playback of empty log: {}", file.getName());
+                    logger.info("Skipping playback of empty log: {}", file.name());
                 }
                 else
                 {
@@ -110,6 +119,19 @@ public class CommitLogReader
             {
                 // let recover deal with it
                 filtered.add(file);
+            }
+            catch (IOError e)
+            {
+                // Only handle file-not-found errors gracefully; let other IOErrors propagate
+                // as they may indicate corruption or serious I/O issues
+                if (e.getCause() instanceof java.nio.file.NoSuchFileException)
+                {
+                    filtered.add(file);
+                }
+                else
+                {
+                    throw e;
+                }
             }
         }
 
@@ -172,7 +194,7 @@ public class CommitLogReader
                                      boolean tolerateTruncation) throws IOException
     {
         // just transform from the file name (no reading of headers) to determine version
-        CommitLogDescriptor desc = CommitLogDescriptor.fromFileName(file.getName());
+        CommitLogDescriptor desc = CommitLogDescriptor.fromFileName(file.name());
 
         try(RandomAccessReader reader = RandomAccessReader.open(file))
         {
@@ -263,7 +285,7 @@ public class CommitLogReader
     private boolean shouldSkipSegmentId(File file, CommitLogDescriptor desc, CommitLogPosition minPosition)
     {
         logger.debug("Reading {} (CL version {}, messaging version {}, compression {})",
-            file.getPath(),
+            file.path(),
             desc.version,
             desc.getMessagingVersion(),
             desc.compression);
@@ -443,9 +465,12 @@ public class CommitLogReader
             {
                 i = new AtomicInteger(1);
                 invalidMutations.put(ex.id, i);
+                segmentsWithInvalidMutations.add(desc.fileName());
             }
             else
                 i.incrementAndGet();
+
+            handler.handleInvalidMutation(ex.id);
             return;
         }
         catch (Throwable t)

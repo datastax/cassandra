@@ -18,17 +18,12 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.util.Set;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 
@@ -42,25 +37,20 @@ public class SingleSSTableLCSTask extends AbstractCompactionTask
     private static final Logger logger = LoggerFactory.getLogger(SingleSSTableLCSTask.class);
 
     private final int level;
+    private final LeveledCompactionStrategy strategy;
 
-    public SingleSSTableLCSTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int level)
+    public SingleSSTableLCSTask(LeveledCompactionStrategy strategy, ILifecycleTransaction txn, int level)
     {
-        super(cfs, txn);
+        super(strategy.realm, txn);
+        this.strategy = strategy;
         assert txn.originals().size() == 1;
         this.level = level;
+        addObserver(strategy);
     }
 
-    @Override
-    public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
+    int getLevel()
     {
-        throw new UnsupportedOperationException("This method should never be called on SingleSSTableLCSTask");
-    }
-
-    @Override
-    protected int executeInternal(ActiveCompactionsTracker activeCompactions)
-    {
-        run();
-        return 1;
+        return level;
     }
 
     @Override
@@ -82,9 +72,9 @@ public class SingleSSTableLCSTask extends AbstractCompactionTask
             catch (Throwable t)
             {
                 transaction.abort();
-                throw new CorruptSSTableException(t, sstable.descriptor.filenameFor(Component.DATA));
+                throw new CorruptSSTableException(t, sstable.descriptor.fileFor(Components.DATA));
             }
-            cfs.getTracker().notifySSTableMetadataChanged(sstable, metadataBefore);
+            strategy.metadataChanged(metadataBefore, sstable);
         }
         finishTransaction(sstable);
     }
@@ -96,5 +86,11 @@ public class SingleSSTableLCSTask extends AbstractCompactionTask
         transaction.cancel(sstable);
         transaction.prepareToCommit();
         transaction.commit();
+    }
+
+    @Override
+    public long getSpaceOverhead()
+    {
+        return 0;   // This is just metadata modification, no overhead.
     }
 }

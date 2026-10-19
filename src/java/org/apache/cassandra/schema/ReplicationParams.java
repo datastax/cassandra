@@ -27,6 +27,7 @@ import com.google.common.collect.ImmutableMap;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.locator.*;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageService;
 
 public final class ReplicationParams
@@ -57,6 +58,11 @@ public final class ReplicationParams
         return new ReplicationParams(SimpleStrategy.class, ImmutableMap.of("replication_factor", replicationFactor));
     }
 
+    static ReplicationParams everywhere()
+    {
+        return new ReplicationParams(EverywhereStrategy.class, ImmutableMap.of());
+    }
+
     static ReplicationParams nts(Object... args)
     {
         assert args.length % 2 == 0;
@@ -70,25 +76,25 @@ public final class ReplicationParams
         return new ReplicationParams(NetworkTopologyStrategy.class, options);
     }
 
-    public void validate(String name)
+    public void validate(String name, ClientState state)
     {
         // Attempt to instantiate the ARS, which will throw a ConfigurationException if the options aren't valid.
-        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        TokenMetadata tmd = StorageService.instance.getTokenMetadataForKeyspace(name);
         IEndpointSnitch eps = DatabaseDescriptor.getEndpointSnitch();
-        AbstractReplicationStrategy.validateReplicationStrategy(name, klass, tmd, eps, options);
+        AbstractReplicationStrategy.validateReplicationStrategy(name, klass, tmd, eps, options, state);
     }
 
     public static ReplicationParams fromMap(Map<String, String> map) {
         return fromMapWithDefaults(map, new HashMap<>());
     }
 
-    public static ReplicationParams fromMapWithDefaults(Map<String, String> map, Map<String, String> defaults)
+    public static ReplicationParams fromMapWithDefaults(Map<String, String> map, Map<String, String> previousOptions)
     {
         Map<String, String> options = new HashMap<>(map);
         String className = options.remove(CLASS);
 
         Class<? extends AbstractReplicationStrategy> klass = AbstractReplicationStrategy.getClass(className);
-        AbstractReplicationStrategy.prepareReplicationStrategyOptions(klass, options, defaults);
+        AbstractReplicationStrategy.prepareReplicationStrategyOptions(klass, options, previousOptions);
 
         return new ReplicationParams(klass, options);
     }

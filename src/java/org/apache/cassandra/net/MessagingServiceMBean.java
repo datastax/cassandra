@@ -30,68 +30,77 @@ public interface MessagingServiceMBean
 {
     /**
      * Pending tasks for large message TCP Connections
+     * @deprecated See CASSANDRA-7544
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public Map<String, Integer> getLargeMessagePendingTasks();
     public Map<String, Integer> getLargeMessagePendingTasksWithPort();
 
     /**
      * Completed tasks for large message) TCP Connections
+     * @deprecated See CASSANDRA-7544
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public Map<String, Long> getLargeMessageCompletedTasks();
     public Map<String, Long> getLargeMessageCompletedTasksWithPort();
 
     /**
      * Dropped tasks for large message TCP Connections
+     * @deprecated See CASSANDRA-7544
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public Map<String, Long> getLargeMessageDroppedTasks();
     public Map<String, Long> getLargeMessageDroppedTasksWithPort();
 
 
     /**
      * Pending tasks for small message TCP Connections
+     * @deprecated See CASSANDRA-7544
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public Map<String, Integer> getSmallMessagePendingTasks();
     public Map<String, Integer> getSmallMessagePendingTasksWithPort();
 
 
     /**
      * Completed tasks for small message TCP Connections
+     * @deprecated See CASSANDRA-7544
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public Map<String, Long> getSmallMessageCompletedTasks();
     public Map<String, Long> getSmallMessageCompletedTasksWithPort();
 
 
     /**
      * Dropped tasks for small message TCP Connections
+     * @deprecated See CASSANDRA-7544
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public Map<String, Long> getSmallMessageDroppedTasks();
     public Map<String, Long> getSmallMessageDroppedTasksWithPort();
 
 
     /**
      * Pending tasks for gossip message TCP Connections
+     * @deprecated See CASSANDRA-7544
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public Map<String, Integer> getGossipMessagePendingTasks();
     public Map<String, Integer> getGossipMessagePendingTasksWithPort();
 
     /**
      * Completed tasks for gossip message TCP Connections
+     * @deprecated See CASSANDRA-7544
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public Map<String, Long> getGossipMessageCompletedTasks();
     public Map<String, Long> getGossipMessageCompletedTasksWithPort();
 
     /**
      * Dropped tasks for gossip message TCP Connections
+     * @deprecated See CASSANDRA-7544
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public Map<String, Long> getGossipMessageDroppedTasks();
     public Map<String, Long> getGossipMessageDroppedTasksWithPort();
 
@@ -99,6 +108,11 @@ public interface MessagingServiceMBean
      * dropped message counts for server lifetime
      */
     public Map<String, Integer> getDroppedMessages();
+    
+    /**
+     * dropped mutation counts by table for server lifetime
+     */
+    public Map<String, Long> getDroppedMutationsByTable();
 
     /**
      * Total number of timeouts happened on this node
@@ -107,27 +121,31 @@ public interface MessagingServiceMBean
 
     /**
      * Number of timeouts per host
+     * @deprecated See CASSANDRA-7544
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public Map<String, Long> getTimeoutsPerHost();
     public Map<String, Long> getTimeoutsPerHostWithPort();
 
     /**
      * Back-pressure rate limiting per host
+     * @deprecated See CASSANDRA-7544
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public Map<String, Double> getBackPressurePerHost();
 
     /**
      * Enable/Disable back-pressure
+     * @deprecated See CASSANDRA-15375
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public void setBackPressureEnabled(boolean enabled);
 
     /**
      * Get back-pressure enabled state
+     * @deprecated See CASSANDRA-15375
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public boolean isBackPressureEnabled();
 
     public int getVersion(String address) throws UnknownHostException;

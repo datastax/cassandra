@@ -1,0 +1,109 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.io.sstable.format;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.io.compress.CompressedSequentialWriter;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.util.ChecksummedSequentialWriter;
+import org.apache.cassandra.io.util.SequentialWriter;
+import org.apache.cassandra.io.util.SequentialWriterOption;
+import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ChecksumType;
+
+public class DataComponent
+{
+    private static final ChecksumType checksumType = CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE.getEnum(ChecksumType.CRC32);
+    static final Component digestComponent = getDigestComponent();
+
+    private static Component getDigestComponent()
+    {
+        switch (checksumType)
+        {
+            case CRC32:
+                return Components.DIGEST;
+            case CRC32C:
+                return Components.DIGEST_CRC32C;
+            case CRC64NVME:
+                return Components.DIGEST_CRC64NVME;
+            default:
+                throw new IllegalStateException("Unexpected checksumType for digest file: " + checksumType);
+        }
+    }
+
+    public static SequentialWriter buildWriter(Descriptor descriptor,
+                                               TableMetadata metadata,
+                                               SequentialWriterOption options,
+                                               MetadataCollector metadataCollector,
+                                               OperationType operationType)
+    {
+        if (metadata.params.compression.isEnabled())
+        {
+            final CompressionParams compressionParams = buildCompressionParams(metadata, operationType);
+            return new CompressedSequentialWriter(descriptor.fileFor(Components.DATA),
+                                                  descriptor.fileFor(Components.COMPRESSION_INFO),
+                                                  descriptor.fileFor(digestComponent),
+                                                      checksumType,
+                                                  options,
+                                                  compressionParams,
+                                                  metadataCollector);
+        }
+        else
+        {
+            return new ChecksummedSequentialWriter(descriptor.fileFor(Components.DATA),
+                                                   descriptor.fileFor(Components.CRC),
+                                                   descriptor.fileFor(digestComponent),
+                                                   checksumType,
+                                                   options);
+        }
+    }
+
+    /**
+     * Given an OpType, determine the correct Compression Parameters
+     *
+     * @return {@link CompressionParams}
+     */
+    private static CompressionParams buildCompressionParams(TableMetadata metadata, OperationType operationType)
+    {
+        CompressionParams compressionParams = metadata.params.compression;
+
+        if (compressionParams.getSstableCompressor() != null)
+        {
+            if (operationType == OperationType.FLUSH)
+            {
+                // When we are flushing out of the memtable throughput of the compressor is critical as flushes,
+                // especially of large tables, can queue up and potentially block writes.
+                // This optimization allows us to fall back to a faster compressor if a particular
+                // compression algorithm indicates we should. See CASSANDRA-15379 for more details.
+                compressionParams = compressionParams.forFlush(metadata.keyspace);
+            }
+            else
+            {
+                // Allows to plugin custom per-keyspace resolution of compressionParams
+                compressionParams = compressionParams.forCompaction(metadata.keyspace);
+            }
+        }
+        return compressionParams;
+    }
+}

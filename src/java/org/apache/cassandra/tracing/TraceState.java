@@ -19,16 +19,19 @@ package org.apache.cassandra.tracing;
 
 import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import javax.annotation.Nullable;
 
 import com.google.common.base.Stopwatch;
 import org.slf4j.helpers.MessageFormatter;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.TracingClientState;
 import org.apache.cassandra.utils.progress.ProgressEvent;
 import org.apache.cassandra.utils.progress.ProgressEventNotifier;
 import org.apache.cassandra.utils.progress.ProgressListener;
@@ -39,12 +42,16 @@ import org.apache.cassandra.utils.progress.ProgressListener;
  */
 public abstract class TraceState implements ProgressEventNotifier
 {
-    public final UUID sessionId;
+    public final TimeUUID sessionId;
     public final InetAddressAndPort coordinator;
     public final Stopwatch watch;
     public final ByteBuffer sessionIdBytes;
     public final Tracing.TraceType traceType;
     public final int ttl;
+    public final ClientState clientState;
+
+    private boolean rangeQuery;
+    private String tracedKeyspace;
 
     private boolean notify;
     private final List<ProgressListener> listeners = new CopyOnWriteArrayList<>();
@@ -63,14 +70,15 @@ public abstract class TraceState implements ProgressEventNotifier
     // See CASSANDRA-7626 for more details.
     private final AtomicInteger references = new AtomicInteger(1);
 
-    protected TraceState(InetAddressAndPort coordinator, UUID sessionId, Tracing.TraceType traceType)
+    protected TraceState(ClientState clientState, InetAddressAndPort coordinator, TimeUUID sessionId, Tracing.TraceType traceType)
     {
         assert coordinator != null;
         assert sessionId != null;
 
+        this.clientState = clientState;
         this.coordinator = coordinator;
         this.sessionId = sessionId;
-        sessionIdBytes = ByteBufferUtil.bytes(sessionId);
+        sessionIdBytes = sessionId.toBytes();
         this.traceType = traceType;
         this.ttl = traceType.getTTL();
         watch = Stopwatch.createStarted();
@@ -101,6 +109,34 @@ public abstract class TraceState implements ProgressEventNotifier
     {
         assert traceType == Tracing.TraceType.REPAIR;
         listeners.remove(listener);
+    }
+
+    public boolean isRangeQuery()
+    {
+        return rangeQuery;
+    }
+
+    public void setRangeQuery(boolean rangeQuery)
+    {
+        this.rangeQuery = rangeQuery;
+    }
+
+    /**
+     * @return the keyspace being traced.
+     */
+    public @Nullable String tracedKeyspace()
+    {
+        if (clientState instanceof TracingClientState)
+            return ((TracingClientState) clientState).tracedKeyspace();
+        return tracedKeyspace;
+    }
+
+    /**
+     * @param tracedKeyspace the keyspace being traced.
+     */
+    public void tracedKeyspace(String tracedKeyspace)
+    {
+        this.tracedKeyspace = tracedKeyspace;
     }
 
     public int elapsed()
@@ -134,7 +170,7 @@ public abstract class TraceState implements ProgressEventNotifier
             }
             catch (InterruptedException e)
             {
-                throw new RuntimeException();
+                throw new UncheckedInterruptedException(e);
             }
         }
         if (status == Status.ACTIVE)

@@ -17,12 +17,13 @@
  */
 package org.apache.cassandra.io.util;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
+import java.util.function.LongConsumer;
 
+import io.github.jbellis.jvector.disk.IndexWriter;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.utils.SyncUtil;
@@ -34,10 +35,10 @@ import static org.apache.cassandra.utils.Throwables.merge;
  * Adds buffering, mark, and fsyncing to OutputStream.  We always fsync on close; we may also
  * fsync incrementally if Config.trickle_fsync is enabled.
  */
-public class SequentialWriter extends BufferedDataOutputStreamPlus implements Transactional
+public class SequentialWriter extends BufferedDataOutputStreamPlus implements Transactional, IndexWriter
 {
     // absolute path to the given file
-    private final String filePath;
+    protected final File file;
 
     // Offset for start of buffer relative to underlying file
     protected long bufferOffset;
@@ -55,12 +56,12 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
 
     // whether to do trickling fsync() to avoid sudden bursts of dirty buffer flushing by kernel causing read
     // latency spikes
-    private final SequentialWriterOption option;
+    protected final SequentialWriterOption option;
     private int bytesSinceTrickleFsync = 0;
 
     protected long lastFlushOffset;
 
-    protected Runnable runPostFlush;
+    protected LongConsumer runPostFlush;
 
     private final TransactionalProxy txnProxy = txnProxy();
 
@@ -84,16 +85,19 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
             return accumulate;
         }
 
+        @Override
         protected void doPrepare()
         {
             syncInternal();
         }
 
+        @Override
         protected Throwable doCommit(Throwable accumulate)
         {
             return accumulate;
         }
 
+        @Override
         protected Throwable doAbort(Throwable accumulate)
         {
             return accumulate;
@@ -101,20 +105,24 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     }
 
     // TODO: we should specify as a parameter if we permit an existing file or not
-    private static FileChannel openChannel(File file)
+    private static FileChannel openChannel(File file, boolean readable)
     {
         try
         {
             if (file.exists())
             {
-                return FileChannel.open(file.toPath(), StandardOpenOption.READ, StandardOpenOption.WRITE);
+                StandardOpenOption[] options = readable ? new StandardOpenOption[] {StandardOpenOption.WRITE, StandardOpenOption.READ}
+                                                        : new StandardOpenOption[] {StandardOpenOption.WRITE};
+                return FileChannel.open(file.toPath(), options);
             }
             else
             {
-                FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.READ, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
+                StandardOpenOption[] options = readable ? new StandardOpenOption[] {StandardOpenOption.WRITE, StandardOpenOption.READ, StandardOpenOption.CREATE_NEW}
+                                                        : new StandardOpenOption[] {StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW};
+                FileChannel channel = FileChannel.open(file.toPath(), options);
                 try
                 {
-                    SyncUtil.trySyncDir(file.getParentFile());
+                    SyncUtil.trySyncDir(file.parent());
                 }
                 catch (Throwable t)
                 {
@@ -137,7 +145,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      */
     public SequentialWriter(File file)
     {
-       this(file, SequentialWriterOption.DEFAULT);
+        this(file, SequentialWriterOption.DEFAULT);
     }
 
     /**
@@ -159,16 +167,31 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      */
     public SequentialWriter(File file, SequentialWriterOption option, boolean strictFlushing)
     {
-        super(openChannel(file), option.allocateBuffer());
+        this(file, false, option, strictFlushing);
+    }
+
+    protected SequentialWriter(File file, ByteBuffer buffer, SequentialWriterOption option, boolean strictFlushing)
+    {
+        super(openChannel(file, false), buffer);
         this.strictFlushing = strictFlushing;
         this.fchannel = (FileChannel)channel;
 
-        this.filePath = file.getAbsolutePath();
+        this.file = file;
+        this.option = option;
+    }
+
+    public SequentialWriter(File file, boolean readable, SequentialWriterOption option, boolean strictFlushing)
+    {
+        super(openChannel(file, readable), option.allocateBuffer());
+        this.strictFlushing = strictFlushing;
+        this.fchannel = (FileChannel)channel;
+
+        this.file = file;
 
         this.option = option;
     }
 
-    public void skipBytes(int numBytes) throws IOException
+    public void skipBytes(long numBytes) throws IOException
     {
         flush();
         fchannel.position(fchannel.position() + numBytes);
@@ -191,7 +214,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, getPath());
+            throw new FSWriteError(e, getFile());
         }
     }
 
@@ -209,15 +232,18 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     @Override
     protected void doFlush(int count)
     {
-        flushData();
-
-        if (option.trickleFsync())
+        if (buffer.position() > 0)
         {
-            bytesSinceTrickleFsync += buffer.position();
-            if (bytesSinceTrickleFsync >= option.trickleFsyncByteInterval())
+            flushData();
+
+            if (option.trickleFsync())
             {
-                syncDataOnlyInternal();
-                bytesSinceTrickleFsync = 0;
+                bytesSinceTrickleFsync += buffer.position();
+                if (bytesSinceTrickleFsync >= option.trickleFsyncByteInterval())
+                {
+                    syncDataOnlyInternal();
+                    bytesSinceTrickleFsync = 0;
+                }
             }
         }
 
@@ -225,7 +251,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         resetBuffer();
     }
 
-    public void setPostFlushListener(Runnable runPostFlush)
+    public void setPostFlushListener(LongConsumer runPostFlush)
     {
         assert this.runPostFlush == null;
         this.runPostFlush = runPostFlush;
@@ -245,20 +271,66 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, getPath());
+            throw new FSWriteError(e, getFile());
         }
         if (runPostFlush != null)
-            runPostFlush.run();
+            runPostFlush.accept(getLastFlushOffset());
     }
 
+    @Override
     public boolean hasPosition()
     {
         return true;
     }
 
+    @Override
     public long position()
     {
         return current();
+    }
+
+    // Page management using on-disk pages
+
+    @Override
+    public int maxBytesInPage()
+    {
+        return PageAware.PAGE_SIZE;
+    }
+
+    @Override
+    public void padToPageBoundary() throws IOException
+    {
+        PageAware.pad(this);
+    }
+
+    @Override
+    public int bytesLeftInPage()
+    {
+        return PageAware.bytesLeftInPage(position());
+    }
+
+    @Override
+    public long paddedPosition()
+    {
+        return PageAware.padded(position());
+    }
+
+    public void updateFileHandle(FileHandle.Builder fhBuilder)
+    {
+        // Set actual length to avoid having to read it off the file system.
+        fhBuilder.withLengthOverride(lastFlushOffset);
+    }
+
+    /**
+     * Some writers cannot feasibly calculate the exact length of a file. If any user needs to be able to store
+     * metadata at the end, they should use this function to ensure the content to be written can be addressed
+     * using `fileLength - bytesNeeded`.
+     *
+     * See PartitionIndexBuilder#complete and PartitionIndex#load for usage example.
+     */
+    public void establishEndAddressablePosition(int bytesNeeded) throws IOException
+    {
+        // Nothing to do when file length can be exactly determined.
     }
 
     /**
@@ -288,13 +360,13 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, getPath());
+            throw new FSReadError(e, getFile());
         }
     }
 
-    public String getPath()
+    public File getFile()
     {
-        return filePath;
+        return file;
     }
 
     protected void resetBuffer()
@@ -344,7 +416,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, getPath());
+            throw new FSReadError(e, getFile());
         }
 
         bufferOffset = truncateTarget;
@@ -365,7 +437,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, getPath());
+            throw new FSWriteError(e, getFile());
         }
     }
 
@@ -374,23 +446,33 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         return channel.isOpen();
     }
 
+    @Override
     public final void prepareToCommit()
     {
         txnProxy.prepareToCommit();
     }
 
+    @Override
     public final Throwable commit(Throwable accumulate)
     {
         return txnProxy.commit(accumulate);
     }
 
+    /**
+     * Stop the operation after errors, i.e. close and release all held resources.
+     *
+     * Do not use this to interrupt a write operation running in another thread.
+     * This is thread-unsafe, releasing and cleaning the buffer while it is being written can have disastrous
+     * consequences (e.g. SIGSEGV).
+     */
+    @Override
     public final Throwable abort(Throwable accumulate)
     {
         return txnProxy.abort(accumulate);
     }
 
     @Override
-    public final void close()
+    public void close()
     {
         if (option.finishOnClose())
             txnProxy.finish();
@@ -422,7 +504,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      */
     protected static class BufferedFileWriterMark implements DataPosition
     {
-        final long pointer;
+        public final long pointer;
 
         public BufferedFileWriterMark(long pointer)
         {

@@ -26,11 +26,10 @@ import java.util.Set;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
-
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.junit.Assert;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -38,8 +37,8 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.MockSchema;
 
-import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertNotNull;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class HelpersTest
@@ -85,9 +84,9 @@ public class HelpersTest
     @Test
     public void testIdentityMap()
     {
-        Integer one = new Integer(1);
-        Integer two = new Integer(2);
-        Integer three = new Integer(3);
+        Integer one = Integer.valueOf(1);
+        Integer two = Integer.valueOf(2);
+        Integer three = Integer.valueOf(3);
         Map<Integer, Integer> identity = Helpers.identityMap(set(one, two, three));
         Assert.assertEquals(3, identity.size());
         Assert.assertSame(one, identity.get(1));
@@ -124,7 +123,7 @@ public class HelpersTest
         failure = false;
         try
         {
-            Map<Integer, Integer> notIdentity = ImmutableMap.of(1, new Integer(1), 2, 2, 3, 3);
+            Map<Integer, Integer> notIdentity = ImmutableMap.of(Integer.MIN_VALUE, Integer.valueOf(Integer.MIN_VALUE), 2, 2, 3, 3);
             Helpers.replace(notIdentity, a, b);
         }
         catch (AssertionError e)
@@ -164,12 +163,14 @@ public class HelpersTest
     public void testMarkObsolete()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        LogTransaction txnLogs = new LogTransaction(OperationType.UNKNOWN);
+        AbstractLogTransaction txnLogs = ILogTransactionsFactory.instance.createLogTransaction(OperationType.UNKNOWN,
+                                                                                               LifecycleTransaction.newId(),
+                                                                                               cfs.metadata);
         Iterable<SSTableReader> readers = Lists.newArrayList(MockSchema.sstable(1, cfs), MockSchema.sstable(2, cfs));
         Iterable<SSTableReader> readersToKeep = Lists.newArrayList(MockSchema.sstable(3, cfs), MockSchema.sstable(4, cfs));
 
-        List<LogTransaction.Obsoletion> obsoletions = new ArrayList<>();
-        Helpers.prepareForObsoletion(readers, txnLogs, obsoletions, null);
+        List<AbstractLogTransaction.Obsoletion> obsoletions = new ArrayList<>();
+        Helpers.prepareForObsoletion(readers, txnLogs, obsoletions, null, null);
         assertNotNull(obsoletions);
         assertEquals(2, obsoletions.size());
 
@@ -191,7 +192,9 @@ public class HelpersTest
     public void testObsoletionPerformance()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        LogTransaction txnLogs = new LogTransaction(OperationType.UNKNOWN);
+        AbstractLogTransaction txnLogs = ILogTransactionsFactory.instance.createLogTransaction(OperationType.UNKNOWN,
+                                                                                               LifecycleTransaction.newId(),
+                                                                                               cfs.metadata);
         List<SSTableReader> readers = new ArrayList<>();
 
         for (int i = 0; i < 10000; i++)
@@ -200,7 +203,7 @@ public class HelpersTest
         }
         long start = System.currentTimeMillis();
 
-        Helpers.prepareForObsoletion(readers.subList(0, 500), txnLogs, new ArrayList<>(),null );
+        Helpers.prepareForObsoletion(readers.subList(0, 500), txnLogs, new ArrayList<>(),null, null);
         txnLogs.finish();
         long time = System.currentTimeMillis() - start;
         assertTrue(time < 20000);

@@ -24,6 +24,7 @@ import java.util.Comparator;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.exceptions.UnknownColumnException;
@@ -43,6 +44,7 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
 {
     public static final Serializer serializer = new Serializer();
 
+    /* this enum is used in serialization; preserve order for compatibility */
     private enum Kind { SLICE, ELEMENT }
 
     protected final ColumnMetadata column;
@@ -75,6 +77,9 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
 
     protected abstract CellPath comparisonPath();
 
+    public abstract CellPath startInclusive();
+    public abstract CellPath endInclusive();
+
     public int compareTo(ColumnSubselection other)
     {
         assert other.column().name.equals(column().name);
@@ -86,6 +91,21 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
      * subselection and 1 if the path is after anything selected by this subselection.
      */
     public abstract int compareInclusionOf(CellPath path);
+
+    @Override
+    public String toString()
+    {
+        return toString(false, Redaction.NONE);
+    }
+
+    /**
+     * Returns a string representation of this subselection.
+     *
+     * @param cql if true, the string representation will be in CQL format
+     * @param redaction if true, the string representation will redact sensitive data
+     * @return a string representation of this subselection
+     */
+    protected abstract String toString(boolean cql, Redaction redaction);
 
     private static class Slice extends ColumnSubselection
     {
@@ -120,12 +140,23 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
                 return 0;
         }
 
-        @Override
-        public String toString()
+        public CellPath startInclusive()
         {
-            // This assert we're dealing with a collection since that's the only thing it's used for so far.
+            return from;
+        }
+        public CellPath endInclusive()
+        {
+            return to;
+        }
+
+        @Override
+        protected String toString(boolean cql, Redaction redaction)
+        {
+            // This asserts we're dealing with a collection since that's the only thing it's used for so far.
             AbstractType<?> type = ((CollectionType<?>)column().type).nameComparator();
-            return String.format("[%s:%s]", from == CellPath.BOTTOM ? "" : type.getString(from.get(0)), to == CellPath.TOP ? "" : type.getString(to.get(0)));
+            return String.format("[%s:%s]",
+                                 from == CellPath.BOTTOM ? "" : (cql ? type.toCQLString(from.get(0), redaction) : type.getString(from.get(0))),
+                                 to == CellPath.TOP ? "" : (cql ? type.toCQLString(to.get(0), redaction) : type.getString(to.get(0))));
         }
     }
 
@@ -154,12 +185,21 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
             return column.cellPathComparator().compare(path, element);
         }
 
-        @Override
-        public String toString()
+        public CellPath startInclusive()
         {
-            // This assert we're dealing with a collection since that's the only thing it's used for so far.
+            return element;
+        }
+        public CellPath endInclusive()
+        {
+            return element;
+        }
+
+        @Override
+        protected String toString(boolean cql, Redaction redaction)
+        {
+            // This asserts we're dealing with a collection since that's the only thing it's used for so far.
             AbstractType<?> type = ((CollectionType<?>)column().type).nameComparator();
-            return String.format("[%s]", type.getString(element.get(0)));
+            return String.format("[%s]", cql ? type.toCQLString(element.get(0), redaction) : type.getString(element.get(0)));
         }
     }
 
@@ -194,10 +234,14 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
             {
                 // If we don't find the definition, it could be we have data for a dropped column, and we shouldn't
                 // fail deserialization because of that. So we grab a "fake" ColumnMetadata that ensure proper
-                // deserialization. The column will be ignore later on anyway.
+                // deserialization. The column will be ignored later on anyway.
                 column = metadata.getDroppedColumn(name);
                 if (column == null)
-                    throw new UnknownColumnException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
+                {
+                    String errorMsg = String.format("Unknown column %s in table %s.%s during deserialization",
+                                                    UTF8Type.instance.getString(name), metadata.keyspace, metadata.name);
+                    throw new UnknownColumnException(errorMsg);
+                }
             }
 
             Kind kind = Kind.values()[in.readUnsignedByte()];

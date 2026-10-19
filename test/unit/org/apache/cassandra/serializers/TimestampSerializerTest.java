@@ -26,6 +26,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+
 public class TimestampSerializerTest
 {
     public static final long ONE_SECOND = 1000L;
@@ -127,7 +129,11 @@ public class TimestampSerializerTest
         final long cstOffset = 6 * ONE_HOUR;
         validateStringTimestamp("1970-01-01 00:00:00 Central Standard Time", cstOffset);
         validateStringTimestamp("1970-01-01 00:00:00 CST", cstOffset);
+        validateStringTimestamp("1970-01-01 00:00:00 -0600", cstOffset);
+        validateStringTimestamp("1970-01-01 00:00:00-0600", cstOffset);
         validateStringTimestamp("1970-01-01T00:00:00 GMT-06:00", cstOffset);
+        validateStringTimestamp("1970-01-01T00:00:00 -0600", cstOffset);
+        validateStringTimestamp("1970-01-01T00:00:00-0600", cstOffset);
     }
 
     @Test
@@ -196,7 +202,7 @@ public class TimestampSerializerTest
     public void testNumeric()
     {
         // now (positive
-        final long now = System.currentTimeMillis();
+        final long now = currentTimeMillis();
         assertEquals(now, TimestampSerializer.dateStringToTimestamp(Long.toString(now)));
 
         // negative
@@ -222,7 +228,7 @@ public class TimestampSerializerTest
     public void testNow()
     {
         final long threshold = 5;
-        final long now = System.currentTimeMillis();
+        final long now = currentTimeMillis();
         final long parsed = TimestampSerializer.dateStringToTimestamp("now");
         assertTrue("'now' timestamp not within expected tolerance.", now <= parsed && parsed <= now + threshold);
     }

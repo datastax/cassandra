@@ -32,15 +32,14 @@ import org.apache.cassandra.distributed.shared.Versions;
  */
 public class Cluster extends AbstractCluster<IInvokableInstance>
 {
-
     private Cluster(Builder builder)
     {
         super(builder);
     }
 
-    protected IInvokableInstance newInstanceWrapper(int generation, Versions.Version version, IInstanceConfig config)
+    protected IInvokableInstance newInstanceWrapper(Versions.Version version, IInstanceConfig config)
     {
-        return new Wrapper(generation, version, config);
+        return new Wrapper(version, config);
     }
 
     public static Builder build()

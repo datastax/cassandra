@@ -26,13 +26,11 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import javax.management.InstanceAlreadyExistsException;
-import javax.management.MBeanRegistrationException;
 import javax.management.MBeanServer;
 import javax.management.MalformedObjectNameException;
-import javax.management.NotCompliantMBeanException;
 import javax.management.Notification;
 import javax.management.NotificationListener;
 import javax.management.ObjectName;
@@ -50,45 +48,36 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.StatusLogger;
 
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+
 public class GCInspector implements NotificationListener, GCInspectorMXBean
 {
     public static final String MBEAN_NAME = "org.apache.cassandra.service:type=GCInspector";
     private static final Logger logger = LoggerFactory.getLogger(GCInspector.class);
-    private volatile long gcLogThreshholdInMs = DatabaseDescriptor.getGCLogThreshold();
-    private volatile long gcWarnThreasholdInMs = DatabaseDescriptor.getGCWarnThreshold();
 
     /*
      * The field from java.nio.Bits that tracks the total number of allocated
-     * bytes of direct memory requires via ByteBuffer.allocateDirect that have not been GCed.
+     * bytes of direct memory requested via ByteBuffer.allocateDirect that have not been GCed.
      */
     final static Field BITS_TOTAL_CAPACITY;
 
-    
     static
     {
-        Field temp = null;
+        Class<?> bitsClass = null;
+
         try
         {
-            Class<?> bitsClass = Class.forName("java.nio.Bits");
-            Field f;
-            try
-            {
-                f = bitsClass.getDeclaredField("totalCapacity");
-            }
-            catch (NoSuchFieldException ex)
-            {
-                // in Java11 it changed name to "TOTAL_CAPACITY"
-                f = bitsClass.getDeclaredField("TOTAL_CAPACITY");
-            }
-            f.setAccessible(true);
-            temp = f;
+            bitsClass = Class.forName("java.nio.Bits");
         }
         catch (Throwable t)
         {
-            logger.debug("Error accessing field of java.nio.Bits", t);
-            //Don't care, will just return the dummy value -1 if we can't get at the field in this JVM
+            logger.debug("Error returning class of java.nio.Bits", t);
         }
-        BITS_TOTAL_CAPACITY = temp;
+
+        if (bitsClass != null)
+            BITS_TOTAL_CAPACITY = getField(bitsClass, "TOTAL_CAPACITY");
+        else
+            BITS_TOTAL_CAPACITY = null;
     }
 
     static final class State
@@ -113,7 +102,7 @@ public class GCInspector implements NotificationListener, GCInspectorMXBean
         State()
         {
             count = maxRealTimeElapsed = sumSquaresRealTimeElapsed = totalRealTimeElapsed = totalBytesReclaimed = 0;
-            startNanos = System.nanoTime();
+            startNanos = nanoTime();
         }
     }
 
@@ -151,18 +140,16 @@ public class GCInspector implements NotificationListener, GCInspectorMXBean
 
     public GCInspector()
     {
-        MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
-
         try
         {
             ObjectName gcName = new ObjectName(ManagementFactory.GARBAGE_COLLECTOR_MXBEAN_DOMAIN_TYPE + ",*");
-            for (ObjectName name : mbs.queryNames(gcName, null))
+            for (ObjectName name : MBeanWrapper.instance.queryNames(gcName, null))
             {
-                GarbageCollectorMXBean gc = ManagementFactory.newPlatformMXBeanProxy(mbs, name.getCanonicalName(), GarbageCollectorMXBean.class);
+                GarbageCollectorMXBean gc = ManagementFactory.newPlatformMXBeanProxy(MBeanWrapper.instance.getMBeanServer(), name.getCanonicalName(), GarbageCollectorMXBean.class);
                 gcStates.put(gc.getName(), new GCState(gc, assumeGCIsPartiallyConcurrent(gc), assumeGCIsOldGen(gc)));
             }
             ObjectName me = new ObjectName(MBEAN_NAME);
-            if (!mbs.isRegistered(me))
+            if (!MBeanWrapper.instance.isRegistered(me))
                 MBeanWrapper.instance.registerMBean(this, new ObjectName(MBEAN_NAME));
         }
         catch (MalformedObjectNameException | IOException e)
@@ -293,9 +280,9 @@ public class GCInspector implements NotificationListener, GCInspectorMXBean
                     break;
             }
             
-            if (gcWarnThreasholdInMs != 0 && duration > gcWarnThreasholdInMs)
+            if (getGcWarnThresholdInMs() != 0 && duration > getGcWarnThresholdInMs())
                 logger.warn(sb.toString());
-            else if (duration > gcLogThreshholdInMs)
+            else if (duration > getGcLogThresholdInMs())
                 logger.info(sb.toString());
             else if (logger.isTraceEnabled())
                 logger.trace(sb.toString());
@@ -317,28 +304,56 @@ public class GCInspector implements NotificationListener, GCInspectorMXBean
     public double[] getAndResetStats()
     {
         State state = getTotalSinceLastCheck();
-        double[] r = new double[7];
-        r[0] = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - state.startNanos);
+        double[] r = new double[9];
+        r[0] = TimeUnit.NANOSECONDS.toMillis(nanoTime() - state.startNanos);
         r[1] = state.maxRealTimeElapsed;
         r[2] = state.totalRealTimeElapsed;
         r[3] = state.sumSquaresRealTimeElapsed;
         r[4] = state.totalBytesReclaimed;
         r[5] = state.count;
-        r[6] = getAllocatedDirectMemory();
+        r[6] = getTotalDirectMemory();
 
         return r;
     }
 
-    private static long getAllocatedDirectMemory()
+    private static long getTotalDirectMemory()
     {
-        if (BITS_TOTAL_CAPACITY == null) return -1;
+        return getFieldValue(BITS_TOTAL_CAPACITY, true);
+    }
+
+    private static Field getField(Class<?> clazz, String fieldName)
+    {
         try
         {
-            return BITS_TOTAL_CAPACITY.getLong(null);
+            Field field = clazz.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            return field;
         }
         catch (Throwable t)
         {
-            logger.trace("Error accessing field of java.nio.Bits", t);
+            logger.trace("Error accessing field {} of {}", fieldName, clazz.getName(), t);
+            // Return null to indicate failure
+            return null;
+        }
+    }
+
+    /**
+     * Retrieves the value of a Field, handling both regular long fields and AtomicLong fields.
+     *
+     * @param field the Field to retrieve the value from
+     * @param isAtomicLong true if the field is an AtomicLong, false if it's a regular long
+     * @return the field value, or -1 if retrieval fails or field is null.
+     */
+    private static long getFieldValue(Field field, boolean isAtomicLong)
+    {
+        if (field == null) return -1;
+        try
+        {
+            return isAtomicLong ? ((AtomicLong) field.get(null)).get() : field.getLong(null);
+        }
+        catch (Throwable t)
+        {
+            logger.trace("Error accessing field value of {}", field.getName(), t);
             //Don't care how or why we failed to get the value in this JVM. Return -1 to indicate failure
             return -1;
         }
@@ -346,37 +361,43 @@ public class GCInspector implements NotificationListener, GCInspectorMXBean
 
     public void setGcWarnThresholdInMs(long threshold)
     {
+        long gcLogThresholdInMs = getGcLogThresholdInMs();
         if (threshold < 0)
             throw new IllegalArgumentException("Threshold must be greater than or equal to 0");
-        if (threshold != 0 && threshold <= gcLogThreshholdInMs)
-            throw new IllegalArgumentException("Threshold must be greater than gcLogTreasholdInMs which is currently " 
-                    + gcLogThreshholdInMs);
-        gcWarnThreasholdInMs = threshold;
+        if (threshold != 0 && threshold <= gcLogThresholdInMs)
+            throw new IllegalArgumentException("Threshold must be greater than gcLogThresholdInMs which is currently "
+                    + gcLogThresholdInMs);
+        if (threshold > Integer.MAX_VALUE)
+            throw new IllegalArgumentException("Threshold must be less than Integer.MAX_VALUE");
+        DatabaseDescriptor.setGCWarnThreshold((int)threshold);
     }
 
     public long getGcWarnThresholdInMs()
     {
-        return gcWarnThreasholdInMs;
+        return DatabaseDescriptor.getGCWarnThreshold();
     }
 
     public void setGcLogThresholdInMs(long threshold)
     {
         if (threshold <= 0)
-            throw new IllegalArgumentException("Threashold must be greater than 0");
-        if (gcWarnThreasholdInMs != 0 && threshold > gcWarnThreasholdInMs)
-            throw new IllegalArgumentException("Threashold must be less than gcWarnTreasholdInMs which is currently " 
-                    + gcWarnThreasholdInMs);
-        gcLogThreshholdInMs = threshold;
+            throw new IllegalArgumentException("Threshold must be greater than 0");
+
+        long gcWarnThresholdInMs = getGcWarnThresholdInMs();
+        if (gcWarnThresholdInMs != 0 && threshold > gcWarnThresholdInMs)
+            throw new IllegalArgumentException("Threshold must be less than gcWarnThresholdInMs which is currently "
+                                               + gcWarnThresholdInMs);
+
+        DatabaseDescriptor.setGCLogThreshold((int) threshold);
     }
 
     public long getGcLogThresholdInMs()
     {
-        return gcLogThreshholdInMs;
+        return DatabaseDescriptor.getGCLogThreshold();
     }
 
     public long getStatusThresholdInMs()
     {
-        return gcWarnThreasholdInMs != 0 ? gcWarnThreasholdInMs : gcLogThreshholdInMs;
+        return getGcWarnThresholdInMs() != 0 ? getGcWarnThresholdInMs() : getGcLogThresholdInMs();
     }
 
 }

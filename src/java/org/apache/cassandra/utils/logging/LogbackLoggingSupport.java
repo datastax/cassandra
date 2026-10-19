@@ -18,30 +18,36 @@
 
 package org.apache.cassandra.utils.logging;
 
-import java.lang.management.ManagementFactory;
 import java.security.AccessControlException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
-import javax.management.JMX;
-import javax.management.ObjectName;
-
-import org.apache.cassandra.security.ThreadAwareSecurityManager;
-import org.apache.commons.lang3.StringUtils;
-import org.slf4j.LoggerFactory;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Maps;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.ILoggerFactory;
+import org.slf4j.LoggerFactory;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
-import ch.qos.logback.classic.jmx.JMXConfiguratorMBean;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.classic.spi.TurboFilterList;
 import ch.qos.logback.classic.turbo.ReconfigureOnChangeFilter;
 import ch.qos.logback.classic.turbo.TurboFilter;
+import ch.qos.logback.classic.util.ContextInitializer;
 import ch.qos.logback.core.Appender;
-import ch.qos.logback.core.hook.DelayingShutdownHook;
+import ch.qos.logback.core.filter.Filter;
+import ch.qos.logback.core.hook.DefaultShutdownHook;
+import ch.qos.logback.core.spi.AppenderAttachable;
+import org.apache.cassandra.security.ThreadAwareSecurityManager;
 
 /**
  * Encapsulates all logback-specific implementations in a central place.
@@ -57,6 +63,8 @@ public class LogbackLoggingSupport implements LoggingSupport
     @Override
     public void onStartup()
     {
+        checkOnlyOneVirtualTableAppender();
+
         // The default logback configuration in conf/logback.xml allows reloading the
         // configuration when the configuration file has changed (every 60 seconds by default).
         // This requires logback to use file I/O APIs. But file I/O is not allowed from UDFs.
@@ -87,7 +95,7 @@ public class LogbackLoggingSupport implements LoggingSupport
     @Override
     public void onShutdown()
     {
-        DelayingShutdownHook logbackHook = new DelayingShutdownHook();
+        DefaultShutdownHook logbackHook = new DefaultShutdownHook();
         logbackHook.setContext((LoggerContext) LoggerFactory.getILoggerFactory());
         logbackHook.run();
     }
@@ -100,10 +108,9 @@ public class LogbackLoggingSupport implements LoggingSupport
         // if both classQualifier and rawLevel are empty, reload from configuration
         if (StringUtils.isBlank(classQualifier) && StringUtils.isBlank(rawLevel))
         {
-            JMXConfiguratorMBean jmxConfiguratorMBean = JMX.newMBeanProxy(ManagementFactory.getPlatformMBeanServer(),
-                                                                          new ObjectName("ch.qos.logback.classic:Name=default,Type=ch.qos.logback.classic.jmx.JMXConfigurator"),
-                                                                          JMXConfiguratorMBean.class);
-            jmxConfiguratorMBean.reloadDefaultConfiguration();
+            LoggerContext lc = (LoggerContext) LoggerFactory.getILoggerFactory();
+            lc.reset();
+            new ContextInitializer(lc).autoConfig();
             return;
         }
         // classQualifier is set, but blank level given
@@ -130,6 +137,70 @@ public class LogbackLoggingSupport implements LoggingSupport
                 logLevelMaps.put(logBackLogger.getName(), logBackLogger.getLevel().toString());
         }
         return logLevelMaps;
+    }
+
+    @Override
+    public Optional<Appender<?>> getAppender(Class<?> appenderClass, String name)
+    {
+        LoggerContext lc = (LoggerContext) LoggerFactory.getILoggerFactory();
+        for (Logger logBackLogger : lc.getLoggerList())
+        {
+            for (Iterator<Appender<ILoggingEvent>> iterator = logBackLogger.iteratorForAppenders(); iterator.hasNext();)
+            {
+                Appender<ILoggingEvent> appender = iterator.next();
+                if (appender.getClass() == appenderClass && appender.getName().equals(name))
+                    return Optional.of(appender);
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    private void checkOnlyOneVirtualTableAppender()
+    {
+        int count = 0;
+        LoggerContext lc = (LoggerContext) LoggerFactory.getILoggerFactory();
+        List<String> virtualAppenderNames = new ArrayList<>();
+        for (Logger logBackLogger : lc.getLoggerList())
+        {
+            for (Iterator<Appender<ILoggingEvent>> iterator = logBackLogger.iteratorForAppenders(); iterator.hasNext();)
+            {
+                Appender<?> appender = iterator.next();
+                if (appender instanceof VirtualTableAppender)
+                {
+                    virtualAppenderNames.add(appender.getName());
+                    count += 1;
+                }
+            }
+        }
+
+        if (count > 1)
+            throw new IllegalStateException(String.format("There are multiple appenders of class %s of names %s. There is only one appender of such class allowed.",
+                                                          VirtualTableAppender.class.getName(), String.join(",", virtualAppenderNames)));
+    }
+
+    private Set<Appender<?>> getAllLogbackAppenders()
+    {
+        ILoggerFactory factory = LoggerFactory.getILoggerFactory();
+        LoggerContext ctx = (LoggerContext) factory;
+
+        Set<Appender<?>> appenders = new HashSet<>();
+        ctx.getLoggerList().forEach(logger -> logger.iteratorForAppenders().forEachRemaining(a -> collectAppenders(a, appenders)));
+        return appenders;
+    }
+
+    private static void collectAppenders(Appender<?> appender, Collection<Appender<?>> collection)
+    {
+        collection.add(appender);
+        if (appender instanceof AppenderAttachable<?>)
+            ((AppenderAttachable<?>) appender).iteratorForAppenders().forEachRemaining(a -> collectAppenders(a, collection));
+    }
+
+    public Set<Filter<?>> getAllLogbackFilters()
+    {
+        return getAllLogbackAppenders().stream()
+                                       .flatMap(a -> a.getCopyOfAttachedFiltersList().stream())
+                                       .collect(Collectors.toSet());
     }
 
     private boolean hasAppenders(Logger logBackLogger)

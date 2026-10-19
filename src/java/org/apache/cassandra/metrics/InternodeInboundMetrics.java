@@ -17,10 +17,14 @@
  */
 package org.apache.cassandra.metrics;
 
+import java.lang.reflect.InvocationTargetException;
+
 import com.codahale.metrics.Gauge;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.InboundMessageHandlers;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry.MetricName;
+import org.apache.cassandra.utils.FBUtilities;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_INTERNODE_INBOUND_METRICS_PROVIDER_PROPERTY;
 
 /**
  * Metrics for internode connections.
@@ -43,11 +47,40 @@ public class InternodeInboundMetrics
     private final MetricName throttledNanos;
 
     /**
+     * Factory method to create metrics for given inbound message handlers.
+     * This ensures the metrics provider is used when configured.
+     *
+     * @param peer IP address and port to use for metrics label
+     * @param handlers the inbound message handlers
+     * @return new InternodeInboundMetrics instance
+     */
+    public static InternodeInboundMetrics create(InetAddressAndPort peer, InboundMessageHandlers handlers)
+    {
+        if (CUSTOM_INTERNODE_INBOUND_METRICS_PROVIDER_PROPERTY.isPresent())
+        {
+            Class<InternodeInboundMetrics> klass = FBUtilities.classForName(CUSTOM_INTERNODE_INBOUND_METRICS_PROVIDER_PROPERTY.getString(), "Internode Inbound Metrics Provider");
+            try
+            {
+                return klass.getDeclaredConstructor(InetAddressAndPort.class, InboundMessageHandlers.class).newInstance(peer, handlers);
+            }
+            catch (NoSuchMethodException | InstantiationException | IllegalAccessException |
+                   InvocationTargetException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+        else
+        {
+            return new InternodeInboundMetrics(peer, handlers);
+        }
+    }
+
+    /**
      * Create metrics for given inbound message handlers.
      *
      * @param peer IP address and port to use for metrics label
      */
-    public InternodeInboundMetrics(InetAddressAndPort peer, InboundMessageHandlers handlers)
+    protected InternodeInboundMetrics(InetAddressAndPort peer, InboundMessageHandlers handlers)
     {
         // ipv6 addresses will contain colons, which are invalid in a JMX ObjectName
         MetricNameFactory factory = new DefaultNameFactory("InboundConnection", peer.getHostAddressAndPortForJMX());

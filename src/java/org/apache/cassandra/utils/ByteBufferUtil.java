@@ -23,20 +23,30 @@ package org.apache.cassandra.utils;
  * afterward, and ensure the tests still pass.
  */
 
-import java.io.*;
+import java.io.DataInput;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.db.TypeSizes;
-import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -276,6 +286,15 @@ public class ByteBufferUtil
         return clone;
     }
 
+    /**
+     * Transfer bytes from a ByteBuffer to byte array.
+     *
+     * @param src the source ByteBuffer
+     * @param srcPos starting position in the source ByteBuffer
+     * @param dst the destination byte array
+     * @param dstPos starting position in the destination byte array
+     * @param length the number of bytes to copy
+     */
     public static void copyBytes(ByteBuffer src, int srcPos, byte[] dst, int dstPos, int length)
     {
         FastByteOperations.copy(src, srcPos, dst, dstPos, length);
@@ -292,6 +311,26 @@ public class ByteBufferUtil
      * @param length the number of bytes to copy
      */
     public static void copyBytes(ByteBuffer src, int srcPos, ByteBuffer dst, int dstPos, int length)
+    {
+        FastByteOperations.copy(src, srcPos, dst, dstPos, length);
+    }
+
+    /**
+     * Transfer bytes from one ByteBuffer to another.
+     * This function acts as System.arrayCopy() but for ByteBuffers.
+     *
+     * @param src the source ByteBuffer
+     * @param srcPos starting position in the source ByteBuffer
+     * @param dst the destination ByteBuffer
+     * @param dstPos starting position in the destination ByteBuffer
+     * @param length the number of bytes to copy
+     */
+    public static void arrayCopy(ByteBuffer src, int srcPos, ByteBuffer dst, int dstPos, int length)
+    {
+        FastByteOperations.copy(src, srcPos, dst, dstPos, length);
+    }
+
+    public static void arrayCopy(ByteBuffer src, int srcPos, byte[] dst, int dstPos, int length)
     {
         FastByteOperations.copy(src, srcPos, dst, dstPos, length);
     }
@@ -338,7 +377,7 @@ public class ByteBufferUtil
 
     public static void writeWithVIntLength(ByteBuffer bytes, DataOutputPlus out) throws IOException
     {
-        out.writeUnsignedVInt(bytes.remaining());
+        out.writeUnsignedVInt32(bytes.remaining());
         out.write(bytes);
     }
 
@@ -364,7 +403,7 @@ public class ByteBufferUtil
 
     public static ByteBuffer readWithVIntLength(DataInputPlus in) throws IOException
     {
-        int length = (int)in.readUnsignedVInt();
+        int length = in.readUnsignedVInt32();
         if (length < 0)
             throw new IOException("Corrupt (negative) value length encountered");
 
@@ -385,7 +424,7 @@ public class ByteBufferUtil
 
     public static void skipWithVIntLength(DataInputPlus in) throws IOException
     {
-        int length = (int)in.readUnsignedVInt();
+        int length = in.readUnsignedVInt32();
         if (length < 0)
             throw new IOException("Corrupt (negative) value length encountered");
 
@@ -422,6 +461,28 @@ public class ByteBufferUtil
     {
         int skip = readShortLength(in);
         in.skipBytesFully(skip);
+    }
+
+    /**
+     * Returns true if the buffer at the current position in the input matches given buffer.
+     * If true, the input is positioned at the end of the consumed buffer.
+     * If false, the position of the input is undefined.
+     * <p>
+     * The matched buffer is unchanged
+     *
+     * @throws IOException
+     */
+    public static boolean equalsWithShortLength(FileDataInput in, ByteBuffer toMatch) throws IOException
+    {
+        int length = readShortLength(in);
+        if (length != toMatch.remaining())
+            return false;
+        int limit = toMatch.limit();
+        for (int i = toMatch.position(); i < limit; ++i)
+            if (toMatch.get(i) != in.readByte())
+                return false;
+
+        return true;
     }
 
     public static ByteBuffer read(DataInput in, int length) throws IOException
@@ -497,6 +558,11 @@ public class ByteBufferUtil
         return bytes.getFloat(bytes.position());
     }
 
+    public static float getFloat(ByteBuffer bytes, int offset)
+    {
+        return bytes.getFloat(offset);
+    }
+
     public static double toDouble(ByteBuffer bytes)
     {
         return bytes.getDouble(bytes.position());
@@ -522,8 +588,21 @@ public class ByteBufferUtil
             return ByteBufferUtil.bytes((InetAddress) obj);
         else if (obj instanceof String)
             return ByteBufferUtil.bytes((String) obj);
+        else if (obj instanceof byte[])
+            return ByteBuffer.wrap((byte[]) obj);
         else if (obj instanceof ByteBuffer)
             return (ByteBuffer) obj;
+        else if (obj instanceof Set)
+        {
+            Set<?> set = (Set<?>) obj;
+            // convert subtypes to BB
+            Set<ByteBuffer> bbs = new LinkedHashSet<>();
+            for (Object o : set)
+                if (!bbs.add(objectToBytes(o)))
+                    throw new IllegalStateException("Object " + o + " maps to a buffer that already exists in the set");
+            // decompose/serializer doesn't use the isMultiCell, so safe to do this
+            return SetType.getInstance(BytesType.instance, false).decompose(bbs);
+        }
         else
             throw new IllegalArgumentException(String.format("Cannot convert value %s of type %s",
                                                              obj,
@@ -662,6 +741,11 @@ public class ByteBufferUtil
         return ByteBuffer.wrap(UUIDGen.decompose(uuid));
     }
 
+    public static ByteBuffer bytes(TimeUUID uuid)
+    {
+        return bytes(uuid.asUUID());
+    }
+
     // Returns whether {@code prefix} is a prefix of {@code value}.
     public static boolean isPrefix(ByteBuffer prefix, ByteBuffer value)
     {
@@ -674,13 +758,14 @@ public class ByteBufferUtil
 
     public static boolean canMinimize(ByteBuffer buf)
     {
-        return buf != null && (buf.capacity() > buf.remaining() || !buf.hasArray());
+        return buf != null && (!buf.hasArray() || buf.array().length > buf.remaining());
+        // Note: buf.array().length is different from buf.capacity() for sliced buffers.
     }
 
     /** trims size of bytebuffer to exactly number of bytes in it, to do not hold too much memory */
     public static ByteBuffer minimalBufferFor(ByteBuffer buf)
     {
-        return buf.capacity() > buf.remaining() || !buf.hasArray() ? ByteBuffer.wrap(getArray(buf)) : buf;
+        return !buf.hasArray() || buf.array().length > buf.remaining() ? ByteBuffer.wrap(getArray(buf)) : buf;
     }
 
     public static ByteBuffer[] minimizeBuffers(ByteBuffer[] src)
@@ -722,6 +807,8 @@ public class ByteBufferUtil
     // changes bb position
     public static void writeShortLength(ByteBuffer bb, int length)
     {
+        if (length > FBUtilities.MAX_UNSIGNED_SHORT)
+            throw new IllegalArgumentException(String.format("Length %d > max length %d", length, FBUtilities.MAX_UNSIGNED_SHORT));
         bb.put((byte) ((length >> 8) & 0xFF));
         bb.put((byte) (length & 0xFF));
     }
@@ -857,5 +944,69 @@ public class ByteBufferUtil
         }
 
         return true;
+    }
+
+    /**
+     * Returns true if the buffer at the current position in the input matches given buffer.
+     * If true, the input is positioned at the end of the consumed buffer.
+     * If false, the position of the input is undefined.
+     * <p>
+     * The matched buffer is unchanged
+     */
+    public static boolean equalsWithShortLength(DataInput in, ByteBuffer toMatch) throws IOException
+    {
+        int length = readShortLength(in);
+        if (length != toMatch.remaining())
+            return false;
+        int limit = toMatch.limit();
+        for (int i = toMatch.position(); i < limit; ++i)
+            if (toMatch.get(i) != in.readByte())
+                return false;
+
+        return true;
+    }
+
+    public static void readFully(FileChannel channel, ByteBuffer dst, long position) throws IOException
+    {
+        while (dst.hasRemaining())
+        {
+            int read = channel.read(dst, position);
+            if (read == -1)
+                throw new EOFException();
+            position += read;
+        }
+    }
+
+    /**
+     * Essentially the same as {@link #bytesToHex(ByteBuffer)} (though it prepends "0x" for clarity) but takes care of
+     * not output a string too long if the value is too big. This is to be used for error/debug message where we don't
+     * want to blow things up.
+     *
+     * @param bytes the bytes to convert to hexadecimal string.
+     * @return a string representation of {@code bytes} that may be only partial if {@code bytes} is too big.
+     */
+    public static String toDebugHexString(ByteBuffer bytes)
+    {
+        int maxSize = 50; // kind of arbitrary tbh but that's not hugely important
+        if (bytes.remaining() > maxSize)
+        {
+            bytes = bytes.duplicate();
+            bytes.limit(bytes.position() + maxSize);
+        }
+        return "0x" + bytesToHex(bytes);
+    }
+
+    /**
+     * Overwrite a buffer with random data. Used for testing.
+     */
+    public static void overwriteWithRandomBytes(ByteBuffer byteBuffer)
+    {
+        byte[] bytes = new byte[Math.min(byteBuffer.capacity(), 256)];
+        ByteBuffer buf = byteBuffer.duplicate();
+        while (buf.remaining() > 0)
+        {
+            ThreadLocalRandom.current().nextBytes(bytes);
+            buf.put(bytes, 0, Math.min(bytes.length, buf.remaining()));
+        }
     }
 }

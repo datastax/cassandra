@@ -28,5 +28,13 @@ package org.apache.cassandra.io.util;
  */
 public interface RebuffererFactory extends ReaderFileProxy
 {
-    Rebufferer instantiateRebufferer();
+    Rebufferer instantiateRebufferer(boolean isScan);
+
+    /**
+     * If the {@link Rebufferer} created by this factory rebuffered in "chunks" of a fixed size, the size (> 0) of those
+     * chunks. Otherwise, this should return a value <= 0.
+     */
+    int chunkSize();
+
+    void invalidateIfCached(long position);
 }

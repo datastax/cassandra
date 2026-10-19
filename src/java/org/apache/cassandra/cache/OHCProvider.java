@@ -37,7 +37,7 @@ public class OHCProvider implements CacheProvider<RowCacheKey, IRowCacheEntry>
     public ICache<RowCacheKey, IRowCacheEntry> create()
     {
         OHCacheBuilder<RowCacheKey, IRowCacheEntry> builder = OHCacheBuilder.newBuilder();
-        builder.capacity(DatabaseDescriptor.getRowCacheSizeInMB() * 1024 * 1024)
+        builder.capacity(DatabaseDescriptor.getRowCacheSizeInMiB() * 1024 * 1024)
                .keySerializer(KeySerializer.instance)
                .valueSerializer(ValueSerializer.instance)
                .throwOOME(true);
@@ -188,12 +188,10 @@ public class OHCProvider implements CacheProvider<RowCacheKey, IRowCacheEntry>
             }
         }
 
-        @SuppressWarnings("resource")
         public IRowCacheEntry deserialize(ByteBuffer buf)
         {
-            try
+            try (RebufferingInputStream in = new DataInputBuffer(buf, false))
             {
-                RebufferingInputStream in = new DataInputBuffer(buf, false);
                 boolean isSentinel = in.readBoolean();
                 if (isSentinel)
                     return new RowCacheSentinel(in.readLong());

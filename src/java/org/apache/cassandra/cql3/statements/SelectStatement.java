@@ -18,128 +18,236 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.NavigableSet;
+import java.util.Objects;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeMap;
+import java.util.concurrent.TimeUnit;
+import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
+import javax.annotation.Nullable;
+import javax.annotation.concurrent.ThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
+import org.apache.commons.lang3.builder.ToStringBuilder;
+import org.apache.commons.lang3.builder.ToStringStyle;
+import com.google.common.math.IntMath;
 
+import org.apache.cassandra.cql3.Ordering;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.config.DataStorageSpec;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.PageSize;
+import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.ResultSet;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.VariableSpecifications;
+import org.apache.cassandra.cql3.WhereClause;
+import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
+import org.apache.cassandra.cql3.restrictions.Restrictions;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.db.guardrails.GuardrailsConfigProvider;
+import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
+import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.ResultSetBuilder;
 import org.apache.cassandra.cql3.selection.Selectable;
+import org.apache.cassandra.cql3.selection.Selectable.WithFunction;
 import org.apache.cassandra.cql3.selection.Selection;
 import org.apache.cassandra.cql3.selection.Selection.Selectors;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.cql3.selection.Selector;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringBound;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DataRange;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.PartitionRangeReadQuery;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.ReadQuery;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.SinglePartitionReadQuery;
+import org.apache.cassandra.db.Slice;
+import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.aggregation.GroupMaker;
-import org.apache.cassandra.db.filter.*;
-import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.filter.ClusteringIndexFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
+import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.ReadSizeAbortException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.metrics.ClientRequestSizeMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.pager.AggregationQueryPager;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.service.pager.QueryPager;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.commons.lang3.builder.ToStringBuilder;
-import org.apache.commons.lang3.builder.ToStringStyle;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 
+import static java.lang.String.format;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+import static org.apache.cassandra.db.filter.DataLimits.NO_LIMIT;
 import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
 
 /**
  * Encapsulates a completely parsed SELECT query, including the target
  * column family, expression, result count, and ordering clause.
- *
+ * </p>
  * A number of public methods here are only used internally. However,
  * many of these are made accessible for the benefit of custom
  * QueryHandler implementations, so before reducing their accessibility
  * due consideration should be given.
+ * <p>
+ * Note that select statements can be accessed by multiple threads, so we cannot rely on mutable attributes.
  */
-public class SelectStatement implements CQLStatement
+@ThreadSafe
+public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 {
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
+    public static final String USAGE_WARNING_PAGE_WEIGHT = "Applied page weight limit of ";
+    public static final String TOPK_AGGREGATION_ERROR = "Top-K queries can not be run with aggregation";
+    public static final String TOPK_CONSISTENCY_LEVEL_ERROR = "Top-K queries can only be run with consistency level ONE/LOCAL_ONE. Consistency level %s was used.";
+    public static final String TOPK_CONSISTENCY_LEVEL_WARNING = "Top-K queries can only be run with consistency level ONE " +
+                                                                "/ LOCAL_ONE / NODE_LOCAL. Consistency level %s was requested. " +
+                                                                "Downgrading the consistency level to %s.";
+    public static final String TOPK_OFFSET_ERROR = "Top-K queries cannot be run with an offset. Offset was set to %d.";
 
-    public static final int DEFAULT_PAGE_SIZE = 10000;
+    private static final int NO_OFFSET = -1; // sentinel value meaning no offset has been explicitly requested
 
+    private final String rawCQLStatement;
     public final VariableSpecifications bindVariables;
     public final TableMetadata table;
     public final Parameters parameters;
     private final Selection selection;
     private final Term limit;
     private final Term perPartitionLimit;
+    private final Term offset;
+    private final SelectOptions selectOptions;
 
     private final StatementRestrictions restrictions;
 
     private final boolean isReversed;
 
     /**
-     * The <code>AggregationSpecification</code> used to make the aggregates.
+     * The {@code Factory} used to create the {@code AggregationSpecification}.
      */
-    private final AggregationSpecification aggregationSpec;
+    private final AggregationSpecification.Factory aggregationSpecFactory;
 
     /**
      * The comparator used to orders results when multiple keys are selected (using IN).
      */
-    private final Comparator<List<ByteBuffer>> orderingComparator;
+    private final ColumnComparator<List<ByteBuffer>> orderingComparator;
 
     // Used by forSelection below
-    private static final Parameters defaultParameters = new Parameters(Collections.emptyMap(),
+    private static final Parameters defaultParameters = new Parameters(Collections.emptyList(),
                                                                        Collections.emptyList(),
                                                                        false,
                                                                        false,
                                                                        false);
 
-    public SelectStatement(TableMetadata table,
+    public SelectStatement(String queryString,
+                           TableMetadata table,
                            VariableSpecifications bindVariables,
                            Parameters parameters,
                            Selection selection,
                            StatementRestrictions restrictions,
                            boolean isReversed,
-                           AggregationSpecification aggregationSpec,
-                           Comparator<List<ByteBuffer>> orderingComparator,
+                           AggregationSpecification.Factory aggregationSpecFactory,
+                           ColumnComparator<List<ByteBuffer>> orderingComparator,
                            Term limit,
-                           Term perPartitionLimit)
+                           Term perPartitionLimit,
+                           Term offset,
+                           SelectOptions selectOptions)
     {
+        this.rawCQLStatement = queryString;
         this.table = table;
         this.bindVariables = bindVariables;
         this.selection = selection;
         this.restrictions = restrictions;
         this.isReversed = isReversed;
-        this.aggregationSpec = aggregationSpec;
+        this.aggregationSpecFactory = aggregationSpecFactory;
         this.orderingComparator = orderingComparator;
         this.parameters = parameters;
         this.limit = limit;
         this.perPartitionLimit = perPartitionLimit;
+        this.offset = offset;
+        this.selectOptions = selectOptions;
+    }
+
+    @Override
+    public String getRawCQLStatement()
+    {
+        return rawCQLStatement;
     }
 
     @Override
@@ -167,6 +275,9 @@ public class SelectStatement implements CQLStatement
         selection.addFunctionsTo(functions);
         restrictions.addFunctionsTo(functions);
 
+        if (aggregationSpecFactory != null)
+            aggregationSpecFactory.addFunctionsTo(functions);
+
         if (limit != null)
             limit.addFunctionsTo(functions);
 
@@ -188,16 +299,19 @@ public class SelectStatement implements CQLStatement
     // queried data through processColumnFamily.
     static SelectStatement forSelection(TableMetadata table, Selection selection)
     {
-        return new SelectStatement(table,
+        return new SelectStatement(null,
+                                   table,
                                    VariableSpecifications.empty(),
                                    defaultParameters,
                                    selection,
-                                   StatementRestrictions.empty(StatementType.SELECT, table),
+                                   StatementRestrictions.empty(table),
                                    false,
                                    null,
                                    null,
                                    null,
-                                   null);
+                                   null,
+                                   null,
+                                   SelectOptions.EMPTY);
     }
 
     public ResultSet.ResultMetadata getResultMetadata()
@@ -209,7 +323,7 @@ public class SelectStatement implements CQLStatement
     {
         if (table.isView())
         {
-            TableMetadataRef baseTable = View.findBaseTable(keyspace(), columnFamily());
+            TableMetadataRef baseTable = View.findBaseTable(keyspace(), table());
             if (baseTable != null)
                 state.ensureTablePermission(baseTable, Permission.SELECT);
         }
@@ -220,80 +334,316 @@ public class SelectStatement implements CQLStatement
 
         for (Function function : getFunctions())
             state.ensurePermission(Permission.EXECUTE, function);
+
+        if (!state.hasTablePermission(table, Permission.UNMASK) &&
+            !state.hasTablePermission(table, Permission.SELECT_MASKED))
+        {
+            List<ColumnMetadata> queriedMaskedColumns = table.columns()
+                                                             .stream()
+                                                             .filter(ColumnMetadata::isMasked)
+                                                             .filter(restrictions::isRestricted)
+                                                             .collect(Collectors.toList());
+
+            if (!queriedMaskedColumns.isEmpty())
+                throw new UnauthorizedException(format("User %s has no UNMASK nor SELECT_MASKED permission on table %s.%s, " +
+                                                       "cannot query masked columns %s",
+                                                       state.getUser().getName(), keyspace(), table(), queriedMaskedColumns));
+        }
     }
 
+    @Override
     public void validate(ClientState state) throws InvalidRequestException
     {
-        // Nothing to do, all validation has been done by RawStatement.prepare()
+        if (parameters.allowFiltering && !SchemaConstants.isSystemKeyspace(table.keyspace))
+            Guardrails.allowFilteringEnabled.ensureEnabled(state);
     }
 
-    public ResultMessage.Rows execute(QueryState state, QueryOptions options, long queryStartNanoTime)
+    /**
+     * Adds the specified restrictions to the index restrictions.
+     *
+     * @param indexRestrictions the index restrictions to add
+     * @return a new {@code SelectStatement} instance with the added index restrictions
+     */
+    @SuppressWarnings("unused") // this is used by DSE and CNDB to add authorization restrictions
+    public SelectStatement addIndexRestrictions(Restrictions indexRestrictions)
+    {
+        return new SelectStatement(rawCQLStatement,
+                                   table,
+                                   bindVariables,
+                                   parameters,
+                                   selection,
+                                   restrictions.addIndexRestrictions(indexRestrictions),
+                                   isReversed,
+                                   aggregationSpecFactory,
+                                   orderingComparator,
+                                   limit,
+                                   perPartitionLimit,
+                                   offset,
+                                   selectOptions);
+    }
+
+    /**
+     * Adds the specified external restrictions to the index restrictions.
+     *
+     * @param indexRestrictions the index restrictions to add
+     * @return a new {@code SelectStatement} instance with the added index restrictions
+     */
+    public SelectStatement addIndexRestrictions(Iterable<ExternalRestriction> indexRestrictions)
+    {
+        return new SelectStatement(rawCQLStatement,
+                                   table,
+                                   bindVariables,
+                                   parameters,
+                                   selection,
+                                   restrictions.addExternalRestrictions(indexRestrictions),
+                                   isReversed,
+                                   aggregationSpecFactory,
+                                   orderingComparator,
+                                   limit,
+                                   perPartitionLimit,
+                                   offset,
+                                   selectOptions);
+    }
+
+    private void validateQueryOptions(QueryState queryState, QueryOptions options)
+    {
+        if (SchemaConstants.isUserKeyspace(table.keyspace))
+            Guardrails.readConsistencyLevels.guard(EnumSet.of(options.getConsistency()), queryState.getClientState());
+
+        PageSize pageSize = options.getPageSize();
+        pageSize.guard(table(), queryState.getClientState());
+    }
+
+    /**
+     * Returns whether the paging can be skipped based on the user limits and the page size - that is, if the user limit
+     * is provided and is lower than the page size, it means that we will only return at most one page and thus paging
+     * is unnecessary in this case. That applies to the page size defined in rows - if the page size is defined in bytes
+     * we cannot say anything about the relation beteween the user rows limit and the page size.
+     */
+    private boolean canSkipPaging(DataLimits userLimits, PageSize pageSize, boolean topK)
+    {
+        return !pageSize.isDefined() ||
+               pageSize.getUnit() == PageSize.PageUnit.ROWS && !pageSize.isCompleted(userLimits.count(), PageSize.PageUnit.ROWS) ||
+               topK;
+    }
+
+    @Override
+    public ResultMessage.Rows execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime)
+    {
+        return execute(state, options, null, requestTime);
+    }
+
+    /**
+     * Common implementation of {@link #execute(QueryState, QueryOptions, Dispatcher.RequestTime)} and
+     * {@link #executeWithReadQuery(QueryState, QueryOptions, ReadQuery, Dispatcher.RequestTime)}: the two differ
+     * only in where the {@link ReadQuery} to read comes from.
+     *
+     * @param externalQuery the caller-supplied query to read, or {@code null} to build one from this statement's
+     *                      own restrictions with {@code getQuery(...)}
+     */
+    private ResultMessage.Rows execute(QueryState state,
+                                       QueryOptions options,
+                                       @Nullable ReadQuery externalQuery,
+                                       Dispatcher.RequestTime requestTime)
     {
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
 
         cl.validateForRead();
+        validateQueryOptions(state, options);
 
-        int nowInSec = options.getNowInSeconds(state);
+        long nowInSec = options.getNowInSeconds(state);
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
-        int pageSize = options.getPageSize();
+        int userOffset = getOffset(options);
+        PageSize pageSize = options.getPageSize();
+        boolean unmask = !table.hasMaskedColumns() || state.getClientState().hasTablePermission(table, Permission.UNMASK);
 
         Selectors selectors = selection.newSelectors(options);
-        ReadQuery query = getQuery(options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
+        AggregationSpecification aggregationSpec = getAggregationSpec(options);
+        ReadQuery query;
+        if (externalQuery == null)
+        {
+            query = getQuery(options, state.getClientState(), selectors.getColumnFilter(),
+                             nowInSec, userLimit, userPerPartitionLimit, userOffset, aggregationSpec);
+        }
+        else
+        {
+            // getQuery(...) validates the query it builds before returning it; do the same for the supplied one.
+            query = externalQuery;
+            query.validateSelectOptions(selectOptions, state.getClientState());
+            query.maybeValidateIndexes();
+        }
 
-        if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
-            return execute(query, options, state, selectors, nowInSec, userLimit, queryStartNanoTime);
+        if (options.isReadThresholdsEnabled())
+            query.trackWarnings();
+        ResultMessage.Rows rows;
 
-        QueryPager pager = getPager(query, options);
+        if (query.limits().isGroupByLimit() && pageSize != null && pageSize.isDefined() && pageSize.getUnit() == PageSize.PageUnit.BYTES)
+            throw new InvalidRequestException("Paging in bytes cannot be specified for aggregation queries");
 
-        return execute(Pager.forDistributedQuery(pager, cl, state.getClientState()),
-                       options,
-                       selectors,
-                       pageSize,
-                       nowInSec,
-                       userLimit,
-                       queryStartNanoTime);
+        if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize, query.isTopK()))
+        {
+            rows = execute(query, options, state.getClientState(), selectors, nowInSec, userLimit, userOffset, null, requestTime, unmask);
+        }
+        else
+        {
+            QueryPager pager = getPager(query, options);
+
+            rows = execute(state,
+                           Pager.forDistributedQuery(pager, cl, state.getClientState()),
+                           options,
+                           selectors,
+                           pageSize,
+                           nowInSec,
+                           userLimit,
+                           userOffset,
+                           aggregationSpec,
+                           requestTime,
+                           unmask);
+        }
+        if (!SchemaConstants.isSystemKeyspace(table.keyspace))
+            ClientRequestSizeMetrics.recordReadResponseMetrics(rows, restrictions, selection);
+
+        return rows;
     }
 
-    public ReadQuery getQuery(QueryOptions options, int nowInSec) throws RequestValidationException
+    /**
+     * Executes this {@code SELECT} against a caller-supplied {@link ReadQuery} instead of the one this
+     * statement would build from its own {@code WHERE} restrictions, returning a single page of results.
+     * <p>
+     * This is the entry point for components that resolve <em>which</em> partitions to read (and in
+     * <em>what order</em>) out of band — for example a custom {@link org.apache.cassandra.cql3.QueryHandler}
+     * that obtains the matching primary keys from an external index and, in the desired order, assembles a
+     * {@link org.apache.cassandra.db.SinglePartitionReadCommand.Group}. Result order is entirely the query's:
+     * this method pages the supplied {@code query} through {@link #getPager(ReadQuery, QueryOptions)}, and a
+     * {@link org.apache.cassandra.service.pager.MultiPartitionPager} yields partitions in the order of the
+     * {@link org.apache.cassandra.db.SinglePartitionReadCommand.Group}'s commands — not token order — across
+     * page boundaries.
+     * <p>
+     * Apart from substituting {@code query} for {@link #getQuery(QueryOptions, ClientState, ColumnFilter, long, int, int, int, AggregationSpecification)},
+     * this runs the very same code as {@link #execute(QueryState, QueryOptions, Dispatcher.RequestTime)} — both
+     * delegate to {@link #execute(QueryState, QueryOptions, ReadQuery, Dispatcher.RequestTime)}: consistency
+     * validation, guardrails ({@link #validateQueryOptions}, {@code pageSize.guard}), the per-query validation
+     * {@code getQuery} applies to the query it builds ({@link ReadQuery#validateSelectOptions(SelectOptions, ClientState)},
+     * {@link ReadQuery#maybeValidateIndexes()}), read-threshold tracking
+     * ({@link ReadQuery#trackWarnings()}), selection/projection, user {@code LIMIT}/{@code OFFSET}, aggregation,
+     * dynamic-data masking, the single-shot fast path when paging can be skipped, read metrics/sensors, and page
+     * continuation via {@link ResultSet.ResultMetadata#setHasMorePages}.
+     * <p>
+     * Caller contract:
+     * <ul>
+     *   <li>{@code query} must read partitions of this statement's {@link #table}; build it with this
+     *       statement's data limits and column filter (see {@link #getQuery(QueryOptions, long)}) so
+     *       storage-level and result-level limits agree. Passing a query over a different table, or one whose
+     *       shape disagrees with this statement's aggregation/selection, is undefined.</li>
+     *   <li>Top-K queries are not supported through this entry point.</li>
+     * </ul>
+     * This method holds no state across calls and reads only immutable statement fields, so — like
+     * {@link #execute(QueryState, QueryOptions, Dispatcher.RequestTime)} — it is safe to call concurrently on a
+     * single shared (prepared) {@code SelectStatement} instance, one {@code query} per call. It relies on the
+     * same request-scoped thread-locals as the normal read path ({@link ClientWarn},
+     * {@link org.apache.cassandra.sensors.RequestTracker}), so callers must invoke it on a request thread that
+     * has them set up (as the native-transport dispatch path does).
+     */
+    public ResultMessage.Rows executeWithReadQuery(QueryState state,
+                                                   QueryOptions options,
+                                                   ReadQuery query,
+                                                   Dispatcher.RequestTime requestTime)
+    {
+        Objects.requireNonNull(query, "query");
+        // Top-K needs the specific validation/CL-downgrade handling in getQuery, which this entry point bypasses.
+        checkFalse(query.isTopK(), "Top-K queries are not supported by executeWithReadQuery");
+
+        return execute(state, options, query, requestTime);
+    }
+
+    public AggregationSpecification getAggregationSpec(QueryOptions options)
+    {
+        return aggregationSpecFactory == null ? null : aggregationSpecFactory.newInstance(options);
+    }
+
+    public ReadQuery getQuery(QueryOptions options, long nowInSec) throws RequestValidationException
     {
         Selectors selectors = selection.newSelectors(options);
         return getQuery(options,
+                        ClientState.forInternalCalls(),
                         selectors.getColumnFilter(),
                         nowInSec,
                         getLimit(options),
                         getPerPartitionLimit(options),
-                        options.getPageSize());
+                        getOffset(options),
+                        getAggregationSpec(options));
     }
 
     public ReadQuery getQuery(QueryOptions options,
+                              ClientState state,
                               ColumnFilter columnFilter,
-                              int nowInSec,
+                              long nowInSec,
                               int userLimit,
                               int perPartitionLimit,
-                              int pageSize)
+                              int userOffset,
+                              AggregationSpecification aggregationSpec)
     {
-        boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing();
+        IndexRegistry indexRegistry = IndexRegistry.obtain(table);
+        RowFilter rowFilter = getRowFilter(options, state, indexRegistry);
+        DataLimits dataLimits = getDataLimits(state, userLimit, perPartitionLimit, userOffset, aggregationSpec);
 
-        DataLimits limit = getDataLimits(userLimit, perPartitionLimit, pageSize);
+        if (restrictions.isKeyRange() && restrictions.usesSecondaryIndexing() && !SchemaConstants.isLocalSystemKeyspace(table.keyspace))
+            Guardrails.nonPartitionRestrictedIndexQueryEnabled.ensureEnabled(state);
 
-        if (isPartitionRangeQuery)
-            return getRangeCommand(options, columnFilter, limit, nowInSec);
+        ReadQuery query = restrictions.isKeyRange()
+                        ? getRangeCommand(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry)
+                        : getSliceCommands(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry);
 
-        return getSliceCommands(options, columnFilter, limit, nowInSec);
+        // Handle additional validation for topK queries
+        if (query.isTopK())
+        {
+            // We aren't going to allow SERIAL at all, so we can error out on those.
+            checkFalse(options.getConsistency() == ConsistencyLevel.LOCAL_SERIAL ||
+                       options.getConsistency() == ConsistencyLevel.SERIAL,
+                       String.format(TOPK_CONSISTENCY_LEVEL_ERROR, options.getConsistency()));
+
+            // Consistency levels with more than one replica are downgraded to ONE/LOCAL_ONE.
+            if (options.getConsistency() != ConsistencyLevel.ONE &&
+                options.getConsistency() != ConsistencyLevel.LOCAL_ONE &&
+                options.getConsistency() != ConsistencyLevel.NODE_LOCAL)
+            {
+                ConsistencyLevel supplied = options.getConsistency();
+                ConsistencyLevel downgrade = supplied.isDatacenterLocal() ? ConsistencyLevel.LOCAL_ONE : ConsistencyLevel.ONE;
+                options.updateConsistency(downgrade);
+                ClientWarn.instance.warn(String.format(TOPK_CONSISTENCY_LEVEL_WARNING, supplied, downgrade));
+            }
+
+            // We don't support offset for top-k queries.
+            checkFalse(userOffset != NO_OFFSET, String.format(TOPK_OFFSET_ERROR, userOffset));
+
+            // We don't support aggregation for top-k queries because we don't support paging.
+            checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
+        }
+
+        query.validateSelectOptions(selectOptions, state);
+
+        // If there's a secondary index that the command can use, have it validate the request parameters.
+        query.maybeValidateIndexes();
+
+        return query;
     }
 
     private ResultMessage.Rows execute(ReadQuery query,
                                        QueryOptions options,
-                                       QueryState state,
+                                       ClientState state,
                                        Selectors selectors,
-                                       int nowInSec,
-                                       int userLimit, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+                                       long nowInSec,
+                                       int userLimit,
+                                       int userOffset,
+                                       AggregationSpecification aggregationSpec,
+                                       Dispatcher.RequestTime requestTime,
+                                       boolean unmask)
     {
-        try (PartitionIterator data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime))
+        try (PartitionIterator data = query.execute(options.getConsistency(), state, requestTime))
         {
-            return processResults(data, options, selectors, nowInSec, userLimit);
+            return processResults(data, options, selectors, nowInSec, userLimit, userOffset, aggregationSpec, unmask, state);
         }
     }
 
@@ -333,23 +683,32 @@ public class SelectStatement implements CQLStatement
             return pager.state();
         }
 
-        public abstract PartitionIterator fetchPage(int pageSize, long queryStartNanoTime);
+        public abstract PartitionIterator fetchPage(PageSize pageSize, Dispatcher.RequestTime requestTime);
+
+        public abstract PartitionIterator readAll(PageSize pageSize, Dispatcher.RequestTime requestTime);
 
         public static class NormalPager extends Pager
         {
             private final ConsistencyLevel consistency;
             private final ClientState clientState;
 
-            private NormalPager(QueryPager pager, ConsistencyLevel consistency, ClientState clientState)
+            private NormalPager(QueryPager pager, ConsistencyLevel consistency, ClientState queryState)
             {
                 super(pager);
                 this.consistency = consistency;
-                this.clientState = clientState;
+                this.clientState = queryState;
             }
 
-            public PartitionIterator fetchPage(int pageSize, long queryStartNanoTime)
+            @Override
+            public PartitionIterator fetchPage(PageSize pageSize, Dispatcher.RequestTime requestTime)
             {
-                return pager.fetchPage(pageSize, consistency, clientState, queryStartNanoTime);
+                return pager.fetchPage(pageSize, consistency, clientState, requestTime);
+            }
+
+            @Override
+            public PartitionIterator readAll(PageSize pageSize, Dispatcher.RequestTime requestTime)
+            {
+                return pager.readAll(pageSize, consistency, clientState, requestTime);
             }
         }
 
@@ -363,48 +722,77 @@ public class SelectStatement implements CQLStatement
                 this.executionController = executionController;
             }
 
-            public PartitionIterator fetchPage(int pageSize, long queryStartNanoTime)
+            @Override
+            public PartitionIterator fetchPage(PageSize pageSize, Dispatcher.RequestTime requestTime)
             {
                 return pager.fetchPageInternal(pageSize, executionController);
+            }
+
+            @Override
+            public PartitionIterator readAll(PageSize pageSize, Dispatcher.RequestTime requestTime)
+            {
+                return pager.readAllInternal(pageSize, executionController);
             }
         }
     }
 
-    private ResultMessage.Rows execute(Pager pager,
+    private ResultMessage.Rows execute(QueryState state,
+                                       Pager pager,
                                        QueryOptions options,
                                        Selectors selectors,
-                                       int pageSize,
-                                       int nowInSec,
+                                       PageSize pageSize,
+                                       long nowInSec,
                                        int userLimit,
-                                       long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+                                       int userOffset,
+                                       AggregationSpecification aggregationSpec,
+                                       Dispatcher.RequestTime requestTime,
+                                       boolean unmask)
     {
-        if (aggregationSpec != null)
+        pageSize.guard(table(), state.getClientState());
+
+        if (aggregationSpecFactory != null)
         {
             if (!restrictions.hasPartitionKeyRestrictions())
             {
                 warn("Aggregation query used without partition key");
+                noSpamLogger.warn(String.format("Aggregation query used without partition key on table %s.%s, aggregation type: %s",
+                                                 keyspace(), table(), aggregationSpec.kind()));
             }
             else if (restrictions.keyIsInRelation())
             {
                 warn("Aggregation query used on multiple partition keys (IN restriction)");
+                noSpamLogger.warn(String.format("Aggregation query used on multiple partition keys (IN restriction) on table %s.%s, aggregation type: %s",
+                                                 keyspace(), table(), aggregationSpec.kind()));
             }
         }
 
         // We can't properly do post-query ordering if we page (see #6722)
         // For GROUP BY or aggregation queries we always page internally even if the user has turned paging off
-        checkFalse(pageSize > 0 && needsPostQueryOrdering(),
+        checkFalse(pageSize.isDefined() && needsPostQueryOrdering(),
                   "Cannot page queries with both ORDER BY and a IN restriction on the partition key;"
                   + " you must either remove the ORDER BY or the IN and sort client side, or disable paging for this query");
 
+        // If the query has an offset we silently ignore user-facing paging and return all the rows specified by the
+        // limit/offset constraints in one go, since regular key-based paging is not supported when using limit/offest
+        // paging. However, we still use the query fetch size to internally page the rows. We do that to avoid loading
+        // in memory all the rows that will be discarded by the offset. Key-based paging is also disabled if the offset
+        // is explicitly set to zero.
         ResultMessage.Rows msg;
-        try (PartitionIterator page = pager.fetchPage(pageSize, queryStartNanoTime))
+        try (PartitionIterator partitions = userOffset == NO_OFFSET
+                                          ? pager.fetchPage(pageSize, requestTime)
+                                          : pager.readAll(pageSize, requestTime))
         {
-            msg = processResults(page, options, selectors, nowInSec, userLimit);
+            msg = processResults(partitions, options, selectors, nowInSec, userLimit, userOffset, aggregationSpec, unmask, state.getClientState());
         }
+
+        RequestSensors sensors = RequestTracker.instance.get();
+        Context context = Context.from(this.table);
+        Type sensorType = Type.READ_BYTES;
+        SensorsCustomParams.addSensorToCQLResponse(msg, options.getProtocolVersion(), sensors, context, sensorType);
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
-        if (!pager.isExhausted())
+        if (!pager.isExhausted() && !pager.pager.isTopK())
             msg.result.metadata.setHasMorePages(pager.state());
 
         return msg;
@@ -419,72 +807,141 @@ public class SelectStatement implements CQLStatement
     private ResultMessage.Rows processResults(PartitionIterator partitions,
                                               QueryOptions options,
                                               Selectors selectors,
-                                              int nowInSec,
-                                              int userLimit) throws RequestValidationException
+                                              long nowInSec,
+                                              int userLimit,
+                                              int userOffset,
+                                              AggregationSpecification aggregationSpec,
+                                              boolean unmask,
+                                              ClientState state) throws RequestValidationException
     {
-        ResultSet rset = process(partitions, options, selectors, nowInSec, userLimit);
+        ResultSet rset = process(partitions, options, selectors, nowInSec, userLimit, userOffset, aggregationSpec, unmask, state);
         return new ResultMessage.Rows(rset);
     }
 
+    @Override
     public ResultMessage.Rows executeLocally(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
     {
-        return executeInternal(state, options, options.getNowInSeconds(state), System.nanoTime());
+        return executeInternal(state, options, options.getNowInSeconds(state), Dispatcher.RequestTime.forImmediateExecution());
     }
 
-    public ResultMessage.Rows executeInternal(QueryState state, QueryOptions options, int nowInSec, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    public ResultMessage.Rows executeInternal(QueryState state,
+                                              QueryOptions options,
+                                              long nowInSec,
+                                              Dispatcher.RequestTime requestTime)
     {
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
-        int pageSize = options.getPageSize();
+        int userOffset = getOffset(options);
+        PageSize pageSize = options.getPageSize();
+        boolean unmask = state.getClientState().hasTablePermission(table, Permission.UNMASK);
 
         Selectors selectors = selection.newSelectors(options);
-        ReadQuery query = getQuery(options, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, pageSize);
+        AggregationSpecification aggregationSpec = getAggregationSpec(options);
+        ReadQuery query = getQuery(options,
+                                   state.getClientState(),
+                                   selectors.getColumnFilter(),
+                                   nowInSec,
+                                   userLimit,
+                                   userPerPartitionLimit,
+                                   userOffset,
+                                   aggregationSpec);
 
         try (ReadExecutionController executionController = query.executionController())
         {
-            if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
+            if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize, query.isTopK()))
             {
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
-                    return processResults(data, options, selectors, nowInSec, userLimit);
+                    return processResults(data, options, selectors, nowInSec, userLimit, userOffset, null, unmask, state.getClientState());
                 }
             }
 
             QueryPager pager = getPager(query, options);
 
-            return execute(Pager.forInternalQuery(pager, executionController),
+            return execute(state,
+                           Pager.forInternalQuery(pager, executionController),
                            options,
                            selectors,
                            pageSize,
                            nowInSec,
                            userLimit,
-                           queryStartNanoTime);
+                           userOffset,
+                           aggregationSpec,
+                           requestTime,
+                           unmask);
         }
     }
 
-    private QueryPager getPager(ReadQuery query, QueryOptions options)
+    @VisibleForTesting
+    public QueryPager getPager(ReadQuery query, QueryOptions options)
     {
         QueryPager pager = query.getPager(options.getPagingState(), options.getProtocolVersion());
 
-        if (aggregationSpec == null || query.isEmpty())
+        if (aggregationSpecFactory == null || query.isEmpty())
             return pager;
 
-        return new AggregationQueryPager(pager, query.limits());
+        return new AggregationQueryPager(pager, DatabaseDescriptor.getAggregationSubPageSize(), query.limits(), DatabaseDescriptor.getAggregationRpcTimeout(TimeUnit.NANOSECONDS));
     }
 
-    public ResultSet process(PartitionIterator partitions, int nowInSec) throws InvalidRequestException
+    public Map<DecoratedKey, List<Row>> executeRawInternal(QueryOptions options, ClientState state, long nowInSec) throws RequestExecutionException, RequestValidationException
+    {
+        int userLimit = getLimit(options);
+        int userPerPartitionLimit = getPerPartitionLimit(options);
+        int userOffset = getOffset(options);
+        if (options.getPageSize().isDefined())
+            throw new IllegalStateException();
+        if (aggregationSpecFactory != null)
+            throw new IllegalStateException();
+
+        Selectors selectors = selection.newSelectors(options);
+        ReadQuery query = getQuery(options, state, selectors.getColumnFilter(), nowInSec, userLimit, userPerPartitionLimit, userOffset, null);
+
+        Map<DecoratedKey, List<Row>> result = Collections.emptyMap();
+        try (ReadExecutionController executionController = query.executionController())
+        {
+            try (PartitionIterator data = query.executeInternal(executionController))
+            {
+                while (data.hasNext())
+                {
+                    try (RowIterator in = data.next())
+                    {
+                        List<Row> out = Collections.emptyList();
+                        while (in.hasNext())
+                        {
+                            switch (out.size())
+                            {
+                                case 0:  out = Collections.singletonList(in.next()); break;
+                                case 1:  out = new ArrayList<>(out);
+                                default: out.add(in.next());
+                            }
+                        }
+                        switch (result.size())
+                        {
+                            case 0:  result = Collections.singletonMap(in.partitionKey(), out); break;
+                            case 1:  result = new TreeMap<>(result);
+                            default: result.put(in.partitionKey(), out);
+                        }
+                    }
+                }
+                return result;
+            }
+        }
+    }
+
+    public ResultSet process(PartitionIterator partitions, long nowInSec, boolean unmask, ClientState state) throws InvalidRequestException
     {
         QueryOptions options = QueryOptions.DEFAULT;
         Selectors selectors = selection.newSelectors(options);
-        return process(partitions, options, selectors, nowInSec, getLimit(options));
+        return process(partitions, options, selectors, nowInSec, getLimit(options), getOffset(options), getAggregationSpec(options), unmask, state);
     }
 
+    @Override
     public String keyspace()
     {
         return table.keyspace;
     }
 
-    public String columnFamily()
+    public String table()
     {
         return table.name;
     }
@@ -505,17 +962,22 @@ public class SelectStatement implements CQLStatement
         return restrictions;
     }
 
-    private ReadQuery getSliceCommands(QueryOptions options, ColumnFilter columnFilter, DataLimits limit, int nowInSec)
+    private ReadQuery getSliceCommands(QueryOptions options, ClientState state, ColumnFilter columnFilter,
+                                       RowFilter rowFilter, DataLimits limit, long nowInSec,
+                                       IndexRegistry indexRegistry)
     {
-        Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options);
+        Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options, state);
         if (keys.isEmpty())
             return ReadQuery.empty(table);
 
-        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter);
+        if (restrictions.keyIsInRelation())
+        {
+            Guardrails.partitionKeysInSelect.guard(keys.size(), table.name, false, state);
+        }
+
+        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, state, columnFilter);
         if (filter == null || filter.isEmpty(table.comparator))
             return ReadQuery.empty(table);
-
-        RowFilter rowFilter = getRowFilter(options);
 
         List<DecoratedKey> decoratedKeys = new ArrayList<>(keys.size());
         for (ByteBuffer key : keys)
@@ -524,7 +986,10 @@ public class SelectStatement implements CQLStatement
             decoratedKeys.add(table.partitioner.decorateKey(ByteBufferUtil.clone(key)));
         }
 
-        return SinglePartitionReadQuery.createGroup(table, nowInSec, columnFilter, rowFilter, limit, decoratedKeys, filter);
+        SinglePartitionReadQuery.Group<? extends SinglePartitionReadQuery> group =
+            SinglePartitionReadQuery.createGroup(table, nowInSec, columnFilter, rowFilter, limit, decoratedKeys, filter);
+
+        return group;
     }
 
     /**
@@ -538,8 +1003,9 @@ public class SelectStatement implements CQLStatement
     public Slices clusteringIndexFilterAsSlices()
     {
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
+        ClientState state = ClientState.forInternalCalls();
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
-        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter);
+        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, state, columnFilter);
         if (filter instanceof ClusteringIndexSliceFilter)
             return ((ClusteringIndexSliceFilter)filter).requestedSlices();
 
@@ -553,12 +1019,13 @@ public class SelectStatement implements CQLStatement
      * Returns a read command that can be used internally to query all the rows queried by this SELECT for a
      * give key (used for materialized views).
      */
-    public SinglePartitionReadCommand internalReadForView(DecoratedKey key, int nowInSec)
+    public SinglePartitionReadCommand internalReadForView(DecoratedKey key, long nowInSec)
     {
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
+        ClientState state = ClientState.forInternalCalls();
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
-        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter);
-        RowFilter rowFilter = getRowFilter(options);
+        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, state, columnFilter);
+        RowFilter rowFilter = getRowFilter(options, state, IndexRegistry.EMPTY);
         return SinglePartitionReadCommand.create(table, nowInSec, columnFilter, rowFilter, DataLimits.NONE, key, filter);
     }
 
@@ -567,16 +1034,18 @@ public class SelectStatement implements CQLStatement
      */
     public RowFilter rowFilterForInternalCalls()
     {
-        return getRowFilter(QueryOptions.forInternalCalls(Collections.emptyList()));
+        return getRowFilter(QueryOptions.forInternalCalls(Collections.emptyList()),
+                            ClientState.forInternalCalls(),
+                            IndexRegistry.EMPTY);
     }
 
-    private ReadQuery getRangeCommand(QueryOptions options, ColumnFilter columnFilter, DataLimits limit, int nowInSec)
+    private ReadQuery getRangeCommand(QueryOptions options, ClientState state, ColumnFilter columnFilter,
+                                      RowFilter rowFilter, DataLimits limit, long nowInSec,
+                                      IndexRegistry indexRegistry)
     {
-        ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options, columnFilter);
+        ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options, state, columnFilter);
         if (clusteringIndexFilter == null)
             return ReadQuery.empty(table);
-
-        RowFilter rowFilter = getRowFilter(options);
 
         // The LIMIT provided by the user is the number of CQL row he wants returned.
         // We want to have getRangeSlice to count the number of columns, not the number of keys.
@@ -584,16 +1053,10 @@ public class SelectStatement implements CQLStatement
         if (keyBounds == null)
             return ReadQuery.empty(table);
 
-        ReadQuery command =
-            PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter));
-
-        // If there's a secondary index that the command can use, have it validate the request parameters.
-        command.maybeValidateIndex();
-
-        return command;
+        return PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter));
     }
 
-    private ClusteringIndexFilter makeClusteringIndexFilter(QueryOptions options, ColumnFilter columnFilter)
+    private ClusteringIndexFilter makeClusteringIndexFilter(QueryOptions options, ClientState state, ColumnFilter columnFilter)
     {
         if (parameters.isDistinct)
         {
@@ -607,6 +1070,11 @@ public class SelectStatement implements CQLStatement
             return new ClusteringIndexSliceFilter(Slices.ALL, false);
         }
 
+        if (restrictions.isDisjunction())
+        {
+            return new ClusteringIndexSliceFilter(Slices.ALL, false);
+        }
+
         if (restrictions.isColumnRange())
         {
             Slices slices = makeSlices(options);
@@ -616,7 +1084,7 @@ public class SelectStatement implements CQLStatement
             return new ClusteringIndexSliceFilter(slices, isReversed);
         }
 
-        NavigableSet<Clustering<?>> clusterings = getRequestedRows(options);
+        NavigableSet<Clustering<?>> clusterings = getRequestedRows(options, state);
         // We can have no clusterings if either we're only selecting the static columns, or if we have
         // a 'IN ()' for clusterings. In that case, we still want to query if some static columns are
         // queried. But we're fine otherwise.
@@ -662,41 +1130,68 @@ public class SelectStatement implements CQLStatement
         return builder.build();
     }
 
-    private DataLimits getDataLimits(int userLimit, int perPartitionLimit, int pageSize)
+    private DataLimits getDataLimits(ClientState clientState,
+                                     int userLimit,
+                                     int perPartitionLimit,
+                                     int userOffset,
+                                     AggregationSpecification aggregationSpec)
     {
-        int cqlRowLimit = DataLimits.NO_LIMIT;
-        int cqlPerPartitionLimit = DataLimits.NO_LIMIT;
+        assert userOffset == NO_OFFSET || userLimit != NO_LIMIT : "Cannot use OFFSET without LIMIT";
+
+        if (userOffset != NO_OFFSET)
+            Guardrails.offsetRows.guard(userOffset, "Select query", false, clientState);
+
+        int fetchLimit = userLimit == NO_LIMIT || userOffset == NO_OFFSET ? userLimit : IntMath.saturatedAdd(userLimit, userOffset);
+        int cqlRowLimit = NO_LIMIT;
+        int cqlPerPartitionLimit = NO_LIMIT;
 
         // If we do post ordering we need to get all the results sorted before we can trim them.
         if (aggregationSpec != AggregationSpecification.AGGREGATE_EVERYTHING)
         {
-            if (!needsPostQueryOrdering())
-                cqlRowLimit = userLimit;
+            if (!needsToSkipUserLimit())
+                cqlRowLimit = fetchLimit;
             cqlPerPartitionLimit = perPartitionLimit;
         }
 
-        // Group by and aggregation queries will always be paged internally to avoid OOM.
-        // If the user provided a pageSize we'll use that to page internally (because why not), otherwise we use our default
-        if (pageSize <= 0)
-            pageSize = DEFAULT_PAGE_SIZE;
+        DataLimits limits = null;
 
         // Aggregation queries work fine on top of the group by paging but to maintain
         // backward compatibility we need to use the old way.
         if (aggregationSpec != null && aggregationSpec != AggregationSpecification.AGGREGATE_EVERYTHING)
         {
             if (parameters.isDistinct)
-                return DataLimits.distinctLimits(cqlRowLimit);
-
-            return DataLimits.groupByLimits(cqlRowLimit,
-                                            cqlPerPartitionLimit,
-                                            pageSize,
-                                            aggregationSpec);
+                limits = DataLimits.distinctLimits(cqlRowLimit);
+            else
+                limits = DataLimits.groupByLimits(cqlRowLimit,
+                                                  cqlPerPartitionLimit,
+                                                  NO_LIMIT,
+                                                  NO_LIMIT,
+                                                  aggregationSpec);
+        }
+        else
+        {
+            if (parameters.isDistinct)
+                limits = cqlRowLimit == NO_LIMIT ? DataLimits.DISTINCT_NONE : DataLimits.distinctLimits(cqlRowLimit);
+            else
+                limits = DataLimits.cqlLimits(cqlRowLimit, cqlPerPartitionLimit);
         }
 
-        if (parameters.isDistinct)
-            return cqlRowLimit == DataLimits.NO_LIMIT ? DataLimits.DISTINCT_NONE : DataLimits.distinctLimits(cqlRowLimit);
+        if (!limits.isGroupByLimit())
+        {
+            // if the user does not specify any limit, it means there is no limit - when the guardrail is defined, we
+            // want to limit the number of rows returned to the user
+            if (Guardrails.pageWeight.enabled(clientState))
+            {
+                DataStorageSpec.IntBytesBound pageWeightFailThreshold = GuardrailsConfigProvider.instance.getOrCreate(clientState).getPageWeightFailThreshold();
+                int bytesLimit = pageWeightFailThreshold == null ? NO_LIMIT : pageWeightFailThreshold.toBytes();
+                String limitStr = USAGE_WARNING_PAGE_WEIGHT + FBUtilities.prettyPrintMemory(bytesLimit);
+                ClientWarn.instance.warn(limitStr);
+                logger.trace(limitStr);
+                limits = limits.forPaging(PageSize.inBytes(bytesLimit));
+            }
+        }
 
-        return DataLimits.cqlLimits(cqlRowLimit, cqlPerPartitionLimit);
+        return limits;
     }
 
     /**
@@ -725,7 +1220,7 @@ public class SelectStatement implements CQLStatement
 
     private int getLimit(Term limit, QueryOptions options)
     {
-        int userLimit = DataLimits.NO_LIMIT;
+        int userLimit = NO_LIMIT;
 
         if (limit != null)
         {
@@ -748,31 +1243,76 @@ public class SelectStatement implements CQLStatement
         return userLimit;
     }
 
-    private NavigableSet<Clustering<?>> getRequestedRows(QueryOptions options) throws InvalidRequestException
+    public int getOffset(QueryOptions options)
+    {
+        int userOffset = NO_OFFSET;
+
+        if (offset != null)
+        {
+            ByteBuffer b = checkNotNull(offset.bindAndGet(options), "Invalid null value of offset");
+            // treat UNSET limit value as zero
+            if (b != UNSET_BYTE_BUFFER)
+            {
+                try
+                {
+                    Int32Type.instance.validate(b);
+                    userOffset = Int32Type.instance.compose(b);
+                    checkTrue(userOffset >= 0, "Offset must be positive");
+                }
+                catch (MarshalException e)
+                {
+                    throw new InvalidRequestException("Invalid offset value");
+                }
+            }
+        }
+        return userOffset;
+    }
+
+    private NavigableSet<Clustering<?>> getRequestedRows(QueryOptions options, ClientState state) throws InvalidRequestException
     {
         // Note: getRequestedColumns don't handle static columns, but due to CASSANDRA-5762
         // we always do a slice for CQL3 tables, so it's ok to ignore them here
         assert !restrictions.isColumnRange();
-        return restrictions.getClusteringColumns(options);
+        return restrictions.getClusteringColumns(options, state);
     }
 
     /**
      * May be used by custom QueryHandler implementations
      */
-    public RowFilter getRowFilter(QueryOptions options) throws InvalidRequestException
+    public RowFilter getRowFilter(QueryOptions options, ClientState state) throws InvalidRequestException
     {
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
-        return restrictions.getRowFilter(indexRegistry, options);
+        RowFilter filter = restrictions.getRowFilter(indexRegistry, options, state, selectOptions);
+
+        if (filter.needsReconciliation() && filter.isMutableIntersection() && restrictions.needFiltering(table))
+            Guardrails.intersectFilteringQueryEnabled.ensureEnabled(state);
+
+        return filter;
+    }
+
+    public RowFilter getRowFilter(QueryOptions options, ClientState state, IndexRegistry indexRegistry) throws InvalidRequestException
+    {
+        RowFilter filter = restrictions.getRowFilter(indexRegistry, options, state, selectOptions);
+
+        if (filter.needsReconciliation() && filter.isMutableIntersection() && restrictions.needFiltering(table))
+            Guardrails.intersectFilteringQueryEnabled.ensureEnabled(state);
+
+        return filter;
     }
 
     private ResultSet process(PartitionIterator partitions,
                               QueryOptions options,
                               Selectors selectors,
-                              int nowInSec,
-                              int userLimit) throws InvalidRequestException
+                              long nowInSec,
+                              int userLimit,
+                              int userOffset,
+                              AggregationSpecification aggregationSpec,
+                              boolean unmask,
+                              ClientState state) throws InvalidRequestException
     {
         GroupMaker groupMaker = aggregationSpec == null ? null : aggregationSpec.newGroupMaker();
-        ResultSetBuilder result = new ResultSetBuilder(getResultMetadata(), selectors, groupMaker);
+        SortedRowsBuilder rows = sortedRowsBuilder(userLimit, userOffset == NO_OFFSET ? 0 : userOffset);
+        ResultSetBuilder result = new ResultSetBuilder(getResultMetadata(), selectors, unmask, groupMaker, rows);
 
         while (partitions.hasNext())
         {
@@ -782,11 +1322,9 @@ public class SelectStatement implements CQLStatement
             }
         }
 
+        // maybeWarn requires the result set to be built
         ResultSet cqlRows = result.build();
-
-        orderResults(cqlRows);
-
-        cqlRows.trim(userLimit);
+        maybeWarn(result, options);
 
         return cqlRows;
     }
@@ -794,6 +1332,8 @@ public class SelectStatement implements CQLStatement
     public static ByteBuffer[] getComponents(TableMetadata metadata, DecoratedKey dk)
     {
         ByteBuffer key = dk.getKey();
+        if (metadata.partitionKeyColumns().size() == 1)
+            return new ByteBuffer[]{ key };
         if (metadata.partitionKeyType instanceof CompositeType)
         {
             return ((CompositeType)metadata.partitionKeyType).split(key);
@@ -804,23 +1344,88 @@ public class SelectStatement implements CQLStatement
         }
     }
 
-    // Determines whether, when we have a partition result with not rows, we still return the static content (as a
-    // result set row with null for all other regular columns.)
-    private boolean returnStaticContentOnPartitionWithNoRows()
+    private void maybeWarn(ResultSetBuilder result, QueryOptions options)
     {
-        if (table.isStaticCompactTable())
-            return true;
+        if (!options.isReadThresholdsEnabled())
+            return;
+        ColumnFamilyStore store = cfs();
+        if (store != null)
+        {
+            updatedMetrics(store.metric, restrictions, result.readRowsSize());
+        }
+        if (result.shouldWarn(options.getCoordinatorReadSizeWarnThresholdBytes()))
+        {
+            String msg = String.format("Read on table %s has exceeded the size warning threshold of %,d bytes", table, options.getCoordinatorReadSizeWarnThresholdBytes());
+            ClientState state = ClientState.forInternalCalls();
+            ClientWarn.instance.warn(msg + " with " + loggableTokens(options, state));
+            logger.warn("{} with query {}", msg, asCQL(options, state));
+            if (store != null)
+                store.metric.coordinatorReadSizeWarnings.mark();
+        }
+    }
 
-        // The general rational is that if some rows are specifically selected by the query (have clustering or
-        // regular columns restrictions), we ignore partitions that are empty outside of static content, but if it's a full partition
-        // query, then we include that content.
-        return queriesFullPartitions();
+    private void updatedMetrics(TableMetrics metrics, StatementRestrictions restrictions, long rowsSize)
+    {
+        boolean isRangeQuery = restrictions.isKeyRange() || restrictions.isDisjunction();
+        boolean isIndexQuery = restrictions.usesSecondaryIndexing();
+
+        metrics.coordinatorReadSize.update(rowsSize);
+
+        if (isRangeQuery)
+        {
+            metrics.coordinatorRangeReadSize.update(rowsSize);
+            if (isIndexQuery)
+                metrics.coordinatorRangeReadSizeWithIndex.update(rowsSize);
+            else
+                metrics.coordinatorRangeReadSizeWithoutIndex.update(rowsSize);
+        }
+        else
+        {
+            metrics.coordinatorSingleReadSize.update(rowsSize);
+            if (isIndexQuery)
+                metrics.coordinatorSingleReadSizeWithIndex.update(rowsSize);
+            else
+                metrics.coordinatorSingleReadSizeWithoutIndex.update(rowsSize);
+        }
+    }
+
+    private void maybeFail(ResultSetBuilder result, QueryOptions options)
+    {
+        if (!options.isReadThresholdsEnabled())
+            return;
+        if (result.shouldReject(options.getCoordinatorReadSizeAbortThresholdBytes()))
+        {
+            String msg = String.format("Read on table %s has exceeded the size failure threshold of %,d bytes", table, options.getCoordinatorReadSizeAbortThresholdBytes());
+            ClientState state = ClientState.forInternalCalls();
+            String clientMsg = msg + " with " + loggableTokens(options, state);
+            ClientWarn.instance.warn(clientMsg);
+            logger.warn("{} with query {}", msg, asCQL(options, state));
+            ColumnFamilyStore store = cfs();
+            if (store != null)
+            {
+                store.metric.coordinatorReadSizeAborts.mark();
+                store.metric.coordinatorReadSize.update(result.getSize());
+            }
+            // read errors require blockFor and recieved (its in the protocol message), but this isn't known;
+            // to work around this, treat the coordinator as the only response we care about and mark it failed
+            ReadSizeAbortException exception = new ReadSizeAbortException(clientMsg, options.getConsistency(), 0, 1, true,
+                                                                          ImmutableMap.of(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.READ_SIZE));
+            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(options.getKeyspace());
+            StorageProxy.recordReadRegularAbort(options.getConsistency(), exception, metrics);
+            throw exception;
+        }
+    }
+
+    private ColumnFamilyStore cfs()
+    {
+        return Schema.instance.getColumnFamilyStoreInstance(table.id);
     }
 
     // Used by ModificationStatement for CAS operations
-    void processPartition(RowIterator partition, QueryOptions options, ResultSetBuilder result, int nowInSec)
+    public void processPartition(RowIterator partition, QueryOptions options, ResultSetBuilder result, long nowInSec)
     throws InvalidRequestException
     {
+        maybeFail(result, options);
         ProtocolVersion protocolVersion = options.getProtocolVersion();
 
         ByteBuffer[] keyComponents = getComponents(table, partition.partitionKey());
@@ -829,9 +1434,10 @@ public class SelectStatement implements CQLStatement
         // If there is no rows, we include the static content if we should and we're done.
         if (!partition.hasNext())
         {
-            if (!staticRow.isEmpty() && returnStaticContentOnPartitionWithNoRows())
+            if (!staticRow.isEmpty() && restrictions.returnStaticContentOnPartitionWithNoRows())
             {
-                result.newRow(partition.partitionKey(), staticRow.clustering());
+                result.newRow(protocolVersion, partition.partitionKey(), staticRow.clustering(), selection.getColumns());
+                maybeFail(result, options);
                 for (ColumnMetadata def : selection.getColumns())
                 {
                     switch (def.kind)
@@ -840,10 +1446,10 @@ public class SelectStatement implements CQLStatement
                             result.add(keyComponents[def.position()]);
                             break;
                         case STATIC:
-                            addValue(result, def, staticRow, nowInSec, protocolVersion);
+                            result.add(partition.staticRow().getColumnData(def), nowInSec);
                             break;
                         default:
-                            result.add((ByteBuffer)null);
+                            result.add(null);
                     }
                 }
             }
@@ -853,7 +1459,14 @@ public class SelectStatement implements CQLStatement
         while (partition.hasNext())
         {
             Row row = partition.next();
-            result.newRow( partition.partitionKey(), row.clustering());
+            result.newRow(protocolVersion, partition.partitionKey(), row.clustering(), selection.getColumns());
+
+            // reads aren't failed as soon the size exceeds the failure threshold, they're failed once the failure
+            // threshold has been exceeded and we start adding more data. We're slightly more permissive to avoid
+            // cases where a row can never be read. Since we only warn/fail after entire rows are read, this will
+            // still allow the entire dataset to be read with LIMIT 1 queries, even if every row is oversized
+            maybeFail(result, options);
+
             // Respect selection order
             for (ColumnMetadata def : selection.getColumns())
             {
@@ -865,76 +1478,75 @@ public class SelectStatement implements CQLStatement
                     case CLUSTERING:
                         result.add(row.clustering().bufferAt(def.position()));
                         break;
+                    case SYNTHETIC:
+                        // treat as REGULAR
                     case REGULAR:
-                        addValue(result, def, row, nowInSec, protocolVersion);
+                        result.add(row.getColumnData(def), nowInSec);
                         break;
                     case STATIC:
-                        addValue(result, def, staticRow, nowInSec, protocolVersion);
+                        result.add(staticRow.getColumnData(def), nowInSec);
                         break;
+                    default:
+                        throw new AssertionError();
                 }
             }
         }
     }
 
-    /**
-     * Checks if the query is a full partitions selection.
-     * @return {@code true} if the query is a full partitions selection, {@code false} otherwise.
-     */
-    private boolean queriesFullPartitions()
+    private boolean needsToSkipUserLimit()
     {
-        return !restrictions.hasClusteringColumnsRestrictions() && !restrictions.hasRegularColumnsRestrictions();
-    }
-
-    private static void addValue(ResultSetBuilder result, ColumnMetadata def, Row row, int nowInSec, ProtocolVersion protocolVersion)
-    {
-        if (def.isComplex())
-        {
-            assert def.type.isMultiCell();
-            ComplexColumnData complexData = row.getComplexColumnData(def);
-            if (complexData == null)
-                result.add(null);
-            else if (def.type.isCollection())
-                result.add(((CollectionType) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
-            else
-                result.add(((UserType) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
-        }
-        else
-        {
-            result.add(row.getCell(def), nowInSec);
-        }
+        // if post query ordering is required, and it's not ordered by an index
+        return needsPostQueryOrdering() && !needIndexOrdering();
     }
 
     private boolean needsPostQueryOrdering()
     {
-        // We need post-query ordering only for queries with IN on the partition key and an ORDER BY.
-        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty();
+        // We need post-query ordering only for queries with IN on the partition key and an ORDER BY or index restriction reordering
+        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty() || needIndexOrdering();
+    }
+
+    private boolean needIndexOrdering()
+    {
+        return orderingComparator != null && orderingComparator.indexOrdering();
     }
 
     /**
      * Orders results when multiple keys are selected (using IN)
      */
-    private void orderResults(ResultSet cqlRows)
+    public SortedRowsBuilder sortedRowsBuilder(int limit, int offset)
     {
-        if (cqlRows.size() == 0 || !needsPostQueryOrdering())
-            return;
+        assert (orderingComparator != null) == needsPostQueryOrdering()
+                : String.format("orderingComparator: %s, needsPostQueryOrdering: %s",
+                                orderingComparator, needsPostQueryOrdering());
 
-        Collections.sort(cqlRows.rows, orderingComparator);
+        if (orderingComparator == null || orderingComparator.indexOrdering())
+        {
+            return SortedRowsBuilder.create(limit, offset);
+        }
+        else
+        {
+            return SortedRowsBuilder.create(limit, offset, orderingComparator);
+        }
     }
 
-    public static class RawStatement extends QualifiedStatement
+    public static class RawStatement extends QualifiedStatement<SelectStatement>
     {
         public final Parameters parameters;
         public final List<RawSelector> selectClause;
         public final WhereClause whereClause;
         public final Term.Raw limit;
         public final Term.Raw perPartitionLimit;
+        public final Term.Raw offset;
+        public final SelectOptions options;
 
         public RawStatement(QualifiedName cfName,
                             Parameters parameters,
                             List<RawSelector> selectClause,
                             WhereClause whereClause,
                             Term.Raw limit,
-                            Term.Raw perPartitionLimit)
+                            Term.Raw perPartitionLimit,
+                            Term.Raw offset,
+                            SelectOptions options)
         {
             super(cfName);
             this.parameters = parameters;
@@ -942,29 +1554,49 @@ public class SelectStatement implements CQLStatement
             this.whereClause = whereClause;
             this.limit = limit;
             this.perPartitionLimit = perPartitionLimit;
+            this.offset = offset;
+            this.options = options;
         }
 
-        public SelectStatement prepare(ClientState state)
+        @Override
+        public SelectStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            return prepare(false);
+            setKeyspace(state);
+            return prepare(state, false, keyspaceMapper);
         }
 
-        public SelectStatement prepare(boolean forView) throws InvalidRequestException
+        public SelectStatement prepare(ClientState state, boolean forView, UnaryOperator<String> keyspaceMapper) throws InvalidRequestException
         {
-            TableMetadata table = Schema.instance.validateTable(keyspace(), name());
+            String ks = keyspaceMapper.apply(keyspace());
+            TableMetadata table = Schema.instance.validateTable(ks, name());
+
+            // Besides actual restrictions (where clauses), prepareRestrictions will include the user-provided index hints,
+            // which are needed to determine what indexes to use for the query and to validate whether filtering is needed.
+            IndexHints indexHints = options.parseIndexHints(table, IndexRegistry.obtain(table));
 
             List<Selectable> selectables = RawSelector.toSelectables(selectClause, table);
             boolean containsOnlyStaticColumns = selectOnlyStaticColumns(table, selectables);
 
-            StatementRestrictions restrictions = prepareRestrictions(table, bindVariables, containsOnlyStaticColumns, forView);
+            // Besides actual restrictions (where clauses), prepareRestrictions will include pseudo-restrictions
+            // on indexed columns to allow pushing ORDER BY into the index; see StatementRestrictions::addOrderingRestrictions.
+            // Therefore, we don't want to convert an ANN Ordering column into a +score column until after that.
+            List<Ordering> orderings = getOrderings(table);
+
+            StatementRestrictions restrictions = prepareRestrictions(
+                    state, table, bindVariables, orderings, indexHints, containsOnlyStaticColumns, forView);
 
             // If we order post-query, the sorted column needs to be in the ResultSet for sorting,
             // even if we don't ultimately ship them to the client (CASSANDRA-4911).
-            Map<ColumnMetadata, Boolean> orderingColumns = getOrderingColumns(table);
-            Set<ColumnMetadata> resultSetOrderingColumns = restrictions.keyIsInRelation() ? orderingColumns.keySet()
-                                                                                          : Collections.emptySet();
+            Map<ColumnMetadata, Ordering> orderingColumns = getOrderingColumns(orderings);
+            // +score column for ANN/BM25
+            var scoreOrdering = getScoreOrdering(orderings);
+            assert scoreOrdering == null || orderingColumns.isEmpty() : "can't have both scored ordering and column ordering";
+            if (scoreOrdering != null)
+                orderingColumns = scoreOrdering;
+            Set<ColumnMetadata> resultSetOrderingColumns = getResultSetOrdering(restrictions, orderingColumns);
 
-            Selection selection = prepareSelection(table,
+            Selection selection = prepareSelection(state,
+                                                   table,
                                                    selectables,
                                                    bindVariables,
                                                    resultSetOrderingColumns,
@@ -976,42 +1608,72 @@ public class SelectStatement implements CQLStatement
                 validateDistinctSelection(table, selection, restrictions);
             }
 
-            AggregationSpecification aggregationSpec = getAggregationSpecification(table,
-                                                                                   selection,
-                                                                                   restrictions,
-                                                                                   parameters.isDistinct);
+            AggregationSpecification.Factory aggregationSpecFactory = getAggregationSpecFactory(table,
+                                                                                                bindVariables,
+                                                                                                selection,
+                                                                                                restrictions,
+                                                                                                parameters.isDistinct);
 
-            checkFalse(aggregationSpec == AggregationSpecification.AGGREGATE_EVERYTHING && perPartitionLimit != null,
+            checkFalse(aggregationSpecFactory == AggregationSpecification.AGGREGATE_EVERYTHING_FACTORY
+                       && perPartitionLimit != null,
                        "PER PARTITION LIMIT is not allowed with aggregate queries.");
 
-            Comparator<List<ByteBuffer>> orderingComparator = null;
+            ColumnComparator<List<ByteBuffer>> orderingComparator = null;
             boolean isReversed = false;
 
             if (!orderingColumns.isEmpty())
             {
                 assert !forView;
-                verifyOrderingIsAllowed(restrictions);
+                verifyOrderingIsAllowed(table, restrictions, orderingColumns);
                 orderingComparator = getOrderingComparator(selection, restrictions, orderingColumns);
-                isReversed = isReversed(table, orderingColumns, restrictions);
-                if (isReversed)
-                    orderingComparator = Collections.reverseOrder(orderingComparator);
+                isReversed = isReversed(table, orderingColumns);
+                if (isReversed && orderingComparator != null)
+                    orderingComparator = orderingComparator.reverse();
             }
 
-            checkNeedsFiltering(restrictions);
+            checkNeedsFiltering(table, restrictions, state);
 
-            return new SelectStatement(table,
+            checkDisjunctionIsSupported(table, restrictions);
+
+            return new SelectStatement(rawCQLStatement,
+                                       table,
                                        bindVariables,
                                        parameters,
                                        selection,
                                        restrictions,
                                        isReversed,
-                                       aggregationSpec,
+                                       aggregationSpecFactory,
                                        orderingComparator,
-                                       prepareLimit(bindVariables, limit, keyspace(), limitReceiver()),
-                                       prepareLimit(bindVariables, perPartitionLimit, keyspace(), perPartitionLimitReceiver()));
+                                       prepareLimit(bindVariables, limit, ks, limitReceiver()),
+                                       prepareLimit(bindVariables, perPartitionLimit, ks, perPartitionLimitReceiver()),
+                                       prepareLimit(bindVariables, offset, ks, offsetReceiver()),
+                                       options);
         }
 
-        private Selection prepareSelection(TableMetadata table,
+        private Map<ColumnMetadata, Ordering> getScoreOrdering(List<Ordering> orderings)
+        {
+            if (orderings.isEmpty())
+                return null;
+
+            var expr = orderings.get(0).expression;
+            if (!expr.isScored())
+                return null;
+
+            // Create synthetic score column
+            ColumnMetadata sourceColumn = expr.getColumn();
+            var cm = ColumnMetadata.syntheticScoreColumn(sourceColumn, FloatType.instance);
+            return Map.of(cm, orderings.get(0));
+        }
+
+        private Set<ColumnMetadata> getResultSetOrdering(StatementRestrictions restrictions, Map<ColumnMetadata, Ordering> orderingColumns)
+        {
+            if (restrictions.keyIsInRelation() || orderingColumns.values().stream().anyMatch(o -> o.expression.hasNonClusteredOrdering()))
+                return orderingColumns.keySet();
+            return Collections.emptySet();
+        }
+
+        private Selection prepareSelection(ClientState state,
+                                           TableMetadata table,
                                            List<Selectable> selectables,
                                            VariableSpecifications boundNames,
                                            Set<ColumnMetadata> resultSetOrderingColumns,
@@ -1019,10 +1681,17 @@ public class SelectStatement implements CQLStatement
         {
             boolean hasGroupBy = !parameters.groups.isEmpty();
 
+            if (hasGroupBy)
+                Guardrails.groupByEnabled.ensureEnabled(state);
+
+            boolean isJson = parameters.isJson;
+            boolean returnStaticContentOnPartitionWithNoRows = restrictions.returnStaticContentOnPartitionWithNoRows();
+
             if (selectables.isEmpty()) // wildcard query
             {
-                return hasGroupBy ? Selection.wildcardWithGroupBy(table, boundNames, parameters.isJson)
-                                  : Selection.wildcard(table, parameters.isJson);
+                return hasGroupBy || table.hasMaskedColumns()
+                       ? Selection.wildcardWithGroupByOrMaskedColumns(table, boundNames, resultSetOrderingColumns, isJson, returnStaticContentOnPartitionWithNoRows)
+                       : Selection.wildcard(table, resultSetOrderingColumns, isJson, returnStaticContentOnPartitionWithNoRows);
             }
 
             return Selection.fromSelectors(table,
@@ -1031,7 +1700,8 @@ public class SelectStatement implements CQLStatement
                                            resultSetOrderingColumns,
                                            restrictions.nonPKRestrictedColumns(false),
                                            hasGroupBy,
-                                           parameters.isJson);
+                                           isJson,
+                                           returnStaticContentOnPartitionWithNoRows);
         }
 
         /**
@@ -1055,20 +1725,29 @@ public class SelectStatement implements CQLStatement
         }
 
         /**
-         * Returns the columns used to order the data.
-         * @return the columns used to order the data.
+         * Returns the columns in the same order as given list used to order the data.
+         * @return the columns in the same order as given list used to order the data.
          */
-        private Map<ColumnMetadata, Boolean> getOrderingColumns(TableMetadata table)
+        private Map<ColumnMetadata, Ordering> getOrderingColumns(List<Ordering> orderings)
         {
-            if (parameters.orderings.isEmpty())
+            if (orderings.isEmpty())
                 return Collections.emptyMap();
 
-            Map<ColumnMetadata, Boolean> orderingColumns = new LinkedHashMap<>();
-            for (Map.Entry<ColumnIdentifier, Boolean> entry : parameters.orderings.entrySet())
-            {
-                orderingColumns.put(table.getExistingColumn(entry.getKey()), entry.getValue());
-            }
-            return orderingColumns;
+            return orderings.stream()
+                            .filter(ordering -> !ordering.expression.isScored())
+                            .collect(Collectors.toMap(ordering -> ordering.expression.getColumn(),
+                                                      ordering -> ordering,
+                                                      (a, b) -> {
+                                                          throw new IllegalStateException("Duplicate keys");
+                                                      },
+                                                      LinkedHashMap::new));
+        }
+
+        private List<Ordering> getOrderings(TableMetadata table)
+        {
+            return parameters.orderings.stream()
+                    .map(o -> o.bind(table, bindVariables))
+                    .collect(Collectors.toList());
         }
 
         /**
@@ -1076,22 +1755,30 @@ public class SelectStatement implements CQLStatement
          *
          * @param metadata the column family meta data
          * @param boundNames the variable specifications
+         * @param orderings the orderings
+         * @param indexHints the index hints
          * @param selectsOnlyStaticColumns {@code true} if the query select only static columns, {@code false} otherwise.
          * @return the restrictions
          * @throws InvalidRequestException if a problem occurs while building the restrictions
          */
-        private StatementRestrictions prepareRestrictions(TableMetadata metadata,
+        private StatementRestrictions prepareRestrictions(ClientState state,
+                                                          TableMetadata metadata,
                                                           VariableSpecifications boundNames,
+                                                          List<Ordering> orderings,
+                                                          IndexHints indexHints,
                                                           boolean selectsOnlyStaticColumns,
                                                           boolean forView) throws InvalidRequestException
         {
-            return new StatementRestrictions(StatementType.SELECT,
-                                             metadata,
-                                             whereClause,
-                                             boundNames,
-                                             selectsOnlyStaticColumns,
-                                             parameters.allowFiltering,
-                                             forView);
+            return StatementRestrictions.create(state,
+                                             StatementType.SELECT,
+                                                metadata,
+                                                whereClause,
+                                                boundNames,
+                                                orderings,
+                                                indexHints,
+                                                selectsOnlyStaticColumns,
+                                                parameters.allowFiltering,
+                                                forView);
         }
 
         /** Returns a Term for the limit or null if no limit is set */
@@ -1106,10 +1793,28 @@ public class SelectStatement implements CQLStatement
             return prepLimit;
         }
 
-        private static void verifyOrderingIsAllowed(StatementRestrictions restrictions) throws InvalidRequestException
+        private static void verifyOrderingIsAllowed(TableMetadata table, StatementRestrictions restrictions, Map<ColumnMetadata, Ordering> orderingColumns) throws InvalidRequestException
         {
+            if (orderingColumns.values().stream().anyMatch(o -> o.expression.hasNonClusteredOrdering()))
+                return;
+
             checkFalse(restrictions.usesSecondaryIndexing(), "ORDER BY with 2ndary indexes is not supported.");
             checkFalse(restrictions.isKeyRange(), "ORDER BY is only supported when the partition key is restricted by an EQ or an IN.");
+
+            // check that clustering columns are valid
+            int i = 0;
+            for (var entry : orderingColumns.entrySet())
+            {
+                ColumnMetadata def = entry.getKey();
+                checkTrue(def.isClusteringColumn(),
+                          "Order by is currently only supported on indexed columns and the clustered columns of the PRIMARY KEY, got %s", def.name);
+                while (i != def.position())
+                {
+                    checkTrue(restrictions.isColumnRestrictedByEq(table.clusteringColumns().get(i++)),
+                              "Ordering by clustered columns must follow the declared order in the PRIMARY KEY");
+                }
+                i++;
+            }
         }
 
         private static void validateDistinctSelection(TableMetadata metadata,
@@ -1138,32 +1843,57 @@ public class SelectStatement implements CQLStatement
         }
 
         /**
-         * Creates the <code>AggregationSpecification</code>s used to make the aggregates.
+         * Creates the {@code AggregationSpecification.Factory} used to make the aggregates.
          *
          * @param metadata the table metadata
          * @param selection the selection
          * @param restrictions the restrictions
          * @param isDistinct <code>true</code> if the query is a DISTINCT one.
-         * @return the <code>AggregationSpecification</code>s used to make the aggregates
+         * @return the {@code AggregationSpecification.Factory} used to make the aggregates
          */
-        private AggregationSpecification getAggregationSpecification(TableMetadata metadata,
-                                                                     Selection selection,
-                                                                     StatementRestrictions restrictions,
-                                                                     boolean isDistinct)
+        private AggregationSpecification.Factory getAggregationSpecFactory(TableMetadata metadata,
+                                                                           VariableSpecifications boundNames,
+                                                                           Selection selection,
+                                                                           StatementRestrictions restrictions,
+                                                                           boolean isDistinct)
         {
             if (parameters.groups.isEmpty())
-                return selection.isAggregate() ? AggregationSpecification.AGGREGATE_EVERYTHING
+                return selection.isAggregate() ? AggregationSpecification.AGGREGATE_EVERYTHING_FACTORY
                                                : null;
 
             int clusteringPrefixSize = 0;
 
             Iterator<ColumnMetadata> pkColumns = metadata.primaryKeyColumns().iterator();
-            for (ColumnIdentifier id : parameters.groups)
+            List<ColumnMetadata> columns = null;
+            Selector.Factory selectorFactory = null;
+            for (Selectable.Raw raw : parameters.groups)
             {
-                ColumnMetadata def = metadata.getExistingColumn(id);
+                Selectable selectable = raw.prepare(metadata);
+                ColumnMetadata def = null;
 
-                checkTrue(def.isPartitionKey() || def.isClusteringColumn(),
-                          "Group by is currently only supported on the columns of the PRIMARY KEY, got %s", def.name);
+                // For GROUP BY we only allow column names or functions at the higher level.
+                if (selectable instanceof WithFunction)
+                {
+                    WithFunction withFunction = (WithFunction) selectable;
+                    validateGroupByFunction(withFunction);
+                    columns = new ArrayList<ColumnMetadata>();
+                    selectorFactory = selectable.newSelectorFactory(metadata, null, columns, boundNames);
+                    checkFalse(columns.isEmpty(), "GROUP BY functions must have one clustering column name as parameter");
+                    if (columns.size() > 1)
+                        throw invalidRequest("GROUP BY functions accept only one clustering column as parameter, got: %s",
+                                             columns.stream().map(c -> c.name.toCQLString()).collect(Collectors.joining(",")));
+
+                    def = columns.get(0);
+                    checkTrue(def.isClusteringColumn(),
+                              "Group by functions are only supported on clustering columns, got %s", def.name);
+                }
+                else
+                {
+                    def = (ColumnMetadata) selectable;
+                    checkTrue(def.isPartitionKey() || def.isClusteringColumn(),
+                              "Group by is currently only supported on the columns of the PRIMARY KEY, got %s", def.name);
+                    checkNull(selectorFactory, "Functions are only supported on the last element of the GROUP BY clause");
+                }
 
                 while (true)
                 {
@@ -1191,53 +1921,79 @@ public class SelectStatement implements CQLStatement
             checkFalse(clusteringPrefixSize > 0 && isDistinct,
                        "Grouping on clustering columns is not allowed for SELECT DISTINCT queries");
 
-            return AggregationSpecification.aggregatePkPrefix(metadata.comparator, clusteringPrefixSize);
+            return selectorFactory == null ? AggregationSpecification.aggregatePkPrefixFactory(metadata.comparator, clusteringPrefixSize)
+                                           : AggregationSpecification.aggregatePkPrefixFactoryWithSelector(metadata.comparator,
+                                                                                                           clusteringPrefixSize,
+                                                                                                           selectorFactory,
+                                                                                                           columns);
         }
 
-        private Comparator<List<ByteBuffer>> getOrderingComparator(Selection selection,
-                                                                   StatementRestrictions restrictions,
-                                                                   Map<ColumnMetadata, Boolean> orderingColumns)
+        /**
+         * Checks that the function used is a valid one for the GROUP BY clause.
+         *
+         * @param withFunction the {@code Selectable} from which the function must be retrieved.
+         * @return the monotonic scalar function that must be used for determining the groups.
+         */
+        private void validateGroupByFunction(WithFunction withFunction)
+        {
+            Function f = withFunction.function;
+            checkFalse(f.isAggregate(), "Aggregate functions are not supported within the GROUP BY clause, got: %s", f.name());
+        }
+
+        private ColumnComparator<List<ByteBuffer>> getOrderingComparator(Selection selection,
+                                                                         StatementRestrictions restrictions,
+                                                                         Map<ColumnMetadata, Ordering> orderingColumns)
                                                                    throws InvalidRequestException
         {
+            for (Map.Entry<ColumnMetadata, Ordering> e : orderingColumns.entrySet())
+            {
+                if (e.getValue().expression.hasNonClusteredOrdering())
+                {
+                    Preconditions.checkState(orderingColumns.size() == 1);
+                    return new IndexColumnComparator();
+                }
+            }
+
             if (!restrictions.keyIsInRelation())
                 return null;
 
-            List<Integer> idToSort = new ArrayList<Integer>(orderingColumns.size());
-            List<Comparator<ByteBuffer>> sorters = new ArrayList<Comparator<ByteBuffer>>(orderingColumns.size());
+            List<Integer> idToSort = new ArrayList<>(orderingColumns.size());
+            List<Comparator<ByteBuffer>> sorters = new ArrayList<>(orderingColumns.size());
 
             for (ColumnMetadata orderingColumn : orderingColumns.keySet())
             {
                 idToSort.add(selection.getOrderingIndex(orderingColumn));
                 sorters.add(orderingColumn.type);
             }
+
             return idToSort.size() == 1 ? new SingleColumnComparator(idToSort.get(0), sorters.get(0))
                     : new CompositeComparator(sorters, idToSort);
         }
 
-        private boolean isReversed(TableMetadata table, Map<ColumnMetadata, Boolean> orderingColumns, StatementRestrictions restrictions) throws InvalidRequestException
+        private boolean isReversed(TableMetadata table, Map<ColumnMetadata, Ordering> orderingColumns) throws InvalidRequestException
         {
-            Boolean[] reversedMap = new Boolean[table.clusteringColumns().size()];
-            int i = 0;
-            for (Map.Entry<ColumnMetadata, Boolean> entry : orderingColumns.entrySet())
+            // Nonclustered ordering handles descending logic through ScoreOrderedResultRetriever and TKP
+            if (orderingColumns.values().stream().anyMatch(o -> o.expression.hasNonClusteredOrdering()))
+                return false;
+
+            Boolean[] clusteredMap = new Boolean[table.clusteringColumns().size()];
+            for (var entry : orderingColumns.entrySet())
             {
                 ColumnMetadata def = entry.getKey();
-                boolean reversed = entry.getValue();
-
-                checkTrue(def.isClusteringColumn(),
-                          "Order by is currently only supported on the clustered columns of the PRIMARY KEY, got %s", def.name);
-
-                while (i != def.position())
-                {
-                    checkTrue(restrictions.isColumnRestrictedByEq(table.clusteringColumns().get(i++)),
-                              "Order by currently only supports the ordering of columns following their declared order in the PRIMARY KEY");
-                }
-                i++;
-                reversedMap[def.position()] = (reversed != def.isReversedType());
+                Ordering ordering = entry.getValue();
+                // We defined ANN OF to be ASC ordering, as in, "order by near-ness".  But since score goes from
+                // 0 (worst) to 1 (closest), we need to reverse the ordering for the comparator when we're sorting
+                // by synthetic +score column.
+                boolean cqlReversed = ordering.direction == Ordering.Direction.DESC;
+                if (def.position() == ColumnMetadata.NO_POSITION)
+                    return ordering.expression.isScored() || cqlReversed;
+                else
+                    clusteredMap[def.position()] = (cqlReversed != def.isReversedType());
             }
 
-            // Check that all boolean in reversedMap, if set, agrees
+            // Check that all boolean in clusteredMap, if set, agrees
             Boolean isReversed = null;
-            for (Boolean b : reversedMap)
+            for (Boolean b : clusteredMap)
             {
                 // Column on which order is specified can be in any order
                 if (b == null)
@@ -1254,16 +2010,43 @@ public class SelectStatement implements CQLStatement
             return isReversed;
         }
 
-        /** If ALLOW FILTERING was not specified, this verifies that it is not needed */
-        private void checkNeedsFiltering(StatementRestrictions restrictions) throws InvalidRequestException
+        /**
+         * This verifies that if the expression contains a disjunction - "value = 1 or value = 2" or "value in (1, 2)"
+         * the indexes involved in the query support disjunction.
+         */
+        private void checkDisjunctionIsSupported(TableMetadata table, StatementRestrictions restrictions) throws InvalidRequestException
         {
+            if (!parameters.allowFiltering &&
+                restrictions.usesSecondaryIndexing() &&
+                restrictions.needsDisjunctionSupport(table))
+            {
+                restrictions.throwsRequiresIndexSupportingDisjunctionError();
+            }
+        }
+
+        /** If ALLOW FILTERING was not specified, this verifies that it is not needed */
+        private void checkNeedsFiltering(TableMetadata table, StatementRestrictions restrictions, ClientState state) throws InvalidRequestException
+        {
+            if (parameters.allowFiltering && restrictions.hasIndxBasedOrdering())
+            {
+                // ANN queries do not currently work correctly when filtering is required, so
+                // we fail even though ALLOW FILTERING was passed
+                if (restrictions.needFiltering(table))
+                    throw invalidRequest(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+            }
             // non-key-range non-indexed queries cannot involve filtering underneath
             if (!parameters.allowFiltering && (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing()))
             {
-                // We will potentially filter data if either:
-                //  - Have more than one IndexExpression
-                //  - Have no index expression and the row filter is not the identity
-                checkFalse(restrictions.needFiltering(), StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+                // We will potentially filter data if the row filter is not the identity and there isn't any index group
+                // supporting all the expressions in the filter.
+                if (restrictions.needFiltering(table))
+                {
+                    restrictions.throwRequiresAllowFilteringError(table, state);
+                }
+                if (restrictions.hasClusteringColumnsRestrictions()
+                    && restrictions.hasIndxBasedOrdering()
+                    && restrictions.hasClusterColumnRestrictionWithoutSupportingIndex(table))
+                        restrictions.throwRequiresAllowFilteringError(table, state);
             }
         }
 
@@ -1275,6 +2058,11 @@ public class SelectStatement implements CQLStatement
         private ColumnSpecification perPartitionLimitReceiver()
         {
             return new ColumnSpecification(keyspace(), name(), new ColumnIdentifier("[per_partition_limit]", true), Int32Type.instance);
+        }
+
+        private ColumnSpecification offsetReceiver()
+        {
+            return new ColumnSpecification(keyspace(), name(), new ColumnIdentifier("[offset]", true), Int32Type.instance);
         }
 
         @Override
@@ -1292,14 +2080,14 @@ public class SelectStatement implements CQLStatement
     public static class Parameters
     {
         // Public because CASSANDRA-9858
-        public final Map<ColumnIdentifier, Boolean> orderings;
-        public final List<ColumnIdentifier> groups;
+        public final List<Ordering.Raw> orderings;
+        public final List<Selectable.Raw> groups;
         public final boolean isDistinct;
         public final boolean allowFiltering;
         public final boolean isJson;
 
-        public Parameters(Map<ColumnIdentifier, Boolean> orderings,
-                          List<ColumnIdentifier> groups,
+        public Parameters(List<Ordering.Raw> orderings,
+                          List<Selectable.Raw> groups,
                           boolean isDistinct,
                           boolean allowFiltering,
                           boolean isJson)
@@ -1321,6 +2109,41 @@ public class SelectStatement implements CQLStatement
 
             return bValue == null ? 1 : comparator.compare(aValue, bValue);
         }
+
+        public ColumnComparator<T> reverse()
+        {
+            return new ReversedColumnComparator<>(this);
+        }
+
+        /**
+         * @return true if ordering is performed by index
+         */
+        public boolean indexOrdering()
+        {
+            return false;
+        }
+    }
+
+    private static class ReversedColumnComparator<T> extends ColumnComparator<T>
+    {
+        private final ColumnComparator<T> wrapped;
+
+        public ReversedColumnComparator(ColumnComparator<T> wrapped)
+        {
+            this.wrapped = wrapped;
+        }
+
+        @Override
+        public int compare(T o1, T o2)
+        {
+            return wrapped.compare(o2, o1);
+        }
+
+        @Override
+        public boolean indexOrdering()
+        {
+            return wrapped.indexOrdering();
+        }
     }
 
     /**
@@ -1340,6 +2163,21 @@ public class SelectStatement implements CQLStatement
         public int compare(List<ByteBuffer> a, List<ByteBuffer> b)
         {
             return compare(comparator, a.get(index), b.get(index));
+        }
+    }
+
+    private static class IndexColumnComparator extends ColumnComparator<List<ByteBuffer>>
+    {
+        @Override
+        public boolean indexOrdering()
+        {
+            return true;
+        }
+
+        @Override
+        public int compare(List<ByteBuffer> o1, List<ByteBuffer> o2)
+        {
+            throw new UnsupportedOperationException();
         }
     }
 
@@ -1373,10 +2211,137 @@ public class SelectStatement implements CQLStatement
             return 0;
         }
     }
-    
+
     @Override
     public String toString()
     {
         return ToStringBuilder.reflectionToString(this, ToStringStyle.SHORT_PREFIX_STYLE);
+    }
+
+    private String loggableTokens(QueryOptions options, ClientState state)
+    {
+        if (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing())
+        {
+            AbstractBounds<PartitionPosition> bounds = restrictions.getPartitionKeyBounds(options);
+            return "token range: " + (bounds.inclusiveLeft() ? '[' : '(') +
+                   bounds.left.getToken().toString() + ", " +
+                   bounds.right.getToken().toString() +
+                   (bounds.inclusiveRight() ? ']' : ')');
+        }
+        else
+        {
+            Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options, state);
+            if (keys.size() == 1)
+            {
+                return "token: " + table.partitioner.getToken(Iterables.getOnlyElement(keys)).toString();
+            }
+            else
+            {
+                StringBuilder sb = new StringBuilder("tokens: [");
+                boolean isFirst = true;
+                for (ByteBuffer key : keys)
+                {
+                    if (!isFirst) sb.append(", ");
+                    sb.append(table.partitioner.getToken(key).toString());
+                    isFirst = false;
+                }
+                return sb.append(']').toString();
+            }
+        }
+    }
+
+    private String asCQL(QueryOptions options, ClientState state)
+    {
+        ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("SELECT ").append(queriedColumns().toCQLString(Redaction.NONE));
+        sb.append(" FROM ").append(table.keyspace).append('.').append(table.name);
+        if (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing())
+        {
+            // partition range
+            ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options, state, columnFilter);
+            if (clusteringIndexFilter == null)
+                return "EMPTY";
+
+            RowFilter rowFilter = getRowFilter(options, state);
+
+            // The LIMIT provided by the user is the number of CQL row he wants returned.
+            // We want to have getRangeSlice to count the number of columns, not the number of keys.
+            AbstractBounds<PartitionPosition> keyBounds = restrictions.getPartitionKeyBounds(options);
+            if (keyBounds == null)
+                return "EMPTY";
+
+            DataRange dataRange = new DataRange(keyBounds, clusteringIndexFilter);
+
+            if (!dataRange.isUnrestricted(table) || !rowFilter.isEmpty())
+            {
+                sb.append(" WHERE ");
+                // We put the row filter first because the data range can end by "ORDER BY"
+                if (!rowFilter.isEmpty())
+                {
+                    sb.append(rowFilter);
+                    if (!dataRange.isUnrestricted(table))
+                        sb.append(" AND ");
+                }
+                if (!dataRange.isUnrestricted(table))
+                    sb.append(dataRange.toCQLString(table, rowFilter, Redaction.NONE));
+            }
+        }
+        else
+        {
+            // single partition
+            Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options, state);
+            if (keys.isEmpty())
+                return "EMPTY";
+            ClusteringIndexFilter filter = makeClusteringIndexFilter(options, state, columnFilter);
+            if (filter == null)
+                return "EMPTY";
+
+            sb.append(" WHERE ");
+
+
+            boolean compoundPk = table.partitionKeyColumns().size() > 1;
+            if (compoundPk) sb.append('(');
+            sb.append(ColumnMetadata.toCQLString(table.partitionKeyColumns()));
+            if (compoundPk) sb.append(')');
+            if (keys.size() == 1)
+            {
+                sb.append(" = ");
+                if (compoundPk) sb.append('(');
+                DataRange.appendKeyString(sb, table.partitionKeyType, Iterables.getOnlyElement(keys), Redaction.NONE);
+                if (compoundPk) sb.append(')');
+            }
+            else
+            {
+                sb.append(" IN (");
+                boolean first = true;
+                for (ByteBuffer key : keys)
+                {
+                    if (!first)
+                        sb.append(", ");
+
+                    if (compoundPk) sb.append('(');
+                    DataRange.appendKeyString(sb, table.partitionKeyType, key, Redaction.NONE);
+                    if (compoundPk) sb.append(')');
+                    first = false;
+                }
+
+                sb.append(')');
+            }
+
+            RowFilter rowFilter = getRowFilter(options, state);
+            if (!rowFilter.isEmpty())
+                sb.append(" AND ").append(rowFilter);
+
+            String filterString = filter.toCQLString(table, rowFilter, Redaction.NONE);
+            if (!filterString.isEmpty())
+                sb.append(" AND ").append(filterString);
+        }
+
+        DataLimits limits = getDataLimits(state, getLimit(options), getPerPartitionLimit(options), getOffset(options), getAggregationSpec(options));
+        if (limits != DataLimits.NONE)
+            sb.append(' ').append(limits);
+        return sb.toString();
     }
 }

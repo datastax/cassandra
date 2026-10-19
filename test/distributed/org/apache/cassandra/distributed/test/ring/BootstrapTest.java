@@ -18,34 +18,224 @@
 
 package org.apache.cassandra.distributed.test.ring;
 
+import java.io.Closeable;
+import java.io.IOException;
+import java.lang.management.ManagementFactory;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import javax.management.JMX;
+import javax.management.MBeanServerConnection;
+import javax.management.MalformedObjectNameException;
+import javax.management.ObjectName;
+import javax.management.remote.JMXConnector;
+
+import com.google.common.util.concurrent.Uninterruptibles;
+import org.junit.After;
 import org.junit.Assert;
+import org.junit.AssumptionViolatedException;
+import org.junit.Before;
 import org.junit.Test;
 
+import net.bytebuddy.ByteBuddy;
+import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
+import net.bytebuddy.implementation.MethodDelegation;
+import net.bytebuddy.implementation.bind.annotation.SuperCall;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
+import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.api.TokenSupplier;
+import org.apache.cassandra.distributed.shared.JMXUtil;
 import org.apache.cassandra.distributed.shared.NetworkTopology;
+import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.distributed.test.DecommissionTest;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.StorageServiceMBean;
 
 import static java.util.Arrays.asList;
+import static net.bytebuddy.matcher.ElementMatchers.named;
+import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
+import static org.apache.cassandra.config.CassandraRelevantProperties.JOIN_RING;
+import static org.apache.cassandra.config.CassandraRelevantProperties.MIGRATION_DELAY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.RESET_BOOTSTRAP_PROGRESS;
 import static org.apache.cassandra.distributed.action.GossipHelper.bootstrap;
 import static org.apache.cassandra.distributed.action.GossipHelper.pullSchemaFrom;
 import static org.apache.cassandra.distributed.action.GossipHelper.statusToBootstrap;
 import static org.apache.cassandra.distributed.action.GossipHelper.withProperty;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class BootstrapTest extends TestBaseImpl
 {
+    private long savedMigrationDelay;
+
+    static WithProperties properties;
+
+    @Before
+    public void beforeTest()
+    {
+        // MigrationCoordinator schedules schema pull requests immediatelly when the node is just starting up, otherwise
+        // the first pull request is sent in 60 seconds. Whether we are starting up or not is detected by examining
+        // the node up-time and if it is lower than MIGRATION_DELAY, we consider the server is starting up.
+        // When we are running multiple test cases in the class, where each starts a node but in the same JVM, the
+        // up-time will be more or less relevant only for the first test. In order to enforce the startup-like behaviour
+        // for each test case, the MIGRATION_DELAY time is adjusted accordingly
+        properties = new WithProperties().set(MIGRATION_DELAY, ManagementFactory.getRuntimeMXBean().getUptime() + savedMigrationDelay);
+    }
+
+    @After
+    public void afterTest()
+    {
+        properties.close();
+    }
+
     @Test
-    public void bootstrapTest() throws Throwable
+    public void bootstrapWithResumeTest() throws Throwable
+    {
+        RESET_BOOTSTRAP_PROGRESS.setBoolean(false);
+        bootstrapTest();
+    }
+
+    @Test
+    public void bootstrapWithoutResumeTest() throws Throwable
+    {
+        RESET_BOOTSTRAP_PROGRESS.setBoolean(true);
+        bootstrapTest();
+    }
+
+    /**
+     * Confirm that a normal, non-resumed bootstrap without the reset_bootstrap_progress param specified works without issue.
+     * @throws Throwable
+     */
+    @Test
+    public void bootstrapUnspecifiedResumeTest() throws Throwable
+    {
+        RESET_BOOTSTRAP_PROGRESS.clearValue(); // checkstyle: suppress nearby 'clearValueSystemPropertyUsage'
+        bootstrapTest();
+    }
+
+    /**
+     * Confirm that, in the absence of the reset_bootstrap_progress param being set and in the face of a found prior
+     * partial bootstrap, we error out and don't complete our bootstrap.
+     *
+     * Test w/out vnodes only; logic is identical for both run env but the token alloc in this test doesn't work for
+     * vnode env and it's not worth the lift to update it to work in both env.
+     *
+     * @throws Throwable
+     */
+    @Test
+    public void bootstrapUnspecifiedFailsOnResumeTest() throws Throwable
+    {
+        RESET_BOOTSTRAP_PROGRESS.clearValue(); // checkstyle: suppress nearby 'clearValueSystemPropertyUsage'
+
+        // Need our partitioner active for rangeToBytes conversion below
+        Config c = DatabaseDescriptor.loadConfig();
+        DatabaseDescriptor.daemonInitialization(() -> c);
+
+        int originalNodeCount = 2;
+        int expandedNodeCount = originalNodeCount + 1;
+
+        boolean sawException = false;
+        try (Cluster cluster = builder().withNodes(originalNodeCount)
+                                        .withoutVNodes()
+                                        .withTokenSupplier(TokenSupplier.evenlyDistributedTokens(expandedNodeCount))
+                                        .withNodeIdTopology(NetworkTopology.singleDcNetworkTopology(expandedNodeCount, "dc0", "rack0"))
+                                        .withConfig(config -> config.with(NETWORK, GOSSIP))
+                                        .start())
+        {
+            populate(cluster, 0, 100);
+
+            IInstanceConfig config = cluster.newInstanceConfig();
+            IInvokableInstance newInstance = cluster.bootstrap(config);
+            withProperty(JOIN_RING, false, () -> newInstance.startup(cluster));
+            cluster.forEach(statusToBootstrap(newInstance));
+
+            List<Token> tokens = cluster.tokens();
+            assert tokens.size() >= 3;
+
+            /*
+            Our local tokens:
+            Tokens in cluster tokens: [-3074457345618258603, 3074457345618258601, 9223372036854775805]
+
+            From the bootstrap process:
+            fetchReplicas in our test keyspace:
+            [FetchReplica
+                {local=Full(/127.0.0.3:7012,(-3074457345618258603,3074457345618258601]),
+                remote=Full(/127.0.0.1:7012,(-3074457345618258603,3074457345618258601])},
+            FetchReplica
+                {local=Full(/127.0.0.3:7012,(9223372036854775805,-3074457345618258603]),
+                remote=Full(/127.0.0.1:7012,(9223372036854775805,-3074457345618258603])},
+            FetchReplica
+                {local=Full(/127.0.0.3:7012,(3074457345618258601,9223372036854775805]),
+                remote=Full(/127.0.0.1:7012,(3074457345618258601,9223372036854775805])}]
+             */
+
+            // Insert some bogus ranges in the keyspace to be bootstrapped to trigger the check on available ranges on bootstrap.
+            // Note: these have to precisely overlap with the token ranges hit during streaming or they won't trigger the
+            // availability logic on bootstrap to then except out; we can't just have _any_ range for a keyspace, but rather,
+            // must have a range that overlaps with what we're trying to stream.
+            Set<Range<Token>> fullSet = new HashSet<>();
+            fullSet.add(new Range<>(tokens.get(0), tokens.get(1)));
+            fullSet.add(new Range<>(tokens.get(1), tokens.get(2)));
+            fullSet.add(new Range<>(tokens.get(2), tokens.get(0)));
+
+            // Should be fine to trigger on full ranges only but add a partial for good measure.
+            Set<Range<Token>> partialSet = new HashSet<>();
+            partialSet.add(new Range<>(tokens.get(2), tokens.get(1)));
+
+            String cql = String.format("INSERT INTO %s.%s (keyspace_name, full_ranges, transient_ranges) VALUES (?, ?, ?)",
+                                       SchemaConstants.SYSTEM_KEYSPACE_NAME,
+                                       SystemKeyspace.AVAILABLE_RANGES_V2);
+
+            newInstance.executeInternal(cql,
+                                        KEYSPACE,
+                                        fullSet.stream().map(SystemKeyspace::rangeToBytes).collect(Collectors.toSet()),
+                                        partialSet.stream().map(SystemKeyspace::rangeToBytes).collect(Collectors.toSet()));
+
+            // We expect bootstrap to throw an exception on node3 w/the seen ranges we've inserted
+            cluster.run(asList(pullSchemaFrom(cluster.get(1)),
+                               bootstrap()),
+                        newInstance.config().num());
+        }
+        catch (AssumptionViolatedException ave)
+        {
+            // We get an AssumptionViolatedException if we're in a test job configured w/vnodes
+            throw ave;
+        }
+        catch (RuntimeException rte)
+        {
+            if (rte.getMessage().contains("Discovered existing bootstrap data"))
+                sawException = true;
+        }
+        Assert.assertTrue("Expected to see a RuntimeException w/'Discovered existing bootstrap data' in the error message; did not.",
+                          sawException);
+    }
+
+    private void bootstrapTest() throws Throwable
     {
         int originalNodeCount = 2;
         int expandedNodeCount = originalNodeCount + 1;
@@ -56,11 +246,11 @@ public class BootstrapTest extends TestBaseImpl
                                         .withConfig(config -> config.with(NETWORK, GOSSIP))
                                         .start())
         {
-            populate(cluster,0, 100);
+            populate(cluster, 0, 100);
 
             IInstanceConfig config = cluster.newInstanceConfig();
             IInvokableInstance newInstance = cluster.bootstrap(config);
-            withProperty("cassandra.join_ring", false,
+            withProperty(JOIN_RING, false,
                          () -> newInstance.startup(cluster));
 
             cluster.forEach(statusToBootstrap(newInstance));
@@ -77,7 +267,7 @@ public class BootstrapTest extends TestBaseImpl
     }
 
     @Test
-    public void autoBootstrapTest() throws Throwable
+    public void readWriteDuringBootstrapTest() throws Throwable
     {
         int originalNodeCount = 2;
         int expandedNodeCount = originalNodeCount + 1;
@@ -88,13 +278,50 @@ public class BootstrapTest extends TestBaseImpl
                                         .withConfig(config -> config.with(NETWORK, GOSSIP))
                                         .start())
         {
-            populate(cluster,0, 100);
-            bootstrapAndJoinNode(cluster);
+            IInstanceConfig config = cluster.newInstanceConfig();
+            IInvokableInstance newInstance = cluster.bootstrap(config);
+            withProperty(JOIN_RING, false,
+                         () -> newInstance.startup(cluster));
 
-            for (Map.Entry<Integer, Long> e : count(cluster).entrySet())
-                Assert.assertEquals("Node " + e.getKey() + " has incorrect row state", e.getValue().longValue(), 100L);
+            cluster.forEach(statusToBootstrap(newInstance));
+
+            populate(cluster, 0, 100);
+
+            Assert.assertEquals(100, newInstance.executeInternal("SELECT * FROM " + KEYSPACE + ".tbl").length);
         }
     }
+
+    @Test
+    public void bootstrapJMXStatus() throws Throwable
+    {
+        int originalNodeCount = 2;
+        int expandedNodeCount = originalNodeCount + 1;
+
+        RESET_BOOTSTRAP_PROGRESS.setBoolean(false);
+        try (Cluster cluster = builder().withNodes(originalNodeCount)
+                                        .withTokenSupplier(TokenSupplier.evenlyDistributedTokens(expandedNodeCount))
+                                        .withNodeIdTopology(NetworkTopology.singleDcNetworkTopology(expandedNodeCount, "dc0", "rack0"))
+                                        .withConfig(config -> config.with(NETWORK, GOSSIP))
+                                        .withInstanceInitializer(BootstrapTest.BB::install)
+                                        .start())
+        {
+            bootstrapAndJoinNodeNoWait(cluster);
+
+            IInvokableInstance joiningInstance = cluster.get(3);
+
+            joiningInstance.runOnInstance(() -> {
+                assertEquals("IN_PROGRESS", StorageService.instance.getBootstrapState());
+                assertTrue(StorageService.instance.isBootstrapFailed());
+            });
+
+            joiningInstance.nodetoolResult("bootstrap", "resume").asserts().success();
+            joiningInstance.runOnInstance(() -> {
+                assertEquals("COMPLETED", StorageService.instance.getBootstrapState());
+                assertFalse(StorageService.instance.isBootstrapFailed());
+            });
+        }
+    }
+
 
     public static void populate(ICluster cluster, int from, int to)
     {
@@ -120,4 +347,118 @@ public class BootstrapTest extends TestBaseImpl
                         .collect(Collectors.toMap(nodeId -> nodeId,
                                                   nodeId -> (Long) cluster.get(nodeId).executeInternal("SELECT count(*) FROM " + KEYSPACE + ".tbl")[0][0]));
     }
+
+    public static class BB
+    {
+        public static void install(ClassLoader classLoader, Integer num)
+        {
+            if (num != 3)
+            {
+                return;
+            }
+            new ByteBuddy().rebase(StorageService.class)
+                           .method(named("bootstrapFinished"))
+                           .intercept(MethodDelegation.to(DecommissionTest.BB.class))
+                           .make()
+                           .load(classLoader, ClassLoadingStrategy.Default.INJECTION);
+        }
+
+        private static int invocations = 0;
+
+        @SuppressWarnings("unused")
+        public static void bootstrapFinished(@SuperCall Callable<Void> zuper)
+        {
+            ++invocations;
+
+            if (invocations == 1)
+                throw new RuntimeException("simulated error in bootstrapFinished");
+
+            try
+            {
+                zuper.call();
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    /**
+     * This regression test for CASSANDRA-19902 ensures {@link StorageServiceMBean} JMX
+     * interface is published before the node finishes bootstrapping
+     */
+    @Test
+    public void testStorageServiceMBeanIsPublishedOnJMXDuringBootstrap() throws Throwable
+    {
+        ExecutorService es = Executors.newFixedThreadPool(1);
+        try (Cluster cluster = builder().withNodes(2)
+                                        .withConfig(config -> config.with(GOSSIP)
+                                                                    .with(NETWORK)
+                                                                    .with(Feature.JMX)
+                                                                    .set("auto_bootstrap", true))
+                                        .withInstanceInitializer(BBBootstrapInterceptor::install)
+                                        .createWithoutStarting();
+             Closeable ignored = es::shutdown)
+        {
+            Runnable test = () ->
+            {
+                // Wait for bootstrap to start via countdown latch
+                IInvokableInstance joiningInstance = cluster.get(2);
+                joiningInstance.runOnInstance(() -> Uninterruptibles.awaitUninterruptibly(BBBootstrapInterceptor.bootstrapStart));
+                // At this point, it should be possible to check bootstrap status via JMX
+                IInstanceConfig config = joiningInstance.config();
+                try (JMXConnector jmxc = JMXUtil.getJmxConnector(config))
+                {
+                    MBeanServerConnection mbsc = jmxc.getMBeanServerConnection();
+                    StorageServiceMBean sp = JMX.newMBeanProxy(mbsc, new ObjectName("org.apache.cassandra.db:type=StorageService"), StorageServiceMBean.class);
+                    assertEquals(sp.getOperationMode(), StorageService.Mode.JOINING.toString());
+                }
+                catch (IOException | MalformedObjectNameException e)
+                {
+                    throw new RuntimeException(e);
+                }
+                finally
+                {
+                    // Complete bootstrap via countdown latch so test will finish properly
+                    joiningInstance.runOnInstance(() -> BBBootstrapInterceptor.bootstrapReady.countDown());
+                }
+            };
+
+            Future<?> testResult = es.submit(test);
+            try
+            {
+                cluster.startup();
+            }
+            catch (Exception ex) {
+                // ignore exceptions from startup process. More interested in the test result.
+            }
+            testResult.get();
+        }
+        es.awaitTermination(5, TimeUnit.SECONDS);
+    }
+
+    public static class BBBootstrapInterceptor
+    {
+        final static CountDownLatch bootstrapReady = new CountDownLatch(1);
+        final static CountDownLatch bootstrapStart = new CountDownLatch(1);
+        static void install(ClassLoader cl, int nodeNumber)
+        {
+            if (nodeNumber != 2)
+                return;
+            new ByteBuddy().rebase(StorageService.class)
+                           .method(named("bootstrap").and(takesArguments(2)))
+                           .intercept(MethodDelegation.to(BBBootstrapInterceptor.class))
+                           .make()
+                           .load(cl, ClassLoadingStrategy.Default.INJECTION);
+        }
+
+        public static boolean bootstrap(Collection<Token> tokens, long bootstrapTimeoutMillis)
+        {
+            bootstrapStart.countDown();
+            Uninterruptibles.awaitUninterruptibly(bootstrapReady);
+            return false; // bootstrap fails
+        }
+    }
+
 }

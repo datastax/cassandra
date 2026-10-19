@@ -18,14 +18,13 @@
 
 package org.apache.cassandra.test.microbench;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.Files;
-import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.DirectorySizeCalculator;
 import org.openjdk.jmh.annotations.*;
@@ -46,7 +45,7 @@ public class DirectorySizerBench
     @Setup(Level.Trial)
     public void setUp() throws IOException
     {
-        tempDir = Files.createTempDirectory(randString()).toFile();
+        tempDir = new File(Files.createTempDirectory(randString()));
 
         // Since #'s on laptops and commodity desktops are so useful in considering enterprise virtualized server environments...
 
@@ -65,14 +64,9 @@ public class DirectorySizerBench
         // [java]   Statistics: (min, avg, max) = (73.687, 74.714, 76.872), stdev = 0.835
         // [java]   Confidence interval (99.9%): [74.156, 75.272]
 
-        // Throttle CPU on the Windows box to .87GHZ from 4.3GHZ turbo single-core, and #'s for 25600:
-        // [java] Result: 298.628 ▒(99.9%) 14.755 ms/op [Average]
-        // [java]   Statistics: (min, avg, max) = (291.245, 298.628, 412.881), stdev = 22.085
-        // [java]   Confidence interval (99.9%): [283.873, 313.383]
-
         // Test w/25,600 files, 100x the load of a full default CommitLog (8192) divided by size (32 per)
         populateRandomFiles(tempDir, 25600);
-        sizer = new DirectorySizeCalculator(tempDir);
+        sizer = new DirectorySizeCalculator();
     }
 
     @TearDown
@@ -85,7 +79,7 @@ public class DirectorySizerBench
     {
         for (int i = 0; i < count; i++)
         {
-            PrintWriter pw = new PrintWriter(dir + File.separator + randString(), "UTF-8");
+            PrintWriter pw = new PrintWriter(dir + File.pathSeparator() + randString(), "UTF-8");
             pw.write(randString());
             pw.close();
         }

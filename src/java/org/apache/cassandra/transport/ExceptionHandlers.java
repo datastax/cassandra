@@ -19,7 +19,11 @@
 package org.apache.cassandra.transport;
 
 import java.io.IOException;
+import java.net.SocketAddress;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
+
+import javax.net.ssl.SSLException;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
@@ -31,9 +35,16 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
+import io.netty.channel.unix.Errors;
+import org.apache.cassandra.exceptions.OverloadedException;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.exceptions.OversizedCQLMessageException;
+import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.net.FrameEncoder;
 import org.apache.cassandra.transport.messages.ErrorMessage;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.Throwables;
 
 public class ExceptionHandlers
 {
@@ -60,9 +71,9 @@ public class ExceptionHandlers
         public void exceptionCaught(final ChannelHandlerContext ctx, Throwable cause)
         {
             // Provide error message to client in case channel is still open
-            UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), false);
             if (ctx.channel().isOpen())
             {
+                Predicate<Throwable> handler = getUnexpectedExceptionHandler(ctx.channel(), false);
                 ErrorMessage errorMessage = ErrorMessage.fromException(cause, handler);
                 Envelope response = errorMessage.encode(version);
                 FrameEncoder.Payload payload = allocator.allocate(true, CQLMessageHandler.envelopeSize(response.header));
@@ -73,7 +84,7 @@ public class ExceptionHandlers
                     payload.finish();
                     ChannelPromise promise = ctx.newPromise();
                     // On protocol exception, close the channel as soon as the message has been sent
-                    if (cause instanceof ProtocolException)
+                    if (isFatal(cause))
                         promise.addListener(future -> ctx.close());
                     ctx.writeAndFlush(payload, promise);
                 }
@@ -83,7 +94,74 @@ public class ExceptionHandlers
                     JVMStabilityInspector.inspectThrowable(cause);
                 }
             }
+            
+            if (DatabaseDescriptor.getClientErrorReportingExclusions().contains(ctx.channel().remoteAddress()))
+            {
+                // Sometimes it is desirable to ignore exceptions from specific IPs; such as when security scans are
+                // running.  To avoid polluting logs and metrics, metrics are not updated when the IP is in the exclude
+                // list.
+                logger.debug("Excluding client exception for {}; address contained in client_error_reporting_exclusions", ctx.channel().remoteAddress(), cause);
+                return;
+            }
+            logClientNetworkingExceptions(cause, ctx.channel().remoteAddress());
         }
+
+        private static boolean isFatal(Throwable cause)
+        {
+            return Throwables.anyCauseMatches(cause, t -> t instanceof ProtocolException
+                                                          && ((ProtocolException)t).isFatal());
+        }
+    }
+
+    static void logClientNetworkingExceptions(Throwable cause, SocketAddress clientAddress)
+    {
+        if (Throwables.anyCauseMatches(cause, t -> t instanceof ProtocolException))
+        {
+            // if any ProtocolExceptions is not silent, then handle
+            if (Throwables.anyCauseMatches(cause, t -> t instanceof ProtocolException && !((ProtocolException) t).isSilent()))
+            {
+                ClientMetrics.instance.markProtocolException();
+                // since protocol exceptions are expected to be client issues, not logging stack trace
+                // to avoid spamming the logs once a bad client shows up
+                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES, "Protocol exception with client networking: " + cause.getMessage());
+            }
+        }
+        else if (Throwables.anyCauseMatches(cause, t -> t instanceof OverloadedException))
+        {
+            // Once the threshold for overload is breached, it will very likely spam the logs...
+            NoSpamLogger.log(logger, NoSpamLogger.Level.INFO, 1, TimeUnit.MINUTES, cause.getMessage());
+        }
+        else if (Throwables.anyCauseMatches(cause, t -> t instanceof OversizedCQLMessageException))
+        {
+            NoSpamLogger.log(logger, NoSpamLogger.Level.INFO, 1, TimeUnit.MINUTES, cause.getMessage());
+        }
+        else if (Throwables.anyCauseMatches(cause, t -> t instanceof Errors.NativeIoException))
+        {
+            ClientMetrics.instance.markUnknownException();
+            logger.trace("Native exception in client networking", cause);
+        }
+        else if (Throwables.anyCauseMatches(cause, t -> t instanceof SSLException))
+        {
+            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES, "SSLException in client networking with peer {} {}", clientAddress, cause.getMessage());
+        }
+        else
+        {
+            ClientMetrics.instance.markUnknownException();
+            logger.warn("Unknown exception in client networking with peer {} {}", clientAddress, cause.getMessage());
+        }
+    }
+
+    static Predicate<Throwable> getUnexpectedExceptionHandler(Channel channel, boolean alwaysLogAtError)
+    {
+        SocketAddress address = channel.remoteAddress();
+        if (DatabaseDescriptor.getClientErrorReportingExclusions().contains(address))
+        {
+            return cause -> {
+                logger.debug("Excluding client exception for {}; address contained in client_error_reporting_exclusions", address, cause);
+                return true;
+            };
+        }
+        return new UnexpectedChannelExceptionHandler(channel, alwaysLogAtError);
     }
 
     /**

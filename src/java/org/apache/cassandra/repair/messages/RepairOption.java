@@ -20,17 +20,16 @@ package org.apache.cassandra.repair.messages;
 import java.util.*;
 
 import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.repair.RepairParallelism;
-import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Repair options.
@@ -47,11 +46,17 @@ public class RepairOption
     public static final String HOSTS_KEY = "hosts";
     public static final String TRACE_KEY = "trace";
     public static final String SUB_RANGE_REPAIR_KEY = "sub_range_repair";
+    public static final String PUSH_REPAIR_KEY = "pushRepair";
     public static final String PULL_REPAIR_KEY = "pullRepair";
     public static final String FORCE_REPAIR_KEY = "forceRepair";
     public static final String PREVIEW = "previewKind";
     public static final String OPTIMISE_STREAMS_KEY = "optimiseStreams";
     public static final String IGNORE_UNREPLICATED_KS = "ignoreUnreplicatedKeyspaces";
+    public static final String REPAIR_PAXOS_KEY = "repairPaxos";
+    public static final String PAXOS_ONLY_KEY = "paxosOnly";
+    public static final String OFFLINE_SERVICE = "offlineService";
+    public static final String ENTITY_ID_KEY = "entityId";
+    public static final String REPAIR_TYPE_KEY = "repairType";
 
     // we don't want to push nodes too much for repair
     public static final int MAX_JOB_THREADS = 4;
@@ -147,6 +152,11 @@ public class RepairOption
      *             <td></td>
      *         </tr>
      *         <tr>
+     *             <td>pushRepair</td>
+     *             <td>"true" if the repair should only stream data one way from local host to remote host.</td>
+     *             <td>false</td>
+     *         </tr>
+     *         <tr>
      *             <td>pullRepair</td>
      *             <td>"true" if the repair should only stream data one way from a remote host to this host.
      *             This is only allowed if exactly 2 hosts are specified along with a token range that they share.</td>
@@ -162,6 +172,24 @@ public class RepairOption
      *             <td>"true" if we should try to optimise the syncing to avoid transfering identical
      *             ranges to the same host multiple times</td>
      *             <td>false</td>
+     *         </tr>
+     *         <tr>
+     *             <td>offlineService</td>
+     *             <td>"true" if current repair task is executed by an offline service which has no token metadata and
+     *              it's not part of the ring. Repair should use tokens and hosts directly from repair options.</td>
+     *             <td>false</td>
+     *         </tr>
+     *         <tr>
+     *             <td>entityId</td>
+     *             <td>Opaque entity identifier set by CNDB orchestration. Not used by Cassandra internals.
+     *             Included in repair log lines for observability. Ignored when absent.</td>
+     *             <td>null</td>
+     *         </tr>
+     *         <tr>
+     *             <td>repairType</td>
+     *             <td>Source of the repair as set by CNDB (e.g. "continuous", "decommission", "on_demand").
+     *             Not used by Cassandra internals. Included in repair log lines for observability. Ignored when absent.</td>
+     *             <td>null</td>
      *         </tr>
      *     </tbody>
      * </table>
@@ -179,8 +207,22 @@ public class RepairOption
         PreviewKind previewKind = PreviewKind.valueOf(options.getOrDefault(PREVIEW, PreviewKind.NONE.toString()));
         boolean trace = Boolean.parseBoolean(options.get(TRACE_KEY));
         boolean force = Boolean.parseBoolean(options.get(FORCE_REPAIR_KEY));
+        boolean pushRepair = Boolean.parseBoolean(options.get(PUSH_REPAIR_KEY));
         boolean pullRepair = Boolean.parseBoolean(options.get(PULL_REPAIR_KEY));
         boolean ignoreUnreplicatedKeyspaces = Boolean.parseBoolean(options.get(IGNORE_UNREPLICATED_KS));
+        boolean repairPaxos = Boolean.parseBoolean(options.get(REPAIR_PAXOS_KEY));
+        boolean paxosOnly = Boolean.parseBoolean(options.get(PAXOS_ONLY_KEY));
+
+        if (previewKind != PreviewKind.NONE)
+        {
+            Preconditions.checkArgument(!repairPaxos, "repairPaxos must be set to false for preview repairs");
+            Preconditions.checkArgument(!paxosOnly, "paxosOnly must be set to false for preview repairs");
+        }
+        boolean offlineService = Boolean.parseBoolean(options.get(OFFLINE_SERVICE));
+        String entityId   = options.get(ENTITY_ID_KEY);   // null if absent - no default needed
+        String repairType = options.get(REPAIR_TYPE_KEY);  // null if absent
+
+        Preconditions.checkArgument(!pullRepair || !pushRepair, "Cannot use pushRepair and pullRepair as the same time");
 
         int jobThreads = 1;
         if (options.containsKey(JOB_THREADS_KEY))
@@ -197,7 +239,9 @@ public class RepairOption
 
         boolean asymmetricSyncing = Boolean.parseBoolean(options.get(OPTIMISE_STREAMS_KEY));
 
-        RepairOption option = new RepairOption(parallelism, primaryRange, incremental, trace, jobThreads, ranges, !ranges.isEmpty(), pullRepair, force, previewKind, asymmetricSyncing, ignoreUnreplicatedKeyspaces);
+        RepairOption option = new RepairOption(parallelism, primaryRange, incremental, trace, jobThreads, ranges,
+                                               !ranges.isEmpty(), pushRepair, pullRepair, force, previewKind, asymmetricSyncing,
+                                               ignoreUnreplicatedKeyspaces, repairPaxos, paxosOnly, offlineService, entityId, repairType);
 
         // data centers
         String dataCentersStr = options.get(DATACENTERS_KEY);
@@ -272,40 +316,48 @@ public class RepairOption
     private final boolean trace;
     private final int jobThreads;
     private final boolean isSubrangeRepair;
+    private final boolean pushRepair;
     private final boolean pullRepair;
     private final boolean forceRepair;
     private final PreviewKind previewKind;
     private final boolean optimiseStreams;
     private final boolean ignoreUnreplicatedKeyspaces;
+    private final boolean repairPaxos;
+    private final boolean paxosOnly;
+    private final boolean offlineService;
+    private final String entityId;   // nullable - absent when not set by CNDB
+    private final String repairType; // nullable - e.g. "continuous", "decommission", "on_demand"
 
     private final Collection<String> columnFamilies = new HashSet<>();
     private final Collection<String> dataCenters = new HashSet<>();
     private final Collection<String> hosts = new HashSet<>();
     private final Collection<Range<Token>> ranges = new HashSet<>();
 
-    public RepairOption(RepairParallelism parallelism, boolean primaryRange, boolean incremental, boolean trace, int jobThreads, Collection<Range<Token>> ranges, boolean isSubrangeRepair, boolean pullRepair, boolean forceRepair, PreviewKind previewKind, boolean optimiseStreams, boolean ignoreUnreplicatedKeyspaces)
+    public RepairOption(RepairParallelism parallelism, boolean primaryRange, boolean incremental, boolean trace,
+                        int jobThreads, Collection<Range<Token>> ranges, boolean isSubrangeRepair, boolean pushRepair,
+                        boolean pullRepair, boolean forceRepair, PreviewKind previewKind, boolean optimiseStreams,
+                        boolean ignoreUnreplicatedKeyspaces, boolean repairPaxos, boolean paxosOnly, boolean offlineService,
+                        String entityId, String repairType)
     {
-        if (FBUtilities.isWindows &&
-            (DatabaseDescriptor.getDiskAccessMode() != Config.DiskAccessMode.standard || DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard) &&
-            parallelism == RepairParallelism.SEQUENTIAL)
-        {
-            logger.warn("Sequential repair disabled when memory-mapped I/O is configured on Windows. Reverting to parallel.");
-            this.parallelism = RepairParallelism.PARALLEL;
-        }
-        else
-            this.parallelism = parallelism;
 
+        this.parallelism = parallelism;
         this.primaryRange = primaryRange;
         this.incremental = incremental;
         this.trace = trace;
         this.jobThreads = jobThreads;
         this.ranges.addAll(ranges);
+        this.pushRepair = pushRepair;
         this.isSubrangeRepair = isSubrangeRepair;
         this.pullRepair = pullRepair;
         this.forceRepair = forceRepair;
         this.previewKind = previewKind;
         this.optimiseStreams = optimiseStreams;
         this.ignoreUnreplicatedKeyspaces = ignoreUnreplicatedKeyspaces;
+        this.repairPaxos = repairPaxos;
+        this.paxosOnly = paxosOnly;
+        this.offlineService = offlineService;
+        this.entityId = entityId;
+        this.repairType = repairType;
     }
 
     public RepairParallelism getParallelism()
@@ -326,6 +378,16 @@ public class RepairOption
     public boolean isTraced()
     {
         return trace;
+    }
+
+    public boolean isOfflineService()
+    {
+        return offlineService;
+    }
+
+    public boolean isPushRepair()
+    {
+        return pushRepair;
     }
 
     public boolean isPullRepair()
@@ -390,27 +452,51 @@ public class RepairOption
 
     public boolean optimiseStreams()
     {
-        if(optimiseStreams)
-            return true;
-
-        if (isPullRepair() || isForcedRepair())
+        if (isPullRepair())
             return false;
 
-        if (isIncremental() && DatabaseDescriptor.autoOptimiseIncRepairStreams())
+        if (isPreview())
+        {
+            if (DatabaseDescriptor.autoOptimisePreviewRepairStreams())
+                return true;
+        }
+        else if (isIncremental() && DatabaseDescriptor.autoOptimiseIncRepairStreams())
+            return true;
+        else if (!isIncremental() && DatabaseDescriptor.autoOptimiseFullRepairStreams())
             return true;
 
-        if (isPreview() && DatabaseDescriptor.autoOptimisePreviewRepairStreams())
-            return true;
-
-        if (!isIncremental() && DatabaseDescriptor.autoOptimiseFullRepairStreams())
-            return true;
-
-        return false;
+        return optimiseStreams;
     }
 
     public boolean ignoreUnreplicatedKeyspaces()
     {
         return ignoreUnreplicatedKeyspaces;
+    }
+
+    public boolean repairPaxos()
+    {
+        return repairPaxos;
+    }
+
+    public boolean paxosOnly()
+    {
+        return paxosOnly;
+    }
+
+    /**
+     * @return entity identifier supplied by CNDB at repair initiation, or null if not set
+     */
+    public String getEntityId()
+    {
+        return entityId;
+    }
+
+    /**
+     * @return repair source label supplied by CNDB (e.g. "continuous", "decommission", "on_demand"), or null if not set
+     */
+    public String getRepairType()
+    {
+        return repairType;
     }
 
     @Override
@@ -426,10 +512,16 @@ public class RepairOption
                ", hosts: " + hosts +
                ", previewKind: " + previewKind +
                ", # of ranges: " + ranges.size() +
+               ", push repair: " + pushRepair +
                ", pull repair: " + pullRepair +
                ", force repair: " + forceRepair +
                ", optimise streams: "+ optimiseStreams() +
                ", ignore unreplicated keyspaces: "+ ignoreUnreplicatedKeyspaces +
+               ", repairPaxos: " + repairPaxos +
+               ", paxosOnly: " + paxosOnly +
+               ", offline service: " + offlineService +
+               (entityId   != null ? ", entityId: "   + entityId   : "") +
+               (repairType != null ? ", repairType: " + repairType : "") +
                ')';
     }
 
@@ -446,10 +538,14 @@ public class RepairOption
         options.put(SUB_RANGE_REPAIR_KEY, Boolean.toString(isSubrangeRepair));
         options.put(TRACE_KEY, Boolean.toString(trace));
         options.put(RANGES_KEY, Joiner.on(",").join(ranges));
+        options.put(PUSH_REPAIR_KEY, Boolean.toString(pushRepair));
         options.put(PULL_REPAIR_KEY, Boolean.toString(pullRepair));
         options.put(FORCE_REPAIR_KEY, Boolean.toString(forceRepair));
         options.put(PREVIEW, previewKind.toString());
         options.put(OPTIMISE_STREAMS_KEY, Boolean.toString(optimiseStreams));
+        options.put(REPAIR_PAXOS_KEY, Boolean.toString(repairPaxos));
+        options.put(PAXOS_ONLY_KEY, Boolean.toString(paxosOnly));
+        options.put(OFFLINE_SERVICE, Boolean.toString(offlineService));
         return options;
     }
 }

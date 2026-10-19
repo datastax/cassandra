@@ -36,20 +36,20 @@ public class CASClientWriteRequestMetrics extends CASClientRequestMetrics
 
     public final Counter conditionNotMet;
 
-    public CASClientWriteRequestMetrics(String scope)
+    public CASClientWriteRequestMetrics(String scope, String namePrefix)
     {
-        super(scope);
-        mutationSize = Metrics.histogram(factory.createMetricName("MutationSizeHistogram"), false);
+        super(scope, namePrefix);
+        mutationSize = Metrics.histogram(factory.createMetricName(namePrefix + "MutationSizeHistogram"), false);
         // scope for this metric was changed in 4.0; adding backward compatibility
-        conditionNotMet = Metrics.counter(factory.createMetricName("ConditionNotMet"),
-                                          DefaultNameFactory.createMetricName("ClientRequest", "ConditionNotMet", "CASRead"));
+        conditionNotMet = Metrics.counter(factory.createMetricName(namePrefix + "ConditionNotMet"),
+                                          DefaultNameFactory.createMetricName("ClientRequest", namePrefix + "ConditionNotMet", "CASRead"));
     }
 
     public void release()
     {
         super.release();
-        Metrics.remove(factory.createMetricName("ConditionNotMet"),
-                       DefaultNameFactory.createMetricName("ClientRequest", "ConditionNotMet", "CASRead"));
-        Metrics.remove(factory.createMetricName("MutationSizeHistogram"));
+        Metrics.remove(factory.createMetricName(namePrefix + "ConditionNotMet"),
+                       DefaultNameFactory.createMetricName("ClientRequest", namePrefix + "ConditionNotMet", "CASRead"));
+        Metrics.remove(factory.createMetricName(namePrefix + "MutationSizeHistogram"));
     }
 }

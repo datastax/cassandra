@@ -19,7 +19,7 @@ package org.apache.cassandra.service;
 
 import java.net.InetAddress;
 
-import org.apache.cassandra.transport.ClientStat;
+import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -33,14 +33,14 @@ public class QueryState
     private final ClientState clientState;
 
     private long timestamp = Long.MIN_VALUE;
-    private int nowInSeconds = Integer.MIN_VALUE;
+    private long nowInSeconds = Integer.MIN_VALUE;
 
     public QueryState(ClientState clientState)
     {
         this.clientState = clientState;
     }
 
-    public QueryState(ClientState clientState, long timestamp, int nowInSeconds)
+    public QueryState(ClientState clientState, long timestamp, long nowInSeconds)
     {
         this(clientState);
         this.timestamp = timestamp;
@@ -83,7 +83,7 @@ public class QueryState
      *
      * @return server-generated, recorded timestamp in seconds
      */
-    public int getNowInSeconds()
+    public long getNowInSeconds()
     {
         if (nowInSeconds == Integer.MIN_VALUE)
             nowInSeconds = FBUtilities.nowInSeconds();
@@ -101,7 +101,7 @@ public class QueryState
     /**
      * @return server-generated nowInSeconds value, if one had been requested, or Integer.MIN_VALUE otherwise
      */
-    public int generatedNowInSeconds()
+    public long generatedNowInSeconds()
     {
         return nowInSeconds;
     }
@@ -114,5 +114,16 @@ public class QueryState
     public InetAddress getClientAddress()
     {
         return clientState.getClientAddress();
+    }
+
+    /**
+     * Checks if this user is an ordinary user (not a super or system user).
+     *
+     * @return {@code true} if this user is an ordinary user, {@code false} otherwise.
+     */
+    public boolean isOrdinaryUser()
+    {
+        AuthenticatedUser user = getClientState().getUser();
+        return !getClientState().isInternal && null != user && !user.isSystem() && !user.isSuper();
     }
 }

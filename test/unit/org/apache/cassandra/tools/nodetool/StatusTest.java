@@ -18,35 +18,35 @@
 
 package org.apache.cassandra.tools.nodetool;
 
+import java.util.regex.Pattern;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static org.hamcrest.CoreMatchers.*;
-import static org.hamcrest.Matchers.matchesPattern;
-import static org.junit.Assert.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 
-@RunWith(OrderedJUnit4ClassRunner.class)
 public class StatusTest extends CQLTester
 {
+    private static final Pattern PATTERN = Pattern.compile("\\R");
     private static String localHostId;
     private static String token;
 
     @BeforeClass
     public static void setup() throws Exception
     {
-        StorageService.instance.initServer();
+        requireNetwork();
+        startJMXServer();
         localHostId = StorageService.instance.getLocalHostId();
         token = StorageService.instance.getTokens().get(0);
-        startJMXServer();
     }
 
     /**
@@ -55,6 +55,8 @@ public class StatusTest extends CQLTester
     @Test
     public void testStatusOutput()
     {
+        SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES.forEach(k -> Keyspace.open(k).flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
+
         HostStatWithPort host = new HostStatWithPort(null, FBUtilities.getBroadcastAddressAndPort(), false, null);
         validateStatusOutput(host.ipOrDns(false),
                             "status");
@@ -73,31 +75,34 @@ public class StatusTest extends CQLTester
     @Test
     public void testOutputWhileBootstrapping()
     {
+        SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES.forEach(k -> Keyspace.open(k).flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
+
         // Deleting these tables will simulate we're bootstrapping
         schemaChange("DROP KEYSPACE " + SchemaConstants.TRACE_KEYSPACE_NAME);
         schemaChange("DROP KEYSPACE " + CQLTester.KEYSPACE);
         schemaChange("DROP KEYSPACE " + CQLTester.KEYSPACE_PER_TEST);
 
-        ToolRunner.ToolResult nodetool = ToolRunner.invokeNodetool("status");
-        nodetool.assertOnCleanExit();
-        String[] lines = nodetool.getStdout().split("\\R");
+        ToolRunner.ToolResult tool = ToolRunner.invokeNodetool("status");
+        tool.assertOnCleanExit();
+        String[] lines = PATTERN.split(tool.getStdout());
 
         String hostStatus = lines[lines.length-3].trim();
-        assertThat(hostStatus, startsWith("UN"));
-        assertThat(hostStatus, containsString(FBUtilities.getJustLocalAddress().getHostAddress()));
-        assertThat(hostStatus, matchesPattern(".*\\d+\\.\\d+ KiB.*"));
-        assertThat(hostStatus, containsString(localHostId));
-        assertThat(hostStatus, containsString(token));
-        assertThat(hostStatus, endsWith(SimpleSnitch.RACK_NAME));
+        assertThat(hostStatus).startsWith("UN");
+        assertThat(hostStatus).contains(FBUtilities.getJustLocalAddress().getHostAddress());
+        assertThat(hostStatus).containsPattern("\\d+\\.?\\d+ KiB");
+        assertThat(hostStatus).contains(localHostId);
+        assertThat(hostStatus).contains(token);
+        assertThat(hostStatus).endsWith(SimpleSnitch.RACK_NAME);
 
-        String bootstrappingWarn = lines[lines.length-1].trim();;
-        assertThat(bootstrappingWarn, containsString("probably still bootstrapping. Effective ownership information is meaningless."));
+        String bootstrappingWarn = lines[lines.length-1].trim();
+        assertThat(bootstrappingWarn)
+                .contains("probably still bootstrapping. Effective ownership information is meaningless.");
     }
 
     private void validateStatusOutput(String hostForm, String... args)
     {
-        ToolRunner.ToolResult nodetool = ToolRunner.invokeNodetool(args);
-        nodetool.assertOnCleanExit();
+        ToolRunner.ToolResult tool = ToolRunner.invokeNodetool(args);
+        tool.assertOnCleanExit();
         /*
          Datacenter: datacenter1
          =======================
@@ -106,16 +111,17 @@ public class StatusTest extends CQLTester
          --  Address    Load       Owns (effective)  Host ID                               Token                Rack
          UN  localhost  45.71 KiB  100.0%            0b1b5e91-ad3b-444e-9c24-50578486978a  1849950853373272258  rack1
          */
-        String[] lines = nodetool.getStdout().split("\\R");
-        assertThat(lines[0].trim(), endsWith(SimpleSnitch.DATA_CENTER_NAME));
+        String[] lines = PATTERN.split(tool.getStdout());
+        assertThat(lines[0].trim()).endsWith(SimpleSnitch.DATA_CENTER_NAME);
         String hostStatus = lines[lines.length-1].trim();
-        assertThat(hostStatus, startsWith("UN"));
-        assertThat(hostStatus, containsString(hostForm));
-        assertThat(hostStatus, matchesPattern(".*\\d+\\.\\d+ KiB.*"));
-        assertThat(hostStatus, matchesPattern(".*\\d+\\.\\d+%.*"));
-        assertThat(hostStatus, containsString(localHostId));
-        assertThat(hostStatus, containsString(token));
-        assertThat(hostStatus, endsWith(SimpleSnitch.RACK_NAME));
-        assertThat(hostStatus, not(containsString("?")));
+        assertThat(hostStatus).startsWith("UN");
+        assertThat(hostStatus).contains(hostForm);
+        assertThat(hostStatus).containsPattern("\\d+\\.?\\d+ KiB");
+        assertThat(hostStatus).matches(".*\\d+(\\.\\d+)? (bytes|KiB).*");
+        assertThat(hostStatus).containsPattern("\\d+\\.\\d+%");
+        assertThat(hostStatus).contains(localHostId);
+        assertThat(hostStatus).contains(token);
+        assertThat(hostStatus).endsWith(SimpleSnitch.RACK_NAME);
+        assertThat(hostStatus).doesNotContain("?");
     }
 }

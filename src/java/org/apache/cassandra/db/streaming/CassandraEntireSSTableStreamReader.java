@@ -18,25 +18,29 @@
 
 package org.apache.cassandra.db.streaming;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.function.UnaryOperator;
 
-import com.google.common.base.Throwables;
-import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.IOOptions;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.big.BigTableZeroCopyWriter;
+import org.apache.cassandra.io.sstable.SSTableZeroCopyWriter;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.streaming.ProgressInfo;
 import org.apache.cassandra.streaming.StreamReceiver;
@@ -53,6 +57,8 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraEntireSSTableStreamReader.class);
 
+    private static final boolean SKIP_MUTATING_STATS_AFTER_ZCS = CassandraRelevantProperties.SKIP_MUTATING_STATS_AFTER_ZCS.getBoolean();
+
     private final TableId tableId;
     private final StreamSession session;
     private final StreamMessageHeader messageHeader;
@@ -61,9 +67,6 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
 
     public CassandraEntireSSTableStreamReader(StreamMessageHeader messageHeader, CassandraStreamHeader streamHeader, StreamSession session)
     {
-        if (streamHeader.format != SSTableFormat.Type.BIG)
-            throw new AssertionError("Unsupported SSTable format " + streamHeader.format);
-
         if (session.getPendingRepair() != null)
         {
             // we should only ever be streaming pending repair sstables if the session has a pending repair id
@@ -83,7 +86,6 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
      * @return SSTable transferred
      * @throws IOException if reading the remote sstable fails. Will throw an RTE if local write fails.
      */
-    @SuppressWarnings("resource") // input needs to remain open, streams on top of it can't be closed
     @Override
     public SSTableMultiWriter read(DataInputPlus in) throws IOException
     {
@@ -104,7 +106,7 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
                      prettyPrintMemory(totalSize),
                      cfs.metadata());
 
-        BigTableZeroCopyWriter writer = null;
+        SSTableZeroCopyWriter writer = null;
 
         try
         {
@@ -122,8 +124,8 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
                              prettyPrintMemory(bytesRead),
                              prettyPrintMemory(totalSize));
 
-                writer.writeComponent(component.type, in, length);
-                session.progress(writer.descriptor.filenameFor(component), ProgressInfo.Direction.IN, length, length);
+                writer.writeComponent(component, in, length);
+                session.progress(writer.descriptor.fileFor(component).toString(), ProgressInfo.Direction.IN, length, length, length);
                 bytesRead += length;
 
                 logger.debug("[Stream #{}] Finished receiving {} component from {}, componentSize = {}, readBytes = {}, totalSize = {}",
@@ -135,20 +137,34 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
                              prettyPrintMemory(totalSize));
             }
 
-            UnaryOperator<StatsMetadata> transform = stats -> stats.mutateLevel(header.sstableLevel)
-                                                                   .mutateRepairedMetadata(messageHeader.repairedAt, messageHeader.pendingRepair, false);
-            String description = String.format("level %s and repairedAt time %s and pendingRepair %s",
-                                               header.sstableLevel, messageHeader.repairedAt, messageHeader.pendingRepair);
-            writer.descriptor.getMetadataSerializer().mutate(writer.descriptor, description, transform);
+            if (!SKIP_MUTATING_STATS_AFTER_ZCS)
+            {
+                UnaryOperator<StatsMetadata> transform = stats -> stats.mutateLevel(header.sstableLevel)
+                                                                       .mutateRepairedMetadata(messageHeader.repairedAt, messageHeader.pendingRepair, false);
+                String description = String.format("level %s and repairedAt time %s and pendingRepair %s",
+                                                   header.sstableLevel, messageHeader.repairedAt, messageHeader.pendingRepair);
+                writer.descriptor.getMetadataSerializer().mutate(writer.descriptor, description, transform);
+            }
+            else
+            {
+                logger.debug("[Stream #{}] Skipped mutating {} component from {} for sstable {} by config -Dcassandra.skip_mutating_stats_after_zcs",
+                             session.planId(),
+                             SSTableFormat.Components.STATS,
+                             session.peer,
+                             writer.descriptor);
+            }
             return writer;
         }
         catch (Throwable e)
         {
             logger.error("[Stream {}] Error while reading sstable from stream for table = {}", session.planId(), cfs.metadata(), e);
             if (writer != null)
-                e = writer.abort(e);
-            Throwables.throwIfUnchecked(e);
-            throw new RuntimeException(e);
+            {
+                Throwable e2 = writer.abort(null);
+                if (e2 != null)
+                    e.addSuppressed(e2);
+            }
+            throw e;
         }
     }
 
@@ -166,8 +182,7 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
         return dir;
     }
 
-    @SuppressWarnings("resource")
-    protected BigTableZeroCopyWriter createWriter(ColumnFamilyStore cfs, long totalSize, Collection<Component> components) throws IOException
+    protected SSTableZeroCopyWriter createWriter(ColumnFamilyStore cfs, long totalSize, Collection<Component> components) throws IOException
     {
         File dataDir = getDataDir(cfs, totalSize);
 
@@ -176,10 +191,26 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
 
         LifecycleNewTracker lifecycleNewTracker = CassandraStreamReceiver.fromReceiver(session.getAggregator(tableId)).createLifecycleNewTracker();
 
-        Descriptor desc = cfs.newSSTableDescriptor(dataDir, header.version, header.format);
+        Descriptor desc = cfs.newSSTableDescriptor(dataDir, header.version);
 
-        logger.debug("[Table #{}] {} Components to write: {}", cfs.metadata(), desc.filenameFor(Component.DATA), components);
+        IOOptions ioOptions = new IOOptions(DatabaseDescriptor.getDiskOptimizationStrategy(),
+                                            DatabaseDescriptor.getDiskAccessMode(),
+                                            DatabaseDescriptor.getIndexAccessMode(),
+                                            DatabaseDescriptor.getDiskOptimizationEstimatePercentile(),
+                                            SequentialWriterOption.newBuilder()
+                                                                  .trickleFsync(false)
+                                                                  .bufferSize(2 << 20)
+                                                                  .bufferType(BufferType.OFF_HEAP)
+                                                                  .build(),
+                                            DatabaseDescriptor.getFlushCompression());
 
-        return new BigTableZeroCopyWriter(desc, cfs.metadata, lifecycleNewTracker, components);
+        logger.debug("[Table #{}] {} Components to write: {}", cfs.metadata(), desc, components);
+        return desc.getFormat()
+                   .getWriterFactory()
+                   .builder(desc)
+                   .setComponents(components)
+                   .setTableMetadataRef(cfs.metadata)
+                   .setIOOptions(ioOptions)
+                   .createZeroCopyWriter(lifecycleNewTracker, cfs);
     }
 }

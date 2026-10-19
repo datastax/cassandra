@@ -23,6 +23,7 @@ import java.util.stream.StreamSupport;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Digest;
@@ -45,7 +46,7 @@ public abstract class AbstractRow implements Row
     }
 
     @Override
-    public boolean hasLiveData(int nowInSec, boolean enforceStrictLiveness)
+    public boolean hasLiveData(long nowInSec, boolean enforceStrictLiveness)
     {
         if (primaryKeyLivenessInfo().isLive(nowInSec))
             return true;
@@ -115,7 +116,7 @@ public abstract class AbstractRow implements Row
 
     public String toString()
     {
-        return columnData().toString();
+        return Iterables.toString(this);
     }
 
     public String toString(TableMetadata metadata)
@@ -140,10 +141,10 @@ public abstract class AbstractRow implements Row
             sb.append(" ]");
         }
         sb.append(": ");
-        if(includeClusterKeys)
+        if (includeClusterKeys)
             sb.append(clustering().toString(metadata));
         else
-            sb.append(clustering().toCQLString(metadata));
+            sb.append(clustering().toCQLString(metadata, Redaction.NONE));
         sb.append(" | ");
         boolean isFirst = true;
         for (ColumnData cd : this)

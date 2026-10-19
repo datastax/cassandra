@@ -17,23 +17,38 @@
  */
 package org.apache.cassandra.hints;
 
-import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Predicate;
+
+import javax.annotation.Nullable;
+import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
+import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.metrics.HintsServiceMetrics;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.SyncUtil;
+
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
 /**
  * Encapsulates the state of a peer's hints: the queue of hints files for dispatch, and the current writer (if any).
@@ -53,6 +68,7 @@ final class HintsStore
     private final Map<HintsDescriptor, InputPosition> dispatchPositions;
     private final Deque<HintsDescriptor> dispatchDequeue;
     private final Queue<HintsDescriptor> corruptedFiles;
+    private final Map<HintsDescriptor, Long> hintsExpirations;
 
     // last timestamp used in a descriptor; make sure to not reuse the same timestamp for new descriptors.
     private volatile long lastUsedTimestamp;
@@ -67,9 +83,13 @@ final class HintsStore
         dispatchPositions = new ConcurrentHashMap<>();
         dispatchDequeue = new ConcurrentLinkedDeque<>(descriptors);
         corruptedFiles = new ConcurrentLinkedQueue<>();
+        hintsExpirations = new ConcurrentHashMap<>();
 
         //noinspection resource
         lastUsedTimestamp = descriptors.stream().mapToLong(d -> d.timestamp).max().orElse(0L);
+
+        long hintsNum = descriptors.stream().mapToLong(d -> d.statistics().totalCount()).sum();
+        HintsServiceMetrics.hintsOnDisk.inc(hintsNum);
     }
 
     static HintsStore create(UUID hostId, File hintsDirectory, ImmutableMap<String, Object> writerParams, List<HintsDescriptor> descriptors)
@@ -84,15 +104,59 @@ final class HintsStore
         return dispatchDequeue.size();
     }
 
+    @VisibleForTesting
+    int getHintsExpirationsMapSize()
+    {
+        return hintsExpirations.size();
+    }
+
     InetAddressAndPort address()
     {
         return StorageService.instance.getEndpointForHostId(hostId);
     }
 
+    @Nullable
+    PendingHintsInfo getPendingHintsInfo()
+    {
+        Iterator<HintsDescriptor> descriptors = dispatchDequeue.iterator();
+        int queueSize = 0;
+        long minTimestamp = Long.MAX_VALUE;
+        long maxTimestamp = Long.MIN_VALUE;
+        while (descriptors.hasNext())
+        {
+            HintsDescriptor descriptor = descriptors.next();
+            minTimestamp = Math.min(minTimestamp, descriptor.timestamp);
+            maxTimestamp = Math.max(maxTimestamp, descriptor.timestamp);
+            queueSize++;
+        }
+
+        if (queueSize == 0)
+            return null;
+        return new PendingHintsInfo(hostId, queueSize, minTimestamp, maxTimestamp);
+    }
+
+    /**
+     * Find the oldest hint written for a particular node by looking into descriptors
+     * and current open writer, if any.
+     *
+     * @return the oldest hint as per unix time or Long.MAX_VALUE if not present
+     */
+    public long findOldestHintTimestamp()
+    {
+        HintsDescriptor desc = dispatchDequeue.peekFirst();
+        if (desc != null)
+            return desc.timestamp;
+
+        HintsWriter writer = getWriter();
+        if (writer != null)
+            return writer.descriptor().timestamp;
+
+        return Long.MAX_VALUE;
+    }
+
     boolean isLive()
     {
-        InetAddressAndPort address = address();
-        return address != null && FailureDetector.instance.isAlive(address);
+        return HintsEndpointProvider.instance.isAlive(hostId);
     }
 
     HintsDescriptor poll()
@@ -123,24 +187,83 @@ final class HintsStore
         {
             cleanUp(descriptor);
             delete(descriptor);
+            HintsServiceMetrics.corruptedHintsOnDisk.dec(descriptor.statistics().totalCount());
+        }
+    }
+
+    void deleteExpiredHints(long now)
+    {
+        deleteHints(it -> hasExpired(it, now));
+    }
+
+    private boolean hasExpired(HintsDescriptor descriptor, long now)
+    {
+        Long cachedExpiresAt = hintsExpirations.get(descriptor);
+        if (null != cachedExpiresAt)
+            return cachedExpiresAt <= now;
+
+        File hintFile = new File(hintsDirectory, descriptor.fileName());
+        // the file does not exist or if an I/O error occurs
+        if (!hintFile.exists() || hintFile.lastModified() == 0)
+            return false;
+
+        // 'lastModified' can be considered as the upper bound of the hint creation time.
+        // So the TTL upper bound of all hints in the file can be estimated by lastModified + maxGcgs of all tables
+        long ttl = hintFile.lastModified() + Schema.instance.largestGcgs();
+        hintsExpirations.put(descriptor, ttl);
+        return ttl <= now;
+    }
+
+    private void deleteHints(Predicate<HintsDescriptor> predicate)
+    {
+        Set<HintsDescriptor> removeSet = new HashSet<>();
+        try
+        {
+            for (HintsDescriptor descriptor : Iterables.concat(dispatchDequeue, corruptedFiles))
+            {
+                if (predicate.test(descriptor))
+                {
+                    cleanUp(descriptor);
+                    removeSet.add(descriptor);
+                    delete(descriptor);
+                }
+            }
+        }
+        finally // remove the already deleted hints from internal queues in case of exception
+        {
+            dispatchDequeue.removeAll(removeSet);
+            corruptedFiles.removeAll(removeSet);
         }
     }
 
     void delete(HintsDescriptor descriptor)
     {
-        File hintsFile = new File(hintsDirectory, descriptor.fileName());
-        if (hintsFile.delete())
+        File hintsFile = descriptor.file(hintsDirectory);
+        if (hintsFile.tryDelete())
+        {
+            HintsServiceMetrics.hintsOnDisk.dec(descriptor.statistics().totalCount());
             logger.info("Deleted hint file {}", descriptor.fileName());
-        else
+        }
+        else if (hintsFile.exists())
             logger.error("Failed to delete hint file {}", descriptor.fileName());
+        else
+            logger.info("Already deleted hint file {}", descriptor.fileName());
 
         //noinspection ResultOfMethodCallIgnored
-        new File(hintsDirectory, descriptor.checksumFileName()).delete();
+        descriptor.checksumFile(hintsDirectory).tryDelete();
+        //noinspection ResultOfMethodCallIgnored
+        new File(hintsDirectory, descriptor.statisticsFileName()).tryDelete();
     }
 
     boolean hasFiles()
     {
         return !dispatchDequeue.isEmpty();
+    }
+
+    @VisibleForTesting
+    Stream<HintsDescriptor> descriptors()
+    {
+        return dispatchDequeue.stream();
     }
 
     InputPosition getDispatchOffset(HintsDescriptor descriptor)
@@ -153,14 +276,42 @@ final class HintsStore
         dispatchPositions.put(descriptor, inputPosition);
     }
 
+    /**
+     * @return the total size of all files belonging to the hints store, in bytes.
+     */
+    long getTotalFileSize()
+    {
+        long total = 0;
+        for (HintsDescriptor descriptor : Iterables.concat(dispatchDequeue, corruptedFiles))
+            total += descriptor.getDataSize();
+
+        HintsWriter currentWriter = getWriter();
+        if (null != currentWriter)
+            total += currentWriter.descriptor().getDataSize();
+
+        return total;
+    }
+
+    public int getTotalFilesNum()
+    {
+        return dispatchDequeue.size() + corruptedFiles.size();
+    }
+
+    public int getCorruptedFilesNum()
+    {
+        return corruptedFiles.size();
+    }
+
     void cleanUp(HintsDescriptor descriptor)
     {
         dispatchPositions.remove(descriptor);
+        hintsExpirations.remove(descriptor);
     }
 
     void markCorrupted(HintsDescriptor descriptor)
     {
         corruptedFiles.add(descriptor);
+        HintsServiceMetrics.corruptedHintsOnDisk.inc(descriptor.statistics().totalCount());
     }
 
     /*
@@ -188,7 +339,7 @@ final class HintsStore
 
     private HintsWriter openWriter()
     {
-        lastUsedTimestamp = Math.max(System.currentTimeMillis(), lastUsedTimestamp + 1);
+        lastUsedTimestamp = Math.max(currentTimeMillis(), lastUsedTimestamp + 1);
         HintsDescriptor descriptor = new HintsDescriptor(hostId, lastUsedTimestamp, writerParams);
 
         try

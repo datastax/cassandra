@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.EnumSet;
 import java.util.Set;
+import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
 
@@ -82,5 +83,85 @@ public interface ICompressor
     default Set<Uses> recommendedUses()
     {
         return ImmutableSet.copyOf(EnumSet.allOf(Uses.class));
+    }
+
+    /**
+     * Returns the compressor configured for a particular use.
+     * Allows creating a compressor implementation that can handle multiple uses but requires different configurations
+     * adapted to a particular use.
+     * <p>
+     * May return this object.
+     * May not modify this object.
+     * Should return null if the request cannot be satisfied.
+     */
+    default @Nullable ICompressor forUse(Uses use)
+    {
+        return recommendedUses().contains(use) ? this : null;
+    }
+
+    /**
+     * Get an encryption-only version of this compressor (no compression, only encryption)
+     * @return An ICompressor that only encrypts without compression
+     */
+    default ICompressor encryptionOnly()
+    {
+        // Default implementation returns null, should be overridden by compressors that support encryption
+        return null;
+    }
+
+    /**
+     * Whether the compressor can decompress data in place (using the same buffer for input and output)
+     * @return true if in-place decompression is supported
+     */
+    default boolean canDecompressInPlace()
+    {
+        return false;
+    }
+
+    /**
+     * Find the maximum number of bytes that can fit in a chunk of the given size
+     * @param targetSize The target chunk size
+     * @return The maximum bytes that can fit
+     */
+    default int findMaxBytesInChunk(int targetSize)
+    {
+        int rawSize = targetSize;
+        int encSize = 0;
+        int stepMax = targetSize;
+
+        encSize = initialCompressedBufferLength(rawSize);
+        while (stepMax > 4)
+        {
+            if (encSize == targetSize)
+                break;
+
+            if (encSize < targetSize)
+                rawSize += Math.min(stepMax, targetSize - encSize);
+            else
+                rawSize -= Math.min(stepMax, encSize - targetSize);
+            stepMax = stepMax * 3 / 4;  // decrease the step for next round so that we don't jump between two values
+            // indefinitely
+
+            encSize = initialCompressedBufferLength(rawSize);
+        }
+
+        // decrease size by a byte while we need to
+        while (encSize > targetSize)
+        {
+            --rawSize;
+            encSize = initialCompressedBufferLength(rawSize);
+        }
+
+        // and finally increase it while we can
+        while (true)
+        {
+            int nextSize = initialCompressedBufferLength(rawSize + 1);
+            if (nextSize > targetSize)
+                break;
+            ++rawSize;
+            encSize = nextSize;
+        }
+
+        return rawSize;
     }
 }

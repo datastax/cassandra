@@ -23,18 +23,21 @@ import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -91,6 +94,10 @@ public class StubIndex implements Index
         return UTF8Type.instance;
     }
 
+    public RowFilter postIndexQueryFilter(RowFilter filter)
+    {
+        return filter;
+    }
     public RowFilter getPostIndexQueryFilter(RowFilter filter)
     {
         return filter;
@@ -98,9 +105,10 @@ public class StubIndex implements Index
 
     public Indexer indexerFor(final DecoratedKey key,
                               RegularAndStaticColumns columns,
-                              int nowInSec,
+                              long nowInSec,
                               WriteContext ctx,
-                              IndexTransaction.Type transactionType)
+                              IndexTransaction.Type transactionType,
+                              Memtable memtable)
     {
         return new Indexer()
         {
@@ -151,7 +159,8 @@ public class StubIndex implements Index
         return indexMetadata;
     }
 
-    public void register(IndexRegistry registry){
+    public void register(IndexRegistry registry)
+    {
         registry.registerIndex(this);
     }
 
@@ -198,18 +207,41 @@ public class StubIndex implements Index
         return 0;
     }
 
-    public void validate(PartitionUpdate update) throws InvalidRequestException
+    @Override
+    public void validate(PartitionUpdate update, ClientState state) throws InvalidRequestException
     {
 
     }
 
     public Searcher searcherFor(final ReadCommand command)
     {
-        return (controller) -> Util.executeLocally((PartitionRangeReadCommand)command, baseCfs, controller);
+        return new Searcher(command);
     }
 
     public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand readCommand)
     {
         return (iter, command) -> iter;
+    }
+
+    public class Searcher implements Index.Searcher
+    {
+        private final ReadCommand command;
+
+        Searcher(ReadCommand command)
+        {
+            this.command = command;
+        }
+
+        @Override
+        public ReadCommand command()
+        {
+            return command;
+        }
+
+        @Override
+        public UnfilteredPartitionIterator search(ReadExecutionController executionController)
+        {
+            return Util.executeLocally(command, baseCfs, executionController);
+        }
     }
 }

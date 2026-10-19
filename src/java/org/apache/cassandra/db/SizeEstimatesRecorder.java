@@ -17,9 +17,13 @@
  */
 package org.apache.cassandra.db;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,10 +36,13 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Refs;
+
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 /**
  * A very simplistic/crude partition count/size estimator.
@@ -46,7 +53,7 @@ import org.apache.cassandra.utils.concurrent.Refs;
  *
  * See CASSANDRA-7688.
  */
-public class SizeEstimatesRecorder extends SchemaChangeListener implements Runnable
+public class SizeEstimatesRecorder implements SchemaChangeListener, Runnable
 {
     private static final Logger logger = LoggerFactory.getLogger(SizeEstimatesRecorder.class);
 
@@ -89,7 +96,7 @@ public class SizeEstimatesRecorder extends SchemaChangeListener implements Runna
             boolean rangesAreEqual = primaryRanges.equals(localPrimaryRanges);
             for (ColumnFamilyStore table : keyspace.getColumnFamilyStores())
             {
-                long start = System.nanoTime();
+                long start = nanoTime();
 
                 // compute estimates for primary ranges for backwards compatability
                 Map<Range<Token>, Pair<Long, Long>> estimates = computeSizeEstimates(table, primaryRanges);
@@ -103,7 +110,7 @@ public class SizeEstimatesRecorder extends SchemaChangeListener implements Runna
                 }
                 SystemKeyspace.updateTableEstimates(table.metadata.keyspace, table.metadata.name, SystemKeyspace.TABLE_ESTIMATES_TYPE_LOCAL_PRIMARY, estimates);
 
-                long passed = System.nanoTime() - start;
+                long passed = nanoTime() - start;
                 if (logger.isTraceEnabled())
                     logger.trace("Spent {} milliseconds on estimating {}.{} size",
                                  TimeUnit.NANOSECONDS.toMillis(passed),
@@ -113,7 +120,6 @@ public class SizeEstimatesRecorder extends SchemaChangeListener implements Runna
         }
     }
 
-    @SuppressWarnings("resource")
     private static Map<Range<Token>, Pair<Long, Long>> computeSizeEstimates(ColumnFamilyStore table, Collection<Range<Token>> ranges)
     {
         // for each local primary range, estimate (crudely) mean partition size and partitions count.
@@ -131,7 +137,7 @@ public class SizeEstimatesRecorder extends SchemaChangeListener implements Runna
                     while (refs == null)
                     {
                         Iterable<SSTableReader> sstables = table.getTracker().getView().select(SSTableSet.CANONICAL);
-                        SSTableIntervalTree tree = SSTableIntervalTree.build(sstables);
+                        SSTableIntervalTree tree = SSTableIntervalTree.buildSSTableIntervalTree(ImmutableList.copyOf(sstables));
                         Range<PartitionPosition> r = Range.makeRowRange(unwrappedRange);
                         Iterable<SSTableReader> canonicalSSTables = View.sstablesInBounds(r.left, r.right, tree);
                         refs = Refs.tryRef(canonicalSSTables);
@@ -175,8 +181,8 @@ public class SizeEstimatesRecorder extends SchemaChangeListener implements Runna
     }
 
     @Override
-    public void onDropTable(String keyspace, String table)
+    public void onDropTable(TableMetadata table, boolean dropData)
     {
-        SystemKeyspace.clearEstimates(keyspace, table);
+        SystemKeyspace.clearEstimates(table.keyspace, table.name);
     }
 }

@@ -17,20 +17,60 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.File;
+import java.nio.file.Path;
+
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.utils.DseLegacy;
 
 public class CorruptSSTableException extends RuntimeException
 {
-    public final File path;
+    public final File file;
 
-    public CorruptSSTableException(Throwable cause, File path)
+    public CorruptSSTableException(Throwable cause, File file)
     {
-        super("Corrupted: " + path, cause);
-        this.path = path;
+        super("Corrupted: " + file, cause);
+        this.file = file;
     }
 
     public CorruptSSTableException(Throwable cause, String path)
     {
+        this(cause, new File(PathUtils.getPath(path)));
+    }
+
+    protected CorruptSSTableException(String msg, Throwable cause, File file)
+    {
+        super(msg, cause);
+        this.file = file;
+    }
+
+    @DseLegacy
+    public CorruptSSTableException(Throwable cause, Path path)
+    {
         this(cause, new File(path));
+    }
+
+    /**
+     * Returns the given failure as a {@link CorruptSSTableException}: unchanged if it already is one (e.g. a chunk
+     * failing its checksum or decryption, reported by a lower level that already knows the corrupted file), otherwise
+     * wrapped in a new one for the given file.
+     * <p>
+     * Meant for the read paths that catch both {@link java.io.IOException} (or similar failures caused by corrupted
+     * data) and {@code CorruptSSTableException}, mark the sstable suspect and rethrow, so that both cases can be
+     * handled by a single catch clause without wrapping a {@code CorruptSSTableException} twice.
+     */
+    public static CorruptSSTableException maybeWrapInCorruptSSTableException(Throwable failure, File file)
+    {
+        return failure instanceof CorruptSSTableException ? (CorruptSSTableException) failure
+                                                          : new CorruptSSTableException(failure, file);
+    }
+
+    /**
+     * As {@link #maybeWrapInCorruptSSTableException(Throwable, File)}, for a file given by its path.
+     */
+    public static CorruptSSTableException maybeWrapInCorruptSSTableException(Throwable failure, String path)
+    {
+        return failure instanceof CorruptSSTableException ? (CorruptSSTableException) failure
+                                                          : new CorruptSSTableException(failure, path);
     }
 }

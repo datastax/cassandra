@@ -19,21 +19,21 @@ package org.apache.cassandra.db;
 
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.SortedSet;
 
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.utils.memory.AbstractAllocator;
+import org.apache.cassandra.utils.memory.ByteBufferCloner;
 
 /**
  * A mutable implementation of {@code DeletionInfo}.
  */
 public class MutableDeletionInfo implements DeletionInfo
 {
-    private static final long EMPTY_SIZE = ObjectSizes.measure(new MutableDeletionInfo(0, 0));
+    protected static final long EMPTY_SIZE = ObjectSizes.measure(new MutableDeletionInfo(0, 0));
 
     /**
      * This represents a deletion of the entire partition. We can't represent this within the RangeTombstoneList, so it's
@@ -53,11 +53,11 @@ public class MutableDeletionInfo implements DeletionInfo
      * @param localDeletionTime what time the deletion write was applied locally (for purposes of
      *                          purging the tombstone after gc_grace_seconds).
      */
-    public MutableDeletionInfo(long markedForDeleteAt, int localDeletionTime)
+    public MutableDeletionInfo(long markedForDeleteAt, long localDeletionTime)
     {
         // Pre-1.1 node may return MIN_VALUE for non-deleted container, but the new default is MAX_VALUE
         // (see CASSANDRA-3872)
-        this(new DeletionTime(markedForDeleteAt, localDeletionTime == Integer.MIN_VALUE ? Integer.MAX_VALUE : localDeletionTime));
+        this(DeletionTime.build(markedForDeleteAt, localDeletionTime == Integer.MIN_VALUE ? Long.MAX_VALUE : localDeletionTime));
     }
 
     public MutableDeletionInfo(DeletionTime partitionDeletion)
@@ -84,13 +84,19 @@ public class MutableDeletionInfo implements DeletionInfo
         return new MutableDeletionInfo(partitionDeletion, ranges == null ? null : ranges.copy());
     }
 
-    public MutableDeletionInfo copy(AbstractAllocator allocator)
+    @Override
+    public MutableDeletionInfo clone(ByteBufferCloner cloner)
+    {
+        return new MutableDeletionInfo(partitionDeletion, copyRanges(cloner));
+    }
+
+    @Override
+    public RangeTombstoneList copyRanges(ByteBufferCloner cloner)
     {
         RangeTombstoneList rangesCopy = null;
         if (ranges != null)
-             rangesCopy = ranges.copy(allocator);
-
-        return new MutableDeletionInfo(partitionDeletion, rangesCopy);
+            rangesCopy = ranges.clone(cloner);
+        return rangesCopy;
     }
 
     /**
@@ -160,6 +166,11 @@ public class MutableDeletionInfo implements DeletionInfo
         return ranges == null ? Collections.emptyIterator() : ranges.iterator(slice, reversed);
     }
 
+    public Iterator<RangeTombstone> rangeIterator(SortedSet<Clustering<?>> names, boolean reversed)
+    {
+        return ranges == null ? Collections.emptyIterator() : ranges.iterator(names, reversed);
+    }
+
     public RangeTombstone rangeCovering(Clustering<?> name)
     {
         return ranges == null ? null : ranges.search(name);
@@ -167,7 +178,7 @@ public class MutableDeletionInfo implements DeletionInfo
 
     public int dataSize()
     {
-        int size = TypeSizes.sizeof(partitionDeletion.markedForDeleteAt());
+        int size = (int) DeletionTime.serializer.serializedSize(partitionDeletion); // small enough so cast is okay
         return size + (ranges == null ? 0 : ranges.dataSize());
     }
 
@@ -223,7 +234,7 @@ public class MutableDeletionInfo implements DeletionInfo
     public DeletionInfo updateAllTimestamp(long timestamp)
     {
         if (partitionDeletion.markedForDeleteAt() != Long.MIN_VALUE)
-            partitionDeletion = new DeletionTime(timestamp, partitionDeletion.localDeletionTime());
+            partitionDeletion = DeletionTime.build(timestamp, partitionDeletion.localDeletionTime());
 
         if (ranges != null)
             ranges.updateAllTimestamp(timestamp);

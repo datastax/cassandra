@@ -1,0 +1,2 @@
+# Test legacy sstable format along with legacy sstable identifiers
+uuid_sstable_identifiers_enabled: false

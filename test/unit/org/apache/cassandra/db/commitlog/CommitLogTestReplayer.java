@@ -18,7 +18,6 @@
 */
 package org.apache.cassandra.db.commitlog;
 
-import java.io.File;
 import java.io.IOException;
 
 import com.google.common.base.Predicate;
@@ -48,7 +47,7 @@ public class CommitLogTestReplayer extends CommitLogReplayer
 
     public void examineCommitLog() throws IOException
     {
-        replayFiles(new File(DatabaseDescriptor.getCommitLogLocation()).listFiles());
+        replayFiles(DatabaseDescriptor.getCommitLogLocation().tryList());
     }
 
     private class CommitLogTestReader extends CommitLogReader

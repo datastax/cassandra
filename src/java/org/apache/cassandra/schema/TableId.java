@@ -20,12 +20,19 @@ package org.apache.cassandra.schema;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.UUID;
+
+import javax.annotation.Nullable;
 
 import org.apache.commons.lang3.ArrayUtils;
 
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.Pair;
+
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 /**
  * The unique identifier of a table.
@@ -35,6 +42,7 @@ import org.apache.cassandra.utils.UUIDGen;
  */
 public class TableId
 {
+    // TODO: should this be a TimeUUID?
     private final UUID id;
 
     private TableId(UUID id)
@@ -47,14 +55,36 @@ public class TableId
         return new TableId(id);
     }
 
+    // TODO: should we be using UUID.randomUUID()?
     public static TableId generate()
     {
-        return new TableId(UUIDGen.getTimeUUID());
+        return new TableId(nextTimeUUID().asUUID());
     }
 
     public static TableId fromString(String idString)
     {
         return new TableId(UUID.fromString(idString));
+    }
+
+    public static TableId fromHexString(String nonDashUUID)
+    {
+        ByteBuffer bytes = ByteBufferUtil.hexToBytes(nonDashUUID);
+        long msb = bytes.getLong(0);
+        long lsb = bytes.getLong(8);
+        return fromUUID(new UUID(msb, lsb));
+    }
+
+    @Nullable
+    public static Pair<String, TableId> tableNameAndIdFromFilename(String filename)
+    {
+        int dash = filename.lastIndexOf('-');
+        if (dash <= 0 || dash != filename.length() - 32 - 1)
+            return null;
+
+        TableId id = fromHexString(filename.substring(dash + 1));
+        String tableName = filename.substring(0, dash);
+
+        return Pair.create(tableName, id);
     }
 
     /**
@@ -67,8 +97,13 @@ public class TableId
      */
     public static TableId forSystemTable(String keyspace, String table)
     {
-        assert SchemaConstants.isLocalSystemKeyspace(keyspace) || SchemaConstants.isReplicatedSystemKeyspace(keyspace);
-        return new TableId(UUID.nameUUIDFromBytes(ArrayUtils.addAll(keyspace.getBytes(), table.getBytes())));
+        assert SchemaConstants.isSystemKeyspace(keyspace) : String.format("Table %s.%s is not a system table; only keyspaces allowed are %s", keyspace, table, SchemaConstants.getSystemKeyspaces());
+        return unsafeDeterministic(keyspace, table);
+    }
+
+    public static TableId unsafeDeterministic(String keyspace, String table)
+    {
+        return new TableId(UUID.nameUUIDFromBytes(ArrayUtils.addAll(keyspace.getBytes(UTF_8), table.getBytes(UTF_8))));
     }
 
     public String toHexString()

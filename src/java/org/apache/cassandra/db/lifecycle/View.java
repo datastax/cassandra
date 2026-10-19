@@ -17,17 +17,30 @@
  */
 package org.apache.cassandra.db.lifecycle;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Functions;
 import com.google.common.base.Predicate;
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+
+import com.google.common.collect.Maps;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Interval;
@@ -55,6 +68,8 @@ import static org.apache.cassandra.db.lifecycle.Helpers.replace;
  */
 public class View
 {
+    private static final Logger logger = LoggerFactory.getLogger(View.class);
+
     /**
      * ordinarily a list of size 1, but when preparing to flush will contain both the memtable we will flush
      * and the new replacement memtable, until all outstanding write operations on the old table complete.
@@ -68,6 +83,7 @@ public class View
     public final List<Memtable> flushingMemtables;
     final Set<SSTableReader> compacting;
     final Set<SSTableReader> sstables;
+    final Map<String, SSTableReader> sstablesByFilename;
     // we use a Map here so that we can easily perform identity checks as well as equality checks.
     // When marking compacting, we now  indicate if we expect the sstables to be present (by default we do),
     // and we then check that not only are they all present in the live set, but that the exact instance present is
@@ -93,6 +109,9 @@ public class View
         this.compactingMap = compacting;
         this.compacting = compactingMap.keySet();
         this.intervalTree = intervalTree;
+        this.sstablesByFilename = Maps.newHashMapWithExpectedSize(sstables.size());
+        for (SSTableReader sstable : this.sstables)
+            this.sstablesByFilename.put(sstable.getDataFile().name(), sstable);
     }
 
     public Memtable getCurrentMemtable()
@@ -112,6 +131,15 @@ public class View
     public Set<SSTableReader> liveSSTables()
     {
         return sstables;
+    }
+
+    @Nullable
+    /**
+     * @return the sstable with the provided file name (not a full path), or null if it is not present in this view
+     */
+    public SSTableReader getLiveSSTable(String filename)
+    {
+        return sstablesByFilename.get(filename);
     }
 
     public Iterable<SSTableReader> sstables(SSTableSet sstableSet, Predicate<SSTableReader> filter)
@@ -136,13 +164,30 @@ public class View
             case NONCOMPACTING:
                 return filter(sstables, (s) -> !compacting.contains(s));
             case CANONICAL:
-                Set<SSTableReader> canonicalSSTables = new HashSet<>();
+                // When early open is not in play, the LIVE and CANONICAL sets are the same.
+                // However, when we do have early-open sstables, we will have some unfinished sources in the live set.
+                // For these sources we need to extract the originals, in their non-moved-start versions, from the
+                // compacting set.
+                // This creates a problem when the compaction completes, as then both:
+                // - the source is in the compacting set
+                // - the result is in the live set
+                // This currently causes the CANONICAL set to return both source and result when early-open is disabled,
+                // and is otherwise worked around by opening early the last sstable in the result set (which pushes it
+                // in the compacting set with EARLY openReason) and the !compacting.contains(sstable) check in the
+                // second loop below.
+                // Unfortunately there does not appear to be a way to avoid this workaround. Filtering the compacting
+                // set through having an early-open version in live does not work because sources are fully removed from
+                // the live set when they are completely exhausted.
+
+                // Add the compacting versions first because they will be the canonical versions of compaction sources.
+                Set<SSTableReader> canonicalSSTables = new HashSet<>(sstables.size() + compacting.size());
                 for (SSTableReader sstable : compacting)
                     if (sstable.openReason != SSTableReader.OpenReason.EARLY)
                         canonicalSSTables.add(sstable);
-                // reason for checking if compacting contains the sstable is that if compacting has an EARLY version
-                // of a NORMAL sstable, we still have the canonical version of that sstable in sstables.
-                // note that the EARLY version is equal, but not == since it is a different instance of the same sstable.
+                // Add anything that is not compacting, removing any compaction result where we still have the
+                // compaction sources.
+                // note that the EARLY version is equal to the original, i.e. the set itself can guarantee early-open
+                // versions of sstables in compacting won't be added, but we also want to remove the results.
                 for (SSTableReader sstable : sstables)
                     if (!compacting.contains(sstable) && sstable.openReason != SSTableReader.OpenReason.EARLY)
                         canonicalSSTables.add(sstable);
@@ -153,15 +198,11 @@ public class View
         }
     }
 
-    public Iterable<SSTableReader> getUncompacting(Iterable<SSTableReader> candidates)
+
+    public <S extends CompactionSSTable>
+    Iterable<S> getNoncompacting(Iterable<S> candidates)
     {
-        return filter(candidates, new Predicate<SSTableReader>()
-        {
-            public boolean apply(SSTableReader sstable)
-            {
-                return !compacting.contains(sstable);
-            }
-        });
+        return filter(candidates, sstable -> !compacting.contains(sstable));
     }
 
     public boolean isEmpty()
@@ -169,7 +210,7 @@ public class View
         return sstables.isEmpty()
                && liveMemtables.size() <= 1
                && flushingMemtables.size() == 0
-               && (liveMemtables.size() == 0 || liveMemtables.get(0).getOperations() == 0);
+               && (liveMemtables.size() == 0 || liveMemtables.get(0).operationCount() == 0);
     }
 
     @Override
@@ -241,7 +282,8 @@ public class View
     // METHODS TO CONSTRUCT FUNCTIONS FOR MODIFYING A VIEW:
 
     // return a function to un/mark the provided readers compacting in a view
-    static Function<View, View> updateCompacting(final Set<SSTableReader> unmark, final Iterable<SSTableReader> mark)
+    @VisibleForTesting
+    public static Function<View, View> updateCompacting(final Set<? extends SSTableReader> unmark, final Iterable<? extends SSTableReader> mark)
     {
         if (unmark.isEmpty() && Iterables.isEmpty(mark))
             return Functions.identity();
@@ -259,7 +301,7 @@ public class View
 
     // construct a predicate to reject views that do not permit us to mark these readers compacting;
     // i.e. one of them is either already compacting, has been compacted, or has been replaced
-    static Predicate<View> permitCompacting(final Iterable<SSTableReader> readers)
+    static Predicate<View> permitCompacting(final Iterable<? extends SSTableReader> readers)
     {
         return new Predicate<View>()
         {
@@ -267,14 +309,18 @@ public class View
             {
                 for (SSTableReader reader : readers)
                     if (view.compacting.contains(reader) || view.sstablesMap.get(reader) != reader || reader.isMarkedCompacted())
+                    {
+                        logger.debug("Refusing to compact {}, already compacting={}, suspect={}, compacted={}", reader,
+                                     view.compacting.contains(reader), reader.isMarkedSuspect(), reader.isMarkedCompacted());
                         return false;
+                    }
                 return true;
             }
         };
     }
 
     // construct a function to change the liveset in a Snapshot
-    static Function<View, View> updateLiveSet(final Set<SSTableReader> remove, final Iterable<SSTableReader> add)
+    static Function<View, View> updateLiveSet(final Set<SSTableReader> remove, final Collection<SSTableReader> add)
     {
         if (remove.isEmpty() && Iterables.isEmpty(add))
             return Functions.identity();
@@ -284,7 +330,7 @@ public class View
             {
                 Map<SSTableReader, SSTableReader> sstableMap = replace(view.sstablesMap, remove, add);
                 return new View(view.liveMemtables, view.flushingMemtables, sstableMap, view.compactingMap,
-                                SSTableIntervalTree.build(sstableMap.keySet()));
+                                SSTableIntervalTree.update(view.intervalTree, remove, add));
             }
         };
     }
@@ -323,7 +369,7 @@ public class View
     }
 
     // called after flush: removes memtable from flushingMemtables, and inserts flushed into the live sstable set
-    static Function<View, View> replaceFlushed(final Memtable memtable, final Iterable<SSTableReader> flushed)
+    static Function<View, View> replaceFlushed(final Memtable memtable, final Collection<SSTableReader> flushed)
     {
         return new Function<View, View>()
         {
@@ -338,7 +384,7 @@ public class View
 
                 Map<SSTableReader, SSTableReader> sstableMap = replace(view.sstablesMap, emptySet(), flushed);
                 return new View(view.liveMemtables, flushingMemtables, sstableMap, view.compactingMap,
-                                SSTableIntervalTree.build(sstableMap.keySet()));
+                                    SSTableIntervalTree.update(view.intervalTree, null, flushed));
             }
         };
     }

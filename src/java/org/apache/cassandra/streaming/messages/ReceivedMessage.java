@@ -20,21 +20,20 @@ package org.apache.cassandra.streaming.messages;
 import java.io.*;
 
 import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.streaming.StreamingDataOutputPlus;
 import org.apache.cassandra.streaming.StreamSession;
 
 public class ReceivedMessage extends StreamMessage
 {
     public static Serializer<ReceivedMessage> serializer = new Serializer<ReceivedMessage>()
     {
-        @SuppressWarnings("resource") // Not closing constructed DataInputPlus's as the channel needs to remain open.
         public ReceivedMessage deserialize(DataInputPlus input, int version) throws IOException
         {
             return new ReceivedMessage(TableId.deserialize(input), input.readInt());
         }
 
-        public void serialize(ReceivedMessage message, DataOutputStreamPlus out, int version, StreamSession session) throws IOException
+        public void serialize(ReceivedMessage message, StreamingDataOutputPlus out, int version, StreamSession session) throws IOException
         {
             message.tableId.serialize(out);
             out.writeInt(message.sequenceNumber);

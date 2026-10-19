@@ -18,9 +18,12 @@
 
 package org.apache.cassandra.schema;
 
+import java.util.function.Supplier;
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.exceptions.UnknownKeyspaceException;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 
@@ -29,7 +32,7 @@ public interface SchemaProvider
     @Nullable
     Keyspace getKeyspaceInstance(String keyspaceName);
 
-    void storeKeyspaceInstance(Keyspace keyspace);
+    Keyspace maybeAddKeyspaceInstance(String keyspaceName, Supplier<Keyspace> loadFunction) throws UnknownKeyspaceException;
 
     @Nullable
     KeyspaceMetadata getKeyspaceMetadata(String keyspaceName);
@@ -40,6 +43,7 @@ public interface SchemaProvider
     @Nullable
     TableMetadata getTableMetadata(String keyspace, String table);
 
+    @Nonnull
     default TableMetadata getExistingTableMetadata(TableId id) throws UnknownTableException
     {
         TableMetadata metadata = getTableMetadata(id);

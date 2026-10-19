@@ -21,7 +21,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
-import org.apache.cassandra.concurrent.LocalAwareExecutorService;
+import org.apache.cassandra.concurrent.ResizableThreadPool;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry.MetricName;
 
 import static java.lang.String.format;
@@ -40,6 +40,7 @@ public class ThreadPoolMetrics
     public static final String TOTAL_BLOCKED_TASKS = "TotalBlockedTasks";
     public static final String MAX_POOL_SIZE = "MaxPoolSize";
     public static final String MAX_TASKS_QUEUED = "MaxTasksQueued";
+    public static final String OLDEST_TASK_QUEUE_TIME = "OldestTaskQueueTime";
 
     /** Number of active tasks. */
     public final Gauge<Integer> activeTasks;
@@ -62,6 +63,9 @@ public class ThreadPoolMetrics
     /** Maximum number of threads before it will start queuing tasks */
     public final Gauge<Integer> maxPoolSize;
 
+    /** For how long the oldest task in the queue was queued */
+    public final Gauge<Long> oldestTaskQueueTime;
+
     /** Maximum number of tasks queued before a task get blocked */
     public final Gauge<Integer> maxTasksQueued;
 
@@ -75,7 +79,7 @@ public class ThreadPoolMetrics
      * @param path Type of thread pool
      * @param poolName Name of thread pool to identify metrics
      */
-    public ThreadPoolMetrics(LocalAwareExecutorService executor, String path, String poolName)
+    public ThreadPoolMetrics(ResizableThreadPool executor, String path, String poolName)
     {
         this.path = path;
         this.poolName = poolName;
@@ -87,6 +91,7 @@ public class ThreadPoolMetrics
         completedTasks = executor::getCompletedTaskCount;
         maxPoolSize = executor::getMaximumPoolSize;
         maxTasksQueued = executor::getMaxTasksQueued;
+        oldestTaskQueueTime = executor::oldestTaskQueueTime;
     }
 
     public ThreadPoolMetrics register()
@@ -98,6 +103,7 @@ public class ThreadPoolMetrics
         Metrics.register(makeMetricName(path, poolName, TOTAL_BLOCKED_TASKS), totalBlocked);
         Metrics.register(makeMetricName(path, poolName, MAX_POOL_SIZE), maxPoolSize);
         Metrics.register(makeMetricName(path, poolName, MAX_TASKS_QUEUED), maxTasksQueued);
+        Metrics.register(makeMetricName(path, poolName, OLDEST_TASK_QUEUE_TIME), oldestTaskQueueTime);
         return Metrics.register(this);
     }
 
@@ -110,6 +116,7 @@ public class ThreadPoolMetrics
         Metrics.remove(makeMetricName(path, poolName, TOTAL_BLOCKED_TASKS));
         Metrics.remove(makeMetricName(path, poolName, MAX_POOL_SIZE));
         Metrics.remove(makeMetricName(path, poolName, MAX_TASKS_QUEUED));
+        Metrics.remove(makeMetricName(path, poolName, OLDEST_TASK_QUEUE_TIME));
         Metrics.remove(this);
     }
 

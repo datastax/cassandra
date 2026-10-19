@@ -20,10 +20,17 @@ package org.apache.cassandra.schema;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
-import java.util.*;
-import java.util.regex.Pattern;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
@@ -31,16 +38,25 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.internal.CassandraIndex;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
+
+import javax.annotation.Nullable;
+
+import static org.apache.cassandra.schema.SchemaConstants.PATTERN_NON_WORD_CHAR;
+import static org.apache.cassandra.schema.SchemaConstants.isValidCharsName;
 
 /**
  * An immutable representation of secondary index metadata.
@@ -49,11 +65,26 @@ public final class IndexMetadata
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexMetadata.class);
 
-    private static final Pattern PATTERN_NON_WORD_CHAR = Pattern.compile("\\W");
-    private static final Pattern PATTERN_WORD_CHARS = Pattern.compile("\\w+");
-
-
     public static final Serializer serializer = new Serializer();
+
+    static final String INDEX_POSTFIX = "_idx";
+    /**
+     * A mapping of user-friendly index names to their fully qualified index class names.
+     */
+    private static final Map<String, String> indexNameAliases = new ConcurrentHashMap<>();
+
+    /**
+     * The fully qualified class names of the custom index implementations listed in the
+     * {@link CassandraRelevantProperties#TRUSTED_INDEX_IMPLEMENTATIONS} system property.
+     */
+    private static final Set<String> trustedIndexImplementations = ConcurrentHashMap.newKeySet();
+
+    static
+    {
+        indexNameAliases.put(StorageAttachedIndex.NAME, StorageAttachedIndex.class.getCanonicalName());
+        indexNameAliases.put(StorageAttachedIndex.class.getSimpleName().toLowerCase(), StorageAttachedIndex.class.getCanonicalName());
+        loadTrustedIndexImplementations(CassandraRelevantProperties.TRUSTED_INDEX_IMPLEMENTATIONS.getString());
+    }
 
     public enum Kind
     {
@@ -94,25 +125,52 @@ public final class IndexMetadata
         return new IndexMetadata(name, newOptions, kind);
     }
 
-    public static boolean isNameValid(String name)
+    /**
+     * Generates a default index name from the table and column names.
+     * Characters other than alphanumeric and underscore are removed.
+     * Long index names are truncated to fit the length allowing constructing filenames.
+     *
+     * @param table  the table name
+     * @param column the column identifier. Can be null if the index is not column specific.
+     * @return the generated index name
+     */
+    public static String generateDefaultIndexName(String table, @Nullable ColumnIdentifier column)
     {
-        return name != null && !name.isEmpty() && PATTERN_WORD_CHARS.matcher(name).matches();
+        String indexNameUncleaned = table;
+        if (column != null)
+            indexNameUncleaned += '_' + column.toString();
+        String indexNameUntrimmed = PATTERN_NON_WORD_CHAR.matcher(indexNameUncleaned).replaceAll("");
+        String indexNameTrimmed = indexNameUntrimmed
+                                  .substring(0,
+                                             Math.min(calculateGeneratedIndexNameMaxLength(),
+                                                      indexNameUntrimmed.length()));
+        return indexNameTrimmed + INDEX_POSTFIX;
     }
 
-    public static String generateDefaultIndexName(String table, ColumnIdentifier column)
+    /**
+     * Calculates the maximum length of the generated index name to fit file names.
+     * It includes the generated suffixes in account.
+     * The calculation depends on how an index implements file names construciton from index names.
+     * This needs to be addressed, see CNDB-13240.
+     *
+     * @return the allowed length of the generated index name
+     */
+    private static int calculateGeneratedIndexNameMaxLength()
     {
-        return PATTERN_NON_WORD_CHAR.matcher(table + "_" + column.toString() + "_idx").replaceAll("");
-    }
+        // Speculative assumption that uniqueness breaker will fit into 999.
+        // The value is used for trimming the index name if needed.
+        // Introducing validation of index name length is TODO for CNDB-13198.
+        int uniquenessSuffixLength = 4;
+        int indexNameAddition = uniquenessSuffixLength + INDEX_POSTFIX.length();
 
-    public static String generateDefaultIndexName(String table)
-    {
-        return PATTERN_NON_WORD_CHAR.matcher(table + "_" + "idx").replaceAll("");
+        return SchemaConstants.INDEX_NAME_LENGTH - indexNameAddition;
     }
 
     public void validate(TableMetadata table)
     {
-        if (!isNameValid(name))
-            throw new ConfigurationException("Illegal index name " + name);
+        if (!isValidCharsName(name))
+            throw new ConfigurationException(String.format("Index name must not be empty, or contain non-alphanumeric-underscore characters (got \"%s\")",
+                                                           name));
 
         if (kind == null)
             throw new ConfigurationException("Index kind is null for index " + name);
@@ -122,12 +180,77 @@ public final class IndexMetadata
             if (options == null || !options.containsKey(IndexTarget.CUSTOM_INDEX_OPTION_NAME))
                 throw new ConfigurationException(String.format("Required option missing for index %s : %s",
                                                                name, IndexTarget.CUSTOM_INDEX_OPTION_NAME));
-            String className = options.get(IndexTarget.CUSTOM_INDEX_OPTION_NAME);
+            // Find any aliases to the fully qualified index class name:
+            String className = expandAliases(options.get(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
+
             Class<Index> indexerClass = FBUtilities.classForName(className, "custom indexer");
             if (!Index.class.isAssignableFrom(indexerClass))
                 throw new ConfigurationException(String.format("Specified Indexer class (%s) does not implement the Indexer interface", className));
             validateCustomIndexOptions(table, indexerClass, options);
         }
+    }
+
+    public String getIndexClassName()
+    {
+        if (isCustom())
+            return expandAliases(options.get(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
+        return CassandraIndex.class.getName();
+    }
+
+    public static String expandAliases(String className)
+    {
+        return indexNameAliases.getOrDefault(className.toLowerCase(), className);
+    }
+
+    /**
+     * (Re)loads the trusted custom index implementations from the given comma-separated list of fully qualified
+     * class names, registering for each of them an alias by its simple class name so that users can reference it
+     * in {@code CREATE CUSTOM INDEX ... USING} without the package name.
+     */
+    @VisibleForTesting
+    public static void loadTrustedIndexImplementations(String classNames)
+    {
+        for (String className : trustedIndexImplementations)
+            indexNameAliases.remove(simpleClassName(className).toLowerCase(), className);
+        trustedIndexImplementations.clear();
+
+        if (classNames == null)
+            return;
+
+        for (String className : classNames.split(","))
+        {
+            className = className.trim();
+            if (className.isEmpty())
+                continue;
+
+            String simpleName = simpleClassName(className);
+            if (simpleName.equals(className))
+            {
+                logger.warn("Ignoring trusted index implementation '{}' declared in the {} system property: " +
+                            "a fully qualified class name is required",
+                            className, CassandraRelevantProperties.TRUSTED_INDEX_IMPLEMENTATIONS.getKey());
+                continue;
+            }
+
+            trustedIndexImplementations.add(className);
+            indexNameAliases.put(simpleName.toLowerCase(), className);
+            logger.info("Registered a trusted secondary implementation {}", className);
+        }
+    }
+
+    /**
+     * Tells whether the given index class name, either fully qualified or an alias, is one of the custom index
+     * implementations trusted through the {@link CassandraRelevantProperties#TRUSTED_INDEX_IMPLEMENTATIONS} system
+     * property. Trusted implementations are limited by the {@code trusted_indexes_per_table} guardrail.
+     */
+    public static boolean isTrustedIndexImplementation(String className)
+    {
+        return className != null && trustedIndexImplementations.contains(expandAliases(className));
+    }
+
+    private static String simpleClassName(String className)
+    {
+        return className.substring(className.lastIndexOf('.') + 1);
     }
 
     private void validateCustomIndexOptions(TableMetadata table, Class<? extends Index> indexerClass, Map<String, String> options)
@@ -159,9 +282,11 @@ public final class IndexMetadata
         }
         catch (InvocationTargetException e)
         {
+            if (e.getTargetException() instanceof RequestValidationException)
+                throw (RequestValidationException) e.getTargetException();
             if (e.getTargetException() instanceof ConfigurationException)
                 throw (ConfigurationException) e.getTargetException();
-            throw new ConfigurationException("Failed to validate custom indexer options: " + options);
+            throw new ConfigurationException("Failed to validate custom indexer options: " + options, e);
         }
         catch (ConfigurationException e)
         {
@@ -212,6 +337,26 @@ public final class IndexMetadata
         IndexMetadata other = (IndexMetadata) obj;
 
         return Objects.equal(id, other.id) && Objects.equal(name, other.name) && equalsWithoutName(other);
+    }
+
+    /**
+     * @param metadata the index metadata to join
+     * @return a comma-separated list of alphabetically sorted unqualified index names
+     */
+    public static String joinNames(Iterable<IndexMetadata> metadata)
+    {
+        TreeSet<String> sortedNames = new TreeSet<>();
+        for (IndexMetadata indexMetadata : metadata)
+            sortedNames.add(indexMetadata.name);
+        return String.join(",", sortedNames);
+    }
+
+    public static Set<String> toNames(Set<IndexMetadata> indexes)
+    {
+        Set<String> included = new HashSet<>(indexes.size());
+        for (IndexMetadata i : indexes)
+            included.add(i.name);
+        return included;
     }
 
     @Override

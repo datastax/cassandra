@@ -17,12 +17,19 @@
  */
 package org.apache.cassandra.service;
 
+import java.util.Collection;
+import java.util.stream.Collectors;
+
 import org.apache.commons.lang3.StringUtils;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -32,24 +39,38 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.SimpleClient;
 import org.apache.cassandra.transport.messages.QueryMessage;
 
-import static junit.framework.Assert.assertEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
+@RunWith(Parameterized.class)
 public class ClientWarningsTest extends CQLTester
 {
+    @Parameterized.Parameter
+    public ProtocolVersion version;
+
+    @Parameterized.Parameters()
+    public static Collection<Object[]> versions()
+    {
+        return ProtocolVersion.SUPPORTED.stream()
+                                        .skip(1)
+                                        .map(v -> new Object[]{v})
+                                        .collect(Collectors.toList());
+    }
+
     @BeforeClass
     public static void setUp()
     {
         requireNetwork();
-        DatabaseDescriptor.setBatchSizeWarnThresholdInKB(1);
+        DatabaseDescriptor.setBatchSizeWarnThresholdInKiB(1);
     }
 
     @Test
-    public void testUnloggedBatchWithProtoV4() throws Exception
+    public void testUnloggedBatch() throws Exception
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
 
-        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort, ProtocolVersion.V4))
+        // v4 and higher
+        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort, version, true, new EncryptionOptions()))
         {
             client.connect(false);
 
@@ -64,11 +85,12 @@ public class ClientWarningsTest extends CQLTester
     }
 
     @Test
-    public void testLargeBatchWithProtoV4() throws Exception
+    public void testLargeBatch() throws Exception
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
 
-        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort, ProtocolVersion.V4))
+        // v4 and higher
+        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort, version, true, new EncryptionOptions()))
         {
             client.connect(false);
 
@@ -88,7 +110,7 @@ public class ClientWarningsTest extends CQLTester
         final int iterations = 10000;
         createTable("CREATE TABLE %s (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
 
-        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort, ProtocolVersion.V4))
+        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort, version, true, new EncryptionOptions()))
         {
             client.connect(false);
 
@@ -101,7 +123,7 @@ public class ClientWarningsTest extends CQLTester
                 client.execute(query);
             }
             ColumnFamilyStore store = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-            store.forceBlockingFlush();
+            Util.flush(store);
 
             for (int i = 0; i < iterations; i++)
             {
@@ -111,7 +133,7 @@ public class ClientWarningsTest extends CQLTester
                                                                     i), QueryOptions.DEFAULT);
                 client.execute(query);
             }
-            store.forceBlockingFlush();
+            Util.flush(store);
 
             {
                 QueryMessage query = new QueryMessage(String.format("SELECT * FROM %s.%s WHERE pk = 1",

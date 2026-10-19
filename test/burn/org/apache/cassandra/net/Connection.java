@@ -35,7 +35,7 @@ import org.apache.cassandra.net.Verifier.Destiny;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ExecutorUtils.runWithThreadName;
-import static org.apache.cassandra.utils.MonotonicClock.approxTime;
+import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
 public class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks, OutboundDebugCallbacks
 {
@@ -330,6 +330,11 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
     }
 
     public void onExecuted(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
+    {
+    }
+
+    @Override
+    public void onMessageHandlingCompleted(Message.Header header, long timeElapsed, TimeUnit unit)
     {
     }
 

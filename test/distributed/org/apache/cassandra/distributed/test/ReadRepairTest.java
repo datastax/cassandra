@@ -33,10 +33,8 @@ import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.bind.annotation.SuperCall;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -52,14 +50,16 @@ import org.apache.cassandra.distributed.shared.NetworkTopology;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaPlan;
-import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.reads.repair.BlockingReadRepair;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
-import org.apache.cassandra.utils.concurrent.SimpleCondition;
+import org.apache.cassandra.utils.concurrent.Condition;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_ALTER_RF_DURING_RANGE_MOVEMENT;
+import static org.apache.cassandra.db.Keyspace.open;
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.QUORUM;
 import static org.apache.cassandra.distributed.shared.AssertUtils.assertEquals;
@@ -68,6 +68,8 @@ import static org.apache.cassandra.distributed.shared.AssertUtils.row;
 import static org.apache.cassandra.net.Verb.READ_REPAIR_REQ;
 import static org.apache.cassandra.net.Verb.READ_REPAIR_RSP;
 import static org.apache.cassandra.net.Verb.READ_REQ;
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import static org.apache.cassandra.utils.concurrent.Condition.newOneTimeCondition;
 import static org.junit.Assert.fail;
 
 public class ReadRepairTest extends TestBaseImpl
@@ -131,7 +133,7 @@ public class ReadRepairTest extends TestBaseImpl
             cluster.get(2).executeInternal("INSERT INTO " + KEYSPACE + ".tbl (pk, ck, v) VALUES (1, 1, 1)");
             assertRows(cluster.get(3).executeInternal("SELECT * FROM " + KEYSPACE + ".tbl WHERE pk = 1"));
             cluster.verbs(READ_REPAIR_RSP).to(1).drop();
-            final long start = System.currentTimeMillis();
+            final long start = currentTimeMillis();
             try
             {
                 cluster.coordinator(1).execute("SELECT * FROM " + KEYSPACE + ".tbl WHERE pk = 1", ConsistencyLevel.ALL);
@@ -141,7 +143,7 @@ public class ReadRepairTest extends TestBaseImpl
             {
                 // the containing exception class was loaded by another class loader. Comparing the message as a workaround to assert the exception
                 Assert.assertTrue(ex.getClass().toString().contains("ReadTimeoutException"));
-                long actualTimeTaken = System.currentTimeMillis() - start;
+                long actualTimeTaken = currentTimeMillis() - start;
                 long magicDelayAmount = 100L; // it might not be the best way to check if the time taken is around the timeout value.
                 // Due to the delays, the actual time taken from client perspective is slighly more than the timeout value
                 Assert.assertTrue(actualTimeTaken > reducedReadTimeout);
@@ -178,7 +180,8 @@ public class ReadRepairTest extends TestBaseImpl
     @Test
     public void movingTokenReadRepairTest() throws Throwable
     {
-        try (Cluster cluster = init(Cluster.create(4), 3))
+        // TODO: fails with vnode enabled
+        try (Cluster cluster = init(Cluster.build(4).withoutVNodes().withConfig(c -> c.set("reject_out_of_token_range_requests", false)).start(), 3))
         {
             List<Token> tokens = cluster.tokens();
 
@@ -250,7 +253,7 @@ public class ReadRepairTest extends TestBaseImpl
             assertRows(cluster.get(2).executeInternal(query));
 
             // alter RF
-            System.setProperty(Config.PROPERTY_PREFIX + "allow_alter_rf_during_range_movement", "true");
+            ALLOW_ALTER_RF_DURING_RANGE_MOVEMENT.setBoolean(true);
             cluster.schemaChange(withKeyspace("ALTER KEYSPACE %s WITH replication = " +
                                               "{'class': 'SimpleStrategy', 'replication_factor': 2}"));
 
@@ -353,7 +356,9 @@ public class ReadRepairTest extends TestBaseImpl
         String key = "test1";
         try (Cluster cluster = init(Cluster.build()
                                            .withConfig(config -> config.with(Feature.GOSSIP, Feature.NETWORK)
-                                                                       .set("read_request_timeout_in_ms", Integer.MAX_VALUE))
+                                                                       .set("read_request_timeout", String.format("%dms", Integer.MAX_VALUE))
+                                                                       .set("native_transport_timeout", String.format("%dms", Integer.MAX_VALUE))
+                                                                       .set("reject_out_of_token_range_requests", false))
                                            .withTokenSupplier(TokenSupplier.evenlyDistributedTokens(4))
                                            .withNodeIdTopology(NetworkTopology.singleDcNetworkTopology(4, "dc0", "rack0"))
                                            .withNodes(3)
@@ -365,7 +370,7 @@ public class ReadRepairTest extends TestBaseImpl
                                  "    PRIMARY KEY (key, column1)\n" +
                                  ") WITH CLUSTERING ORDER BY (column1 ASC)");
 
-            cluster.forEach(i -> i.runOnInstance(() -> Keyspace.open(KEYSPACE).getColumnFamilyStore("tbl").disableAutoCompaction()));
+            cluster.forEach(i -> i.runOnInstance(() -> open(KEYSPACE).getColumnFamilyStore("tbl").disableAutoCompaction()));
 
             for (int i = 1; i <= 2; i++)
             {
@@ -378,9 +383,9 @@ public class ReadRepairTest extends TestBaseImpl
             cluster.get(3).flush(KEYSPACE);
 
             // pause the read until we have bootstrapped a new node below
-            SimpleCondition continueRead = new SimpleCondition();
-            SimpleCondition readStarted = new SimpleCondition();
-            cluster.filters().outbound().from(3).to(1,2).verbs(Verb.READ_REQ.id).messagesMatching((i, i1, iMessage) -> {
+            Condition continueRead = newOneTimeCondition();
+            Condition readStarted = newOneTimeCondition();
+            cluster.filters().outbound().from(3).to(1,2).verbs(READ_REQ.id).messagesMatching((i, i1, iMessage) -> {
                 try
                 {
                     readStarted.signalAll();
@@ -394,7 +399,7 @@ public class ReadRepairTest extends TestBaseImpl
             }).drop();
             Future<Object[][]> read = es.submit(() -> cluster.coordinator(3)
                                                           .execute("SELECT * FROM distributed_test_keyspace.tbl WHERE key=? and column1 >= ? and column1 <= ?",
-                                                                   ConsistencyLevel.ALL, key, 20, 40));
+                                                                   ALL, key, 20, 40));
             readStarted.await();
             IInstanceConfig config = cluster.newInstanceConfig();
             config.set("auto_bootstrap", true);
@@ -491,7 +496,8 @@ public class ReadRepairTest extends TestBaseImpl
         // on timestamp tie of RT and partition deletion: we should not generate RT bounds in such case,
         // since monotonicity is already ensured by the partition deletion, and RT is unnecessary there.
         // For details, see CASSANDRA-16453.
-        public static Object repairPartition(DecoratedKey partitionKey, Map<Replica, Mutation> mutations, ReplicaPlan.ForTokenWrite writePlan, @SuperCall Callable<Void> r) throws Exception
+        @SuppressWarnings("unused")
+        public static Object repairPartition(DecoratedKey partitionKey, Map<Replica, Mutation> mutations, ReplicaPlan.ForWrite writePlan, @SuperCall Callable<Void> r) throws Exception
         {
             Assert.assertEquals(2, mutations.size());
             for (Mutation value : mutations.values())

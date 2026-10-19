@@ -25,6 +25,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
 
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.Term.Raw;
@@ -76,7 +77,7 @@ public final class TokenRelation extends Relation
     }
 
     @Override
-    protected Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames)
+    protected Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames, IndexHints indexHints)
     {
         List<ColumnMetadata> columnDefs = getColumnDefinitions(table);
         Term term = toTerm(toReceivers(table, columnDefs), value, table.keyspace, boundNames);
@@ -84,7 +85,18 @@ public final class TokenRelation extends Relation
     }
 
     @Override
+    protected Restriction newNEQRestriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used with the token function", operator());
+    }
+
+    @Override
     protected Restriction newINRestriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used with the token function", operator());
+    }
+
+    protected Restriction newNotINRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         throw invalidRequest("%s cannot be used with the token function", operator());
     }
@@ -107,6 +119,12 @@ public final class TokenRelation extends Relation
     }
 
     @Override
+    protected Restriction newNotContainsRestriction(TableMetadata table, VariableSpecifications boundNames, boolean isKey)
+    {
+        throw invalidRequest("%s cannot be used with the token function", operator());
+    }
+
+    @Override
     protected Restriction newIsNotRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         throw invalidRequest("%s cannot be used with the token function", operator());
@@ -116,6 +134,24 @@ public final class TokenRelation extends Relation
     protected Restriction newLikeRestriction(TableMetadata table, VariableSpecifications boundNames, Operator operator)
     {
         throw invalidRequest("%s cannot be used with the token function", operator);
+    }
+
+    @Override
+    protected Restriction newAnnRestriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used for token relations", operator());
+    }
+
+    @Override
+    protected Restriction newBm25Restriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used for token relations", operator());
+    }
+
+    @Override
+    protected Restriction newAnalyzerMatchesRestriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used for token relations", operator());
     }
 
     @Override

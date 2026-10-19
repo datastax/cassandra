@@ -18,21 +18,20 @@
 
 package org.apache.cassandra.schema;
 
-import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.function.Supplier;
 
 import com.google.common.collect.ImmutableMap;
+
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
-import org.junit.runner.RunWith;
 
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -41,21 +40,26 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.ByteType;
 import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static java.util.Collections.singleton;
 import static org.apache.cassandra.Util.throwAssert;
 import static org.apache.cassandra.cql3.CQLTester.assertRows;
 import static org.apache.cassandra.cql3.CQLTester.row;
+import static org.apache.cassandra.cql3.FieldIdentifier.forUnquoted;
+import static org.apache.cassandra.schema.SchemaConstants.NAME_LENGTH;
+import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -63,10 +67,10 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 
-@RunWith(OrderedJUnit4ClassRunner.class)
 public class MigrationManagerTest
 {
     private static final String KEYSPACE1 = "keyspace1";
+    private static final String KEYSPACE2 = "keyspace2";
     private static final String KEYSPACE3 = "keyspace3";
     private static final String KEYSPACE6 = "keyspace6";
     private static final String EMPTY_KEYSPACE = "test_empty_keyspace";
@@ -86,9 +90,13 @@ public class MigrationManagerTest
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, TABLE1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, TABLE2));
+        SchemaLoader.createKeyspace(KEYSPACE2,
+                KeyspaceParams.simple(1),
+                SchemaLoader.standardCFMD(KEYSPACE2, TABLE1),
+                SchemaLoader.standardCFMD(KEYSPACE2, TABLE2));
         SchemaLoader.createKeyspace(KEYSPACE3,
                                     KeyspaceParams.simple(5),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, TABLE1),
+                                    SchemaLoader.standardCFMD(KEYSPACE3, TABLE1),
                                     SchemaLoader.compositeIndexCFMD(KEYSPACE3, TABLE1i, true));
         SchemaLoader.createKeyspace(KEYSPACE6,
                                     KeyspaceParams.simple(1),
@@ -136,13 +144,21 @@ public class MigrationManagerTest
     @Test
     public void testInvalidNames()
     {
-        String[] valid = {"1", "a", "_1", "b_", "__", "1_a"};
+        String[] valid = { "1", "a", "_1", "b_", "__", "1_a" };
         for (String s : valid)
-            assertTrue(SchemaConstants.isValidName(s));
-
-        String[] invalid = {"b@t", "dash-y", "", " ", "dot.s", ".hidden"};
+        {
+            assertTrue(SchemaConstants.isValidCharsName(s));
+            KeyspaceMetadata.validateKeyspaceName(s, InvalidRequestException::new);
+        }
+        String[] invalid = { "b@t", "dash-y", "", " ", "dot.s", ".hidden" };
         for (String s : invalid)
-            assertFalse(SchemaConstants.isValidName(s));
+        {
+            assertFalse(SchemaConstants.isValidCharsName(s));
+            assertThatThrownBy(() -> KeyspaceMetadata.validateKeyspaceName(s, InvalidRequestException::new)).isInstanceOf(InvalidRequestException.class);
+        }
+
+        KeyspaceMetadata.validateKeyspaceName("k".repeat(NAME_LENGTH), InvalidRequestException::new);
+        assertThatThrownBy(() -> KeyspaceMetadata.validateKeyspaceName("k".repeat(NAME_LENGTH + 1), InvalidRequestException::new)).isInstanceOf(InvalidRequestException.class);
     }
 
     @Test
@@ -151,7 +167,7 @@ public class MigrationManagerTest
         TableMetadata newCf = addTestTable("MadeUpKeyspace", "NewCF", "new cf");
         try
         {
-            MigrationManager.announceNewTable(newCf);
+            SchemaTestUtil.announceNewTable(newCf);
             throw new AssertionError("You shouldn't be able to do anything to a keyspace that doesn't exist.");
         }
         catch (ConfigurationException expected)
@@ -169,7 +185,7 @@ public class MigrationManagerTest
         TableMetadata cfm = addTestTable(original.name, tableName, "A New Table");
 
         assertFalse(Schema.instance.getKeyspaceMetadata(ksName).tables.get(cfm.name).isPresent());
-        MigrationManager.announceNewTable(cfm);
+        SchemaTestUtil.announceNewTable(cfm);
 
         assertTrue(Schema.instance.getKeyspaceMetadata(ksName).tables.get(cfm.name).isPresent());
         assertEquals(cfm, Schema.instance.getKeyspaceMetadata(ksName).tables.get(cfm.name).get());
@@ -182,7 +198,7 @@ public class MigrationManagerTest
         // flush to exercise more than just hitting the memtable
         ColumnFamilyStore cfs = Keyspace.open(ksName).getColumnFamilyStore(tableName);
         assertNotNull(cfs);
-        cfs.forceBlockingFlush();
+        Util.flush(cfs);
 
         // and make sure we get out what we put in
         UntypedResultSet rows = QueryProcessor.executeInternal(String.format("SELECT * FROM %s.%s", ksName, tableName));
@@ -205,10 +221,10 @@ public class MigrationManagerTest
                                            "dropCf", "col" + i, "anyvalue");
         ColumnFamilyStore store = Keyspace.open(cfm.keyspace).getColumnFamilyStore(cfm.name);
         assertNotNull(store);
-        store.forceBlockingFlush();
+        Util.flush(store);
         assertTrue(store.getDirectories().sstableLister(Directories.OnTxnErr.THROW).list().size() > 0);
 
-        MigrationManager.announceTableDrop(ks.name, cfm.name, false);
+        SchemaTestUtil.announceTableDrop(ks.name, cfm.name);
 
         assertFalse(Schema.instance.getKeyspaceMetadata(ks.name).tables.get(cfm.name).isPresent());
 
@@ -230,7 +246,7 @@ public class MigrationManagerTest
         Supplier<Object> lambda = () -> {
             for (File file : store.getDirectories().sstableLister(Directories.OnTxnErr.THROW).listFiles())
             {
-                if (file.getPath().endsWith("Data.db") && !new File(file.getPath().replace("Data.db", "Compacted")).exists())
+                if (file.path().endsWith("Data.db") && !new File(file.path().replace("Data.db", "Compacted")).exists())
                     return false;
             }
             return true;
@@ -244,7 +260,7 @@ public class MigrationManagerTest
     {
         TableMetadata cfm = addTestTable("newkeyspace1", "newstandard1", "A new cf for a new ks");
         KeyspaceMetadata newKs = KeyspaceMetadata.create(cfm.keyspace, KeyspaceParams.simple(5), Tables.of(cfm));
-        MigrationManager.announceNewKeyspace(newKs);
+        SchemaTestUtil.announceNewKeyspace(newKs);
 
         assertNotNull(Schema.instance.getKeyspaceMetadata(cfm.keyspace));
         assertEquals(Schema.instance.getKeyspaceMetadata(cfm.keyspace), newKs);
@@ -254,7 +270,7 @@ public class MigrationManagerTest
                                        "key0", "col0", "val0");
         ColumnFamilyStore store = Keyspace.open(cfm.keyspace).getColumnFamilyStore(cfm.name);
         assertNotNull(store);
-        store.forceBlockingFlush();
+        Util.flush(store);
 
         UntypedResultSet rows = QueryProcessor.executeInternal("SELECT * FROM newkeyspace1.newstandard1");
         assertRows(rows, row("key0", "col0", "val0"));
@@ -264,7 +280,7 @@ public class MigrationManagerTest
     public void dropKS() throws ConfigurationException
     {
         // sanity
-        final KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(KEYSPACE1);
+        final KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(KEYSPACE2);
         assertNotNull(ks);
         final TableMetadata cfm = ks.tables.getNullable(TABLE2);
         assertNotNull(cfm);
@@ -272,14 +288,14 @@ public class MigrationManagerTest
         // write some data, force a flush, then verify that files exist on disk.
         for (int i = 0; i < 100; i++)
             QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (key, name, val) VALUES (?, ?, ?)",
-                                                         KEYSPACE1, TABLE2),
+                                                         KEYSPACE2, TABLE2),
                                            "dropKs", "col" + i, "anyvalue");
         ColumnFamilyStore cfs = Keyspace.open(cfm.keyspace).getColumnFamilyStore(cfm.name);
         assertNotNull(cfs);
-        cfs.forceBlockingFlush();
+        Util.flush(cfs);
         assertTrue(!cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).list().isEmpty());
 
-        MigrationManager.announceKeyspaceDrop(ks.name);
+        SchemaTestUtil.announceKeyspaceDrop(ks.name);
 
         assertNull(Schema.instance.getKeyspaceMetadata(ks.name));
 
@@ -288,7 +304,7 @@ public class MigrationManagerTest
         try
         {
             QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (key, name, val) VALUES (?, ?, ?)",
-                                                         KEYSPACE1, TABLE2),
+                                                         KEYSPACE2, TABLE2),
                                            "dropKs", "col0", "anyvalue");
         }
         catch (Throwable th)
@@ -325,7 +341,7 @@ public class MigrationManagerTest
                                                          KEYSPACE3, TABLE1),
                                            "dropKs", "col" + i, "anyvalue");
 
-        MigrationManager.announceKeyspaceDrop(ks.name);
+        SchemaTestUtil.announceKeyspaceDrop(ks.name);
 
         assertNull(Schema.instance.getKeyspaceMetadata(ks.name));
     }
@@ -335,7 +351,7 @@ public class MigrationManagerTest
     {
         assertNull(Schema.instance.getKeyspaceMetadata(EMPTY_KEYSPACE));
         KeyspaceMetadata newKs = KeyspaceMetadata.create(EMPTY_KEYSPACE, KeyspaceParams.simple(5));
-        MigrationManager.announceNewKeyspace(newKs);
+        SchemaTestUtil.announceNewKeyspace(newKs);
         assertNotNull(Schema.instance.getKeyspaceMetadata(EMPTY_KEYSPACE));
 
         String tableName = "added_later";
@@ -345,7 +361,7 @@ public class MigrationManagerTest
         assertFalse(Schema.instance.getKeyspaceMetadata(newKs.name).tables.get(newCf.name).isPresent());
 
         //add the new CF to the empty space
-        MigrationManager.announceNewTable(newCf);
+        SchemaTestUtil.announceNewTable(newCf);
 
         assertTrue(Schema.instance.getKeyspaceMetadata(newKs.name).tables.get(newCf.name).isPresent());
         assertEquals(Schema.instance.getKeyspaceMetadata(newKs.name).tables.get(newCf.name).get(), newCf);
@@ -357,7 +373,7 @@ public class MigrationManagerTest
 
         ColumnFamilyStore cfs = Keyspace.open(newKs.name).getColumnFamilyStore(newCf.name);
         assertNotNull(cfs);
-        cfs.forceBlockingFlush();
+        Util.flush(cfs);
 
         UntypedResultSet rows = QueryProcessor.executeInternal(String.format("SELECT * FROM %s.%s", EMPTY_KEYSPACE, tableName));
         assertRows(rows, row("key0", "col0", "val0"));
@@ -370,7 +386,7 @@ public class MigrationManagerTest
         TableMetadata cf = addTestTable("UpdatedKeyspace", "AddedStandard1", "A new cf for a new ks");
         KeyspaceMetadata oldKs = KeyspaceMetadata.create(cf.keyspace, KeyspaceParams.simple(5), Tables.of(cf));
 
-        MigrationManager.announceNewKeyspace(oldKs);
+        SchemaTestUtil.announceNewKeyspace(oldKs);
 
         assertNotNull(Schema.instance.getKeyspaceMetadata(cf.keyspace));
         assertEquals(Schema.instance.getKeyspaceMetadata(cf.keyspace), oldKs);
@@ -379,7 +395,7 @@ public class MigrationManagerTest
         KeyspaceMetadata newBadKs2 = KeyspaceMetadata.create(cf.keyspace + "trash", KeyspaceParams.simple(4));
         try
         {
-            MigrationManager.announceKeyspaceUpdate(newBadKs2);
+            SchemaTestUtil.announceKeyspaceUpdate(newBadKs2);
             throw new AssertionError("Should not have been able to update a KS with an invalid KS name.");
         }
         catch (ConfigurationException ex)
@@ -392,7 +408,7 @@ public class MigrationManagerTest
         replicationMap.put("replication_factor", "1");
 
         KeyspaceMetadata newKs = KeyspaceMetadata.create(cf.keyspace, KeyspaceParams.create(true, replicationMap));
-        MigrationManager.announceKeyspaceUpdate(newKs);
+        SchemaTestUtil.announceKeyspaceUpdate(newKs);
 
         KeyspaceMetadata newFetchedKs = Schema.instance.getKeyspaceMetadata(newKs.name);
         assertEquals(newFetchedKs.params.replication.klass, newKs.params.replication.klass);
@@ -512,7 +528,7 @@ public class MigrationManagerTest
                                                     TABLE1i),
                                        "key0", "col0", 1L, 1L);
 
-        cfs.forceBlockingFlush();
+        Util.flush(cfs);
         ColumnFamilyStore indexCfs = cfs.indexManager.getIndexByName(indexName)
                                                      .getBackingTable()
                                                      .orElseThrow(throwAssert("Cannot access index cfs"));
@@ -524,23 +540,31 @@ public class MigrationManagerTest
                                      .get(indexName)
                                      .orElseThrow(throwAssert("Index not found"));
 
-        MigrationManager.announceTableUpdate(meta.unbuild().indexes(meta.indexes.without(existing.name)).build());
+        SchemaTestUtil.announceTableUpdate(meta.unbuild().indexes(meta.indexes.without(existing.name)).build());
 
         // check
         assertTrue(cfs.indexManager.listIndexes().isEmpty());
         LifecycleTransaction.waitForDeletions();
-        assertFalse(new File(desc.filenameFor(Component.DATA)).exists());
+        assertFalse(desc.fileFor(Components.DATA).exists());
     }
 
     @Test
-    public void testValidateNullKeyspace() throws Exception
+    public void testTableMetadataBuilderWithInvalidKeyspace()
     {
-        TableMetadata.Builder builder = TableMetadata.builder(null, TABLE1).addPartitionKeyColumn("partitionKey", BytesType.instance);
-
-        TableMetadata table1 = builder.build();
-        thrown.expect(ConfigurationException.class);
-        thrown.expectMessage(null + "." + TABLE1 + ": Keyspace name must not be empty");
-        table1.validate();
+        String[][] keyspaces =
+        {
+        { null, "Keyspace name must not be empty" },
+        { "a@b", "Keyspace name must not be empty and must contain alphanumeric or underscore characters only" },
+        { "k".repeat(NAME_LENGTH), String.format("Keyspace name must not be more than %d characters long", NAME_LENGTH) }
+        };
+        for (String[] keyspace : keyspaces)
+        {
+            TableMetadata.Builder builder = TableMetadata.builder(keyspace[0], TABLE1).addPartitionKeyColumn("partitionKey", BytesType.instance);
+            TableMetadata table1 = builder.build();
+            thrown.expect(ConfigurationException.class);
+            thrown.expectMessage(String.format("%s.%s: %s", keyspace[0], TABLE1, keyspace[1]));
+            table1.validate();
+        }
     }
 
     @Test
@@ -573,11 +597,14 @@ public class MigrationManagerTest
         TableMetadata table = addTestTable("ks0", "t", "");
         KeyspaceMetadata keyspace = KeyspaceMetadata.create("ks0", KeyspaceParams.simple(1), Tables.of(table));
 
-        Optional<Mutation> mutation = MigrationManager.evolveSystemKeyspace(keyspace, 0);
-        assertTrue(mutation.isPresent());
+        SchemaTransformation transformation = SchemaTransformations.updateSystemKeyspace(keyspace, 0);
+        Keyspaces before = Keyspaces.none();
+        Keyspaces after = transformation.apply(before);
+        Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before, after);
 
-        Schema.instance.merge(singleton(mutation.get()));
-        assertEquals(keyspace, Schema.instance.getKeyspaceMetadata("ks0"));
+        assertTrue(diff.altered.isEmpty());
+        assertTrue(diff.dropped.isEmpty());
+        assertEquals(keyspace, diff.created.getNullable("ks0"));
     }
 
     @Test
@@ -586,12 +613,12 @@ public class MigrationManagerTest
         TableMetadata table = addTestTable("ks1", "t", "");
         KeyspaceMetadata keyspace = KeyspaceMetadata.create("ks1", KeyspaceParams.simple(1), Tables.of(table));
 
-        // create the keyspace, verify it's there
-        Schema.instance.merge(singleton(SchemaKeyspace.makeCreateKeyspaceMutation(keyspace, 0).build()));
-        assertEquals(keyspace, Schema.instance.getKeyspaceMetadata("ks1"));
+        SchemaTransformation transformation = SchemaTransformations.updateSystemKeyspace(keyspace, 0);
+        Keyspaces before = Keyspaces.of(keyspace);
+        Keyspaces after = transformation.apply(before);
+        Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before, after);
 
-        Optional<Mutation> mutation = MigrationManager.evolveSystemKeyspace(keyspace, 0);
-        assertFalse(mutation.isPresent());
+        assertTrue(diff.isEmpty());
     }
 
     @Test
@@ -600,18 +627,52 @@ public class MigrationManagerTest
         TableMetadata table0 = addTestTable("ks2", "t", "");
         KeyspaceMetadata keyspace0 = KeyspaceMetadata.create("ks2", KeyspaceParams.simple(1), Tables.of(table0));
 
-        // create the keyspace, verify it's there
-        Schema.instance.merge(singleton(SchemaKeyspace.makeCreateKeyspaceMutation(keyspace0, 0).build()));
-        assertEquals(keyspace0, Schema.instance.getKeyspaceMetadata("ks2"));
-
         TableMetadata table1 = table0.unbuild().comment("comment").build();
         KeyspaceMetadata keyspace1 = KeyspaceMetadata.create("ks2", KeyspaceParams.simple(1), Tables.of(table1));
 
-        Optional<Mutation> mutation = MigrationManager.evolveSystemKeyspace(keyspace1, 1);
-        assertTrue(mutation.isPresent());
+        SchemaTransformation transformation = SchemaTransformations.updateSystemKeyspace(keyspace1, 1);
+        Keyspaces before = Keyspaces.of(keyspace0);
+        Keyspaces after = transformation.apply(before);
+        Keyspaces.KeyspacesDiff diff = Keyspaces.diff(before, after);
 
-        Schema.instance.merge(singleton(mutation.get()));
-        assertEquals(keyspace1, Schema.instance.getKeyspaceMetadata("ks2"));
+        assertTrue(diff.created.isEmpty());
+        assertTrue(diff.dropped.isEmpty());
+        assertEquals(1, diff.altered.size());
+        assertEquals(keyspace1, diff.altered.get(0).after);
+    }
+
+    @Test
+    public void testInheritTypesFromPreviousKeyspace()
+    {
+        // given
+        UserType udt = new UserType("ks2",
+                                    bytes("PreviousType"),
+                                    List.of(forUnquoted("a"), forUnquoted("b")),
+                                    List.of(Int32Type.instance, Int32Type.instance),
+                                    true);
+        UserType unreferencedUdt = new UserType("ks2",
+                                                bytes("UnreferencedType"),
+                                                List.of(forUnquoted("a")),
+                                                List.of(Int32Type.instance),
+                                                true);
+        TableMetadata table0 = addTestTable("ks2", "t", "").unbuild()
+                                                        .addRegularColumn("udt", udt)
+                                                        .build();
+        KeyspaceMetadata previousKeyspace = KeyspaceMetadata.create("ks2", KeyspaceParams.simple(1), Tables.of(table0), Views.none(), Types.of(udt, unreferencedUdt), UserFunctions.none());
+        KeyspaceMetadata currentKeyspace = KeyspaceMetadata.create("ks2", KeyspaceParams.simple(1), Tables.of(table0));
+
+        // when
+        SchemaTransformation transformation = SchemaTransformations.updateSystemKeyspace(currentKeyspace, 1);
+        Keyspaces after = transformation.apply(Keyspaces.of(previousKeyspace));
+
+        // then
+        KeyspaceMetadata keyspaceAfterTransformation = after.getNullable("ks2");
+        assertNotNull(keyspaceAfterTransformation);
+        assertEquals(currentKeyspace.types.stream().count() + 1, keyspaceAfterTransformation.types.stream().count());
+        UserType inheritedUdt = keyspaceAfterTransformation.types.getNullable(udt.name);
+        assertNotNull(inheritedUdt);
+        assertEquals(udt, inheritedUdt);
+        assertNull(keyspaceAfterTransformation.types.getNullable(unreferencedUdt.name));
     }
 
     private TableMetadata addTestTable(String ks, String cf, String comment)

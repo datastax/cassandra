@@ -17,29 +17,33 @@
  */
 package org.apache.cassandra.gms;
 
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.util.Collection;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static java.nio.charset.StandardCharsets.ISO_8859_1;
-
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.sstable.format.VersionAndType;
+import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.commons.lang3.StringUtils;
+
+import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
 
 /**
@@ -84,6 +88,8 @@ public class VersionedValue implements Comparable<VersionedValue>
     // values for ApplicationState.REMOVAL_COORDINATOR
     public final static String REMOVAL_COORDINATOR = "REMOVER";
 
+    public final static Set<String> BOOTSTRAPPING_STATUS = ImmutableSet.of(STATUS_BOOTSTRAPPING, STATUS_BOOTSTRAPPING_REPLACE);
+
     public final int version;
     public final String value;
 
@@ -97,6 +103,12 @@ public class VersionedValue implements Comparable<VersionedValue>
     private VersionedValue(String value)
     {
         this(value, VersionGenerator.getNextVersion());
+    }
+
+    @VisibleForTesting
+    public VersionedValue withVersion(int version)
+    {
+        return new VersionedValue(value, version);
     }
 
     public static VersionedValue unsafeMakeVersionedValue(String value, int version)
@@ -113,6 +125,21 @@ public class VersionedValue implements Comparable<VersionedValue>
     public String toString()
     {
         return "Value(" + value + ',' + version + ')';
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        VersionedValue that = (VersionedValue) o;
+        return version == that.version && value.equals(that.value);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(version, value);
     }
 
     public byte[] toBytes()
@@ -139,7 +166,8 @@ public class VersionedValue implements Comparable<VersionedValue>
             return new VersionedValue(value.value);
         }
 
-        @Deprecated
+        /** @deprecated See CASSANDRA-7544 */
+        @Deprecated(since = "4.0")
         public VersionedValue bootReplacing(InetAddress oldNode)
         {
             return new VersionedValue(versionString(VersionedValue.STATUS_BOOTSTRAPPING_REPLACE, oldNode.getHostAddress()));
@@ -172,6 +200,11 @@ public class VersionedValue implements Comparable<VersionedValue>
             return new VersionedValue(String.valueOf(load));
         }
 
+        public VersionedValue diskUsage(String state)
+        {
+            return new VersionedValue(state);
+        }
+
         public VersionedValue schema(UUID newVersion)
         {
             return new VersionedValue(newVersion.toString());
@@ -188,6 +221,14 @@ public class VersionedValue implements Comparable<VersionedValue>
             return new VersionedValue(versionString(VersionedValue.STATUS_LEFT,
                                                     makeTokenString(tokens),
                                                     Long.toString(expireTime)));
+        }
+
+        @VisibleForTesting
+        public VersionedValue left(Collection<Token> tokens, long expireTime, int generation)
+        {
+            return new VersionedValue(versionString(VersionedValue.STATUS_LEFT,
+                                                    makeTokenString(tokens),
+                                                    Long.toString(expireTime)), generation);
         }
 
         public VersionedValue moving(Token token)
@@ -243,6 +284,11 @@ public class VersionedValue implements Comparable<VersionedValue>
         public VersionedValue shutdown(boolean value)
         {
             return new VersionedValue(VersionedValue.SHUTDOWN + VersionedValue.DELIMITER + value);
+        }
+
+        public VersionedValue indexStatus(String status)
+        {
+            return new VersionedValue(status);
         }
 
         public VersionedValue datacenter(String dcId)
@@ -302,10 +348,10 @@ public class VersionedValue implements Comparable<VersionedValue>
             return new VersionedValue(String.valueOf(value));
         }
 
-        public VersionedValue sstableVersions(Set<VersionAndType> versions)
+        public VersionedValue sstableVersions(Set<Version> versions)
         {
             return new VersionedValue(versions.stream()
-                                              .map(VersionAndType::toString)
+                                              .map(Version::toFormatAndVersionString)
                                               .collect(Collectors.joining(",")));
         }
     }

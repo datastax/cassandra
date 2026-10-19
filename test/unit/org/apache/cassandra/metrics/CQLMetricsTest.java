@@ -20,38 +20,35 @@ package org.apache.cassandra.metrics;
 
 import java.io.IOException;
 
+import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
 import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Session;
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
-import org.apache.cassandra.SchemaLoader;
+import com.datastax.driver.core.exceptions.InvalidQueryException;
+import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.EmbeddedCassandraService;
 
-import static junit.framework.Assert.assertEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
-@RunWith(OrderedJUnit4ClassRunner.class)
-public class CQLMetricsTest extends SchemaLoader
+public class CQLMetricsTest
 {
-    private static EmbeddedCassandraService cassandra;
-
     private static Cluster cluster;
     private static Session session;
+    private static EmbeddedCassandraService cassandra;
 
     @BeforeClass()
     public static void setup() throws ConfigurationException, IOException
     {
-        Schema.instance.clear();
-
-        cassandra = new EmbeddedCassandraService();
-        cassandra.start();
+        cassandra = ServerTestUtils.startEmbeddedCassandraService();
 
         cluster = Cluster.builder().addContactPoint("127.0.0.1").withPort(DatabaseDescriptor.getNativeTransportPort()).build();
         session = cluster.connect();
@@ -60,12 +57,45 @@ public class CQLMetricsTest extends SchemaLoader
         session.execute("CREATE TABLE IF NOT EXISTS junit.metricstest (id int PRIMARY KEY, val text);");
     }
 
+    @AfterClass
+    public static void tearDown()
+    {
+        if (cluster != null)
+            cluster.close();
+        if (cassandra != null)
+            cassandra.stop();
+    }
+
+    @Test
+    public void testConnectionWithUseDisabled()
+    {
+        long useCountBefore = QueryProcessor.metrics.useStatementsExecuted.getCount();
+        DatabaseDescriptor.setUseStatementsEnabled(false);
+
+        try (Session ignored = cluster.connect("junit"))
+        {
+            fail("expected USE statement to fail with use_statements_enabled = false");
+        }
+        catch (InvalidQueryException e)
+        {
+            Assert.assertEquals(useCountBefore, QueryProcessor.metrics.useStatementsExecuted.getCount());
+            assertTrue(e.getMessage().contains("USE statements prohibited"));
+        }
+        finally
+        {
+            DatabaseDescriptor.setUseStatementsEnabled(true);
+        }
+    }
+
     @Test
     public void testPreparedStatementsCount()
     {
-        int n = (int) QueryProcessor.metrics.preparedStatementsCount.getValue();
+        int n = QueryProcessor.metrics.preparedStatementsCount.getValue();
+        long useCountBefore = QueryProcessor.metrics.useStatementsExecuted.getCount();
+        session.execute("use junit");
+        Assert.assertEquals(useCountBefore + 1, QueryProcessor.metrics.useStatementsExecuted.getCount());
         session.prepare("SELECT * FROM junit.metricstest WHERE id = ?");
-        assertEquals(n+1, (int) QueryProcessor.metrics.preparedStatementsCount.getValue());
+        assertEquals(n+2, (int) QueryProcessor.metrics.preparedStatementsCount.getValue());
     }
 
     @Test
@@ -106,15 +136,15 @@ public class CQLMetricsTest extends SchemaLoader
         clearMetrics();
         PreparedStatement metricsStatement = session.prepare("INSERT INTO junit.metricstest (id, val) VALUES (?, ?)");
 
-        assertEquals(Double.NaN, QueryProcessor.metrics.preparedStatementsRatio.getValue());
+        assertEquals(Double.NaN, QueryProcessor.metrics.preparedStatementsRatio.getValue(), 0.0);
 
         for (int i = 0; i < 10; i++)
             session.execute(metricsStatement.bind(i, "val" + i));
-        assertEquals(1.0, QueryProcessor.metrics.preparedStatementsRatio.getValue());
+        assertEquals(1.0, QueryProcessor.metrics.preparedStatementsRatio.getValue(), 0.0);
 
         for (int i = 0; i < 10; i++)
             session.execute(String.format("INSERT INTO junit.metricstest (id, val) VALUES (%d, '%s')", i, "val" + i));
-        assertEquals(0.5, QueryProcessor.metrics.preparedStatementsRatio.getValue());
+        assertEquals(0.5, QueryProcessor.metrics.preparedStatementsRatio.getValue(), 0.0);
     }
 
     private void clearMetrics()

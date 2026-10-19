@@ -17,18 +17,20 @@
  */
 package org.apache.cassandra.cql3.validation.entities;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.dht.ByteOrderedPartitioner;
-import org.apache.cassandra.exceptions.InvalidRequestException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import org.apache.commons.lang3.StringUtils;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.dht.ByteOrderedPartitioner;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -39,6 +41,7 @@ public class SecondaryIndexOnMapEntriesTest extends CQLTester
     public static void setUp()
     {
         DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+        Util.assumeLegacySecondaryIndex();
     }
 
     @Test
@@ -203,6 +206,8 @@ public class SecondaryIndexOnMapEntriesTest extends CQLTester
         Object[] baz = insertIntoSimpleTable("baz", map("common", 31415,
                                                         "target", 8192));
 
+        assertRowsForConditions(entry("common", 31415),
+                                bar, baz, foo);
         assertRowsForConditions(entry("target", 8192),
                                 bar, baz, foo);
         baz = updateMapInSimpleTable(baz, "target", 4096);
@@ -215,6 +220,13 @@ public class SecondaryIndexOnMapEntriesTest extends CQLTester
         assertNoRowsForConditions(entry("target", 8192));
         assertRowsForConditions(entry("common", 31415),
                                 bar, baz);
+        assertRowsForConditions(entry("target", 4096),
+                                baz);
+
+        execute("DELETE v FROM %s WHERE k = 'bar'");
+        assertNoRowsForConditions(entry("target", 8192));
+        assertRowsForConditions(entry("common", 31415),
+                                baz);
         assertRowsForConditions(entry("target", 4096),
                                 baz);
     }
@@ -256,7 +268,7 @@ public class SecondaryIndexOnMapEntriesTest extends CQLTester
         assertRows(execute(query, params));
     }
 
-    private void createSimpleTableAndIndex() throws Throwable
+    private void createSimpleTableAndIndex()
     {
         createTable("CREATE TABLE %s (k TEXT PRIMARY KEY, v MAP<TEXT, INT>)");
         createIndex("CREATE INDEX ON %s(ENTRIES(v))");

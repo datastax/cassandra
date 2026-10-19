@@ -19,7 +19,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.db.marshal.ByteArrayAccessor;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.filter.*;
@@ -28,6 +28,7 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Groups both the range of partitions to query, and the clustering index filter to
@@ -140,6 +141,34 @@ public class DataRange
     }
 
     /**
+     * The start of the partition key range queried by this {@code DataRange}.
+     *
+     * @return the start of the partition key range expressed as a ByteComparable.
+     */
+    public ByteComparable startAsByteComparable()
+    {
+        PartitionPosition bound = keyRange.left;
+        if (bound.isMinimum())
+            return null;
+
+        return bound.asComparableBound(keyRange.inclusiveLeft());
+    }
+
+    /**
+     * The end of the partition key range queried by this {@code DataRange}.
+     *
+     * @return the end of the partition key range expressed as a ByteComparable.
+     */
+    public ByteComparable stopAsByteComparable()
+    {
+        PartitionPosition bound = keyRange.right;
+        if (bound.isMinimum())
+            return null;
+
+        return bound.asComparableBound(!keyRange.inclusiveRight());
+    }
+
+    /**
      * Whether the underlying clustering index filter is a names filter or not.
      *
      * @return Whether the underlying clustering index filter is a names filter or not.
@@ -186,9 +215,10 @@ public class DataRange
      *
      * @return Whether this {@code DataRange} queries everything.
      */
-    public boolean isUnrestricted()
+    public boolean isUnrestricted(TableMetadata metadata)
     {
-        return startKey().isMinimum() && stopKey().isMinimum() && clusteringIndexFilter.selectsAllPartition();
+        return startKey().isMinimum() && stopKey().isMinimum() &&
+               (clusteringIndexFilter.selectsAllPartition() || metadata.clusteringColumns().isEmpty());
     }
 
     public boolean selectsAllPartition()
@@ -252,56 +282,79 @@ public class DataRange
         return new DataRange(range, clusteringIndexFilter);
     }
 
+    /**
+     * Whether this range queries a single partition. That happens for partition queries using secondary indexes, which
+     * are internally mapped to range commands using a single-key data range.
+     *
+     * @return {@code true} if this range queries a single partition, {@code false} otherwise
+     */
+    public boolean isSinglePartition()
+    {
+        return keyRange.inclusiveLeft() &&
+               keyRange.inclusiveRight() &&
+               keyRange.left instanceof DecoratedKey &&
+               keyRange.right instanceof DecoratedKey &&
+               keyRange.left.equals(keyRange.right);
+    }
+
     public String toString(TableMetadata metadata)
     {
         return String.format("range=%s pfilter=%s", keyRange.getString(metadata.partitionKeyType), clusteringIndexFilter.toString(metadata));
     }
 
-    public String toCQLString(TableMetadata metadata)
+    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
     {
-        if (isUnrestricted())
-            return "UNRESTRICTED";
+        if (isUnrestricted(metadata))
+            return rowFilter.toCQLString(redaction);
 
-        StringBuilder sb = new StringBuilder();
-
-        boolean needAnd = false;
-        if (!startKey().isMinimum())
+        if (isSinglePartition())
         {
-            appendClause(startKey(), sb, metadata, true, keyRange.isStartInclusive());
-            needAnd = true;
+            /*
+             * Single partition queries using an index are internally mapped to range commands where the start and end
+             * key are the same. If that is the case, we want to print the query as an equality on the partition key
+             * rather than a token range, as if it was a partition query, for better readability.
+             */
+            return ((DecoratedKey) startKey()).toCQLString(metadata, redaction);
         }
-        if (!stopKey().isMinimum())
+        else
         {
-            if (needAnd)
-                sb.append(" AND ");
-            appendClause(stopKey(), sb, metadata, false, keyRange.isEndInclusive());
-            needAnd = true;
+            StringBuilder builder = new StringBuilder();
+            if (!startKey().isMinimum())
+            {
+                appendCQLClause(startKey(), builder, metadata, true, keyRange.isStartInclusive(), redaction);
+            }
+            if (!stopKey().isMinimum())
+            {
+                if (builder.length() > 0)
+                    builder.append(" AND ");
+                appendCQLClause(stopKey(), builder, metadata, false, keyRange.isEndInclusive(), redaction);
+            }
+            return builder.toString();
         }
-
-        String filterString = clusteringIndexFilter.toCQLString(metadata);
-        if (!filterString.isEmpty())
-            sb.append(needAnd ? " AND " : "").append(filterString);
-
-        return sb.toString();
     }
 
-    private void appendClause(PartitionPosition pos, StringBuilder sb, TableMetadata metadata, boolean isStart, boolean isInclusive)
+    private void appendCQLClause(PartitionPosition pos,
+                                 StringBuilder builder,
+                                 TableMetadata metadata,
+                                 boolean isStart,
+                                 boolean isInclusive,
+                                 Redaction redaction)
     {
-        sb.append("token(");
-        sb.append(ColumnMetadata.toCQLString(metadata.partitionKeyColumns()));
-        sb.append(") ");
+        builder.append("token(");
+        builder.append(ColumnMetadata.toCQLString(metadata.partitionKeyColumns()));
+        builder.append(") ");
         if (pos instanceof DecoratedKey)
         {
-            sb.append(getOperator(isStart, isInclusive)).append(" ");
-            sb.append("token(");
-            appendKeyString(sb, metadata.partitionKeyType, ((DecoratedKey)pos).getKey());
-            sb.append(")");
+            builder.append(getOperator(isStart, isInclusive)).append(" ");
+            builder.append("token(");
+            appendKeyString(builder, metadata.partitionKeyType, ((DecoratedKey)pos).getKey(), redaction);
+            builder.append(')');
         }
         else
         {
             Token.KeyBound keyBound = (Token.KeyBound) pos;
-            sb.append(getOperator(isStart, isStart == keyBound.isMinimumBound)).append(" ");
-            sb.append(keyBound.getToken());
+            builder.append(getOperator(isStart, isStart == keyBound.isMinimumBound)).append(' ');
+            builder.append(redaction == Redaction.REDACT ? "?" : keyBound.getToken());
         }
     }
 
@@ -314,18 +367,18 @@ public class DataRange
 
     // TODO: this is reused in SinglePartitionReadCommand but this should not really be here. Ideally
     // we need a more "native" handling of composite partition keys.
-    public static void appendKeyString(StringBuilder sb, AbstractType<?> type, ByteBuffer key)
+    public static void appendKeyString(StringBuilder builder, AbstractType<?> type, ByteBuffer key, Redaction redaction)
     {
         if (type instanceof CompositeType)
         {
             CompositeType ct = (CompositeType)type;
             ByteBuffer[] values = ct.split(key);
-            for (int i = 0; i < ct.types.size(); i++)
-                sb.append(i == 0 ? "" : ", ").append(ct.types.get(i).getString(values[i]));
+            for (int i = 0; i < ct.subTypes().size(); i++)
+                builder.append(i == 0 ? "" : ", ").append(ct.subTypes().get(i).toCQLString(values[i], redaction));
         }
         else
         {
-            sb.append(type.getString(key));
+            builder.append(type.toCQLString(key, redaction));
         }
     }
 
@@ -393,7 +446,7 @@ public class DataRange
         }
 
         @Override
-        public boolean isUnrestricted()
+        public boolean isUnrestricted(TableMetadata metadata)
         {
             return false;
         }

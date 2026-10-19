@@ -17,22 +17,29 @@
  */
 package org.apache.cassandra.cache;
 
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.marshal.AsciiType;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.RowUpdateBuilder;
+import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
 public class AutoSavingCacheTest
 {
@@ -42,6 +49,8 @@ public class AutoSavingCacheTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        DatabaseDescriptor.daemonInitialization();
+        Assume.assumeTrue(KeyCacheSupport.isSupportedBy(DatabaseDescriptor.getSelectedSSTableFormat()));
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
@@ -53,14 +62,14 @@ public class AutoSavingCacheTest
     @Test
     public void testSerializeAndLoadKeyCache0kB() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(0);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(0);
         doTestSerializeAndLoadKeyCache();
     }
 
     @Test
     public void testSerializeAndLoadKeyCache() throws Exception
     {
-        DatabaseDescriptor.setColumnIndexCacheSize(8);
+        DatabaseDescriptor.setColumnIndexCacheSizeInKiB(8);
         doTestSerializeAndLoadKeyCache();
     }
 
@@ -71,10 +80,10 @@ public class AutoSavingCacheTest
         for (int i = 0; i < 2; i++)
         {
             ColumnMetadata colDef = ColumnMetadata.regularColumn(cfs.metadata(), ByteBufferUtil.bytes("col1"), AsciiType.instance);
-            RowUpdateBuilder rowBuilder = new RowUpdateBuilder(cfs.metadata(), System.currentTimeMillis(), "key1");
+            RowUpdateBuilder rowBuilder = new RowUpdateBuilder(cfs.metadata(), currentTimeMillis(), "key1");
             rowBuilder.add(colDef, "val1");
             rowBuilder.build().apply();
-            cfs.forceBlockingFlush();
+            Util.flush(cfs);
         }
 
         Assert.assertEquals(2, cfs.getLiveSSTables().size());
@@ -83,7 +92,7 @@ public class AutoSavingCacheTest
         for (SSTableReader sstable : cfs.getLiveSSTables())
             sstable.getPosition(Util.dk("key1"), SSTableReader.Operator.EQ);
 
-        AutoSavingCache<KeyCacheKey, RowIndexEntry> keyCache = CacheService.instance.keyCache;
+        AutoSavingCache<KeyCacheKey, AbstractRowIndexEntry> keyCache = CacheService.instance.keyCache;
 
         // serialize to file
         keyCache.submitWrite(keyCache.size()).get();

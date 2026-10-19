@@ -18,16 +18,15 @@
 package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
-import java.util.List;
-import java.nio.ByteBuffer;
 
+import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 
@@ -102,6 +101,17 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
         class FilterNotIndexed extends Transformation
         {
             @Override
+            protected RegularAndStaticColumns applyToPartitionColumns(RegularAndStaticColumns columns)
+            {
+                // The rows and the static row are filtered with the column filter below, so the columns advertised
+                // by the resulting iterator must be the fetched ones. Keeping the columns of the source iterator (for
+                // instance all the table columns when the source is a full partition read done to populate the row
+                // cache) would make the result claim columns the column filter does not fetch, which breaks the
+                // serialization of the read response (see Columns.Serializer#serializeSubset).
+                return columnFilter.fetchedColumns();
+            }
+
+            @Override
             public Row applyToRow(Row row)
             {
                 return tester.includes(row.clustering()) ? row.filter(columnFilter, iterator.metadata()) : null;
@@ -126,15 +136,9 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
         return partition.unfilteredIterator(columnFilter, slices, reversed);
     }
 
-    public boolean shouldInclude(SSTableReader sstable)
+    public boolean intersects(ClusteringComparator comparator, Slice slice)
     {
-        List<ByteBuffer> minClusteringValues = sstable.getSSTableMetadata().minClusteringValues;
-        List<ByteBuffer> maxClusteringValues = sstable.getSSTableMetadata().maxClusteringValues;
-
-        if (minClusteringValues.isEmpty() || maxClusteringValues.isEmpty())
-            return true;
-
-        return slices.intersects(minClusteringValues, maxClusteringValues);
+        return slices.intersects(slice);
     }
 
     public String toString(TableMetadata metadata)
@@ -142,16 +146,13 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
         return String.format("slice(slices=%s, reversed=%b)", slices, reversed);
     }
 
-    public String toCQLString(TableMetadata metadata)
+    @Override
+    public String toCQLString(TableMetadata metadata, RowFilter rowFilter, Redaction redaction)
     {
-        StringBuilder sb = new StringBuilder();
-
-        if (!selectsAllPartition())
-            sb.append(slices.toCQLString(metadata));
-
-        appendOrderByToCQLString(metadata, sb);
-
-        return sb.toString();
+        CqlBuilder builder = new CqlBuilder();
+        builder.append(slices.toCQLString(metadata, rowFilter, redaction));
+        appendOrderByToCQLString(metadata, builder);
+        return builder.toString();
     }
 
     public Kind kind()

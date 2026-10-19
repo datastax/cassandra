@@ -20,30 +20,57 @@
  */
 package org.apache.cassandra.index;
 
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.CassandraWriteContext;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.RangeTombstone;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.WriteContext;
+import org.apache.cassandra.db.WriteOptions;
+import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CollatedViewIndexBuilder;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.transactions.IndexTransaction;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
-import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ClientState;
 
 /**
  * Consisting of a top level Index interface and two sub-interfaces which handle read and write operations,
@@ -59,35 +86,35 @@ import org.apache.cassandra.schema.IndexMetadata;
  *          in the base table.
  * Searcher: performs queries against the index based on a predicate defined in a RowFilter. An instance
  *          is expected to be single use, being involved in the execution of a single ReadCommand.
- *
+ * </p>
  * The main interface includes factory methods for obtaining instances of both of the sub-interfaces;
- *
+ * </p>
  * The methods defined in the top level interface can be grouped into 3 categories:
- *
+ * </p>
  * Management Tasks:
- * This group of methods is primarily concerned with maintenance of secondary indexes are are mainly called from
+ * This group of methods is primarily concerned with maintenance of secondary indexes are mainly called from
  * SecondaryIndexManager. It includes methods for registering and un-registering an index, performing maintenance
  * tasks such as (re)building an index from SSTable data, flushing, invalidating and so forth, as well as some to
- * retrieve general metadata about the index (index name, any internal tables used for persistence etc).
+ * retrieve general metadata about the index (index name, any internal tables used for persistence etc.).
  * Several of these maintenance functions have a return type of {@code Callable<?>}; the expectation for these methods is
  * that any work required to be performed by the method be done inside the Callable so that the responsibility for
  * scheduling its execution can rest with SecondaryIndexManager. For instance, a task like reloading index metadata
  * following potential updates caused by modifications to the base table may be performed in a blocking way. In
  * contrast, adding a new index may require it to be built from existing SSTable data, a potentially expensive task
  * which should be performed asynchronously.
- *
+ * </p>
  * Index Selection:
  * There are two facets to index selection, write time and read time selection. The former is concerned with
  * identifying whether an index should be informed about a particular write operation. The latter is about providing
  * means to use the index for search during query execution.
- *
+ * </p>
  * Validation:
  * Values that may be written to an index are checked as part of input validation, prior to an update or insert
  * operation being accepted.
- *
+ * </p>
  *
  * Sub-interfaces:
- *
+ * </p>
  * Update processing:
  * Indexes are subscribed to the stream of events generated by modifications to the base table. Subscription is
  * done via first registering the Index with the base table's SecondaryIndexManager. For each partition update, the set
@@ -99,7 +126,7 @@ import org.apache.cassandra.schema.IndexMetadata;
  * discarded by the SecondaryIndexManager. Indexer instances are never re-used by SecondaryIndexManager and the
  * expectation is that each call to indexerFor should return a unique instance, or at least if instances can
  * be recycled, that a given instance is only used to process a single partition update at a time.
- *
+ * </p>
  * Search:
  * Each query (i.e. a single ReadCommand) that uses indexes will use a single instance of Index.Searcher. As with
  * processing of updates, an Index must be registered with the primary table's SecondaryIndexManager to be able to
@@ -113,9 +140,9 @@ import org.apache.cassandra.schema.IndexMetadata;
  * {@code java.util.functions.BiFunction<PartitionIterator, RowFilter, PartitionIterator>}, that is a function which takes as
  * arguments a PartitionIterator (containing the reconciled result rows) and a RowFilter (from the ReadCommand being
  * executed) and returns another iterator of partitions, possibly having transformed the initial results in some way.
- * The post processing function is obtained from the Index's postProcessorFor method; the built-in indexes which ship
+ * The post-processing function is obtained from the Index's postProcessorFor method; the built-in indexes which ship
  * with Cassandra return a no-op function here.
- *
+ * </p>
  * An optional static method may be provided to validate custom index options (two variants are supported):
  *
  * <pre>{@code public static Map<String, String> validateOptions(Map<String, String> options);}</pre>
@@ -126,19 +153,18 @@ import org.apache.cassandra.schema.IndexMetadata;
  *
  * In this version, the base table's metadata is also supplied as an argument.
  * If both overloaded methods are provided, only the one including the base table's metadata will be invoked.
- *
+ * </p>
  * The validation method should return a map containing any of the supplied options which are not valid for the
  * implementation. If the returned map is not empty, validation is considered failed and an error is raised.
  * Alternatively, the implementation may choose to throw an org.apache.cassandra.exceptions.ConfigurationException
  * if invalid options are encountered.
- *
  */
 public interface Index
 {
     /**
      * Supported loads. An index could be badly initialized and support only reads i.e.
      */
-    public enum LoadType
+    enum LoadType
     {
         READ, WRITE, ALL, NOOP;
 
@@ -159,21 +185,25 @@ public interface Index
 
     /**
      * Provider of {@code SecondaryIndexBuilder} instances. See {@code getBuildTaskSupport} and
-     * {@code SecondaryIndexManager.buildIndexesBlocking} for more detail.
+     * {@code SecondaryIndexManager} for more detail.
      */
     interface IndexBuildingSupport
     {
-        SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstables);
+        SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstables, boolean isFullRebuild);
+
+        default List<SecondaryIndexBuilder> getParallelIndexBuildTasks(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstables, boolean isFullRebuild)
+        {
+            return Collections.singletonList(getIndexBuildTask(cfs, indexes, sstables, isFullRebuild));
+        }
     }
 
     /**
      * Default implementation of {@code IndexBuildingSupport} which uses a {@code ReducingKeyIterator} to obtain a
      * collated view of the data in the SSTables.
      */
-    public static class CollatedViewIndexBuildingSupport implements IndexBuildingSupport
+    class CollatedViewIndexBuildingSupport implements IndexBuildingSupport
     {
-        @SuppressWarnings("resource")
-        public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstables)
+        public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstables, boolean isFullRebuild)
         {
             return new CollatedViewIndexBuilder(cfs, indexes, new ReducingKeyIterator(sstables), sstables);
         }
@@ -183,7 +213,7 @@ public interface Index
      * Singleton instance of {@code CollatedViewIndexBuildingSupport}, which may be used by any {@code Index}
      * implementation.
      */
-    public static final CollatedViewIndexBuildingSupport INDEX_BUILDER_SUPPORT = new CollatedViewIndexBuildingSupport();
+    CollatedViewIndexBuildingSupport INDEX_BUILDER_SUPPORT = new CollatedViewIndexBuildingSupport();
 
     /*
      * Management functions
@@ -203,7 +233,7 @@ public interface Index
     {
         return INDEX_BUILDER_SUPPORT;
     }
-    
+
     /**
      * Same as {@code getBuildTaskSupport} but can be overloaded with a specific 'recover' logic different than the index building one
      */
@@ -211,7 +241,7 @@ public interface Index
     {
         return getBuildTaskSupport();
     }
-    
+
     /**
      * Returns the type of operations supported by the index in case its building has failed and it's needing recovery.
      *
@@ -224,19 +254,37 @@ public interface Index
     }
 
     /**
+     * @return Period in millis to trigger a flush for indexes in the group. Non-positive value to disable it.
+     */
+    default int getFlushPeriodInMs()
+    {
+        return -1;
+    }
+
+    /**
+     * Returns true if index initialization should be skipped, false if it should run
+     * (via {@link #getInitializationTask()}); defaults to skipping based on {@link IndexBuildDecider#onInitialBuild()}
+     * decision.
+     */
+    default boolean shouldSkipInitialization()
+    {
+        return IndexBuildDecider.instance.onInitialBuild().skipped();
+    }
+
+    /**
      * Return a task to perform any initialization work when a new index instance is created.
      * This may involve costly operations such as (re)building the index, and is performed asynchronously
      * by SecondaryIndexManager
      * @return a task to perform any necessary initialization work
      */
-    public Callable<?> getInitializationTask();
+    Callable<?> getInitializationTask();
 
     /**
      * Returns the IndexMetadata which configures and defines the index instance. This should be the same
      * object passed as the argument to setIndexMetadata.
      * @return the index's metadata
      */
-    public IndexMetadata getIndexMetadata();
+    IndexMetadata getIndexMetadata();
 
     /**
      * Return a task to reload the internal metadata of an index.
@@ -246,7 +294,7 @@ public interface Index
      * by SecondaryIndexManager
      * @return task to be executed by the index manager during a reload
      */
-    public Callable<?> getMetadataReloadTask(IndexMetadata indexMetadata);
+    Callable<?> getMetadataReloadTask(IndexMetadata indexMetadata);
 
     /**
      * An index must be registered in order to be able to either subscribe to update events on the base
@@ -256,37 +304,81 @@ public interface Index
      * to the implementation, not the manager.
      * @param registry the index registry to register the instance with
      */
-    public void register(IndexRegistry registry);
+    void register(IndexRegistry registry);
 
     /**
-     * If the index implementation uses a local table to store its index data this method should return a
-     * handle to it. If not, an empty Optional should be returned. Typically, this is useful for the built-in
-     * Index implementations.
+     * Unregister current index when it's removed from system
+     *
+     * @param registry the index registry to unregister the instance with
+     */
+    default void unregister(IndexRegistry registry)
+    {
+        // for singleton index, the group key is the index itself
+        registry.unregisterIndex(this, new Index.Group.Key(this));
+    }
+
+    /**
+     * If the index implementation uses a local table to store its index data, this method should return a
+     * handle to it. If not, an empty {@link Optional} should be returned. This exists to support legacy
+     * implementations, and should always be empty for indexes not belonging to a {@link SingletonIndexGroup}.
+     *
      * @return an Optional referencing the Index's backing storage table if it has one, or Optional.empty() if not.
      */
-    public Optional<ColumnFamilyStore> getBackingTable();
+    Optional<ColumnFamilyStore> getBackingTable();
 
     /**
-     * Return a task which performs a blocking flush of the index's data to persistent storage.
+     * Return a task which performs a blocking flush of the index's data corresponding to the provided
+     * base table's Memtable. This may extract any necessary data from the base table's Memtable as part of the flush.
+     *
+     * This version of the method is invoked whenever we flush the base table. If the index stores no in-memory data
+     * of its own, it is safe to only implement this method.
+     *
      * @return task to be executed by the index manager to perform the flush.
      */
-    public Callable<?> getBlockingFlushTask();
+    public default Callable<?> getBlockingFlushTask(Memtable baseCfs)
+    {
+        return getBlockingFlushTask();
+    }
+
+    /**
+     * Return a task which performs a blocking flush of any in-memory index data to persistent storage,
+     * independent of any flush of the base table.
+     *
+     * Note that this method is only invoked outside of normal flushes: if there is no in-memory storage
+     * for this index, and it only extracts data on flush from the base table's Memtable, then it is safe to
+     * perform no work.
+     *
+     * @return task to be executed by the index manager to perform the flush.
+     */
+    Callable<?> getBlockingFlushTask();
 
     /**
      * Return a task which invalidates the index, indicating it should no longer be considered usable.
      * This should include an clean up and releasing of resources required when dropping an index.
      * @return task to be executed by the index manager to invalidate the index.
      */
-    public Callable<?> getInvalidateTask();
+    Callable<?> getInvalidateTask();
+
+    /**
+     * Return a task which unload the index, indicating it should no longer be considered usable.
+     * This should include a cleanup and releasing of resources required without removing files.
+     *
+     * @return task to be executed by the index manager to invalidate the index.
+     */
+    default Callable<?> getUnloadTask()
+    {
+        return () -> null;
+    }
 
     /**
      * Return a task to truncate the index with the specified truncation timestamp.
      * Called when the base table is truncated.
+     *
      * @param truncatedAt timestamp of the truncation operation. This will be the same timestamp used
      *                    in the truncation of the base table.
      * @return task to be executed by the index manager when the base table is truncated.
      */
-    public Callable<?> getTruncateTask(long truncatedAt);
+    Callable<?> getTruncateTask(long truncatedAt);
 
     /**
      * Return a task to be executed before the node enters NORMAL state and finally joins the ring.
@@ -294,7 +386,7 @@ public interface Index
      * @param hadBootstrap If the node had bootstrap before joining.
      * @return task to be executed by the index manager before joining the ring.
      */
-    default public Callable<?> getPreJoinTask(boolean hadBootstrap)
+    default Callable<?> getPreJoinTask(boolean hadBootstrap)
     {
         return null;
     }
@@ -303,25 +395,61 @@ public interface Index
      * Return true if this index can be built or rebuilt when the index manager determines it is necessary. Returning
      * false enables the index implementation (or some other component) to control if and when SSTable data is
      * incorporated into the index.
-     *
+     * <p>
      * This is called by SecondaryIndexManager in buildIndexBlocking, buildAllIndexesBlocking and rebuildIndexesBlocking
      * where a return value of false causes the index to be exluded from the set of those which will process the
      * SSTable data.
+     *
      * @return if the index should be included in the set which processes SSTable data, false otherwise.
      */
-    public boolean shouldBuildBlocking();
+    boolean shouldBuildBlocking();
+
+    /**
+     * For an index to qualify as SSTable-attached, it must do two things:
+     * <p>
+     * 1.) It must use {@link SSTableFlushObserver} to incrementally build indexes as SSTables are written. This ensures
+     *     that non-entire file streaming builds them correctly before the streaming transaction finishes. 
+     * <p> 
+     * 2.) Its implementation of {@link SecondaryIndexBuilder} must support incremental building by SSTable.
+     * 
+     * @return true if the index builds SSTable-attached on-disk components
+     */
+    default boolean isSSTableAttached()
+    {
+        return false;
+    }
 
     /**
      * Get flush observer to observe partition/cell events generated by flushing SSTable (memtable flush or compaction).
      *
      * @param descriptor The descriptor of the sstable observer is requested for.
-     * @param opType The type of the operation which requests observer e.g. memtable flush or compaction.
-     *
+     * @param tracker The {@link LifecycleNewTracker} associated with the SSTable being written
      * @return SSTable flush observer.
      */
-    default SSTableFlushObserver getFlushObserver(Descriptor descriptor, OperationType opType)
+    default SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker)
     {
         return null;
+    }
+
+    /**
+     * @param indexes the indexes to join
+     * @return a comma-separated list of alphabetically sorted unqualified index names
+     */
+    static String joinNames(Iterable<Index> indexes)
+    {
+        return IndexMetadata.joinNames(getMetadata(indexes));
+    }
+
+    /**
+     * @param indexes the indexes to get the metadata from
+     * @return the list of index metadata
+     */
+    static List<IndexMetadata> getMetadata(Iterable<Index> indexes)
+    {
+        List<IndexMetadata> metadata = new ArrayList<>();
+        for (Index index : indexes)
+            metadata.add(index.getIndexMetadata());
+        return metadata;
     }
 
     /*
@@ -339,17 +467,42 @@ public interface Index
      * @return true if the index depends on the supplied column being present; false if the column may be
      *              safely dropped or modified without adversely affecting the index
      */
-    public boolean dependsOn(ColumnMetadata column);
+    boolean dependsOn(ColumnMetadata column);
+
+    /**
+     * Called to determine whether this index can provide a searcher to execute a query on the
+     * supplied expression. This forms part of the query validation done before a CQL select
+     * statement is executed.
+     *
+     * @param expression a search query predicate
+     * @return true if this index is capable of supporting such expressions, false otherwise
+     */
+    default boolean supportsExpression(RowFilter.Expression expression)
+    {
+        return supportsExpression(expression.column(), expression.operator());
+    }
 
     /**
      * Called to determine whether this index can provide a searcher to execute a query on the
      * supplied column using the specified operator. This forms part of the query validation done
      * before a CQL select statement is executed.
+     *
      * @param column the target column of a search query predicate
      * @param operator the operator of a search query predicate
      * @return true if this index is capable of supporting such expressions, false otherwise
      */
-    public boolean supportsExpression(ColumnMetadata column, Operator operator);
+    boolean supportsExpression(ColumnMetadata column, Operator operator);
+
+    /**
+     * Returns whether this index does any kind of filtering when the query has multiple contains expressions, assuming
+     * that each of those expressions are supported as defined by {@link #supportsExpression(ColumnMetadata, Operator)}.
+     *
+     * @return {@code true} if this index uses filtering on multiple contains expressions, {@code false} otherwise
+     */
+    default boolean filtersMultipleContains()
+    {
+        return true;
+    }
 
     /**
      * If the index supports custom search expressions using the
@@ -359,10 +512,63 @@ public interface Index
      * method should return {@code}UTF8Type.instance{@code}.
      * If the index implementation does not support custom expressions, then it should
      * return null.
-     * @return an the type of custom index expressions supported by this index, or an
+     *
+     * @return the type of custom index expressions supported by this index, or an
      *         null if custom expressions are not supported.
      */
-    public AbstractType<?> customExpressionValueType();
+    AbstractType<?> customExpressionValueType();
+
+    /**
+     * If the index supports custom search expressions using the
+     * {@code SELECT * FROM table WHERE expr(index_name, expression)} syntax, this method should return a new
+     * {@link RowFilter.CustomExpression} for the specified expression value. Index implementations may provide their
+     * own implementations using method {@link RowFilter.CustomExpression#isSatisfiedBy(TableMetadata, DecoratedKey, Row)}
+     * to filter reconciled rows in the coordinator. Otherwise, the default implementation will accept all rows.
+     * See DB-2185 and DSP-16537 for further details.
+     *
+     * @param metadata the indexed table metadata
+     * @param value the custom expression value
+     * @return a custom index expression for the specified value
+     */
+    default RowFilter.CustomExpression customExpressionFor(TableMetadata metadata, ByteBuffer value)
+    {
+        return new RowFilter.CustomExpression(metadata, getIndexMetadata(), value);
+    }
+
+    /**
+     * Returns whether this index transforms the indexed column values.
+     *
+     * @return {@code true} if this index transforms the indexed column values, {@code false} otherwise
+     */
+    default boolean isAnalyzed()
+    {
+        return false;
+    }
+
+    /**
+     * Returns the {@link Analyzer} for this index, if any. If the index doesn't transform the column values,
+     * this method will return an empty optional.
+     *
+     * @return the transforming column value analyzer for the index, if any
+     */
+    default Optional<Analyzer> getAnalyzer(ByteBuffer queriedValue)
+    {
+        return Optional.empty();
+    }
+
+    /**
+     * Class representing a transformation of the indexed values done by the index.
+     * </p>
+     * This is used by the CQL operators when a filtering expression supported by an index is evaluated outside the
+     * index. It can be used to perform the same transformation on values that the index does when indexing. That way,
+     * the CQL operator can replicate the index behaviour when filtering results.
+     */
+    interface Analyzer
+    {
+        List<ByteBuffer> indexedTokens(ByteBuffer indexedValue);
+
+        List<ByteBuffer> queriedTokens();
+    }
 
     /**
      * Transform an initial RowFilter into the filter that will still need to applied
@@ -374,7 +580,7 @@ public interface Index
      * @return the (hopefully) reduced filter that would still need to be applied after
      *         the index was used to narrow the initial result set
      */
-    public RowFilter getPostIndexQueryFilter(RowFilter filter);
+    RowFilter getPostIndexQueryFilter(RowFilter filter);
 
     /**
      * Return an estimate of the number of results this index is expected to return for any given
@@ -384,7 +590,18 @@ public interface Index
      *
      * @return the estimated average number of results a Searcher may return for any given query
      */
-    public long getEstimatedResultRows();
+    long getEstimatedResultRows();
+
+    /**
+     * Check if current index is queryable based on the index status.
+     *
+     * @param status current status of the index
+     * @return true if index should be queryable, false if index should be non-queryable
+     */
+    default boolean isQueryable(Status status)
+    {
+        return true;
+    }
 
     /*
      * Input validation
@@ -396,76 +613,194 @@ public interface Index
      * will process it. The partition key as well as the clustering and
      * cell values for each row in the update may be checked by index
      * implementations
+     * 
      * @param update PartitionUpdate containing the values to be validated by registered Index implementations
-     * @throws InvalidRequestException
+     * @param state state related to the client connection
      */
-    public void validate(PartitionUpdate update) throws InvalidRequestException;
+    public void validate(PartitionUpdate update, ClientState state) throws InvalidRequestException;
+
+    /**
+     * Returns the SSTable-attached {@link Component}s created by this index.
+     *
+     * @return the SSTable components created by this index
+     */
+    default Set<Component> getComponents()
+    {
+        return Collections.emptySet();
+    }
+
+
+    /**
+     * When a secondary index is created on a column for a table with e.g. TWCS strategy,
+     * when this table contains SSTables which are evaluated as fully expired upon compaction,
+     * they are by default filtered out as they can be dropped in their entirety. However, once dropped like that,
+     * the index implementation is not notified about this fact via IndexGCTransaction as compaction on
+     * non-fully expired tables would do. This in turn means that custom index will never know that some data have
+     * been removed hence data custom index implementation is responsible for will grow beyond any limit.
+     *
+     * Override this method and return false in index implementation only in case you do not want to be notified about
+     * dropped fully-expired data. This will eventually mean that {@link Indexer#removeRow(Row)} will not be called
+     * for rows contained in fully expired table. Return true if you do want to be notified about that fact.
+     *
+     * This method returns true by default.
+     *
+     * @return true when fully expired tables should be included in compaction process, false otherwise.
+     */
+    public default boolean notifyIndexerAboutRowsInFullyExpiredSSTables()
+    {
+        return true;
+    }
 
     /*
      * Update processing
      */
 
     /**
-     * Creates an new {@code Indexer} object for updates to a given partition.
+     * An opaque handle returned by {@link #prepareWrite}, carried by the write context of the enclosing mutation
+     * and taken back by the index in {@link #indexerFor} ({@link CassandraWriteContext#takePreparedWrite}) for
+     * the same partition update, so an index can carry state from before the write is persisted to the moment
+     * its rows are applied. Cassandra never inspects it.
+     */
+    interface PreparedWrite
+    {
+    }
+
+    /**
+     * Whether this index wants {@link #prepareWrite} called. Off by default, and cached by the index manager
+     * when the index is registered, so that a table whose indexes do not use the hook pays nothing for it on
+     * the write path -- no call, no allocation. An index that overrides {@link #prepareWrite} must override
+     * this to return {@code true}, or it is never called.
+     */
+    default boolean preparesWrites()
+    {
+        return false;
+    }
+
+    /**
+     * Gives the index a look at a partition update BEFORE it is persisted anywhere on this replica: before the
+     * mutation is appended to the commit log, and before it reaches the memtable (where
+     * {@link #indexerFor} and the resulting {@link Indexer} callbacks observe it).
+     * <p>
+     * The one guarantee this ordering provides, and the reason the hook exists: if the process dies at any
+     * point after this method returns, either the write never made it to the commit log or, if it did and is
+     * replayed at the next startup, the index has already been told about it. An index that keeps its own
+     * write-ahead record of in-flight updates can therefore record the update here and treat the commit log
+     * replay as already covered, instead of having to detect and track replayed rows. Nothing has been fsync'd
+     * when this runs; an index that needs its own record durable before Cassandra's must arrange that itself,
+     * off the mutation thread.
+     * <p>
+     * Called, when {@link #preparesWrites} is true, for every update applied on the write path -- client writes,
+     * hints, read repair, batchlog replay, paxos commits, and the commit log replay itself -- with the
+     * {@link WriteOptions} the mutation is applied with, so an index can tell those apart (a replayed mutation,
+     * {@link WriteOptions#FOR_COMMITLOG_REPLAY}, was already prepared when it was first written). Not called for
+     * updates that skip indexing, nor while the index is not writable. The writability test is the one
+     * {@link #indexerFor} is later gated by, but it is evaluated twice, at each end of the write: an index that
+     * becomes writable in between is asked for an {@link Indexer} it was not prepared for, and its
+     * {@link CassandraWriteContext#takePreparedWrite} then returns null. An index must accept an Indexer with no
+     * handle; it can rely on every handle it did return reaching exactly one of the two outcomes below.
+     * <p>
+     * Runs on the mutation thread, before the write, while the keyspace's write order group is held: it must be
+     * fast, and it must not wait on anything the write path itself produces (a flush barrier, an fsync of this
+     * mutation). A thrown exception fails the write before anything is persisted; the handles other indexes
+     * returned for the same mutation are then {@linkplain #abortWrite aborted}. The default does nothing and
+     * returns {@code null}.
+     * <p>
+     * The handle returned here travels in the mutation's {@link CassandraWriteContext}, from which the index takes
+     * it back in {@link #indexerFor} with {@link CassandraWriteContext#takePreparedWrite}. It is handed to exactly
+     * one of those two outcomes: taken there, or {@linkplain #abortWrite aborted} because the update is never
+     * applied to this index -- never both, never neither.
+     *
+     * @param update the partition update about to be written
+     * @param options the options the enclosing mutation is applied with
+     * @param origin where the enclosing mutation came from (never null on this path)
+     * @return a handle the index will take back from the write context when the update is applied, or
+     * {@code null} if the index has nothing to carry over
+     */
+    default PreparedWrite prepareWrite(PartitionUpdate update, WriteOptions options, WriteOrigin origin)
+    {
+        return null;
+    }
+
+    /**
+     * Tells the index that a handle {@link #prepareWrite} returned was NOT taken back in {@link #indexerFor}:
+     * the write failed between the two (another index's {@code prepareWrite} threw, the commit log append
+     * failed, the memtable apply of an earlier update of the same mutation failed), the update was dropped
+     * because its table no longer exists, the index is no longer writable so it was not asked for an indexer,
+     * or the index's own {@code indexerFor} simply did not take it. Whatever {@code prepareWrite} recorded for
+     * the update should be undone: as far as this replica is concerned the write never happened. Runs on the
+     * mutation thread when the write context is closed. The default does nothing.
+     *
+     * @param prepared the handle {@link #prepareWrite} returned, never null
+     */
+    default void abortWrite(PreparedWrite prepared)
+    {
+    }
+
+    /**
+     * Creates a new {@code Indexer} object for updates to a given partition.
      *
      * @param key key of the partition being modified
      * @param columns the regular and static columns the created indexer will have to deal with.
      * This can be empty as an update might only contain partition, range and row deletions, but
      * the indexer is guaranteed to not get any cells for a column that is not part of {@code columns}.
      * @param nowInSec current time of the update operation
-     * @param ctx WriteContext spanning the update operation
+     * @param ctx WriteContext spanning the update operation. On the write path it is the
+     *            {@link CassandraWriteContext} of the enclosing mutation, carrying what {@link #prepareWrite}
+     *            returned for this update: an index that prepares writes takes its handle back with
+     *            {@link CassandraWriteContext#takePreparedWrite}.
      * @param transactionType indicates what kind of update is being performed on the base data
      *                        i.e. a write time insert/update/delete or the result of compaction
+     * @param memtable current memtable that the write goes into. It's to make sure memtable and index memtable
+     *                 are in sync.
      * @return the newly created indexer or {@code null} if the index is not interested by the update
      * (this could be because the index doesn't care about that particular partition, doesn't care about
      * that type of transaction, ...).
      */
     public Indexer indexerFor(DecoratedKey key,
                               RegularAndStaticColumns columns,
-                              int nowInSec,
+                              long nowInSec,
                               WriteContext ctx,
-                              IndexTransaction.Type transactionType);
+                              IndexTransaction.Type transactionType,
+                              Memtable memtable);
 
     /**
      * Listener for processing events emitted during a single partition update.
      * Instances of this are responsible for applying modifications to the index in response to a single update
      * operation on a particular partition of the base table.
-     *
+     * </p>
      * That update may be generated by the normal write path, by iterating SSTables during streaming operations or when
      * building or rebuilding an index from source. Updates also occur during compaction when multiple versions of a
      * source partition from different SSTables are merged.
-     *
+     * </p>
      * Implementations should not make assumptions about resolution or filtering of the partition update being
      * processed. That is to say that it is possible for an Indexer instance to receive notification of a
      * PartitionDelete or RangeTombstones which shadow a Row it then receives via insertRow/updateRow.
-     *
+     * </p>
      * It is important to note that the only ordering guarantee made for the methods here is that the first call will
      * be to begin() and the last call to finish(). The other methods may be called to process update events in any
      * order. This can also include duplicate calls, in cases where a memtable partition is under contention from
      * several updates. In that scenario, the same set of events may be delivered to the Indexer as memtable update
      * which failed due to contention is re-applied.
      */
-    public interface Indexer
+    interface Indexer
     {
         /**
          * Notification of the start of a partition update.
          * This event always occurs before any other during the update.
          */
-        public void begin();
+        default void begin() {}
 
         /**
          * Notification of a top level partition delete.
-         * @param deletionTime
          */
-        public void partitionDelete(DeletionTime deletionTime);
+        default void partitionDelete(DeletionTime deletionTime) {}
 
         /**
          * Notification of a RangeTombstone.
          * An update of a single partition may contain multiple RangeTombstones,
          * and a notification will be passed for each of them.
-         * @param tombstone
          */
-        public void rangeTombstone(RangeTombstone tombstone);
+        default void rangeTombstone(RangeTombstone tombstone) {}
 
         /**
          * Notification that a new row was inserted into the Memtable holding the partition.
@@ -475,7 +810,7 @@ public interface Index
          *
          * @param row the Row being inserted into the base table's Memtable.
          */
-        public void insertRow(Row row);
+        default void insertRow(Row row) {}
 
         /**
          * Notification of a modification to a row in the base table's Memtable.
@@ -496,13 +831,13 @@ public interface Index
          * @param newRowData data that was not present in the existing row and is being inserted
          *                   into the base table's Memtable
          */
-        public void updateRow(Row oldRowData, Row newRowData);
+        default void updateRow(Row oldRowData, Row newRowData) {}
 
         /**
          * Notification that a row was removed from the partition.
          * Note that this is only called as part of either a compaction or a cleanup.
          * This context is indicated by the TransactionType supplied to the indexerFor method.
-         *
+         * </p>
          * As with updateRow, it cannot be guaranteed that all data belonging to the Clustering
          * of the supplied Row has been removed (although in the case of a cleanup, that is the
          * ultimate intention).
@@ -514,13 +849,13 @@ public interface Index
          *
          * @param row data being removed from the base table
          */
-        public void removeRow(Row row);
+        default void removeRow(Row row) {}
 
         /**
          * Notification of the end of the partition update.
          * This event always occurs after all others for the particular update.
          */
-        public void finish();
+        default void finish() {}
     }
 
     /*
@@ -529,11 +864,8 @@ public interface Index
 
     /**
      * Used to validate the various parameters of a supplied {@code}ReadCommand{@code},
-     * this is called prior to execution. In theory, any command instance may be checked
-     * by any {@code}Index{@code} instance, but in practice the index will be the one
-     * returned by a call to the {@code}getIndex(ColumnFamilyStore cfs){@code} method on
-     * the supplied command.
-     *
+     * this is called prior to execution.
+     * </p>
      * Custom index implementations should perform any validation of query expressions here and throw a meaningful
      * InvalidRequestException when any expression or other parameter is invalid.
      *
@@ -547,7 +879,7 @@ public interface Index
 
     /**
      * Tells whether this index supports replica fitering protection or not.
-     *
+     * </p>
      * Replica filtering protection might need to run the query row filter in the coordinator to detect stale results.
      * An index implementation will be compatible with this protection mechanism if it returns the same results for the
      * row filter as CQL will return with {@code ALLOW FILTERING} and without using the index. This means that index
@@ -563,40 +895,481 @@ public interface Index
     }
 
     /**
-     * Return a function which performs post processing on the results of a partition range read command.
-     * In future, this may be used as a generalized mechanism for transforming results on the coordinator prior
-     * to returning them to the caller.
-     *
-     * This is used on the coordinator during execution of a range command to perform post
-     * processing of merged results obtained from the necessary replicas. This is the only way in which results are
-     * transformed in this way but this may change over time as usage is generalized.
-     * See CASSANDRA-8717 for further discussion.
-     *
-     * The function takes a PartitionIterator of the results from the replicas which has already been collated
-     * and reconciled, along with the command being executed. It returns another PartitionIterator containing the results
-     * of the transformation (which may be the same as the input if the transformation is a no-op).
-     */
-    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command);
-
-    /**
      * Factory method for query time search helper.
      *
      * @param command the read command being executed
-     * @return an Searcher with which to perform the supplied command
+     * @return a Searcher with which to perform the supplied command
      */
-    public Searcher searcherFor(ReadCommand command);
+    Searcher searcherFor(ReadCommand command);
 
     /**
      * Performs the actual index lookup during execution of a ReadCommand.
      * An instance performs its query according to the RowFilter.Expression it was created for (see searcherFor)
      * An Expression is a predicate of the form [column] [operator] [value].
      */
-    public interface Searcher
+    interface Searcher
     {
+        /**
+         * Returns the {@link ReadCommand} for which this searcher has been created.
+         *
+         * @return the base read command
+         */
+        ReadCommand command();
+
         /**
          * @param executionController the collection of OpOrder.Groups which the ReadCommand is being performed under.
          * @return partitions from the base table matching the criteria of the search.
          */
-        public UnfilteredPartitionIterator search(ReadExecutionController executionController);
+        UnfilteredPartitionIterator search(ReadExecutionController executionController);
+
+        /**
+         * Returns a supplier for the custom {@link Monitorable.ExecutionInfo} for this query, to be used by
+         * {@link ReadCommand#executionInfo()} at the end of the query to collect details about the query execution in
+         * case it is considered too slow.
+         *
+         * @return a supplier for the execution info for this query, or {@code null} if no custom execution info is available
+         */
+        @Nullable
+        default Supplier<Monitorable.ExecutionInfo> monitorableExecutionInfo()
+        {
+            return null;
+        }
+    }
+
+    /**
+     * Class providing grouped operations for indexes that communicate with each other.
+     * </p>
+     * Index implementations should provide a {@code Group} implementation calling to
+     * {@link IndexRegistry#registerIndex(Index, Key, Supplier)}
+     * at {@link #register(IndexRegistry)} method and provide {@code groupKey} calling to
+     * {@link IndexRegistry#unregisterIndex(Index, Key)} during index unregistering
+     * at {@link #unregister(IndexRegistry)} method
+     */
+    interface Group
+    {
+        /**
+         * Group key is used to uniquely identify a {@link Group} within a table
+         */
+        class Key
+        {
+            private final Object object;
+
+            public Key(Object object)
+            {
+                this.object = object;
+            }
+
+            @Override
+            public boolean equals(Object o)
+            {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                Key key = (Key) o;
+                return Objects.equals(object, key.object);
+            }
+
+            @Override
+            public int hashCode()
+            {
+                return Objects.hash(object);
+            }
+        }
+
+        /**
+         * Returns the indexes that are members of this group.
+         *
+         * @return the indexes that are members of this group
+         */
+        Set<? extends Index> getIndexes();
+
+        /**
+         * Adds the specified {@link Index} as a member of this group.
+         *
+         * @param index the index to be added
+         */
+        default void addIndex(Index index)
+        {}
+
+        /**
+         * Removes the specified {@link Index} from the members of this group.
+         *
+         * @param index the index to be removed
+         */
+        default void removeIndex(Index index)
+        {}
+
+        /**
+         * Returns if this group contains the specified {@link Index}.
+         *
+         * @param index the index to be removed
+         * @return {@code true} if this group contains {@code index}, {@code false} otherwise
+         */
+        boolean containsIndex(Index index);
+
+        /**
+         * Returns whether this group can only ever contain a single index.
+         *
+         * @return {@code true} if this group only contains a single index, {@code false} otherwise
+         */
+        default boolean isSingleton()
+        {
+            return true;
+        }
+
+        /**
+         * Creates an new {@code Indexer} object for updates to a given partition.
+         *
+         * @param indexSelector a predicate selecting the targeted members
+         * @param key key of the partition being modified
+         * @param columns the regular and static columns the created indexer will have to deal with.
+         * This can be empty as an update might only contain partition, range and row deletions, but
+         * the indexer is guaranteed to not get any cells for a column that is not part of {@code columns}.
+         * @param nowInSec current time of the update operation
+         * @param ctx WriteContext spanning the update operation
+         * @param transactionType indicates what kind of update is being performed on the base data
+         *                        i.e. a write time insert/update/delete or the result of compaction
+         * @param memtable the {@link Memtable} to which the updates are being applied or {@code null}
+         *                 if the source of the updates is an existing {@link SSTable}
+         *
+         * @return the newly created indexer or {@code null} if the index is not interested by the update
+         * (this could be because the index doesn't care about that particular partition, doesn't care about
+         * that type of transaction, ...).
+         */
+        Indexer indexerFor(Predicate<Index> indexSelector,
+                           DecoratedKey key,
+                           RegularAndStaticColumns columns,
+                           long nowInSec,
+                           WriteContext ctx,
+                           IndexTransaction.Type transactionType,
+                           Memtable memtable);
+
+        /**
+         * Returns a new {@link QueryPlan} for the specified {@link RowFilter}, or {@code null} if none of the indexes in
+         * this group supports the expression in the row filter.
+         *
+         * @param rowFilter a row filter
+         * @return a new query plan for the specified {@link RowFilter} if it's supported, {@code null} otherwise
+         */
+        @Nullable
+        QueryPlan queryPlanFor(RowFilter rowFilter);
+
+        /**
+         * Get flush observer to observe partition/cell events generated by flushing SSTable (memtable flush or compaction).
+         *
+         * @param descriptor    The descriptor of the sstable observer is requested for.
+         * @param tracker       The {@link LifecycleNewTracker} associated with the SSTable being written
+         * @param tableMetadata The immutable metadata of the table at the moment the SSTable is flushed
+         * @param keyCount      The estimated number of keys in the sstable being flushed
+         * @return SSTable flush observer.
+         */
+        SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount);
+
+        /**
+         * @param type index transaction type
+         * @return true if index will be able to handle given index transaction type
+         */
+        default boolean handles(IndexTransaction.Type type)
+        {
+            return true;
+        }
+
+        /**
+         * Called when the table associated with this group has been invalidated or all indexes in the group are removed.
+         * Implementations should dispose of any resources tied to the lifecycle of the {@link Group}.
+         */
+        default void invalidate() { }
+
+        /**
+         * Called when the table associated with this group has been unloaded. Implementations
+         * should dispose of any resources tied to the lifecycle of the {@link Group} without removing index files.
+         */
+        default void unload() { }
+
+        /**
+         * Returns the set of sstable-attached components that this group will create for a newly flushed sstable.
+         * </p>
+         * Note that the result of this method is only valid for newly flushed/written sstables as the components
+         * returned will assume a version of {@link Version#current(String)} and a generation of 0. SSTables for which
+         * some index have been rebuild may have index components that do not match what this method return in
+         * particular.
+         */
+        Set<Component> componentsForNewSSTable();
+
+        /**
+         * Return the set of sstable-attached components belonging to the group that are currently "active" for the
+         * provided sstable.
+         * <p>
+         * The "active" components are the components that are currently in use, meaning that if a given component
+         * of the sstable exists with multiple versions or generation on disk, only the most recent version/generation
+         * is the active one.
+         *
+         * @param sstable the sstable to get components for.
+         * @return the set of the sstable-attached components of the provided sstable for this group.
+         */
+        Set<Component> activeComponents(SSTableReader sstable);
+
+        /**
+         * @return true if this index group is capable of supporting multiple contains restrictions, false otherwise
+         */
+        default boolean supportsMultipleContains()
+        {
+            return false;
+        }
+
+        /**
+         * @return true is this index group supports disjunction queries of "a = 1 OR a = 2" or "a IN (1, 2)"
+         */
+        default boolean supportsDisjunction()
+        {
+            return false;
+        }
+
+        /**
+         * Validates all indexes in the group against the specified SSTables.
+         *
+         * @param sstables SSTables for which indexes in the group should be built
+         * @param throwOnIncomplete whether to throw an error if any index in the group is incomplete
+         * @param validateChecksum whether checksum will be tested as part of the validation
+         *
+         * @return true if all indexes in the group are complete and valid
+         *         false if any index is incomplete and {@code throwOnIncomplete} is false
+         *
+         * @throws IllegalStateException if {@code throwOnIncomplete} is true and any index in the group is incomplete
+         * @throws UncheckedIOException if there is a problem validating any on-disk component of an index in the group
+         */
+        default boolean validateSSTableAttachedIndexes(Collection<SSTableReader> sstables, boolean throwOnIncomplete, boolean validateChecksum)
+        {
+            return true;
+        }
+
+        /**
+         * Whether this index group supports sharding when flushing memtables, e.g. level 0 of UCS.
+         * @return true iff all indexes in the group support L0 sharding.
+         */
+        default boolean supportsL0Shards()
+        {
+            return true;
+        }
+    }
+
+    /**
+     * Specifies a set of compatible indexes to be used with a query according to its {@link RowFilter}, ignoring data
+     * ranges, limits, etc. All the indexes in it should belong to the same {@link Group}.
+     * <p>
+     * It's created by {@link Group#queryPlanFor} from the {@link RowFilter} that is common to all the subcommands of a
+     * user query's {@link ReadCommand}, so it can be reused by those subcommands along the cluster nodes. The
+     * {@link #searcherFor(ReadCommand)} method provides the {@link Searcher} object to read the index for each
+     * particular (sub)command.
+     */
+    interface QueryPlan extends Comparable<QueryPlan>
+    {
+        /**
+         * Returns the indexes selected by this query plan, all of them belonging to the same {@link Group}.
+         * It should never be empty.
+         *
+         * @return the indexes selected by this query plan, which is never empty
+         */
+        Set<Index> getIndexes();
+
+        /**
+         * Returns the first index in this plan.
+         *
+         * @return the first index
+         */
+        @Nonnull
+        default Index getFirst()
+        {
+            return getIndexes().iterator().next();
+        }
+
+        /**
+         * Return an estimate of the number of results this plan is expected to return for any given {@link ReadCommand}
+         * that it can be used to answer. Used by  {@link SecondaryIndexManager#getBestIndexQueryPlanFor(RowFilter)}
+         * to determine the {@link Group} with the most selective plan for a given {@link RowFilter}.
+         * Additionally, this is also used by StorageProxy.estimateResultsPerRange to calculate the initial concurrency
+         * factor for range requests.
+         * </p>
+         * Please note that some index implementations (SAI) will always return -1 for that method to
+         * prioritize themselves. Third party implementations can also return similar fixed values. See CNDB-14764 for
+         * details.
+         *
+         * @return the estimated average number of results a Searcher may return for any given command
+         */
+        default long getEstimatedResultRows()
+        {
+            // CQL only supports AND expressions, so the estimated number of results for multiple indexes will be the
+            // lowest of the estimates for each index
+            return getIndexes().stream()
+                               .mapToLong(Index::getEstimatedResultRows)
+                               .min()
+                               .orElseThrow(AssertionError::new); // registered groups are never empty
+        }
+
+        /**
+         * Used to determine whether to estimate initial concurrency during remote range reads. Default is true, each
+         * implementation must override this method if they choose a different strategy.
+         *
+         * @return true if the {@link QueryPlan} should estimate initial concurrency, false otherwise
+         */
+        default boolean shouldEstimateInitialConcurrency()
+        {
+            return true;
+        }
+
+        @Override
+        default int compareTo(QueryPlan other)
+        {
+            // initially, we prefer the plan with less estimated results
+            int results = Long.compare(getEstimatedResultRows(), other.getEstimatedResultRows());
+            if (results != 0)
+                return results;
+
+            // In case of having the same number of estimated results, we favour the plan that involves more indexes.
+            // This way, we honour the possible absence of ALLOW FILTERING in the CQL query. Also, this criteria should
+            // not break the transitivity of this method because the estimated number of results for a plan is the
+            // minimum of the estimates of its members.
+            return Integer.compare(getIndexes().size(), other.getIndexes().size());
+        }
+
+        /**
+         * Used to validate the various parameters of a supplied {@link ReadCommand} against the indexes in this plan.
+         *
+         * @param command a ReadCommand whose parameters are to be verified
+         * @throws InvalidRequestException if the details of the command fail to meet the validation rules of the
+         * indexes in the query plan
+         */
+        default void validate(ReadCommand command) throws InvalidRequestException
+        {
+            getIndexes().forEach(i -> i.validate(command));
+        }
+
+        /**
+         * Factory method for query time search helper.
+         *
+         * @param command the read command being executed
+         * @return an Searcher with which to perform the supplied command
+         */
+        Searcher searcherFor(ReadCommand command);
+
+        /**
+         * Return a function which performs post-processing on the results of a partition range read command.
+         * In the future, this may be used as a generalized mechanism for transforming results on the coordinator prior
+         * to returning them to the caller.
+         * </p>
+         * This is used on the coordinator during execution of a range command to perform post-processing of merged
+         * results obtained from the necessary replicas. This is the only way in which results are
+         * transformed in this way but this may change over time as usage is generalized.
+         * See CASSANDRA-8717 for further discussion.
+         * </p>
+         * The function takes a PartitionIterator of the results from the replicas which has already been collated
+         * and reconciled, along with the command being executed. It returns another PartitionIterator containing the
+         * results of the transformation (which may be the same as the input if the transformation is a no-op).
+         *
+         * @param command the read command being executed
+         */
+        default Function<PartitionIterator, PartitionIterator> postProcessor(ReadCommand command)
+        {
+            return partitions -> partitions;
+        }
+
+        /**
+         * Transform an initial {@link RowFilter} into the filter that will still need to applied to a set of Rows after
+         * the index has performed its initial scan.
+         * </p>
+         * Used in {@link ReadCommand#executeLocally(ReadExecutionController)} to reduce the amount of filtering
+         * performed on the results of the index query.
+         *
+         * @return the (hopefully) reduced filter that would still need to be applied after
+         *         the index was used to narrow the initial result set
+         */
+        RowFilter postIndexQueryFilter();
+
+
+        /**
+         * Tells whether this index supports replica fitering protection or not.
+         *
+         * Replica filtering protection might need to run the query row filter in the coordinator to detect stale results.
+         * An index implementation will be compatible with this protection mechanism if it returns the same results for the
+         * row filter as CQL will return with {@code ALLOW FILTERING} and without using the index. This means that index
+         * implementations using custom query syntax or applying transformations to the indexed data won't support it.
+         * See CASSANDRA-8272 for further details.
+         *
+         * @param rowFilter rowFilter of query to decide if it supports replica filtering protection or not
+         * @return true if this index supports replica filtering protection, false otherwise
+         */
+        default boolean supportsReplicaFilteringProtection(RowFilter rowFilter)
+        {
+            return true;
+        }
+
+        /**
+         * @return true if given index query plan is a top-k request
+         */
+        default boolean isTopK()
+        {
+            return false;
+        }
+        
+        /**
+         * @return true if the indexes in this plan support querying multiple vnode ranges at once.
+         */
+        default boolean supportsMultiRangeReadCommand()
+        {
+            return false;
+        }
+
+        /**
+         * @return {@code true} if this plan is a BM25 request, {@code false} otherwise
+         */
+        default boolean isBM25()
+        {
+            return false;
+        }
+
+        /**
+         * @return {@code true} if this plan uses index-based filtering, {@code false} otherwise
+         */
+        default boolean usesIndexFiltering()
+        {
+            return true;
+        }
+    }
+
+    /*
+     * Status of index used to determine queryability
+     */
+    enum Status
+    {
+        UNKNOWN(0),
+        FULL_REBUILD_STARTED(1),
+        BUILD_FAILED(2),
+        BUILD_SUCCEEDED(3),
+        DROPPED(4);
+
+        public final int code;
+
+        Status(int code)
+        {
+            this.code = code;
+        }
+
+        static Status fromCode(int code)
+        {
+            switch (code)
+            {
+                case 0:
+                    return UNKNOWN;
+                case 1:
+                    return FULL_REBUILD_STARTED;
+                case 2:
+                    return BUILD_FAILED;
+                case 3:
+                    return BUILD_SUCCEEDED;
+                case 4:
+                    return DROPPED;
+            }
+
+            throw new IllegalArgumentException("Unrecognized code: " + code);
+        }
     }
 }

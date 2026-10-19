@@ -26,10 +26,11 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.SchemaLoader.standardCFMD;
@@ -48,7 +49,7 @@ public class OptionalTasksTest
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE, KeyspaceParams.simple(1), standardCFMD(KEYSPACE, TABLE));
     }
-    
+
     @Test
     public void shouldIgnoreDroppedKeyspace()
     {
@@ -56,23 +57,24 @@ public class OptionalTasksTest
         TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
         ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(Objects.requireNonNull(metadata).id);
         Objects.requireNonNull(cfs).metric.coordinatorReadLatency.update(100, TimeUnit.NANOSECONDS);
-        
+
         // Remove the Keyspace name to make it invisible to the updater...
-        Keyspace removed = Schema.instance.removeKeyspaceInstance(KEYSPACE);
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(KEYSPACE);
+        SchemaTestUtil.dropKeyspaceIfExist(KEYSPACE, true);
 
         try
         {
-            long originalValue = cfs.sampleReadLatencyNanos;
+            long originalValue = cfs.sampleReadLatencyMicros;
 
             // ...and ensure that the speculation threshold updater doesn't run.
             SPECULATION_THRESHOLD_UPDATER.run();
 
-            assertEquals(originalValue, cfs.sampleReadLatencyNanos);
+            assertEquals(originalValue, cfs.sampleReadLatencyMicros);
         }
         finally
         {
             // Restore the removed Keyspace to put things back the way we found them.
-            Schema.instance.storeKeyspaceInstance(removed);
+            SchemaTestUtil.addOrUpdateKeyspace(ksm, true);
         }
     }
 
@@ -84,11 +86,11 @@ public class OptionalTasksTest
         ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(Objects.requireNonNull(metadata).id);
         Objects.requireNonNull(cfs).metric.coordinatorReadLatency.update(100, TimeUnit.NANOSECONDS);
 
-        long originalValue = cfs.sampleReadLatencyNanos;
-        
+        long originalValue = cfs.sampleReadLatencyMicros;
+
         // ...and ensure that the speculation threshold updater runs.
         SPECULATION_THRESHOLD_UPDATER.run();
-        
-        assertNotEquals(originalValue, cfs.sampleReadLatencyNanos);
+
+        assertNotEquals(originalValue, cfs.sampleReadLatencyMicros);
     }
 }

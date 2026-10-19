@@ -18,35 +18,37 @@
 
 package org.apache.cassandra.db.lifecycle;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.junit.Assert;
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
 import org.apache.cassandra.db.compaction.CompactionController;
 import org.apache.cassandra.db.compaction.CompactionIterator;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.CQLSSTableWriter;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
+import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.apache.cassandra.db.lifecycle.LogTransactionTest.getAllFilePaths;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -81,11 +83,11 @@ public class RealTransactionsTest extends SchemaLoader
         SSTableReader oldSSTable = getSSTable(cfs, 1);
         LifecycleTransaction txn = cfs.getTracker().tryModify(oldSSTable, OperationType.COMPACTION);
         SSTableReader newSSTable = replaceSSTable(cfs, txn, false);
-        LogTransaction.waitForDeletions();
+        LifecycleTransaction.waitForDeletions();
 
         // both sstables are in the same folder
-        assertFiles(oldSSTable.descriptor.directory.getPath(), new HashSet<>(newSSTable.getAllFilePaths()));
-        assertFiles(newSSTable.descriptor.directory.getPath(), new HashSet<>(newSSTable.getAllFilePaths()));
+        assertFiles(oldSSTable.descriptor.directory, getAllFilePaths(newSSTable));
+        assertFiles(newSSTable.descriptor.directory, getAllFilePaths(newSSTable));
     }
 
     @Test
@@ -98,9 +100,9 @@ public class RealTransactionsTest extends SchemaLoader
         LifecycleTransaction txn = cfs.getTracker().tryModify(oldSSTable, OperationType.COMPACTION);
 
         replaceSSTable(cfs, txn, true);
-        LogTransaction.waitForDeletions();
+        LifecycleTransaction.waitForDeletions();
 
-        assertFiles(oldSSTable.descriptor.directory.getPath(), new HashSet<>(oldSSTable.getAllFilePaths()));
+        assertFiles(oldSSTable.descriptor.directory, getAllFilePaths(oldSSTable));
     }
 
     @Test
@@ -111,8 +113,8 @@ public class RealTransactionsTest extends SchemaLoader
 
         SSTableReader ssTableReader = getSSTable(cfs, 100);
 
-        String dataFolder = cfs.getLiveSSTables().iterator().next().descriptor.directory.getPath();
-        assertFiles(dataFolder, new HashSet<>(ssTableReader.getAllFilePaths()));
+        File dataFolder = cfs.getLiveSSTables().iterator().next().descriptor.directory;
+        assertFiles(dataFolder, getAllFilePaths(ssTableReader));
     }
 
     private SSTableReader getSSTable(ColumnFamilyStore cfs, int numPartitions) throws IOException
@@ -133,8 +135,8 @@ public class RealTransactionsTest extends SchemaLoader
 
         try (CQLSSTableWriter writer = CQLSSTableWriter.builder()
                                                        .inDirectory(cfs.getDirectories().getDirectoryForNewSSTables())
-                                                       .forTable(String.format(schema, cfs.keyspace.getName(), cfs.name))
-                                                       .using(String.format(query, cfs.keyspace.getName(), cfs.name))
+                                                       .forTable(String.format(schema, cfs.getKeyspaceName(), cfs.name))
+                                                       .using(String.format(query, cfs.getKeyspaceName(), cfs.name))
                                                        .build())
         {
             for (int j = 0; j < numPartitions; j ++)
@@ -147,36 +149,34 @@ public class RealTransactionsTest extends SchemaLoader
     private SSTableReader replaceSSTable(ColumnFamilyStore cfs, LifecycleTransaction txn, boolean fail)
     {
         List<SSTableReader> newsstables = null;
-        int nowInSec = FBUtilities.nowInSeconds();
+        long nowInSec = FBUtilities.nowInSeconds();
         try (CompactionController controller = new CompactionController(cfs, txn.originals(), cfs.gcBefore(FBUtilities.nowInSeconds())))
         {
             try (SSTableRewriter rewriter = SSTableRewriter.constructKeepingOriginals(txn, false, 1000);
-                 AbstractCompactionStrategy.ScannerList scanners = cfs.getCompactionStrategyManager().getScanners(txn.originals());
+                 ScannerList scanners = cfs.getCompactionStrategy().getScanners(txn.originals());
                  CompactionIterator ci = new CompactionIterator(txn.opType(), scanners.scanners, controller, nowInSec, txn.opId())
             )
             {
-                long lastCheckObsoletion = System.nanoTime();
+                long lastCheckObsoletion = nanoTime();
                 File directory = txn.originals().iterator().next().descriptor.directory;
                 Descriptor desc = cfs.newSSTableDescriptor(directory);
                 TableMetadataRef metadata = Schema.instance.getTableMetadataRef(desc);
-                rewriter.switchWriter(SSTableWriter.create(metadata,
-                                                           desc,
-                                                           0,
-                                                           0,
-                                                           null,
-                                                           false,
-                                                           0,
-                                                           SerializationHeader.make(cfs.metadata(), txn.originals()),
-                                                           cfs.indexManager.listIndexes(),
-                                                           txn));
+                rewriter.switchWriter(desc.getFormat().getWriterFactory().builder(desc)
+                                          .setTableMetadataRef(metadata)
+                                          .setSerializationHeader(SerializationHeader.make(cfs.metadata(), txn.originals()))
+                                          .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
+                                          .setMetadataCollector(new MetadataCollector(cfs.metadata().comparator))
+                                          .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                                          .build(txn, cfs));
                 while (ci.hasNext())
                 {
+                    ci.setTargetDirectory(rewriter.currentWriter().getFilename());
                     rewriter.append(ci.next());
 
-                    if (System.nanoTime() - lastCheckObsoletion > TimeUnit.MINUTES.toNanos(1L))
+                    if (nanoTime() - lastCheckObsoletion > TimeUnit.MINUTES.toNanos(1L))
                     {
                         controller.maybeRefreshOverlaps();
-                        lastCheckObsoletion = System.nanoTime();
+                        lastCheckObsoletion = nanoTime();
                     }
                 }
 
@@ -198,17 +198,15 @@ public class RealTransactionsTest extends SchemaLoader
         return null;
     }
 
-    private void assertFiles(String dirPath, Set<String> expectedFiles)
+    private void assertFiles(File dirPath, Set<File> expectedFiles)
     {
-        File dir = new File(dirPath);
-        for (File file : dir.listFiles())
+        for (File file : dirPath.tryList())
         {
             if (file.isDirectory())
                 continue;
 
-            String filePath = file.getPath();
-            assertTrue(filePath, expectedFiles.contains(filePath));
-            expectedFiles.remove(filePath);
+            assertTrue(file.toString(), expectedFiles.contains(file));
+            expectedFiles.remove(file);
         }
 
         assertTrue(expectedFiles.isEmpty());

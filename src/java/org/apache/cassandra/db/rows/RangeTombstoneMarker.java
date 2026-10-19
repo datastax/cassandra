@@ -19,15 +19,16 @@ package org.apache.cassandra.db.rows;
 
 import java.util.*;
 
+import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.utils.memory.AbstractAllocator;
+import org.apache.cassandra.utils.memory.ByteBufferCloner;
 
 /**
  * A marker for a range tombstone bound.
  * <p>
  * There is 2 types of markers: bounds (see {@link RangeTombstoneBoundMarker}) and boundaries (see {@link RangeTombstoneBoundaryMarker}).
  */
-public interface RangeTombstoneMarker extends Unfiltered
+public interface RangeTombstoneMarker extends Unfiltered, IMeasurableMemory
 {
     @Override
     public ClusteringBoundOrBoundary<?> clustering();
@@ -45,7 +46,7 @@ public interface RangeTombstoneMarker extends Unfiltered
     public ClusteringBound<?> openBound(boolean reversed);
     public ClusteringBound<?> closeBound(boolean reversed);
 
-    public RangeTombstoneMarker copy(AbstractAllocator allocator);
+    public RangeTombstoneMarker clone(ByteBufferCloner cloner);
 
     default public boolean isEmpty()
     {

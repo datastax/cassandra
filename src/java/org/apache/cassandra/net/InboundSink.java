@@ -27,7 +27,10 @@ import org.slf4j.LoggerFactory;
 import net.openhft.chronicle.core.util.ThrowingConsumer;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
+import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 /**
@@ -81,8 +84,12 @@ public class InboundSink implements InboundMessageHandlers.MessageConsumer
     {
         if (header.callBackOnFailure())
         {
-            Message response = Message.failureResponse(header.id, header.expiresAtNanos, RequestFailureReason.forException(failure));
-            messaging.send(response, header.from);
+            InetAddressAndPort to = header.respondTo() != null ? header.respondTo() : header.from;
+            Message<RequestFailureReason> response = Message.failureResponse(header.id,
+                                                                             header.expiresAtNanos,
+                                                                             RequestFailureReason.forException(failure),
+                                                                             header.verb);
+            messaging.send(response, to);
         }
     }
 
@@ -96,12 +103,24 @@ public class InboundSink implements InboundMessageHandlers.MessageConsumer
         {
             fail(message.header, t);
 
-            if (t instanceof TombstoneOverwhelmingException || t instanceof IndexNotAvailableException)
+            // The site throwing AbortedOperationException is responsible for logging it.
+            if (t instanceof AbortedOperationException)
+                return;
+
+            if (t instanceof TombstoneOverwhelmingException || 
+                t instanceof IndexNotAvailableException || 
+                t instanceof IndexBuildInProgressException)
+            {
                 noSpamLogger.error(t.getMessage());
+            }
             else if (t instanceof RuntimeException)
+            {
                 throw (RuntimeException) t;
+            }
             else
+            {
                 throw new RuntimeException(t);
+            }
         }
     }
 
@@ -120,7 +139,8 @@ public class InboundSink implements InboundMessageHandlers.MessageConsumer
         sinkUpdater.updateAndGet(this, InboundSink::clear);
     }
 
-    @Deprecated // TODO: this is not the correct way to do things
+    /** @deprecated See CASSANDRA-15066 */
+    @Deprecated(since = "4.0") // TODO: this is not the correct way to do things
     public boolean allow(Message<?> message)
     {
         return allows(sink, message);

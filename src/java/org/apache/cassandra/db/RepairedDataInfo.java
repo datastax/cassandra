@@ -22,6 +22,8 @@ import java.nio.ByteBuffer;
 import java.util.function.LongPredicate;
 import java.util.concurrent.TimeUnit;
 
+import javax.annotation.concurrent.NotThreadSafe;
+
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PurgeFunction;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -34,12 +36,30 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-class RepairedDataInfo
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+
+@NotThreadSafe
+public class RepairedDataInfo
 {
-    public static final RepairedDataInfo NULL_REPAIRED_DATA_INFO = new RepairedDataInfo(null)
+    public static final RepairedDataInfo NO_OP_REPAIRED_DATA_INFO = new RepairedDataInfo(null)
     {
-        boolean isConclusive(){ return true; }
-        ByteBuffer getDigest(){ return ByteBufferUtil.EMPTY_BYTE_BUFFER; }
+        @Override
+        public UnfilteredPartitionIterator withRepairedDataInfo(UnfilteredPartitionIterator iterator)
+        {
+            return iterator;
+        }
+
+        @Override
+        public UnfilteredRowIterator withRepairedDataInfo(UnfilteredRowIterator iterator)
+        {
+            return iterator;
+        }
+            
+        @Override
+        public UnfilteredPartitionIterator extend(UnfilteredPartitionIterator partitions, DataLimits.Counter limit)
+        {
+           return partitions;
+        }
     };
 
     // Keeps a digest of the partition currently being processed. Since we won't know
@@ -72,6 +92,14 @@ class RepairedDataInfo
         this.repairedCounter = repairedCounter;
     }
 
+    /**
+     * If either repaired status tracking is not active or the command has not yet been
+     * executed, then this digest will be an empty buffer.
+     * Otherwise, it will contain a digest of the repaired data read, or an empty buffer
+     * if no repaired data was read.
+     *
+     * @return a digest of the repaired data read during local execution of a command
+     */
     ByteBuffer getDigest()
     {
         if (calculatedDigest != null)
@@ -84,7 +112,7 @@ class RepairedDataInfo
         return calculatedDigest;
     }
 
-    void prepare(ColumnFamilyStore cfs, int nowInSec, int oldestUnrepairedTombstone)
+    void prepare(ColumnFamilyStore cfs, long nowInSec, long oldestUnrepairedTombstone)
     {
         this.purger = new RepairedDataPurger(cfs, nowInSec, oldestUnrepairedTombstone);
         this.metrics = cfs.metric;
@@ -95,6 +123,21 @@ class RepairedDataInfo
         this.postLimitPartitions = postLimitPartitions;
     }
 
+    /**
+     * Returns a boolean indicating whether any relevant sstables were skipped during the read
+     * that produced the repaired data digest.
+     *
+     * If true, then no pending repair sessions or partition deletes have influenced the extent
+     * of the repaired sstables that went into generating the digest.
+     * This indicates whether or not the digest can reliably be used to infer consistency
+     * issues between the repaired sets across replicas.
+     *
+     * If either repaired status tracking is not active or the command has not yet been
+     * executed, then this will always return true.
+     *
+     * @return boolean to indicate confidence in the whether or not the digest of the repaired data can be
+     *         reliably be used to infer inconsistency issues between the repaired sets across replicas
+     */
     boolean isConclusive()
     {
         return isConclusive;
@@ -240,7 +283,7 @@ class RepairedDataInfo
                     return null;
 
                 long countBeforeOverreads = repairedCounter.counted();
-                long overreadStartTime = System.nanoTime();
+                long overreadStartTime = nanoTime();
                 if (currentPartition != null)
                     consumePartition(currentPartition, repairedCounter);
 
@@ -250,7 +293,7 @@ class RepairedDataInfo
 
                 // we're not actually providing any more rows, just consuming the repaired data
                 long rows = repairedCounter.counted() - countBeforeOverreads;
-                long nanos = System.nanoTime() - overreadStartTime;
+                long nanos = nanoTime() - overreadStartTime;
                 metrics.repairedDataTrackingOverreadRows.update(rows);
                 metrics.repairedDataTrackingOverreadTime.update(nanos, TimeUnit.NANOSECONDS);
                 Tracing.trace("Read {} additional rows of repaired data for tracking in {}ps", rows, TimeUnit.NANOSECONDS.toMicros(nanos));
@@ -283,13 +326,13 @@ class RepairedDataInfo
     private static class RepairedDataPurger extends PurgeFunction
     {
         RepairedDataPurger(ColumnFamilyStore cfs,
-                           int nowInSec,
-                           int oldestUnrepairedTombstone)
+                           long nowInSec,
+                           long oldestUnrepairedTombstone)
         {
             super(nowInSec,
                   cfs.gcBefore(nowInSec),
                   oldestUnrepairedTombstone,
-                  cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones(),
+                  cfs.onlyPurgeRepairedTombstones(),
                   cfs.metadata.get().enforceStrictLiveness());
         }
 

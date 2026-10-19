@@ -30,6 +30,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
  * This is the first message that gets sent out as a start of the Gossip protocol in a
  * round.
  */
+
 public class GossipDigestSyn
 {
     public static final IVersionedSerializer<GossipDigestSyn> serializer = new GossipDigestSynSerializer();

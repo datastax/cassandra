@@ -18,35 +18,56 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.CompletableFuture;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableMap;
 import org.apache.commons.lang3.StringUtils;
 
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.TeeDataInputPlus;
+import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.concurrent.Future;
 
-import static org.apache.cassandra.net.MessagingService.VERSION_30;
-import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
-import static org.apache.cassandra.utils.MonotonicClock.approxTime;
+import static org.apache.cassandra.net.MessagingService.VERSION_50;
+import static org.apache.cassandra.net.MessagingService.VERSION_DSE_68;
+import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_12;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_20;
 
-public class Mutation implements IMutation
+public class Mutation implements IMutation, Supplier<Mutation>
 {
-    public static final MutationSerializer serializer = new MutationSerializer();
+    public static final MutationSerializer serializer = new MutationSerializer(PartitionUpdate.serializer);
 
     // todo this is redundant
     // when we remove it, also restore SerializationsTest.testMutationRead to not regenerate new Mutations each test
@@ -61,7 +82,29 @@ public class Mutation implements IMutation
     // keep track of when mutation has started waiting for a MV partition lock
     final AtomicLong viewLockAcquireStart = new AtomicLong(0);
 
+    // Where this mutation came from, when it arrived over the wire. Set by the verb handler before the
+    // apply -- and, in MutationVerbHandler, before the payload can be handed to the forwarding path -- then
+    // read by the keyspace write handler, which passes it to secondary indexes through the write context.
+    // Never serialized, and never part of the mutation's identity.
+    //
+    // The handler thread that writes it is also the one that reads it back through Keyspace.apply, and the
+    // one re-dispatch that changes threads (Keyspace.applyInternal deferring on MV lock contention) goes
+    // through an executor, which already publishes safely. Volatile anyway: this is one field written once
+    // per inbound message on a path that is otherwise easy to get subtly wrong, and it costs nothing next
+    // to the commit log append that follows.
+    private volatile WriteOrigin origin = WriteOrigin.LOCAL;
+
     private final boolean cdcEnabled;
+    private final RequestTracker requestTracker;
+
+    private static final int SERIALIZATION_VERSION_COUNT = MessagingService.Version.values().length;
+    // Contains serialized representations of this mutation.
+    // Note: there is no functionality to clear/remove serialized instances, because a mutation must never
+    // be modified (e.g. calling add(PartitionUpdate)) when it's being serialized.
+    private final Serialization[] cachedSerializations = new Serialization[SERIALIZATION_VERSION_COUNT];
+
+    /** @see CassandraRelevantProperties#CACHEABLE_MUTATION_SIZE_LIMIT */
+    private static final long CACHEABLE_MUTATION_SIZE_LIMIT = CassandraRelevantProperties.CACHEABLE_MUTATION_SIZE_LIMIT.getLong();
 
     public Mutation(PartitionUpdate update)
     {
@@ -80,6 +123,7 @@ public class Mutation implements IMutation
         this.modifications = modifications;
         this.cdcEnabled = cdcEnabled;
         this.approxCreatedAtNanos = approxCreatedAtNanos;
+        this.requestTracker = RequestTracker.instance;
     }
 
     private static boolean cdcEnabled(Iterable<PartitionUpdate> modifications)
@@ -104,7 +148,9 @@ public class Mutation implements IMutation
             }
         }
 
-        return new Mutation(keyspaceName, key, builder.build(), approxCreatedAtNanos);
+        Mutation filtered = new Mutation(keyspaceName, key, builder.build(), approxCreatedAtNanos);
+        filtered.origin = origin;
+        return filtered;
     }
 
     public Mutation without(TableId tableId)
@@ -112,9 +158,30 @@ public class Mutation implements IMutation
         return without(Collections.singleton(tableId));
     }
 
+    /**
+     * Records where this mutation came from, for the benefit of the replica-side apply path. Called by the
+     * verb handlers before the apply; {@link WriteOrigin#LOCAL} otherwise.
+     */
+    public Mutation withOrigin(WriteOrigin origin)
+    {
+        this.origin = origin == null ? WriteOrigin.LOCAL : origin;
+        return this;
+    }
+
+    /** Never null; {@link WriteOrigin#LOCAL} for a mutation that did not arrive over the wire. */
+    public WriteOrigin origin()
+    {
+        return origin;
+    }
+
     public String getKeyspaceName()
     {
         return keyspaceName;
+    }
+
+    public Keyspace getKeyspace()
+    {
+        return Keyspace.open(keyspaceName);
     }
 
     public Collection<TableId> getTableIds()
@@ -130,6 +197,23 @@ public class Mutation implements IMutation
     public ImmutableCollection<PartitionUpdate> getPartitionUpdates()
     {
         return modifications.values();
+    }
+
+    public long getApproxCreatedAtNanos()
+    {
+        return approxCreatedAtNanos;
+    }
+
+    @Override
+    public Supplier<Mutation> hintOnFailure()
+    {
+        return this;
+    }
+
+    @Override
+    public Mutation get()
+    {
+        return this;
     }
 
     public void validateSize(int version, int overhead)
@@ -198,26 +282,34 @@ public class Mutation implements IMutation
             if (updates.isEmpty())
                 continue;
 
-            modifications.put(table, updates.size() == 1 ? updates.get(0) : PartitionUpdate.merge(updates));
+            modifications.put(table, PartitionUpdate.merge(updates));
             updates.clear();
         }
-        return new Mutation(ks, key, modifications.build(), approxTime.now());
+
+        Mutation merged = new Mutation(ks, key, modifications.build(), approxTime.now());
+        // All inputs were checked to share a keyspace and a key above, so they came from one inbound
+        // message and share an origin; keep it rather than silently reverting the merged result to LOCAL.
+        merged.origin = mutations.get(0).origin;
+        return merged;
     }
 
-    public CompletableFuture<?> applyFuture()
+    public Future<?> applyFuture(WriteOptions writeOptions)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
-        return ks.applyFuture(this, Keyspace.open(keyspaceName).getMetadata().params.durableWrites, true);
+        return ks.applyFuture(this, writeOptions, true).addListener(f -> {
+            RequestSensors sensors = requestTracker.get();
+            if (sensors != null)
+                sensors.syncAllSensors();
+        });
     }
 
-    public void apply(boolean durableWrites, boolean isDroppable)
+    public void apply(WriteOptions writeOptions)
     {
-        Keyspace.open(keyspaceName).apply(this, durableWrites, true, isDroppable);
-    }
+        Keyspace.open(keyspaceName).apply(this, writeOptions);
 
-    public void apply(boolean durableWrites)
-    {
-        apply(durableWrites, true);
+        RequestSensors sensors = requestTracker.get();
+        if (sensors != null)
+            sensors.syncAllSensors();
     }
 
     /*
@@ -226,12 +318,12 @@ public class Mutation implements IMutation
      */
     public void apply()
     {
-        apply(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
+        apply(WriteOptions.DEFAULT);
     }
 
     public void applyUnsafe()
     {
-        apply(false);
+        apply(WriteOptions.DEFAULT_WITHOUT_COMMITLOG);
     }
 
     public long getTimeout(TimeUnit unit)
@@ -279,26 +371,47 @@ public class Mutation implements IMutation
         }
         return buff.append("])").toString();
     }
-    private int serializedSize30;
-    private int serializedSize3014;
+
     private int serializedSize40;
+    private int serializedSize50;
+    private int serializedSizeDS10;
+    private int serializedSizeDS11;
+    private int serializedSizeDS12;
+    private int serializedSizeDS20;
+    private int serializedSizeDSE68;
 
     public int serializedSize(int version)
     {
         switch (version)
         {
-            case VERSION_30:
-                if (serializedSize30 == 0)
-                    serializedSize30 = (int) serializer.serializedSize(this, VERSION_30);
-                return serializedSize30;
-            case VERSION_3014:
-                if (serializedSize3014 == 0)
-                    serializedSize3014 = (int) serializer.serializedSize(this, VERSION_3014);
-                return serializedSize3014;
             case VERSION_40:
                 if (serializedSize40 == 0)
                     serializedSize40 = (int) serializer.serializedSize(this, VERSION_40);
                 return serializedSize40;
+            case VERSION_50:
+                if (serializedSize50 == 0)
+                    serializedSize50 = (int) serializer.serializedSize(this, VERSION_50);
+                return serializedSize50;
+            case VERSION_DS_10:
+                if (serializedSizeDS10 == 0)
+                    serializedSizeDS10 = (int) serializer.serializedSize(this, VERSION_DS_10);
+                return serializedSizeDS10;
+            case VERSION_DS_11:
+                if (serializedSizeDS11 == 0)
+                    serializedSizeDS11 = (int) serializer.serializedSize(this, VERSION_DS_11);
+                return serializedSizeDS11;
+            case VERSION_DS_12:
+                if (serializedSizeDS12 == 0)
+                    serializedSizeDS12 = (int) serializer.serializedSize(this, VERSION_DS_12);
+                return serializedSizeDS12;
+            case VERSION_DS_20:
+                if (serializedSizeDS20 == 0)
+                    serializedSizeDS20 = (int) serializer.serializedSize(this, VERSION_DS_20);
+                return serializedSizeDS20;
+            case VERSION_DSE_68:
+                if (serializedSizeDSE68 == 0)
+                    serializedSizeDSE68 = (int) serializer.serializedSize(this, VERSION_DSE_68);
+                return serializedSizeDSE68;
             default:
                 throw new IllegalStateException("Unknown serialization version: " + version);
         }
@@ -372,36 +485,124 @@ public class Mutation implements IMutation
 
     public static class MutationSerializer implements IVersionedSerializer<Mutation>
     {
+        private final PartitionUpdate.PartitionUpdateSerializer partitionUpdateSerializer;
+
+        public MutationSerializer(PartitionUpdate.PartitionUpdateSerializer partitionUpdateSerializer)
+        {
+            this.partitionUpdateSerializer = partitionUpdateSerializer;
+        }
+
         public void serialize(Mutation mutation, DataOutputPlus out, int version) throws IOException
         {
+            serialization(mutation, version).serialize(partitionUpdateSerializer, mutation, out, version);
+        }
+
+        /**
+         * Called early during request processing to prevent that {@link #serialization(Mutation, int)} is
+         * called concurrently.
+         * See {@link org.apache.cassandra.service.StorageProxy#sendToHintedReplicas(Mutation, ReplicaPlan.ForWrite, AbstractWriteResponseHandler, String, Stage)}
+         */
+        @SuppressWarnings("JavadocReference")
+        public void prepareSerializedBuffer(Mutation mutation, int version)
+        {
+            serialization(mutation, version);
+        }
+
+        /**
+         * Retrieve the cached serialization of this mutation, or compute and cache said serialization if it doesn't
+         * exist yet. Note that this method is _not_ synchronized even though it may (and will often) be called
+         * concurrently. Concurrent calls are still safe however, the only risk is that the value is not cached yet,
+         * multiple concurrent calls may compute it multiple times instead of just once. This is ok as in practice
+         * as we make sure this doesn't happen in the hot path by forcing the initial caching in
+         * {@link org.apache.cassandra.service.StorageProxy#sendToHintedReplicas(Mutation, ReplicaPlan.ForWrite, AbstractWriteResponseHandler, String, Stage)}
+         * via {@link #prepareSerializedBuffer(Mutation)}, which is the only caller that passes
+         * {@code isPrepare==true}.
+         */
+        @SuppressWarnings("JavadocReference")
+        private Serialization serialization(Mutation mutation, int version)
+        {
+            int versionOrdinal = MessagingService.getVersionOrdinal(version);
+            // Retrieves the cached version, or build+cache it if it's not cached already.
+            Serialization serialization = mutation.cachedSerializations[versionOrdinal];
+            if (serialization == null)
+            {
+                serialization = new SizeOnlyCacheableSerialization();
+                long serializedSize = serialization.serializedSize(partitionUpdateSerializer, mutation, version);
+
+                // Excessively large mutation objects cause GC pressure and huge allocations when serialized.
+                // so we only cache serialized mutations when they are below the defined limit.
+                if (serializedSize < CACHEABLE_MUTATION_SIZE_LIMIT)
+                {
+                    try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
+                    {
+                        serializeInternal(partitionUpdateSerializer, mutation, dob, version);
+                        serialization = new CachedSerialization(dob.toByteArray());
+                    }
+                    catch (IOException e)
+                    {
+                        throw new RuntimeException(e);
+                    }
+                }
+                mutation.cachedSerializations[versionOrdinal] = serialization;
+            }
+
+            return serialization;
+        }
+
+        static void serializeInternal(PartitionUpdate.PartitionUpdateSerializer serializer,
+                                         Mutation mutation,
+                                         DataOutputPlus out,
+                                         int version) throws IOException
+        {
+            Map<TableId, PartitionUpdate> modifications = mutation.modifications;
+
             /* serialize the modifications in the mutation */
-            int size = mutation.modifications.size();
-            out.writeUnsignedVInt(size);
+            int size = modifications.size();
+            out.writeUnsignedVInt32(size);
 
             assert size > 0;
-            for (Map.Entry<TableId, PartitionUpdate> entry : mutation.modifications.entrySet())
-                PartitionUpdate.serializer.serialize(entry.getValue(), out, version);
+            for (PartitionUpdate partitionUpdate : modifications.values())
+            {
+                serializer.serialize(partitionUpdate, out, version);
+            }
         }
 
         public Mutation deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
         {
-            int size = (int)in.readUnsignedVInt();
-            assert size > 0;
-
-            PartitionUpdate update = PartitionUpdate.serializer.deserialize(in, version, flag);
-            if (size == 1)
-                return new Mutation(update);
-
-            ImmutableMap.Builder<TableId, PartitionUpdate> modifications = new ImmutableMap.Builder<>();
-            DecoratedKey dk = update.partitionKey();
-
-            modifications.put(update.metadata().id, update);
-            for (int i = 1; i < size; ++i)
+            Mutation m;
+            TeeDataInputPlus teeIn;
+            try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
             {
-                update = PartitionUpdate.serializer.deserialize(in, version, flag);
-                modifications.put(update.metadata().id, update);
+                teeIn = new TeeDataInputPlus(in, dob, CACHEABLE_MUTATION_SIZE_LIMIT);
+
+                int size = teeIn.readUnsignedVInt32();
+                assert size > 0;
+
+                PartitionUpdate update = partitionUpdateSerializer.deserialize(teeIn, version, flag);
+                if (size == 1)
+                {
+                    m = new Mutation(update);
+                }
+                else
+                {
+                    ImmutableMap.Builder<TableId, PartitionUpdate> modifications = new ImmutableMap.Builder<>();
+                    DecoratedKey dk = update.partitionKey();
+
+                    modifications.put(update.metadata().id, update);
+                    for (int i = 1; i < size; ++i)
+                    {
+                        update = partitionUpdateSerializer.deserialize(teeIn, version, flag);
+                        modifications.put(update.metadata().id, update);
+                    }
+                    m = new Mutation(update.metadata().keyspace, dk, modifications.build(), approxTime.now());
+                }
+
+                //Only cache serializations that don't hit the limit
+                if (!teeIn.isLimitReached())
+                    m.cachedSerializations[MessagingService.getVersionOrdinal(version)] = new CachedSerialization(dob.toByteArray());
+
+                return m;
             }
-            return new Mutation(update.metadata().keyspace, dk, modifications.build(), approxTime.now());
         }
 
         public Mutation deserialize(DataInputPlus in, int version) throws IOException
@@ -411,10 +612,71 @@ public class Mutation implements IMutation
 
         public long serializedSize(Mutation mutation, int version)
         {
-            int size = TypeSizes.sizeofUnsignedVInt(mutation.modifications.size());
-            for (Map.Entry<TableId, PartitionUpdate> entry : mutation.modifications.entrySet())
-                size += PartitionUpdate.serializer.serializedSize(entry.getValue(), version);
+            return serialization(mutation, version).serializedSize(partitionUpdateSerializer, mutation, version);
+        }
+    }
 
+    /**
+     * There are two implementations of this class. One that keeps the serialized representation on-heap for later
+     * reuse and one that doesn't. Keeping all sized mutations around may lead to "bad" GC pressure (G1 GC) due to humongous objects.
+     * By default serialized mutations up to 2MB are kept on-heap - see {@link org.apache.cassandra.config.CassandraRelevantProperties#CACHEABLE_MUTATION_SIZE_LIMIT}.
+     */
+    private static abstract class Serialization
+    {
+        abstract void serialize(PartitionUpdate.PartitionUpdateSerializer serializer, Mutation mutation, DataOutputPlus out, int version) throws IOException;
+
+        abstract long serializedSize(PartitionUpdate.PartitionUpdateSerializer serializer, Mutation mutation, int version);
+    }
+
+    /**
+     * Represents the cached serialization of a {@link Mutation} as a {@code byte[]}.
+     */
+    private static final class CachedSerialization extends Serialization
+    {
+        private final byte[] serialized;
+
+        CachedSerialization(byte[] serialized)
+        {
+            this.serialized = Preconditions.checkNotNull(serialized);
+        }
+
+        @Override
+        void serialize(PartitionUpdate.PartitionUpdateSerializer serializer, Mutation mutation, DataOutputPlus out, int version) throws IOException
+        {
+            out.write(serialized);
+        }
+
+        @Override
+        long serializedSize(PartitionUpdate.PartitionUpdateSerializer serializer, Mutation mutation, int version)
+        {
+            return serialized.length;
+        }
+    }
+
+    /**
+     * Represents a non-cacheable serialization of a {@link Mutation}, only the size of the mutation is lazily cached.
+     */
+    private static final class SizeOnlyCacheableSerialization extends Serialization
+    {
+        private volatile long size;
+
+        @Override
+        void serialize(PartitionUpdate.PartitionUpdateSerializer serializer, Mutation mutation, DataOutputPlus out, int version) throws IOException
+        {
+            MutationSerializer.serializeInternal(serializer, mutation, out, version);
+        }
+
+        @Override
+        long serializedSize(PartitionUpdate.PartitionUpdateSerializer serializer, Mutation mutation, int version)
+        {
+            long size = this.size;
+            if (size == 0L)
+            {
+                size = TypeSizes.sizeofUnsignedVInt(mutation.modifications.size());
+                for (PartitionUpdate partitionUpdate : mutation.modifications.values())
+                    size += serializer.serializedSize(partitionUpdate, version);
+                this.size = size;
+            }
             return size;
         }
     }

@@ -32,24 +32,24 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
-import org.apache.cassandra.locator.ReplicaLayout;
 import org.apache.cassandra.service.reads.ReadCallback;
+import org.apache.cassandra.transport.Dispatcher;
 
 public class ReadOnlyReadRepairTest extends AbstractReadRepairTest
 {
-    private static class InstrumentedReadOnlyReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>>
+    private static class InstrumentedReadOnlyReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
             extends ReadOnlyReadRepair implements InstrumentedReadRepair
     {
-        public InstrumentedReadOnlyReadRepair(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
+        public InstrumentedReadOnlyReadRepair(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, Dispatcher.RequestTime requestTime)
         {
-            super(command, replicaPlan, queryStartNanoTime);
+            super(command, replicaPlan, requestTime);
         }
 
         Set<InetAddressAndPort> readCommandRecipients = new HashSet<>();
         ReadCallback readCallback = null;
 
         @Override
-        void sendReadCommand(Replica to, ReadCallback callback, boolean speculative)
+        void sendReadCommand(Replica to, ReadCallback callback, boolean speculative, boolean trackRepairedStatus)
         {
             assert readCallback == null || readCallback == callback;
             readCommandRecipients.add(to.endpoint());
@@ -76,9 +76,9 @@ public class ReadOnlyReadRepairTest extends AbstractReadRepairTest
     }
 
     @Override
-    public InstrumentedReadRepair createInstrumentedReadRepair(ReadCommand command, ReplicaPlan.Shared<?, ?> replicaPlan, long queryStartNanoTime)
+    public InstrumentedReadRepair createInstrumentedReadRepair(ReadCommand command, ReplicaPlan.Shared<?, ?> replicaPlan, Dispatcher.RequestTime requestTime)
     {
-        return new InstrumentedReadOnlyReadRepair(command, replicaPlan, queryStartNanoTime);
+        return new InstrumentedReadOnlyReadRepair(command, replicaPlan, requestTime);
     }
 
     @Test
@@ -93,7 +93,7 @@ public class ReadOnlyReadRepairTest extends AbstractReadRepairTest
     public void repairPartitionFailure()
     {
         ReplicaPlan.SharedForRangeRead readPlan = ReplicaPlan.shared(replicaPlan(replicas, replicas));
-        ReplicaPlan.ForTokenWrite writePlan = repairPlan(replicas, replicas);
+        ReplicaPlan.ForWrite writePlan = repairPlan(replicas, replicas);
         InstrumentedReadRepair repair = createInstrumentedReadRepair(readPlan);
         repair.repairPartition(null, Collections.emptyMap(), writePlan);
     }

@@ -27,9 +27,7 @@ import io.netty.buffer.ByteBufAllocator;
 import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4SafeDecompressor;
 import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.net.AsyncStreamingOutputPlus;
-
-import static org.apache.cassandra.net.MessagingService.current_version;
+import org.apache.cassandra.streaming.StreamingDataOutputPlus;
 
 /**
  * A serialiazer for stream compressed files (see package-level documentation). Much like a typical compressed
@@ -54,9 +52,8 @@ public class StreamCompressionSerializer
      */
     private static final int HEADER_LENGTH = 8;
 
-    public static AsyncStreamingOutputPlus.Write serialize(LZ4Compressor compressor, ByteBuffer in, int version)
+    public static StreamingDataOutputPlus.Write serialize(LZ4Compressor compressor, ByteBuffer in, int version)
     {
-        assert version == current_version;
         return bufferSupplier -> {
             int uncompressedLength = in.remaining();
             int maxLength = compressor.maxCompressedLength(uncompressedLength);

@@ -24,64 +24,158 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 
-public class InfiniteLoopExecutor
+import org.apache.cassandra.utils.Shared;
+import org.apache.cassandra.utils.concurrent.Condition;
+import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
+
+import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.InternalState.SHUTTING_DOWN_NOW;
+import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.InternalState.TERMINATED;
+import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.Interrupts.SYNCHRONIZED;
+import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.Interrupts.UNSYNCHRONIZED;
+import static org.apache.cassandra.concurrent.Interruptible.State.INTERRUPTED;
+import static org.apache.cassandra.concurrent.Interruptible.State.NORMAL;
+import static org.apache.cassandra.concurrent.Interruptible.State.SHUTTING_DOWN;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.apache.cassandra.utils.concurrent.Condition.newOneTimeCondition;
+
+public class InfiniteLoopExecutor implements Interruptible
 {
     private static final Logger logger = LoggerFactory.getLogger(InfiniteLoopExecutor.class);
 
-    public interface InterruptibleRunnable
-    {
-        void run() throws InterruptedException;
-    }
+    @Shared(scope = Shared.Scope.SIMULATION)
+    public enum InternalState { SHUTTING_DOWN_NOW, TERMINATED }
 
+    @Shared(scope = Shared.Scope.SIMULATION)
+    public enum SimulatorSafe { SAFE, UNSAFE }
+
+    @Shared(scope = Shared.Scope.SIMULATION)
+    public enum Daemon        { DAEMON, NON_DAEMON }
+
+    @Shared(scope = Shared.Scope.SIMULATION)
+    public enum Interrupts    { SYNCHRONIZED, UNSYNCHRONIZED }
+
+    private static final AtomicReferenceFieldUpdater<InfiniteLoopExecutor, Object> stateUpdater = AtomicReferenceFieldUpdater.newUpdater(InfiniteLoopExecutor.class, Object.class, "state");
     private final Thread thread;
-    private final InterruptibleRunnable runnable;
-    private volatile boolean isShutdown = false;
+    private final Task task;
+    private volatile Object state = NORMAL;
+    private final Consumer<Thread> interruptHandler;
+    private final Condition isTerminated = newOneTimeCondition();
 
-    public InfiniteLoopExecutor(String name, InterruptibleRunnable runnable)
+    public InfiniteLoopExecutor(String name, Task task, Daemon daemon)
     {
-        this.runnable = runnable;
-        this.thread = new Thread(this::loop, name);
-        this.thread.setDaemon(true);
+        this(ExecutorFactory.Global.executorFactory(), name, task, daemon, UNSYNCHRONIZED);
     }
+
+    public InfiniteLoopExecutor(ExecutorFactory factory, String name, Task task, Daemon daemon)
+    {
+        this(factory, name, task, daemon, UNSYNCHRONIZED);
+    }
+
+    public InfiniteLoopExecutor(ExecutorFactory factory, String name, Task task, Daemon daemon, Interrupts interrupts)
+    {
+        this.task = task;
+        this.thread = factory.startThread(name, this::loop, daemon);
+        this.interruptHandler = interrupts == SYNCHRONIZED
+                                ? interruptHandler(task)
+                                : Thread::interrupt;
+    }
+
+    public InfiniteLoopExecutor(BiFunction<String, Runnable, Thread> threadStarter, String name, Task task, Interrupts interrupts)
+    {
+        this.task = task;
+        this.thread = threadStarter.apply(name, this::loop);
+        this.interruptHandler = interrupts == SYNCHRONIZED
+                                ? interruptHandler(task)
+                                : Thread::interrupt;
+    }
+
+    private static Consumer<Thread> interruptHandler(final Object monitor)
+    {
+        return thread -> {
+            synchronized (monitor)
+            {
+                thread.interrupt();
+            }
+        };
+    }
+
 
     private void loop()
     {
-        while (!isShutdown)
+        boolean interrupted = false;
+        try
         {
-            try
+            while (true)
             {
-                runnable.run();
+                try
+                {
+                    Object cur = state;
+                    if (cur == SHUTTING_DOWN_NOW) break;
+
+                    interrupted |= Thread.interrupted();
+                    if (cur == NORMAL && interrupted) cur = INTERRUPTED;
+                    task.run((State) cur);
+
+                    interrupted = false;
+                    if (cur == SHUTTING_DOWN) break;
+                }
+                catch (TerminateException ignore)
+                {
+                    break;
+                }
+                catch (UncheckedInterruptedException | InterruptedException ignore)
+                {
+                    interrupted = true;
+                }
+                catch (Throwable t)
+                {
+                    logger.error("Exception thrown by runnable, continuing with loop", t);
+                }
             }
-            catch (InterruptedException ie)
-            {
-                if (isShutdown)
-                    return;
-                logger.error("Interrupted while executing {}, but not shutdown; continuing with loop", runnable, ie);
-            }
-            catch (Throwable t)
-            {
-                logger.error("Exception thrown by runnable, continuing with loop", t);
-            }
+        }
+        finally
+        {
+            state = TERMINATED;
+            isTerminated.signal();
         }
     }
 
-    public InfiniteLoopExecutor start()
+    public void interrupt()
     {
-        thread.start();
-        return this;
+        interruptHandler.accept(thread);
     }
 
-    public void shutdownNow()
+    public void shutdown()
     {
-        isShutdown = true;
-        thread.interrupt();
+        stateUpdater.updateAndGet(this, cur -> cur != TERMINATED && cur != SHUTTING_DOWN_NOW ? SHUTTING_DOWN : cur);
+        interruptHandler.accept(thread);
+    }
+
+    public Object shutdownNow()
+    {
+        stateUpdater.updateAndGet(this, cur -> cur != TERMINATED ? SHUTTING_DOWN_NOW : TERMINATED);
+        interruptHandler.accept(thread);
+        return null;
+    }
+
+    @Override
+    public boolean isTerminated()
+    {
+        return state == TERMINATED;
     }
 
     public boolean awaitTermination(long time, TimeUnit unit) throws InterruptedException
     {
-        thread.join(unit.toMillis(time));
-        return !thread.isAlive();
+        if (isTerminated())
+            return true;
+
+        long deadlineNanos = nanoTime() + unit.toNanos(time);
+        isTerminated.awaitUntil(deadlineNanos);
+        return isTerminated();
     }
 
     @VisibleForTesting

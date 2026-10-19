@@ -33,4 +33,10 @@ public interface AuthCacheMBean
     public void setMaxEntries(int maxEntries);
 
     public int getMaxEntries();
+
+    public boolean getActiveUpdate();
+
+    public void setActiveUpdate(boolean update);
+
+    public long getEstimatedSize();
 }

@@ -25,11 +25,13 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import javax.annotation.concurrent.GuardedBy;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.*;
+
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,7 +42,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.gms.FailureDetector;
+import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.locator.ReplicaCollection.Builder.Conflict;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.BiMultiValMap;
@@ -48,6 +50,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SortedBiMultiValMap;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.LINE_SEPARATOR;
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
 public class TokenMetadata
 {
@@ -110,7 +113,7 @@ public class TokenMetadata
 
     // signals replication strategies that nodes have joined or left the ring and they need to recompute ownership
     @GuardedBy("lock")
-    private long ringVersion = 0;
+    private volatile long ringVersion = 0;
 
     public TokenMetadata()
     {
@@ -130,11 +133,17 @@ public class TokenMetadata
 
     private TokenMetadata(BiMultiValMap<Token, InetAddressAndPort> tokenToEndpointMap, BiMap<InetAddressAndPort, UUID> endpointsMap, Topology topology, IPartitioner partitioner)
     {
+        this(tokenToEndpointMap, endpointsMap, topology, partitioner, 0);
+    }
+
+    private TokenMetadata(BiMultiValMap<Token, InetAddressAndPort> tokenToEndpointMap, BiMap<InetAddressAndPort, UUID> endpointsMap, Topology topology, IPartitioner partitioner, long ringVersion)
+    {
         this.tokenToEndpointMap = tokenToEndpointMap;
         this.topology = topology;
         this.partitioner = partitioner;
         endpointToHostIdMap = endpointsMap;
         sortedTokens = sortTokens();
+        this.ringVersion = ringVersion;
     }
 
     /**
@@ -143,7 +152,32 @@ public class TokenMetadata
     @VisibleForTesting
     public TokenMetadata cloneWithNewPartitioner(IPartitioner newPartitioner)
     {
-        return new TokenMetadata(tokenToEndpointMap, endpointToHostIdMap, topology, newPartitioner);
+        lock.readLock().lock();
+        try
+        {
+            return new TokenMetadata(tokenToEndpointMap, endpointToHostIdMap, topology, newPartitioner);
+        }
+        finally
+        {
+            lock.readLock().unlock();
+        }
+    }
+
+    /**
+     * To be used by tests only (via {@link org.apache.cassandra.service.StorageService#setPartitionerUnsafe}).
+     */
+    public TokenMetadata cloneWithNewSnitch(IEndpointSnitch snitch)
+    {
+        lock.readLock().lock();
+        try
+        {
+            var clonedTopology = topology.unbuild().withSnitchSupplier(() -> snitch).build();
+            return new TokenMetadata(tokenToEndpointMap, endpointToHostIdMap, clonedTopology, partitioner);
+        }
+        finally
+        {
+            lock.readLock().unlock();
+        }
     }
 
     private ArrayList<Token> sortTokens()
@@ -182,8 +216,7 @@ public class TokenMetadata
     public void updateNormalTokens(Collection<Token> tokens, InetAddressAndPort endpoint)
     {
         Multimap<InetAddressAndPort, Token> endpointTokens = HashMultimap.create();
-        for (Token token : tokens)
-            endpointTokens.put(endpoint, token);
+        endpointTokens.putAll(endpoint, tokens);
         updateNormalTokens(endpointTokens);
     }
 
@@ -239,6 +272,82 @@ public class TokenMetadata
     }
 
     /**
+     * Used by CNDB to update endpoint address for given normal tokens
+     */
+    public void updateAddressForNormalTokens(Collection<Token> tokens, InetAddressAndPort existing, InetAddressAndPort current)
+    {
+        assert tokens != null && !tokens.isEmpty();
+        assert existing != null && current != null;
+
+        lock.writeLock().lock();
+        try
+        {
+            // make sure token matches and current endpoint is not in the ring.
+            Multimap<InetAddressAndPort, Token> endpointToTokensMap = tokenToEndpointMap.inverse();
+            Collection<Token> oldNodeTokens = endpointToTokensMap.get(existing);
+            if (!tokens.containsAll(oldNodeTokens) || !oldNodeTokens.containsAll(tokens))
+            {
+                throw new RuntimeException(String.format("Node %s is trying to replace node %s with tokens %s with a " +
+                                                         "different set of tokens %s.", current, existing, oldNodeTokens,
+                                                         tokens));
+            }
+            if (endpointToTokensMap.containsKey(current))
+            {
+                throw new RuntimeException(String.format("Node %s already has normal tokens, can't replace %s", current, existing));
+            }
+
+            // make sure they are not bootstrap.
+            Multimap<InetAddressAndPort, Token> endpointToBootstrapTokensMap = bootstrapTokens.inverse();
+            if (endpointToBootstrapTokensMap.containsKey(existing))
+            {
+                throw new RuntimeException(String.format("Node %s is trying to replace node %s with bootstrapping tokens.", current, existing));
+            }
+            if (endpointToBootstrapTokensMap.containsKey(current))
+            {
+                throw new RuntimeException(String.format("Node %s already has bootstrap tokens, can't replace %s", current, existing));
+            }
+
+            // make sure they are not leaving
+            if (leavingEndpoints.contains(existing))
+            {
+                throw new RuntimeException(String.format("Node %s is trying to replace node %s in leaving state.", current, existing));
+            }
+            if (leavingEndpoints.contains(current))
+            {
+                throw new RuntimeException(String.format("Node %s is already in leaving, can't replace %s", current, existing));
+            }
+
+            // make sure they are not moving
+            if (movingEndpoints.stream().anyMatch(p -> p.right.equals(existing)))
+            {
+                throw new RuntimeException(String.format("Node %s is trying to replace node %s in moving state.", current, existing));
+            }
+            if (movingEndpoints.stream().anyMatch(p -> p.right.equals(current)))
+            {
+                throw new RuntimeException(String.format("Node %s is already in moving, can't replace %s", current, existing));
+            }
+
+            // Note that there is no need to validate replacementToOriginal which is updated together with bootstrapTokens
+            Topology.Builder topologyBuilder = topology.unbuild();
+            topologyBuilder.removeEndpoint(existing);
+            topologyBuilder.addEndpoint(current);
+
+            for (Token token : tokens)
+                tokenToEndpointMap.put(token, current);
+
+            topology = topologyBuilder.build();
+
+            sortedTokens = sortTokens();
+        }
+        finally
+        {
+            lock.writeLock().unlock();
+        }
+
+
+    }
+
+    /**
      * Store an end-point to host ID mapping.  Each ID must be unique, and
      * cannot be changed after the fact.
      */
@@ -250,29 +359,91 @@ public class TokenMetadata
         lock.writeLock().lock();
         try
         {
-            InetAddressAndPort storedEp = endpointToHostIdMap.inverse().get(hostId);
-            if (storedEp != null)
-            {
-                if (!storedEp.equals(endpoint) && (FailureDetector.instance.isAlive(storedEp)))
-                {
-                    throw new RuntimeException(String.format("Host ID collision between active endpoint %s and %s (id=%s)",
-                                                             storedEp,
-                                                             endpoint,
-                                                             hostId));
-                }
-            }
-
-            UUID storedId = endpointToHostIdMap.get(endpoint);
-            if ((storedId != null) && (!storedId.equals(hostId)))
-                logger.warn("Changing {}'s host ID from {} to {}", endpoint, storedId, hostId);
-
-            endpointToHostIdMap.forcePut(endpoint, hostId);
+            updateEndpointToHostIdMap(hostId, endpoint);
         }
         finally
         {
             lock.writeLock().unlock();
         }
 
+    }
+
+    public void updateHostIds(Map<UUID, InetAddressAndPort> hostIdToEndpointMap)
+    {
+        lock.writeLock().lock();
+        try
+        {
+            for (Map.Entry<UUID, InetAddressAndPort> entry : hostIdToEndpointMap.entrySet())
+            {
+                updateEndpointToHostIdMap(entry.getKey(), entry.getValue());
+            }
+        }
+        finally
+        {
+            lock.writeLock().unlock();
+        }
+
+    }
+
+    /**
+     * Used by CNDB to update endpoint address for given host id
+     */
+    public void updateAddressForHostId(UUID hostId, InetAddressAndPort existing, InetAddressAndPort current)
+    {
+        assert hostId != null;
+        assert existing != null;
+        assert current != null;
+
+        lock.writeLock().lock();
+        try
+        {
+            InetAddressAndPort storedEp = endpointToHostIdMap.inverse().get(hostId);
+            if (storedEp != null && !storedEp.equals(existing))
+            {
+                throw new RuntimeException(String.format("Endpoint mismatch between stored endpoint %s and expected endpoint %s (id=%s)",
+                                                         storedEp,
+                                                         existing,
+                                                         hostId));
+            }
+
+            UUID storedId = endpointToHostIdMap.get(existing);
+            if (storedId != null && !storedId.equals(hostId))
+            {
+                throw new RuntimeException(String.format("Host id mismatch for existing endpoint %s and existing id %s and provided id=%s)",
+                                                         existing,
+                                                         storedId,
+                                                         hostId));
+            }
+
+            endpointToHostIdMap.remove(existing);
+            endpointToHostIdMap.forcePut(current, hostId);
+        }
+        finally
+        {
+            lock.writeLock().unlock();
+        }
+
+    }
+    
+    private void updateEndpointToHostIdMap(UUID hostId, InetAddressAndPort endpoint)
+    {
+        InetAddressAndPort storedEp = endpointToHostIdMap.inverse().get(hostId);
+        if (storedEp != null)
+        {
+            if (!storedEp.equals(endpoint) && (IFailureDetector.instance.isAlive(storedEp)))
+            {
+                throw new RuntimeException(String.format("Host ID collision between active endpoint %s and %s (id=%s)",
+                                                         storedEp,
+                                                         endpoint,
+                                                         hostId));
+            }
+        }
+
+        UUID storedId = endpointToHostIdMap.get(endpoint);
+        if ((storedId != null) && (!storedId.equals(hostId)))
+            logger.warn("Changing {}'s host ID from {} to {}", endpoint, storedId, hostId);
+
+        endpointToHostIdMap.forcePut(endpoint, hostId);
     }
 
     /** Return the unique host ID for an end-point. */
@@ -319,12 +490,6 @@ public class TokenMetadata
         }
     }
 
-    @Deprecated
-    public void addBootstrapToken(Token token, InetAddressAndPort endpoint)
-    {
-        addBootstrapTokens(Collections.singleton(token), endpoint);
-    }
-
     public void addBootstrapTokens(Collection<Token> tokens, InetAddressAndPort endpoint)
     {
         addBootstrapTokens(tokens, endpoint, null);
@@ -363,6 +528,9 @@ public class TokenMetadata
         }
     }
 
+    /**
+     * Used by C* node replacement to add replacement tokens as bootstrapping tokens
+     */
     public void addReplaceTokens(Collection<Token> replacingTokens, InetAddressAndPort newNode, InetAddressAndPort oldNode)
     {
         assert replacingTokens != null && !replacingTokens.isEmpty();
@@ -475,7 +643,7 @@ public class TokenMetadata
         try
         {
             bootstrapTokens.removeValue(endpoint);
-            tokenToEndpointMap.removeValue(endpoint);
+
             topology = topology.unbuild().removeEndpoint(endpoint).build();
             leavingEndpoints.remove(endpoint);
             if (replacementToOriginal.remove(endpoint) != null)
@@ -483,8 +651,12 @@ public class TokenMetadata
                 logger.debug("Node {} failed during replace.", endpoint);
             }
             endpointToHostIdMap.remove(endpoint);
-            sortedTokens = sortTokens();
-            invalidateCachedRingsUnsafe();
+            Collection<Token> removedTokens = tokenToEndpointMap.removeValue(endpoint);
+            if (removedTokens != null && !removedTokens.isEmpty())
+            {
+                sortedTokens = sortTokens();
+                invalidateCachedRingsUnsafe();
+            }
         }
         finally
         {
@@ -564,23 +736,17 @@ public class TokenMetadata
     public Collection<Token> getTokens(InetAddressAndPort endpoint)
     {
         assert endpoint != null;
-        assert isMember(endpoint); // don't want to return nulls
 
         lock.readLock().lock();
         try
         {
+            assert isMember(endpoint): String.format("Unable to get tokens for %s; it is not a member", endpoint); // don't want to return nulls
             return new ArrayList<>(tokenToEndpointMap.inverse().get(endpoint));
         }
         finally
         {
             lock.readLock().unlock();
         }
-    }
-
-    @Deprecated
-    public Token getToken(InetAddressAndPort endpoint)
-    {
-        return getTokens(endpoint).iterator().next();
     }
 
     public boolean isMember(InetAddressAndPort endpoint)
@@ -648,7 +814,8 @@ public class TokenMetadata
             return new TokenMetadata(SortedBiMultiValMap.create(tokenToEndpointMap),
                                      HashBiMap.create(endpointToHostIdMap),
                                      topology,
-                                     partitioner);
+                                     partitioner,
+                                     ringVersion);
         }
         finally
         {
@@ -757,12 +924,6 @@ public class TokenMetadata
         return ranges;
     }
 
-    @Deprecated
-    public Range<Token> getPrimaryRangeFor(Token right)
-    {
-        return getPrimaryRangesFor(Arrays.asList(right)).iterator().next();
-    }
-
     public ArrayList<Token> sortedTokens()
     {
         return sortedTokens;
@@ -804,6 +965,14 @@ public class TokenMetadata
         return builder.build();
     }
 
+    @VisibleForTesting
+    public void setPendingRangesUnsafe(String keyspaceName, Multimap<Range<Token>, Replica> rangeMap)
+    {
+        PendingRangeMaps prm = new PendingRangeMaps();
+        rangeMap.entries().forEach(entry -> prm.addPendingRange(entry.getKey(), entry.getValue()));
+        pendingRanges.put(keyspaceName, prm);
+    }
+
      /**
      * Calculate pending ranges according to bootsrapping and leaving nodes. Reasoning is:
      *
@@ -830,57 +999,63 @@ public class TokenMetadata
     public void calculatePendingRanges(AbstractReplicationStrategy strategy, String keyspaceName)
     {
         // avoid race between both branches - do not use a lock here as this will block any other unrelated operations!
-        long startedAt = System.currentTimeMillis();
+        long startedAt = currentTimeMillis();
         synchronized (pendingRanges)
         {
             TokenMetadataDiagnostics.pendingRangeCalculationStarted(this, keyspaceName);
 
-            // create clone of current state
-            BiMultiValMap<Token, InetAddressAndPort> bootstrapTokensClone;
-            Set<InetAddressAndPort> leavingEndpointsClone;
-            Set<Pair<Token, InetAddressAndPort>> movingEndpointsClone;
-            TokenMetadata metadata;
+            unsafeCalculatePendingRanges(strategy, keyspaceName);
 
-            lock.readLock().lock();
-            try
-            {
-
-                if (bootstrapTokens.isEmpty() && leavingEndpoints.isEmpty() && movingEndpoints.isEmpty())
-                {
-                    if (logger.isTraceEnabled())
-                        logger.trace("No bootstrapping, leaving or moving nodes -> empty pending ranges for {}", keyspaceName);
-                    if (bootstrapTokens.isEmpty() && leavingEndpoints.isEmpty() && movingEndpoints.isEmpty())
-                    {
-                        if (logger.isTraceEnabled())
-                            logger.trace("No bootstrapping, leaving or moving nodes -> empty pending ranges for {}", keyspaceName);
-                        pendingRanges.put(keyspaceName, new PendingRangeMaps());
-
-                        return;
-                    }
-                }
-
-                bootstrapTokensClone  = new BiMultiValMap<>(this.bootstrapTokens);
-                leavingEndpointsClone = new HashSet<>(this.leavingEndpoints);
-                movingEndpointsClone = new HashSet<>(this.movingEndpoints);
-                metadata = this.cloneOnlyTokenMap();
-            }
-            finally
-            {
-                lock.readLock().unlock();
-            }
-
-            pendingRanges.put(keyspaceName, calculatePendingRanges(strategy, metadata, bootstrapTokensClone,
-                                                                   leavingEndpointsClone, movingEndpointsClone));
             if (logger.isDebugEnabled())
                 logger.debug("Starting pending range calculation for {}", keyspaceName);
 
-            long took = System.currentTimeMillis() - startedAt;
+            long took = currentTimeMillis() - startedAt;
 
             if (logger.isDebugEnabled())
                 logger.debug("Pending range calculation for {} completed (took: {}ms)", keyspaceName, took);
             if (logger.isTraceEnabled())
                 logger.trace("Calculated pending ranges for {}:\n{}", keyspaceName, (pendingRanges.isEmpty() ? "<empty>" : printPendingRanges()));
         }
+    }
+
+    public void unsafeCalculatePendingRanges(AbstractReplicationStrategy strategy, String keyspaceName)
+    {
+        // create clone of current state
+        BiMultiValMap<Token, InetAddressAndPort> bootstrapTokensClone;
+        Set<InetAddressAndPort> leavingEndpointsClone;
+        Set<Pair<Token, InetAddressAndPort>> movingEndpointsClone;
+        TokenMetadata metadata;
+
+        lock.readLock().lock();
+        try
+        {
+
+            if (bootstrapTokens.isEmpty() && leavingEndpoints.isEmpty() && movingEndpoints.isEmpty())
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("No bootstrapping, leaving or moving nodes -> empty pending ranges for {}", keyspaceName);
+                if (bootstrapTokens.isEmpty() && leavingEndpoints.isEmpty() && movingEndpoints.isEmpty())
+                {
+                    if (logger.isTraceEnabled())
+                        logger.trace("No bootstrapping, leaving or moving nodes -> empty pending ranges for {}", keyspaceName);
+                    pendingRanges.put(keyspaceName, new PendingRangeMaps());
+
+                    return;
+                }
+            }
+
+            bootstrapTokensClone  = new BiMultiValMap<>(this.bootstrapTokens);
+            leavingEndpointsClone = new HashSet<>(this.leavingEndpoints);
+            movingEndpointsClone = new HashSet<>(this.movingEndpoints);
+            metadata = this.cloneOnlyTokenMap();
+        }
+        finally
+        {
+            lock.readLock().unlock();
+        }
+
+        pendingRanges.put(keyspaceName, calculatePendingRanges(strategy, metadata, bootstrapTokensClone,
+                                                               leavingEndpointsClone, movingEndpointsClone));
     }
 
     /**
@@ -1069,6 +1244,13 @@ public class TokenMetadata
         }
     }
 
+    public Set<InetAddressAndPort> getAllMembers()
+    {
+        return getAllEndpoints().stream()
+                                .filter(this::isMember)
+                                .collect(Collectors.toSet());
+    }
+
     /** caller should not modify leavingEndpoints */
     public Set<InetAddressAndPort> getLeavingEndpoints()
     {
@@ -1119,6 +1301,19 @@ public class TokenMetadata
         try
         {
             return movingEndpoints.size();
+        }
+        finally
+        {
+            lock.readLock().unlock();
+        }
+    }
+
+    public Set<InetAddressAndPort> getAllRingMembers()
+    {
+        lock.readLock().lock();
+        try
+        {
+            return ImmutableSet.copyOf(tokenToEndpointMap.valueSet());
         }
         finally
         {
@@ -1291,7 +1486,7 @@ public class TokenMetadata
     /**
      * @deprecated retained for benefit of old tests
      */
-    @Deprecated
+    @Deprecated(since = "4.0")
     public EndpointsForToken getWriteEndpoints(Token token, String keyspaceName, EndpointsForToken natural)
     {
         EndpointsForToken pending = pendingEndpointsForToken(token, keyspaceName);
@@ -1351,22 +1546,13 @@ public class TokenMetadata
      */
     public Topology getTopology()
     {
-        assert this != StorageService.instance.getTokenMetadata();
+        assert !DatabaseDescriptor.isDaemonInitialized() || this != StorageService.instance.getTokenMetadata();
         return topology;
     }
 
     public long getRingVersion()
     {
-        lock.readLock().lock();
-
-        try
-        {
-            return ringVersion;
-        }
-        finally
-        {
-            lock.readLock().unlock();
-        }
+        return ringVersion;
     }
 
     public void invalidateCachedRings()
@@ -1392,6 +1578,12 @@ public class TokenMetadata
     public DecoratedKey decorateKey(ByteBuffer key)
     {
         return partitioner.decorateKey(key);
+    }
+
+    public boolean isTokenInLocalPendingRange(String keyspaceName, Token token)
+    {
+        PendingRangeMaps pending = pendingRanges.get(keyspaceName);
+        return pending == null ? false : pending.isTokenInLocalPendingRange(token);
     }
 
     /**
@@ -1457,7 +1649,7 @@ public class TokenMetadata
 
         static Topology empty()
         {
-            return builder(() -> DatabaseDescriptor.getEndpointSnitch()).build();
+            return builder(DatabaseDescriptor::getEndpointSnitch).build();
         }
 
         private static class Builder
@@ -1468,7 +1660,7 @@ public class TokenMetadata
             private final Map<String, Multimap<String, InetAddressAndPort>> dcRacks;
             /** reverse-lookup map for endpoint to current known dc/rack assignment */
             private final Map<InetAddressAndPort, Pair<String, String>> currentLocations;
-            private final Supplier<IEndpointSnitch> snitchSupplier;
+            private Supplier<IEndpointSnitch> snitchSupplier;
 
             Builder(Supplier<IEndpointSnitch> snitchSupplier)
             {
@@ -1540,7 +1732,7 @@ public class TokenMetadata
 
             Builder updateEndpoint(InetAddressAndPort ep)
             {
-                IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
+                IEndpointSnitch snitch = snitchSupplier.get();
                 if (snitch == null || !currentLocations.containsKey(ep))
                     return this;
 
@@ -1550,7 +1742,7 @@ public class TokenMetadata
 
             Builder updateEndpoints()
             {
-                IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
+                IEndpointSnitch snitch = snitchSupplier.get();
                 if (snitch == null)
                     return this;
 
@@ -1570,6 +1762,12 @@ public class TokenMetadata
 
                 doRemoveEndpoint(ep, current);
                 doAddEndpoint(ep, dc, rack);
+            }
+
+            Builder withSnitchSupplier(Supplier<IEndpointSnitch> snitchSupplier)
+            {
+                this.snitchSupplier = snitchSupplier;
+                return this;
             }
 
             Topology build()

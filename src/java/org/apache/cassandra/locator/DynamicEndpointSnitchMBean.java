@@ -25,7 +25,8 @@ import java.util.List;
 public interface DynamicEndpointSnitchMBean 
 {
     public Map<String, Double> getScoresWithPort();
-    @Deprecated
+    /** @deprecated See CASSANDRA-7544 */
+    @Deprecated(since = "4.0")
     public Map<InetAddress, Double> getScores();
     public int getUpdateInterval();
     public int getResetInterval();
@@ -58,4 +59,23 @@ public interface DynamicEndpointSnitchMBean
      * @return the current manually injected Severity.
      */
     public double getSeverity();
+
+    /**
+     * set replica latency quantile used for replica score computation
+     * @param quantile (0.0 - 1.0); for default see
+     *        {@link org.apache.cassandra.config.CassandraRelevantProperties#DYNAMIC_ENDPOINT_SNITCH_QUANTILE}
+     */
+    public void setQuantile(double quantile);
+
+    /**
+     * @return the replica latency quantile currently used for replica score computation
+     */
+    public double getQuantile();
+
+    /**
+     * set replica latency quantization to 1ms
+     */
+    public void setQuantizationToMillis(boolean enabled);
+
+    public boolean getQuantizationToMillis();
 }

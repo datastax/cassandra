@@ -20,26 +20,63 @@ package org.apache.cassandra.cql3;
 
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.schema.ColumnMetadata;
+import com.datastax.driver.core.CodecUtils;
+import org.apache.cassandra.cql3.functions.types.LocalDate;
 import org.apache.cassandra.cql3.statements.SelectStatement;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.ByteType;
+import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.DoubleType;
+import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.InetAddressType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.db.marshal.ShortType;
+import org.apache.cassandra.db.marshal.TimestampType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.ComplexColumnData;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.QueryPager;
-import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.TimeUUID;
 
 /** a utility for doing internal cql-based queries */
 public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 {
+    public Stream<Row> stream()
+    {
+        return StreamSupport.stream(spliterator(), false);
+    }
+
     public static UntypedResultSet create(ResultSet rs)
     {
         return new FromResultSet(rs);
@@ -50,7 +87,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         return new FromResultList(results);
     }
 
-    public static UntypedResultSet create(SelectStatement select, QueryPager pager, int pageSize)
+    public static UntypedResultSet create(SelectStatement select, QueryPager pager, PageSize pageSize)
     {
         return new FromPager(select, pager, pageSize);
     }
@@ -64,7 +101,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
                                           ConsistencyLevel cl,
                                           ClientState clientState,
                                           QueryPager pager,
-                                          int pageSize)
+                                          PageSize pageSize)
     {
         return new FromDistributedPager(select, cl, clientState, pager, pageSize);
     }
@@ -105,7 +142,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         {
             return new AbstractIterator<Row>()
             {
-                Iterator<List<ByteBuffer>> iter = cqlRows.rows.iterator();
+                final Iterator<List<ByteBuffer>> iter = cqlRows.rows.iterator();
 
                 protected Row computeNext()
                 {
@@ -147,7 +184,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         {
             return new AbstractIterator<Row>()
             {
-                Iterator<Map<String, ByteBuffer>> iter = cqlRows.iterator();
+                final Iterator<Map<String, ByteBuffer>> iter = cqlRows.iterator();
 
                 protected Row computeNext()
                 {
@@ -168,10 +205,10 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
     {
         private final SelectStatement select;
         private final QueryPager pager;
-        private final int pageSize;
+        private final PageSize pageSize;
         private final List<ColumnSpecification> metadata;
 
-        private FromPager(SelectStatement select, QueryPager pager, int pageSize)
+        private FromPager(SelectStatement select, QueryPager pager, PageSize pageSize)
         {
             this.select = select;
             this.pager = pager;
@@ -197,7 +234,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
                 protected Row computeNext()
                 {
-                    int nowInSec = FBUtilities.nowInSeconds();
+                    long nowInSec = FBUtilities.nowInSeconds();
                     while (currentPage == null || !currentPage.hasNext())
                     {
                         if (pager.isExhausted())
@@ -206,7 +243,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
                         try (ReadExecutionController executionController = pager.executionController();
                              PartitionIterator iter = pager.fetchPageInternal(pageSize, executionController))
                         {
-                            currentPage = select.process(iter, nowInSec).rows.iterator();
+                            currentPage = select.process(iter, nowInSec, true, ClientState.forInternalCalls()).rows.iterator();
                         }
                     }
                     return new Row(metadata, currentPage.next());
@@ -229,13 +266,14 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         private final ConsistencyLevel cl;
         private final ClientState clientState;
         private final QueryPager pager;
-        private final int pageSize;
+        private final PageSize pageSize;
         private final List<ColumnSpecification> metadata;
 
         private FromDistributedPager(SelectStatement select,
                                      ConsistencyLevel cl,
                                      ClientState clientState,
-                                     QueryPager pager, int pageSize)
+                                     QueryPager pager,
+                                     PageSize pageSize)
         {
             this.select = select;
             this.cl = cl;
@@ -263,15 +301,15 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
                 protected Row computeNext()
                 {
-                    int nowInSec = FBUtilities.nowInSeconds();
+                    long nowInSec = FBUtilities.nowInSeconds();
                     while (currentPage == null || !currentPage.hasNext())
                     {
                         if (pager.isExhausted())
                             return endOfData();
 
-                        try (PartitionIterator iter = pager.fetchPage(pageSize, cl, clientState, System.nanoTime()))
+                        try (PartitionIterator iter = pager.fetchPage(pageSize, cl, clientState, Dispatcher.RequestTime.forImmediateExecution()))
                         {
-                            currentPage = select.process(iter, nowInSec).rows.iterator();
+                            currentPage = select.process(iter, nowInSec, true, clientState).rows.iterator();
                         }
                     }
                     return new Row(metadata, currentPage.next());
@@ -326,7 +364,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
                 {
                     ComplexColumnData complexData = row.getComplexColumnData(def);
                     if (complexData != null)
-                        data.put(def.name.toString(), ((CollectionType)def.type).serializeForNativeProtocol(complexData.iterator(), ProtocolVersion.V3));
+                        data.put(def.name.toString(), ((CollectionType<?>) def.type).serializeForNativeProtocol(complexData.iterator()));
                 }
             }
 
@@ -369,14 +407,35 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             return Int32Type.instance.compose(data.get(column));
         }
 
+        public int getInt(String column, int ifNull)
+        {
+            ByteBuffer bytes = data.get(column);
+            return bytes == null ? ifNull : Int32Type.instance.compose(bytes);
+        }
+
         public double getDouble(String column)
         {
             return DoubleType.instance.compose(data.get(column));
         }
 
+        public float getFloat(String column)
+        {
+            return FloatType.instance.compose(data.get(column));
+        }
+
         public ByteBuffer getBytes(String column)
         {
             return data.get(column);
+        }
+
+        public byte[] getByteArray(String column)
+        {
+            ByteBuffer buf = data.get(column);
+            byte[] arr = new byte[buf.remaining()];
+            for (int i = 0; i < arr.length; i++)
+                arr[i] = buf.get(buf.position() + i);
+
+            return arr;
         }
 
         public InetAddress getInetAddress(String column)
@@ -389,10 +448,23 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             return UUIDType.instance.compose(data.get(column));
         }
 
+        public UUID getUUID(String column, UUID ifNull)
+        {
+            ByteBuffer bytes = data.get(column);
+            return bytes == null ? ifNull : UUIDType.instance.compose(bytes);
+        }
+
+        public TimeUUID getTimeUUID(String column)
+        {
+            return TimeUUID.deserialize(data.get(column));
+        }
+
         public Date getTimestamp(String column)
         {
             return TimestampType.instance.compose(data.get(column));
         }
+
+        public LocalDate getDate(String column) { return LocalDate.fromDaysSinceEpoch(CodecUtils.fromUnsignedToSignedInt(data.get(column).getInt()));}
 
         public long getLong(String column)
         {
@@ -417,11 +489,6 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             return raw == null ? null : MapType.getInstance(keyType, valueType, true).compose(raw);
         }
 
-        public Map<String, String> getTextMap(String column)
-        {
-            return getMap(column, UTF8Type.instance, UTF8Type.instance);
-        }
-
         public <T> Set<T> getFrozenSet(String column, AbstractType<T> type)
         {
             ByteBuffer raw = data.get(column);
@@ -443,6 +510,12 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         public Map<String, String> getFrozenTextMap(String column)
         {
             return getFrozenMap(column, UTF8Type.instance, UTF8Type.instance);
+        }
+
+        public <T> List<T> getVector(String column, AbstractType<T> elementType, int dimension)
+        {
+            ByteBuffer raw = data.get(column);
+            return raw == null ? null : VectorType.getInstance(elementType, dimension).compose(raw);
         }
 
         public List<ColumnSpecification> getColumns()

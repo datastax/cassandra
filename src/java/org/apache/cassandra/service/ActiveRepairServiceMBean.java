@@ -29,8 +29,30 @@ public interface ActiveRepairServiceMBean
     public List<Map<String, String>> getSessions(boolean all, String rangesStr);
     public void failSession(String session, boolean force);
 
+    /** @deprecated See CASSANDRA-15234 */
+    @Deprecated(since = "4.1")
     public void setRepairSessionSpaceInMegabytes(int sizeInMegabytes);
+    /** @deprecated See CASSANDRA-15234 */
+    @Deprecated(since = "4.1")
     public int getRepairSessionSpaceInMegabytes();
+
+    /**
+     * @deprecated use setRepairSessionSpaceInMiB instead as it will not throw non-standard exceptions. See CASSANDRA-17668
+     */
+    @Deprecated(since = "4.1")
+    public void setRepairSessionSpaceInMebibytes(int sizeInMebibytes);
+    /**
+     * @deprecated use getRepairSessionSpaceInMiB instead. See CASSANDRA-17668
+     */
+    @Deprecated(since = "4.1")
+    public int getRepairSessionSpaceInMebibytes();
+
+    public void setRepairSessionSpaceInMiB(int sizeInMebibytes);
+    public int getRepairSessionSpaceInMiB();
+
+    int getConcurrentMerkleTreeRequests();
+
+    void setConcurrentMerkleTreeRequests(int value);
 
     public boolean getUseOffheapMerkleTrees();
     public void setUseOffheapMerkleTrees(boolean value);
@@ -50,4 +72,6 @@ public interface ActiveRepairServiceMBean
      * @return current size of the internal cache holding {@link ActiveRepairService.ParentRepairSession} instances
      */
     int parentRepairSessionsCount();
+    public int getPaxosRepairParallelism();
+    public void setPaxosRepairParallelism(int v);
 }

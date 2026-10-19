@@ -17,27 +17,34 @@
  */
 package org.apache.cassandra.db.view;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.stream.Collectors;
-
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterables;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.Selectable;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.cql3.statements.SelectStatement;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.ReadQuery;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.ViewMetadata;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.FBUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * A View copies data from a base table into a view table which can be queried independently from the
@@ -146,10 +153,11 @@ public class View
      * @param nowInSec the current time in seconds (to decide what is live and what isn't).
      * @return {@code true} if {@code baseRow} matches the view filters, {@code false} otherwise.
      */
-    public boolean matchesViewFilter(DecoratedKey partitionKey, Row baseRow, int nowInSec)
+    public boolean matchesViewFilter(DecoratedKey partitionKey, Row baseRow, long nowInSec)
     {
         return getReadQuery().selectsClustering(partitionKey, baseRow.clustering())
-            && getSelectStatement().rowFilterForInternalCalls().isSatisfiedBy(baseCfs.metadata(), partitionKey, baseRow, nowInSec);
+            && getSelectStatement().rowFilterForInternalCalls()
+                                   .isSatisfiedBy(baseCfs.metadata(), partitionKey, baseRow, nowInSec);
     }
 
     /**
@@ -161,23 +169,25 @@ public class View
         if (null == select)
         {
             SelectStatement.Parameters parameters =
-                new SelectStatement.Parameters(Collections.emptyMap(),
+                new SelectStatement.Parameters(Collections.emptyList(),
                                                Collections.emptyList(),
                                                false,
                                                true,
                                                false);
 
             SelectStatement.RawStatement rawSelect =
-                new SelectStatement.RawStatement(new QualifiedName(baseCfs.keyspace.getName(), baseCfs.name),
+                new SelectStatement.RawStatement(new QualifiedName(baseCfs.getKeyspaceName(), baseCfs.name),
                                                  parameters,
                                                  selectClause(),
                                                  definition.whereClause,
                                                  null,
-                                                 null);
+                                                 null,
+                                                 null,
+                                                 SelectOptions.EMPTY);
 
             rawSelect.setBindVariables(Collections.emptyList());
 
-            select = rawSelect.prepare(true);
+            select = rawSelect.prepare(ClientState.forInternalCalls(), true, Constants.IDENTITY_STRING_MAPPER);
         }
 
         return select;

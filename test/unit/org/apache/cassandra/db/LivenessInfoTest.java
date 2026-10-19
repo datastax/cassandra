@@ -20,18 +20,18 @@ package org.apache.cassandra.db;
 
 import static org.junit.Assert.*;
 
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.hadoop.mapred.machines_jsp;
 import org.junit.Test;
 
-public class LivenessInfoTest
+public class LivenessInfoTest extends CQLTester
 {
     @Test
     public void testSupersedes()
     {
         LivenessInfo first;
         LivenessInfo second;
-        int nowInSeconds = FBUtilities.nowInSeconds();
+        long nowInSeconds = FBUtilities.nowInSeconds();
 
         // timestamp supersedes for normal liveness info
         first = LivenessInfo.create(100, 0, nowInSeconds);
@@ -76,12 +76,17 @@ public class LivenessInfoTest
         first = LivenessInfo.withExpirationTime(100, LivenessInfo.EXPIRED_LIVENESS_TTL, nowInSeconds + 1);
         second = LivenessInfo.withExpirationTime(100, LivenessInfo.EXPIRED_LIVENESS_TTL, nowInSeconds);
         assertSupersedes(first, second);
+
+        // rewritten expiring with the same expiration time and a lower TTL, take the lower TTL as likely to be more recent
+        first = LivenessInfo.withExpirationTime(100, 4, nowInSeconds);
+        second = LivenessInfo.withExpirationTime(100, 5, nowInSeconds);
+        assertSupersedes(first, second);
     }
 
     @Test
     public void testIsLive()
     {
-        int nowInSeconds = FBUtilities.nowInSeconds();
+        long nowInSeconds = FBUtilities.nowInSeconds();
 
         assertIsLive(LivenessInfo.create(100, 0, nowInSeconds), nowInSeconds - 3, true);
         assertIsLive(LivenessInfo.create(100, 0, nowInSeconds), nowInSeconds, true);
@@ -105,7 +110,7 @@ public class LivenessInfoTest
         assertFalse(right.supersedes(left));
     }
 
-    private static void assertIsLive(LivenessInfo info, int nowInSec, boolean alive)
+    private static void assertIsLive(LivenessInfo info, long nowInSec, boolean alive)
     {
         assertEquals(info.isLive(nowInSec), alive);
     }

@@ -21,15 +21,27 @@ package org.apache.cassandra.db.commitlog;
  *
  */
 
-import java.io.*;
+import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.util.concurrent.RateLimiter;
 
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -39,22 +51,28 @@ import org.junit.runners.Parameterized.Parameters;
 
 import io.netty.util.concurrent.FastThreadLocalThread;
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.Util;
 import org.apache.cassandra.UpdateBuilder;
+import org.apache.cassandra.Util;
 import org.apache.cassandra.config.*;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.DeserializationHelper;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.compress.DeflateCompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.compress.SnappyCompressor;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
 
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
 @Ignore
 public abstract class CommitLogStressTest
@@ -72,7 +90,7 @@ public abstract class CommitLogStressTest
     public static int rateLimit = 0;
     public static int runTimeMs = 10000;
 
-    public static String location = DatabaseDescriptor.getCommitLogLocation() + "/stress";
+    public static File location = DatabaseDescriptor.getCommitLogLocation().resolve("stress");
 
     public static int hash(int hash, ByteBuffer bytes)
     {
@@ -90,18 +108,21 @@ public abstract class CommitLogStressTest
     private boolean randomSize = false;
     private boolean discardedRun = false;
     private CommitLogPosition discardedPos;
+    private long totalBytesWritten = 0;
 
-    public CommitLogStressTest(ParameterizedClass commitLogCompression, EncryptionContext encryptionContext)
+    public CommitLogStressTest(ParameterizedClass commitLogCompression, EncryptionContext encryptionContext, Config.DiskAccessMode accessMode)
     {
         DatabaseDescriptor.setCommitLogCompression(commitLogCompression);
         DatabaseDescriptor.setEncryptionContext(encryptionContext);
         DatabaseDescriptor.setCommitLogSegmentSize(32);
+        DatabaseDescriptor.setCommitLogWriteDiskAccessMode(accessMode);
+        DatabaseDescriptor.initializeCommitLogDiskAccessMode();
     }
 
     @BeforeClass
     static public void initialize() throws IOException
     {
-        try (FileInputStream fis = new FileInputStream("CHANGES.txt"))
+        try (FileInputStreamPlus fis = new FileInputStreamPlus("CHANGES.txt"))
         {
             dataSource = ByteBuffer.allocateDirect((int) fis.getChannel().size());
             while (dataSource.hasRemaining())
@@ -120,18 +141,17 @@ public abstract class CommitLogStressTest
     @Before
     public void cleanDir() throws IOException
     {
-        File dir = new File(location);
-        if (dir.isDirectory())
+        if (location.isDirectory())
         {
-            File[] files = dir.listFiles();
+            File[] files = location.tryList();
 
             for (File f : files)
-                if (!f.delete())
+                if (!f.tryDelete())
                     Assert.fail("Failed to delete " + f);
         }
         else
         {
-            dir.mkdir();
+            location.tryCreateDirectory();
         }
     }
 
@@ -139,11 +159,12 @@ public abstract class CommitLogStressTest
     public static Collection<Object[]> buildParameterizedVariants()
     {
         return Arrays.asList(new Object[][]{
-        {null, EncryptionContextGenerator.createDisabledContext()}, // No compression, no encryption
-        {null, EncryptionContextGenerator.createContext(true)}, // Encryption
-        { new ParameterizedClass(LZ4Compressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext()},
-        { new ParameterizedClass(SnappyCompressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext()},
-        { new ParameterizedClass(DeflateCompressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext()}});
+        {null, EncryptionContextGenerator.createDisabledContext(), Config.DiskAccessMode.legacy}, // No compression, no encryption, legacy
+        {null, EncryptionContextGenerator.createDisabledContext(), Config.DiskAccessMode.direct}, // Use Direct-I/O (non-buffered) feature.
+        {null, EncryptionContextGenerator.createContext(true), Config.DiskAccessMode.legacy},
+        { new ParameterizedClass(LZ4Compressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext(), Config.DiskAccessMode.legacy},
+        { new ParameterizedClass(SnappyCompressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext(), Config.DiskAccessMode.legacy},
+        { new ParameterizedClass(DeflateCompressor.class.getName(), Collections.emptyMap()), EncryptionContextGenerator.createDisabledContext(), Config.DiskAccessMode.legacy}});
     }
 
     @Test
@@ -153,6 +174,7 @@ public abstract class CommitLogStressTest
         discardedRun = false;
         testLog();
     }
+
 
     @Test
     public void testFixedSize() throws Exception
@@ -172,10 +194,12 @@ public abstract class CommitLogStressTest
 
     private void testLog() throws IOException, InterruptedException
     {
-        String originalDir = DatabaseDescriptor.getCommitLogLocation();
+        File originalDir = DatabaseDescriptor.getCommitLogLocation();
         try
         {
             DatabaseDescriptor.setCommitLogLocation(location);
+            DatabaseDescriptor.initializeCommitLogDiskAccessMode();
+            DatabaseDescriptor.getRawConfig().commitlog_directory = location.path();
             CommitLog commitLog = new CommitLog(CommitLogArchiver.disabled()).start();
             testLog(commitLog);
             assert !failed;
@@ -183,14 +207,18 @@ public abstract class CommitLogStressTest
         finally
         {
             DatabaseDescriptor.setCommitLogLocation(originalDir);
+            DatabaseDescriptor.initializeCommitLogDiskAccessMode();
+            DatabaseDescriptor.getRawConfig().commitlog_directory = originalDir.path();
         }
     }
 
     private void testLog(CommitLog commitLog) throws IOException, InterruptedException {
-        System.out.format("\nTesting commit log size %.0fmb, compressor: %s, encryption enabled: %b, sync %s%s%s\n",
+        System.out.format("\nTesting commit log size %.0fmb, disk mode: %s, compressor: %s, encryption enabled: %b, direct I/O enabled: %b, sync %s%s%s\n",
                            mb(DatabaseDescriptor.getCommitLogSegmentSize()),
+                           DatabaseDescriptor.getCommitLogWriteDiskAccessMode(),
                            commitLog.configuration.getCompressorName(),
                            commitLog.configuration.useEncryption(),
+                           commitLog.configuration.isDirectIOEnabled(),
                            commitLog.executor.getClass().getSimpleName(),
                            randomSize ? " random size" : "",
                            discardedRun ? " with discarded run" : "");
@@ -245,25 +273,30 @@ public abstract class CommitLogStressTest
         System.out.println("Stopped. Replaying... ");
         System.out.flush();
         Reader reader = new Reader();
-        File[] files = new File(location).listFiles();
+        File[] files = location.tryList();
 
         DummyHandler handler = new DummyHandler();
         reader.readAllFiles(handler, files);
 
         for (File f : files)
-            if (!f.delete())
+            if (!f.tryDelete())
                 Assert.fail("Failed to delete " + f);
 
         if (hash == reader.hash && cells == reader.cells)
-            System.out.format("Test success. compressor = %s, encryption enabled = %b; discarded = %d, skipped = %d\n",
+            System.out.format("Test success. disk mode = %s, compressor = %s, encryption enabled = %b, direct I/O = %b; discarded = %d, skipped = %d; IO speed(total bytes=%.2fmb, rate=%.2fmb/sec)\n",
+                              DatabaseDescriptor.getCommitLogWriteDiskAccessMode(),
                               commitLog.configuration.getCompressorName(),
                               commitLog.configuration.useEncryption(),
-                              reader.discarded, reader.skipped);
+                              commitLog.configuration.isDirectIOEnabled(),
+                              reader.discarded, reader.skipped,
+                              mb(totalBytesWritten), mb(totalBytesWritten)/runTimeMs*1000);
         else
         {
-            System.out.format("Test failed (compressor = %s, encryption enabled = %b). Cells %d, expected %d, diff %d; discarded = %d, skipped = %d -  hash %d expected %d.\n",
+            System.out.format("Test failed (disk mode = %s, compressor = %s, encryption enabled = %b, direct I/O = %b). Cells %d, expected %d, diff %d; discarded = %d, skipped = %d -  hash %d expected %d.\n",
+                              DatabaseDescriptor.getCommitLogWriteDiskAccessMode(),
                               commitLog.configuration.getCompressorName(),
                               commitLog.configuration.useEncryption(),
+                              commitLog.configuration.isDirectIOEnabled(),
                               reader.cells, cells, cells - reader.cells, reader.discarded, reader.skipped,
                               reader.hash, hash);
             failed = true;
@@ -275,16 +308,19 @@ public abstract class CommitLogStressTest
         // Complete anything that's still left to write.
         commitLog.executor.syncBlocking();
         // Wait for any concurrent segment allocations to complete.
-        commitLog.segmentManager.awaitManagementTasksCompletion();
+        commitLog.getSegmentManager().awaitManagementTasksCompletion();
 
         long combinedSize = 0;
-        for (File f : new File(commitLog.segmentManager.storageDirectory).listFiles())
+        for (File f : commitLog.getSegmentManager().storageDirectory.tryList())
+        {
             combinedSize += f.length();
+        }
+        totalBytesWritten = combinedSize;
         Assert.assertEquals(combinedSize, commitLog.getActiveOnDiskSize());
 
         List<String> logFileNames = commitLog.getActiveSegmentNames();
         Map<String, Double> ratios = commitLog.getActiveSegmentCompressionRatios();
-        Collection<CommitLogSegment> segments = commitLog.segmentManager.getActiveSegments();
+        Collection<CommitLogSegment> segments = commitLog.getSegmentManager().getActiveSegments();
 
         for (CommitLogSegment segment : segments)
         {
@@ -307,7 +343,7 @@ public abstract class CommitLogStressTest
             t.start();
         }
 
-        final long start = System.currentTimeMillis();
+        final long start = currentTimeMillis();
         Runnable printRunnable = new Runnable()
         {
             long lastUpdate = 0;
@@ -325,11 +361,11 @@ public abstract class CommitLogStressTest
                     temp += clt.counter.get();
                     sz += clt.dataSize;
                 }
-                double time = (System.currentTimeMillis() - start) / 1000.0;
+                double time = (currentTimeMillis() - start) / 1000.0;
                 double avg = (temp / time);
                 System.out.println(
                         String.format("second %d mem max %.0fmb allocated %.0fmb free %.0fmb mutations %d since start %d avg %.3f content %.1fmb ondisk %.1fmb transfer %.3fmb",
-                                      ((System.currentTimeMillis() - start) / 1000),
+                                      ((currentTimeMillis() - start) / 1000),
                                       mb(maxMemory),
                                       mb(allocatedMemory),
                                       mb(freeMemory),
@@ -459,7 +495,7 @@ public abstract class CommitLogStressTest
             for (PartitionUpdate cf : mutation.getPartitionUpdates())
             {
 
-                Iterator<Row> rowIterator = cf.iterator();
+                Iterator<Row> rowIterator = cf.rowIterator();
 
                 while (rowIterator.hasNext())
                 {
@@ -484,5 +520,7 @@ public abstract class CommitLogStressTest
         public void handleUnrecoverableError(CommitLogReadException exception) throws IOException { }
 
         public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc) { }
+
+        public void handleInvalidMutation(TableId id) {}
     }
 }

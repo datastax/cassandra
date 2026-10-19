@@ -17,8 +17,8 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import org.apache.commons.lang.builder.ToStringBuilder;
-import org.apache.commons.lang.builder.ToStringStyle;
+import org.apache.commons.lang3.builder.ToStringBuilder;
+import org.apache.commons.lang3.builder.ToStringStyle;
 
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QualifiedName;
@@ -27,13 +27,18 @@ import org.apache.cassandra.service.ClientState;
 /**
  * Abstract class for statements that work on sub-keyspace level (tables, views, indexes, functions, etc.)
  */
-public abstract class QualifiedStatement extends CQLStatement.Raw
+public abstract class QualifiedStatement<R extends CQLStatement.SingleKeyspaceCqlStatement> extends RawKeyspaceAwareStatement<R>
 {
     final QualifiedName qualifiedName;
 
     QualifiedStatement(QualifiedName qualifiedName)
     {
         this.qualifiedName = qualifiedName;
+    }
+
+    public boolean isFullyQualified()
+    {
+        return qualifiedName.hasKeyspace();
     }
 
     public void setKeyspace(ClientState state)
@@ -67,7 +72,7 @@ public abstract class QualifiedStatement extends CQLStatement.Raw
     {
         return qualifiedName.getName();
     }
-    
+
     @Override
     public String toString()
     {

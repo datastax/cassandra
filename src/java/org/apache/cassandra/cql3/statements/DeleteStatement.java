@@ -19,9 +19,19 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.List;
 
+import org.apache.commons.lang3.builder.ToStringBuilder;
+import org.apache.commons.lang3.builder.ToStringStyle;
+
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.Attributes;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.Operation;
+import org.apache.cassandra.cql3.Operations;
+import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.UpdateParameters;
+import org.apache.cassandra.cql3.VariableSpecifications;
+import org.apache.cassandra.cql3.WhereClause;
 import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.cql3.conditions.Conditions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -31,9 +41,8 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.Pair;
-import org.apache.commons.lang3.builder.ToStringBuilder;
-import org.apache.commons.lang3.builder.ToStringStyle;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
@@ -43,14 +52,15 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
  */
 public class DeleteStatement extends ModificationStatement
 {
-    private DeleteStatement(VariableSpecifications bindVariables,
+    private DeleteStatement(String queryString,
+                            VariableSpecifications bindVariables,
                             TableMetadata cfm,
                             Operations operations,
                             StatementRestrictions restrictions,
                             Conditions conditions,
                             Attributes attrs)
     {
-        super(StatementType.DELETE, bindVariables, cfm, operations, restrictions, conditions, attrs);
+        super(queryString, StatementType.DELETE, bindVariables, cfm, operations, restrictions, conditions, attrs);
     }
 
     @Override
@@ -140,13 +150,12 @@ public class DeleteStatement extends ModificationStatement
 
 
         @Override
-        protected ModificationStatement prepareInternal(TableMetadata metadata,
+        protected ModificationStatement prepareInternal(ClientState state,
+                                                        TableMetadata metadata,
                                                         VariableSpecifications bindVariables,
                                                         Conditions conditions,
                                                         Attributes attrs)
         {
-            checkFalse(metadata.isVirtual(), "Virtual tables don't support DELETE statements");
-
             Operations operations = new Operations(type);
 
             for (Operation.RawDeletion deletion : deletions)
@@ -162,13 +171,10 @@ public class DeleteStatement extends ModificationStatement
                 operations.add(op);
             }
 
-            StatementRestrictions restrictions = newRestrictions(metadata,
-                                                                 bindVariables,
-                                                                 operations,
-                                                                 whereClause,
-                                                                 conditions);
+            StatementRestrictions restrictions = newRestrictions(state, metadata, bindVariables, operations, whereClause, conditions);
 
-            DeleteStatement stmt = new DeleteStatement(bindVariables,
+            DeleteStatement stmt = new DeleteStatement(rawCQLStatement,
+                                                       bindVariables,
                                                        metadata,
                                                        operations,
                                                        restrictions,
@@ -177,6 +183,8 @@ public class DeleteStatement extends ModificationStatement
 
             if (stmt.hasConditions() && !restrictions.hasAllPKColumnsRestrictedByEqualities())
             {
+                checkFalse(stmt.isVirtual(), "DELETE statements must restrict all PRIMARY KEY columns with equality relations");
+
                 checkFalse(operations.appliesToRegularColumns(),
                            "DELETE statements must restrict all PRIMARY KEY columns with equality relations in order to delete non static columns");
 
@@ -198,6 +206,6 @@ public class DeleteStatement extends ModificationStatement
     @Override
     public AuditLogContext getAuditLogContext()
     {
-        return new AuditLogContext(AuditLogEntryType.DELETE, keyspace(), columnFamily());
+        return new AuditLogContext(AuditLogEntryType.DELETE, keyspace(), table());
     }
 }

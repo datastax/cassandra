@@ -18,26 +18,29 @@
 
 package org.apache.cassandra.io.util;
 
-import java.io.*;
+import java.io.DataOutput;
+import java.io.IOError;
+import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Files;
-import java.util.zip.CRC32;
+import java.nio.charset.StandardCharsets;
+import java.util.zip.Checksum;
 
 import javax.annotation.Nonnull;
 
-import com.google.common.base.Charsets;
-
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.compress.CompressedSequentialWriter;
+import org.apache.cassandra.utils.ChecksumType;
 
 public class ChecksumWriter
 {
-    private final CRC32 incrementalChecksum = new CRC32();
+    private final Checksum incrementalChecksum = ChecksumType.CRC32.newInstance();
     private final DataOutput incrementalOut;
-    private final CRC32 fullChecksum = new CRC32();
+    private final Checksum fullChecksum;
 
-    public ChecksumWriter(DataOutput incrementalOut)
+    public ChecksumWriter(DataOutput incrementalOut, ChecksumType fullChecksumType)
     {
         this.incrementalOut = incrementalOut;
+        this.fullChecksum = fullChecksumType.newInstance();
     }
 
     public void writeChunkSize(int length)
@@ -88,11 +91,41 @@ public class ChecksumWriter
         }
     }
 
+    /**
+    * Checksum the given buffer and append the partial checksum after its end.
+    * Full checksum is updated to reflect the checksum bytes.
+    *
+    * Assumes the buffer has enough capacity to fit the extra 4 bytes, and leaves the buffer ready
+    * for writing (i.e. setting position to 0 and limit to the input limit + 4).
+    */
+    public void appendToBuf(ByteBuffer bb)
+    {
+        incrementalChecksum.update(bb);
+        bb.limit(bb.capacity());
+        int incrementalChecksumValue = (int) incrementalChecksum.getValue();
+        bb.putInt(incrementalChecksumValue);
+        bb.flip();
+        fullChecksum.update(bb);
+        incrementalChecksum.reset();
+        bb.flip();
+    }
+
     public void writeFullChecksum(@Nonnull File digestFile)
     {
-        try (BufferedWriter out = Files.newBufferedWriter(digestFile.toPath(), Charsets.UTF_8))
+        writeFullChecksum(digestFile, fullChecksum.getValue());
+    }
+
+    /**
+     * Write given checksum into the digest file. This is used when {@link CompressedSequentialWriter} is reset and truncated,
+     * and we need to recompute digest for the whole file.
+     */
+    public static void writeFullChecksum(@Nonnull File digestFile, long checksum)
+    {
+        try (FileOutputStreamPlus fos = new FileOutputStreamPlus(digestFile))
         {
-            out.write(String.valueOf(fullChecksum.getValue()));
+            fos.write(String.valueOf(checksum).getBytes(StandardCharsets.UTF_8));
+            fos.flush();
+            fos.getChannel().force(true);
         }
         catch (IOException e)
         {

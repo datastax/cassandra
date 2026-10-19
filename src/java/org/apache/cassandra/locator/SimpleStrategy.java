@@ -26,10 +26,13 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
 
@@ -42,7 +45,7 @@ import org.apache.cassandra.service.StorageService;
  */
 public class SimpleStrategy extends AbstractReplicationStrategy
 {
-    private static final String REPLICATION_FACTOR = "replication_factor";
+    public static final String REPLICATION_FACTOR = "replication_factor";
     private static final Logger logger = LoggerFactory.getLogger(SimpleStrategy.class);
     private final ReplicationFactor rf;
 
@@ -99,12 +102,14 @@ public class SimpleStrategy extends AbstractReplicationStrategy
     }
 
     @Override
-    public void maybeWarnOnOptions()
+    public void maybeWarnOnOptions(ClientState state)
     {
         if (!SchemaConstants.isSystemKeyspace(keyspaceName))
         {
             int nodeCount = StorageService.instance.getHostIdToEndpoint().size();
             // nodeCount==0 on many tests
+            Guardrails.minimumReplicationFactor.guard(rf.fullReplicas, keyspaceName, false, state);
+            Guardrails.maximumReplicationFactor.guard(rf.fullReplicas, keyspaceName, false, state);
             if (rf.fullReplicas > nodeCount && nodeCount != 0)
             {
                 String msg = "Your replication factor " + rf.fullReplicas
@@ -122,5 +127,14 @@ public class SimpleStrategy extends AbstractReplicationStrategy
     public Collection<String> recognizedOptions()
     {
         return Collections.singleton(REPLICATION_FACTOR);
+    }
+
+    protected static void prepareOptions(Map<String, String> options, Map<String, String> previousOptions)
+    {
+        // When altering from NTS to SS, previousOptions could have multiple different RFs for different data centers - so we
+        // will instead default to DefaultRF configuration if RF is not mentioned with the alter statement
+        String rf = previousOptions.containsKey(REPLICATION_FACTOR) ? previousOptions.get(REPLICATION_FACTOR)
+                                                                    : Integer.toString(DatabaseDescriptor.getDefaultKeyspaceRF());
+        options.putIfAbsent(REPLICATION_FACTOR, rf);
     }
 }

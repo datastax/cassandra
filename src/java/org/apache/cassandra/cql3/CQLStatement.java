@@ -24,10 +24,19 @@ import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 public interface CQLStatement
 {
+    /**
+     * The query string that produced that statement, if available.
+     *
+     * @return the raw query string that produced that statement, or {@code null} if said string is not available
+     * (typically because the statement has not been built from a string). Note that said string may contain bind markers.
+     */
+    String getRawCQLStatement();
+
     /**
      * Returns all bind variables for the statement
      */
@@ -75,9 +84,9 @@ public interface CQLStatement
      *
      * @param state the current query state
      * @param options options for this query (consistency, variables, pageSize, ...)
-     * @param queryStartNanoTime the timestamp returned by System.nanoTime() when this statement was received
+     * @param requestTime request enqueue / and start times;
      */
-    public ResultMessage execute(QueryState state, QueryOptions options, long queryStartNanoTime);
+    public ResultMessage execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime);
 
     /**
      * Variant of execute used for internal query against the system tables, and thus only query the local node.
@@ -101,7 +110,18 @@ public interface CQLStatement
 
     public static abstract class Raw
     {
+        protected String rawCQLStatement;
         protected VariableSpecifications bindVariables;
+
+        public void setRawCQLStatement(String queryString)
+        {
+            this.rawCQLStatement = queryString;
+        }
+
+        public String getRawCQLStatement()
+        {
+            return rawCQLStatement;
+        }
 
         public void setBindVariables(List<ColumnIdentifier> variables)
         {
@@ -109,5 +129,16 @@ public interface CQLStatement
         }
 
         public abstract CQLStatement prepare(ClientState state);
+    }
+
+    /**
+     * A marker for the statements (prepared) which run against an exact keyspace.
+     */
+    public static interface SingleKeyspaceCqlStatement extends CQLStatement
+    {
+        /**
+         * Returns a keyspace name associated with this statement.
+         */
+        public String keyspace();
     }
 }

@@ -21,10 +21,12 @@ package org.apache.cassandra.db.commitlog;
  *
  */
 
-import java.io.*;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Properties;
 
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.junit.Assert;
 
 import com.google.common.base.Predicate;
@@ -40,6 +42,7 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
@@ -49,6 +52,7 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.security.EncryptionContextGenerator;
+import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 
@@ -73,7 +77,7 @@ public class CommitLogUpgradeTest
     static final String KEYSPACE = "Keyspace1";
     static final String CELLNAME = "name";
 
-    private JVMStabilityInspector.Killer originalKiller;
+    private JVMKiller originalKiller;
     private KillerForTests killerForTests;
     private boolean shouldBeKilled = false;
 
@@ -82,6 +86,7 @@ public class CommitLogUpgradeTest
                      .addPartitionKeyColumn("key", AsciiType.instance)
                      .addClusteringColumn("col", AsciiType.instance)
                      .addRegularColumn("val", BytesType.instance)
+                     .addRegularColumn("val0", BytesType.instance)
                      .compression(SchemaLoader.getCompressionParameters())
                      .build();
 
@@ -97,6 +102,27 @@ public class CommitLogUpgradeTest
     {
         JVMStabilityInspector.replaceKiller(originalKiller);
         Assert.assertEquals("JVM killed", shouldBeKilled, killerForTests.wasKilled());
+    }
+
+    // 30 matches version in MessagingService, 3.0.13 is the latest patch release after 3.0.0 but before 3.0.14
+    @Test
+    public void test30_encrypted() throws Exception
+    {
+        testRestore(DATA_DIR + "3.0.13-encrypted");
+    }
+
+    // 3014 matches version in MessagingService, 3.0.29 is the latest patch release after 3.0.14
+    @Test
+    public void test3014_encrypted() throws Exception
+    {
+        testRestore(DATA_DIR + "3.0.29-encrypted");
+    }
+
+    // 40 matches version in MessagingService, 4.0.11 is the latest patch release on 4.0
+    @Test
+    public void test40_encrypted() throws Exception
+    {
+        testRestore(DATA_DIR + "4.0.11-encrypted");
     }
 
     @Test
@@ -116,7 +142,7 @@ public class CommitLogUpgradeTest
     public void testRestore(String location) throws IOException, InterruptedException
     {
         Properties prop = new Properties();
-        prop.load(new FileInputStream(new File(location + File.separatorChar + PROPERTIES_FILE)));
+        prop.load(new FileInputStreamPlus(new File(location + File.pathSeparator() + PROPERTIES_FILE)));
         int hash = Integer.parseInt(prop.getProperty(HASH_PROPERTY));
         int cells = Integer.parseInt(prop.getProperty(CELLS_PROPERTY));
 
@@ -125,12 +151,15 @@ public class CommitLogUpgradeTest
         {
             TableId tableId = TableId.fromString(cfidString);
             if (Schema.instance.getTableMetadata(tableId) == null)
-                Schema.instance.load(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1), Tables.of(metadata.unbuild().id(tableId).build())));
+                SchemaTestUtil.addOrUpdateKeyspace(KeyspaceMetadata.create(KEYSPACE,
+                                                                           KeyspaceParams.simple(1),
+                                                                           Tables.of(metadata.unbuild().id(tableId).build())),
+                                                   true);
         }
 
         Hasher hasher = new Hasher();
         CommitLogTestReplayer replayer = new CommitLogTestReplayer(hasher);
-        File[] files = new File(location).listFiles((file, name) -> name.endsWith(".log"));
+        File[] files = new File(location).tryList((file, name) -> name.endsWith(".log"));
         replayer.replayFiles(files);
 
         Assert.assertEquals(cells, hasher.cells);
@@ -158,7 +187,7 @@ public class CommitLogUpgradeTest
         {
             for (PartitionUpdate update : mutation.getPartitionUpdates())
             {
-                for (Row row : update)
+                for (Row row : update.rows())
                     if (row.clustering().size() > 0 &&
                         AsciiType.instance.compose(row.clustering().bufferAt(0)).startsWith(CELLNAME))
                     {

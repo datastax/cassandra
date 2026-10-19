@@ -18,9 +18,10 @@
 package org.apache.cassandra.db;
 
 import java.nio.ByteBuffer;
+import java.util.Iterator;
 import java.util.Random;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadLocalRandom;
 
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -30,25 +31,26 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.memory.HeapAllocator;
+import org.apache.cassandra.utils.memory.HeapCloner;
 import org.apache.cassandra.utils.memory.NativeAllocator;
 import org.apache.cassandra.utils.memory.NativePool;
 
-public class NativeCellTest
+public class NativeCellTest extends CQLTester
 {
 
     private static final Logger logger = LoggerFactory.getLogger(NativeCellTest.class);
     private static final NativeAllocator nativeAllocator = new NativePool(Integer.MAX_VALUE,
                                                                           Integer.MAX_VALUE,
                                                                           1f,
-                                                                          () -> CompletableFuture.completedFuture(true)).newAllocator();
-    @SuppressWarnings("resource")
+                                                                          () -> ImmediateFuture.success(true)).newAllocator(null);
     private static final OpOrder.Group group = new OpOrder().start();
     private static Random rand;
 
@@ -116,16 +118,17 @@ public class NativeCellTest
         return new ColumnMetadata("",
                                   "",
                                   ColumnIdentifier.getInterned(uuid.toString(), false),
-                                    isComplex ? new SetType<>(BytesType.instance, true) : BytesType.instance,
+                                    isComplex ? SetType.getInstance(BytesType.instance, true) : BytesType.instance,
                                   -1,
-                                  ColumnMetadata.Kind.REGULAR);
+                                  ColumnMetadata.Kind.REGULAR,
+                                  null);
     }
 
     private static Cell<?> rndcell(ColumnMetadata col)
     {
         long timestamp = rand.nextLong();
         int ttl = rand.nextInt();
-        int localDeletionTime = rand.nextInt();
+        long localDeletionTime = ThreadLocalRandom.current().nextLong(CellData.getVersionedMaxDeletiontionTime() + 1);
         byte[] value = new byte[rand.nextInt(sanesize(expdecay()))];
         rand.nextBytes(value);
         CellPath path = null;
@@ -151,8 +154,8 @@ public class NativeCellTest
 
     private static void test(Row row)
     {
-        Row nrow = clone(row, nativeAllocator.rowBuilder(group));
-        Row brow = clone(row, HeapAllocator.instance.cloningBTreeRowBuilder());
+        Row nrow = row.clone(nativeAllocator.cloner(group));
+        Row brow = row.clone(HeapCloner.instance);
         Assert.assertEquals(row, nrow);
         Assert.assertEquals(row, brow);
         Assert.assertEquals(nrow, brow);
@@ -161,15 +164,29 @@ public class NativeCellTest
         Assert.assertEquals(row.clustering(), brow.clustering());
         Assert.assertEquals(nrow.clustering(), brow.clustering());
 
+        Assert.assertEquals(row.clustering().dataSize(), nrow.clustering().dataSize());
+        Assert.assertEquals(row.clustering().dataSize(), brow.clustering().dataSize());
+
         ClusteringComparator comparator = new ClusteringComparator(UTF8Type.instance);
         Assert.assertEquals(0, comparator.compare(row.clustering(), nrow.clustering()));
         Assert.assertEquals(0, comparator.compare(row.clustering(), brow.clustering()));
         Assert.assertEquals(0, comparator.compare(nrow.clustering(), brow.clustering()));
+
+        assertCellsDataSize(row, nrow);
+        assertCellsDataSize(row, brow);
+
     }
 
-    private static Row clone(Row row, Row.Builder builder)
+    private static void assertCellsDataSize(Row row1, Row row2)
     {
-        return Rows.copy(row, builder).build();
+        Iterator<Cell<?>> row1Iterator = row1.cells().iterator();
+        Iterator<Cell<?>> row2Iterator = row2.cells().iterator();
+        while (row1Iterator.hasNext())
+        {
+            Cell cell1 = row1Iterator.next();
+            Cell cell2 = row2Iterator.next();
+            Assert.assertEquals(cell1.dataSize(), cell2.dataSize());
+        }
     }
 
 }

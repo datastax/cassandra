@@ -18,20 +18,30 @@
 
 package org.apache.cassandra.tools.nodetool.stats;
 
+import java.lang.reflect.UndeclaredThrowableException;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
 
 import javax.management.InstanceNotFoundException;
+
+import org.apache.commons.lang3.time.DurationFormatUtils;
+
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy;
+import org.apache.cassandra.db.compaction.TimeWindowCompactionStrategyOptions;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.metrics.*;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.tools.*;
 
 public class TableStatsHolder implements StatsHolder
 {
     public final List<StatsKeyspace> keyspaces;
-    public final int numberOfTables;
+    public int numberOfTables = 0;
     public final boolean humanReadable;
     public final String sortKey;
     public final int top;
@@ -46,14 +56,7 @@ public class TableStatsHolder implements StatsHolder
         this.locationCheck = locationCheck;
 
         if (!this.isTestTableStatsHolder())
-        {
-            this.numberOfTables = probe.getNumberOfTables();
             this.initializeKeyspaces(probe, ignore, tableNames);
-        }
-        else
-        {
-            this.numberOfTables = 0;
-        }
     }
 
     @Override
@@ -66,7 +69,7 @@ public class TableStatsHolder implements StatsHolder
     }
 
     /**
-     * @returns Map<String, Object> a nested HashMap of keyspaces, their tables, and the tables' statistics.
+     * @return {@code Map<String, Object>} a nested HashMap of keyspaces, their tables, and the tables' statistics.
      */
     private Map<String, Object> convertAllToMap()
     {
@@ -98,7 +101,7 @@ public class TableStatsHolder implements StatsHolder
     }
 
     /**
-     * @returns Map<String, Object> a nested HashMap of the sorted and filtered table names and the HashMaps of their statistics.
+     * @return {@code Map<String, Object>} a nested HashMap of the sorted and filtered table names and the HashMaps of their statistics.
      */
     private Map<String, Object> convertSortedFilteredSubsetToMap()
     {
@@ -117,7 +120,12 @@ public class TableStatsHolder implements StatsHolder
     private Map<String, Object> convertStatsTableToMap(StatsTable table)
     {
         Map<String, Object> mpTable = new HashMap<>();
+        mpTable.put("sstable_count", table.sstableCount);
+        mpTable.put("old_sstable_count", table.oldSSTableCount);
         mpTable.put("sstables_in_each_level", table.sstablesInEachLevel);
+        mpTable.put("sstable_bytes_in_each_level", table.sstableBytesInEachLevel);
+        mpTable.put("max_sstable_size", table.maxSSTableSize);
+        mpTable.put("twcs", table.twcs);
         mpTable.put("space_used_live", table.spaceUsedLive);
         mpTable.put("space_used_total", table.spaceUsedTotal);
         mpTable.put("space_used_by_snapshots_total", table.spaceUsedBySnapshotsTotal);
@@ -130,12 +138,17 @@ public class TableStatsHolder implements StatsHolder
         if (table.memtableOffHeapUsed)
             mpTable.put("memtable_off_heap_memory_used", table.memtableOffHeapMemoryUsed);
         mpTable.put("memtable_switch_count", table.memtableSwitchCount);
+        mpTable.put("speculative_retries", table.speculativeRetries);
         mpTable.put("local_read_count", table.localReadCount);
         mpTable.put("local_read_latency_ms", String.format("%01.3f", table.localReadLatencyMs));
         mpTable.put("local_write_count", table.localWriteCount);
         mpTable.put("local_write_latency_ms", String.format("%01.3f", table.localWriteLatencyMs));
+        mpTable.put("local_read_write_ratio", String.format("%01.5f", table.localReadWriteRatio));
         mpTable.put("pending_flushes", table.pendingFlushes);
         mpTable.put("percent_repaired", table.percentRepaired);
+        mpTable.put("bytes_repaired", table.bytesRepaired);
+        mpTable.put("bytes_unrepaired", table.bytesUnrepaired);
+        mpTable.put("bytes_pending_repair", table.bytesPendingRepair);
         mpTable.put("bloom_filter_false_positives", table.bloomFilterFalsePositives);
         mpTable.put("bloom_filter_false_ratio", String.format("%01.5f", table.bloomFilterFalseRatio));
         mpTable.put("bloom_filter_space_used", table.bloomFilterSpaceUsed);
@@ -157,9 +170,22 @@ public class TableStatsHolder implements StatsHolder
                     table.averageTombstonesPerSliceLastFiveMinutes);
         mpTable.put("maximum_tombstones_per_slice_last_five_minutes",
                     table.maximumTombstonesPerSliceLastFiveMinutes);
-        mpTable.put("dropped_mutations", table.droppedMutations);
+        mpTable.put("droppable_tombstone_ratio",
+                    String.format("%01.5f", table.droppableTombstoneRatio));
+        mpTable.put("top_size_partitions", table.topSizePartitions);
+        mpTable.put("top_tombstone_partitions", table.topTombstonePartitions);
         if (locationCheck)
             mpTable.put("sstables_in_correct_location", table.isInCorrectLocation);
+
+        mpTable.put("sai_local_query_latency_ms",String.format("%01.3f", table.saiQueryLatencyMs));
+        mpTable.put("sai_post_filtering_read_latency",String.format("%01.3f", table.saiPostFilteringReadLatencyMs));
+        mpTable.put("sai_disk_used_bytes",table.saiDiskUsedBytes);
+        mpTable.put("sai_sstable_indexes_hit",table.saiSSTableIndexesHit);
+        mpTable.put("sai_index_segments_hit",table.saiIndexSegmentsHit);
+        mpTable.put("sai_rows_filtered",table.saiRowsFiltered);
+        mpTable.put("sai_total_query_timeouts",table.saiTotalQueryTimeouts);
+        mpTable.put("sai_total_queryable_index_ratio", table.saiTotalQueryableIndexRatio);
+
         return mpTable;
     }
 
@@ -193,6 +219,8 @@ public class TableStatsHolder implements StatsHolder
             }
         }
 
+        numberOfTables = selectedTableMbeans.size();
+
         // make sure all specified keyspace and tables exist
         filter.verifyKeyspaces(probe.getKeyspaces());
         filter.verifyTables();
@@ -215,9 +243,11 @@ public class TableStatsHolder implements StatsHolder
                 statsTable.isIndex = tableName.contains(".");
                 statsTable.sstableCount = probe.getColumnFamilyMetric(keyspaceName, tableName, "LiveSSTableCount");
                 statsTable.oldSSTableCount = probe.getColumnFamilyMetric(keyspaceName, tableName, "OldVersionSSTableCount");
+                Long sstableSize = (Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "MaxSSTableSize");
+                statsTable.maxSSTableSize = sstableSize == null ? 0 : sstableSize;
 
                 int[] leveledSStables = table.getSSTableCountPerLevel();
-                if (leveledSStables != null)
+                if (leveledSStables.length > 0)
                 {
                     statsTable.isLeveledSstable = true;
 
@@ -231,6 +261,18 @@ public class TableStatsHolder implements StatsHolder
                         statsTable.sstablesInEachLevel.add(count + ((count > maxCount) ? "/" + maxCount : ""));
                     }
                 }
+                statsTable.sstableCountPerTWCSBucket = table.getSSTableCountPerTWCSBucket();
+
+                long[] leveledSSTablesBytes = table.getPerLevelSizeBytes();
+                if (leveledSSTablesBytes != null)
+                {
+                    statsTable.isLeveledSstable = true;
+                    for (int level = 0; level < leveledSSTablesBytes.length; level++)
+                    {
+                        long size = leveledSSTablesBytes[level];
+                        statsTable.sstableBytesInEachLevel.add(format(size, humanReadable));
+                    }
+                }
 
                 if (locationCheck)
                     statsTable.isInCorrectLocation = !table.hasMisplacedSSTables();
@@ -241,6 +283,9 @@ public class TableStatsHolder implements StatsHolder
                 Long compressionMetadataOffHeapSize = null;
                 Long offHeapSize = null;
                 Double percentRepaired = null;
+                Long bytesRepaired = null;
+                Long bytesUnrepaired = null;
+                Long bytesPendingRepair = null;
 
                 try
                 {
@@ -250,6 +295,9 @@ public class TableStatsHolder implements StatsHolder
                     compressionMetadataOffHeapSize = (Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "CompressionMetadataOffHeapMemoryUsed");
                     offHeapSize = memtableOffHeapSize + bloomFilterOffHeapSize + indexSummaryOffHeapSize + compressionMetadataOffHeapSize;
                     percentRepaired = (Double) probe.getColumnFamilyMetric(keyspaceName, tableName, "PercentRepaired");
+                    bytesRepaired = (Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "BytesRepaired");
+                    bytesUnrepaired = (Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "BytesUnrepaired");
+                    bytesPendingRepair = (Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "BytesPendingRepair");
                 }
                 catch (RuntimeException e)
                 {
@@ -261,6 +309,9 @@ public class TableStatsHolder implements StatsHolder
                 statsTable.spaceUsedLive = format((Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "LiveDiskSpaceUsed"), humanReadable);
                 statsTable.spaceUsedTotal = format((Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "TotalDiskSpaceUsed"), humanReadable);
                 statsTable.spaceUsedBySnapshotsTotal = format((Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "SnapshotsSize"), humanReadable);
+
+                maybeAddTWCSWindowWithMaxDuration(statsTable, probe, keyspaceName, tableName);
+
                 if (offHeapSize != null)
                 {
                     statsTable.offHeapUsed = true;
@@ -271,6 +322,11 @@ public class TableStatsHolder implements StatsHolder
                 {
                     statsTable.percentRepaired = Math.round(100 * percentRepaired) / 100.0;
                 }
+
+                statsTable.bytesRepaired = bytesRepaired != null ? bytesRepaired : 0;
+                statsTable.bytesUnrepaired = bytesUnrepaired != null ? bytesUnrepaired : 0;
+                statsTable.bytesPendingRepair = bytesPendingRepair != null ? bytesPendingRepair : 0;
+
                 statsTable.sstableCompressionRatio = probe.getColumnFamilyMetric(keyspaceName, tableName, "CompressionRatio");
                 Object estimatedPartitionCount = probe.getColumnFamilyMetric(keyspaceName, tableName, "EstimatedPartitionCount");
                 if (Long.valueOf(-1L).equals(estimatedPartitionCount))
@@ -287,6 +343,7 @@ public class TableStatsHolder implements StatsHolder
                     statsTable.memtableOffHeapMemoryUsed = format(memtableOffHeapSize, humanReadable);
                 }
                 statsTable.memtableSwitchCount = probe.getColumnFamilyMetric(keyspaceName, tableName, "MemtableSwitchCount");
+                statsTable.speculativeRetries = probe.getColumnFamilyMetric(keyspaceName, tableName, "SpeculativeRetries");
                 statsTable.localReadCount = ((CassandraMetricsRegistry.JmxTimerMBean) probe.getColumnFamilyMetric(keyspaceName, tableName, "ReadLatency")).getCount();
 
                 double localReadLatency = ((CassandraMetricsRegistry.JmxTimerMBean) probe.getColumnFamilyMetric(keyspaceName, tableName, "ReadLatency")).getMean() / 1000;
@@ -296,6 +353,9 @@ public class TableStatsHolder implements StatsHolder
 
                 double localWriteLatency = ((CassandraMetricsRegistry.JmxTimerMBean) probe.getColumnFamilyMetric(keyspaceName, tableName, "WriteLatency")).getMean() / 1000;
                 double localWLatency = localWriteLatency > 0 ? localWriteLatency : Double.NaN;
+
+                statsTable.localReadWriteRatio = statsTable.localWriteCount > 0 ? statsTable.localReadCount / (double) statsTable.localWriteCount : 0;
+
                 statsTable.localWriteLatencyMs = localWLatency;
                 statsTable.pendingFlushes = probe.getColumnFamilyMetric(keyspaceName, tableName, "PendingFlushes");
 
@@ -330,16 +390,139 @@ public class TableStatsHolder implements StatsHolder
                 histogram = (CassandraMetricsRegistry.JmxHistogramMBean) probe.getColumnFamilyMetric(keyspaceName, tableName, "TombstoneScannedHistogram");
                 statsTable.averageTombstonesPerSliceLastFiveMinutes = histogram.getMean();
                 statsTable.maximumTombstonesPerSliceLastFiveMinutes = histogram.getMax();
-                statsTable.droppedMutations = format((Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "DroppedMutations"), humanReadable);
+                statsTable.droppableTombstoneRatio = probe.getDroppableTombstoneRatio(keyspaceName, tableName);
+                statsTable.topSizePartitions = format(table.getTopSizePartitions(), humanReadable);
+                if (table.getTopSizePartitionsLastUpdate() != null)
+                    statsTable.topSizePartitionsLastUpdate = millisToDateString(table.getTopSizePartitionsLastUpdate());
+                statsTable.topTombstonePartitions = table.getTopTombstonePartitions();
+                if (table.getTopTombstonePartitionsLastUpdate() != null)
+                    statsTable.topTombstonePartitionsLastUpdate = millisToDateString(table.getTopTombstonePartitionsLastUpdate());
+
+                if (!SchemaConstants.isSystemKeyspace(keyspaceName))
+                {
+                    statsTable.hasSaiIndexes = probe.hasSaiIndexes(keyspaceName, tableName);
+
+                    if (statsTable.hasSaiIndexes)
+                    {
+                        // the table state metrics, which count the indexes, can be disabled
+                        Object totalIndexCount = probe.getSaiMetric(keyspaceName, tableName, "TotalIndexCount");
+                        statsTable.saiTotalIndexCount = (totalIndexCount != null) ? (int) totalIndexCount : 0;
+
+                        Object queryLatencyMetric = probe.getSaiMetric(keyspaceName, tableName, "QueryLatency");
+                        double queryLatency = getMetricMean(queryLatencyMetric);
+                        statsTable.saiQueryLatencyMs = queryLatency > 0 ? queryLatency : Double.NaN;
+
+                        Object PostFilteringReadLatency = probe.getSaiMetric(keyspaceName, tableName, "PostFilteringReadLatency");
+                        double postfilteringreadlatency = getMetricMean(PostFilteringReadLatency);
+                        statsTable.saiPostFilteringReadLatencyMs = postfilteringreadlatency > 0 ? postfilteringreadlatency : Double.NaN;
+
+                        Object diskUsedBytes = probe.getSaiMetric(keyspaceName, tableName, "DiskUsedBytes");
+                        long saidiskusedbytes = (diskUsedBytes != null) ? (long) diskUsedBytes : 0L;
+                        statsTable.saiDiskUsedBytes = format(saidiskusedbytes, humanReadable);
+
+                        Object SSTableIndexesHit = probe.getSaiMetric(keyspaceName, tableName, "SSTableIndexesHit");
+                        statsTable.saiSSTableIndexesHit = getMetricMean(SSTableIndexesHit);
+
+                        Object IndexSegmentsHit = probe.getSaiMetric(keyspaceName, tableName, "IndexSegmentsHit");
+                        statsTable.saiIndexSegmentsHit = getMetricMean(IndexSegmentsHit);
+
+                        Object RowsFiltered = probe.getSaiMetric(keyspaceName, tableName, "RowsFiltered");
+                        statsTable.saiRowsFiltered = getMetricMean(RowsFiltered);
+
+                        Object totalQueryTimeouts = probe.getSaiMetric(keyspaceName, tableName, "TotalQueryTimeouts");
+                        statsTable.saiTotalQueryTimeouts = (totalQueryTimeouts != null) ? (Long) totalQueryTimeouts : 0L;
+
+                        Object totalQueryableIndexCount = (totalIndexCount != null)
+                                                          ? probe.getSaiMetric(keyspaceName, tableName, "TotalQueryableIndexCount")
+                                                          : null;
+                        if (totalQueryableIndexCount != null)
+                            statsTable.saiTotalQueryableIndexRatio = String.format("%d/%d", (int) totalQueryableIndexCount, statsTable.saiTotalIndexCount);
+                        else
+                            statsTable.saiTotalQueryableIndexRatio = "n/a";
+                    }
+                }
+
                 statsKeyspace.tables.add(statsTable);
             }
             keyspaces.add(statsKeyspace);
         }
     }
 
+    /**
+     * Returns the mean of an SAI timer in milliseconds, or of an SAI histogram rounded to two decimals. A metric that
+     * is not registered, or not anymore, has a NaN mean, while an empty histogram has a mean of 0: its mean is NaN,
+     * which {@link Math#round} turns into 0.
+     */
+    @VisibleForTesting
+    static double getMetricMean(Object metricObject) {
+        // the metric may not be registered, e.g. the SAI query latency timer when SAI histograms are disabled
+        if (metricObject == null)
+            return Double.NaN;
+        try
+        {
+            if (metricObject instanceof CassandraMetricsRegistry.JmxTimerMBean) {
+                // JMX timers report their mean in microseconds
+                return ((CassandraMetricsRegistry.JmxTimerMBean) metricObject).getMean() / 1000;
+            }
+            if (metricObject instanceof CassandraMetricsRegistry.JmxHistogramMBean) {
+                return Math.round(((CassandraMetricsRegistry.JmxHistogramMBean) metricObject).getMean() * 100.0) / 100.0;
+            }
+        }
+        catch (UndeclaredThrowableException e)
+        {
+            // the metric has been unregistered since it was looked up, e.g. because the index was dropped
+            if (e.getCause() instanceof InstanceNotFoundException)
+                return Double.NaN;
+            throw e;
+        }
+        throw new IllegalArgumentException("Unsupported metric object type: " + metricObject.getClass().getName());
+    }
+
+    private void maybeAddTWCSWindowWithMaxDuration(StatsTable statsTable, NodeProbe probe, String keyspaceName, String tableName)
+    {
+        Map<String, String> compactionParameters = probe.getCfsProxy(statsTable.keyspaceName, statsTable.tableName)
+                                                        .getCompactionParameters();
+
+        if (compactionParameters == null)
+            return;
+
+        String compactor = compactionParameters.get("class");
+
+        if (compactor == null || !compactor.endsWith(TimeWindowCompactionStrategy.class.getSimpleName()))
+            return;
+
+        String unit = compactionParameters.get(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_UNIT_KEY);
+        String size = compactionParameters.get(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_SIZE_KEY);
+
+        statsTable.twcsDurationInMillis = (Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "MaxSSTableDuration");
+        String maxDuration = millisToDuration(statsTable.twcsDurationInMillis);
+        statsTable.twcs = String.format("%s %s, max duration: %s", size, unit, maxDuration);
+    }
+
     private String format(long bytes, boolean humanReadable)
     {
         return humanReadable ? FileUtils.stringifyFileSize(bytes) : Long.toString(bytes);
+    }
+
+    private Map<String, String> format(Map<String, Long> map, boolean humanReadable)
+    {
+        LinkedHashMap<String, String> retMap = new LinkedHashMap<>();
+        for (Map.Entry<String, Long> entry : map.entrySet())
+            retMap.put(entry.getKey(), format(entry.getValue(), humanReadable));
+        return retMap;
+    }
+
+    private String millisToDateString(long millis)
+    {
+        TimeZone tz = TimeZone.getTimeZone("UTC");
+        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
+        df.setTimeZone(tz);
+        return df.format(new Date(millis));
+    }
+
+    private String millisToDuration(long millis)
+    {
+        return DurationFormatUtils.formatDurationWords(millis, true, true);
     }
 
     /**
@@ -428,7 +611,7 @@ public class TableStatsHolder implements StatsHolder
             return filter.get(keyspace) != null || ignoreMode;
         }
 
-        public void verifyKeyspaces(List<String> keyspaces)
+        public void verifyKeyspaces(Collection<String> keyspaces)
         {
             for (String ks : verifier.keySet())
                 if (!keyspaces.contains(ks))

@@ -17,50 +17,55 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.*;
+import java.io.IOException;
+import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
-import java.util.*;
-import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicates;
 import com.google.common.collect.Collections2;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
-import com.google.common.io.Files;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.BufferDecoratedKey;
+import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowIndexEntry;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.util.DiskOptimizationStrategy;
+import org.apache.cassandra.io.sstable.filter.BloomFilterTracker;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
+import org.apache.cassandra.io.sstable.format.TOCComponent;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.memory.HeapAllocator;
+import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.SharedCloseable;
 
+import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
 import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
 
 /**
- * This class is built on top of the SequenceFile. It stores
- * data on disk in sorted fashion. However the sorting is upto
- * the application. This class expects keys to be handed to it
- * in sorted order.
- *
- * A separate index file is maintained as well, containing the
- * SSTable keys and the offset into the SSTable at which they are found.
- * Every 1/indexInterval key is read into memory when the SSTable is opened.
- *
- * Finally, a bloom filter file is also kept for the keys in each SSTable.
+ * This class represents an abstract sstable on disk whose keys and corresponding partitions are stored in
+ * a {@link SSTableFormat.Components#DATA} file in order as imposed by {@link DecoratedKey#comparator}.
  */
 public abstract class SSTable
 {
@@ -68,67 +73,131 @@ public abstract class SSTable
 
     public static final int TOMBSTONE_HISTOGRAM_BIN_SIZE = 100;
     public static final int TOMBSTONE_HISTOGRAM_SPOOL_SIZE = 100000;
-    public static final int TOMBSTONE_HISTOGRAM_TTL_ROUND_SECONDS = Integer.valueOf(System.getProperty("cassandra.streaminghistogram.roundseconds", "60"));
+    public static final int TOMBSTONE_HISTOGRAM_TTL_ROUND_SECONDS = CassandraRelevantProperties.STREAMING_HISTOGRAM_ROUND_SECONDS.getInt();
 
     public final Descriptor descriptor;
-    protected final Set<Component> components;
+    private volatile ImmutableSet<Component> components;
     public final boolean compression;
 
-    public DecoratedKey first;
-    public DecoratedKey last;
-
-    protected final DiskOptimizationStrategy optimizationStrategy;
     protected final TableMetadataRef metadata;
+    // This field is null if the compaction metadata is not loaded yet, it can be a empty optional if the compaction metadata is not available
+    protected Optional<CompactionMetadata> compactionMetadata;
 
-    protected SSTable(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, DiskOptimizationStrategy optimizationStrategy)
+    public final ChunkCache chunkCache;
+    public final IOOptions ioOptions;
+
+    @Nullable
+    private final WeakReference<Owner> owner;
+
+    public SSTable(Builder<?, ?> builder, Owner owner)
     {
-        // In almost all cases, metadata shouldn't be null, but allowing null allows to create a mostly functional SSTable without
-        // full schema definition. SSTableLoader use that ability
-        assert descriptor != null;
-        assert components != null;
+        this.owner = new WeakReference<>(owner);
+        checkNotNull(builder.descriptor);
+        checkNotNull(builder.getComponents());
 
-        this.descriptor = descriptor;
-        Set<Component> dataComponents = new HashSet<>(components);
-        this.compression = dataComponents.contains(Component.COMPRESSION_INFO);
-        this.components = new CopyOnWriteArraySet<>(dataComponents);
-        this.metadata = metadata;
-        this.optimizationStrategy = Objects.requireNonNull(optimizationStrategy);
+        this.descriptor = builder.descriptor;
+        this.ioOptions = builder.getIOOptions();
+        this.components = ImmutableSet.copyOf(builder.getComponents());
+        this.compression = components.contains(Components.COMPRESSION_INFO);
+        this.metadata = builder.getTableMetadataRef();
+        this.chunkCache = builder.getChunkCache();
+    }
+
+    public final Optional<Owner> owner()
+    {
+        if (owner == null)
+            return Optional.empty();
+        return Optional.ofNullable(owner.get());
+    }
+
+    public static void rename(Descriptor tmpdesc, Descriptor newdesc, Set<Component> components)
+    {
+        components.stream()
+                  .filter(c -> !newdesc.getFormat().generatedOnLoadComponents().contains(c))
+                  .filter(c -> !c.equals(Components.DATA))
+                  .forEach(c -> tmpdesc.fileFor(c).move(newdesc.fileFor(c)));
+
+        // do -Data last because -Data present should mean the sstable was completely renamed before crash
+        tmpdesc.fileFor(Components.DATA).move(newdesc.fileFor(Components.DATA));
+
+        // rename it without confirmation because summary can be available for loadNewSSTables but not for closeAndOpenReader
+        components.stream()
+                  .filter(c -> newdesc.getFormat().generatedOnLoadComponents().contains(c))
+                  .forEach(c -> tmpdesc.fileFor(c).tryMove(newdesc.fileFor(c)));
+    }
+
+    public static void copy(Descriptor tmpdesc, Descriptor newdesc, Set<Component> components)
+    {
+        components.stream()
+                  .filter(c -> !newdesc.getFormat().generatedOnLoadComponents().contains(c))
+                  .filter(c -> !c.equals(Components.DATA))
+                  .forEach(c -> FileUtils.copyWithConfirm(tmpdesc.fileFor(c), newdesc.fileFor(c)));
+
+        // do -Data last because -Data present should mean the sstable was completely copied before crash
+        FileUtils.copyWithConfirm(tmpdesc.fileFor(Components.DATA), newdesc.fileFor(Components.DATA));
+
+        // copy it without confirmation because summary can be available for loadNewSSTables but not for closeAndOpenReader
+        components.stream()
+                  .filter(c -> newdesc.getFormat().generatedOnLoadComponents().contains(c))
+                  .forEach(c -> FileUtils.copyWithOutConfirm(tmpdesc.fileFor(c), newdesc.fileFor(c)));
+    }
+
+    public static void hardlink(Descriptor tmpdesc, Descriptor newdesc, Set<Component> components)
+    {
+        components.stream()
+                  .filter(c -> !newdesc.getFormat().generatedOnLoadComponents().contains(c))
+                  .filter(c -> !c.equals(Components.DATA))
+                  .forEach(c -> FileUtils.createHardLinkWithConfirm(tmpdesc.fileFor(c), newdesc.fileFor(c)));
+
+        // do -Data last because -Data present should mean the sstable was completely copied before crash
+        FileUtils.createHardLinkWithConfirm(tmpdesc.fileFor(Components.DATA), newdesc.fileFor(Components.DATA));
+
+        // copy it without confirmation because summary can be available for loadNewSSTables but not for closeAndOpenReader
+        components.stream()
+                  .filter(c -> newdesc.getFormat().generatedOnLoadComponents().contains(c))
+                  .forEach(c -> FileUtils.createHardLinkWithoutConfirm(tmpdesc.fileFor(c), newdesc.fileFor(c)));
+    }
+
+    public abstract PartitionPosition getFirst();
+
+    public abstract PartitionPosition getLast();
+
+    public abstract AbstractBounds<Token> getBounds();
+
+    public ImmutableSet<Component> components()
+    {
+        return components;
+    }
+
+    public Optional<CompactionMetadata> getCompactionMetadata() throws IOException
+    {
+        // if compaction metadata is not loaded yet, load it
+        if (compactionMetadata == null)
+        {
+            logger.debug("Loading compaction metadata for {}", descriptor);
+            compactionMetadata = Optional.ofNullable((CompactionMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.COMPACTION));
+        }
+        return compactionMetadata;
     }
 
     /**
-     * We use a ReferenceQueue to manage deleting files that have been compacted
-     * and for which no more SSTable references exist.  But this is not guaranteed
-     * to run for each such file because of the semantics of the JVM gc.  So,
-     * we write a marker to `compactedFilename` when a file is compacted;
-     * if such a marker exists on startup, the file should be removed.
-     *
-     * This method will also remove SSTables that are marked as temporary.
-     *
-     * @return true if the file was deleted
+     * Returns all SSTable components that should be streamed.
      */
-    public static boolean delete(Descriptor desc, Set<Component> components)
+    public Set<Component> getStreamingComponents()
     {
-        logger.info("Deleting sstable: {}", desc);
-        // remove the DATA component first if it exists
-        if (components.contains(Component.DATA))
-            FileUtils.deleteWithConfirm(desc.filenameFor(Component.DATA));
-        for (Component component : components)
-        {
-            if (component.equals(Component.DATA) || component.equals(Component.SUMMARY))
-                continue;
-
-            FileUtils.deleteWithConfirm(desc.filenameFor(component));
-        }
-
-        if (components.contains(Component.SUMMARY))
-            FileUtils.delete(desc.filenameFor(Component.SUMMARY));
-
-        return true;
+        return components.stream()
+                         .filter(c -> c.type.streamable)
+                         .collect(Collectors.toSet());
     }
 
     public TableMetadata metadata()
     {
         return metadata.get();
+    }
+
+    public TableMetadataRef metadataRef()
+    {
+        return metadata;
     }
 
     public IPartitioner getPartitioner()
@@ -141,25 +210,14 @@ public abstract class SSTable
         return getPartitioner().decorateKey(key);
     }
 
-    /**
-     * If the given @param key occupies only part of a larger buffer, allocate a new buffer that is only
-     * as large as necessary.
-     */
-    public static DecoratedKey getMinimalKey(DecoratedKey key)
-    {
-        return key.getKey().position() > 0 || key.getKey().hasRemaining() || !key.getKey().hasArray()
-                                       ? new BufferDecoratedKey(key.getToken(), HeapAllocator.instance.clone(key.getKey()))
-                                       : key;
-    }
-
     public String getFilename()
     {
-        return descriptor.filenameFor(Component.DATA);
+        return getDataFile().path();
     }
 
-    public String getIndexFilename()
+    public File getDataFile()
     {
-        return descriptor.filenameFor(Component.PRIMARY_INDEX);
+        return descriptor.fileFor(Components.DATA);
     }
 
     public String getColumnFamilyName()
@@ -172,12 +230,35 @@ public abstract class SSTable
         return descriptor.ksname;
     }
 
-    public List<String> getAllFilePaths()
+    public SSTableId getId()
     {
-        List<String> ret = new ArrayList<>(components.size());
-        for (Component component : components)
-            ret.add(descriptor.filenameFor(component));
-        return ret;
+        return descriptor.id;
+    }
+
+    public int getComponentSize()
+    {
+        return components.size();
+    }
+
+    /**
+     * The method sets fields for this sstable representation on the provided {@link Builder}. The method is intended
+     * to be called from the overloaded {@code unbuildTo} method in subclasses.
+     *
+     * @param builder    the builder on which the fields should be set
+     * @param sharedCopy whether the {@link SharedCloseable} resources should be passed as shared copies or directly;
+     *                   note that the method will overwrite the fields representing {@link SharedCloseable} only if
+     *                   they are not set in the builder yet (the relevant fields in the builder are {@code null}).
+     *                   Although {@link SSTable} does not keep any references to resources, the parameters is added
+     *                   for the possible future fields and for consistency with the overloaded implementations in
+     *                   subclasses
+     * @return the same instance of builder as provided
+     */
+    protected final <B extends Builder<?, B>> B unbuildTo(B builder, boolean sharedCopy)
+    {
+        return builder.setTableMetadataRef(metadata)
+                      .setComponents(components)
+                      .setChunkCache(chunkCache)
+                      .setIOOptions(ioOptions);
     }
 
     /**
@@ -192,7 +273,29 @@ public abstract class SSTable
     {
         try
         {
-            return Descriptor.fromFilenameWithComponent(file);
+            return Descriptor.fromFileWithComponent(file);
+        }
+        catch (Throwable e)
+        {
+            return null;
+        }
+    }
+
+    /**
+     * Parse a sstable filename into both a {@link Descriptor} and {@code Component} object.
+     *
+     * @param file     the filename to parse.
+     * @param keyspace The keyspace name of the file.
+     * @param table    The table name of the file.
+     * @return a pair of the {@code Descriptor} and {@code Component} corresponding to {@code file} if it corresponds to
+     * a valid and supported sstable filename, {@code null} otherwise. Note that components of an unknown type will be
+     * returned as CUSTOM ones.
+     */
+    public static Pair<Descriptor, Component> tryComponentFromFilename(File file, String keyspace, String table)
+    {
+        try
+        {
+            return Descriptor.fromFileWithComponent(file, keyspace, table);
         }
         catch (Throwable e)
         {
@@ -210,11 +313,11 @@ public abstract class SSTable
      * @return the {@code Descriptor} corresponding to {@code file} if it corresponds to a valid and supported sstable
      * filename, {@code null} otherwise.
      */
-    public static Descriptor tryDescriptorFromFilename(File file)
+    public static Descriptor tryDescriptorFromFile(File file)
     {
         try
         {
-            return Descriptor.fromFilename(file);
+            return Descriptor.fromFile(file);
         }
         catch (Throwable e)
         {
@@ -222,155 +325,211 @@ public abstract class SSTable
         }
     }
 
-    /**
-     * Discovers existing components for the descriptor. Slow: only intended for use outside the critical path.
-     */
-    public static Set<Component> componentsFor(final Descriptor desc)
-    {
-        try
-        {
-            try
-            {
-                return readTOC(desc);
-            }
-            catch (FileNotFoundException e)
-            {
-                Set<Component> components = discoverComponentsFor(desc);
-                if (components.isEmpty())
-                    return components; // sstable doesn't exist yet
-
-                if (!components.contains(Component.TOC))
-                    components.add(Component.TOC);
-                appendTOC(desc, components);
-                return components;
-            }
-        }
-        catch (IOException e)
-        {
-            throw new IOError(e);
-        }
-    }
-
-    public static Set<Component> discoverComponentsFor(Descriptor desc)
-    {
-        Set<Component.Type> knownTypes = Sets.difference(Component.TYPES, Collections.singleton(Component.Type.CUSTOM));
-        Set<Component> components = Sets.newHashSetWithExpectedSize(knownTypes.size());
-        for (Component.Type componentType : knownTypes)
-        {
-            Component component = new Component(componentType);
-            if (new File(desc.filenameFor(component)).exists())
-                components.add(component);
-        }
-        return components;
-    }
-
-    /** @return An estimate of the number of keys contained in the given index file. */
-    public static long estimateRowsFromIndex(RandomAccessReader ifile, Descriptor descriptor) throws IOException
-    {
-        // collect sizes for the first 10000 keys, or first 10 megabytes of data
-        final int SAMPLES_CAP = 10000, BYTES_CAP = (int)Math.min(10000000, ifile.length());
-        int keys = 0;
-        while (ifile.getFilePointer() < BYTES_CAP && keys < SAMPLES_CAP)
-        {
-            ByteBufferUtil.skipShortLength(ifile);
-            RowIndexEntry.Serializer.skip(ifile, descriptor.version);
-            keys++;
-        }
-        assert keys > 0 && ifile.getFilePointer() > 0 && ifile.length() > 0 : "Unexpected empty index file: " + ifile;
-        long estimatedRows = ifile.length() / (ifile.getFilePointer() / keys);
-        ifile.seek(0);
-        return estimatedRows;
-    }
-
-    public long bytesOnDisk()
-    {
-        long bytes = 0;
-        for (Component component : components)
-        {
-            bytes += new File(descriptor.filenameFor(component)).length();
-        }
-        return bytes;
-    }
-
     @Override
     public String toString()
     {
-        return getClass().getSimpleName() + "(" +
-               "path='" + getFilename() + '\'' +
-               ')';
+        return String.format("%s:%s(path='%s')", getClass().getSimpleName(), descriptor.version.format.name(), getFilename());
     }
 
-    /**
-     * Reads the list of components from the TOC component.
-     * @return set of components found in the TOC
-     */
-    protected static Set<Component> readTOC(Descriptor descriptor) throws IOException
+    public static void validateRepairedMetadata(long repairedAt, TimeUUID pendingRepair, boolean isTransient)
     {
-        return readTOC(descriptor, true);
-    }
-
-    /**
-     * Reads the list of components from the TOC component.
-     * @param skipMissing, skip adding the component to the returned set if the corresponding file is missing.
-     * @return set of components found in the TOC
-     */
-    protected static Set<Component> readTOC(Descriptor descriptor, boolean skipMissing) throws IOException
-    {
-        File tocFile = new File(descriptor.filenameFor(Component.TOC));
-        List<String> componentNames = Files.readLines(tocFile, Charset.defaultCharset());
-        Set<Component> components = Sets.newHashSetWithExpectedSize(componentNames.size());
-        for (String componentName : componentNames)
-        {
-            Component component = new Component(Component.Type.fromRepresentation(componentName), componentName);
-            if (skipMissing && !new File(descriptor.filenameFor(component)).exists())
-                logger.error("Missing component: {}", descriptor.filenameFor(component));
-            else
-                components.add(component);
-        }
-        return components;
-    }
-
-    /**
-     * Appends new component names to the TOC component.
-     */
-    protected static void appendTOC(Descriptor descriptor, Collection<Component> components)
-    {
-        File tocFile = new File(descriptor.filenameFor(Component.TOC));
-        try (PrintWriter w = new PrintWriter(new FileWriter(tocFile, true)))
-        {
-            for (Component component : components)
-                w.println(component.name);
-        }
-        catch (IOException e)
-        {
-            throw new FSWriteError(e, tocFile);
-        }
+        Preconditions.checkArgument((pendingRepair == NO_PENDING_REPAIR) || (repairedAt == UNREPAIRED_SSTABLE),
+                                    "pendingRepair cannot be set on a repaired sstable");
+        Preconditions.checkArgument(!isTransient || (pendingRepair != NO_PENDING_REPAIR),
+                                    "isTransient can only be true for sstables pending repair");
     }
 
     /**
      * Registers new custom components. Used by custom compaction strategies.
      * Adding a component for the second time is a no-op.
      * Don't remove this - this method is a part of the public API, intended for use by custom compaction strategies.
+     *
      * @param newComponents collection of components to be added
      */
     public synchronized void addComponents(Collection<Component> newComponents)
     {
-        Collection<Component> componentsToAdd = Collections2.filter(newComponents, Predicates.not(Predicates.in(components)));
-        appendTOC(descriptor, componentsToAdd);
-        components.addAll(componentsToAdd);
+        registerComponents(newComponents, null);
     }
 
-    public AbstractBounds<Token> getBounds()
+    /**
+     * Registers new custom components into sstable and update size tracking
+     * @param newComponents collection of components to be added
+     * @param tracker used to update on-disk size metrics
+     */
+    public synchronized void registerComponents(Collection<Component> newComponents, Tracker tracker)
     {
-        return AbstractBounds.bounds(first.getToken(), true, last.getToken(), true);
+        Collection<Component> componentsToAdd = new HashSet<>(Collections2.filter(newComponents, x -> !components.contains(x)));
+        if (componentsToAdd.isEmpty())
+            return;
+
+        TOCComponent.updateTOC(descriptor, componentsToAdd);
+        components = ImmutableSet.<Component>builder().addAll(components).addAll(componentsToAdd).build();
+
+        updateComponentsTracking(componentsToAdd, tracker, 1);
     }
 
-    public static void validateRepairedMetadata(long repairedAt, UUID pendingRepair, boolean isTransient)
+    /**
+     * Unregisters custom components from sstable and update size tracking
+     * @param removeComponents collection of components to be removed
+     * @param tracker used to update on-disk size metrics
+     */
+    public synchronized void unregisterComponents(Collection<Component> removeComponents, Tracker tracker)
     {
-        Preconditions.checkArgument((pendingRepair == NO_PENDING_REPAIR) || (repairedAt == UNREPAIRED_SSTABLE),
-                                    "pendingRepair cannot be set on a repaired sstable");
-        Preconditions.checkArgument(!isTransient || (pendingRepair != NO_PENDING_REPAIR),
-                                    "isTransient can only be true for sstables pending repair");
+        Set<Component> componentsToRemove = new HashSet<>(Collections2.filter(removeComponents, components::contains));
+        components = Sets.difference(components, componentsToRemove).immutableCopy();
+        TOCComponent.rewriteTOC(descriptor, components);
 
+        updateComponentsTracking(componentsToRemove, tracker, -1);
+    }
+
+    private void updateComponentsTracking(Collection<Component> toUpdate, Tracker tracker, long multiplier)
+    {
+        if (tracker == null)
+            return;
+
+        for (Component component : toUpdate)
+        {
+            File file = descriptor.fileFor(component);
+            if (file.exists())
+                tracker.updateSizeTracking(multiplier * file.length());
+        }
+    }
+
+    /**
+     * Reads components from the TOC file and update the `components` set of this object accordindly.
+     * <p>
+     * Usually, components are added/removed through {@link #addComponents}, {@link #registerComponents} or
+     * {@link #unregisterComponents}, which both update this object component and update the TOC file accordingly, and
+     * this method should not be used. But some implementation of tiered storage may add components/rewrite the TOC
+     * "externally" (one reason can be offloading index rebuild) and need those change to be reflected to this object
+     * and this is where this method comes in.
+     * <p>
+     * If the TOC file does not exist, cannot be read, or does not at least contains the minimal components that all
+     * sstables should have when this is called, this method is a no-op.
+     */
+    public synchronized void reloadComponentsFromTOC(Tracker tracker)
+    {
+        try
+        {
+            Set<Component> tocComponents = TOCComponent.loadTOC(descriptor);
+            Set<Component> requiredComponents = descriptor.getFormat().requiredComponents();
+            if (!tocComponents.containsAll(requiredComponents))
+            {
+                logger.error("Cannot reload components from read TOC file for {}; the TOC does not contain all the required components for the sstable type and is like corrupted (components in TOC: {}, required by sstable format: {})",
+                             descriptor, tocComponents, requiredComponents);
+                return;
+            }
+
+            Set<Component> toAdd = Sets.difference(tocComponents, components);
+            Set<Component> toRemove = Sets.difference(components, tocComponents);
+            components = ImmutableSet.copyOf(tocComponents);
+
+            updateComponentsTracking(toAdd, tracker, 1);
+            updateComponentsTracking(toRemove, tracker, -1);
+
+        }
+        catch (IOException e)
+        {
+            logger.error("Failed to read TOC file for {}; ignoring component reload", descriptor, e);
+        }
+    }
+    
+    public interface Owner
+    {
+        Double getCrcCheckChance();
+        BloomFilterTracker getBloomFilterTracker();
+        OpOrder.Barrier newReadOrderingBarrier();
+
+        TableMetrics getMetrics();
+    }
+
+    /**
+     * A builder of this sstable representation. It should be extended for each implementation with the specific fields.
+     *
+     * @param <S> type of the sstable representation to be build with this builder
+     * @param <B> type of this builder
+     */
+    public static class Builder<S extends SSTable, B extends Builder<S, B>>
+    {
+        public final Descriptor descriptor;
+
+        private Set<Component> components;
+        private TableMetadataRef tableMetadataRef;
+        private ChunkCache chunkCache = ChunkCache.instance;
+        private IOOptions ioOptions = IOOptions.fromDatabaseDescriptor();
+
+        public Builder(Descriptor descriptor)
+        {
+            checkNotNull(descriptor);
+            this.descriptor = descriptor;
+        }
+
+        public B setComponents(Collection<Component> components)
+        {
+            if (components != null)
+            {
+                components.forEach(c -> Preconditions.checkState(c.isValidFor(descriptor), "Invalid component type for sstable format " + descriptor.version.format.name()));
+                this.components = ImmutableSet.copyOf(components);
+            }
+            else
+            {
+                this.components = null;
+            }
+            return (B) this;
+        }
+
+        public B addComponents(Collection<Component> components)
+        {
+            if (components == null || components.isEmpty())
+                return (B) this;
+
+            if (this.components == null)
+                return setComponents(components);
+
+            return setComponents(Sets.union(this.components, ImmutableSet.copyOf(components)));
+        }
+
+        public B setTableMetadataRef(TableMetadataRef ref)
+        {
+            this.tableMetadataRef = ref;
+            return (B) this;
+        }
+
+        public B setChunkCache(ChunkCache chunkCache)
+        {
+            this.chunkCache = chunkCache;
+            return (B) this;
+        }
+
+        public B setIOOptions(IOOptions ioOptions)
+        {
+            this.ioOptions = ioOptions;
+            return (B) this;
+        }
+
+        public Descriptor getDescriptor()
+        {
+            return descriptor;
+        }
+
+        public Set<Component> getComponents()
+        {
+            return components;
+        }
+
+        public TableMetadataRef getTableMetadataRef()
+        {
+            return tableMetadataRef;
+        }
+
+        public ChunkCache getChunkCache()
+        {
+            return chunkCache;
+        }
+
+        public IOOptions getIOOptions()
+        {
+            return ioOptions;
+        }
     }
 }

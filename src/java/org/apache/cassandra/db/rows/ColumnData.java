@@ -19,11 +19,13 @@ package org.apache.cassandra.db.rows;
 
 import java.util.Comparator;
 
+import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.memory.Cloner;
 
 /**
  * Generic interface for the data of a given column (inside a row).
@@ -31,9 +33,46 @@ import org.apache.cassandra.serializers.MarshalException;
  * In practice, there is only 2 implementations of this: either {@link Cell} for simple columns
  * or {@code ComplexColumnData} for complex columns.
  */
-public abstract class ColumnData
+public abstract class ColumnData implements IMeasurableMemory
 {
     public static final Comparator<ColumnData> comparator = (cd1, cd2) -> cd1.column().compareTo(cd2.column());
+
+
+    public static PostReconciliationFunction noOp = new PostReconciliationFunction()
+    {
+        @Override
+        public Cell<?> merge(Cell<?> previous, Cell<?> insert)
+        {
+            return insert;
+        }
+
+        @Override
+        public ColumnData insert(ColumnData insert)
+        {
+            return insert;
+        }
+
+        @Override
+        public void delete(ColumnData existing)
+        {
+        }
+
+        public void onAllocatedOnHeap(long delta)
+        {
+        }
+    };
+
+    public interface PostReconciliationFunction
+    {
+
+        ColumnData insert(ColumnData insert);
+
+        Cell<?> merge(Cell<?> previous, Cell<?> insert);
+
+        void delete(ColumnData existing);
+
+        void onAllocatedOnHeap(long delta);
+    }
 
     protected final ColumnMetadata column;
     protected ColumnData(ColumnMetadata column)
@@ -55,7 +94,17 @@ public abstract class ColumnData
      */
     public abstract int dataSize();
 
+    /**
+     * The size of the data hold by this {@code ColumnData} that is live at {@code nowInSec}.
+     *
+     * @param nowInSec the query timestamp in seconds
+     * @return the size used by the live data of this {@code ColumnData}.
+     */
+    public abstract int liveDataSize(long nowInSec);
+
     public abstract long unsharedHeapSizeExcludingData();
+
+    public abstract long unsharedHeapSize();
 
     /**
      * Validate the column data.
@@ -83,6 +132,8 @@ public abstract class ColumnData
         cd.digest(digest);
     }
 
+    public abstract ColumnData clone(Cloner cloner);
+
     /**
      * Returns a copy of the data where all timestamps for live data have replaced by {@code newTimestamp} and
      * all deletion timestamp by {@code newTimestamp - 1}.
@@ -93,7 +144,10 @@ public abstract class ColumnData
 
     public abstract ColumnData markCounterLocalToBeCleared();
 
-    public abstract ColumnData purge(DeletionPurger purger, int nowInSec);
+    public abstract ColumnData purge(DeletionPurger purger, long nowInSec);
+    public abstract ColumnData purgeDataOlderThan(long timestamp);
 
     public abstract long maxTimestamp();
+
+    public abstract long minTimestamp();
 }

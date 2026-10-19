@@ -20,25 +20,38 @@
  */
 package org.apache.cassandra.index;
 
+import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.function.BiFunction;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+
+import javax.annotation.Nullable;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.BytesType;
-import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.transactions.IndexTransaction;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ClientState;
 
 /**
  * The collection of all Index instances for a base table.
@@ -53,15 +66,15 @@ public interface IndexRegistry
     /**
      * An empty {@code IndexRegistry}
      */
-    public static final IndexRegistry EMPTY = new IndexRegistry()
+    IndexRegistry EMPTY = new IndexRegistry()
     {
         @Override
-        public void unregisterIndex(Index index)
+        public void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier)
         {
         }
 
         @Override
-        public void registerIndex(Index index)
+        public void unregisterIndex(Index index, Index.Group.Key groupKey)
         {
         }
 
@@ -72,19 +85,43 @@ public interface IndexRegistry
         }
 
         @Override
+        public Collection<Index> listNotExcludedIndexes(IndexHints hints)
+        {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public Collection<Index.Group> listIndexGroups()
+        {
+            return Collections.emptySet();
+        }
+
+        @Override
         public Index getIndex(IndexMetadata indexMetadata)
         {
             return null;
         }
 
         @Override
-        public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+        public Index getIndexByName(String indexName)
+        {
+            return null;
+        }
+
+        @Override
+        public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator)
         {
             return Optional.empty();
         }
 
         @Override
-        public void validate(PartitionUpdate update)
+        public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator, IndexHints hints)
+        {
+            return Optional.empty();
+        }
+
+        @Override
+        public void validate(PartitionUpdate update, ClientState state)
         {
         }
     };
@@ -95,90 +132,101 @@ public interface IndexRegistry
      * but enables query validation and preparation to succeed. Useful for tools which need to prepare
      * CQL statements without instantiating the whole ColumnFamilyStore infrastructure.
      */
-    public static final IndexRegistry NON_DAEMON = new IndexRegistry()
+    IndexRegistry NON_DAEMON = new IndexRegistry()
     {
-        Index index = new Index()
+        final Index index = new Index()
         {
+            @Override
             public Callable<?> getInitializationTask()
             {
                 return null;
             }
 
+            @Override
             public IndexMetadata getIndexMetadata()
             {
                 return null;
             }
 
+            @Override
             public Callable<?> getMetadataReloadTask(IndexMetadata indexMetadata)
             {
                 return null;
             }
 
+            @Override
             public void register(IndexRegistry registry)
             {
 
             }
 
+            @Override
             public Optional<ColumnFamilyStore> getBackingTable()
             {
                 return Optional.empty();
             }
 
+            @Override
             public Callable<?> getBlockingFlushTask()
             {
                 return null;
             }
 
+            @Override
             public Callable<?> getInvalidateTask()
             {
                 return null;
             }
 
+            @Override
             public Callable<?> getTruncateTask(long truncatedAt)
             {
                 return null;
             }
 
+            @Override
             public boolean shouldBuildBlocking()
             {
                 return false;
             }
 
+            @Override
             public boolean dependsOn(ColumnMetadata column)
             {
                 return false;
             }
 
+            @Override
             public boolean supportsExpression(ColumnMetadata column, Operator operator)
             {
                 return true;
             }
 
+            @Override
             public AbstractType<?> customExpressionValueType()
             {
                 return BytesType.instance;
             }
 
+            @Override
             public RowFilter getPostIndexQueryFilter(RowFilter filter)
             {
                 return null;
             }
 
+            @Override
             public long getEstimatedResultRows()
             {
                 return 0;
             }
 
-            public void validate(PartitionUpdate update) throws InvalidRequestException
+            @Override
+            public void validate(PartitionUpdate update, ClientState state) throws InvalidRequestException
             {
             }
 
-            public Indexer indexerFor(DecoratedKey key, RegularAndStaticColumns columns, int nowInSec, WriteContext ctx, IndexTransaction.Type transactionType)
-            {
-                return null;
-            }
-
-            public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command)
+            @Override
+            public Indexer indexerFor(DecoratedKey key, RegularAndStaticColumns columns, long nowInSec, WriteContext ctx, IndexTransaction.Type transactionType, Memtable memtable)
             {
                 return null;
             }
@@ -189,43 +237,166 @@ public interface IndexRegistry
             }
         };
 
-        public void registerIndex(Index index)
+        final Index.Group group = new Index.Group()
+        {
+            @Override
+            public Set<Index> getIndexes()
+            {
+                return Collections.singleton(index);
+            }
+
+            @Override
+            public boolean containsIndex(Index i)
+            {
+                return index == i;
+            }
+
+            @Nullable
+            @Override
+            public Index.Indexer indexerFor(Predicate<Index> indexSelector, DecoratedKey key, RegularAndStaticColumns columns, long nowInSec, WriteContext ctx, IndexTransaction.Type transactionType, Memtable memtable)
+            {
+                return null;
+            }
+
+            @Nullable
+            @Override
+            public Index.QueryPlan queryPlanFor(RowFilter rowFilter)
+            {
+                return null;
+            }
+
+            @Nullable
+            @Override
+            public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount)
+            {
+                return null;
+            }
+
+            @Override
+            public Set<Component> componentsForNewSSTable()
+            {
+                return null;
+            }
+
+            @Override
+            public Set<Component> activeComponents(SSTableReader sstable)
+            {
+                return null;
+            }
+        };
+
+        @Override
+        public void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier)
         {
         }
 
-        public void unregisterIndex(Index index)
+        public void unregisterIndex(Index index, Index.Group.Key groupKey)
         {
         }
 
+        @Override
         public Index getIndex(IndexMetadata indexMetadata)
         {
             return index;
         }
 
+        @Override
+        public Index getIndexByName(String indexName)
+        {
+            return index;
+        }
+
+        @Override
         public Collection<Index> listIndexes()
         {
             return Collections.singletonList(index);
         }
 
-        public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+        @Override
+        public Collection<Index> listNotExcludedIndexes(IndexHints hints)
+        {
+            return hints.excludes(index)
+                   ? Collections.emptyList()
+                   : Collections.singletonList(index);
+        }
+
+        @Override
+        public Collection<Index.Group> listIndexGroups()
+        {
+            return Collections.singletonList(group);
+        }
+
+        @Override
+        public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator)
         {
             return Optional.empty();
         }
 
-        public void validate(PartitionUpdate update)
+        @Override
+        public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator, IndexHints hints)
         {
+            return Optional.empty();
+        }
 
+        @Override
+        public void validate(PartitionUpdate update, ClientState state)
+        {
         }
     };
 
-    void registerIndex(Index index);
-    void unregisterIndex(Index index);
+    default void registerIndex(Index index)
+    {
+        registerIndex(index, new Index.Group.Key(index), SingletonIndexGroup::new);
+    }
+    void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier);
+    void unregisterIndex(Index index, Index.Group.Key groupKey);
+    Collection<Index.Group> listIndexGroups();
 
     Index getIndex(IndexMetadata indexMetadata);
+    @Nullable
+    Index getIndexByName(String indexName);
     Collection<Index> listIndexes();
 
-    Optional<Index> getBestIndexFor(RowFilter.Expression expression);
+    /**
+     * Lists the indexes in this registry, minus the ones excluded by the specified {@link IndexHints}.
+     *
+     * @param hints the index hints with the indexes to exclude.
+     * @return the indexes in this registry that are not excluded by the hints.
+     */
+    Collection<Index> listNotExcludedIndexes(IndexHints hints);
 
+    default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator, ByteBuffer value)
+    {
+        for (Index index : listIndexes())
+        {
+            if (index.supportsExpression(column, operator))
+            {
+                Optional<Index.Analyzer> analyzer = index.getAnalyzer(value);
+                if (analyzer.isPresent())
+                    return analyzer;
+            }
+        }
+        return Optional.empty();
+    }
+
+    default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator, ByteBuffer value, IndexHints hints)
+    {
+        return getBestIndexFor(column, operator, hints).flatMap(i -> i.getAnalyzer(value));
+    }
+
+    Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator);
+
+    default Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+    {
+        return getBestIndexFor(expression.column(), expression.operator());
+    }
+
+    Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator, IndexHints hints);
+
+    default Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints)
+    {
+        return getBestIndexFor(expression.column(), expression.operator(), hints);
+    }
     /**
      * Called at write time to ensure that values present in the update
      * are valid according to the rules of all registered indexes which
@@ -234,8 +405,9 @@ public interface IndexRegistry
      * implementations
      *
      * @param update PartitionUpdate containing the values to be validated by registered Index implementations
+     * @param state state related to the client connection
      */
-    void validate(PartitionUpdate update);
+    void validate(PartitionUpdate update, ClientState state);
 
     /**
      * Returns the {@code IndexRegistry} associated to the specified table.
@@ -243,11 +415,97 @@ public interface IndexRegistry
      * @param table the table metadata
      * @return the {@code IndexRegistry} associated to the specified table
      */
-    public static IndexRegistry obtain(TableMetadata table)
+    static IndexRegistry obtain(TableMetadata table)
     {
         if (!DatabaseDescriptor.isDaemonInitialized())
             return NON_DAEMON;
 
         return table.isVirtual() ? EMPTY : Keyspace.openAndGetStore(table).indexManager;
+    }
+
+    enum EqBehavior
+    {
+        EQ,
+        MATCH,
+        AMBIGUOUS
+    }
+
+    class EqBehaviorIndexes
+    {
+        public EqBehavior behavior;
+        public final Collection<Index> eqIndexes;
+        public final Collection<Index> matchIndexes;
+
+        private EqBehaviorIndexes(Collection<Index> eqIndexes, Collection<Index> matchIndexes, EqBehavior behavior)
+        {
+            this.eqIndexes = eqIndexes;
+            this.matchIndexes = matchIndexes;
+            this.behavior = behavior;
+        }
+
+        public static EqBehaviorIndexes eq(Collection<Index> eqIndexes)
+        {
+            return new EqBehaviorIndexes(eqIndexes, null, EqBehavior.EQ);
+        }
+
+        public static EqBehaviorIndexes match(Collection<Index> eqAndMatchIndexes)
+        {
+            return new EqBehaviorIndexes(eqAndMatchIndexes, eqAndMatchIndexes, EqBehavior.MATCH);
+        }
+
+        public static EqBehaviorIndexes ambiguous(Collection<Index> firstEqIndexes, Collection<Index> secondEqIndexes)
+        {
+            return new EqBehaviorIndexes(firstEqIndexes, secondEqIndexes, EqBehavior.AMBIGUOUS);
+        }
+    }
+
+    /**
+     * @return
+     * - AMBIGUOUS if an index that is not excluded by the hints supports EQ and a different one, also not excluded by
+     *   the hints, supports both EQ and ANALYZER_MATCHES. If one of the indexes is included by the hints, the behavior
+     *   is not AMBIGUOUS.
+     * - MATCHES if it's not AMBIGUOUS and an index supports both EQ and ANALYZER_MATCHES
+     * - otherwise EQ
+     */
+    default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm, IndexHints hints)
+    {
+        Set<Index> eqOnlyIndexes = new HashSet<>();
+        Set<Index> eqAndMatchIndexes = new HashSet<>();
+
+        for (Index index : listNotExcludedIndexes(hints))
+        {
+            boolean supportsEq = index.supportsExpression(cm, Operator.EQ);
+            boolean supportsMatches = index.supportsExpression(cm, Operator.ANALYZER_MATCHES);
+            // This is an edge case due to the NON_DAEMON IndexRegistry, which doesn't have index metadata and
+            // which uses regular equality by convention.
+            boolean hasIndexMetadata = index.getIndexMetadata() != null;
+
+            // Categorize indexes based on their capabilities
+            if (supportsEq && supportsMatches && hasIndexMetadata)
+                eqAndMatchIndexes.add(index);
+            else if (supportsEq)
+                eqOnlyIndexes.add(index);
+        }
+
+        // we should consider the user-provided index hints, which can be used to disambiguate EQ queries
+        boolean prefersEq = hints.includesAnyOf(eqOnlyIndexes);
+        boolean prefersMatch = hints.includesAnyOf(eqAndMatchIndexes);
+
+        // If we have indexes supporting only EQ and indexes supporting both, return AMBIGUOUS,
+        // unless the index hints prefer one index over the other.
+        if (!eqOnlyIndexes.isEmpty() && !eqAndMatchIndexes.isEmpty())
+        {
+            if (prefersMatch == prefersEq)
+                return EqBehaviorIndexes.ambiguous(eqOnlyIndexes, eqAndMatchIndexes);
+
+            return prefersMatch ? EqBehaviorIndexes.match(eqAndMatchIndexes) : EqBehaviorIndexes.eq(eqOnlyIndexes);
+        }
+
+        // If we have indexes supporting both EQ and MATCHES, return MATCHES
+        if (!eqAndMatchIndexes.isEmpty())
+            return EqBehaviorIndexes.match(eqAndMatchIndexes);
+
+        // Otherwise return EQ
+        return EqBehaviorIndexes.eq(eqOnlyIndexes);
     }
 }

@@ -18,8 +18,6 @@
  */
 package org.apache.cassandra.tools;
 
-import java.io.File;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -39,21 +37,27 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.AbstractStrategyHolder;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.db.compaction.LeveledCompactionStrategy;
 import org.apache.cassandra.db.compaction.LeveledManifest;
 import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.compaction.Scrubber;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.SSTableHeaderFix;
+import org.apache.cassandra.io.sstable.IScrubber;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.tools.BulkLoader.CmdLineOptions;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Pair;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_UTIL_ALLOW_TOOL_REINIT_FOR_TEST;
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
 public class StandaloneScrubber
 {
@@ -71,13 +75,16 @@ public class StandaloneScrubber
     private static final String SKIP_CORRUPTED_OPTION = "skip-corrupted";
     private static final String NO_VALIDATE_OPTION = "no-validate";
     private static final String REINSERT_OVERFLOWED_TTL_OPTION = "reinsert-overflowed-ttl";
+    /**
+     * This option was logically removed from the code, but to avoid breaking backwards compatability the option remains
+     */
     private static final String HEADERFIX_OPTION = "header-fix";
 
     public static void main(String args[])
     {
         Options options = Options.parseArgs(args);
 
-        if (Boolean.getBoolean(Util.ALLOW_TOOL_REINIT_FOR_TEST))
+        if (TEST_UTIL_ALLOW_TOOL_REINIT_FOR_TEST.getBoolean())
             DatabaseDescriptor.toolInitialization(false); //Necessary for testing
         else
             Util.initDatabaseDescriptor();
@@ -85,7 +92,7 @@ public class StandaloneScrubber
         try
         {
             // load keyspace descriptions.
-            Schema.instance.loadFromDisk(false);
+            Schema.instance.loadFromDisk();
 
             if (Schema.instance.getKeyspaceMetadata(options.keyspaceName) == null)
                 throw new IllegalArgumentException(String.format("Unknown keyspace %s", options.keyspaceName));
@@ -108,7 +115,7 @@ public class StandaloneScrubber
                                                                   options.keyspaceName,
                                                                   options.cfName));
 
-            String snapshotName = "pre-scrub-" + System.currentTimeMillis();
+            String snapshotName = "pre-scrub-" + currentTimeMillis();
 
             OutputHandler handler = new OutputHandler.SystemOutput(options.verbose, options.debug);
             Directories.SSTableLister lister = cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).skipTemporary(true);
@@ -119,75 +126,15 @@ public class StandaloneScrubber
             {
                 Descriptor descriptor = entry.getKey();
                 Set<Component> components = entry.getValue();
-                if (!components.contains(Component.DATA))
+                if (!components.contains(Components.DATA))
                     continue;
 
                 listResult.add(Pair.create(descriptor, components));
 
                 File snapshotDirectory = Directories.getSnapshotDirectory(descriptor, snapshotName);
-                SSTableReader.createLinks(descriptor, components, snapshotDirectory.getPath());
+                SSTableReader.createLinks(descriptor, components, snapshotDirectory.path());
             }
             System.out.println(String.format("Pre-scrub sstables snapshotted into snapshot %s", snapshotName));
-
-            if (options.headerFixMode != Options.HeaderFixMode.OFF)
-            {
-                // Run the frozen-UDT checks _before_ the sstables are opened
-
-                List<String> logOutput = new ArrayList<>();
-
-                SSTableHeaderFix.Builder headerFixBuilder = SSTableHeaderFix.builder()
-                                                                            .logToList(logOutput)
-                                                                            .schemaCallback(() -> Schema.instance::getTableMetadata);
-                if (options.headerFixMode == Options.HeaderFixMode.VALIDATE)
-                    headerFixBuilder = headerFixBuilder.dryRun();
-
-                for (Pair<Descriptor, Set<Component>> p : listResult)
-                    headerFixBuilder.withPath(Paths.get(p.left.filenameFor(Component.DATA)));
-
-                SSTableHeaderFix headerFix = headerFixBuilder.build();
-                try
-                {
-                    headerFix.execute();
-                }
-                catch (Exception e)
-                {
-                    JVMStabilityInspector.inspectThrowable(e);
-                    if (options.debug)
-                        e.printStackTrace(System.err);
-                }
-
-                if (headerFix.hasChanges() || headerFix.hasError())
-                    logOutput.forEach(System.out::println);
-
-                if (headerFix.hasError())
-                {
-                    System.err.println("Errors in serialization-header detected, aborting.");
-                    System.exit(1);
-                }
-
-                switch (options.headerFixMode)
-                {
-                    case VALIDATE_ONLY:
-                    case FIX_ONLY:
-                        System.out.printf("Not continuing with scrub, since '--%s %s' was specified.%n",
-                                          HEADERFIX_OPTION,
-                                          options.headerFixMode.asCommandLineOption());
-                        System.exit(0);
-                    case VALIDATE:
-                        if (headerFix.hasChanges())
-                        {
-                            System.err.printf("Unfixed, but fixable errors in serialization-header detected, aborting. " +
-                                              "Use a non-validating mode ('-e %s' or '-e %s') for --%s%n",
-                                              Options.HeaderFixMode.FIX.asCommandLineOption(),
-                                              Options.HeaderFixMode.FIX_ONLY.asCommandLineOption(),
-                                              HEADERFIX_OPTION);
-                            System.exit(2);
-                        }
-                        break;
-                    case FIX:
-                        break;
-                }
-            }
 
             List<SSTableReader> sstables = new ArrayList<>();
 
@@ -196,7 +143,7 @@ public class StandaloneScrubber
             {
                 Descriptor descriptor = pair.left;
                 Set<Component> components = pair.right;
-                if (!components.contains(Component.DATA))
+                if (!components.contains(Components.DATA))
                     continue;
 
                 try
@@ -220,7 +167,9 @@ public class StandaloneScrubber
                     try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.SCRUB, sstable))
                     {
                         txn.obsoleteOriginals(); // make sure originals are deleted and avoid NPE if index is missing, CASSANDRA-9591
-                        try (Scrubber scrubber = new Scrubber(cfs, txn, options.skipCorrupted, handler, !options.noValidate, options.reinserOverflowedTTL))
+
+                        SSTableFormat format = sstable.descriptor.getFormat();
+                        try (IScrubber scrubber = format.getScrubber(cfs, txn, handler, options.build()))
                         {
                             scrubber.scrub();
                         }
@@ -242,7 +191,7 @@ public class StandaloneScrubber
             }
 
             // Check (and repair) manifests
-            checkManifest(cfs.getCompactionStrategyManager(), cfs, sstables);
+            checkManifest(cfs, sstables);
             CompactionManager.instance.finishCompactionsAndShutdown(5, TimeUnit.MINUTES);
             LifecycleTransaction.waitForDeletions();
             System.exit(0); // We need that to stop non daemonized threads
@@ -256,25 +205,26 @@ public class StandaloneScrubber
         }
     }
 
-    private static void checkManifest(CompactionStrategyManager strategyManager, ColumnFamilyStore cfs, Collection<SSTableReader> sstables)
+    private static void checkManifest(ColumnFamilyStore cfs, Collection<? extends CompactionSSTable> sstables)
     {
-        if (strategyManager.getCompactionParams().klass().equals(LeveledCompactionStrategy.class))
+        if (cfs.getCompactionParams().klass().equals(LeveledCompactionStrategy.class))
         {
-            int maxSizeInMB = (int)((cfs.getCompactionStrategyManager().getMaxSSTableBytes()) / (1024L * 1024L));
-            int fanOut = cfs.getCompactionStrategyManager().getLevelFanoutSize();
-            for (AbstractStrategyHolder.GroupedSSTableContainer sstableGroup : strategyManager.groupSSTables(sstables))
+            int maxSizeInMiB = (int)((cfs.getCompactionStrategy().getMaxSSTableBytes()) / (1024L * 1024L));
+            int fanOut = cfs.getCompactionStrategy().getLevelFanoutSize();
+            CompactionStrategyManager csm = (CompactionStrategyManager) cfs.getCompactionStrategyContainer();
+            for (AbstractStrategyHolder.GroupedSSTableContainer<?> sstableGroup : csm.groupSSTables(sstables))
             {
                 for (int i = 0; i < sstableGroup.numGroups(); i++)
                 {
-                    List<SSTableReader> groupSSTables = new ArrayList<>(sstableGroup.getGroup(i));
+                    List<CompactionSSTable> groupSSTables = new ArrayList<>(sstableGroup.getGroup(i));
                     // creating the manifest makes sure the leveling is sane:
-                    LeveledManifest.create(cfs, maxSizeInMB, fanOut, groupSSTables);
+                    LeveledManifest.create(cfs, maxSizeInMiB, fanOut, groupSSTables);
                 }
             }
         }
     }
 
-    private static class Options
+    private static class Options extends IScrubber.Options.Builder
     {
         public final String keyspaceName;
         public final String cfName;
@@ -282,9 +232,6 @@ public class StandaloneScrubber
         public boolean debug;
         public boolean verbose;
         public boolean manifestCheckOnly;
-        public boolean skipCorrupted;
-        public boolean noValidate;
-        public boolean reinserOverflowedTTL;
         public HeaderFixMode headerFixMode = HeaderFixMode.VALIDATE;
 
         enum HeaderFixMode
@@ -343,21 +290,11 @@ public class StandaloneScrubber
                 opts.debug = cmd.hasOption(DEBUG_OPTION);
                 opts.verbose = cmd.hasOption(VERBOSE_OPTION);
                 opts.manifestCheckOnly = cmd.hasOption(MANIFEST_CHECK_OPTION);
-                opts.skipCorrupted = cmd.hasOption(SKIP_CORRUPTED_OPTION);
-                opts.noValidate = cmd.hasOption(NO_VALIDATE_OPTION);
-                opts.reinserOverflowedTTL = cmd.hasOption(REINSERT_OVERFLOWED_TTL_OPTION);
+                opts.skipCorrupted(cmd.hasOption(SKIP_CORRUPTED_OPTION));
+                opts.checkData(!cmd.hasOption(NO_VALIDATE_OPTION));
+                opts.reinsertOverflowedTTLRows(cmd.hasOption(REINSERT_OVERFLOWED_TTL_OPTION));
                 if (cmd.hasOption(HEADERFIX_OPTION))
-                {
-                    try
-                    {
-                        opts.headerFixMode = HeaderFixMode.fromCommandLine(cmd.getOptionValue(HEADERFIX_OPTION));
-                    }
-                    catch (Exception e)
-                    {
-                        errorMsg(String.format("Invalid argument value '%s' for --%s", cmd.getOptionValue(HEADERFIX_OPTION), HEADERFIX_OPTION), options);
-                        return null;
-                    }
-                }
+                    System.err.println(String.format("Option %s is deprecated and no longer functional", HEADERFIX_OPTION));
                 return opts;
             }
             catch (ParseException e)

@@ -17,82 +17,77 @@
  */
 package org.apache.cassandra.db.compaction;
 
-import java.io.File;
-import java.util.*;
 import java.util.function.LongPredicate;
-import java.util.function.Predicate;
 
 import com.google.common.base.Throwables;
 import com.google.common.collect.Sets;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTableRewriter;
+import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.OutputHandler;
-import org.apache.cassandra.utils.UUIDGen;
+
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
 public class Upgrader
 {
-    private final ColumnFamilyStore cfs;
+    private final CompactionRealm realm;
     private final SSTableReader sstable;
     private final LifecycleTransaction transaction;
     private final File directory;
 
     private final CompactionController controller;
-    private final CompactionStrategyManager strategyManager;
-    private final long estimatedRows;
 
     private final OutputHandler outputHandler;
 
-    public Upgrader(ColumnFamilyStore cfs, LifecycleTransaction txn, OutputHandler outputHandler)
+    public Upgrader(CompactionRealm realm, LifecycleTransaction txn, OutputHandler outputHandler)
     {
-        this.cfs = cfs;
+        this.realm = realm;
         this.transaction = txn;
         this.sstable = txn.onlyOne();
         this.outputHandler = outputHandler;
-
-        this.directory = new File(sstable.getFilename()).getParentFile();
-
-        this.controller = new UpgradeController(cfs);
-
-        this.strategyManager = cfs.getCompactionStrategyManager();
-        long estimatedTotalKeys = Math.max(cfs.metadata().params.minIndexInterval, SSTableReader.getApproximateKeyCount(Arrays.asList(this.sstable)));
-        long estimatedSSTables = Math.max(1, SSTableReader.getTotalBytes(Arrays.asList(this.sstable)) / strategyManager.getMaxSSTableBytes());
-        this.estimatedRows = (long) Math.ceil((double) estimatedTotalKeys / estimatedSSTables);
+        this.directory = new File(sstable.getFilename()).parent();
+        this.controller = new UpgradeController(realm);
     }
 
     private SSTableWriter createCompactionWriter(StatsMetadata metadata)
     {
-        MetadataCollector sstableMetadataCollector = new MetadataCollector(cfs.getComparator());
+        MetadataCollector sstableMetadataCollector = new MetadataCollector(realm.metadata().comparator);
         sstableMetadataCollector.sstableLevel(sstable.getSSTableLevel());
-        return SSTableWriter.create(cfs.newSSTableDescriptor(directory),
-                                    estimatedRows,
-                                    metadata.repairedAt,
-                                    metadata.pendingRepair,
-                                    metadata.isTransient,
-                                    cfs.metadata,
-                                    sstableMetadataCollector,
-                                    SerializationHeader.make(cfs.metadata(), Sets.newHashSet(sstable)),
-                                    cfs.indexManager.listIndexes(),
-                                    transaction);
+
+        Descriptor descriptor = realm.newSSTableDescriptor(directory);
+        return descriptor.getFormat().getWriterFactory().builder(descriptor)
+                         .setKeyCount(metadata.totalRows) // TODO is it correct? I don't know why did we estimate that value instead of just copying it from metadata
+                         .setRepairedAt(metadata.repairedAt)
+                         .setPendingRepair(metadata.pendingRepair)
+                         .setTransientSSTable(metadata.isTransient)
+                         .setTableMetadataRef(realm.metadataRef())
+                         .setMetadataCollector(sstableMetadataCollector)
+                         .setSerializationHeader(SerializationHeader.make(realm.metadata(), Sets.newHashSet(sstable)))
+                         .addDefaultComponents(realm.getIndexManager().listIndexGroups())
+                         .setSecondaryIndexGroups(realm.getIndexManager().listIndexGroups())
+                         .build(transaction, realm);
     }
 
     public void upgrade(boolean keepOriginals)
     {
         outputHandler.output("Upgrading " + sstable);
-        int nowInSec = FBUtilities.nowInSeconds();
-        try (SSTableRewriter writer = SSTableRewriter.construct(cfs, transaction, keepOriginals, CompactionTask.getMaxDataAge(transaction.originals()));
-             AbstractCompactionStrategy.ScannerList scanners = strategyManager.getScanners(transaction.originals());
-             CompactionIterator iter = new CompactionIterator(transaction.opType(), scanners.scanners, controller, nowInSec, UUIDGen.getTimeUUID()))
+        long nowInSec = FBUtilities.nowInSeconds();
+        try (SSTableRewriter writer = SSTableRewriter.construct(realm, transaction, keepOriginals, CompactionTask.getMaxDataAge(transaction.originals()));
+             ScannerList scanners = ScannerList.of(transaction.originals(), null);
+             CompactionIterator iter = new CompactionIterator(transaction.opType(), scanners.scanners, controller, nowInSec, nextTimeUUID()))
         {
             writer.switchWriter(createCompactionWriter(sstable.getSSTableMetadata()));
+            iter.setTargetDirectory(writer.currentWriter().getFilename());
             while (iter.hasNext())
                 writer.append(iter.next());
 
@@ -101,7 +96,8 @@ public class Upgrader
         }
         catch (Exception e)
         {
-            Throwables.propagate(e);
+            Throwables.throwIfUnchecked(e);
+            throw new RuntimeException(e);
         }
         finally
         {
@@ -111,7 +107,7 @@ public class Upgrader
 
     private static class UpgradeController extends CompactionController
     {
-        public UpgradeController(ColumnFamilyStore cfs)
+        public UpgradeController(CompactionRealm cfs)
         {
             super(cfs, Integer.MAX_VALUE);
         }

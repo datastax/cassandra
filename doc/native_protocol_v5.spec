@@ -29,7 +29,6 @@ Table of Contents
       2.3.1 Initial Handshake
       2.3.2 Compression
     2.4. Frame Payload
-      2.4.1 Frame Header
       2.4.1.1. version
       2.4.1.2. flags
       2.4.1.3. stream
@@ -69,10 +68,10 @@ Table of Contents
 
 1. Overview
 
-  The CQL binary protocol is a frame based protocol with a frame comprises a header, payload
-  and trailer. In v5 there are two distinct frame formats, compressed and uncompressed, in
-  both cases, the payload is a stream of CQL envelopes (Section 2.4). Each envelope contains
-  a single CQL message, along with a metadata header. In effect, the v5 framing format is a
+  The CQL binary protocol is a frame based protocol with frames comprising a header, payload
+  and trailer. In v5 there are two distinct frame formats, compressed and uncompressed and in
+  both cases the payload is a stream of CQL envelopes (Section 2.4). Each envelope contains
+  a single CQL message, along with a metadata header. In effect, the framing format is a
   simple wrapper around protocol v5.
 
   In either format, a frame may or may not be self contained. If self contained, then the
@@ -92,20 +91,24 @@ Table of Contents
   The trailer contains a CRC32 to protect the integrity of the payload, covering all envelopes
   (whole or partial) contained therein.
 
+  All the integers in the v5 framing format are little-endian.
 
 2. Frame Format
 
 2.1 Uncompressed Format
 
-  The uncompressed variant uses a 6 byte header containing payload length, self contained
-  flag and CRC24 for the header itself. The max size for the payload is 128KiB, and is
-  followed by its CRC32.
+  The uncompressed variant uses a 6 byte header. The first 3 bytes contain payload length and
+  self contained flag. The following 3 bytes contain the CRC24 for the header itself.
+  The max size for the payload is 128KiB, and is followed by its CRC32.
+
+  The first 3 bytes of the header represent a single unsigned little-endian integer. The self
+  contained flag is the 17th bit of that decoded integer.
 
   1. Payload length               (17 bits)
   2. isSelfContained flag         (1 bit)
   3. Header padding               (6 bits)
   4. CRC24 of the header          (24 bits)
-  5. Payload                      (up to 2 ^ 17 - 1 bits)
+  5. Payload                      (up to 2 ^ 17 - 1 bytes)
   6. Payload CRC32                (32 bits)
 
   0                   1                   2                   3
@@ -124,11 +127,18 @@ Table of Contents
   |                        CRC32 of Payload                       |
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
+  The headed padding can be discarded.
+
+  The CRC24 of the header is calculated by initializing the CRC24 algorithm
+  with the value 0x875060 and using the polynomial 0x1974F0B.
+
 2.2 LZ4 Compressed Format
 
-  The variant with LZ4 compression uses an 8 byte header, containing both the compressed
-  and uncompressed lengths of the payload, the self contained flag and a CRC24 for the
-  header. As with uncompressed frames, the max payload size is 128KiB and is followed
+  The variant with LZ4 compression uses an 8 byte header. The first 4 bytes contain
+  an unsigned integer (little endian) containing the compressed and uncompressed
+  lengths of the payload and the self contained flag. The remaining 4 bytes are an
+  unsigned integer (little endian) representing the CRC24 for the header.
+  As with uncompressed frames, the max payload size is 128KiB and is followed
   by a CRC32 trailer. This is the CRC of the compressed payload.
 
   1. Compressed length            (17 bits)
@@ -155,6 +165,13 @@ Table of Contents
   |                  CRC32 of Compressed Payload                  |
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
+  The header padding can be discarded.
+
+  An uncompressed length of 0 signals that the compressed payload
+  should be used as-is and not decompressed.
+
+  The CRC24 of the header is calculated with the same parameters as for
+  the uncompressed format (Section 2.1).
 
 2.3 Protocol Negotiation
 
@@ -211,10 +228,10 @@ Table of Contents
       .                                       .
       +----------------------------------------
 
-  The protocol is big-endian (network byte order).
+  All values in an envelope are big-endian (network byte order).
 
   Each envelope contains a fixed size header (9 bytes) followed by a variable size
-  body. The header is described in Section 2.4.1. The content of the body depends
+  body. The content of the body depends
   on the header opcode value (the body can in particular be empty for some
   opcode values). The list of allowed opcodes is defined in Section 2.4.1.4 and the
   details of each corresponding message are described Section 4.
@@ -237,7 +254,7 @@ Table of Contents
   previously possible to enable compression for an individual envelope. This is no
   longer possible, as the framing format is responsible for compression, which is set for
   the lifetime of a connection and applies to all messages transmitted throughout it
-  (see Section 2.2.1 for caveats). The compression flag is therefore deprecated and
+  (see Section 2.2 for caveats). The compression flag is therefore deprecated and
   ignored in protocol v5.
 
 2.4.1.1. version
@@ -259,7 +276,7 @@ Table of Contents
   connection.
 
   This document describes version 5 of the protocol. For the changes made since
-  version 4, see Section 10.
+  version 4, see Section 9.
 
 2.4.1.2. flags
 
@@ -1189,6 +1206,13 @@ Table of Contents
   value.  Implementors should pad positive values that have a MSB >= 0x80
   with a leading 0x00 byte.
 
+5.25 vector
+
+  For a vector of n dimensions of a fixed-length type, a sequence of those n elements.
+  For a vector with variable-length elements, the size of the elements will preced
+  each element.  Each element is the [bytes] representing the serialized value.  The
+  number of dimensions is not encoded, since it's part of the type definition.
+
 
 6. User Defined Types
 
@@ -1298,7 +1322,7 @@ Table of Contents
                              - "VIEW": the timeout occured when a write involves
                                VIEW update and failure to acqiure local view(MV)
                                lock for key within timeout
-                             - "CDC": the timeout occured when cdc_total_space_in_mb is
+                             - "CDC": the timeout occured when cdc_total_space is
                                exceeded when doing a write to data tracked by cdc.
                 <contentions> is a [short] that describes the number of contentions occured during the CAS operation.
                               The field only presents when the <writeType> is "CAS".
@@ -1381,7 +1405,7 @@ Table of Contents
                              - "VIEW": the failure occured when a write involves
                                VIEW update and failure to acqiure local view(MV)
                                lock for key within timeout
-                             - "CDC": the failure occured when cdc_total_space_in_mb is
+                             - "CDC": the failure occured when cdc_total_space is
                                exceeded when doing a write to data tracked by cdc.
     0x1600    CDC_WRITE_FAILURE: // todo
     0x1700    CAS_WRITE_UNKNOWN: An exception occured due to contended Compare And Set write/update.

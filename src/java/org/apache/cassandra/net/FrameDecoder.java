@@ -51,10 +51,6 @@ import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
           LZ4 compression with custom frame format; payload is protected by CRC32
  * 3. {@link FrameDecoderUnprotected}:
           no compression; no integrity protection
- * 4. {@link FrameDecoderLegacy}:
-          no compression; no integrity protection; turns unframed streams of legacy messages (< 4.0) into frames
- * 5. {@link FrameDecoderLegacyLZ4}
- *        LZ4 compression using standard LZ4 frame format; groups legacy messages (< 4.0) into frames
  */
 public abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 {
@@ -191,6 +187,14 @@ public abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     abstract void addLastTo(ChannelPipeline pipeline);
 
     /**
+     * @return true if we are actively decoding and processing frames
+     */
+    public boolean isActive()
+    {
+        return isActive;
+    }
+    
+    /**
      * For use by InboundMessageHandler (or other upstream handlers) that want to start receiving frames.
      */
     public void activate(FrameProcessor processor)
@@ -208,7 +212,7 @@ public abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      * For use by InboundMessageHandler (or other upstream handlers) that want to resume
      * receiving frames after previously indicating that processing should be paused.
      */
-    void reactivate() throws IOException
+    public void reactivate() throws IOException
     {
         if (isActive)
             throw new IllegalStateException("Tried to reactivate an already active FrameDecoder");
@@ -268,10 +272,6 @@ public abstract class FrameDecoder extends ChannelInboundHandlerAdapter
             allocator.putUnusedPortion(buf);
             channelRead(ShareableBytes.wrap(buf));
         }
-        else if (msg instanceof ShareableBytes) // legacy LZ4 decoder
-        {
-            channelRead((ShareableBytes) msg);
-        }
         else
         {
             throw new IllegalArgumentException();
@@ -282,7 +282,8 @@ public abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     {
         decode(frames, bytes);
 
-        if (isActive) isActive = deliver(processor);
+        if (isActive)
+            isActive = deliver(processor);
     }
 
     @Override

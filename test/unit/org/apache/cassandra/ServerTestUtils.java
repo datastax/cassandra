@@ -17,25 +17,32 @@
  */
 package org.apache.cassandra;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.audit.AuditLogManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
-import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.big.BigTableReader;
+import org.apache.cassandra.io.sstable.indexsummary.IndexSummarySupport;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.security.ThreadAwareSecurityManager;
+import org.apache.cassandra.service.EmbeddedCassandraService;
 
 /**
  * Utility methodes used by SchemaLoader and CQLTester to manage the server and its state.
@@ -131,15 +138,15 @@ public final class ServerTestUtils
     }
 
     /**
-     * Cleanup the directories used by the server, creating them if they do not exists.
+     * Cleanup the directories used by the server, creating them if they do not exist.
      */
     public static void cleanupAndLeaveDirs() throws IOException
     {
-        // We need to stop and unmap all CLS instances prior to cleanup() or we'll get failures on Windows.
         CommitLog.instance.stopUnsafe(true);
         mkdirs(); // Creates the directories if they does not exists
         cleanup(); // Ensure that the directories are all empty
         CommitLog.instance.restartUnsafe();
+        CommitLog.instance.getSegmentManager().awaitManagementTasksCompletion();
     }
 
     /**
@@ -150,14 +157,15 @@ public final class ServerTestUtils
         // clean up commitlog
         cleanupDirectory(DatabaseDescriptor.getCommitLogLocation());
 
-        String cdcDir = DatabaseDescriptor.getCDCLogLocation();
+        File cdcDir = DatabaseDescriptor.getCDCLogLocation();
         if (cdcDir != null)
             cleanupDirectory(cdcDir);
         cleanupDirectory(DatabaseDescriptor.getHintsDirectory());
+        cleanupDirectory(DatabaseDescriptor.getMetadataDirectory());
         cleanupSavedCaches();
 
         // clean up data directory which are stored as data directory/keyspace/data files
-        for (String dirName : DatabaseDescriptor.getAllDataFileLocations())
+        for (File dirName : DatabaseDescriptor.getAllDataFileLocations())
         {
             cleanupDirectory(dirName);
         }
@@ -167,13 +175,14 @@ public final class ServerTestUtils
     {
         if (directory.exists())
         {
-            FileUtils.deleteChildrenRecursive(directory);
+            Arrays.stream(directory.tryList()).forEach(File::deleteRecursive);
         }
     }
 
     private static void cleanupDirectory(String dirName)
     {
-        cleanupDirectory(new File(dirName));
+        if (dirName != null)
+            cleanupDirectory(new File(dirName));
     }
 
     /**
@@ -189,7 +198,35 @@ public final class ServerTestUtils
         cleanupDirectory(DatabaseDescriptor.getSavedCachesLocation());
     }
 
+    public static EmbeddedCassandraService startEmbeddedCassandraService() throws IOException
+    {
+        DatabaseDescriptor.daemonInitialization();
+        mkdirs();
+        cleanup();
+        EmbeddedCassandraService service = new EmbeddedCassandraService();
+        service.start();
+        return service;
+    }
+
     private ServerTestUtils()
     {
+    }
+
+    public static List<BigTableReader> getLiveBigTableReaders(ColumnFamilyStore cfs)
+    {
+        return cfs.getLiveSSTables()
+                  .stream()
+                  .filter(BigTableReader.class::isInstance)
+                  .map(BigTableReader.class::cast)
+                  .collect(Collectors.toList());
+    }
+
+    public static <R extends SSTableReader & IndexSummarySupport<R>> List<R> getLiveIndexSummarySupportingReaders(ColumnFamilyStore cfs)
+    {
+        return cfs.getLiveSSTables()
+                  .stream()
+                  .filter(IndexSummarySupport.class::isInstance)
+                  .map(r -> (R) r)
+                  .collect(Collectors.toList());
     }
 }

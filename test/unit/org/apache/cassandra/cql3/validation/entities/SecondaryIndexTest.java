@@ -25,9 +25,18 @@ import java.util.concurrent.CountDownLatch;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.commons.lang3.StringUtils;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.index.internal.CassandraIndex;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -42,11 +51,11 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.StubIndex;
 import org.apache.cassandra.index.internal.CustomCassandraIndex;
-import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -59,6 +68,7 @@ import static java.lang.String.format;
 import static org.apache.cassandra.Util.throwAssert;
 import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BYTE_BUFFER;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -69,23 +79,29 @@ import static org.junit.Assert.fail;
 public class SecondaryIndexTest extends CQLTester
 {
     public static final int TOO_BIG = 1024 * 65;
+    
+    @BeforeClass
+    public static void setDefaultSecondaryIndex()
+    {
+        DatabaseDescriptor.setDefaultSecondaryIndex(CassandraIndex.NAME);
+    }
 
     @Test
-    public void testCreateAndDropIndex() throws Throwable
+    public void testCreateAndDropIndex()
     {
         testCreateAndDropIndex("test", false);
         testCreateAndDropIndex("test2", true);
     }
 
     @Test
-    public void testCreateAndDropIndexWithQuotedIdentifier() throws Throwable
+    public void testCreateAndDropIndexWithQuotedIdentifier()
     {
         testCreateAndDropIndex("\"quoted_ident\"", false);
         testCreateAndDropIndex("\"quoted_ident2\"", true);
     }
 
     @Test
-    public void testCreateAndDropIndexWithCamelCaseIdentifier() throws Throwable
+    public void testCreateAndDropIndexWithCamelCaseIdentifier()
     {
         testCreateAndDropIndex("CamelCase", false);
         testCreateAndDropIndex("CamelCase2", true);
@@ -96,9 +112,8 @@ public class SecondaryIndexTest extends CQLTester
      *
      * @param indexName         the index name
      * @param addKeyspaceOnDrop add the keyspace name in the drop statement
-     * @throws Throwable if an error occurs
      */
-    private void testCreateAndDropIndex(String indexName, boolean addKeyspaceOnDrop) throws Throwable
+    private void testCreateAndDropIndex(String indexName, boolean addKeyspaceOnDrop)
     {
         assertInvalidMessage(format("Index '%s.%s' doesn't exist",
                                     KEYSPACE,
@@ -106,17 +121,17 @@ public class SecondaryIndexTest extends CQLTester
                              format("DROP INDEX %s.%s", KEYSPACE, indexName));
 
         createTable("CREATE TABLE %s (a int primary key, b int);");
-        createIndex("CREATE INDEX " + indexName + " ON %s(b);");
-        createIndex("CREATE INDEX IF NOT EXISTS " + indexName + " ON %s(b);");
+        createIndexAsync("CREATE INDEX " + indexName + " ON %s(b);");
+        createIndexAsync("CREATE INDEX IF NOT EXISTS " + indexName + " ON %s(b);");
 
         assertInvalidMessage(format("Index '%s' already exists",
                                     removeQuotes(indexName.toLowerCase(Locale.US))),
                              "CREATE INDEX " + indexName + " ON %s(b)");
 
         // IF NOT EXISTS should apply in cases where the new index differs from an existing one in name only
-        String otherIndexName = "index_" + System.nanoTime();
+        String otherIndexName = "index_" + nanoTime();
         assertEquals(1, getCurrentColumnFamilyStore().metadata().indexes.size());
-        createIndex("CREATE INDEX IF NOT EXISTS " + otherIndexName + " ON %s(b)");
+        createIndexAsync("CREATE INDEX IF NOT EXISTS " + otherIndexName + " ON %s(b)");
         assertEquals(1, getCurrentColumnFamilyStore().metadata().indexes.size());
         assertInvalidMessage(format("Index %s is a duplicate of existing index %s",
                                     removeQuotes(otherIndexName.toLowerCase(Locale.US)),
@@ -158,6 +173,43 @@ public class SecondaryIndexTest extends CQLTester
     private static String removeQuotes(String indexName)
     {
         return StringUtils.remove(indexName, '\"');
+    }
+
+    @Test
+    public void shouldCreateCassandraIndexExplicitly() throws Throwable
+    {
+        createTable("CREATE TABLE %s (userid uuid PRIMARY KEY, firstname text, lastname text, age int)");
+        createIndex("CREATE INDEX byAge ON %s(age) USING 'legacy_local_table'");
+
+        SecondaryIndexManager indexManager = getCurrentColumnFamilyStore().indexManager;
+        assertTrue(indexManager.getIndexByName("byage") instanceof CassandraIndex);
+
+        UUID id1 = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
+        execute("INSERT INTO %s (userid, firstname, lastname, age) VALUES (?, 'Frodo', 'Baggins', 32)", id1);
+        assertEmpty(execute("SELECT firstname FROM %s WHERE userid = ? AND age = 33", id1));
+    }
+
+    @Test
+    public void shouldCreateCassandraIndexWhenNotDefault() throws Throwable
+    {
+        DatabaseDescriptor.setDefaultSecondaryIndex(StorageAttachedIndex.NAME);
+        
+        try
+        {
+            createTable("CREATE TABLE %s (userid uuid PRIMARY KEY, firstname text, lastname text, age int)");
+            createIndex("CREATE INDEX byAge ON %s(age) USING 'legacy_local_table'");
+
+            SecondaryIndexManager indexManager = getCurrentColumnFamilyStore().indexManager;
+            assertTrue(indexManager.getIndexByName("byage") instanceof CassandraIndex);
+
+            UUID id1 = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
+            execute("INSERT INTO %s (userid, firstname, lastname, age) VALUES (?, 'Frodo', 'Baggins', 32)", id1);
+            assertEmpty(execute("SELECT firstname FROM %s WHERE userid = ? AND age = 33", id1));
+        }
+        finally
+        {
+            DatabaseDescriptor.setDefaultSecondaryIndex(CassandraIndex.NAME);
+        }
     }
 
     /**
@@ -238,7 +290,7 @@ public class SecondaryIndexTest extends CQLTester
      * migrated from cql_tests.py:TestCQL.compression_option_validation_test()
      */
     @Test
-    public void testUnknownCompressionOptions() throws Throwable
+    public void testUnknownCompressionOptions()
     {
         String tableName = createTableName();
         assertInvalidThrow(SyntaxException.class, format("CREATE TABLE %s (key varchar PRIMARY KEY, password varchar, gender varchar) WITH compression_parameters:sstable_compressor = 'DeflateCompressor'", tableName));
@@ -253,7 +305,7 @@ public class SecondaryIndexTest extends CQLTester
     @Test
     public void testIndexOnComposite() throws Throwable
     {
-        String tableName = createTable("CREATE TABLE %s (blog_id int, timestamp int, author text, content text, PRIMARY KEY (blog_id, timestamp))");
+        createTable("CREATE TABLE %s (blog_id int, timestamp int, author text, content text, PRIMARY KEY (blog_id, timestamp))");
 
         execute("INSERT INTO %s (blog_id, timestamp, author, content) VALUES (?, ?, ?, ?)", 0, 0, "bob", "1st post");
         execute("INSERT INTO %s (blog_id, timestamp, author, content) VALUES (?, ?, ?, ?)", 0, 1, "tom", "2nd post");
@@ -262,8 +314,6 @@ public class SecondaryIndexTest extends CQLTester
         execute("INSERT INTO %s (blog_id, timestamp, author, content) VALUES (?, ?, ?, ?)", 1, 0, "bob", "5th post");
 
         createIndex("CREATE INDEX authoridx ON %s (author)");
-
-        assertTrue(waitForIndex(keyspace(), tableName, "authoridx"));
 
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT blog_id, timestamp FROM %s WHERE author = 'bob'"),
@@ -299,7 +349,7 @@ public class SecondaryIndexTest extends CQLTester
      * migrated from cql_tests.py:TestCQL.refuse_in_with_indexes_test()
      */
     @Test
-    public void testInvalidIndexSelect() throws Throwable
+    public void testInvalidIndexSelect()
     {
         createTable("create table %s (pk varchar primary key, col1 varchar, col2 varchar)");
         createIndex("create index on %s (col1)");
@@ -387,7 +437,7 @@ public class SecondaryIndexTest extends CQLTester
      * Migrated from cql_tests.py:TestCQL.secondary_index_counters()
      */
     @Test
-    public void testIndexOnCountersInvalid() throws Throwable
+    public void testIndexOnCountersInvalid()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, c counter)");
         assertInvalid("CREATE INDEX ON test(c)");
@@ -430,6 +480,104 @@ public class SecondaryIndexTest extends CQLTester
             assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS 2"), row(0, 1));
             assertEmpty(execute("SELECT k, v FROM %s  WHERE m CONTAINS 4"));
         });
+    }
+
+    private static void assertBackingTableKeyValidator(SecondaryIndexManager indexManager, String indexName, AbstractType<?> expectedType)
+    {
+        assertEquals(expectedType, indexManager.getIndexByName(indexName)
+                                               .getBackingTable()
+                                               .map(ColumnFamilyStore::metadata)
+                                               .map(m -> m.partitionKeyType)
+                                               .orElseThrow(AssertionError::new));
+    }
+
+    /**
+     * Test for DB-1121
+     */
+    @Test
+    public void testIndexOnCollectionsBackingTableKeyValidator()
+    {
+        createTable("CREATE TABLE %s (" +
+                    "k int PRIMARY KEY, " +
+                    "non_frozen_list list<int>, " +
+                    "non_frozen_set set<text>, " +
+                    "non_frozen_map map<text, int>," +
+                    "frozen_list frozen<list<int>>, " +
+                    "frozen_set frozen<set<text>>, " +
+                    "frozen_map frozen<map<text, int>>)");
+
+        createIndex("CREATE INDEX non_frozen_list_idx ON %s (non_frozen_list)");
+        createIndex("CREATE INDEX non_frozen_set_idx ON %s (non_frozen_set)");
+        createIndex("CREATE INDEX non_frozen_map_idx ON %s (non_frozen_map)");
+        createIndex("CREATE INDEX non_frozen_map_keys_idx ON %s (KEYS(non_frozen_map))");
+        createIndex("CREATE INDEX non_frozen_map_entries_idx ON %s (ENTRIES(non_frozen_map))");
+        createIndex("CREATE INDEX frozen_list_idx ON %s (FULL(frozen_list))");
+        createIndex("CREATE INDEX frozen_set_idx ON %s (FULL(frozen_set))");
+        createIndex("CREATE INDEX frozen_map_idx ON %s (FULL(frozen_map))");
+
+        SecondaryIndexManager indexManager = ColumnFamilyStore.getIfExists(keyspace(), currentTable()).indexManager;
+
+        assertBackingTableKeyValidator(indexManager, "non_frozen_list_idx", Int32Type.instance);
+        assertBackingTableKeyValidator(indexManager, "non_frozen_set_idx", UTF8Type.instance);
+        assertBackingTableKeyValidator(indexManager, "non_frozen_map_idx", Int32Type.instance);
+        assertBackingTableKeyValidator(indexManager, "non_frozen_map_keys_idx", UTF8Type.instance);
+        assertBackingTableKeyValidator(indexManager, "non_frozen_map_entries_idx", CompositeType.getInstance(UTF8Type.instance, Int32Type.instance));
+        assertBackingTableKeyValidator(indexManager, "frozen_list_idx", ListType.getInstance(Int32Type.instance, false));
+        assertBackingTableKeyValidator(indexManager, "frozen_set_idx", SetType.getInstance(UTF8Type.instance, false));
+        assertBackingTableKeyValidator(indexManager, "frozen_map_idx", MapType.getInstance(UTF8Type.instance, Int32Type.instance, false));
+
+        // Unsupported index types for non-frozen list
+        assertInvalidMessage("Cannot create index on keys of column non_frozen_list with non-map type",
+                             "CREATE INDEX ON %s (KEYS(non_frozen_list))");
+        assertInvalidMessage("Cannot create index on entries of column non_frozen_list with non-map type",
+                             "CREATE INDEX ON %s (ENTRIES(non_frozen_list))");
+        assertInvalidMessage("full() indexes can only be created on frozen collections",
+                             "CREATE INDEX ON %s (FULL(non_frozen_list))");
+
+        // Unsupported index types for non-frozen set
+        assertInvalidMessage("Cannot create index on keys of column non_frozen_set with non-map type",
+                             "CREATE INDEX ON %s (KEYS(non_frozen_set))");
+        assertInvalidMessage("Cannot create index on entries of column non_frozen_set with non-map type",
+                             "CREATE INDEX ON %s (ENTRIES(non_frozen_set))");
+        assertInvalidMessage("full() indexes can only be created on frozen collections",
+                             "CREATE INDEX ON %s (FULL(non_frozen_set))");
+
+        // Unsupported index types for non-frozen map
+        assertInvalidMessage("full() indexes can only be created on frozen collections",
+                             "CREATE INDEX ON %s (FULL(non_frozen_map))");
+
+        // Unsupported index types for frozen list
+        assertInvalidMessage("Cannot create keys() index on frozen column frozen_list. Frozen collections " +
+                             "are immutable and must be fully indexed by using the 'full(frozen_list)' modifier",
+                             "CREATE INDEX ON %s (KEYS(frozen_list))");
+        assertInvalidMessage("Cannot create entries() index on frozen column frozen_list. Frozen collections " +
+                             "are immutable and must be fully indexed by using the 'full(frozen_list)' modifier",
+                             "CREATE INDEX ON %s (ENTRIES(frozen_list))");
+        assertInvalidMessage("Cannot create values() index on frozen column frozen_list. Frozen collections " +
+                             "are immutable and must be fully indexed by using the 'full(frozen_list)' modifier",
+                             "CREATE INDEX ON %s (VALUES(frozen_list))");
+
+        // Unsupported index types for frozen set
+        assertInvalidMessage("Cannot create keys() index on frozen column frozen_set. Frozen collections " +
+                             "are immutable and must be fully indexed by using the 'full(frozen_set)' modifier",
+                             "CREATE INDEX ON %s (KEYS(frozen_set))");
+        assertInvalidMessage("Cannot create entries() index on frozen column frozen_set. Frozen collections " +
+                             "are immutable and must be fully indexed by using the 'full(frozen_set)' modifier",
+                             "CREATE INDEX ON %s (ENTRIES(frozen_set))");
+        assertInvalidMessage("Cannot create values() index on frozen column frozen_set. Frozen collections " +
+                             "are immutable and must be fully indexed by using the 'full(frozen_set)' modifier",
+                             "CREATE INDEX ON %s (VALUES(frozen_set))");
+
+        // Unsupported index types for frozen map
+        assertInvalidMessage("Cannot create keys() index on frozen column frozen_map. Frozen collections " +
+                             "are immutable and must be fully indexed by using the 'full(frozen_map)' modifier",
+                             "CREATE INDEX ON %s (KEYS(frozen_map))");
+        assertInvalidMessage("Cannot create entries() index on frozen column frozen_map. Frozen collections " +
+                             "are immutable and must be fully indexed by using the 'full(frozen_map)' modifier",
+                             "CREATE INDEX ON %s (ENTRIES(frozen_map))");
+        assertInvalidMessage("Cannot create values() index on frozen column frozen_map. Frozen collections " +
+                             "are immutable and must be fully indexed by using the 'full(frozen_map)' modifier",
+                             "CREATE INDEX ON %s (VALUES(frozen_map))");
     }
 
     @Test
@@ -548,7 +696,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testSyntaxVariationsForIndexOnCollectionsValue() throws Throwable
+    public void testSyntaxVariationsForIndexOnCollectionsValue()
     {
         createTable("CREATE TABLE %s (k int, m map<int, int>, l list<int>, s set<int>, PRIMARY KEY (k))");
         createAndDropCollectionValuesIndex("m");
@@ -556,7 +704,7 @@ public class SecondaryIndexTest extends CQLTester
         createAndDropCollectionValuesIndex("s");
     }
 
-    private void createAndDropCollectionValuesIndex(String columnName) throws Throwable
+    private void createAndDropCollectionValuesIndex(String columnName)
     {
         String indexName = columnName + "_idx";
         SecondaryIndexManager indexManager = getCurrentColumnFamilyStore().indexManager;
@@ -571,7 +719,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testCreateIndexWithQuotedColumnNames() throws Throwable
+    public void testCreateIndexWithQuotedColumnNames()
     {
         createTable("CREATE TABLE %s (" +
                     " k int," +
@@ -593,7 +741,7 @@ public class SecondaryIndexTest extends CQLTester
         createAndDropIndexWithQuotedColumnIdentifier("\"column_name_with\"\"escaped quote\"");
     }
 
-    private void createAndDropIndexWithQuotedColumnIdentifier(String target) throws Throwable
+    private void createAndDropIndexWithQuotedColumnIdentifier(String target)
     {
         String indexName = "test_mixed_case_idx";
         createIndex(format("CREATE INDEX %s ON %%s(%s)", indexName, target));
@@ -611,20 +759,19 @@ public class SecondaryIndexTest extends CQLTester
     /**
      * Test for CASSANDRA-5732, Can not query secondary index
      * migrated from cql_tests.py:TestCQL.bug_5732_test(),
-     * which was executing with a row cache size of 100 MB
+     * which was executing with a row cache size of 100 MiB
      * and restarting the node, here we just cleanup the cache.
      */
     @Test
-    public void testCanQuerySecondaryIndex() throws Throwable
+    public void testCanQuerySecondaryIndex()
     {
-        String tableName = createTable("CREATE TABLE %s (k int PRIMARY KEY, v int,)");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int,)");
 
         execute("ALTER TABLE %s WITH CACHING = { 'keys': 'ALL', 'rows_per_partition': 'ALL' }");
         execute("INSERT INTO %s (k,v) VALUES (0,0)");
         execute("INSERT INTO %s (k,v) VALUES (1,1)");
 
         createIndex("CREATE INDEX testindex on %s (v)");
-        assertTrue(waitForIndex(keyspace(), tableName, "testindex"));
 
         assertRows(execute("SELECT k FROM %s WHERE v = 0"), row(0));
         cleanupCache();
@@ -636,7 +783,7 @@ public class SecondaryIndexTest extends CQLTester
     // make sure we check conditional and unconditional statements,
     // both singly and in batches (CASSANDRA-10536)
     @Test
-    public void testIndexOnCompositeValueOver64k() throws Throwable
+    public void testIndexOnCompositeValueOver64k()
     {
         createTable("CREATE TABLE %s(a int, b int, c blob, PRIMARY KEY (a))");
         createIndex("CREATE INDEX ON %s(c)");
@@ -653,7 +800,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnPartitionKeyInsertValueOver64k() throws Throwable
+    public void testIndexOnPartitionKeyInsertValueOver64k()
     {
         createTable("CREATE TABLE %s(a int, b int, c blob, PRIMARY KEY ((a, b)))");
         createIndex("CREATE INDEX ON %s(a)");
@@ -671,19 +818,19 @@ public class SecondaryIndexTest extends CQLTester
         long batchSizeThreshold = DatabaseDescriptor.getBatchSizeFailThreshold();
         try
         {
-            DatabaseDescriptor.setBatchSizeFailThresholdInKB( (TOO_BIG / 1024) * 2);
+            DatabaseDescriptor.setBatchSizeFailThresholdInKiB((TOO_BIG / 1024) * 2);
             succeedInsert("BEGIN BATCH\n" +
                           "INSERT INTO %s (a, b, c) VALUES (1, 1, ?) IF NOT EXISTS;\n" +
                           "APPLY BATCH", ByteBuffer.allocate(TOO_BIG));
         }
         finally
         {
-            DatabaseDescriptor.setBatchSizeFailThresholdInKB((int) (batchSizeThreshold / 1024));
+            DatabaseDescriptor.setBatchSizeFailThresholdInKiB((int) (batchSizeThreshold / 1024));
         }
     }
 
     @Test
-    public void testIndexOnPartitionKeyWithStaticColumnAndNoRows() throws Throwable
+    public void testIndexOnPartitionKeyWithStaticColumnAndNoRows()
     {
         createTable("CREATE TABLE %s (pk1 int, pk2 int, c int, s int static, v int, PRIMARY KEY((pk1, pk2), c))");
         createIndex("CREATE INDEX ON %s (pk2)");
@@ -706,7 +853,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnClusteringColumnInsertValueOver64k() throws Throwable
+    public void testIndexOnClusteringColumnInsertValueOver64k()
     {
         createTable("CREATE TABLE %s(a int, b int, c blob, PRIMARY KEY (a, b))");
         createIndex("CREATE INDEX ON %s(b)");
@@ -724,19 +871,19 @@ public class SecondaryIndexTest extends CQLTester
         long batchSizeThreshold = DatabaseDescriptor.getBatchSizeFailThreshold();
         try
         {
-            DatabaseDescriptor.setBatchSizeFailThresholdInKB( (TOO_BIG / 1024) * 2);
+            DatabaseDescriptor.setBatchSizeFailThresholdInKiB((TOO_BIG / 1024) * 2);
             succeedInsert("BEGIN BATCH\n" +
                           "INSERT INTO %s (a, b, c) VALUES (1, 1, ?) IF NOT EXISTS;\n" +
                           "APPLY BATCH", ByteBuffer.allocate(TOO_BIG));
         }
         finally
         {
-            DatabaseDescriptor.setBatchSizeFailThresholdInKB((int)(batchSizeThreshold / 1024));
+            DatabaseDescriptor.setBatchSizeFailThresholdInKiB((int)(batchSizeThreshold / 1024));
         }
     }
 
     @Test
-    public void testIndexOnFullCollectionEntryInsertCollectionValueOver64k() throws Throwable
+    public void testIndexOnFullCollectionEntryInsertCollectionValueOver64k()
     {
         createTable("CREATE TABLE %s(a int, b frozen<map<int, blob>>, PRIMARY KEY (a))");
         createIndex("CREATE INDEX ON %s(full(b))");
@@ -753,65 +900,21 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void prepareStatementsWithLIKEClauses() throws Throwable
+    public void prepareStatementsWithLIKEClauses()
     {
-        createTable("CREATE TABLE %s (a int, c1 text, c2 text, v1 text, v2 text, v3 int, PRIMARY KEY (a, c1, c2))");
-        createIndex(format("CREATE CUSTOM INDEX c1_idx on %%s(c1) USING '%s' WITH OPTIONS = {'mode' : 'PREFIX'}",
-                           SASIIndex.class.getName()));
-        createIndex(format("CREATE CUSTOM INDEX c2_idx on %%s(c2) USING '%s' WITH OPTIONS = {'mode' : 'CONTAINS'}",
-                           SASIIndex.class.getName()));
-        createIndex(format("CREATE CUSTOM INDEX v1_idx on %%s(v1) USING '%s' WITH OPTIONS = {'mode' : 'PREFIX'}",
-                           SASIIndex.class.getName()));
-        createIndex(format("CREATE CUSTOM INDEX v2_idx on %%s(v2) USING '%s' WITH OPTIONS = {'mode' : 'CONTAINS'}",
-                           SASIIndex.class.getName()));
-        createIndex(format("CREATE CUSTOM INDEX v3_idx on %%s(v3) USING '%s'", SASIIndex.class.getName()));
-
+        createTable("CREATE TABLE %s (k1 int, k2 int, c1 text, c2 text, s text, v1 text, v2 int, PRIMARY KEY ((k1, k2), c1, c2))");
         forcePreparedValues();
-        // prefix mode indexes support prefix/contains/matches
-        assertInvalidMessage("c1 LIKE '%<term>' abc is only supported on properly indexed columns",
-                             "SELECT * FROM %s WHERE c1 LIKE ?",
-                             "%abc");
-        assertInvalidMessage("c1 LIKE '%<term>%' abc is only supported on properly indexed columns",
-                             "SELECT * FROM %s WHERE c1 LIKE ?",
-                             "%abc%");
-        execute("SELECT * FROM %s WHERE c1 LIKE ?", "abc%");
-        execute("SELECT * FROM %s WHERE c1 LIKE ?", "abc");
-        assertInvalidMessage("v1 LIKE '%<term>' abc is only supported on properly indexed columns",
-                             "SELECT * FROM %s WHERE v1 LIKE ?",
-                             "%abc");
-        assertInvalidMessage("v1 LIKE '%<term>%' abc is only supported on properly indexed columns",
-                             "SELECT * FROM %s WHERE v1 LIKE ?",
-                             "%abc%");
-        execute("SELECT * FROM %s WHERE v1 LIKE ?", "abc%");
-        execute("SELECT * FROM %s WHERE v1 LIKE ?", "abc");
 
-        // contains mode indexes support prefix/suffix/contains/matches
-        execute("SELECT * FROM %s WHERE c2 LIKE ?", "abc%");
-        execute("SELECT * FROM %s WHERE c2 LIKE ?", "%abc");
-        execute("SELECT * FROM %s WHERE c2 LIKE ?", "%abc%");
-        execute("SELECT * FROM %s WHERE c2 LIKE ?", "abc");
-        execute("SELECT * FROM %s WHERE v2 LIKE ?", "abc%");
-        execute("SELECT * FROM %s WHERE v2 LIKE ?", "%abc");
-        execute("SELECT * FROM %s WHERE v2 LIKE ?", "%abc%");
-        execute("SELECT * FROM %s WHERE v2 LIKE ?", "abc");
-
-        // LIKE is not supported on indexes of non-literal values
-        // this is rejected before binding, so the value isn't available in the error message
-        assertInvalidMessage("LIKE restriction is only supported on properly indexed columns. v3 LIKE ? is not valid",
-                             "SELECT * FROM %s WHERE v3 LIKE ?",
-                             "%abc");
-        assertInvalidMessage("LIKE restriction is only supported on properly indexed columns. v3 LIKE ? is not valid",
-                             "SELECT * FROM %s WHERE v3 LIKE ?",
-                             "%abc%");
-        assertInvalidMessage("LIKE restriction is only supported on properly indexed columns. v3 LIKE ? is not valid",
-                             "SELECT * FROM %s WHERE v3 LIKE ?",
-                             "%abc%");
-        assertInvalidMessage("LIKE restriction is only supported on properly indexed columns. v3 LIKE ? is not valid",
-                             "SELECT * FROM %s WHERE v3 LIKE ?",
-                             "abc");
+        for (String column : new String[]{"k1", "k2", "c1", "c2", "s", "v1", "v2"})
+        {
+            createIndex(format("CREATE INDEX %s_idx ON %%s(%<s)", column));
+            assertInvalidMessage(format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, column),
+                    format("SELECT * FROM %%s WHERE %s LIKE ?", column),
+                    "%abc");
+        }
     }
 
-    public void failInsert(String insertCQL, Object...args) throws Throwable
+    public void failInsert(String insertCQL, Object...args)
     {
         try
         {
@@ -824,7 +927,7 @@ public class SecondaryIndexTest extends CQLTester
         }
     }
 
-    public void succeedInsert(String insertCQL, Object...args) throws Throwable
+    public void succeedInsert(String insertCQL, Object...args)
     {
         execute(insertCQL, args);
         flush();
@@ -834,7 +937,7 @@ public class SecondaryIndexTest extends CQLTester
      * Migrated from cql_tests.py:TestCQL.clustering_indexing_test()
      */
     @Test
-    public void testIndexesOnClustering() throws Throwable
+    public void testIndexesOnClustering()
     {
         createTable("CREATE TABLE %s ( id1 int, id2 int, author text, time bigint, v1 text, v2 text, PRIMARY KEY ((id1, id2), author, time))");
 
@@ -867,7 +970,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testMultipleIndexesOnOneColumn() throws Throwable
+    public void testMultipleIndexesOnOneColumn()
     {
         String indexClassName = StubIndex.class.getName();
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY ((a), b))");
@@ -908,7 +1011,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testDeletions() throws Throwable
+    public void testDeletions()
     {
         // Test for bugs like CASSANDRA-10694.  These may not be readily visible with the built-in secondary index
         // implementation because of the stale entry handling.
@@ -944,24 +1047,31 @@ public class SecondaryIndexTest extends CQLTester
 
         // delete the same row again
         execute("DELETE FROM %s USING TIMESTAMP 3 WHERE a = ? AND b = ?", 0, 0);
-        assertEquals(2, index1.rowsUpdated.size());
-        update = index1.rowsUpdated.get(1);
-        existingRow = update.left;
-        newRow = update.right;
 
-        // check the new row from the update call
-        assertFalse(existingRow.deletion().isLive());
-        assertEquals(2L, existingRow.deletion().time().markedForDeleteAt());
-        assertFalse(existingRow.cells().iterator().hasNext());
+        // TrieMemtable (stage 3)  no longer has a row to issue an update for and the deletion is treated as a range deletion.
+        // Legacy memtable implementations would still keep a mapping for the deleted row and issue an update.
+        if (index1.rowsUpdated.size() > 1)
+        {
+            assertEquals(2, index1.rowsUpdated.size());
+            update = index1.rowsUpdated.get(1);
+            existingRow = update.left;
+            newRow = update.right;
 
-        // check the new row from the update call
-        assertFalse(newRow.deletion().isLive());
-        assertEquals(3L, newRow.deletion().time().markedForDeleteAt());
-        assertFalse(newRow.cells().iterator().hasNext());
+
+            // check the new row from the update call
+            assertFalse(existingRow.deletion().isLive());
+            assertEquals(2L, existingRow.deletion().time().markedForDeleteAt());
+            assertFalse(existingRow.cells().iterator().hasNext());
+
+            // check the new row from the update call
+            assertFalse(newRow.deletion().isLive());
+            assertEquals(3L, newRow.deletion().time().markedForDeleteAt());
+            assertFalse(newRow.cells().iterator().hasNext());
+        }
     }
 
     @Test
-    public void testUpdatesToMemtableData() throws Throwable
+    public void testUpdatesToMemtableData()
     {
         // verify the contract specified by Index.Indexer::updateRow(oldRowData, newRowData),
         // when a row in the memtable is updated, the indexer should be informed of:
@@ -1031,7 +1141,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexQueriesWithIndexNotReady() throws Throwable
+    public void testIndexQueriesWithIndexNotReady()
     {
         createTable("CREATE TABLE %s (pk int, ck int, value int, PRIMARY KEY (pk, ck))");
 
@@ -1039,13 +1149,13 @@ public class SecondaryIndexTest extends CQLTester
             for (int j = 0; j < 10; j++)
                 execute("INSERT INTO %s (pk, ck, value) VALUES (?, ?, ?)", i, j, i + j);
 
-        createIndex("CREATE CUSTOM INDEX testIndex ON %s (value) USING '" + IndexBlockingOnInitialization.class.getName() + "'");
+        createIndexAsync("CREATE CUSTOM INDEX testIndex ON %s (value) USING '" + IndexBlockingOnInitialization.class.getName() + "'");
         try
         {
             execute("SELECT value FROM %s WHERE value = 2");
             fail();
         }
-        catch (IndexNotAvailableException e)
+        catch (IndexBuildInProgressException e)
         {
             assertTrue(true);
         }
@@ -1056,12 +1166,11 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test // A Bad init could leave an index only accepting reads
-    public void testReadOnlyIndex() throws Throwable
+    public void testReadOnlyIndex()
     {
         // On successful initialization both reads and writes go through
-        String tableName = createTable("CREATE TABLE %s (pk int, ck int, value int, PRIMARY KEY (pk, ck))");
+        createTable("CREATE TABLE %s (pk int, ck int, value int, PRIMARY KEY (pk, ck))");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s (value) USING '" + ReadOnlyOnFailureIndex.class.getName() + "'");
-        assertTrue(waitForIndex(keyspace(), tableName, indexName));
         execute("SELECT value FROM %s WHERE value = 1");
         execute("INSERT INTO %s (pk, ck, value) VALUES (?, ?, ?)", 1, 1, 1);
         ReadOnlyOnFailureIndex index = (ReadOnlyOnFailureIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(indexName);
@@ -1077,9 +1186,9 @@ public class SecondaryIndexTest extends CQLTester
 
         // On bad initial build writes are not forwarded to the index
         ReadOnlyOnFailureIndex.failInit = true;
-        indexName = createIndex("CREATE CUSTOM INDEX ON %s (value) USING '" + ReadOnlyOnFailureIndex.class.getName() + "'");
+        indexName = createIndexAsync("CREATE CUSTOM INDEX ON %s (value) USING '" + ReadOnlyOnFailureIndex.class.getName() + "'");
         index = (ReadOnlyOnFailureIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(indexName);
-        assertTrue(waitForIndexBuilds(keyspace(), indexName));
+        waitForIndexBuilds(indexName);
         assertInvalidThrow(IndexNotAvailableException.class, "SELECT value FROM %s WHERE value = 1");
         execute("INSERT INTO %s (pk, ck, value) VALUES (?, ?, ?)", 1, 1, 1);
         assertEquals(0, index.rowsInserted.size());
@@ -1095,12 +1204,11 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test  // A Bad init could leave an index only accepting writes
-    public void testWriteOnlyIndex() throws Throwable
+    public void testWriteOnlyIndex()
     {
         // On successful initialization both reads and writes go through
-        String tableName = createTable("CREATE TABLE %s (pk int, ck int, value int, PRIMARY KEY (pk, ck))");
+        createTable("CREATE TABLE %s (pk int, ck int, value int, PRIMARY KEY (pk, ck))");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s (value) USING '" + WriteOnlyOnFailureIndex.class.getName() + "'");
-        assertTrue(waitForIndex(keyspace(), tableName, indexName));
         execute("SELECT value FROM %s WHERE value = 1");
         execute("INSERT INTO %s (pk, ck, value) VALUES (?, ?, ?)", 1, 1, 1);
         WriteOnlyOnFailureIndex index = (WriteOnlyOnFailureIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(indexName);
@@ -1116,9 +1224,9 @@ public class SecondaryIndexTest extends CQLTester
 
         // On bad initial build writes are forwarded to the index
         WriteOnlyOnFailureIndex.failInit = true;
-        indexName = createIndex("CREATE CUSTOM INDEX ON %s (value) USING '" + WriteOnlyOnFailureIndex.class.getName() + "'");
+        indexName = createIndexAsync("CREATE CUSTOM INDEX ON %s (value) USING '" + WriteOnlyOnFailureIndex.class.getName() + "'");
         index = (WriteOnlyOnFailureIndex) getCurrentColumnFamilyStore().indexManager.getIndexByName(indexName);
-        assertTrue(waitForIndexBuilds(keyspace(), indexName));
+        waitForIndexBuilds(indexName);
         execute("INSERT INTO %s (pk, ck, value) VALUES (?, ?, ?)", 1, 1, 1);
         assertEquals(1, index.rowsInserted.size());
         assertInvalidThrow(IndexNotAvailableException.class, "SELECT value FROM %s WHERE value = 1");
@@ -1134,7 +1242,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void droppingIndexInvalidatesPreparedStatements() throws Throwable
+    public void droppingIndexInvalidatesPreparedStatements()
     {
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY ((a), b))");
         String indexName = createIndex("CREATE INDEX ON %s(c)");
@@ -1149,7 +1257,7 @@ public class SecondaryIndexTest extends CQLTester
 
     // See CASSANDRA-11021
     @Test
-    public void testIndexesOnNonStaticColumnsWhereSchemaIncludesStaticColumns() throws Throwable
+    public void testIndexesOnNonStaticColumnsWhereSchemaIncludesStaticColumns()
     {
         createTable("CREATE TABLE %s (a int, b int, c int static, d int, PRIMARY KEY (a, b))");
         createIndex("CREATE INDEX b_idx on %s(b)");
@@ -1183,39 +1291,39 @@ public class SecondaryIndexTest extends CQLTester
 
         beforeAndAfterFlush(() -> {
             // Test clustering columns restrictions
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c = textAsBlob('');"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c = text_as_blob('');"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) = (textAsBlob(''));"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) = (text_as_blob(''));"));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c IN (textAsBlob(''), textAsBlob('1'));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c IN (text_as_blob(''), text_as_blob('1'));"),
                        row(bytes("foo123"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) IN ((textAsBlob('')), (textAsBlob('1')));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) IN ((text_as_blob('')), (text_as_blob('1')));"),
                        row(bytes("foo123"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c > textAsBlob('') AND v = textAsBlob('1') ALLOW FILTERING;"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c > text_as_blob('') AND v = text_as_blob('1') ALLOW FILTERING;"),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c >= textAsBlob('') AND v = textAsBlob('1') ALLOW FILTERING;"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c >= text_as_blob('') AND v = text_as_blob('1') ALLOW FILTERING;"),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) >= (textAsBlob('')) AND v = textAsBlob('1') ALLOW FILTERING;"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) >= (text_as_blob('')) AND v = text_as_blob('1') ALLOW FILTERING;"),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("1")));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c <= textAsBlob('') AND v = textAsBlob('1') ALLOW FILTERING;"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c <= text_as_blob('') AND v = text_as_blob('1') ALLOW FILTERING;"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) <= (textAsBlob('')) AND v = textAsBlob('1') ALLOW FILTERING;"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) <= (text_as_blob('')) AND v = text_as_blob('1') ALLOW FILTERING;"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) < (textAsBlob('')) AND v = textAsBlob('1') ALLOW FILTERING;"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) < (text_as_blob('')) AND v = text_as_blob('1') ALLOW FILTERING;"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c < textAsBlob('') AND v = textAsBlob('1') ALLOW FILTERING;"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c < text_as_blob('') AND v = text_as_blob('1') ALLOW FILTERING;"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c > textAsBlob('') AND c < textAsBlob('') AND v = textAsBlob('1') ALLOW FILTERING;"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c > text_as_blob('') AND c < text_as_blob('') AND v = text_as_blob('1') ALLOW FILTERING;"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) > (textAsBlob('')) AND (c) < (textAsBlob('')) AND v = textAsBlob('1') ALLOW FILTERING;"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) > (text_as_blob('')) AND (c) < (text_as_blob('')) AND v = text_as_blob('1') ALLOW FILTERING;"));
         });
 
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)",
@@ -1223,50 +1331,50 @@ public class SecondaryIndexTest extends CQLTester
 
         beforeAndAfterFlush(() -> {
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c = textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c = text_as_blob('');"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) = (textAsBlob(''));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) = (text_as_blob(''));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c IN (textAsBlob(''), textAsBlob('1'));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c IN (text_as_blob(''), text_as_blob('1'));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1")),
                        row(bytes("foo123"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) IN ((textAsBlob('')), (textAsBlob('1')));"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) IN ((text_as_blob('')), (text_as_blob('1')));"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1")),
                        row(bytes("foo123"), bytes("1"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c > textAsBlob('') AND v = textAsBlob('1') ALLOW FILTERING;"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c > text_as_blob('') AND v = text_as_blob('1') ALLOW FILTERING;"),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c >= textAsBlob('') AND v = textAsBlob('1') ALLOW FILTERING;"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c >= text_as_blob('') AND v = text_as_blob('1') ALLOW FILTERING;"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1")),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) >= (textAsBlob('')) AND v = textAsBlob('1') ALLOW FILTERING;"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) >= (text_as_blob('')) AND v = text_as_blob('1') ALLOW FILTERING;"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1")),
                        row(bytes("foo123"), bytes("1"), bytes("1")),
                        row(bytes("foo123"), bytes("2"), bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c <= textAsBlob('') AND v = textAsBlob('1') ALLOW FILTERING;"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c <= text_as_blob('') AND v = text_as_blob('1') ALLOW FILTERING;"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1")));
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) <= (textAsBlob('')) AND v = textAsBlob('1') ALLOW FILTERING;"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) <= (text_as_blob('')) AND v = text_as_blob('1') ALLOW FILTERING;"),
                        row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1")));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c < textAsBlob('') AND v = textAsBlob('1') ALLOW FILTERING;"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c < text_as_blob('') AND v = text_as_blob('1') ALLOW FILTERING;"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) < (textAsBlob('')) AND v = textAsBlob('1') ALLOW FILTERING;"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) < (text_as_blob('')) AND v = text_as_blob('1') ALLOW FILTERING;"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND c >= textAsBlob('') AND c < textAsBlob('') AND v = textAsBlob('1') ALLOW FILTERING;"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND c >= text_as_blob('') AND c < text_as_blob('') AND v = text_as_blob('1') ALLOW FILTERING;"));
 
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND (c) >= (textAsBlob('')) AND c < textAsBlob('') AND v = textAsBlob('1') ALLOW FILTERING;"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND (c) >= (text_as_blob('')) AND c < text_as_blob('') AND v = text_as_blob('1') ALLOW FILTERING;"));
 
             // Test restrictions on non-primary key value
-            assertEmpty(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND v = textAsBlob('');"));
+            assertEmpty(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND v = text_as_blob('');"));
         });
 
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)",
@@ -1274,7 +1382,7 @@ public class SecondaryIndexTest extends CQLTester
 
         beforeAndAfterFlush(() -> {
 
-            assertRows(execute("SELECT * FROM %s WHERE pk = textAsBlob('foo123') AND v = textAsBlob('');"),
+            assertRows(execute("SELECT * FROM %s WHERE pk = text_as_blob('foo123') AND v = text_as_blob('');"),
                        row(bytes("foo123"), bytes("3"), EMPTY_BYTE_BUFFER));
         });
     }
@@ -1375,7 +1483,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnStaticColumnWithPartitionWithoutRows() throws Throwable
+    public void testIndexOnStaticColumnWithPartitionWithoutRows()
     {
         createTable("CREATE TABLE %s (pk int, c int, s int static, v int, PRIMARY KEY(pk, c))");
         createIndex("CREATE INDEX ON %s (s)");
@@ -1401,7 +1509,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnRegularColumnWithPartitionWithoutRows() throws Throwable
+    public void testIndexOnRegularColumnWithPartitionWithoutRows()
     {
         createTable("CREATE TABLE %s (pk int, c int, s int static, v int, PRIMARY KEY(pk, c))");
         createIndex("CREATE INDEX ON %s (v)");
@@ -1419,7 +1527,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnDurationColumn() throws Throwable
+    public void testIndexOnDurationColumn()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, d duration)");
         assertInvalidMessage("Secondary indexes are not supported on duration columns",
@@ -1445,10 +1553,10 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnFrozenUDT() throws Throwable
+    public void testIndexOnFrozenUDT()
     {
         String type = createType("CREATE TYPE %s (a int)");
-        String tableName = createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<" + type + ">)");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<" + type + ">)");
 
         Object udt1 = userType("a", 1);
         Object udt2 = userType("a", 2);
@@ -1458,7 +1566,6 @@ public class SecondaryIndexTest extends CQLTester
 
         execute("INSERT INTO %s (k, v) VALUES (?, ?)", 1, udt2);
         execute("INSERT INTO %s (k, v) VALUES (?, ?)", 1, udt1);
-        assertTrue(waitForIndex(keyspace(), tableName, indexName));
 
         assertRows(execute("SELECT * FROM %s WHERE v = ?", udt1), row(1, udt1), row(0, udt1));
         assertEmpty(execute("SELECT * FROM %s WHERE v = ?", udt2));
@@ -1474,10 +1581,10 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnFrozenCollectionOfUDT() throws Throwable
+    public void testIndexOnFrozenCollectionOfUDT()
     {
         String type = createType("CREATE TYPE %s (a int)");
-        String tableName = createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<set<frozen<" + type + ">>>)");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<set<frozen<" + type + ">>>)");
 
         Object udt1 = userType("a", 1);
         Object udt2 = userType("a", 2);
@@ -1488,9 +1595,8 @@ public class SecondaryIndexTest extends CQLTester
         String indexName = createIndex("CREATE INDEX ON %s (full(v))");
 
         execute("INSERT INTO %s (k, v) VALUES (?, ?)", 2, set(udt2));
-        assertTrue(waitForIndex(keyspace(), tableName, indexName));
 
-        assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "v"),
                              "SELECT * FROM %s WHERE v CONTAINS ?", udt1);
 
         assertRows(execute("SELECT * FROM %s WHERE v = ?", set(udt1, udt2)), row(1, set(udt1, udt2)));
@@ -1507,10 +1613,10 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnNonFrozenCollectionOfFrozenUDT() throws Throwable
+    public void testIndexOnNonFrozenCollectionOfFrozenUDT()
     {
         String type = createType("CREATE TYPE %s (a int)");
-        String tableName = createTable("CREATE TABLE %s (k int PRIMARY KEY, v set<frozen<" + type + ">>)");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v set<frozen<" + type + ">>)");
 
         Object udt1 = userType("a", 1);
         Object udt2 = userType("a", 2);
@@ -1524,7 +1630,6 @@ public class SecondaryIndexTest extends CQLTester
 
         execute("INSERT INTO %s (k, v) VALUES (?, ?)", 2, set(udt2));
         execute("UPDATE %s SET v = v + ? WHERE k = ?", set(udt2), 1);
-        assertTrue(waitForIndex(keyspace(), tableName, indexName));
 
         assertRows(execute("SELECT * FROM %s WHERE v CONTAINS ?", udt1), row(1, set(udt1, udt2)));
         assertRows(execute("SELECT * FROM %s WHERE v CONTAINS ?", udt2), row(1, set(udt1, udt2)), row(2, set(udt2)));
@@ -1541,7 +1646,7 @@ public class SecondaryIndexTest extends CQLTester
     }
 
     @Test
-    public void testIndexOnNonFrozenUDT() throws Throwable
+    public void testIndexOnNonFrozenUDT()
     {
         String type = createType("CREATE TYPE %s (a int)");
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v " + type + ")");
@@ -1554,38 +1659,152 @@ public class SecondaryIndexTest extends CQLTester
     @Test
     public void testIndexOnPartitionKeyInsertExpiringColumn() throws Throwable
     {
+        testIndexOnPartitionKeyInsertExpiringColumn(false);
+    }
+
+    @Test
+    public void testIndexOnPartitionKeyInsertExpiringColumnWithFlush() throws Throwable
+    {
+        testIndexOnPartitionKeyInsertExpiringColumn(true);
+    }
+
+    private void testIndexOnPartitionKeyInsertExpiringColumn(boolean flushBeforeUpdate) throws Throwable
+    {
         createTable("CREATE TABLE %s (k1 int, k2 int, a int, b int, PRIMARY KEY ((k1, k2)))");
-        createIndex("CREATE INDEX on %s(k1)");
+        createIndex("CREATE INDEX ON %s(k1)");
         execute("INSERT INTO %s (k1, k2, a, b) VALUES (1, 2, 3, 4)");
         assertRows(execute("SELECT * FROM %s WHERE k1 = 1"), row(1, 2, 3, 4));
+
+        if (flushBeforeUpdate)
+            flush();
+
         execute("UPDATE %s USING TTL 1 SET b = 10 WHERE k1 = 1 AND k2 = 2");
         Thread.sleep(1000);
         assertRows(execute("SELECT * FROM %s WHERE k1 = 1"), row(1, 2, 3, null));
     }
 
     @Test
+    public void testIndexOnPartitionKeyOverridingExpiredRow() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k1 int, k2 int, v int, PRIMARY KEY ((k1, k2)))");
+        createIndex("CREATE INDEX ON %s(k1)");
+
+        execute("UPDATE %s USING TTL 1 SET v = 3 WHERE k1 = 1 AND k2 = 2");
+        Thread.sleep(1500);
+
+        assertEmpty(execute("SELECT * FROM %s WHERE k1 = 1"));
+
+        execute("UPDATE %s SET v = 3 WHERE k1 = 1 AND k2 = 2");
+        assertRows(execute("SELECT * FROM %s WHERE k1 = 1"), row(1, 2, 3));
+    }
+
+    @Test
+    public void testIndexOnPartitionKeyOverridingDeletedRow()
+    {
+        createTable("CREATE TABLE %s (k1 int, k2 int, c int, v int, PRIMARY KEY ((k1, k2), c))");
+        createIndex("CREATE INDEX ON %s(k1)");
+
+        execute("INSERT INTO %s(k1, k2, c, v) VALUES (1, 2, 3, 4)");
+        execute("DELETE FROM %s WHERE k1 = 1 AND k2 = 2 AND c = 3");
+        execute("UPDATE %s SET v = 4 WHERE k1 = 1 AND k2 = 2 AND c = 3");
+
+        assertRows(execute("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c = 3"), row(1, 2, 3, 4));
+        assertRows(execute("SELECT * FROM %s WHERE k1 = 1"), row(1, 2, 3, 4));
+    }
+
+    @Test
     public void testIndexOnClusteringKeyInsertExpiringColumn() throws Throwable
     {
+        testIndexOnClusteringKeyInsertExpiringColumn(false);
+    }
+
+    @Test
+    public void testIndexOnClusteringKeyInsertExpiringColumnWithFlush() throws Throwable
+    {
+        testIndexOnClusteringKeyInsertExpiringColumn(true);
+    }
+
+    private void testIndexOnClusteringKeyInsertExpiringColumn(boolean flushBeforeUpdate) throws Throwable
+    {
         createTable("CREATE TABLE %s (pk int, ck int, a int, b int, PRIMARY KEY (pk, ck))");
-        createIndex("CREATE INDEX on %s(ck)");
+        createIndex("CREATE INDEX ON %s(ck)");
         execute("INSERT INTO %s (pk, ck, a, b) VALUES (1, 2, 3, 4)");
         assertRows(execute("SELECT * FROM %s WHERE ck = 2"), row(1, 2, 3, 4));
+
+        if (flushBeforeUpdate)
+            flush();
+
         execute("UPDATE %s USING TTL 1 SET b = 10 WHERE pk = 1 AND ck = 2");
         Thread.sleep(1000);
         assertRows(execute("SELECT * FROM %s WHERE ck = 2"), row(1, 2, 3, null));
     }
 
     @Test
+    public void testIndexOnClusteringKeyOverridingExpiredRow() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
+        createIndex("CREATE INDEX ON %s(ck)");
+
+        execute("UPDATE %s USING TTL 1 SET v = 3 WHERE pk = 1 AND ck = 2");
+        Thread.sleep(1000);
+
+        assertEmpty(execute("SELECT * FROM %s WHERE ck = 2"));
+
+        execute("UPDATE %s SET v = 3 WHERE pk = 1 AND ck = 2");
+        assertRows(execute("SELECT * FROM %s WHERE ck = 2"), row(1, 2, 3));
+    }
+
+    @Test
+    public void testIndexOnClusteringKeyOverridingDeletedRow()
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
+        createIndex("CREATE INDEX ON %s(ck)");
+
+        execute("INSERT INTO %s(pk, ck, v) VALUES (1, 2, 3)");
+        execute("DELETE FROM %s WHERE pk = 1 AND ck = 2");
+        execute("UPDATE %s SET v = 3 WHERE pk = 1 AND ck = 2");
+
+        assertRows(execute("SELECT * FROM %s WHERE pk = 1 AND ck = 2"), row(1, 2, 3));
+        assertRows(execute("SELECT * FROM %s WHERE ck = 2"), row(1, 2, 3));
+    }
+
+    @Test
     public void testIndexOnRegularColumnInsertExpiringColumn() throws Throwable
     {
+        testIndexOnRegularColumnInsertExpiringColumn(false);
+    }
+
+    @Test
+    public void testIndexOnRegularColumnInsertExpiringColumnWithFlush() throws Throwable
+    {
+        testIndexOnRegularColumnInsertExpiringColumn(true);
+    }
+
+    @Test
+    public void testFullIndexOnClusteringColumn()
+    {
+        createTable("CREATE TABLE %s (pk int,ck frozen<list<int>>,value int,PRIMARY KEY(pk, ck)) WITH CLUSTERING ORDER BY (ck DESC)");
+        createIndex("CREATE INDEX ON %s(FULL(ck));");
+        execute("INSERT INTO %s (pk,ck,value) VALUES (1,[1,2,3],4)");
+        assertRows(execute("SELECT pk FROM %S WHERE CK=[1,2,3]"), row(1));
+    }
+
+    private void testIndexOnRegularColumnInsertExpiringColumn(boolean flushBeforeUpdate) throws Throwable
+    {
         createTable("CREATE TABLE %s (pk int, ck int, a int, b int, PRIMARY KEY (pk, ck))");
-        createIndex("CREATE INDEX on %s(a)");
+        createIndex("CREATE INDEX ON %s(a)");
         execute("INSERT INTO %s (pk, ck, a, b) VALUES (1, 2, 3, 4)");
         assertRows(execute("SELECT * FROM %s WHERE a = 3"), row(1, 2, 3, 4));
+
+        if (flushBeforeUpdate)
+            flush();
 
         execute("UPDATE %s USING TTL 1 SET b = 10 WHERE pk = 1 AND ck = 2");
         Thread.sleep(1000);
         assertRows(execute("SELECT * FROM %s WHERE a = 3"), row(1, 2, 3, null));
+
+        if (flushBeforeUpdate)
+            flush();
 
         execute("UPDATE %s USING TTL 1 SET a = 5 WHERE pk = 1 AND ck = 2");
         Thread.sleep(1000);
@@ -1593,10 +1812,39 @@ public class SecondaryIndexTest extends CQLTester
         assertEmpty(execute("SELECT * FROM %s WHERE a = 5"));
     }
 
+    @Test
+    public void testIndexOnRegularColumnOverridingExpiredRow() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
+        createIndex("CREATE INDEX ON %s(v)");
+
+        execute("UPDATE %s USING TTL 1 SET v = 3 WHERE pk = 1 AND ck = 2");
+        Thread.sleep(1000);
+
+        assertEmpty(execute("SELECT * FROM %s WHERE v = 3"));
+
+        execute("UPDATE %s SET v = 3 WHERE pk = 1 AND ck = 2");
+        assertRows(execute("SELECT * FROM %s WHERE v = 3"), row(1, 2, 3));
+    }
+
+    @Test
+    public void testIndexOnRegularColumnOverridingDeletedRow()
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
+        createIndex("CREATE INDEX ON %s(v)");
+
+        execute("INSERT INTO %s(pk, ck, v) VALUES (1, 2, 3)");
+        execute("DELETE FROM %s WHERE pk=1 AND ck=2");
+        execute("UPDATE %s SET v=3 WHERE pk=1 AND ck=2");
+
+        assertRows(execute("SELECT * FROM %s WHERE pk=1 AND ck=2"), row(1, 2, 3));
+        assertRows(execute("SELECT * FROM %s WHERE v=3"), row(1, 2, 3));
+    }
+
     private ResultMessage.Prepared prepareStatement(String cql)
     {
-        return QueryProcessor.prepare(format(cql, KEYSPACE, currentTable()),
-                                      ClientState.forInternalCalls());
+        return QueryProcessor.instance.prepare(format(cql, KEYSPACE, currentTable()),
+                                               ClientState.forInternalCalls());
     }
 
     private void validateCell(Cell<?> cell, ColumnMetadata def, ByteBuffer val, long timestamp)

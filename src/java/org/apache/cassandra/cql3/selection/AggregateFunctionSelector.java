@@ -27,6 +27,15 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 final class AggregateFunctionSelector extends AbstractFunctionSelector<AggregateFunction>
 {
+    static final SelectorDeserializer deserializer = new AbstractFunctionSelectorDeserializer()
+    {
+        @Override
+        protected Selector newFunctionSelector(ProtocolVersion version, Function function, List<Selector> argSelectors)
+        {
+            return new AggregateFunctionSelector(version, function, argSelectors);
+        }
+    };
+
     private final AggregateFunction.Aggregate aggregate;
 
     public boolean isAggregate()
@@ -34,17 +43,19 @@ final class AggregateFunctionSelector extends AbstractFunctionSelector<Aggregate
         return true;
     }
 
-    public void addInput(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
+    public void addInput(InputRow input)
     {
+        ProtocolVersion protocolVersion = input.getProtocolVersion();
+
         // Aggregation of aggregation is not supported
         for (int i = 0, m = argSelectors.size(); i < m; i++)
         {
             Selector s = argSelectors.get(i);
-            s.addInput(protocolVersion, rs);
+            s.addInput(input);
             setArg(i, s.getOutput(protocolVersion));
             s.reset();
         }
-        this.aggregate.addInput(protocolVersion, args());
+        aggregate.addInput(args());
     }
 
     public ByteBuffer getOutput(ProtocolVersion protocolVersion) throws InvalidRequestException
@@ -57,9 +68,9 @@ final class AggregateFunctionSelector extends AbstractFunctionSelector<Aggregate
         aggregate.reset();
     }
 
-    AggregateFunctionSelector(Function fun, List<Selector> argSelectors) throws InvalidRequestException
+    AggregateFunctionSelector(ProtocolVersion version, Function fun, List<Selector> argSelectors) throws InvalidRequestException
     {
-        super((AggregateFunction) fun, argSelectors);
+        super(Kind.AGGREGATE_FUNCTION_SELECTOR, version, (AggregateFunction) fun, argSelectors);
 
         this.aggregate = this.fun.newAggregate();
     }

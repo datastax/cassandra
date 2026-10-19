@@ -17,32 +17,41 @@
  */
 package org.apache.cassandra.io.sstable.metadata;
 
-import java.io.*;
-import java.util.*;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.UnaryOperator;
 import java.util.zip.CRC32;
+import javax.annotation.Nullable;
 
 import com.google.common.base.Throwables;
-import com.google.common.collect.Lists;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.compress.CompressionMetadataReaderType;
+import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.CompressionInfoComponent;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.io.util.FileDataInput;
-import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
-import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
+import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.utils.TimeUUID;
 
+import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
 /**
@@ -61,24 +70,65 @@ public class MetadataSerializer implements IMetadataSerializer
 
     private static final int CHECKSUM_LENGTH = 4; // CRC32
 
-    public void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Version version) throws IOException
+    @Override
+    public void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Descriptor descriptor) throws IOException
     {
+        serializeWith(components, out, descriptor, getEncryptor(descriptor, CompressionMetadataReaderType.WRITE_TIME));
+    }
+
+    @Override
+    public void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Descriptor descriptor, CompressionParams compressionParams) throws IOException
+    {
+        serializeWith(components, out, descriptor, encryptorFor(descriptor.version, compressionParams));
+    }
+
+    private void serializeWith(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Descriptor descriptor, @Nullable ICompressor encryptor) throws IOException
+    {
+        Version version = descriptor.version;
         boolean checksum = version.hasMetadataChecksum();
         CRC32 crc = new CRC32();
+        final int componentsCount = components.size();
+        
         // sort components by type
-        List<MetadataComponent> sortedComponents = Lists.newArrayList(components.values());
-        Collections.sort(sortedComponents);
+        MetadataComponent[] sortedComponents = components.values().toArray(new MetadataComponent[componentsCount]);
+        Arrays.sort(sortedComponents);
 
         // write number of component
-        out.writeInt(components.size());
-        updateChecksumInt(crc, components.size());
+        out.writeInt(componentsCount);
+        updateChecksumInt(crc, componentsCount);
         maybeWriteChecksum(crc, out, version);
 
-        // build and write toc
-        int lastPosition = 4 + (8 * sortedComponents.size()) + (checksum ? 2 * CHECKSUM_LENGTH : 0);
-        Map<MetadataType, Integer> sizes = new EnumMap<>(MetadataType.class);
-        for (MetadataComponent component : sortedComponents)
+        ByteBuffer[] componentsSerializations = new ByteBuffer[componentsCount];
+
+        // serialize and possibly encrypt components
+        for (int i = 0; i < componentsCount; ++i)
         {
+            MetadataComponent metadataComponent = sortedComponents[i];
+            MetadataType componentType = metadataComponent.getType();
+            int size = componentType.serializer.serializedSize(version, metadataComponent);
+
+            try (DataOutputBuffer dob = new DataOutputBuffer(size))
+            {
+                componentType.serializer.serialize(version, metadataComponent, dob);
+                if (encryptor != null)
+                {
+                    ByteBuffer encrypted = ByteBuffer.allocate(encryptor.initialCompressedBufferLength(size));
+                    encryptor.compress(dob.buffer(), encrypted);
+                    encrypted.flip();
+                    componentsSerializations[i] = encrypted;
+                }
+                else
+                {
+                    componentsSerializations[i] = dob.buffer();
+                }
+            }
+        }
+
+        // build and write toc
+        int lastPosition = 4 + (8 * componentsCount) + (checksum ? 2 * CHECKSUM_LENGTH : 0);
+        for (int i = 0; i < componentsCount; ++i)
+        {
+            MetadataComponent component = sortedComponents[i];
             MetadataType type = component.getType();
             // serialize type
             out.writeInt(type.ordinal());
@@ -86,24 +136,18 @@ public class MetadataSerializer implements IMetadataSerializer
             // serialize position
             out.writeInt(lastPosition);
             updateChecksumInt(crc, lastPosition);
-            int size = type.serializer.serializedSize(version, component);
+            int size = componentsSerializations[i].remaining();
             lastPosition += size + (checksum ? CHECKSUM_LENGTH : 0);
-            sizes.put(type, size);
         }
         maybeWriteChecksum(crc, out, version);
 
-        // serialize components
-        for (MetadataComponent component : sortedComponents)
+        // copy components to output
+        for (int i = 0; i < componentsCount; ++i)
         {
-            byte[] bytes;
-            try (DataOutputBuffer dob = new DataOutputBuffer(sizes.get(component.getType())))
-            {
-                component.getType().serializer.serialize(version, component, dob);
-                bytes = dob.getData();
-            }
+            ByteBuffer bytes = componentsSerializations[i];
             out.write(bytes);
-
-            crc.reset(); crc.update(bytes);
+            crc.reset();
+            crc.update(bytes);
             maybeWriteChecksum(crc, out, version);
         }
     }
@@ -118,7 +162,7 @@ public class MetadataSerializer implements IMetadataSerializer
     {
         Map<MetadataType, MetadataComponent> components;
         logger.trace("Load metadata for {}", descriptor);
-        File statsFile = new File(descriptor.filenameFor(Component.STATS));
+        File statsFile = descriptor.fileFor(Components.STATS);
         if (!statsFile.exists())
         {
             logger.trace("No sstable stats for {}", descriptor);
@@ -127,7 +171,7 @@ public class MetadataSerializer implements IMetadataSerializer
         }
         else
         {
-            try (RandomAccessReader r = RandomAccessReader.open(statsFile))
+            try (FileInputStreamPlus r = new FileInputStreamPlus(statsFile))
             {
                 components = deserialize(descriptor, r, types);
             }
@@ -141,7 +185,7 @@ public class MetadataSerializer implements IMetadataSerializer
     }
 
     public Map<MetadataType, MetadataComponent> deserialize(Descriptor descriptor,
-                                                            FileDataInput in,
+                                                            FileInputStreamPlus in,
                                                             EnumSet<MetadataType> selectedTypes)
     throws IOException
     {
@@ -152,7 +196,7 @@ public class MetadataSerializer implements IMetadataSerializer
          * Read TOC
          */
 
-        int length = (int) in.bytesRemaining();
+        int length = (int) in.getChannel().size();
 
         int count = in.readInt();
         updateChecksumInt(crc, count);
@@ -183,6 +227,7 @@ public class MetadataSerializer implements IMetadataSerializer
         MetadataType[] allMetadataTypes = MetadataType.values();
 
         Map<MetadataType, MetadataComponent> components = new EnumMap<>(MetadataType.class);
+        ICompressor encryptor = getEncryptor(descriptor, CompressionMetadataReaderType.READ_TIME);
 
         for (int i = 0; i < count; i++)
         {
@@ -195,11 +240,22 @@ public class MetadataSerializer implements IMetadataSerializer
             }
 
             byte[] buffer = new byte[isChecksummed ? lengths[i] - CHECKSUM_LENGTH : lengths[i]];
+            int bufLen = buffer.length;
             in.readFully(buffer);
 
             crc.reset(); crc.update(buffer);
             maybeValidateChecksum(crc, in, descriptor);
-            try (DataInputBuffer dataInputBuffer = new DataInputBuffer(buffer))
+            
+            if (encryptor != null)
+            {
+                // Because we only use the encryption component, we are guaranteed that the serialization will fit
+                // within the buffer we already have, and that we can decrypt in place
+                // (see org.apache.cassandra.io.compress.Encryptor.canDecompressInPlace).
+                assert encryptor.canDecompressInPlace();
+                bufLen = encryptor.uncompress(buffer, 0, buffer.length, buffer, 0);
+            }
+            
+            try (DataInputBuffer dataInputBuffer = new DataInputBuffer(buffer, 0, bufLen))
             {
                 components.put(type, type.serializer.deserialize(descriptor.version, dataInputBuffer));
             }
@@ -208,7 +264,7 @@ public class MetadataSerializer implements IMetadataSerializer
         return components;
     }
 
-    private static void maybeValidateChecksum(CRC32 crc, FileDataInput in, Descriptor descriptor) throws IOException
+    private static void maybeValidateChecksum(CRC32 crc, DataInputPlus in, Descriptor descriptor) throws IOException
     {
         if (!descriptor.version.hasMetadataChecksum())
             return;
@@ -218,8 +274,8 @@ public class MetadataSerializer implements IMetadataSerializer
 
         if (actualChecksum != expectedChecksum)
         {
-            String filename = descriptor.filenameFor(Component.STATS);
-            throw new CorruptSSTableException(new IOException("Checksums do not match for " + filename), filename);
+            File file = descriptor.fileFor(Components.STATS);
+            throw new CorruptSSTableException(new IOException("Checksums do not match for " + file), file);
         }
     }
 
@@ -227,7 +283,7 @@ public class MetadataSerializer implements IMetadataSerializer
     public void mutate(Descriptor descriptor, String description, UnaryOperator<StatsMetadata> transform) throws IOException
     {
         if (logger.isTraceEnabled() )
-            logger.trace("Mutating {} to {}", descriptor.filenameFor(Component.STATS), description);
+            logger.trace("Mutating {} to {}", descriptor.fileFor(Components.STATS), description);
 
         mutate(descriptor, transform);
     }
@@ -236,17 +292,17 @@ public class MetadataSerializer implements IMetadataSerializer
     public void mutateLevel(Descriptor descriptor, int newLevel) throws IOException
     {
         if (logger.isTraceEnabled())
-            logger.trace("Mutating {} to level {}", descriptor.filenameFor(Component.STATS), newLevel);
+            logger.trace("Mutating {} to level {}", descriptor.fileFor(Components.STATS), newLevel);
 
         mutate(descriptor, stats -> stats.mutateLevel(newLevel));
     }
 
     @Override
-    public void mutateRepairMetadata(Descriptor descriptor, long newRepairedAt, UUID newPendingRepair, boolean isTransient) throws IOException
+    public void mutateRepairMetadata(Descriptor descriptor, long newRepairedAt, TimeUUID newPendingRepair, boolean isTransient) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace("Mutating {} to repairedAt time {} and pendingRepair {}",
-                         descriptor.filenameFor(Component.STATS), newRepairedAt, newPendingRepair);
+                         descriptor.fileFor(Components.STATS), newRepairedAt, newPendingRepair);
 
         mutate(descriptor, stats -> stats.mutateRepairedMetadata(newRepairedAt, newPendingRepair, isTransient));
     }
@@ -260,23 +316,103 @@ public class MetadataSerializer implements IMetadataSerializer
         rewriteSSTableMetadata(descriptor, currentComponents);
     }
 
+    @Override
     public void rewriteSSTableMetadata(Descriptor descriptor, Map<MetadataType, MetadataComponent> currentComponents) throws IOException
     {
-        String filePath = descriptor.tmpFilenameFor(Component.STATS);
-        try (DataOutputStreamPlus out = new BufferedDataOutputStreamPlus(new FileOutputStream(filePath)))
+        // The TOC is the last component a writer saves (after the metadata, see SSTableWriter.TransactionalProxy),
+        // so an sstable without one is still being written (e.g. by a caller that does not use the overload with
+        // the compression parameters) and its compression info file must be read through the write-time channel.
+        // Complete sstables (e.g. mutateLevel/mutateRepairMetadata) read it like any other of their components.
+        // Checking the TOC is a single local file-existence check. Sstables so old that they have no TOC are read
+        // at write time too, which makes no difference unless the storage distinguishes the two channels.
+        CompressionMetadataReaderType readerType = descriptor.fileFor(Components.TOC).exists() ? CompressionMetadataReaderType.READ_TIME
+                                                                                               : CompressionMetadataReaderType.WRITE_TIME;
+        rewriteWith(descriptor, currentComponents, getEncryptor(descriptor, readerType));
+    }
+
+    @Override
+    public void rewriteSSTableMetadata(Descriptor descriptor, Map<MetadataType, MetadataComponent> currentComponents, CompressionParams compressionParams) throws IOException
+    {
+        rewriteWith(descriptor, currentComponents, encryptorFor(descriptor.version, compressionParams));
+    }
+
+    private void rewriteWith(Descriptor descriptor, Map<MetadataType, MetadataComponent> currentComponents, @Nullable ICompressor encryptor) throws IOException
+    {
+        File file = descriptor.tmpFileFor(Components.STATS);
+        try (DataOutputStreamPlus out = file.newOutputStream(File.WriteMode.OVERWRITE))
         {
-            serialize(currentComponents, out, descriptor.version);
+            serializeWith(currentComponents, out, descriptor, encryptor);
             out.flush();
         }
         catch (IOException e)
         {
             Throwables.throwIfInstanceOf(e, FileNotFoundException.class);
-            throw new FSWriteError(e, filePath);
+            throw new FSWriteError(e, file);
         }
-        // we cant move a file on top of another file in windows:
-        if (FBUtilities.isWindows)
-            FileUtils.delete(descriptor.filenameFor(Component.STATS));
-        FileUtils.renameWithConfirm(filePath, descriptor.filenameFor(Component.STATS));
+        file.move(descriptor.fileFor(Components.STATS));
+    }
 
+    public void updateSSTableMetadata(Descriptor descriptor, Map<MetadataType, MetadataComponent> updatedComponents) throws IOException
+    {
+        Map<MetadataType, MetadataComponent> currentComponents = deserialize(descriptor, EnumSet.allOf(MetadataType.class));
+        currentComponents.putAll(updatedComponents);
+        rewriteSSTableMetadata(descriptor, currentComponents);
+    }
+
+    /**
+     * Read the compression info file pointed by the given descriptor and create the corresponding encryptor.
+     * <p>
+     * Returns null if no encryption applies (version doesn't support it, compression is not applied, or the applicable
+     * compression does not include encryption).
+     * <p>
+     * An sstable of a version with encrypted metadata whose compression info file is missing although its TOC lists
+     * it is corrupted: its metadata may be encrypted, so a {@link CorruptSSTableException} is thrown rather than
+     * silently treating it as plaintext (which would fail later with a confusing deserialization error, or write
+     * plaintext metadata). The check is best-effort: without a TOC, a missing compression info file means that the
+     * sstable is not compressed (see {@link CompressionInfoComponent#verifyCompressionInfoExistenceIfApplicable}).
+     *
+     * @param readerType {@link CompressionMetadataReaderType#WRITE_TIME} if the sstable is still being written,
+     *                   {@link CompressionMetadataReaderType#READ_TIME} otherwise
+     */
+    @Nullable
+    private static ICompressor getEncryptor(Descriptor desc, CompressionMetadataReaderType readerType)
+    {
+        if (!desc.version.metadataIsEncrypted())
+            return null;
+
+        // We only need the compression parameters, not the chunk offsets, so read just the header. This allocates
+        // no off-heap memory and creates no ref-counted resource to release.
+        CompressionParams params = CompressionInfoComponent.readCompressionParamsIfExists(desc, readerType);
+        if (params == null)
+        {
+            // CompressionInfo.db is known to be absent here, so there is no need to probe the other components:
+            // fail if the TOC says it should be there
+            CompressionInfoComponent.verifyCompressionInfoExistenceIfApplicable(desc, Set.of());
+            return null;
+        }
+
+        return encryptorFor(desc.version, params);
+    }
+
+    /**
+     * @param compressionParams the compression parameters of the data file, not null
+     *                          ({@link CompressionParams#noCompression()} if it is not compressed)
+     * @return the encryptor to use for the metadata of an sstable of the given version whose data file is (being)
+     * written with the given compression parameters, or null if no encryption applies
+     */
+    @Nullable
+    private static ICompressor encryptorFor(Version version, CompressionParams compressionParams)
+    {
+        checkNotNull(compressionParams, "compressionParams must not be null, use CompressionParams.noCompression() for uncompressed sstables");
+        if (!version.metadataIsEncrypted())
+            return null;
+
+        // Note: we use only the encryption component, without any compression. The reason for doing this is to
+        // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
+        // serialization on reads.
+        ICompressor compressor = compressionParams.getSstableCompressor();
+        if (compressor != null)
+            return compressor.encryptionOnly();
+        return null;
     }
 }

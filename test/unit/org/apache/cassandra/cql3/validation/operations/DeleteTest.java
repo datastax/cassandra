@@ -23,17 +23,17 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.commons.lang3.StringUtils;
-
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.memtable.TrieMemtable;
+import org.apache.cassandra.db.memtable.TrieMemtableStage3;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BYTE_BUFFER;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
-import static org.apache.commons.lang3.StringUtils.isEmpty;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -146,6 +146,27 @@ public class DeleteTest extends CQLTester
 
         assertRows(execute("SELECT * FROM %s"),
                    row("abc", 4, "xyz", "some other value"));
+    }
+
+    @Test
+    public void testDeletionWithContainsAndContainsKey() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a int, b frozen<map<int, int>>, c int, primary key (a, b))");
+
+        Object[] row = row(1, map(1, 1, 2, 2), 3);
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", row);
+
+        assertRows(execute("SELECT * FROM %s"), row);
+
+        assertInvalidMessage("Cannot use DELETE with CONTAINS",
+                             "DELETE FROM %s WHERE a=1 AND b CONTAINS 1");
+
+        assertRows(execute("SELECT * FROM %s"), row);
+
+        assertInvalidMessage("Cannot use DELETE with CONTAINS KEY",
+                             "DELETE FROM %s WHERE a=1 AND b CONTAINS KEY 1");
+
+        assertRows(execute("SELECT * FROM %s"), row);
     }
 
     /**
@@ -466,7 +487,7 @@ public class DeleteTest extends CQLTester
         assertInvalidMessage("Only EQ and IN relation are supported on the partition key (unless you use the token() function)",
                              "DELETE FROM %s WHERE partitionKey > ? ", 0);
 
-        assertInvalidMessage("Cannot use CONTAINS on non-collection column partitionkey",
+        assertInvalidMessage("Cannot use DELETE with CONTAINS",
                              "DELETE FROM %s WHERE partitionKey CONTAINS ?", 0);
 
         // Non primary key in the where clause
@@ -520,6 +541,29 @@ public class DeleteTest extends CQLTester
                    row(0, 2, 2),
                    row(0, 3, 3));
 
+        // test slices:
+        execute("INSERT INTO %s (partitionKey, clustering, value) VALUES (0, 0, 0)");
+        execute("INSERT INTO %s (partitionKey, clustering, value) VALUES (0, 1, 1)");
+        execute("INSERT INTO %s (partitionKey, clustering, value) VALUES (0, 2, 2)");
+        execute("INSERT INTO %s (partitionKey, clustering, value) VALUES (0, 3, 3)");
+        execute("INSERT INTO %s (partitionKey, clustering, value) VALUES (0, 4, 4)");
+        execute("INSERT INTO %s (partitionKey, clustering, value) VALUES (0, 5, 5)");
+        flush(forceFlush);
+
+        execute("DELETE FROM %s WHERE partitionKey = ? AND clustering > ?", 0, 3);
+        flush(forceFlush);
+        assertRows(execute("SELECT * FROM %s WHERE partitionKey = ?", 0),
+                   row(0, 0, 0),
+                   row(0, 1, 1),
+                   row(0, 2, 2),
+                   row(0, 3, 3));
+
+        execute("DELETE FROM %s WHERE partitionKey = ? AND clustering NOT IN (?, ?)", 0, 1, 2);
+        flush(forceFlush);
+        assertRows(execute("SELECT * FROM %s WHERE partitionKey = ?", 0),
+                   row(0, 1, 1),
+                   row(0, 2, 2));
+
         // test invalid queries
 
         // missing primary key element
@@ -548,12 +592,13 @@ public class DeleteTest extends CQLTester
         assertInvalidMessage("Only EQ and IN relation are supported on the partition key (unless you use the token() function)",
                              "DELETE FROM %s WHERE partitionKey > ? AND clustering = ?", 0, 1);
 
-        assertInvalidMessage("Cannot use CONTAINS on non-collection column partitionkey",
+        assertInvalidMessage("Cannot use DELETE with CONTAINS",
                              "DELETE FROM %s WHERE partitionKey CONTAINS ? AND clustering = ?", 0, 1);
 
         // Non primary key in the where clause
         assertInvalidMessage("Non PRIMARY KEY columns found in where clause: value",
                              "DELETE FROM %s WHERE partitionKey = ? AND clustering = ? AND value = ?", 0, 1, 3);
+
     }
 
     @Test
@@ -649,7 +694,7 @@ public class DeleteTest extends CQLTester
         assertInvalidMessage("Only EQ and IN relation are supported on the partition key (unless you use the token() function)",
                              "DELETE FROM %s WHERE partitionKey > ? AND clustering_1 = ? AND clustering_2 = ?", 0, 1, 1);
 
-        assertInvalidMessage("Cannot use CONTAINS on non-collection column partitionkey",
+        assertInvalidMessage("Cannot use DELETE with CONTAINS",
                              "DELETE FROM %s WHERE partitionKey CONTAINS ? AND clustering_1 = ? AND clustering_2 = ?", 0, 1, 1);
 
         // Non primary key in the where clause
@@ -1057,17 +1102,17 @@ public class DeleteTest extends CQLTester
 
         assertInvalidMessage("Non PRIMARY KEY columns found in where clause: value",
                              "DELETE FROM %s WHERE partitionKey = ? AND clustering_1 = ? AND value = ?", 3, 3, 3);
-        assertInvalidMessage("Non PRIMARY KEY columns found in where clause: values",
+        assertInvalidMessage("Cannot use DELETE with CONTAINS",
                              "DELETE FROM %s WHERE partitionKey = ? AND clustering_1 = ? AND values CONTAINS ?", 3, 3, 3);
         assertInvalidMessage("Non PRIMARY KEY columns found in where clause: value",
                              "DELETE FROM %s WHERE partitionKey = ? AND value = ?", 3, 3);
-        assertInvalidMessage("Non PRIMARY KEY columns found in where clause: values",
+        assertInvalidMessage("Cannot use DELETE with CONTAINS",
                              "DELETE FROM %s WHERE partitionKey = ? AND values CONTAINS ?", 3, 3);
         assertInvalidMessage("Some partition key parts are missing: partitionkey",
                              "DELETE FROM %s WHERE clustering_1 = ?", 3);
         assertInvalidMessage("Some partition key parts are missing: partitionkey",
                              "DELETE FROM %s WHERE value = ?", 3);
-        assertInvalidMessage("Some partition key parts are missing: partitionkey",
+        assertInvalidMessage("Cannot use DELETE with CONTAINS",
                              "DELETE FROM %s WHERE values CONTAINS ?", 3);
     }
 
@@ -1153,12 +1198,12 @@ public class DeleteTest extends CQLTester
         createTable("CREATE TABLE %s (pk blob, c blob, v blob, PRIMARY KEY (pk, c))");
 
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"));
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c = textAsBlob('');");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c = text_as_blob('');");
 
         assertEmpty(execute("SELECT * FROM %s"));
 
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"));
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c IN (textAsBlob(''), textAsBlob('1'));");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c IN (text_as_blob(''), text_as_blob('1'));");
 
         assertEmpty(execute("SELECT * FROM %s"));
 
@@ -1166,27 +1211,27 @@ public class DeleteTest extends CQLTester
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", bytes("foo123"), bytes("1"), bytes("1"));
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", bytes("foo123"), bytes("2"), bytes("2"));
 
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c > textAsBlob('')");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c > text_as_blob('')");
 
         assertRows(execute("SELECT * FROM %s"),
                    row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1")));
 
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c >= textAsBlob('')");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c >= text_as_blob('')");
 
         assertEmpty(execute("SELECT * FROM %s"));
 
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", bytes("foo123"), bytes("1"), bytes("1"));
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", bytes("foo123"), bytes("2"), bytes("2"));
 
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c > textAsBlob('')");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c > text_as_blob('')");
 
         assertEmpty(execute("SELECT * FROM %s"));
 
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", bytes("foo123"), bytes("1"), bytes("1"));
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", bytes("foo123"), bytes("2"), bytes("2"));
 
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c <= textAsBlob('')");
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c < textAsBlob('')");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c <= text_as_blob('')");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c < text_as_blob('')");
 
         assertRows(execute("SELECT * FROM %s"),
                    row(bytes("foo123"), bytes("1"), bytes("1")),
@@ -1199,12 +1244,12 @@ public class DeleteTest extends CQLTester
         createTable("CREATE TABLE %s (pk blob, c1 blob, c2 blob, v blob, PRIMARY KEY (pk, c1, c2))");
 
         execute("INSERT INTO %s (pk, c1, c2, v) VALUES (?, ?, ?, ?)", bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("1"));
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c1 = textAsBlob('');");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c1 = text_as_blob('');");
 
         assertEmpty(execute("SELECT * FROM %s"));
 
         execute("INSERT INTO %s (pk, c1, c2, v) VALUES (?, ?, ?, ?)", bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("1"));
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c1 IN (textAsBlob(''), textAsBlob('1')) AND c2 = textAsBlob('1');");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c1 IN (text_as_blob(''), text_as_blob('1')) AND c2 = text_as_blob('1');");
 
         assertEmpty(execute("SELECT * FROM %s"));
 
@@ -1212,27 +1257,27 @@ public class DeleteTest extends CQLTester
         execute("INSERT INTO %s (pk, c1, c2, v) VALUES (?, ?, ?, ?)", bytes("foo123"), bytes("1"), bytes("1"), bytes("1"));
         execute("INSERT INTO %s (pk, c1, c2, v) VALUES (?, ?, ?, ?)", bytes("foo123"), bytes("1"), bytes("2"), bytes("3"));
 
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c1 > textAsBlob('')");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c1 > text_as_blob('')");
 
         assertRows(execute("SELECT * FROM %s"),
                    row(bytes("foo123"), EMPTY_BYTE_BUFFER, bytes("1"), bytes("0")));
 
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c1 >= textAsBlob('')");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c1 >= text_as_blob('')");
 
         assertEmpty(execute("SELECT * FROM %s"));
 
         execute("INSERT INTO %s (pk, c1, c2, v) VALUES (?, ?, ?, ?)", bytes("foo123"), bytes("1"), bytes("1"), bytes("1"));
         execute("INSERT INTO %s (pk, c1, c2, v) VALUES (?, ?, ?, ?)", bytes("foo123"), bytes("1"), bytes("2"), bytes("3"));
 
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c1 > textAsBlob('')");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c1 > text_as_blob('')");
 
         assertEmpty(execute("SELECT * FROM %s"));
 
         execute("INSERT INTO %s (pk, c1, c2, v) VALUES (?, ?, ?, ?)", bytes("foo123"), bytes("1"), bytes("1"), bytes("1"));
         execute("INSERT INTO %s (pk, c1, c2, v) VALUES (?, ?, ?, ?)", bytes("foo123"), bytes("1"), bytes("2"), bytes("3"));
 
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c1 <= textAsBlob('')");
-        execute("DELETE FROM %s WHERE pk = textAsBlob('foo123') AND c1 < textAsBlob('')");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c1 <= text_as_blob('')");
+        execute("DELETE FROM %s WHERE pk = text_as_blob('foo123') AND c1 < text_as_blob('')");
 
         assertRows(execute("SELECT * FROM %s"),
                    row(bytes("foo123"), bytes("1"), bytes("1"), bytes("1")),
@@ -1423,6 +1468,91 @@ public class DeleteTest extends CQLTester
         execute("DELETE FROM %s WHERE k = ? AND a >= ? AND a < ?", "a", 0, 2);
     }
 
+    @Test
+    public void testStaticColumnDeletionWithMultipleStaticColumns() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, s1 int static, s2 int static, v int, PRIMARY KEY(pk, ck))");
+
+        execute("INSERT INTO %s (pk, s1, s2) VALUES (1, 1, 1) USING TIMESTAMP 1000");
+        flush();
+        execute("INSERT INTO %s (pk, s1) VALUES (1, 2) USING TIMESTAMP 2000");
+        flush();
+        execute("DELETE s1 FROM %s USING TIMESTAMP 3000 WHERE pk = 1");
+        flush();
+
+        assertRows(execute("SELECT * FROM %s WHERE pk=1"), row(1, null, null, 1, null));
+        assertRows(execute("SELECT pk, s1, s2 FROM %s WHERE pk=1"), row(1, (Integer) null, 1));
+        assertRows(execute("SELECT s1, s2 FROM %s WHERE pk=1"), row((Integer) null, 1));
+        assertRows(execute("SELECT pk, s1 FROM %s WHERE pk=1"), row(1, (Integer) null));
+        assertRows(execute("SELECT s1 FROM %s WHERE pk=1"), row((Integer) null));
+        assertRows(execute("SELECT pk, s2 FROM %s WHERE pk=1"), row(1, 1));
+        assertRows(execute("SELECT s2 FROM %s WHERE pk=1"), row(1));
+        assertRows(execute("SELECT pk, ck FROM %s WHERE pk=1"), row(1, null));
+        assertRows(execute("SELECT ck FROM %s WHERE pk=1"), row((Integer) null));
+        assertRows(execute("SELECT DISTINCT pk, s1, s2 FROM %s WHERE pk=1"), row(1, (Integer) null, 1));
+        assertRows(execute("SELECT DISTINCT s1, s2 FROM %s WHERE pk=1"), row((Integer) null, 1));
+        assertRows(execute("SELECT DISTINCT pk, s1 FROM %s WHERE pk=1"), row(1, (Integer) null));
+        assertRows(execute("SELECT DISTINCT pk, s2 FROM %s WHERE pk=1"), row(1, 1));
+        assertRows(execute("SELECT DISTINCT s1 FROM %s WHERE pk=1"), row((Integer) null));
+        assertRows(execute("SELECT DISTINCT s2 FROM %s WHERE pk=1"), row(1));
+    }
+
+    @Test
+    public void testStaticColumnDeletionWithMultipleStaticColumnsAndRegularColumns() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, s1 int static, s2 int static, v int, PRIMARY KEY(pk, ck))");
+
+        execute("INSERT INTO %s (pk, ck, v, s2) VALUES (1, 1, 1, 1) USING TIMESTAMP 1000");
+        flush();
+        execute("INSERT INTO %s (pk, s1) VALUES (1, 2) USING TIMESTAMP 2000");
+        flush();
+        execute("DELETE s1 FROM %s USING TIMESTAMP 3000 WHERE pk = 1");
+        flush();
+
+        assertRows(execute("SELECT * FROM %s WHERE pk=1"), row(1, 1, null, 1, 1));
+        assertRows(execute("SELECT s1, s2 FROM %s WHERE pk=1"), row(null, 1));
+        assertRows(execute("SELECT s1 FROM %s WHERE pk=1"), row((Integer) null));
+        assertRows(execute("SELECT DISTINCT s1, s2 FROM %s WHERE pk=1"), row(null, 1));
+        assertRows(execute("SELECT DISTINCT s1 FROM %s WHERE pk=1"), row((Integer) null));
+    }
+
+    /**
+     * Test for CNDB-19588: the last deletion adds a boundary at clustering 511 (encoded with a 0xFF byte) to a trie
+     * memtable deletion branch node that already had 6 children, and ends past that node. Advancing past the 0xFF
+     * child used to wrap around to the node's first child, applying the last deletion over older boundaries.
+     */
+    @Test
+    public void testOverlappingRangeDeletionsInTrieMemtable() throws Throwable
+    {
+        testOverlappingRangeDeletionsInTrieMemtable("trie", TrieMemtable.class);
+        testOverlappingRangeDeletionsInTrieMemtable("trie_stage3", TrieMemtableStage3.class);
+    }
+
+    private void testOverlappingRangeDeletionsInTrieMemtable(String memtable, Class<? extends Memtable> memtableClass) throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY (k, c)) WITH memtable = '" + memtable + "'");
+        assertEquals(memtableClass, getCurrentColumnFamilyStore().getCurrentMemtable().getClass());
+
+        execute("DELETE FROM %s USING TIMESTAMP 1000 WHERE k = 1 AND c > 108 AND c < 551");
+        execute("DELETE FROM %s USING TIMESTAMP 2000 WHERE k = 1 AND c >= 351 AND c < 432");
+        execute("DELETE FROM %s USING TIMESTAMP 3000 WHERE k = 1 AND c > 478 AND c < 568");
+        execute("DELETE FROM %s USING TIMESTAMP 4000 WHERE k = 1 AND c > 276 AND c < 324");
+        execute("DELETE FROM %s USING TIMESTAMP 5000 WHERE k = 1 AND c >= 307 AND c < 349");
+        execute("DELETE FROM %s USING TIMESTAMP 7000 WHERE k = 1 AND c >= 511 AND c <= 610");
+
+        // The highest deletion covering c=320 is 5000, thus this row must be visible.
+        execute("INSERT INTO %s (k, c, v) VALUES (1, 320, 'live') USING TIMESTAMP 6000");
+
+        assertRows(execute("SELECT * FROM %s WHERE k = 1 AND c = 320"), row(1, 320, "live"));
+        assertRows(execute("SELECT * FROM %s WHERE k = 1"), row(1, 320, "live"));
+        assertRows(execute("SELECT * FROM %s WHERE k = 1 ORDER BY c DESC"), row(1, 320, "live"));
+
+        // Flushing a memtable with mismatched range tombstone bounds fails the RT bound validation on read.
+        flush();
+        assertRows(execute("SELECT * FROM %s WHERE k = 1 AND c = 320"), row(1, 320, "live"));
+        assertRows(execute("SELECT * FROM %s WHERE k = 1"), row(1, 320, "live"));
+        assertRows(execute("SELECT * FROM %s WHERE k = 1 ORDER BY c DESC"), row(1, 320, "live"));
+    }
 
     /**
      * Checks if the memtable is empty or not

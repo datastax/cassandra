@@ -20,23 +20,34 @@ package org.apache.cassandra.cql3.restrictions;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.cql3.Term.Terminal;
+import javax.annotation.Nullable;
+
+import org.apache.cassandra.cql3.MarkerOrTerms;
+import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.Terms;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
-import org.apache.cassandra.db.MultiCBuilder;
+import org.apache.cassandra.db.MultiClusteringBuilder;
+import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.serializers.ListSerializer;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
+import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkBindValueSet;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
@@ -71,13 +82,30 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     }
 
     @Override
-    public boolean hasSupportingIndex(IndexRegistry indexRegistry)
+    public boolean hasSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
-        for (Index index : indexRegistry.listIndexes())
-            if (isSupportedBy(index))
-                return true;
+        return findSupportingIndex(indexRegistry, indexHints) != null;
+    }
 
-        return false;
+    @Nullable
+    public Index findSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
+    {
+        return indexHints.getBestIndexFor(indexRegistry.listIndexes(), this::isSupportedBy, isContains()).orElse(null);
+    }
+
+    @Override
+    public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
+    {
+        for (Index index : indexGroup.getIndexes())
+        {
+            if (indexHints.excludes(index))
+                continue;
+
+            if (isSupportedBy(index))
+                return false;
+        }
+
+        return true;
     }
 
     @Override
@@ -123,18 +151,20 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
     public static final class EQRestriction extends SingleColumnRestriction
     {
-        private final Term value;
+        public static final String CANNOT_BE_MERGED_ERROR = "%s cannot be restricted by more than one relation if it includes an Equal";
 
-        public EQRestriction(ColumnMetadata columnDef, Term value)
+        private final Term term;
+
+        public EQRestriction(ColumnMetadata columnDef, Term term)
         {
             super(columnDef);
-            this.value = value;
+            this.term = term;
         }
 
         @Override
         public void addFunctionsTo(List<Function> functions)
         {
-            value.addFunctionsTo(functions);
+            term.addFunctionsTo(functions);
         }
 
         @Override
@@ -146,21 +176,24 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         MultiColumnRestriction toMultiColumnRestriction()
         {
-            return new MultiColumnRestriction.EQRestriction(Collections.singletonList(columnDef), value);
+            return new MultiColumnRestriction.EQRestriction(Collections.singletonList(columnDef), term);
         }
 
         @Override
-        public void addRowFilterTo(RowFilter filter,
+        public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
-            filter.add(columnDef, Operator.EQ, value.bindAndGet(options));
+            filter.add(columnDef, Operator.EQ, term.bindAndGet(options));
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
-            builder.addElementToAll(value.bindAndGet(options));
+            List<MultiClusteringBuilder.ClusteringElements> element = Collections.singletonList(MultiClusteringBuilder.ClusteringElements.point(term.bindAndGet(options)));
+            builder.extend(element, getColumnDefs());
             checkFalse(builder.containsNull(), "Invalid null value in condition for column %s", columnDef.name);
             checkFalse(builder.containsUnset(), "Invalid unset value for column %s", columnDef.name);
             return builder;
@@ -169,13 +202,13 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public String toString()
         {
-            return String.format("EQ(%s)", value);
+            return String.format("EQ(%s)", term);
         }
 
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by more than one relation if it includes an Equal", columnDef.name);
+            throw invalidRequest(CANNOT_BE_MERGED_ERROR, columnDef.name);
         }
 
         @Override
@@ -185,11 +218,15 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
     }
 
-    public static abstract class INRestriction extends SingleColumnRestriction
+    public static class INRestriction extends SingleColumnRestriction
     {
-        public INRestriction(ColumnMetadata columnDef)
+        public static final String CANNOT_BE_MERGED_ERROR = "%s cannot be restricted by more than one relation if it includes a IN";
+        protected final MarkerOrTerms terms;
+
+        public INRestriction(ColumnMetadata columnDef, MarkerOrTerms terms)
         {
             super(columnDef);
+            this.terms = terms;
         }
 
         @Override
@@ -201,119 +238,87 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public final SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by more than one relation if it includes a IN", columnDef.name);
+            throw invalidRequest(CANNOT_BE_MERGED_ERROR, columnDef.name);
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        MultiColumnRestriction toMultiColumnRestriction()
         {
-            builder.addEachElementToAll(getValues(options));
+            throw new UnsupportedOperationException("Cannot convert to multicolumn restriction");
+        }
+
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            List<ByteBuffer> values = this.terms.bindAndGet(options, columnDef.name);
+            List<MultiClusteringBuilder.ClusteringElements> elements = new ArrayList<>(values.size());
+            for (ByteBuffer value: values)
+                elements.add(MultiClusteringBuilder.ClusteringElements.point(value));
+            builder.extend(elements, getColumnDefs());
             checkFalse(builder.containsNull(), "Invalid null value in condition for column %s", columnDef.name);
             checkFalse(builder.containsUnset(), "Invalid unset value for column %s", columnDef.name);
             return builder;
         }
 
         @Override
-        public void addRowFilterTo(RowFilter filter,
+        public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
-            throw invalidRequest("IN restrictions are not supported on indexed columns");
+            List<ByteBuffer> values = this.terms.bindAndGet(options, columnDef.name);
+            for (ByteBuffer v : values)
+            {
+                checkNotNull(v, "Invalid null value for column %s", columnDef.name);
+                checkBindValueSet(v, "Invalid unset value for column %s", columnDef.name);
+            }
+            ByteBuffer buffer = ListSerializer.pack(values, values.size());
+            filter.add(columnDef, Operator.IN, buffer);
         }
 
         @Override
-        protected final boolean isSupportedBy(Index index)
+        public void addFunctionsTo(List<Function> functions)
+        {
+            terms.addFunctionsTo(functions);
+        }
+
+        @Override
+        public final boolean isSupportedBy(Index index)
         {
             return index.supportsExpression(columnDef, Operator.IN);
         }
 
-        protected abstract List<ByteBuffer> getValues(QueryOptions options);
-    }
-
-    public static class InRestrictionWithValues extends INRestriction
-    {
-        protected final List<Term> values;
-
-        public InRestrictionWithValues(ColumnMetadata columnDef, List<Term> values)
-        {
-            super(columnDef);
-            this.values = values;
-        }
-
-        @Override
-        MultiColumnRestriction toMultiColumnRestriction()
-        {
-            return new MultiColumnRestriction.InRestrictionWithValues(Collections.singletonList(columnDef), values);
-        }
-
-        @Override
-        public void addFunctionsTo(List<Function> functions)
-        {
-            Terms.addFunctions(values, functions);
-        }
-
-        @Override
-        protected List<ByteBuffer> getValues(QueryOptions options)
-        {
-            List<ByteBuffer> buffers = new ArrayList<>(values.size());
-            for (Term value : values)
-                buffers.add(value.bindAndGet(options));
-            return buffers;
-        }
-
         @Override
         public String toString()
         {
-            return String.format("IN(%s)", values);
-        }
-    }
-
-    public static class InRestrictionWithMarker extends INRestriction
-    {
-        protected final AbstractMarker marker;
-
-        public InRestrictionWithMarker(ColumnMetadata columnDef, AbstractMarker marker)
-        {
-            super(columnDef);
-            this.marker = marker;
-        }
-
-        @Override
-        public void addFunctionsTo(List<Function> functions)
-        {
-        }
-
-        @Override
-        MultiColumnRestriction toMultiColumnRestriction()
-        {
-            return new MultiColumnRestriction.InRestrictionWithMarker(Collections.singletonList(columnDef), marker);
-        }
-
-        @Override
-        protected List<ByteBuffer> getValues(QueryOptions options)
-        {
-            Terminal term = marker.bind(options);
-            checkNotNull(term, "Invalid null value for column %s", columnDef.name);
-            checkFalse(term == Constants.UNSET_VALUE, "Invalid unset value for column %s", columnDef.name);
-            Term.MultiItemTerminal lval = (Term.MultiItemTerminal) term;
-            return lval.getElements();
-        }
-
-        @Override
-        public String toString()
-        {
-            return "IN ?";
+            return String.format("IN(%s)", terms);
         }
     }
 
     public static class SliceRestriction extends SingleColumnRestriction
     {
         private final TermSlice slice;
+        private final List<MarkerOrTerms> skippedValues; // values passed in NOT IN
 
-        public SliceRestriction(ColumnMetadata columnDef, Bound bound, boolean inclusive, Term term)
+        private SliceRestriction(ColumnMetadata columnDef, TermSlice slice, List<MarkerOrTerms> skippedValues)
         {
             super(columnDef);
-            slice = TermSlice.newInstance(bound, inclusive, term);
+            assert slice != null;
+            assert skippedValues != null;
+            this.slice = slice;
+            this.skippedValues = skippedValues;
+        }
+
+        public static SliceRestriction fromBound(ColumnMetadata columnDef, Bound bound, boolean inclusive, Term term)
+        {
+            TermSlice slice = TermSlice.newInstance(bound, inclusive, term);
+            return new SliceRestriction(columnDef, slice, Collections.emptyList());
+        }
+
+        public static SliceRestriction fromSkippedValues(ColumnMetadata columnDef, MarkerOrTerms skippedValues)
+        {
+            return new SliceRestriction(columnDef, TermSlice.UNBOUNDED, Collections.singletonList(skippedValues));
         }
 
         @Override
@@ -325,7 +330,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         MultiColumnRestriction toMultiColumnRestriction()
         {
-            return new MultiColumnRestriction.SliceRestriction(Collections.singletonList(columnDef), slice);
+            return new MultiColumnRestriction.SliceRestriction(Collections.singletonList(columnDef), slice, skippedValues);
         }
 
         @Override
@@ -335,7 +340,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             throw new UnsupportedOperationException();
         }
@@ -347,17 +352,31 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendBoundTo(MultiCBuilder builder, Bound bound, QueryOptions options)
+        public MultiClusteringBuilder appendBoundTo(MultiClusteringBuilder builder, Bound bound, QueryOptions options)
         {
             Bound b = bound.reverseIfNeeded(getFirstColumn());
 
-            if (!hasBound(b))
-                return builder;
+            List<MultiClusteringBuilder.ClusteringElements> toAdd = new ArrayList<>(skippedValues.size() + 1);
+            if (hasBound(b))
+            {
+                ByteBuffer value = slice.bound(b).bindAndGet(options);
+                checkBindValueSet(value, "Invalid unset value for column %s", columnDef.name);
+                toAdd.add(MultiClusteringBuilder.ClusteringElements.bound(value, bound, slice.isInclusive(b)));
+            }
+            else
+            {
+                toAdd.add(bound.isStart() ? MultiClusteringBuilder.ClusteringElements.BOTTOM : MultiClusteringBuilder.ClusteringElements.TOP);
+            }
 
-            ByteBuffer value = slice.bound(b).bindAndGet(options);
-            checkBindValueSet(value, "Invalid unset value for column %s", columnDef.name);
-            return builder.addElementToAll(value);
-
+            for (MarkerOrTerms markerOrTerms : skippedValues)
+            {
+                for (ByteBuffer value: markerOrTerms.bindAndGet(options, columnDef.name))
+                {
+                    checkBindValueSet(value, "Invalid unset value for column %s", columnDef.name);
+                    toAdd.add(MultiClusteringBuilder.ClusteringElements.bound(value, bound, false));
+                }
+            }
+            return builder.extend(toAdd, getColumnDefs());
         }
 
         @Override
@@ -381,58 +400,236 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             checkFalse(hasBound(Bound.END) && otherSlice.hasBound(Bound.END),
                        "More than one restriction was found for the end bound on %s", columnDef.name);
 
-            return new SliceRestriction(columnDef,  slice.merge(otherSlice.slice));
+            List<MarkerOrTerms> newSkippedValues = new ArrayList<>(skippedValues.size() + otherSlice.skippedValues.size());
+            newSkippedValues.addAll(skippedValues);
+            newSkippedValues.addAll(otherSlice.skippedValues);
+            return new SliceRestriction(columnDef,  slice.merge(otherSlice.slice), newSkippedValues);
         }
 
         @Override
-        public void addRowFilterTo(RowFilter filter, IndexRegistry indexRegistry, QueryOptions options)
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             for (Bound b : Bound.values())
                 if (hasBound(b))
                     filter.add(columnDef, slice.getIndexOperator(b), slice.bound(b).bindAndGet(options));
+
+            for (MarkerOrTerms markerOrTerms : skippedValues)
+            {
+                for (ByteBuffer value : markerOrTerms.bindAndGet(options, columnDef.name))
+                   filter.add(columnDef, Operator.NEQ, value);
+            }
         }
 
         @Override
         protected boolean isSupportedBy(Index index)
         {
-            return slice.isSupportedBy(columnDef, index);
+            boolean supportsSlice = slice.isSupportedBy(columnDef, index);
+            boolean supportsNeq = index.supportsExpression(columnDef, Operator.NEQ);
+            return  supportsSlice || !skippedValues.isEmpty() && supportsNeq;
         }
 
         @Override
         public String toString()
         {
-            return String.format("SLICE%s", slice);
+            return String.format("SLICE{%s, NOT IN %s}", slice, skippedValues);
         }
 
-        private SliceRestriction(ColumnMetadata columnDef, TermSlice slice)
+    }
+
+    /**
+     * One or more slice restrictions on a column's map entries.
+     * For a map column of type map&lt;text,int&gt; with name m, here are some examples of valid restrictions:
+     * One restriction:                m['a'] > 1
+     * Restrictions on different keys: m['a'] > 1 AND m['b'] < 2
+     * Restrictions on same key:       m['a'] > 0 AND m['a'] < 2
+     */
+    public static class MapSliceRestriction extends SingleColumnRestriction
+    {
+        // Left is the map's key and right is the slice on the map's value.
+        private final List<Pair<Term, TermSlice>> slices;
+
+        public MapSliceRestriction(ColumnMetadata columnDef, Bound bound, boolean inclusive, Term key, Term value)
         {
             super(columnDef);
-            this.slice = slice;
+            slices = new ArrayList<>();
+            slices.add(Pair.create(key, TermSlice.newInstance(bound, inclusive, value)));
+        }
+
+        private MapSliceRestriction(ColumnMetadata columnDef, List<Pair<Term, TermSlice>> slices)
+        {
+            super(columnDef);
+            this.slices = slices;
+        }
+
+        @Override
+        public void addFunctionsTo(List<Function> functions)
+        {
+            slices.forEach(slice -> {
+                slice.left.addFunctionsTo(functions);
+                slice.right.addFunctionsTo(functions);
+            });
+        }
+
+        @Override
+        MultiColumnRestriction toMultiColumnRestriction()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            // MapSliceRestrictions are not supported on clustering columns.
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean hasBound(Bound b)
+        {
+            // Because a MapSliceRestriction can have multiple slices, we cannot implement this method.
+            throw new UnsupportedOperationException("Bounds not well defined for map slice restrictions");
+        }
+
+        @Override
+        public boolean isInclusive(Bound b)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
+        {
+            checkTrue(otherRestriction instanceof SingleColumnRestriction.MapSliceRestriction,
+                      "Column \"%s\" cannot be restricted by both an inequality relation and \"%s\"",
+                      columnDef.name, otherRestriction);
+
+            MapSliceRestriction otherMapSlice = ((SingleColumnRestriction.MapSliceRestriction) otherRestriction);
+            // Because the keys are not necessarily bound, we defer on making assertions about boundary violations
+            // until we create the row filter.
+            ArrayList<Pair<Term, TermSlice>> newSlices = new ArrayList<>(slices);
+            newSlices.addAll(otherMapSlice.slices);
+            return new MapSliceRestriction(columnDef, newSlices);
+        }
+
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
+        {
+            HashMap<ByteBuffer, TermSlice> map = new HashMap<ByteBuffer, TermSlice>();
+            // First, we iterate through to verify that none of the slices create invalid ranges.
+            // We can only do this now because this is the point when we can bind the map's key and
+            // correctly compare them.
+            for (Pair<Term, TermSlice> pair : slices)
+            {
+                final ByteBuffer key = pair.left.bindAndGet(options);
+                final TermSlice otherSlice = pair.right();
+                map.compute(key, (k, slice) -> {
+                    if (slice == null)
+                        return otherSlice;
+
+                    // Validate that the bounds do not conflict
+                    checkFalse(slice.hasBound(Bound.START) && otherSlice.hasBound(Bound.START),
+                               "More than one restriction was found for the start bound on %s", columnDef.name);
+                    checkFalse(slice.hasBound(Bound.END) && otherSlice.hasBound(Bound.END),
+                               "More than one restriction was found for the end bound on %s", columnDef.name);
+                    return slice.merge(otherSlice);
+                });
+            }
+            // Now we can add the filters.
+            for (Map.Entry<ByteBuffer, TermSlice> entry : map.entrySet())
+            {
+                TermSlice slice = entry.getValue();
+                Term start = slice.bound(Bound.START);
+                if (start != null)
+                    filter.addMapComparison(columnDef,
+                                            entry.getKey(),
+                                            slice.isInclusive(Bound.START) ? Operator.GTE : Operator.GT,
+                                            start.bindAndGet(options));
+                Term end = slice.bound(Bound.END);
+                if (end != null)
+                    filter.addMapComparison(columnDef,
+                                            entry.getKey(),
+                                            slice.isInclusive(Bound.END) ? Operator.LTE : Operator.LT,
+                                            end.bindAndGet(options));
+            }
+        }
+
+        @Override
+        protected boolean isSupportedBy(Index index)
+        {
+            for (Pair<Term, TermSlice> slice : slices)
+                if (!slice.right().isSupportedBy(columnDef, index))
+                    return false;
+            return true;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("MAP_SLICE %s", slices);
         }
     }
 
-    // This holds CONTAINS, CONTAINS_KEY, and map[key] = value restrictions because we might want to have any combination of them.
+    // This holds CONTAINS, CONTAINS_KEY, NOT CONTAINS, NOT CONTAINS KEY and map[key] = value restrictions because we might want to have any combination of them.
     public static final class ContainsRestriction extends SingleColumnRestriction
     {
-        private List<Term> values = new ArrayList<>(); // for CONTAINS
-        private List<Term> keys = new ArrayList<>(); // for CONTAINS_KEY
-        private List<Term> entryKeys = new ArrayList<>(); // for map[key] = value
-        private List<Term> entryValues = new ArrayList<>(); // for map[key] = value
+        public static final String MULTIPLE_INDEXES_WARNING = "Multiple indexes found for CONTAINS restriction on %s. " +
+                                                              "Using not-analyzed index %s. You can use index hints to " +
+                                                              "specify which index to use, as in SELECT ... WITH included_indexes={...}.";
 
-        public ContainsRestriction(ColumnMetadata columnDef, Term t, boolean isKey)
+        private final List<Term> values = new ArrayList<>(); // for CONTAINS
+        private final List<Term> negativeValues = new ArrayList<>(); // for NOT_CONTAINS
+        private final List<Term> keys = new ArrayList<>(); // for CONTAINS_KEY
+        private final List<Term> negativeKeys = new ArrayList<>(); // for NOT_CONTAINS_KEY
+        private final List<Term> entryKeys = new ArrayList<>(); // for map[key] = value
+        private final List<Term> entryValues = new ArrayList<>(); // for map[key] = value
+        private final List<Term> negativeEntryKeys = new ArrayList<>(); // for map[key] != value
+        private final List<Term> negativeEntryValues = new ArrayList<>(); // for map[key] != value
+
+        public ContainsRestriction(ColumnMetadata columnDef, Term t, boolean isKey, boolean isNot)
         {
             super(columnDef);
-            if (isKey)
-                keys.add(t);
+            if (isNot)
+            {
+                if (isKey)
+                    negativeKeys.add(t);
+                else
+                    negativeValues.add(t);
+            }
             else
-                values.add(t);
+            {
+                if (isKey)
+                    keys.add(t);
+                else
+                    values.add(t);
+            }
         }
 
-        public ContainsRestriction(ColumnMetadata columnDef, Term mapKey, Term mapValue)
+        public ContainsRestriction(ColumnMetadata columnDef, Term mapKey, Term mapValue, boolean isNot)
         {
             super(columnDef);
-            entryKeys.add(mapKey);
-            entryValues.add(mapValue);
+            if (isNot)
+            {
+                negativeEntryKeys.add(mapKey);
+                negativeEntryValues.add(mapValue);
+            }
+            else
+            {
+                entryKeys.add(mapKey);
+                entryValues.add(mapValue);
+            }
+        }
+
+        private ContainsRestriction(ColumnMetadata columnDef)
+        {
+            super(columnDef);
         }
 
         @Override
@@ -448,7 +645,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             throw new UnsupportedOperationException();
         }
@@ -467,7 +664,6 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                       columnDef.name);
 
             SingleColumnRestriction.ContainsRestriction newContains = new ContainsRestriction(columnDef);
-
             copyKeysAndValues(this, newContains);
             copyKeysAndValues((ContainsRestriction) otherRestriction, newContains);
 
@@ -475,18 +671,33 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public void addRowFilterTo(RowFilter filter, IndexRegistry indexRegistry, QueryOptions options)
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             for (ByteBuffer value : bindAndGet(values, options))
                 filter.add(columnDef, Operator.CONTAINS, value);
             for (ByteBuffer key : bindAndGet(keys, options))
                 filter.add(columnDef, Operator.CONTAINS_KEY, key);
+            for (ByteBuffer value : bindAndGet(negativeValues, options))
+                filter.add(columnDef, Operator.NOT_CONTAINS, value);
+            for (ByteBuffer key : bindAndGet(negativeKeys, options))
+                filter.add(columnDef, Operator.NOT_CONTAINS_KEY, key);
 
             List<ByteBuffer> eks = bindAndGet(entryKeys, options);
             List<ByteBuffer> evs = bindAndGet(entryValues, options);
             assert eks.size() == evs.size();
             for (int i = 0; i < eks.size(); i++)
-                filter.addMapEquality(columnDef, eks.get(i), Operator.EQ, evs.get(i));
+                filter.addMapComparison(columnDef, eks.get(i), Operator.EQ, evs.get(i));
+
+            List<ByteBuffer> neks = bindAndGet(negativeEntryKeys, options);
+            List<ByteBuffer> nevs = bindAndGet(negativeEntryValues, options);
+            assert neks.size() == nevs.size();
+            for (int i = 0; i < neks.size(); i++)
+                filter.addMapComparison(columnDef, neks.get(i), Operator.NEQ, nevs.get(i));
+
         }
 
         @Override
@@ -500,10 +711,33 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             if (numberOfKeys() > 0)
                 supported |= index.supportsExpression(columnDef, Operator.CONTAINS_KEY);
 
+            if (numberOfNegativeValues() > 0)
+                supported |= index.supportsExpression(columnDef, Operator.NOT_CONTAINS);
+
+            if (numberOfNegativeKeys() > 0)
+                supported |= index.supportsExpression(columnDef, Operator.NOT_CONTAINS_KEY);
+
             if (numberOfEntries() > 0)
                 supported |= index.supportsExpression(columnDef, Operator.EQ);
 
+            if (numberOfNegativeEntries() > 0)
+                supported |= index.supportsExpression(columnDef, Operator.NEQ);
+
             return supported;
+        }
+
+        public boolean needsFiltering(Index.Group indexGroup)
+        {
+            // multiple contains might require filtering on some indexes, since that is equivalent to a disjunction (or)
+            boolean hasMultipleContains = (numberOfValues() + numberOfKeys() + numberOfEntries()) > 1;
+
+            for (Index index : indexGroup.getIndexes())
+            {
+                if (isSupportedBy(index) && !(hasMultipleContains && index.filtersMultipleContains()))
+                    return false;
+            }
+
+            return true;
         }
 
         public int numberOfValues()
@@ -511,14 +745,64 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             return values.size();
         }
 
+        public int numberOfNegativeValues()
+        {
+            return negativeValues.size();
+        }
+
         public int numberOfKeys()
         {
             return keys.size();
         }
 
+        public int numberOfNegativeKeys()
+        {
+            return negativeKeys.size();
+        }
+
         public int numberOfEntries()
         {
             return entryKeys.size();
+        }
+
+        public int numberOfNegativeEntries()
+        {
+            return negativeEntryKeys.size();
+        }
+
+        @Override
+        public Index findSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
+        {
+            Index bestIndex = super.findSupportingIndex(indexRegistry, indexHints);
+
+            // If there is no index, or the best index is explicitly included by the user-provided hints,
+            // we don't need to do anything but return the best index.
+            if (bestIndex == null || indexHints.includes(bestIndex))
+                return bestIndex;
+
+            // If there are multiple supporting indexes, we prefer those without an analyzer (see CNDB-13925).
+            // This is done by the call to findSupportingIndex() above, but we also check it here to throw a client warning.
+            boolean hasNotAnalyzedIndex = false;
+            boolean hasAnalyzedIndex = false;
+            for (Index index : indexRegistry.listNotExcludedIndexes(indexHints))
+            {
+                if (isSupportedBy(index))
+                {
+                    if (index.isAnalyzed())
+                        hasAnalyzedIndex = true;
+                    else
+                        hasNotAnalyzedIndex = true;
+                }
+            }
+
+            // We use a client warning key so the warning is emitted just once per query.
+            if (hasNotAnalyzedIndex && hasAnalyzedIndex)
+            {
+                String msg = String.format(MULTIPLE_INDEXES_WARNING, columnDef.name, bestIndex.getIndexMetadata().name);
+                ClientWarn.instance.warn(msg, "multiple_indexes_for_contains_on_" + columnDef.name);
+            }
+
+            return bestIndex;
         }
 
         @Override
@@ -528,12 +812,18 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             Terms.addFunctions(keys, functions);
             Terms.addFunctions(entryKeys, functions);
             Terms.addFunctions(entryValues, functions);
+
+            Terms.addFunctions(negativeValues, functions);
+            Terms.addFunctions(negativeKeys, functions);
+            Terms.addFunctions(negativeEntryKeys, functions);
+            Terms.addFunctions(negativeEntryValues, functions);
         }
 
         @Override
         public String toString()
         {
-            return String.format("CONTAINS(values=%s, keys=%s, entryKeys=%s, entryValues=%s)", values, keys, entryKeys, entryValues);
+            return String.format("CONTAINS(values=%s, keys=%s, entryKeys=%s, entryValues=%s)",
+                                 values, keys, entryKeys, entryValues);
         }
 
         @Override
@@ -543,7 +833,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendBoundTo(MultiCBuilder builder, Bound bound, QueryOptions options)
+        public MultiClusteringBuilder appendBoundTo(MultiClusteringBuilder builder, Bound bound, QueryOptions options)
         {
             throw new UnsupportedOperationException();
         }
@@ -578,16 +868,48 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         private static void copyKeysAndValues(ContainsRestriction from, ContainsRestriction to)
         {
             to.values.addAll(from.values);
+            to.negativeValues.addAll(from.negativeValues);
             to.keys.addAll(from.keys);
+            to.negativeKeys.addAll(from.negativeKeys);
             to.entryKeys.addAll(from.entryKeys);
             to.entryValues.addAll(from.entryValues);
+            to.negativeEntryKeys.addAll(from.negativeEntryKeys);
+            to.negativeEntryValues.addAll(from.negativeEntryValues);
+
         }
 
-        private ContainsRestriction(ColumnMetadata columnDef)
+        public Index findSupportingIndex(IndexRegistry indexRegistry)
         {
-            super(columnDef);
+            // if there are multiple supporting indexes, we prefer those without an analyzer (see CNDB-13925)
+            Index notAnalyzedIndex = null;
+            Index analyzedIndex = null;
+            for (Index index : indexRegistry.listIndexes())
+            {
+                if (isSupportedBy(index))
+                {
+                    if (index.getAnalyzer(null).isPresent())
+                        analyzedIndex = index;
+                    else
+                        notAnalyzedIndex = index;
+                }
+            }
+
+            if (notAnalyzedIndex != null)
+            {
+                // We prefer the not analyzed index, but if there was also an analyzed index, we warn the user.
+                // We use a client warning key so the warning is emitted just once per query.
+                if (analyzedIndex != null)
+                {
+                    String msg = String.format(MULTIPLE_INDEXES_WARNING, columnDef.name, notAnalyzedIndex.getIndexMetadata().name);
+                    ClientWarn.instance.warn(msg, "multiple_indexes_for_contains_on_" + columnDef.name);
+                }
+                return notAnalyzedIndex;
+            }
+
+            return analyzedIndex;
         }
     }
+
 
     public static final class IsNotNullRestriction extends SingleColumnRestriction
     {
@@ -614,15 +936,17 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public void addRowFilterTo(RowFilter filter,
+        public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             throw new UnsupportedOperationException("Secondary indexes do not support IS NOT NULL restrictions");
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             throw new UnsupportedOperationException("Cannot use IS NOT NULL restriction for slicing");
         }
@@ -666,12 +990,6 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public boolean isEQ()
-        {
-            return false;
-        }
-
-        @Override
         public boolean isLIKE()
         {
             return true;
@@ -690,21 +1008,23 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public void addRowFilterTo(RowFilter filter,
+        public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             Pair<Operator, ByteBuffer> operation = makeSpecific(value.bindAndGet(options));
 
             // there must be a suitable INDEX for LIKE_XXX expressions
             RowFilter.SimpleExpression expression = filter.add(columnDef, operation.left, operation.right);
-            indexRegistry.getBestIndexFor(expression)
+            indexRegistry.getBestIndexFor(expression, indexHints)
                          .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
                                                            expression));
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             // LIKE can be used with clustering columns, but as it doesn't
             // represent an actual clustering value, it can't be used in a
@@ -774,6 +1094,455 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             newValue.position(beginIndex);
             newValue.limit(endIndex);
             return Pair.create(operator, newValue);
+        }
+    }
+
+    /**
+     * For now, index based ordering is represented as a restriction.
+     */
+    public static final class OrderRestriction extends SingleColumnRestriction
+    {
+        private final SingleColumnRestriction otherRestriction;
+        private final Operator direction;
+
+        public OrderRestriction(ColumnMetadata columnDef, Operator direction)
+        {
+            this(columnDef, null, direction);
+        }
+
+        private OrderRestriction(ColumnMetadata columnDef, SingleColumnRestriction otherRestriction, Operator direction)
+        {
+            super(columnDef);
+            this.otherRestriction = otherRestriction;
+            this.direction = direction;
+
+            if (direction != Operator.ORDER_BY_ASC && direction != Operator.ORDER_BY_DESC)
+                throw new IllegalArgumentException("Ordering restriction must be ASC or DESC");
+        }
+
+        public Operator getDirection()
+        {
+            return direction;
+        }
+
+        @Override
+        public void addFunctionsTo(List<Function> functions)
+        {
+            if (otherRestriction != null)
+                otherRestriction.addFunctionsTo(functions);
+        }
+
+        @Override
+        MultiColumnRestriction toMultiColumnRestriction()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
+        {
+            filter.add(columnDef, direction, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+            if (otherRestriction != null)
+                otherRestriction.addToRowFilter(filter, indexRegistry, options, annOptions, indexHints);
+        }
+
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("ORDER BY %s %s", columnDef.name, direction);
+        }
+
+        @Override
+        public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
+        {
+            if (!(otherRestriction instanceof SingleColumnRestriction))
+                throw invalidRequest("%s cannot be restricted by both ORDER BY and %s",
+                                     columnDef.name,
+                                     otherRestriction.toString());
+            var otherSingleColumnRestriction = (SingleColumnRestriction) otherRestriction;
+            if (this.otherRestriction == null)
+                return new OrderRestriction(columnDef, otherSingleColumnRestriction, direction);
+            var mergedOtherRestriction = this.otherRestriction.doMergeWith(otherSingleColumnRestriction);
+            return new OrderRestriction(columnDef, (SingleColumnRestriction) mergedOtherRestriction, direction);
+        }
+
+        @Override
+        protected boolean isSupportedBy(Index index)
+        {
+            return index.supportsExpression(columnDef, direction)
+                   && (otherRestriction == null || otherRestriction.isSupportedBy(index));
+        }
+
+        @Override
+        public boolean isIndexBasedOrdering()
+        {
+            return true;
+        }
+    }
+
+    public static final class AnnRestriction extends SingleColumnRestriction
+    {
+        private final Term value;
+        // This is the only kind of restriction that can be merged into an AnnRestriction because all Ann
+        // are on vector columns, and the only other valid restriction on vector columns is BOUNDED_ANN.
+        private final BoundedAnnRestriction boundedAnnRestriction;
+
+        public AnnRestriction(ColumnMetadata columnDef, Term value)
+        {
+            this(columnDef, value, null);
+        }
+
+        private AnnRestriction(ColumnMetadata columnDef, Term value, BoundedAnnRestriction boundedAnnRestriction)
+        {
+            super(columnDef);
+            this.value = value;
+            this.boundedAnnRestriction = boundedAnnRestriction;
+        }
+
+        public ByteBuffer value(QueryOptions options)
+        {
+            return value.bindAndGet(options);
+        }
+
+        @Override
+        public void addFunctionsTo(List<Function> functions)
+        {
+            value.addFunctionsTo(functions);
+            if (boundedAnnRestriction != null)
+                boundedAnnRestriction.addFunctionsTo(functions);
+        }
+
+        @Override
+        MultiColumnRestriction toMultiColumnRestriction()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
+        {
+            filter.addANNExpression(columnDef, value.bindAndGet(options), annOptions);
+            if (boundedAnnRestriction != null)
+                boundedAnnRestriction.addToRowFilter(filter, indexRegistry, options, annOptions, indexHints);
+        }
+
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("ANN(%s)", value);
+        }
+
+        @Override
+        public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
+        {
+            if (otherRestriction.isIndexBasedOrdering())
+                throw invalidRequest("%s cannot be restricted by multiple ANN restrictions", columnDef.name);
+
+            if (!otherRestriction.isBoundedAnn())
+                throw invalidRequest("%s cannot be restricted by both BOUNDED_ANN and %s", columnDef.name, otherRestriction.toString());
+
+            if (boundedAnnRestriction == null)
+                return new AnnRestriction(columnDef, value, (BoundedAnnRestriction) otherRestriction);
+
+            var mergedAnnRestriction = boundedAnnRestriction.doMergeWith(otherRestriction);
+            return new AnnRestriction(columnDef, value, (BoundedAnnRestriction) mergedAnnRestriction);
+        }
+
+        @Override
+        protected boolean isSupportedBy(Index index)
+        {
+            return index.supportsExpression(columnDef, Operator.ANN) && (boundedAnnRestriction == null || boundedAnnRestriction.isSupportedBy(index));
+        }
+
+        @Override
+        public boolean isIndexBasedOrdering()
+        {
+            return true;
+        }
+
+        @Override
+        public boolean isBoundedAnn()
+        {
+            return boundedAnnRestriction != null;
+        }
+    }
+
+    public static final class Bm25Restriction extends SingleColumnRestriction
+    {
+        private final Term value;
+
+        public Bm25Restriction(ColumnMetadata columnDef, Term value)
+        {
+            super(columnDef);
+            this.value = value;
+        }
+
+        public ByteBuffer value(QueryOptions options)
+        {
+            return value.bindAndGet(options);
+        }
+
+        @Override
+        public void addFunctionsTo(List<Function> functions)
+        {
+            value.addFunctionsTo(functions);
+        }
+
+        @Override
+        MultiColumnRestriction toMultiColumnRestriction()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
+        {
+            var index = findSupportingIndex(indexRegistry, indexHints);
+            var valueBytes = value.bindAndGet(options);
+            var terms = index.getAnalyzer(valueBytes).get().queriedTokens();
+            if (terms.isEmpty())
+                throw invalidRequest("BM25 query must contain at least one term (perhaps your analyzer is discarding tokens you didn't expect)");
+            filter.add(columnDef, Operator.BM25, valueBytes);
+        }
+
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("BM25(%s)", value);
+        }
+
+        @Override
+        public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
+        {
+            throw invalidRequest("%s cannot be restricted by both BM25 and %s", columnDef.name, otherRestriction.toString());
+        }
+
+        @Override
+        protected boolean isSupportedBy(Index index)
+        {
+            return index.supportsExpression(columnDef, Operator.BM25);
+        }
+
+        @Override
+        public boolean isIndexBasedOrdering()
+        {
+            return true;
+        }
+
+        @Override
+        public boolean shouldMerge(SingleRestriction other)
+        {
+            // we don't want to merge MATCH restrictions with ORDER BY BM25
+            // so shouldMerge = false for that scenario, and true for others
+            // (because even though we can't meaningfully merge with others, we want doMergeWith to be called to throw)
+            //
+            // (Note that because ORDER BY is processed before WHERE, we only need this check in the BM25 class)
+            return !other.isAnalyzerMatches();
+        }
+    }
+
+    /**
+     * A Bounded ANN Restriction is one that uses a similarity score as the limiting factor for ANN instead of a number
+     * of results.
+     */
+    public static final class BoundedAnnRestriction extends SingleColumnRestriction
+    {
+        private final Term value;
+        private final Term distance;
+        private final boolean isInclusive;
+
+        public BoundedAnnRestriction(ColumnMetadata columnDef, Term value, Term distance, boolean isInclusive)
+        {
+            super(columnDef);
+            this.value = value;
+            this.distance = distance;
+            this.isInclusive = isInclusive;
+        }
+
+        @Override
+        public void addFunctionsTo(List<Function> functions)
+        {
+            value.addFunctionsTo(functions);
+            distance.addFunctionsTo(functions);
+        }
+
+        @Override
+        MultiColumnRestriction toMultiColumnRestriction()
+        {
+            // only used by partition and clustering restrictions
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
+        {
+            filter.addGeoDistanceExpression(columnDef, value.bindAndGet(options), isInclusive ? Operator.LTE : Operator.LT, distance.bindAndGet(options));
+        }
+
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("BOUNDED_ANN(%s)", value);
+        }
+
+        @Override
+        public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
+        {
+            if (!otherRestriction.isBoundedAnn())
+                throw invalidRequest("%s cannot be restricted by both BOUNDED_ANN and %s", columnDef.name, otherRestriction.toString());
+            throw invalidRequest("%s cannot be restricted by multiple BOUNDED_ANN restrictions", columnDef.name, otherRestriction.toString());
+        }
+
+        @Override
+        protected boolean isSupportedBy(Index index)
+        {
+            return index.supportsExpression(columnDef, Operator.BOUNDED_ANN);
+        }
+
+        @Override
+        public boolean isBoundedAnn()
+        {
+            return true;
+        }
+    }
+
+    public static final class AnalyzerMatchesRestriction extends SingleColumnRestriction
+    {
+        public static final String CANNOT_BE_MERGED_ERROR = "%s cannot be restricted by other operators if it includes analyzer match (:)";
+        public static final String CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR =
+        "Cannot restrict column '%s' by analyzer match (:) because it is a clustering column. Equals (=) can be used " +
+        "instead of match, but it will produce incomplete results due to clustering column post filtering.";
+
+        private final List<Term> values;
+
+        public AnalyzerMatchesRestriction(ColumnMetadata columnDef, Term value)
+        {
+            this(columnDef, Collections.singletonList(value));
+        }
+
+        public AnalyzerMatchesRestriction(ColumnMetadata columnDef, List<Term> values)
+        {
+            super(columnDef);
+            // If we don't fail here, we would alternatively fail with the call to this::appendTo, which produces
+            // an unhelpful error message.
+            if (columnDef.isClusteringColumn())
+                throw invalidRequest(CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR, columnDef.name);
+            this.values = values;
+        }
+
+        @Override
+        public boolean isAnalyzerMatches()
+        {
+            return true;
+        }
+
+        List<Term> getValues()
+        {
+            return values;
+        }
+
+        @Override
+        public void addFunctionsTo(List<Function> functions)
+        {
+            for (Term value : values)
+            {
+                value.addFunctionsTo(functions);
+            }
+        }
+
+        @Override
+        MultiColumnRestriction toMultiColumnRestriction()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
+        {
+            for (Term value : values)
+            {
+                filter.add(columnDef, Operator.ANALYZER_MATCHES, value.bindAndGet(options));
+            }
+        }
+
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("ANALYZER_MATCHES(%s)", values);
+        }
+
+        /**
+         * Merges this restriction with another restriction. Only called for conjuctive restrictions.
+         */
+        @Override
+        public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
+        {
+            if (!otherRestriction.isAnalyzerMatches())
+                throw invalidRequest(CANNOT_BE_MERGED_ERROR, columnDef.name);
+
+            List<Term> otherValues = otherRestriction instanceof AnalyzerMatchesRestriction
+                                   ? ((AnalyzerMatchesRestriction) otherRestriction).getValues()
+                                   : List.of(((EQRestriction) otherRestriction).term);
+            List<Term> newValues = new ArrayList<>(values.size() + otherValues.size());
+            newValues.addAll(values);
+            newValues.addAll(otherValues);
+            return new AnalyzerMatchesRestriction(columnDef, newValues);
+        }
+
+        @Override
+        protected boolean isSupportedBy(Index index)
+        {
+            return index.supportsExpression(columnDef, Operator.ANALYZER_MATCHES);
         }
     }
 }

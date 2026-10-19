@@ -17,33 +17,47 @@
  */
 package org.apache.cassandra.net;
 
+import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
-
+import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.Future; //checkstyle: permit this import
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
+import org.apache.cassandra.utils.concurrent.FutureCombiner;
 
 import static java.util.Collections.synchronizedList;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.apache.cassandra.concurrent.Stage.MUTATION;
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 
 /**
@@ -194,32 +208,151 @@ import static org.apache.cassandra.utils.Throwables.maybeFail;
  * implemented in {@link org.apache.cassandra.db.virtual.InternodeInboundTable} and
  * {@link org.apache.cassandra.db.virtual.InternodeOutboundTable} respectively.
  */
-public final class MessagingService extends MessagingServiceMBeanImpl
+public class MessagingService extends MessagingServiceMBeanImpl implements MessageDelivery
 {
     private static final Logger logger = LoggerFactory.getLogger(MessagingService.class);
 
     // 8 bits version, so don't waste versions
-    public static final int VERSION_30 = 10;
-    public static final int VERSION_3014 = 11;
-    public static final int VERSION_40 = 12;
-    public static final int minimum_version = VERSION_30;
-    public static final int current_version = VERSION_40;
-    static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version);
-    static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
-
     public enum Version
     {
-        VERSION_30(10),
-        VERSION_3014(11),
-        VERSION_40(12);
+        /** @deprecated See CASSANDRA-18314 */
+        @Deprecated(since = "5.0")
+        VERSION_30(MessagingService.VERSION_30, false),
+        /** @deprecated See CASSANDRA-18314 */
+        @Deprecated(since = "5.0")
+        VERSION_3014(MessagingService.VERSION_3014, false),
+        VERSION_40(MessagingService.VERSION_40, false),
+        // c14227 TTL overflow, 'uint' timestamps
+        VERSION_50(MessagingService.VERSION_50, true),
+        VERSION_DS_10(MessagingService.VERSION_DS_10, false), // DS Converged Cassandra 4.0
+        VERSION_DS_11(MessagingService.VERSION_DS_11, false),
+        VERSION_DS_12(MessagingService.VERSION_DS_12, false), // adds index hints (CNDB-13129)
+        VERSION_DS_20(MessagingService.VERSION_DS_20, true), // DS Converged Cassandra 5.0
+        VERSION_DSE_68(MessagingService.VERSION_DSE_68, false), // DSE 6.8
+        ;
+
+        public static final Version CURRENT = VERSION_DS_20; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
 
         public final int value;
+        public final boolean supportsExtendedDeletionTime;
 
-        Version(int value)
+        Version(int value, boolean extendedDeletionTime)
         {
             this.value = value;
+            this.supportsExtendedDeletionTime = extendedDeletionTime;
+        }
+
+        @VisibleForTesting
+        public static List<Version> supportedVersions()
+        {
+            List<Version> versions = Lists.newArrayList();
+            for (Version version : values())
+                if (minimum_version <= version.value && version.value <= current_version)
+                    versions.add(version);
+
+            return Collections.unmodifiableList(versions);
+        }
+
+        public static boolean supportsExtendedDeletionTime(int value)
+        {
+            return  Version.values()[versionOrdinalMap.get(value)].supportsExtendedDeletionTime;
         }
     }
+    // Maintance Note:
+    // Try to keep Version enum in-sync for testing.  By having the versions in the enum tests can get access without forcing this class
+    // to load, which adds a lot of costs to each test
+    /** @deprecated See CASSANDRA-18816 */
+    @Deprecated(since = "5.0")
+    public static final int VERSION_30 = 10;
+    /** @deprecated See CASSANDRA-18816 */
+    @Deprecated(since = "5.0")
+    public static final int VERSION_3014 = 11;
+    public static final int VERSION_40 = 12;
+    public static final int VERSION_50 = 13; // c14227 TTL overflow, 'uint' timestamps
+    public static final int VERSION_DS_10 = 100; // DS Converged Cassandra 4.0
+    // Current DataStax version while we have serialization differences.
+    // If differences get merged upstream then we can revert to OS versioning.
+    public static final int VERSION_DS_11 = 101; // adds ann_options (CNDB-12456)
+    public static final int VERSION_DS_12 = 102; // adds index hints (CNDB-13129)
+    public static final int VERSION_DS_20 = 110; // DS Converged Cassandra 5.0
+    public static final int minimum_version = VERSION_40;
+    public static final int maximum_version = VERSION_DS_20;
+    // we want to use a modified behavior for the tools and clients - that is, since they are not running a server, they
+    // should not need to run in a compatibility mode. They should be able to connect to the server regardless whether
+    // it uses messaving version 4 or 5
+    public static final int current_version = currentVersion();
+    // DSE 6.8 version for backward compatibility
+    public static final int VERSION_DSE_68 = 168;
+    static AcceptVersions accept_messaging;
+    static AcceptVersions accept_streaming;
+    static
+    {
+        if (DatabaseDescriptor.isClientInitialized())
+        {
+            accept_messaging = new AcceptVersions(minimum_version, maximum_version);
+            accept_streaming = new AcceptVersions(Math.min(VERSION_40, maximum_version), maximum_version);
+        }
+        else
+        {
+            accept_messaging = new AcceptVersions(minimum_version, current_version);
+            // Streaming negotiates any common version in [VERSION_40, current_version]; this is only safe because every
+            // streaming serializer (stream headers, control/file messages, compressed payloads) is wire-compatible across
+            // that range.
+            accept_streaming = new AcceptVersions(Math.min(VERSION_40, current_version), current_version);
+        }
+    }
+    static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, Enum::ordinal));
+
+    @Deprecated(since = "5.0") // remove when cndb no longer supports bdp/6.8-cndb
+    private static int currentVersion()
+    {
+        int version = CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt();
+        for (Version v : Version.values())
+        {
+            if (v.value == version)
+                return version;
+        }
+        throw new IllegalArgumentException("Unsupported current messaging version: " + version);
+    }
+
+    /**
+     * Whether the given messaging version belongs to the 5.0 family, i.e. it carries the serialization changes
+     * introduced by {@link #VERSION_50}.
+     * <p>
+     * The DataStax versions are numbered above the Apache ones, so a plain {@code version >= VERSION_50} check is wrong:
+     * {@link #VERSION_DS_10}, {@link #VERSION_DS_11} and {@link #VERSION_DS_12} are spoken by DS Converged Cassandra 4.0
+     * (HCD 1.x) nodes and {@link #VERSION_DSE_68} by DSE 6.8 nodes, none of which know about the 5.0 changes.
+     *
+     * @param version the serialization version
+     * @return {@code true} if {@code version} is {@link #VERSION_50}, {@link #VERSION_DS_20} or a later 5.0-based version
+     */
+    public static boolean isVersion50OrLater(int version)
+    {
+        if (version < VERSION_50)
+            return false;
+        if (version >= VERSION_DS_10 && version < VERSION_DS_20)
+            return false;
+        return version != VERSION_DSE_68;
+    }
+
+    /**
+     * This is an optimisation to speed up the translation of the serialization
+     * version to the {@link Version} enum ordinal.
+     *
+     * @param version the serialization version
+     * @return a {@link Version} ordinal value
+     */
+    public static int getVersionOrdinal(int version)
+    {
+        Integer ordinal = versionOrdinalMap.get(version);
+        if (ordinal == null)
+            throw new IllegalStateException("Unkown serialization version: " + version);
+
+        return ordinal;
+    }
+
+    public final static boolean GRACEFUL_CLOSE = !NON_GRACEFUL_CLOSE.getBoolean();
+    public final static boolean UNUSED_CONNECTION_MONITORING = !DISABLE_UNUSED_CONNECTION_MONITORING.getBoolean();
 
     private static class MSHandle
     {
@@ -258,8 +391,68 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     @VisibleForTesting
     MessagingService(boolean testOnly)
     {
-        super(testOnly);
-        OutboundConnections.scheduleUnusedConnectionMonitoring(this, ScheduledExecutors.scheduledTasks, 1L, TimeUnit.HOURS);
+        this(testOnly, new EndpointMessagingVersions(),
+             CUSTOM_MESSAGING_METRICS_PROVIDER_PROPERTY.isPresent() ?
+                FBUtilities.construct(CUSTOM_MESSAGING_METRICS_PROVIDER_PROPERTY.getString(), "Messaging Metrics Provider") :
+                new MessagingMetrics());
+    }
+
+    @VisibleForTesting
+    MessagingService(boolean testOnly, EndpointMessagingVersions versions, MessagingMetrics metrics)
+    {
+        super(testOnly, versions, metrics);
+        if (UNUSED_CONNECTION_MONITORING)
+            OutboundConnections.scheduleUnusedConnectionMonitoring(this, ScheduledExecutors.scheduledTasks, 1L, TimeUnit.HOURS);
+    }
+
+    @Override
+    public <REQ, RSP> org.apache.cassandra.utils.concurrent.Future<Message<RSP>> sendWithResult(Message<REQ> message, InetAddressAndPort to)
+    {
+        AsyncPromise<Message<RSP>> promise = new AsyncPromise<>();
+        sendWithCallback(message, to, new RequestCallback<RSP>()
+        {
+            @Override
+            public void onResponse(Message<RSP> msg)
+            {
+                promise.trySuccess(msg);
+            }
+
+            @Override
+            public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
+            {
+                promise.tryFailure(new FailureResponseException(from, failureReason));
+            }
+
+            @Override
+            public boolean invokeOnFailure()
+            {
+                return true;
+            }
+        });
+        return promise;
+    }
+
+    public static class FailureResponseException extends IOException
+    {
+        private final InetAddressAndPort from;
+        private final RequestFailureReason failureReason;
+
+        public FailureResponseException(InetAddressAndPort from, RequestFailureReason failureReason)
+        {
+            super(String.format("Failure from %s: %s", from, failureReason.name()));
+            this.from = from;
+            this.failureReason = failureReason;
+        }
+
+        public InetAddressAndPort from()
+        {
+            return from;
+        }
+
+        public RequestFailureReason failureReason()
+        {
+            return failureReason;
+        }
     }
 
     /**
@@ -295,10 +488,10 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      * @param handler callback interface which is used to pass the responses or
      *                suggest that a timeout occurred to the invoker of the send().
      */
-    public void sendWriteWithCallback(Message message, Replica to, AbstractWriteResponseHandler<?> handler, boolean allowHints)
+    public void sendWriteWithCallback(Message message, Replica to, AbstractWriteResponseHandler<?> handler)
     {
         assert message.callBackOnFailure();
-        callbacks.addWithExpiration(handler, message, to, handler.consistencyLevel(), allowHints);
+        callbacks.addWithExpiration(handler, message, to);
         send(message, to.endpoint(), null);
     }
 
@@ -312,6 +505,18 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     public void send(Message message, InetAddressAndPort to)
     {
         send(message, to, null);
+    }
+
+    /**
+     * Send a message to a given endpoint. This method adheres to the fire and forget
+     * style messaging.
+     *
+     * @param message messages to be sent.
+     * @param response
+     */
+    public <V> void respond(V response, Message<?> message)
+    {
+        send(message.responseWith(response), message.respondTo());
     }
 
     public void send(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
@@ -332,7 +537,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         // expire the callback if the message failed to enqueue (failed to establish a connection or exceeded queue capacity)
         while (true)
         {
-            OutboundConnections connections = getOutbound(to);
+            OutboundConnections connections = getOutbound(to, true);
             try
             {
                 connections.enqueue(message, specifyConnection);
@@ -374,9 +579,17 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      */
     void closeOutboundNow(OutboundConnections connections)
     {
-        connections.close(true).addListener(
+        connections.close(GRACEFUL_CLOSE).addListener(
             future -> channelManagers.remove(connections.template().to, connections)
         );
+    }
+
+    // Used by CNDB
+    public void closeOutboundNow(InetAddressAndPort to)
+    {
+        OutboundConnections pool = channelManagers.get(to);
+        if (pool != null)
+            closeOutboundNow(pool);
     }
 
     /**
@@ -397,7 +610,10 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     {
         OutboundConnections pool = channelManagers.get(to);
         if (pool != null)
+        {
             pool.interrupt();
+            logger.info("Interrupted outbound connections to {}", to);
+        }
     }
 
     /**
@@ -422,15 +638,20 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     }
 
     /**
-     * Wait for callbacks and don't allow any more to be created (since they could require writing hints)
+     * Wait for callbacks and don't allow anymore to be created (since they could require writing hints)
      */
     public void shutdown()
     {
-        shutdown(1L, MINUTES, true, true);
+        if (NON_GRACEFUL_SHUTDOWN.getBoolean())
+            // this branch is used in unit-tests when we really never restart a node and shutting down means the end of test
+            shutdownAbrubtly();
+        else
+            shutdown(1L, MINUTES, true, true);
     }
 
     public void shutdown(long timeout, TimeUnit units, boolean shutdownGracefully, boolean shutdownExecutors)
     {
+        logger.debug("Shutting down: timeout={}s, gracefully={}, shutdownExecutors={}", units.toSeconds(timeout), shutdownGracefully, shutdownExecutors);
         if (isShuttingDown)
         {
             logger.info("Shutdown was already called");
@@ -440,21 +661,21 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         isShuttingDown = true;
         logger.info("Waiting for messaging service to quiesce");
         // We may need to schedule hints on the mutation stage, so it's erroneous to shut down the mutation stage first
-        assert !MUTATION.executor().isShutdown();
+        assert !MUTATION.isShutdown();
 
         if (shutdownGracefully)
         {
             callbacks.shutdownGracefully();
             List<Future<Void>> closing = new ArrayList<>();
             for (OutboundConnections pool : channelManagers.values())
-                closing.add(pool.close(true));
+                closing.add(pool.close(GRACEFUL_CLOSE));
 
-            long deadline = System.nanoTime() + units.toNanos(timeout);
-            maybeFail(() -> new FutureCombiner(closing).get(timeout, units),
+            long deadline = nanoTime() + units.toNanos(timeout);
+            maybeFail(() -> FutureCombiner.nettySuccessListener(closing).get(timeout, units),
                       () -> {
                           List<ExecutorService> inboundExecutors = new ArrayList<>();
                           inboundSockets.close(synchronizedList(inboundExecutors)::add).get();
-                          ExecutorUtils.awaitTermination(1L, TimeUnit.MINUTES, inboundExecutors);
+                          ExecutorUtils.awaitTermination(timeout, units, inboundExecutors);
                       },
                       () -> {
                           if (shutdownExecutors)
@@ -473,17 +694,51 @@ public final class MessagingService extends MessagingServiceMBeanImpl
             for (OutboundConnections pool : channelManagers.values())
                 closing.add(pool.close(false));
 
-            long deadline = System.nanoTime() + units.toNanos(timeout);
-            maybeFail(() -> new FutureCombiner(closing).get(timeout, units),
-                      () -> {
-                          if (shutdownExecutors)
-                              shutdownExecutors(deadline);
-                      },
-                      () -> ExecutorUtils.awaitTermination(timeout, units, inboundExecutors),
-                      () -> callbacks.awaitTerminationUntil(deadline),
-                      inboundSink::clear,
-                      outboundSink::clear);
+            long deadline = nanoTime() + units.toNanos(timeout);
+            try
+            {
+                maybeFail(() -> FutureCombiner.nettySuccessListener(closing).get(timeout, units),
+                          () -> {
+                              if (shutdownExecutors)
+                                  shutdownExecutors(deadline);
+                          },
+                          () -> ExecutorUtils.awaitTermination(timeout, units, inboundExecutors),
+                          () -> callbacks.awaitTerminationUntil(deadline),
+                          inboundSink::clear,
+                          outboundSink::clear);
+            }
+            catch (Throwable t)
+            {
+                if (NON_GRACEFUL_SHUTDOWN.getBoolean())
+                    logger.info("Timeout when waiting for messaging service shutdown", t);
+                else
+                    throw t;
+            }
         }
+    }
+
+    public void shutdownAbrubtly()
+    {
+        logger.debug("Shutting down abruptly");
+        if (isShuttingDown)
+        {
+            logger.info("Shutdown was already called");
+            return;
+        }
+
+        isShuttingDown = true;
+        logger.info("Waiting for messaging service to quiesce");
+        // We may need to schedule hints on the mutation stage, so it's erroneous to shut down the mutation stage first
+        assert !MUTATION.isShutdown();
+
+        callbacks.shutdownNow(false);
+        inboundSockets.close();
+        for (OutboundConnections pool : channelManagers.values())
+            pool.close(false);
+
+        maybeFail(socketFactory::shutdownNow,
+                  inboundSink::clear,
+                  outboundSink::clear);
     }
 
     private void shutdownExecutors(long deadlineNanos) throws TimeoutException, InterruptedException
@@ -492,10 +747,10 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         socketFactory.awaitTerminationUntil(deadlineNanos);
     }
 
-    private OutboundConnections getOutbound(InetAddressAndPort to)
+    private OutboundConnections getOutbound(InetAddressAndPort to, boolean tryRegister)
     {
         OutboundConnections connections = channelManagers.get(to);
-        if (connections == null)
+        if (connections == null && tryRegister)
             connections = OutboundConnections.tryRegister(channelManagers, to, new OutboundConnectionSettings(to).withDefaults(ConnectionCategory.MESSAGING));
         return connections;
     }
@@ -532,5 +787,61 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     public void waitUntilListening() throws InterruptedException
     {
         inboundSockets.open().await();
+    }
+
+    /**
+     * Returns the endpoints for the given keyspace that are known to be alive and are using a messaging version older
+     * than the given version.
+     *
+     * @param keyspace a keyspace
+     * @param version a messaging version
+     * @return a set of alive endpoints in the given keyspace with messaging version below the given version
+     */
+    public Set<InetAddressAndPort> endpointsWithVersionBelow(String keyspace, int version)
+    {
+        Set<InetAddressAndPort> nodes = new HashSet<>();
+        for (InetAddressAndPort node : StorageService.instance.getTokenMetadataForKeyspace(keyspace).getAllEndpoints())
+        {
+            if (versions.knows(node) && versions.getRaw(node) < version)
+                nodes.add(node);
+        }
+        return nodes;
+    }
+
+    /**
+     * Returns the endpoints for the given keyspace that are known to be alive and have a connection whose
+     * messaging version is older than the given version. To be used for example when we want to be sure a message
+     * can be serialized to all endpoints, according to their negotiated version at connection time.
+     *
+     * @param keyspace a keyspace
+     * @param version a messaging version
+     * @return a set of alive endpoints in the given keyspace with messaging version below the given version
+     */
+    public Set<InetAddressAndPort> endpointsWithConnectionsOnVersionBelow(String keyspace, int version)
+    {
+        Set<InetAddressAndPort> nodes = new HashSet<>();
+        for (InetAddressAndPort node : StorageService.instance.getTokenMetadataForKeyspace(keyspace).getAllEndpoints())
+        {
+            if (hasConnectionWithVersionBelow(node, version))
+                nodes.add(node);
+        }
+        return nodes;
+    }
+
+    private boolean hasConnectionWithVersionBelow(InetAddressAndPort node, int version)
+    {
+        OutboundConnections connections = getOutbound(node, false);
+
+        if (connections == null)
+            return false;
+
+        for (ConnectionType type : ConnectionType.MESSAGING_TYPES)
+        {
+            OutboundConnection connection = connections.connectionFor(type);
+            if (connection != null && connection.messagingVersion() < version)
+                return true;
+        }
+
+        return false;
     }
 }

@@ -19,74 +19,97 @@ package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.locator.ReplicationFactor;
+import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.utils.FBUtilities;
 
-public final class AlterKeyspaceStatement extends AlterSchemaStatement
+import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_ALTER_RF_DURING_RANGE_MOVEMENT;
+import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNSAFE_TRANSIENT_CHANGES;
+
+public final class AlterKeyspaceStatement extends AlterSchemaStatement implements AlterSchemaStatement.WithKeyspaceAttributes
 {
-    private static final boolean allow_alter_rf_during_range_movement = Boolean.getBoolean(Config.PROPERTY_PREFIX + "allow_alter_rf_during_range_movement");
-    private static final boolean allow_unsafe_transient_changes = Boolean.getBoolean(Config.PROPERTY_PREFIX + "allow_unsafe_transient_changes");
-    private final HashSet<String> clientWarnings = new HashSet<>();
+    private static final boolean allow_alter_rf_during_range_movement = ALLOW_ALTER_RF_DURING_RANGE_MOVEMENT.getBoolean();
+    private static final boolean allow_unsafe_transient_changes = ALLOW_UNSAFE_TRANSIENT_CHANGES.getBoolean();
 
     private final KeyspaceAttributes attrs;
+    private final boolean ifExists;
 
-    public AlterKeyspaceStatement(String keyspaceName, KeyspaceAttributes attrs)
+    public AlterKeyspaceStatement(String queryString, String keyspaceName, KeyspaceAttributes attrs, boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.attrs = attrs;
+        this.ifExists = ifExists;
+    }
+
+    public Object getAttribute(String key)
+    {
+        return attrs.getProperty(key);
+    }
+
+    public void overrideAttribute(String oldKey, String newKey, String newValue)
+    {
+        attrs.removeProperty(oldKey);
+        attrs.addProperty(newKey, newValue);
+    }
+
+    public void overrideAttribute(String oldKey, String newKey, Map<String, String> newValue)
+    {
+        attrs.removeProperty(oldKey);
+        attrs.addProperty(newKey, newValue);
     }
 
     public Keyspaces apply(Keyspaces schema)
     {
-        if (ClientWarn.instance.get() == null)
-            ClientWarn.instance.captureWarnings();
-        int previousNumWarnings = ClientWarn.instance.numWarnings();
         attrs.validate();
 
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
         if (null == keyspace)
-            throw ire("Keyspace '%s' doesn't exist", keyspaceName);
+        {
+            if (!ifExists)
+                throw ire("Keyspace '%s' doesn't exist", keyspaceName);
+            return schema;
+        }
 
         KeyspaceMetadata newKeyspace = keyspace.withSwapped(attrs.asAlteredKeyspaceParams(keyspace.params));
+
+        if (attrs.getReplicationStrategyClass() != null && attrs.getReplicationStrategyClass().equals(SimpleStrategy.class.getSimpleName()))
+            Guardrails.simpleStrategyEnabled.ensureEnabled(state);
 
         if (newKeyspace.params.replication.klass.equals(LocalStrategy.class))
             throw ire("Unable to use given strategy class: LocalStrategy is reserved for internal use.");
 
-        newKeyspace.params.validate(keyspaceName);
+        newKeyspace.validate(state);
 
         validateNoRangeMovements();
         validateTransientReplication(keyspace.createReplicationStrategy(), newKeyspace.createReplicationStrategy());
 
         Keyspaces res = schema.withAddedOrUpdated(newKeyspace);
-
-        int newNumWarnings = ClientWarn.instance.numWarnings();
-        if (newNumWarnings > previousNumWarnings)
-            clientWarnings.addAll(ClientWarn.instance.getWarnings().subList(previousNumWarnings, newNumWarnings));
 
         return res;
     }
@@ -104,6 +127,7 @@ public final class AlterKeyspaceStatement extends AlterSchemaStatement
     @Override
     Set<String> clientWarnings(KeyspacesDiff diff)
     {
+        HashSet<String> clientWarnings = new HashSet<>();
         if (diff.isEmpty())
             return clientWarnings;
 
@@ -199,20 +223,23 @@ public final class AlterKeyspaceStatement extends AlterSchemaStatement
         return String.format("%s (%s)", getClass().getSimpleName(), keyspaceName);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<AlterKeyspaceStatement>
     {
         private final String keyspaceName;
         private final KeyspaceAttributes attrs;
+        private final boolean ifExists;
 
-        public Raw(String keyspaceName, KeyspaceAttributes attrs)
+        public Raw(String keyspaceName, KeyspaceAttributes attrs, boolean ifExists)
         {
             this.keyspaceName = keyspaceName;
             this.attrs = attrs;
+            this.ifExists = ifExists;
         }
 
-        public AlterKeyspaceStatement prepare(ClientState state)
+        @Override
+        public AlterKeyspaceStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            return new AlterKeyspaceStatement(keyspaceName, attrs);
+            return new AlterKeyspaceStatement(rawCQLStatement, keyspaceMapper.apply(keyspaceName), attrs, ifExists);
         }
     }
 }

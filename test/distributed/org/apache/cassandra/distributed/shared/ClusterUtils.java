@@ -18,8 +18,10 @@
 
 package org.apache.cassandra.distributed.shared;
 
-import java.io.File;
+import java.io.Serializable;
+import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
+import java.security.Permission;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -30,6 +32,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -40,6 +43,8 @@ import java.util.stream.Collectors;
 import com.google.common.util.concurrent.Futures;
 import org.junit.Assert;
 
+import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.distributed.api.IInstance;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
@@ -48,10 +53,20 @@ import org.apache.cassandra.distributed.api.IMessageFilters;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.distributed.impl.AbstractCluster;
 import org.apache.cassandra.distributed.impl.InstanceConfig;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.VersionedValue;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.tools.SystemExitException;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Isolated;
+import org.apache.cassandra.utils.Shared;
 
 import static com.google.common.util.concurrent.Uninterruptibles.sleepUninterruptibly;
 import static org.apache.cassandra.config.CassandraRelevantProperties.BOOTSTRAP_SCHEMA_DELAY_MS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.BROADCAST_INTERVAL_MS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.REPLACE_ADDRESS_FIRST_BOOT;
+import static org.apache.cassandra.config.CassandraRelevantProperties.RING_DELAY;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -136,6 +151,22 @@ public class ClusterUtils
      * Create a new instance and add it to the cluster, without starting it.
      *
      * @param cluster to add to
+     * @param other config to copy from
+     * @param fn function to add to the config before starting
+     * @param <I> instance type
+     * @return the instance added
+     */
+    public static <I extends IInstance> I addInstance(AbstractCluster<I> cluster,
+                                                      IInstanceConfig other,
+                                                      Consumer<IInstanceConfig> fn)
+    {
+        return addInstance(cluster, other.localDatacenter(), other.localRack(), fn);
+    }
+
+    /**
+     * Create a new instance and add it to the cluster, without starting it.
+     *
+     * @param cluster to add to
      * @param dc the instance should be in
      * @param rack the instance should be in
      * @param <I> instance type
@@ -205,20 +236,38 @@ public class ClusterUtils
                                                               IInstance toReplace,
                                                               Consumer<WithProperties> fn)
     {
+        return replaceHostAndStart(cluster, toReplace, (ignore, prop) -> fn.accept(prop));
+    }
+
+    /**
+     * Create and start a new instance that replaces an existing instance.
+     *
+     * The instance will be in the same datacenter and rack as the existing instance.
+     *
+     * @param cluster to add to
+     * @param toReplace instance to replace
+     * @param fn lambda to add additional properties or modify instance
+     * @param <I> instance type
+     * @return the instance added
+     */
+    public static <I extends IInstance> I replaceHostAndStart(AbstractCluster<I> cluster,
+                                                              IInstance toReplace,
+                                                              BiConsumer<I, WithProperties> fn)
+    {
         IInstanceConfig toReplaceConf = toReplace.config();
-        I inst = addInstance(cluster, toReplaceConf.localDatacenter(), toReplaceConf.localRack(), c -> c.set("auto_bootstrap", true));
+        I inst = addInstance(cluster, toReplaceConf, c -> c.set("auto_bootstrap", true));
 
         return start(inst, properties -> {
             // lower this so the replacement waits less time
-            properties.setProperty("cassandra.broadcast_interval_ms", Long.toString(TimeUnit.SECONDS.toMillis(30)));
+            properties.set(BROADCAST_INTERVAL_MS, Long.toString(TimeUnit.SECONDS.toMillis(30)));
             // default is 30s, lowering as it should be faster
-            properties.setProperty("cassandra.ring_delay_ms", Long.toString(TimeUnit.SECONDS.toMillis(10)));
+            properties.set(RING_DELAY, Long.toString(TimeUnit.SECONDS.toMillis(10)));
             properties.set(BOOTSTRAP_SCHEMA_DELAY_MS, TimeUnit.SECONDS.toMillis(10));
 
             // state which node to replace
-            properties.setProperty("cassandra.replace_address_first_boot", toReplace.config().broadcastAddress().getAddress().getHostAddress());
+            properties.set(REPLACE_ADDRESS_FIRST_BOOT, toReplace.config().broadcastAddress().getAddress().getHostAddress());
 
-            fn.accept(properties);
+            fn.accept(inst, properties);
         });
     }
 
@@ -233,6 +282,32 @@ public class ClusterUtils
                                                           .map(Object::toString)
                                                           .collect(Collectors.toList()));
     }
+
+    public static Collection<String> getLocalTokens(IInvokableInstance inst)
+    {
+        return inst.callOnInstance(() -> {
+            List<String> tokens = new ArrayList<>();
+            for (Token t : StorageService.instance.getTokenMetadata().getTokens(FBUtilities.getBroadcastAddressAndPort()))
+                tokens.add(t.getTokenValue().toString());
+            return tokens;
+        });
+    }
+
+    public static <I extends IInstance> void runAndWaitForLogs(Runnable r, String waitString, AbstractCluster<I> cluster) throws TimeoutException
+    {
+        runAndWaitForLogs(r, waitString, cluster.stream().toArray(IInstance[]::new));
+    }
+
+    public static void runAndWaitForLogs(Runnable r, String waitString, IInstance...instances) throws TimeoutException
+    {
+        long [] marks = new long[instances.length];
+        for (int i = 0; i < instances.length; i++)
+            marks[i] = instances[i].logs().mark();
+        r.run();
+        for (int i = 0; i < instances.length; i++)
+            instances[i].logs().watchFor(marks[i], waitString);
+    }
+
 
     /**
      * Get the ring from the perspective of the instance.
@@ -359,6 +434,20 @@ public class ClusterUtils
     }
 
     /**
+     * Wait for the ring to have the target instance with the provided status.
+     *
+     * @param instance instance to check on
+     * @param expectedInRing to look for
+     * @param status expected
+     * @return the ring
+     */
+    public static List<RingInstanceDetails> awaitRingStatus(IInstance instance, IInstance expectedInRing, String status)
+    {
+        return awaitInstanceMatching(instance, expectedInRing, d -> d.status.equals(status),
+                                     "Timeout waiting for " + expectedInRing + " to have status " + status);
+    }
+
+    /**
      * Wait for the ring to have the target instance with the provided state.
      *
      * @param instance instance to check on
@@ -368,12 +457,20 @@ public class ClusterUtils
      */
     public static List<RingInstanceDetails> awaitRingState(IInstance instance, IInstance expectedInRing, String state)
     {
-        return awaitRing(instance, "Timeout waiting for " + expectedInRing + " to have state " + state,
-                         ring ->
-                         ring.stream()
-                             .filter(d -> d.address.equals(getBroadcastAddressHostString(expectedInRing)))
-                             .filter(d -> d.state.equals(state))
-                             .findAny().isPresent());
+        return awaitInstanceMatching(instance, expectedInRing, d -> d.state.equals(state),
+                                     "Timeout waiting for " + expectedInRing + " to have state " + state);
+    }
+
+    private static List<RingInstanceDetails> awaitInstanceMatching(IInstance instance,
+                                                                   IInstance expectedInRing,
+                                                                   Predicate<RingInstanceDetails> predicate,
+                                                                   String errorMessage)
+    {
+        return awaitRing(instance,
+                         errorMessage,
+                         ring -> ring.stream()
+                                     .filter(d -> d.address.equals(getBroadcastAddressHostString(expectedInRing)))
+                                     .anyMatch(predicate));
     }
 
     /**
@@ -487,6 +584,63 @@ public class ClusterUtils
         });
     }
 
+    public static void awaitGossipSchemaMatch(ICluster<? extends  IInstance> cluster)
+    {
+        cluster.forEach(ClusterUtils::awaitGossipSchemaMatch);
+    }
+
+    public static void awaitGossipSchemaMatch(IInstance instance)
+    {
+        if (!instance.config().has(Feature.GOSSIP))
+        {
+            // when gosisp isn't enabled, don't bother waiting on gossip to settle...
+            return;
+        }
+        awaitGossip(instance, "Schema IDs did not match", all -> {
+            String current = null;
+            for (Map.Entry<String, Map<String, String>> e : all.entrySet())
+            {
+                Map<String, String> state = e.getValue();
+                // has the instance joined?
+                String status = state.get(ApplicationState.STATUS_WITH_PORT.name());
+                if (status == null)
+                    status = state.get(ApplicationState.STATUS.name());
+                if (status == null || !status.contains(VersionedValue.STATUS_NORMAL))
+                    continue; // ignore instances not joined yet
+                String schema = state.get("SCHEMA");
+                if (schema == null)
+                    throw new AssertionError("Unable to find schema for " + e.getKey() + "; status was " + status);
+                schema = schema.split(":")[1];
+
+                if (current == null)
+                {
+                    current = schema;
+                }
+                else if (!current.equals(schema))
+                {
+                    return false;
+                }
+            }
+            return true;
+        });
+    }
+
+    public static void awaitGossipStateMatch(ICluster<? extends  IInstance> cluster, IInstance expectedInGossip, ApplicationState key)
+    {
+        Set<String> matches = null;
+        for (int i = 0; i < 100; i++)
+        {
+            matches = cluster.stream().map(ClusterUtils::gossipInfo)
+                             .map(gi -> Objects.requireNonNull(gi.get(getBroadcastAddressString(expectedInGossip))))
+                             .map(m -> m.get(key.name()))
+                             .collect(Collectors.toSet());
+            if (matches.isEmpty() || matches.size() == 1)
+                return;
+            sleepUninterruptibly(1, TimeUnit.SECONDS);
+        }
+        throw new AssertionError("Expected ApplicationState." + key + " to match, but saw " + matches);
+    }
+
     /**
      * Get the gossip information from the node.  Currently only address, generation, and heartbeat are returned
      *
@@ -561,6 +715,17 @@ public class ClusterUtils
     }
 
     /**
+     * Get the number of tokens for the instance via config.
+     *
+     * @param instance to get token count from
+     * @return number of tokens
+     */
+    public static int getTokenCount(IInvokableInstance instance)
+    {
+        return instance.config().getInt("num_tokens");
+    }
+
+    /**
      * Get all data directories for the given instance.
      *
      * @param instance to get data directories for
@@ -576,6 +741,19 @@ public class ClusterUtils
         for (int i = 0; i < ds.length; i++)
             files.add(new File(ds[i]));
         return files;
+    }
+
+    /**
+     * Get the metadata directory where the information about nodes is stored.
+     *
+     * @param instance to get the metadata directory for
+     * @return metadata directory
+     */
+    public static File getMetadataDirectory(IInstance instance)
+    {
+        IInstanceConfig conf = instance.config();
+        String d = conf.getString("metadata_directory");
+        return new File(d);
     }
 
     /**
@@ -636,6 +814,7 @@ public class ClusterUtils
         out.add(getCommitLogDirectory(instance));
         out.add(getHintsDirectory(instance));
         out.add(getSavedCachesDirectory(instance));
+        // out.add(getMetadataDirectory(instance));
         return out;
     }
 
@@ -671,13 +850,33 @@ public class ClusterUtils
      */
     private static void updateAddress(IInstanceConfig conf, String address)
     {
+        InetSocketAddress previous = conf.broadcastAddress();
+
         for (String key : Arrays.asList("broadcast_address", "listen_address", "broadcast_rpc_address", "rpc_address"))
             conf.set(key, address);
 
         // InstanceConfig caches InetSocketAddress -> InetAddressAndPort
         // this causes issues as startup now ignores config, so force reset it to pull from conf.
         ((InstanceConfig) conf).unsetBroadcastAddressAndPort(); //TODO remove the need to null out the cache...
-        conf.networkTopology().put(conf.broadcastAddress(), NetworkTopology.dcAndRack(conf.localDatacenter(), conf.localRack()));
+
+        //TODO NetworkTopology class isn't flexible and doesn't handle adding/removing nodes well...
+        // it also uses a HashMap which makes the class not thread safe... so mutating AFTER starting nodes
+        // are a risk
+        if (!conf.broadcastAddress().equals(previous))
+        {
+            conf.networkTopology().put(conf.broadcastAddress(), NetworkTopology.dcAndRack(conf.localDatacenter(), conf.localRack()));
+            try
+            {
+                Field field = NetworkTopology.class.getDeclaredField("map");
+                field.setAccessible(true);
+                Map<InetSocketAddress, NetworkTopology.DcAndRack> map = (Map<InetSocketAddress, NetworkTopology.DcAndRack>) field.get(conf.networkTopology());
+                map.remove(previous);
+            }
+            catch (NoSuchFieldException | IllegalAccessException e)
+            {
+                throw new AssertionError(e);
+            }
+        }
     }
 
     /**
@@ -770,5 +969,64 @@ public class ClusterUtils
         {
             return Arrays.asList(address, rack, status, state, token).toString();
         }
+    }
+
+    public static void preventSystemExit()
+    {
+        System.setSecurityManager(new SecurityManager()
+        {
+            @Override
+            public void checkExit(int status)
+            {
+                throw new SystemExitException(status);
+            }
+
+            @Override
+            public void checkPermission(Permission perm)
+            {
+            }
+
+            @Override
+            public void checkPermission(Permission perm, Object context)
+            {
+            }
+        });
+    }
+
+    @Shared
+    public static class Range implements Serializable
+    {
+        public final String left, right;
+
+        public Range(String left, String right)
+        {
+            this.left = left;
+            this.right = right;
+        }
+
+        public Range(long left, long right)
+        {
+            this(Long.toString(left), Long.toString(right));
+        }
+
+        public long left()
+        {
+            return Long.parseLong(left);
+        }
+
+        public long right()
+        {
+            return Long.parseLong(right);
+        }
+    }
+
+    public static List<Range> getPrimaryRanges(IInvokableInstance instance, String keyspace)
+    {
+        return instance.callOnInstance(() -> {
+            var ranges = StorageService.instance.getPrimaryRangesForEndpoint(keyspace, FBUtilities.getBroadcastAddressAndPort());
+            return ranges.stream()
+                    .flatMap(r -> r.unwrap().stream().map(r2 -> new Range(r2.left.toString(), r2.right.toString())))
+                    .collect(Collectors.toList());
+        });
     }
 }

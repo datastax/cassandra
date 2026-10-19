@@ -21,27 +21,41 @@ package org.apache.cassandra.stress;
 import java.io.File;
 import java.io.IOError;
 import java.net.URI;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import io.airlift.airline.*;
+import io.airlift.airline.Cli;
+import io.airlift.airline.Command;
+import io.airlift.airline.Help;
+import io.airlift.airline.HelpOption;
+import io.airlift.airline.Option;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.StressCQLSSTableWriter;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.StressCQLSSTableWriter;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -52,8 +66,10 @@ import org.apache.cassandra.stress.generate.SeedManager;
 import org.apache.cassandra.stress.operations.userdefined.SchemaInsert;
 import org.apache.cassandra.stress.settings.StressSettings;
 import org.apache.cassandra.tools.nodetool.CompactionStats;
+import org.apache.cassandra.tools.nodetool.formatter.TableBuilder;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.concurrent.Future;
 
 /**
  * Tool that allows fast route to loading data for arbitrary schemas to disk
@@ -128,7 +144,7 @@ public abstract class CompactionStress implements Runnable
             for (Map.Entry<Descriptor, Set<Component>> entry : lister.list().entrySet())
             {
                 Set<Component> components = entry.getValue();
-                if (!components.contains(Component.DATA))
+                if (!components.contains(Components.DATA))
                     continue;
 
                 try
@@ -150,7 +166,7 @@ public abstract class CompactionStress implements Runnable
                 throw new IllegalStateException("CompactionStress does not support secondary indexes");
 
             //Register with cfs
-            cfs.addSSTables(sstables);
+            cfs.addSSTables(sstables, OperationType.COMPACTION);
         }
 
         return cfs;
@@ -212,14 +228,13 @@ public abstract class CompactionStress implements Runnable
         public void run()
         {
             //Setup
-            SystemKeyspace.finishStartup(); //needed for early-open
             CompactionManager.instance.setMaximumCompactorThreads(threads);
             CompactionManager.instance.setCoreCompactorThreads(threads);
-            CompactionManager.instance.setRate(0);
+            CompactionManager.instance.setRateInBytes(0);
 
             StressProfile stressProfile = getStressProfile();
             ColumnFamilyStore cfs = initCf(stressProfile, true);
-            cfs.getCompactionStrategyManager().compactionLogger.enable();
+            cfs.getCompactionStrategy().getCompactionLogger().enable();
 
             List<Future<?>> futures = new ArrayList<>(threads);
             if (maximal)
@@ -229,20 +244,20 @@ public abstract class CompactionStress implements Runnable
             else
             {
                 cfs.enableAutoCompaction();
-                cfs.getCompactionStrategyManager().enable();
+                cfs.getCompactionStrategyContainer().enable();
                 for (int i = 0; i < threads; i++)
-                    futures.addAll(CompactionManager.instance.submitBackground(cfs));
+                    futures.add(CompactionManager.instance.submitBackground(cfs));
             }
 
             long working;
             //Report compaction stats while working
-            while ((working = futures.stream().filter(f -> !f.isDone()).count()) > 0 || CompactionManager.instance.getActiveCompactions() > 0 || (!maximal && cfs.getCompactionStrategyManager().getEstimatedRemainingTasks() > 0))
+            while ((working = futures.stream().filter(f -> !f.isDone()).count()) > 0 || CompactionManager.instance.getActiveCompactions() > 0 || (!maximal && cfs.getCompactionStrategy().getEstimatedRemainingTasks() > 0))
             {
                 //Re-up any bg jobs
                 if (!maximal)
                 {
                     for (long i = working; i < threads; i++)
-                        futures.addAll(CompactionManager.instance.submitBackground(cfs));
+                        futures.add(CompactionManager.instance.submitBackground(cfs));
                 }
 
                 reportCompactionStats();
@@ -262,17 +277,17 @@ public abstract class CompactionStress implements Runnable
     {
         System.out.println("========");
         System.out.println(String.format("Pending compactions: %d\n", CompactionManager.instance.getPendingTasks()));
-        CompactionStats.reportCompactionTable(CompactionManager.instance.getCompactions(), 0, true, System.out);
+        CompactionStats.reportCompactionTable(CompactionManager.instance.getCompactions(), 0, true, System.out, new TableBuilder());
     }
 
 
     @Command(name = "write", description = "write data directly to disk")
     public static class DataWriter extends CompactionStress
     {
-        private static double BYTES_IN_GB = 1024 * 1014 * 1024;
+        private static double BYTES_IN_GIB = 1024 * 1014 * 1024;
 
         @Option(name = { "-g", "--gbsize"}, description = "Total GB size on disk you wish to write", required = true)
-        Integer totalSizeGb;
+        Integer totalSizeGiB;
 
         @Option(name = { "-t", "--threads" }, description = "Number of sstable writer threads (default 2)")
         Integer threads = 2;
@@ -280,7 +295,7 @@ public abstract class CompactionStress implements Runnable
         @Option(name = { "-c", "--partition-count"}, description = "Number of partitions to loop over (default 1000000)")
         Integer partitions = 1000000;
 
-        @Option(name = { "-b", "--buffer-size-mb"}, description = "Buffer in MB writes before writing new sstable (default 128)")
+        @Option(name = { "-b", "--buffer-size-mb"}, description = "Buffer in MiB writes before writing new sstable (default 128)")
         Integer bufferSize = 128;
 
         @Option(name = { "-r", "--range-aware"}, description = "Splits the local ranges in number of data directories and makes sure we never write the same token in two different directories (default true)")
@@ -322,13 +337,13 @@ public abstract class CompactionStress implements Runnable
                 });
             }
 
-            double currentSizeGB;
-            while ((currentSizeGB = directories.getRawDiretoriesSize() / BYTES_IN_GB) < totalSizeGb)
+            double currentSizeGiB;
+            while ((currentSizeGiB = directories.getRawDiretoriesSize() / BYTES_IN_GIB) < totalSizeGiB)
             {
                 if (finished.getCount() == 0)
                     break;
 
-                System.out.println(String.format("Written %.2fGB of %dGB", currentSizeGB, totalSizeGb));
+                System.out.println(String.format("Written %.2fGB of %dGB", currentSizeGiB, totalSizeGiB));
 
                 Uninterruptibles.sleepUninterruptibly(3, TimeUnit.SECONDS);
             }
@@ -336,8 +351,8 @@ public abstract class CompactionStress implements Runnable
             workManager.stop();
             Uninterruptibles.awaitUninterruptibly(finished);
 
-            currentSizeGB = directories.getRawDiretoriesSize() / BYTES_IN_GB;
-            System.out.println(String.format("Finished writing %.2fGB", currentSizeGB));
+            currentSizeGiB = directories.getRawDiretoriesSize() / BYTES_IN_GIB;
+            System.out.println(String.format("Finished writing %.2fGB", currentSizeGiB));
         }
     }
 

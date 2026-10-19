@@ -27,8 +27,10 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.net.Verb.GOSSIP_DIGEST_ACK2;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 public class GossipDigestAckVerbHandler extends GossipVerbHandler<GossipDigestAck>
 {
@@ -68,7 +70,7 @@ public class GossipDigestAckVerbHandler extends GossipVerbHandler<GossipDigestAc
             // Ignore any GossipDigestAck messages that we handle before a regular GossipDigestSyn has been send.
             // This will prevent Acks from leaking over from the shadow round that are not actual part of
             // the regular gossip conversation.
-            if ((System.nanoTime() - Gossiper.instance.firstSynSendAt) < 0 || Gossiper.instance.firstSynSendAt == 0)
+            if ((nanoTime() - Gossiper.instance.firstSynSendAt) < 0 || Gossiper.instance.firstSynSendAt == 0)
             {
                 if (logger.isTraceEnabled())
                     logger.trace("Ignoring unrequested GossipDigestAck from {}", from);
@@ -85,7 +87,9 @@ public class GossipDigestAckVerbHandler extends GossipVerbHandler<GossipDigestAc
         for (GossipDigest gDigest : gDigestList)
         {
             InetAddressAndPort addr = gDigest.getEndpoint();
-            EndpointState localEpStatePtr = Gossiper.instance.getStateForVersionBiggerThan(addr, gDigest.getMaxVersion());
+            // reply everything regardless of heartbeat if remote is asking about me, adding the flag check so we have the ability to rollback to OSS behavior
+            int maxVersion = FBUtilities.getBroadcastAddressAndPort().equals(addr) ? HeartBeatState.EMPTY_VERSION : gDigest.getMaxVersion();
+            EndpointState localEpStatePtr = Gossiper.instance.getStateForVersionBiggerThan(addr, maxVersion);
             if (localEpStatePtr != null)
                 deltaEpStateMap.put(addr, localEpStatePtr);
         }

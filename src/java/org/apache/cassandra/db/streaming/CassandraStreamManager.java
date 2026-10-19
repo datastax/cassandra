@@ -18,10 +18,19 @@
 
 package org.apache.cassandra.db.streaming;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Set;
+
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.lifecycle.SSTableIntervalTree;
@@ -30,6 +39,7 @@ import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -40,16 +50,11 @@ import org.apache.cassandra.streaming.StreamReceiver;
 import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.streaming.TableStreamManager;
 import org.apache.cassandra.streaming.messages.StreamMessageHeader;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.Refs;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import static org.apache.cassandra.db.lifecycle.SSTableIntervalTree.buildSSTableIntervalTree;
 
 /**
  * Implements the streaming interface for the native cassandra storage engine.
@@ -82,7 +87,7 @@ public class CassandraStreamManager implements TableStreamManager
     }
 
     @Override
-    public Collection<OutgoingStream> createOutgoingStreams(StreamSession session, RangesAtEndpoint replicas, UUID pendingRepair, PreviewKind previewKind)
+    public Collection<OutgoingStream> createOutgoingStreams(StreamSession session, RangesAtEndpoint replicas, TimeUUID pendingRepair, PreviewKind previewKind)
     {
         Refs<SSTableReader> refs = new Refs<>();
         try
@@ -92,7 +97,7 @@ public class CassandraStreamManager implements TableStreamManager
                 keyRanges.add(Range.makeRowRange(replica.range()));
             refs.addAll(cfs.selectAndReference(view -> {
                 Set<SSTableReader> sstables = Sets.newHashSet();
-                SSTableIntervalTree intervalTree = SSTableIntervalTree.build(view.select(SSTableSet.CANONICAL));
+                SSTableIntervalTree intervalTree = buildSSTableIntervalTree(ImmutableList.copyOf(view.select(SSTableSet.CANONICAL)));
                 Predicate<SSTableReader> predicate;
                 if (previewKind.isPreview())
                 {
@@ -104,7 +109,10 @@ public class CassandraStreamManager implements TableStreamManager
                 }
                 else
                 {
-                    predicate = s -> s.isPendingRepair() && s.getSSTableMetadata().pendingRepair.equals(pendingRepair);
+                    predicate = s -> {
+                        StatsMetadata sstableMetadata = s.getSSTableMetadata();
+                        return sstableMetadata.pendingRepair != ActiveRepairService.NO_PENDING_REPAIR && sstableMetadata.pendingRepair.equals(pendingRepair);
+                    };
                 }
 
                 for (Range<PartitionPosition> keyRange : keyRanges)
@@ -126,6 +134,9 @@ public class CassandraStreamManager implements TableStreamManager
                 return sstables;
             }).refs);
 
+            // This call is normally preceded by a memtable flush in StreamSession.addTransferRanges.
+            // Persistent memtables will not flush, make an sstable with their data.
+            cfs.writeAndAddMemtableRanges(session.getPendingRepair(), () -> Range.normalize(keyRanges), refs);
 
             List<Range<Token>> normalizedFullRanges = Range.normalize(replicas.onlyFull().ranges());
             List<Range<Token>> normalizedAllRanges = Range.normalize(replicas.ranges());
@@ -136,7 +147,7 @@ public class CassandraStreamManager implements TableStreamManager
                 List<Range<Token>> ranges = sstable.isRepaired() ? normalizedFullRanges : normalizedAllRanges;
                 List<SSTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges);
 
-                Ref<SSTableReader> ref = refs.get(sstable);
+                Ref<? extends SSTableReader> ref = refs.get(sstable);
                 if (sections.isEmpty())
                 {
                     ref.release();

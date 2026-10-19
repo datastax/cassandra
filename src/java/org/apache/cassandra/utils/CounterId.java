@@ -22,6 +22,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.cassandra.db.SystemKeyspace;
 
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUIDAsBytes;
+
 public class CounterId implements Comparable<CounterId>
 {
     public static final int LENGTH = 16; // we assume a fixed length size for all CounterIds
@@ -84,7 +86,7 @@ public class CounterId implements Comparable<CounterId>
 
     public static CounterId generate()
     {
-        return new CounterId(ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes()));
+        return new CounterId(ByteBuffer.wrap(nextTimeUUIDAsBytes()));
     }
 
     /*
@@ -136,7 +138,7 @@ public class CounterId implements Comparable<CounterId>
 
         LocalCounterIdHolder()
         {
-            current = new AtomicReference<>(wrap(ByteBufferUtil.bytes(SystemKeyspace.getLocalHostId())));
+            current = new AtomicReference<>(wrap(ByteBufferUtil.bytes(SystemKeyspace.getOrInitializeLocalHostId())));
         }
 
         CounterId get()

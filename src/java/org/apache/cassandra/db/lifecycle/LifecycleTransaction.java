@@ -17,36 +17,66 @@
  */
 package org.apache.cassandra.db.lifecycle;
 
-import java.io.File;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiPredicate;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
-import com.google.common.collect.*;
-
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.Runnables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader.UniqueIdentifier;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 import static com.google.common.base.Functions.compose;
-import static com.google.common.base.Predicates.*;
+import static com.google.common.base.Predicates.in;
 import static com.google.common.collect.ImmutableSet.copyOf;
-import static com.google.common.collect.Iterables.*;
+import static com.google.common.collect.Iterables.concat;
+import static com.google.common.collect.Iterables.getFirst;
+import static com.google.common.collect.Iterables.transform;
 import static java.util.Collections.singleton;
-import static org.apache.cassandra.db.lifecycle.Helpers.*;
+import static org.apache.cassandra.db.lifecycle.Helpers.abortObsoletion;
+import static org.apache.cassandra.db.lifecycle.Helpers.checkNotReplaced;
+import static org.apache.cassandra.db.lifecycle.Helpers.concatUniq;
+import static org.apache.cassandra.db.lifecycle.Helpers.emptySet;
+import static org.apache.cassandra.db.lifecycle.Helpers.filterIn;
+import static org.apache.cassandra.db.lifecycle.Helpers.filterOut;
+import static org.apache.cassandra.db.lifecycle.Helpers.markObsolete;
+import static org.apache.cassandra.db.lifecycle.Helpers.orIn;
+import static org.apache.cassandra.db.lifecycle.Helpers.prepareForObsoletion;
+import static org.apache.cassandra.db.lifecycle.Helpers.select;
+import static org.apache.cassandra.db.lifecycle.Helpers.selectFirst;
+import static org.apache.cassandra.db.lifecycle.Helpers.setReplaced;
 import static org.apache.cassandra.db.lifecycle.View.updateCompacting;
 import static org.apache.cassandra.db.lifecycle.View.updateLiveSet;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
+import static org.apache.cassandra.utils.Throwables.merge;
 import static org.apache.cassandra.utils.concurrent.Refs.release;
 import static org.apache.cassandra.utils.concurrent.Refs.selfRefs;
 
@@ -103,9 +133,9 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         }
     }
 
-    public final Tracker tracker;
+    private final Tracker tracker;
     // The transaction logs keep track of new and old sstable files
-    private final LogTransaction log;
+    private final AbstractLogTransaction log;
     // the original readers this transaction was opened over, and that it guards
     // (no other transactions may operate over these readers concurrently)
     private final Set<SSTableReader> originals = new HashSet<>();
@@ -122,61 +152,67 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     private final State staged = new State();
 
     // the tidier and their readers, to be used for marking readers obsoleted during a commit
-    private List<LogTransaction.Obsoletion> obsoletions;
+    private List<AbstractLogTransaction.Obsoletion> obsoletions;
 
     // commit/rollback hooks
     private List<Runnable> commitHooks = new ArrayList<>();
     private List<Runnable> abortHooks = new ArrayList<>();
 
     /**
-     * construct a Transaction for use in an offline operation
+     * Creates a new unique id that is suitable for a transaction.
      */
-    public static LifecycleTransaction offline(OperationType operationType, SSTableReader reader)
+    public static TimeUUID newId()
     {
-        return offline(operationType, singleton(reader));
+        return TimeUUID.Generator.nextTimeUUID();
     }
 
     /**
      * construct a Transaction for use in an offline operation
      */
-    public static LifecycleTransaction offline(OperationType operationType, Iterable<SSTableReader> readers)
+    public static LifecycleTransaction offline(OperationType operationType, SSTableReader reader)
+    {
+        return offline(operationType, reader.metadataRef(), singleton(reader));
+    }
+
+    /**
+     * construct a Transaction for use in an offline operation
+     */
+    public static LifecycleTransaction offline(OperationType operationType, TableMetadataRef metadata, Collection<SSTableReader> readers)
     {
         // if offline, for simplicity we just use a dummy tracker
-        Tracker dummy = new Tracker(null, false);
+        Tracker dummy = Tracker.newDummyTracker(metadata);
         dummy.addInitialSSTables(readers);
         dummy.apply(updateCompacting(emptySet(), readers));
-        return new LifecycleTransaction(dummy, operationType, readers);
+        return new LifecycleTransaction(dummy, operationType, readers, newId());
     }
 
     /**
      * construct an empty Transaction with no existing readers
      */
-    @SuppressWarnings("resource") // log closed during postCleanup
-    public static LifecycleTransaction offline(OperationType operationType)
+    public static LifecycleTransaction offline(OperationType operationType, TableMetadataRef metadata)
     {
-        Tracker dummy = new Tracker(null, false);
-        return new LifecycleTransaction(dummy, new LogTransaction(operationType, dummy), Collections.emptyList());
+        Tracker dummy = Tracker.newDummyTracker(metadata);
+        return new LifecycleTransaction(dummy, operationType, Collections.emptyList(), newId());
     }
 
-    @SuppressWarnings("resource") // log closed during postCleanup
-    LifecycleTransaction(Tracker tracker, OperationType operationType, Iterable<SSTableReader> readers)
-    {
-        this(tracker, new LogTransaction(operationType, tracker), readers);
-    }
-
-    LifecycleTransaction(Tracker tracker, LogTransaction log, Iterable<SSTableReader> readers)
+    @VisibleForTesting
+    public LifecycleTransaction(Tracker tracker,
+                                OperationType operationType,
+                                Iterable<? extends SSTableReader> readers,
+                                TimeUUID uuid)
     {
         this.tracker = tracker;
-        this.log = log;
+        this.log = ILogTransactionsFactory.instance.createLogTransaction(operationType, uuid, tracker.metadata);
         for (SSTableReader reader : readers)
         {
             originals.add(reader);
             marked.add(reader);
             identities.add(reader.instanceId);
         }
+        logger.debug("LifecycleTransaction {} created", uuid);
     }
 
-    public LogTransaction log()
+    public AbstractLogTransaction log()
     {
         return log;
     }
@@ -184,10 +220,10 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     @Override //LifecycleNewTracker
     public OperationType opType()
     {
-        return log.type();
+        return log.opType();
     }
 
-    public UUID opId()
+    public TimeUUID opId()
     {
         return log.id();
     }
@@ -202,7 +238,14 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
 
         // prepare for compaction obsolete readers as long as they were part of the original set
         // since those that are not original are early readers that share the same desc with the finals
-        maybeFail(prepareForObsoletion(filterIn(logged.obsolete, originals), log, obsoletions = new ArrayList<>(), null));
+        maybeFail(prepareForObsoletion(filterIn(logged.obsolete, originals), log, obsoletions = new ArrayList<>(), tracker, null));
+
+        // Use original sstables instead of logged.obsolete which may change their starting position due to early-open
+        Set<SSTableReader> obsolete = Sets.newHashSet(filterIn(originals, logged.obsolete));
+        log.validate(obsolete, logged.update);
+
+        // This needs to be called after checkpoint and having prepared the obsoletions because it will upload the deletion
+        // marks in CNDB
         log.prepareToCommit();
     }
 
@@ -230,7 +273,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         accumulate = tracker.updateSizeTracking(logged.obsolete, logged.update, accumulate);
         accumulate = runOnCommitHooks(accumulate);
         accumulate = release(selfRefs(logged.obsolete), accumulate);
-        accumulate = tracker.notifySSTablesChanged(originals, logged.update, log.type(), accumulate);
+        accumulate = tracker.notifySSTablesChanged(originals, logged.update, log.opType(), Optional.of(log.id()), accumulate);
 
         return accumulate;
     }
@@ -253,7 +296,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         Iterable<SSTableReader> obsolete = filterOut(concatUniq(staged.update, logged.update), originals);
         logger.trace("Obsoleting {}", obsolete);
 
-        accumulate = prepareForObsoletion(obsolete, log, obsoletions = new ArrayList<>(), accumulate);
+        accumulate = prepareForObsoletion(obsolete, log, obsoletions = new ArrayList<>(), tracker, accumulate);
         // it's safe to abort even if committed, see maybeFail in doCommit() above, in this case it will just report
         // a failure to abort, which is useful information to have for debug
         accumulate = log.abort(accumulate);
@@ -263,7 +306,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         List<SSTableReader> restored = restoreUpdatedOriginals();
         List<SSTableReader> invalid = Lists.newArrayList(Iterables.concat(logged.update, logged.obsolete));
         accumulate = tracker.apply(updateLiveSet(logged.update, restored), accumulate);
-        accumulate = tracker.notifySSTablesChanged(invalid, restored, OperationType.COMPACTION, accumulate);
+        accumulate = tracker.notifySSTablesChanged(invalid, restored, OperationType.COMPACTION, Optional.of(log.id()), accumulate);
         // setReplaced immediately preceding versions that have not been obsoleted
         accumulate = setReplaced(logged.update, accumulate);
         accumulate = runOnAbortooks(accumulate);
@@ -307,13 +350,21 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     @Override
     protected Throwable doPostCleanup(Throwable accumulate)
     {
-        log.close();
-        return unmarkCompacting(marked, accumulate);
+        accumulate = Throwables.close(accumulate, log);
+        accumulate = unmarkCompacting(marked, accumulate);
+        logger.debug("LifecycleTransaction {} finalized", opId());
+        return accumulate;
     }
 
     public boolean isOffline()
     {
         return tracker.isDummy();
+    }
+
+    @VisibleForTesting
+    public void unsafeClose()
+    {
+        log.close();
     }
 
     /**
@@ -339,6 +390,10 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         // check the current versions of the readers we're replacing haven't somehow been replaced by someone else
         checkNotReplaced(filterIn(toUpdate, staged.update));
 
+        // notify the tracker of the new readers are about to be added and visible
+        if (!fresh.isEmpty())
+            accumulate = merge(accumulate, tracker.notifyAdding(fresh, null, null, opType(), Optional.of(opId())));
+
         // ensure any new readers are in the compacting set, since we aren't done with them yet
         // and don't want anyone else messing with them
         // apply atomically along with updating the live set of readers
@@ -358,10 +413,27 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         return accumulate;
     }
 
+    /**
+     * Rolls back the changes staged since the last {@link #checkpoint()} (not a prepared or logged state): releases
+     * the readers staged with {@link #update} and forgets the staged obsoletions. See
+     * {@link ILifecycleTransaction#abortCheckpoint}.
+     */
+    public Throwable abortCheckpoint(Throwable accumulate)
+    {
+        // Release the references of newly-prepared SSTableReaders that will not be used.
+        accumulate = release(selfRefs(staged.update), accumulate);
+
+        staged.clear();
+        // We may have added some sstable states in the identities list, which we aren't removing. This is fine, the
+        // next time we try to checkpoint we will use different readers.
+        return accumulate;
+    }
 
     /**
      * update a reader: if !original, this is a reader that is being introduced by this transaction;
-     * otherwise it must be in the originals() set, i.e. a reader guarded by this transaction
+     * otherwise it must be in the originals() set, i.e. a reader guarded by this transaction.
+     * <p>
+     * If this throws, nothing has been staged and the caller keeps the ownership of the reader's reference.
      */
     public void update(SSTableReader reader, boolean original)
     {
@@ -370,10 +442,11 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         // check it isn't obsolete, and that it matches the original flag
         assert !(logged.obsolete.contains(reader) || staged.obsolete.contains(reader)) : "may not update a reader that has been obsoleted";
         assert original == originals.contains(reader) : String.format("the 'original' indicator was incorrect (%s provided): %s", original, reader);
-        staged.update.add(reader);
-        identities.add(reader.instanceId);
+        // before staging, so that a failure leaves nothing staged
         if (!isOffline())
             reader.setupOnline();
+        staged.update.add(reader);
+        identities.add(reader.instanceId);
     }
 
     public void update(Collection<SSTableReader> readers, boolean original)
@@ -455,7 +528,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     private List<SSTableReader> restoreUpdatedOriginals()
     {
         Iterable<SSTableReader> torestore = filterIn(originals, logged.update, logged.obsolete);
-        return ImmutableList.copyOf(transform(torestore, (reader) -> current(reader).cloneWithRestoredStart(reader.first)));
+        return ImmutableList.copyOf(transform(torestore, (reader) -> current(reader).cloneWithRestoredStart(reader.getFirst())));
     }
 
     /**
@@ -532,7 +605,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
             originals.remove(reader);
             marked.remove(reader);
         }
-        return new LifecycleTransaction(tracker, log.type(), readers);
+        return new LifecycleTransaction(tracker, log.opType(), readers, newId());
     }
 
     /**
@@ -552,11 +625,12 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         // when the CFS is invalidated, it will call unreferenceSSTables().  However, unreferenceSSTables only deals
         // with sstables that aren't currently being compacted.  If there are ongoing compactions that finish or are
         // interrupted after the CFS is invalidated, those sstables need to be unreferenced as well, so we do that here.
-        accumulate = tracker.dropSSTablesIfInvalid(accumulate);
+        accumulate = tracker.dropOrUnloadSSTablesIfInvalid("for transaction " + log.id(), accumulate);
         return accumulate;
     }
 
     // convenience method for callers that know only one sstable is involved in the transaction
+    // overridden to avoid defensive copying
     public SSTableReader onlyOne()
     {
         assert originals.size() == 1;
@@ -572,6 +646,18 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     }
 
     @Override
+    public void trackNewWritten(SSTable table)
+    {
+        log.trackNewWritten(table);
+    }
+
+    @Override
+    public void trackNewAttachedIndexFiles(SSTable table)
+    {
+        log.trackNewAttachedIndexFiles(table);
+    }
+
+    @Override
     public void untrackNew(SSTable table)
     {
         log.untrackNew(table);
@@ -579,12 +665,36 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
 
     public static boolean removeUnfinishedLeftovers(ColumnFamilyStore cfs)
     {
-        return LogTransaction.removeUnfinishedLeftovers(cfs.getDirectories().getCFDirectories());
+        return removeUnfinishedLeftovers(cfs.getDirectories().getCFDirectories());
     }
 
+    /**
+     * Removes any leftovers from unifinished transactions as indicated by any transaction log files that
+     * are found in the table directories. This means that any old sstable files for transactions that were committed,
+     * or any new sstable files for transactions that were aborted or still in progress, should be removed *if
+     * it is safe to do so*. Refer to the checks in LogFile.verify for further details on the safety checks
+     * before removing transaction leftovers and refer to the comments at the beginning of this file or in NEWS.txt
+     * for further details on transaction logs.
+     *
+     * This method is called on startup and by the standalone sstableutil tool when the cleanup option is specified,
+     * @see org.apache.cassandra.tools.StandaloneSSTableUtil
+     *
+     * @return true if the leftovers of all transaction logs found were removed, false otherwise.
+     *
+     */
     public static boolean removeUnfinishedLeftovers(TableMetadata metadata)
     {
-        return LogTransaction.removeUnfinishedLeftovers(metadata);
+        return removeUnfinishedLeftovers(new Directories(metadata).getCFDirectories());
+    }
+
+    public static boolean removeUnfinishedLeftovers(List<File> directories)
+    {
+        // List<Path> directories
+        ILogFileCleaner cleaner = ILogTransactionsFactory.instance.createLogFileCleaner();
+        for (File dir : directories)
+            cleaner.list(dir);
+
+        return cleaner.removeUnfinishedLeftovers();
     }
 
     /**
@@ -601,7 +711,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
      */
     public static List<File> getFiles(Path folder, BiPredicate<File, Directories.FileType> filter, Directories.OnTxnErr onTxnErr)
     {
-        return new LogAwareFileLister(folder, filter, onTxnErr).list();
+        return ILogTransactionsFactory.instance.createLogAwareFileLister().list(folder, filter, onTxnErr);
     }
 
     /**
@@ -610,7 +720,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
      */
     public static void rescheduleFailedDeletions()
     {
-        LogTransaction.rescheduleFailedDeletions();
+        ILogTransactionsFactory.instance.createFailedTransactionDeletionHandler().rescheduleFailedDeletions();
     }
 
     /**
@@ -619,7 +729,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
      */
     public static void waitForDeletions()
     {
-        LogTransaction.waitForDeletions();
+        FBUtilities.waitOnFuture(ScheduledExecutors.nonPeriodicTasks.schedule(Runnables.doNothing(), 0, TimeUnit.MILLISECONDS));
     }
 
     // a class representing the current state of the reader within this transaction, encoding the actions both logged

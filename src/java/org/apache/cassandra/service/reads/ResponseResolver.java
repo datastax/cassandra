@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.service.reads;
 
+import java.util.function.Supplier;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,25 +27,27 @@ import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.concurrent.Accumulator;
 
-public abstract class ResponseResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>>
+public abstract class ResponseResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
 {
     protected static final Logger logger = LoggerFactory.getLogger(ResponseResolver.class);
 
     protected final ReadCommand command;
-    protected final ReplicaPlan.Shared<E, P> replicaPlan;
+    // TODO: this doesn't need to be a full ReplicaPlan; just a replica collection
+    protected final Supplier<? extends P> replicaPlan;
 
     // Accumulator gives us non-blocking thread-safety with optimal algorithmic constraints
     protected final Accumulator<Message<ReadResponse>> responses;
-    protected final long queryStartNanoTime;
+    protected final Dispatcher.RequestTime requestTime;
 
-    public ResponseResolver(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
+    public ResponseResolver(ReadCommand command, Supplier<? extends P> replicaPlan, Dispatcher.RequestTime requestTime)
     {
         this.command = command;
         this.replicaPlan = replicaPlan;
-        this.responses = new Accumulator<>(replicaPlan.get().candidates().size());
-        this.queryStartNanoTime = queryStartNanoTime;
+        this.responses = new Accumulator<>(replicaPlan.get().readCandidates().size());
+        this.requestTime = requestTime;
     }
 
     protected P replicaPlan()

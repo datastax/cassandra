@@ -24,9 +24,15 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import com.google.common.base.Joiner;
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+import org.awaitility.Awaitility;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -41,16 +47,15 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.awaitility.Awaitility;
 
 import static org.apache.cassandra.Util.throwAssert;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
@@ -58,6 +63,12 @@ import static org.junit.Assert.fail;
  */
 public class CassandraIndexTest extends CQLTester
 {
+    @BeforeClass
+    public static void setup()
+    {
+        StorageService.instance.initServer(); // Ensure the node has advanced out of STARTING mode
+    }
+
     @Test
     public void indexOnRegularColumn() throws Throwable
     {
@@ -426,7 +437,7 @@ public class CassandraIndexTest extends CQLTester
         Object[] row2 = row("k0", "c1");
         Object[] row3 = row("k1", "c0");
         Object[] row4 = row("k1", "c1");
-        String tableName = createTable("CREATE TABLE %s (k text, c text, PRIMARY KEY(k, c))");
+        createTable("CREATE TABLE %s (k text, c text, PRIMARY KEY(k, c))");
         createIndex("CREATE INDEX no_regulars_idx ON %s(c)");
 
         execute("INSERT INTO %s (k, c) VALUES (?, ?)", row1);
@@ -440,7 +451,6 @@ public class CassandraIndexTest extends CQLTester
 
         dropIndex("DROP INDEX %s.no_regulars_idx");
         createIndex("CREATE INDEX no_regulars_idx ON %s(c)");
-        assertTrue(waitForIndex(keyspace(), tableName, "no_regulars_idx"));
 
         assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE c = ?", "c0"), row1, row3);
         assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE c = ?", "c1"), row2, row4);
@@ -482,6 +492,7 @@ public class CassandraIndexTest extends CQLTester
     @Test
     public void updateTTLOnIndexedClusteringValue() throws Throwable
     {
+        Util.assumeLegacySecondaryIndex();
         int basePk = 1;
         int indexedVal = 2;
         int initialTtl = 3600;
@@ -569,26 +580,25 @@ public class CassandraIndexTest extends CQLTester
         Awaitility.await()
                   .atMost(1, TimeUnit.MINUTES)
                   .pollDelay(1, TimeUnit.SECONDS)
-                  .untilAsserted(() -> assertRows(execute(selectBuiltIndexesQuery)));
+                  .untilAsserted(() -> assertRows(execute(selectBuiltIndexesQuery), row("system", "PaxosUncommittedIndex", null)));
 
         String indexName = "build_remove_test_idx";
-        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
         createIndex(String.format("CREATE INDEX %s ON %%s(c)", indexName));
-        waitForIndex(KEYSPACE, tableName, indexName);
 
         // check that there are no other rows in the built indexes table
-        assertRows(execute(selectBuiltIndexesQuery), row(KEYSPACE, indexName, null));
+        assertRows(execute(selectBuiltIndexesQuery), row(KEYSPACE, indexName, null), row("system", "PaxosUncommittedIndex", null));
 
         // rebuild the index and verify the built status table
         getCurrentColumnFamilyStore().rebuildSecondaryIndex(indexName);
-        waitForIndex(KEYSPACE, tableName, indexName);
+        waitForIndexQueryable(indexName);
 
         // check that there are no other rows in the built indexes table
-        assertRows(execute(selectBuiltIndexesQuery), row(KEYSPACE, indexName, null));
+        assertRows(execute(selectBuiltIndexesQuery), row(KEYSPACE, indexName, null), row("system", "PaxosUncommittedIndex", null));
 
         // check that dropping the index removes it from the built indexes table
         dropIndex("DROP INDEX %s." + indexName);
-        assertRows(execute(selectBuiltIndexesQuery));
+        assertRows(execute(selectBuiltIndexesQuery), row("system", "PaxosUncommittedIndex", null));
     }
 
 

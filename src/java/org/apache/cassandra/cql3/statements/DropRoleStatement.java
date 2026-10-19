@@ -51,6 +51,7 @@ public class DropRoleStatement extends AuthenticationStatement
             throw new UnauthorizedException("Only superusers can drop a role with superuser status");
     }
 
+    @Override
     public void validate(ClientState state) throws RequestValidationException
     {
         // validate login here before authorize to avoid leaking user existence to anonymous users.
@@ -75,6 +76,8 @@ public class DropRoleStatement extends AuthenticationStatement
         DatabaseDescriptor.getAuthorizer().revokeAllFrom(role);
         DatabaseDescriptor.getAuthorizer().revokeAllOn(role);
         DatabaseDescriptor.getNetworkAuthorizer().drop(role);
+        if (!DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+            DatabaseDescriptor.getCIDRAuthorizer().dropCidrPermissionsForRole(role);
         return null;
     }
     

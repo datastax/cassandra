@@ -19,18 +19,22 @@ package org.apache.cassandra.hints;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.Queue;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.CRC32;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksum;
@@ -52,10 +56,9 @@ final class HintsBuffer
 {
     // hint entry overhead in bytes (int length, int length checksum, int body checksum)
     static final int ENTRY_OVERHEAD_SIZE = 12;
-    static final int CLOSED = -1;
 
     private final ByteBuffer slab; // the underlying backing ByteBuffer for all the serialized hints
-    private final AtomicInteger position; // the position in the slab that we currently allocate from
+    private final AtomicLong position; // the position in the slab that we currently allocate from
 
     private final ConcurrentMap<UUID, Queue<Integer>> offsets;
     private final OpOrder appendOrder;
@@ -64,7 +67,7 @@ final class HintsBuffer
     {
         this.slab = slab;
 
-        position = new AtomicInteger();
+        position = new AtomicLong();
         offsets = new ConcurrentHashMap<>();
         appendOrder = new OpOrder();
     }
@@ -76,7 +79,7 @@ final class HintsBuffer
 
     boolean isClosed()
     {
-        return position.get() == CLOSED;
+        return position.get() < 0;
     }
 
     int capacity()
@@ -86,8 +89,8 @@ final class HintsBuffer
 
     int remaining()
     {
-        int pos = position.get();
-        return pos == CLOSED ? 0 : capacity() - pos;
+        long pos = position.get();
+        return (int) (pos < 0 ? 0 : Math.max(0, capacity() - pos));
     }
 
     HintsBuffer recycle()
@@ -124,7 +127,7 @@ final class HintsBuffer
         if (bufferOffsets == null)
             return Collections.emptyIterator();
 
-        return new AbstractIterator<ByteBuffer>()
+        return new AbstractIterator<>()
         {
             private final ByteBuffer flyweight = slab.duplicate();
 
@@ -137,12 +140,11 @@ final class HintsBuffer
 
                 int totalSize = slab.getInt(offset) + ENTRY_OVERHEAD_SIZE;
 
-                return (ByteBuffer) flyweight.clear().position(offset).limit(offset + totalSize);
+                return flyweight.clear().position(offset).limit(offset + totalSize);
             }
         };
     }
 
-    @SuppressWarnings("resource")
     Allocation allocate(int hintSize)
     {
         int totalSize = hintSize + ENTRY_OVERHEAD_SIZE;
@@ -177,25 +179,21 @@ final class HintsBuffer
         return new Allocation(offset, totalSize, opGroup);
     }
 
+    // allocate bytes in the slab, or return negative if not enough space
     private int allocateBytes(int totalSize)
     {
-        while (true)
+        long prev = position.getAndAdd(totalSize);
+
+        if (prev < 0) // the slab has been 'closed'
+            return -1;
+
+        if ((prev + totalSize) > slab.capacity())
         {
-            int prev = position.get();
-            int next = prev + totalSize;
-
-            if (prev == CLOSED) // the slab has been 'closed'
-                return CLOSED;
-
-            if (next > slab.capacity())
-            {
-                position.set(CLOSED); // mark the slab as no longer allocating if we've exceeded its capacity
-                return CLOSED;
-            }
-
-            if (position.compareAndSet(prev, next))
-                return prev;
+            position.set(Long.MIN_VALUE); // mark the slab as no longer allocating if we've exceeded its capacity
+            return -1;
         }
+
+        return (int)prev;
     }
 
     private void put(UUID hostId, int offset)
@@ -238,7 +236,7 @@ final class HintsBuffer
 
         private void write(Hint hint)
         {
-            ByteBuffer buffer = (ByteBuffer) slab.duplicate().position(offset).limit(offset + totalSize);
+            ByteBuffer buffer = slab.duplicate().position(offset).limit(offset + totalSize);
             CRC32 crc = new CRC32();
             int hintSize = totalSize - ENTRY_OVERHEAD_SIZE;
             try (DataOutputBuffer dop = new DataOutputBufferFixed(buffer))
@@ -247,7 +245,7 @@ final class HintsBuffer
                 updateChecksumInt(crc, hintSize);
                 dop.writeInt((int) crc.getValue());
 
-                Hint.serializer.serialize(hint, dop, MessagingService.current_version);
+                Hint.serializer.serialize(hint, dop, StorageCompatibilityMode.current().storageMessagingVersion());
                 updateChecksum(crc, buffer, buffer.position() - hintSize, hintSize);
                 dop.writeInt((int) crc.getValue());
             }

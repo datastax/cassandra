@@ -17,22 +17,32 @@
  */
 package org.apache.cassandra.hints;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Files;
 import java.util.*;
 
 import com.google.common.collect.ImmutableMap;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
-import org.junit.BeforeClass;
-import org.junit.Test;
 
-import static junit.framework.Assert.*;
+import org.junit.BeforeClass;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import static org.hamcrest.Matchers.greaterThan;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
+
 import static org.apache.cassandra.Util.dk;
 
 public class HintsCatalogTest
@@ -54,18 +64,14 @@ public class HintsCatalogTest
                 SchemaLoader.standardCFMD(KEYSPACE, TABLE2));
     }
 
+    @Rule
+    public TemporaryFolder testFolder = new TemporaryFolder();
+
     @Test
     public void loadCompletenessAndOrderTest() throws IOException
     {
-        File directory = Files.createTempDirectory(null).toFile();
-        try
-        {
-            loadCompletenessAndOrderTest(directory);
-        }
-        finally
-        {
-            directory.deleteOnExit();
-        }
+        File directory = new File(testFolder.newFolder());
+        loadCompletenessAndOrderTest(directory);
     }
 
     private void loadCompletenessAndOrderTest(File directory) throws IOException
@@ -73,10 +79,10 @@ public class HintsCatalogTest
         UUID hostId1 = UUID.randomUUID();
         UUID hostId2 = UUID.randomUUID();
 
-        long timestamp1 = System.currentTimeMillis();
-        long timestamp2 = System.currentTimeMillis() + 1;
-        long timestamp3 = System.currentTimeMillis() + 2;
-        long timestamp4 = System.currentTimeMillis() + 3;
+        long timestamp1 = Clock.Global.currentTimeMillis();
+        long timestamp2 = Clock.Global.currentTimeMillis() + 1;
+        long timestamp3 = Clock.Global.currentTimeMillis() + 2;
+        long timestamp4 = Clock.Global.currentTimeMillis() + 3;
 
         HintsDescriptor descriptor1 = new HintsDescriptor(hostId1, timestamp1);
         HintsDescriptor descriptor2 = new HintsDescriptor(hostId2, timestamp3);
@@ -90,6 +96,11 @@ public class HintsCatalogTest
 
         HintsCatalog catalog = HintsCatalog.load(directory, ImmutableMap.of());
         assertEquals(2, catalog.stores().count());
+
+        // verify hint data size is set for descriptors created from local hint files
+        catalog.stores()
+               .flatMap(HintsStore::descriptors)
+               .forEach(desc -> assertTrue(desc.getDataSize() > 0));
 
         HintsStore store1 = catalog.get(hostId1);
         assertNotNull(store1);
@@ -105,12 +116,44 @@ public class HintsCatalogTest
     }
 
     @Test
+    public void multipleHostsHintsTotalSizeTest() throws IOException
+    {
+        File directory = new File(testFolder.newFolder());
+        HintsCatalog catalog = HintsCatalog.load(directory, ImmutableMap.of());
+
+        long totalSize = 0;
+        int hosts = 10;
+        int filePerHost = 5;
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < hosts; i++)
+        {
+            long sizePerHost = 0;
+            UUID hostId = UUID.randomUUID();
+            HintsStore store = catalog.get(hostId);
+            assertEquals(sizePerHost, store.getTotalFileSize());
+            for (int f = 0; f < filePerHost; f++)
+            {
+                HintsDescriptor descriptor = new HintsDescriptor(hostId, now + f);
+                writeDescriptor(directory, descriptor);
+                store.offerLast(descriptor);
+
+                assertTrue(descriptor.getDataSize() > 0);
+                sizePerHost += descriptor.getDataSize();
+            }
+            totalSize += sizePerHost;
+            assertEquals(sizePerHost, store.getTotalFileSize());
+        }
+
+        assertEquals(totalSize, catalog.stores().mapToLong(HintsStore::getTotalFileSize).sum());
+    }
+
+    @Test
     public void deleteHintsTest() throws IOException
     {
-        File directory = Files.createTempDirectory(null).toFile();
+        File directory = new File(testFolder.newFolder());
         UUID hostId1 = UUID.randomUUID();
         UUID hostId2 = UUID.randomUUID();
-        long now = System.currentTimeMillis();
+        long now = Clock.Global.currentTimeMillis();
         writeDescriptor(directory, new HintsDescriptor(hostId1, now));
         writeDescriptor(directory, new HintsDescriptor(hostId1, now + 1));
         writeDescriptor(directory, new HintsDescriptor(hostId2, now + 2));
@@ -138,14 +181,25 @@ public class HintsCatalogTest
     @Test
     public void exciseHintFiles() throws IOException
     {
-        File directory = Files.createTempDirectory(null).toFile();
-        try
+        File directory = new File(testFolder.newFolder());
+        exciseHintFiles(directory);
+    }
+
+    @Test
+    public void emptyHintsTotalSizeTest() throws IOException
+    {
+        File directory = new File(testFolder.newFolder());
+        UUID hostId = UUID.randomUUID();
+        long totalSize = 0;
+        HintsCatalog catalog = HintsCatalog.load(directory, ImmutableMap.of());
+        HintsStore store = catalog.get(hostId);
+        assertEquals(totalSize, store.getTotalFileSize());
+        for (int i = 0; i < 3; i++)
         {
-            exciseHintFiles(directory);
-        }
-        finally
-        {
-            directory.deleteOnExit();
+            store.getOrOpenWriter();
+            store.closeWriter();
+            assertTrue("Even empty hint files should occupy some space as descriptor is written",
+                       store.getTotalFileSize() > 0);
         }
     }
 
@@ -153,10 +207,10 @@ public class HintsCatalogTest
     {
         UUID hostId = UUID.randomUUID();
 
-        HintsDescriptor descriptor1 = new HintsDescriptor(hostId, System.currentTimeMillis());
-        HintsDescriptor descriptor2 = new HintsDescriptor(hostId, System.currentTimeMillis() + 1);
-        HintsDescriptor descriptor3 = new HintsDescriptor(hostId, System.currentTimeMillis() + 2);
-        HintsDescriptor descriptor4 = new HintsDescriptor(hostId, System.currentTimeMillis() + 3);
+        HintsDescriptor descriptor1 = new HintsDescriptor(hostId, Clock.Global.currentTimeMillis());
+        HintsDescriptor descriptor2 = new HintsDescriptor(hostId, Clock.Global.currentTimeMillis() + 1);
+        HintsDescriptor descriptor3 = new HintsDescriptor(hostId, Clock.Global.currentTimeMillis() + 2);
+        HintsDescriptor descriptor4 = new HintsDescriptor(hostId, Clock.Global.currentTimeMillis() + 3);
 
         createHintFile(directory, descriptor1);
         createHintFile(directory, descriptor2);
@@ -227,5 +281,7 @@ public class HintsCatalogTest
                 session.append(hint);
             }
         }
+
+        assertThat(descriptor.hintsFileSize(directory), greaterThan(0L));
     }
 }

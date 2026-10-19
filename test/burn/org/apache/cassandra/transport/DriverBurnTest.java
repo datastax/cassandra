@@ -19,33 +19,46 @@
 package org.apache.cassandra.transport;
 
 import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-import org.apache.commons.math.stat.descriptive.DescriptiveStatistics;
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.datastax.driver.core.*;
+import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.ProtocolOptions;
+import com.datastax.driver.core.ResultSetFuture;
+import com.datastax.driver.core.Row;
+import com.datastax.driver.core.Session;
+import com.datastax.driver.core.SimpleStatement;
 import io.netty.buffer.ByteBuf;
-import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.QueryMessage;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.AssertUtil;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import static org.apache.cassandra.config.EncryptionOptions.TlsEncryptionPolicy.UNENCRYPTED;
 import static org.apache.cassandra.transport.BurnTestUtil.SizeCaps;
 import static org.apache.cassandra.transport.BurnTestUtil.generateQueryMessage;
 import static org.apache.cassandra.transport.BurnTestUtil.generateQueryStatement;
 import static org.apache.cassandra.transport.BurnTestUtil.generateRows;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class DriverBurnTest extends CQLTester
@@ -63,7 +76,7 @@ public class DriverBurnTest extends CQLTester
             }
         };
 
-        requireNetwork((builder) -> builder.withPipelineConfigurator(configurator));
+        requireNetwork(builder -> builder.withPipelineConfigurator(configurator), builder -> {});
     }
 
     @Test
@@ -78,18 +91,20 @@ public class DriverBurnTest extends CQLTester
             {
                 QueryMessage queryMessage = QueryMessage.codec.decode(body, version);
                 return new QueryMessage(queryMessage.query, queryMessage.options) {
-                    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+
+                    @Override
+                    protected Future<Response> maybeExecuteAsync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
                     {
                         try
                         {
                             int idx = Integer.parseInt(queryMessage.query);
                             SizeCaps caps = idx % largeMessageFrequency == 0 ? largeMessageCap : smallMessageCap;
-                            return generateRows(idx, caps);
+                            return ImmediateFuture.success(generateRows(idx, caps));
                         }
                         catch (NumberFormatException e)
                         {
                             // for the requests driver issues under the hood
-                            return super.execute(state, queryStartNanoTime, traceRequest);
+                            return super.maybeExecuteAsync(state, requestTime, traceRequest);
                         }
                     }
                 };
@@ -185,13 +200,25 @@ public class DriverBurnTest extends CQLTester
     }
 
     @Test
-    public void measureSmallV5() throws Throwable
+    public void measureSmallV6() throws Throwable
     {
         perfTest(new SizeCaps(10, 20, 5, 10),
                  new SizeCaps(10, 20, 5, 10),
                  Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
                         .allowBetaProtocolVersion()
-                        .withPort(nativePort));
+                        .withPort(nativePort),
+                 ProtocolVersion.V6);
+    }
+
+    @Test
+    public void measureSmallV5() throws Throwable
+    {
+        perfTest(new SizeCaps(10, 20, 5, 10),
+                 new SizeCaps(10, 20, 5, 10),
+                 Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
+                        .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.V5)
+                        .withPort(nativePort),
+                 ProtocolVersion.V5);
     }
 
     @Test
@@ -201,7 +228,19 @@ public class DriverBurnTest extends CQLTester
                  new SizeCaps(10, 20, 5, 10),
                  Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
                         .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.V4)
-                        .withPort(nativePort));
+                        .withPort(nativePort),
+                 ProtocolVersion.V4);
+    }
+
+    @Test
+    public void measureLargeV6() throws Throwable
+    {
+        perfTest(new SizeCaps(1000, 2000, 5, 150),
+                 new SizeCaps(1000, 2000, 5, 150),
+                 Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
+                        .allowBetaProtocolVersion()
+                        .withPort(nativePort),
+                 ProtocolVersion.V6);
     }
 
     @Test
@@ -210,8 +249,9 @@ public class DriverBurnTest extends CQLTester
         perfTest(new SizeCaps(1000, 2000, 5, 150),
                  new SizeCaps(1000, 2000, 5, 150),
                  Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
-                        .allowBetaProtocolVersion()
-                        .withPort(nativePort));
+                        .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.V5)
+                        .withPort(nativePort),
+                 ProtocolVersion.V5);
     }
 
     @Test
@@ -221,18 +261,32 @@ public class DriverBurnTest extends CQLTester
                  new SizeCaps(1000, 2000, 5, 150),
                  Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
                         .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.V4)
-                        .withPort(nativePort));
+                        .withPort(nativePort),
+                 ProtocolVersion.V4);
     }
 
     @Test
-    public void measureSmallV5ithCompression() throws Throwable
+    public void measureSmallV6WithCompression() throws Throwable
     {
         perfTest(new SizeCaps(10, 20, 5, 10),
                  new SizeCaps(10, 20, 5, 10),
                  Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
                         .allowBetaProtocolVersion()
                         .withCompression(ProtocolOptions.Compression.LZ4)
-                        .withPort(nativePort));
+                        .withPort(nativePort),
+                 ProtocolVersion.V6);
+    }
+
+    @Test
+    public void measureSmallV5WithCompression() throws Throwable
+    {
+        perfTest(new SizeCaps(10, 20, 5, 10),
+                 new SizeCaps(10, 20, 5, 10),
+                 Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
+                        .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.V5)
+                        .withCompression(ProtocolOptions.Compression.LZ4)
+                        .withPort(nativePort),
+                 ProtocolVersion.V5);
     }
 
     @Test
@@ -243,7 +297,20 @@ public class DriverBurnTest extends CQLTester
                  Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
                         .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.V4)
                         .withCompression(ProtocolOptions.Compression.LZ4)
-                        .withPort(nativePort));
+                        .withPort(nativePort),
+                 ProtocolVersion.V4);
+    }
+
+    @Test
+    public void measureLargeV6WithCompression() throws Throwable
+    {
+        perfTest(new SizeCaps(1000, 2000, 5, 150),
+                 new SizeCaps(1000, 2000, 5, 150),
+                 Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
+                        .allowBetaProtocolVersion()
+                        .withCompression(ProtocolOptions.Compression.LZ4)
+                        .withPort(nativePort),
+                 ProtocolVersion.V6);
     }
 
     @Test
@@ -252,9 +319,10 @@ public class DriverBurnTest extends CQLTester
         perfTest(new SizeCaps(1000, 2000, 5, 150),
                  new SizeCaps(1000, 2000, 5, 150),
                  Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
-                        .allowBetaProtocolVersion()
+                        .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.V5)
                         .withCompression(ProtocolOptions.Compression.LZ4)
-                        .withPort(nativePort));
+                        .withPort(nativePort),
+                 ProtocolVersion.V5);
     }
 
     @Test
@@ -265,18 +333,19 @@ public class DriverBurnTest extends CQLTester
                  Cluster.builder().addContactPoint(nativeAddr.getHostAddress())
                         .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.V4)
                         .withCompression(ProtocolOptions.Compression.LZ4)
-                        .withPort(nativePort));
+                        .withPort(nativePort),
+                 ProtocolVersion.V4);
     }
 
-    public void perfTest(SizeCaps requestCaps, SizeCaps responseCaps, Cluster.Builder builder) throws Throwable
+    public void perfTest(SizeCaps requestCaps, SizeCaps responseCaps, Cluster.Builder builder, ProtocolVersion version) throws Throwable
     {
         SimpleStatement request = generateQueryStatement(0, requestCaps);
         ResultMessage.Rows response = generateRows(0, responseCaps);
-        QueryMessage requestMessage = generateQueryMessage(0, requestCaps);
-        Envelope message = requestMessage.encode(ProtocolVersion.V4);
+        QueryMessage requestMessage = generateQueryMessage(0, requestCaps, version);
+        Envelope message = requestMessage.encode(version);
         int requestSize = message.body.readableBytes();
         message.release();
-        message = response.encode(ProtocolVersion.V4);
+        message = response.encode(version);
         int responseSize = message.body.readableBytes();
         message.release();
         Message.Type.QUERY.unsafeSetCodec(new Message.Codec<QueryMessage>() {
@@ -284,17 +353,19 @@ public class DriverBurnTest extends CQLTester
             {
                 QueryMessage queryMessage = QueryMessage.codec.decode(body, version);
                 return new QueryMessage(queryMessage.query, queryMessage.options) {
-                    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+
+                    @Override
+                    protected Future<Response> maybeExecuteAsync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
                     {
                         try
                         {
                             int idx = Integer.parseInt(queryMessage.query); // unused
-                            return generateRows(idx, responseCaps);
+                            return ImmediateFuture.success(generateRows(idx, responseCaps));
                         }
                         catch (NumberFormatException e)
                         {
                             // for the requests driver issues under the hood
-                            return super.execute(state, queryStartNanoTime, traceRequest);
+                            return super.maybeExecuteAsync(state, requestTime, traceRequest);
                         }
                     }
                 };
@@ -332,10 +403,10 @@ public class DriverBurnTest extends CQLTester
 
                         for (int j = 0; j < perThread; j++)
                         {
-                            long startNanos = System.nanoTime();
+                            long startNanos = nanoTime();
                             ResultSetFuture future = session.executeAsync(request);
                             future.addListener(() -> {
-                                long diff = System.nanoTime() - startNanos;
+                                long diff = nanoTime() - startNanos;
                                 if (measure.get())
                                 {
                                     lock.lock();

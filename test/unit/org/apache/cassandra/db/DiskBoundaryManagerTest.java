@@ -18,26 +18,38 @@
 
 package org.apache.cassandra.db;
 
-import java.io.File;
+import java.io.IOException;
 import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.dht.BootStrapper;
+import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class DiskBoundaryManagerTest extends CQLTester
@@ -45,26 +57,32 @@ public class DiskBoundaryManagerTest extends CQLTester
     private DiskBoundaryManager dbm;
     private MockCFS mock;
     private Directories dirs;
+    private List<Directories.DataDirectory> datadirs;
+    private List<File> tableDirs;
+    private Path tmpDir;
 
     @Before
-    public void setup()
+    public void setup() throws IOException
     {
         DisallowedDirectories.clearUnwritableUnsafe();
         TokenMetadata metadata = StorageService.instance.getTokenMetadata();
         metadata.updateNormalTokens(BootStrapper.getRandomTokens(metadata, 10), FBUtilities.getBroadcastAddressAndPort());
         createTable("create table %s (id int primary key, x text)");
-        dirs = new Directories(getCurrentColumnFamilyStore().metadata(), Lists.newArrayList(new Directories.DataDirectory(new File("/tmp/1")),
-                                                                                          new Directories.DataDirectory(new File("/tmp/2")),
-                                                                                          new Directories.DataDirectory(new File("/tmp/3"))));
+        tmpDir = Files.createTempDirectory("DiskBoundaryManagerTest");
+        datadirs = Lists.newArrayList(new Directories.DataDirectory(new File(tmpDir, "1")),
+                                      new Directories.DataDirectory(new File(tmpDir, "2")),
+                                      new Directories.DataDirectory(new File(tmpDir, "3")));
+        dirs = new Directories(getCurrentColumnFamilyStore().metadata(), datadirs);
         mock = new MockCFS(getCurrentColumnFamilyStore(), dirs);
         dbm = mock.diskBoundaryManager;
+        tableDirs = datadirs.stream().map(ddir -> mock.getDirectories().getLocationForDisk(ddir)).collect(Collectors.toList());
     }
 
     @Test
     public void getBoundariesTest()
     {
         DiskBoundaries dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(3, dbv.positions.size());
+        Assert.assertEquals(3, dbv.getPositions().size());
         assertEquals(dbv.directories, dirs.getWriteableLocations());
     }
 
@@ -72,13 +90,13 @@ public class DiskBoundaryManagerTest extends CQLTester
     public void disallowedDirectoriesTest()
     {
         DiskBoundaries dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(3, dbv.positions.size());
+        Assert.assertEquals(3, dbv.getPositions().size());
         assertEquals(dbv.directories, dirs.getWriteableLocations());
-        DisallowedDirectories.maybeMarkUnwritable(new File("/tmp/3"));
+        DisallowedDirectories.maybeMarkUnwritable(new File(tmpDir, "3"));
         dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(2, dbv.positions.size());
-        Assert.assertEquals(Lists.newArrayList(new Directories.DataDirectory(new File("/tmp/1")),
-                                        new Directories.DataDirectory(new File("/tmp/2"))),
+        Assert.assertEquals(2, dbv.getPositions().size());
+        Assert.assertEquals(Lists.newArrayList(new Directories.DataDirectory(new File(tmpDir, "1")),
+                                               new Directories.DataDirectory(new File(tmpDir, "2"))),
                                  dbv.directories);
     }
 
@@ -105,6 +123,76 @@ public class DiskBoundaryManagerTest extends CQLTester
 
     }
 
+    @Test
+    public void testGetDisksInBounds()
+    {
+        List<Token> pps = new ArrayList<>();
+
+        pps.add(t(100));
+        pps.add(t(200));
+        pps.add(t(Long.MAX_VALUE)); // last position is always the max token
+
+        DiskBoundaries diskBoundaries = new DiskBoundaries(mock, dirs.getWriteableLocations(), pps, null, 0);
+
+        Assert.assertEquals(Lists.newArrayList(datadirs.get(0)),                  diskBoundaries.getDisksInBounds(dk(10),  dk(50)));
+        Assert.assertEquals(Lists.newArrayList(datadirs.get(2)),                  diskBoundaries.getDisksInBounds(dk(250), dk(500)));
+        Assert.assertEquals(Lists.newArrayList(datadirs),                         diskBoundaries.getDisksInBounds(dk(0),   dk(250)));
+        Assert.assertEquals(Lists.newArrayList(datadirs),                         diskBoundaries.getDisksInBounds(dk(0),   dk(250)));
+        Assert.assertEquals(Lists.newArrayList(datadirs.get(1), datadirs.get(2)), diskBoundaries.getDisksInBounds(dk(150), dk(250)));
+        Assert.assertEquals(Lists.newArrayList(datadirs),                         diskBoundaries.getDisksInBounds(null,       dk(250)));
+
+        Assert.assertEquals(Lists.newArrayList(datadirs.get(0)),                  diskBoundaries.getDisksInBounds(dk(0),   dk(99)));
+        Assert.assertEquals(Lists.newArrayList(datadirs.get(0)),                  diskBoundaries.getDisksInBounds(dk(0),   dk(100))); // pp(100) is maxKeyBound, so dk(100) < pp(100)
+        Assert.assertEquals(Lists.newArrayList(datadirs.get(0), datadirs.get(1)), diskBoundaries.getDisksInBounds(dk(100), dk(200)));
+        Assert.assertEquals(Lists.newArrayList(datadirs.get(1)),                  diskBoundaries.getDisksInBounds(dk(101), dk(101)));
+
+    }
+
+    @Test
+    public void testGetDataDirectoriesForFiles()
+    {
+        int gen = 1;
+        List<Murmur3Partitioner.LongToken> tokens = mock.getDiskBoundaries().getPositions().stream().map(t -> (Murmur3Partitioner.LongToken)t.getToken()).collect(Collectors.toList());
+        IPartitioner partitioner = Murmur3Partitioner.instance;
+
+        Murmur3Partitioner.LongToken sstableFirstDisk1 = (Murmur3Partitioner.LongToken) partitioner.midpoint(partitioner.getMinimumToken(), tokens.get(0));
+        Murmur3Partitioner.LongToken sstableEndDisk1   = (Murmur3Partitioner.LongToken) partitioner.midpoint(sstableFirstDisk1,             tokens.get(0));
+        Murmur3Partitioner.LongToken sstableEndDisk2   = (Murmur3Partitioner.LongToken) partitioner.midpoint(tokens.get(0),                 tokens.get(1));
+        Murmur3Partitioner.LongToken sstableFirstDisk2 = (Murmur3Partitioner.LongToken) partitioner.midpoint(tokens.get(0),                 sstableEndDisk2);
+
+        SSTableReader containedDisk1 = MockSchema.sstable(gen++, (long)sstableFirstDisk1.getTokenValue(), (long)sstableEndDisk1.getTokenValue(), 0, mock);
+        SSTableReader startDisk1EndDisk2 = MockSchema.sstable(gen++, (long)sstableFirstDisk1.getTokenValue(), (long)sstableEndDisk2.getTokenValue(), 0, mock);
+        SSTableReader containedDisk2 = MockSchema.sstable(gen++, (long)sstableFirstDisk2.getTokenValue(), (long)sstableEndDisk2.getTokenValue(), 0, mock);
+
+        SSTableReader disk1Boundary = MockSchema.sstable(gen++, (long)sstableFirstDisk1.getTokenValue(), (long)tokens.get(0).getTokenValue(), 0, mock);
+        SSTableReader disk2Full = MockSchema.sstable(gen++, (long)tokens.get(0).nextValidToken().getTokenValue(), (long)tokens.get(1).getTokenValue(), 0, mock);
+        SSTableReader disk3Full = MockSchema.sstable(gen++, (long)tokens.get(1).nextValidToken().getTokenValue(), (long)partitioner.getMaximumToken().getTokenValue(), 0, mock);
+
+        Assert.assertEquals(tableDirs, mock.getDirectoriesForFiles(ImmutableSet.of()));
+        Assert.assertEquals(Lists.newArrayList(tableDirs.get(0)), mock.getDirectoriesForFiles(ImmutableSet.of(containedDisk1)));
+        Assert.assertEquals(Lists.newArrayList(tableDirs.get(0), tableDirs.get(1)), mock.getDirectoriesForFiles(ImmutableSet.of(containedDisk1, startDisk1EndDisk2)));
+        Assert.assertEquals(Lists.newArrayList(tableDirs.get(1)), mock.getDirectoriesForFiles(ImmutableSet.of(containedDisk2)));
+        Assert.assertEquals(Lists.newArrayList(tableDirs.get(0), tableDirs.get(1)), mock.getDirectoriesForFiles(ImmutableSet.of(containedDisk1, containedDisk2)));
+
+        Assert.assertEquals(Lists.newArrayList(tableDirs.get(0)), mock.getDirectoriesForFiles(ImmutableSet.of(disk1Boundary)));
+        Assert.assertEquals(Lists.newArrayList(tableDirs.get(1)), mock.getDirectoriesForFiles(ImmutableSet.of(disk2Full)));
+
+        Assert.assertEquals(tableDirs, mock.getDirectoriesForFiles(ImmutableSet.of(containedDisk1, disk3Full)));
+    }
+
+    private PartitionPosition pp(long t)
+    {
+        return t(t).maxKeyBound();
+    }
+    private Token t(long t)
+    {
+        return new Murmur3Partitioner.LongToken(t);
+    }
+    private DecoratedKey dk(long t)
+    {
+        return new BufferDecoratedKey(t(t), ByteBufferUtil.EMPTY_BYTE_BUFFER);
+    }
+
     private static void assertEquals(List<Directories.DataDirectory> dir1, Directories.DataDirectory[] dir2)
     {
         if (dir1.size() != dir2.length)
@@ -121,7 +209,7 @@ public class DiskBoundaryManagerTest extends CQLTester
     {
         MockCFS(ColumnFamilyStore cfs, Directories dirs)
         {
-            super(cfs.keyspace, cfs.getTableName(), 0, cfs.metadata, dirs, false, false, true);
+            super(cfs.keyspace, cfs.getTableName(), Util.newSeqGen(), cfs.metadata, dirs, false, false, true);
         }
     }
 }

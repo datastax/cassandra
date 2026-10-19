@@ -22,7 +22,6 @@ import java.util.*;
 import javax.management.openmbean.*;
 
 import com.google.common.base.Function;
-import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 
@@ -31,6 +30,7 @@ import org.apache.cassandra.streaming.ProgressInfo;
 import org.apache.cassandra.streaming.SessionInfo;
 import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.streaming.StreamSummary;
+import org.apache.cassandra.utils.TimeUUID;
 
 public class SessionInfoCompositeData
 {
@@ -82,18 +82,18 @@ public class SessionInfoCompositeData
         }
         catch (OpenDataException e)
         {
-            throw Throwables.propagate(e);
+            throw new RuntimeException(e);
         }
     }
 
-    public static CompositeData toCompositeData(final UUID planId, SessionInfo sessionInfo)
+    public static CompositeData toCompositeData(final TimeUUID planId, SessionInfo sessionInfo)
     {
         Map<String, Object> valueMap = new HashMap<>();
         valueMap.put(ITEM_NAMES[0], planId.toString());
-        valueMap.put(ITEM_NAMES[1], sessionInfo.peer.address.getHostAddress());
-        valueMap.put(ITEM_NAMES[2], sessionInfo.peer.port);
-        valueMap.put(ITEM_NAMES[3], sessionInfo.connecting.address.getHostAddress());
-        valueMap.put(ITEM_NAMES[4], sessionInfo.connecting.port);
+        valueMap.put(ITEM_NAMES[1], sessionInfo.peer.getAddress().getHostAddress());
+        valueMap.put(ITEM_NAMES[2], sessionInfo.peer.getPort());
+        valueMap.put(ITEM_NAMES[3], sessionInfo.connecting.getAddress().getHostAddress());
+        valueMap.put(ITEM_NAMES[4], sessionInfo.connecting.getPort());
         Function<StreamSummary, CompositeData> fromStreamSummary = new Function<StreamSummary, CompositeData>()
         {
             public CompositeData apply(StreamSummary input)
@@ -120,7 +120,7 @@ public class SessionInfoCompositeData
         }
         catch (OpenDataException e)
         {
-            throw Throwables.propagate(e);
+            throw new RuntimeException(e);
         }
     }
 
@@ -137,7 +137,7 @@ public class SessionInfoCompositeData
         }
         catch (UnknownHostException e)
         {
-            throw Throwables.propagate(e);
+            throw new RuntimeException(e);
         }
         Function<CompositeData, StreamSummary> toStreamSummary = new Function<CompositeData, StreamSummary>()
         {
@@ -151,7 +151,7 @@ public class SessionInfoCompositeData
                                            connecting,
                                            fromArrayOfCompositeData((CompositeData[]) values[5], toStreamSummary),
                                            fromArrayOfCompositeData((CompositeData[]) values[6], toStreamSummary),
-                                           StreamSession.State.valueOf((String) values[7]));
+                                           StreamSession.State.valueOf((String) values[7]), null); // null is here to maintain backwards compatibility
         Function<CompositeData, ProgressInfo> toProgressInfo = new Function<CompositeData, ProgressInfo>()
         {
             public ProgressInfo apply(CompositeData input)

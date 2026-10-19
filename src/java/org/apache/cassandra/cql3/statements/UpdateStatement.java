@@ -21,21 +21,45 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
+import org.apache.commons.lang3.builder.ToStringBuilder;
+import org.apache.commons.lang3.builder.ToStringStyle;
+
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.Attributes;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Json;
+import org.apache.cassandra.cql3.Operation;
+import org.apache.cassandra.cql3.Operations;
+import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.SingleColumnRelation;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.UpdateParameters;
+import org.apache.cassandra.cql3.VariableSpecifications;
+import org.apache.cassandra.cql3.WhereClause;
 import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.cql3.conditions.Conditions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Slice;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Dispatcher;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
-import org.apache.commons.lang3.builder.ToStringBuilder;
-import org.apache.commons.lang3.builder.ToStringStyle;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkContainsNoDuplicates;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -48,7 +72,8 @@ public class UpdateStatement extends ModificationStatement
 {
     private static final Constants.Value EMPTY = new Constants.Value(ByteBufferUtil.EMPTY_BYTE_BUFFER);
 
-    private UpdateStatement(StatementType type,
+    private UpdateStatement(String queryString,
+                            StatementType type,
                             VariableSpecifications bindVariables,
                             TableMetadata metadata,
                             Operations operations,
@@ -56,7 +81,7 @@ public class UpdateStatement extends ModificationStatement
                             Conditions conditions,
                             Attributes attrs)
     {
-        super(type, bindVariables, metadata, operations, restrictions, conditions, attrs);
+        super(queryString, type, bindVariables, metadata, operations, restrictions, conditions, attrs);
     }
 
     @Override
@@ -109,6 +134,23 @@ public class UpdateStatement extends ModificationStatement
         throw new UnsupportedOperationException();
     }
 
+    @Override
+    public ResultMessage execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime)
+    {
+        ResultMessage result = super.execute(state, options, requestTime);
+
+        if (result == null)
+            result = new ResultMessage.Void();
+
+        RequestSensors sensors = RequestTracker.instance.get();
+        Context context = Context.from(this.metadata());
+        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.WRITE_BYTES);
+        // CAS updates incorporate read sensors
+        SensorsCustomParams.addSensorToCQLResponse(result, options.getProtocolVersion(), sensors, context, Type.READ_BYTES);
+
+        return result;
+    }
+
     public static class ParsedInsert extends ModificationStatement.Parsed
     {
         private final List<ColumnIdentifier> columnNames;
@@ -135,7 +177,8 @@ public class UpdateStatement extends ModificationStatement
         }
 
         @Override
-        protected ModificationStatement prepareInternal(TableMetadata metadata,
+        protected ModificationStatement prepareInternal(ClientState state,
+                                                        TableMetadata metadata,
                                                         VariableSpecifications bindVariables,
                                                         Conditions conditions,
                                                         Attributes attrs)
@@ -168,7 +211,7 @@ public class UpdateStatement extends ModificationStatement
                 }
                 else
                 {
-                    Operation operation = new Operation.SetValue(value).prepare(metadata, def);
+                    Operation operation = new Operation.SetValue(value).prepare(metadata, def, !conditions.isEmpty());
                     operation.collectMarkerSpecification(bindVariables);
                     operations.add(operation);
                 }
@@ -176,15 +219,19 @@ public class UpdateStatement extends ModificationStatement
 
             boolean applyOnlyToStaticColumns = !hasClusteringColumnsSet && appliesOnlyToStaticColumns(operations, conditions);
 
-            StatementRestrictions restrictions = new StatementRestrictions(type,
-                                                                           metadata,
-                                                                           whereClause.build(),
-                                                                           bindVariables,
-                                                                           applyOnlyToStaticColumns,
-                                                                           false,
-                                                                           false);
+            StatementRestrictions restrictions = StatementRestrictions.create(state,
+                                                                              type,
+                                                                              metadata,
+                                                                              whereClause.build(),
+                                                                              bindVariables,
+                                                                              Collections.emptyList(),
+                                                                              IndexHints.NONE,
+                                                                              applyOnlyToStaticColumns,
+                                                                              false,
+                                                                              false);
 
-            return new UpdateStatement(type,
+            return new UpdateStatement(rawCQLStatement,
+                                       type,
                                        bindVariables,
                                        metadata,
                                        operations,
@@ -210,7 +257,8 @@ public class UpdateStatement extends ModificationStatement
         }
 
         @Override
-        protected ModificationStatement prepareInternal(TableMetadata metadata,
+        protected ModificationStatement prepareInternal(ClientState state,
+                                                        TableMetadata metadata,
                                                         VariableSpecifications bindVariables,
                                                         Conditions conditions,
                                                         Attributes attrs)
@@ -236,7 +284,7 @@ public class UpdateStatement extends ModificationStatement
                 }
                 else
                 {
-                    Operation operation = new Operation.SetValue(raw).prepare(metadata, def);
+                    Operation operation = new Operation.SetValue(raw).prepare(metadata, def, !conditions.isEmpty());
                     operation.collectMarkerSpecification(bindVariables);
                     operations.add(operation);
                 }
@@ -244,15 +292,19 @@ public class UpdateStatement extends ModificationStatement
 
             boolean applyOnlyToStaticColumns = !hasClusteringColumnsSet && appliesOnlyToStaticColumns(operations, conditions);
 
-            StatementRestrictions restrictions = new StatementRestrictions(type,
-                                                                           metadata,
-                                                                           whereClause.build(),
-                                                                           bindVariables,
-                                                                           applyOnlyToStaticColumns,
-                                                                           false,
-                                                                           false);
+            StatementRestrictions restrictions = StatementRestrictions.create(state,
+                                                                              type,
+                                                                              metadata,
+                                                                              whereClause.build(),
+                                                                              bindVariables,
+                                                                              Collections.emptyList(),
+                                                                              IndexHints.NONE,
+                                                                              applyOnlyToStaticColumns,
+                                                                              false,
+                                                                              false);
 
-            return new UpdateStatement(type,
+            return new UpdateStatement(rawCQLStatement,
+                                       type,
                                        bindVariables,
                                        metadata,
                                        operations,
@@ -291,7 +343,8 @@ public class UpdateStatement extends ModificationStatement
         }
 
         @Override
-        protected ModificationStatement prepareInternal(TableMetadata metadata,
+        protected ModificationStatement prepareInternal(ClientState state,
+                                                        TableMetadata metadata,
                                                         VariableSpecifications bindVariables,
                                                         Conditions conditions,
                                                         Attributes attrs)
@@ -304,18 +357,20 @@ public class UpdateStatement extends ModificationStatement
 
                 checkFalse(def.isPrimaryKeyColumn(), "PRIMARY KEY part %s found in SET part", def.name);
 
-                Operation operation = entry.right.prepare(metadata, def);
+                Operation operation = entry.right.prepare(metadata, def, !conditions.isEmpty());
                 operation.collectMarkerSpecification(bindVariables);
                 operations.add(operation);
             }
 
-            StatementRestrictions restrictions = newRestrictions(metadata,
+            StatementRestrictions restrictions = newRestrictions(state,
+                                                                 metadata,
                                                                  bindVariables,
                                                                  operations,
                                                                  whereClause,
                                                                  conditions);
 
-            return new UpdateStatement(type,
+            return new UpdateStatement(rawCQLStatement,
+                                       type,
                                        bindVariables,
                                        metadata,
                                        operations,
@@ -334,6 +389,6 @@ public class UpdateStatement extends ModificationStatement
     @Override
     public AuditLogContext getAuditLogContext()
     {
-        return new AuditLogContext(AuditLogEntryType.UPDATE, keyspace(), columnFamily());
+        return new AuditLogContext(AuditLogEntryType.UPDATE, keyspace(), table());
     }
 }

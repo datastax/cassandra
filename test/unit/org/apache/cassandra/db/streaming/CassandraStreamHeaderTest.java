@@ -26,6 +26,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -37,11 +39,12 @@ import org.apache.cassandra.db.streaming.CassandraStreamHeader.CassandraStreamHe
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
@@ -65,7 +68,8 @@ public class CassandraStreamHeaderTest
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE,
                                     KeyspaceParams.simple(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE, CF_COMPRESSED).compression(CompressionParams.DEFAULT));
+                                    SchemaLoader.standardCFMD(KEYSPACE, CF_COMPRESSED)
+                                                .compression(CompressionParams.forNewTables(KEYSPACE)));
 
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         store = keyspace.getColumnFamilyStore(CF_COMPRESSED);
@@ -80,7 +84,7 @@ public class CassandraStreamHeaderTest
             .build()
             .applyUnsafe();
         }
-        store.forceBlockingFlush();
+        Util.flush(store);
         CompactionManager.instance.performMaximal(store, false);
 
         sstable = store.getLiveSSTables().iterator().next();
@@ -98,7 +102,7 @@ public class CassandraStreamHeaderTest
         header.compressionInfo.chunks();
         assertEquals(transferedSize, header.calculateSize());
 
-        SerializationUtils.assertSerializationCycle(header, CassandraStreamHeader.serializer);
+        assertSerializationCycleForStreamingVersions(header, CassandraStreamHeader.serializer);
     }
 
     @Test
@@ -107,14 +111,14 @@ public class CassandraStreamHeaderTest
         // verify all component on-disk length is used for ZCS
         CassandraStreamHeader header = header(true, true);
         long transferedSize = header.size();
-        assertEquals(ComponentManifest.create(sstable.descriptor).totalSize(), transferedSize);
+        assertEquals(ComponentManifest.create(sstable).totalSize(), transferedSize);
         assertEquals(transferedSize, header.calculateSize());
 
         // verify that computing file chunks doesn't change transferred size for ZCS
         header.compressionInfo.chunks();
         assertEquals(transferedSize, header.calculateSize());
 
-        SerializationUtils.assertSerializationCycle(header, CassandraStreamHeader.serializer);
+        assertSerializationCycleForStreamingVersions(header, CassandraStreamHeader.serializer);
     }
 
     @Test
@@ -127,12 +131,12 @@ public class CassandraStreamHeaderTest
         assertEquals(sstable.uncompressedLength(), transferedSize);
         assertEquals(transferedSize, header.calculateSize());
 
-        SerializationUtils.assertSerializationCycle(header, CassandraStreamHeader.serializer);
+        assertSerializationCycleForStreamingVersions(header, CassandraStreamHeader.serializer);
     }
 
     private CassandraStreamHeader header(boolean entireSSTable, boolean compressed)
     {
-        List<Range<Token>> requestedRanges = Collections.singletonList(new Range<>(store.getPartitioner().getMinimumToken(), sstable.last.getToken()));
+        List<Range<Token>> requestedRanges = Collections.singletonList(new Range<>(store.getPartitioner().getMinimumToken(), sstable.getLast().getToken()));
         requestedRanges = Range.normalize(requestedRanges);
 
         List<SSTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(requestedRanges);
@@ -141,11 +145,11 @@ public class CassandraStreamHeaderTest
 
         TableMetadata metadata = store.metadata();
         SerializationHeader.Component serializationHeader = SerializationHeader.makeWithoutStats(metadata).toComponent();
-        ComponentManifest componentManifest = entireSSTable ? ComponentManifest.create(sstable.descriptor) : null;
-        DecoratedKey firstKey = entireSSTable ? sstable.first : null;
+        ComponentManifest componentManifest = entireSSTable ? ComponentManifest.create(sstable) : null;
+        DecoratedKey firstKey = entireSSTable ? sstable.getFirst() : null;
+
         return CassandraStreamHeader.builder()
-                                    .withSSTableFormat(SSTableFormat.Type.BIG)
-                                    .withSSTableVersion(BigFormat.latestVersion)
+                                    .withSSTableVersion(sstable.descriptor.version)
                                     .withSSTableLevel(0)
                                     .withEstimatedKeys(10)
                                     .withCompressionInfo(compressionInfo)
@@ -165,8 +169,7 @@ public class CassandraStreamHeaderTest
         TableMetadata metadata = CreateTableStatement.parse(ddl, "ks").build();
         CassandraStreamHeader header =
             CassandraStreamHeader.builder()
-                                 .withSSTableFormat(SSTableFormat.Type.BIG)
-                                 .withSSTableVersion(BigFormat.latestVersion)
+                                 .withSSTableVersion(DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion())
                                  .withSSTableLevel(0)
                                  .withEstimatedKeys(0)
                                  .withSections(Collections.emptyList())
@@ -174,7 +177,7 @@ public class CassandraStreamHeaderTest
                                  .withTableId(metadata.id)
                                  .build();
 
-        SerializationUtils.assertSerializationCycle(header, CassandraStreamHeader.serializer);
+        assertSerializationCycleForStreamingVersions(header, CassandraStreamHeader.serializer);
     }
 
     @Test
@@ -183,12 +186,11 @@ public class CassandraStreamHeaderTest
         String ddl = "CREATE TABLE tbl (k INT PRIMARY KEY, v INT)";
         TableMetadata metadata = CreateTableStatement.parse(ddl, "ks").build();
 
-        ComponentManifest manifest = new ComponentManifest(new LinkedHashMap<Component, Long>() {{ put(Component.DATA, 100L); }});
+        ComponentManifest manifest = new ComponentManifest(new LinkedHashMap<Component, Long>() {{ put(Components.DATA, 100L); }});
 
         CassandraStreamHeader header =
             CassandraStreamHeader.builder()
-                                 .withSSTableFormat(SSTableFormat.Type.BIG)
-                                 .withSSTableVersion(BigFormat.latestVersion)
+                                 .withSSTableVersion(DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion())
                                  .withSSTableLevel(0)
                                  .withEstimatedKeys(0)
                                  .withSections(Collections.emptyList())
@@ -199,7 +201,16 @@ public class CassandraStreamHeaderTest
                                  .withTableId(metadata.id)
                                  .build();
 
-        SerializationUtils.assertSerializationCycle(header, new TestableCassandraStreamHeaderSerializer());
+        assertSerializationCycleForStreamingVersions(header, new TestableCassandraStreamHeaderSerializer());
+    }
+
+    private static void assertSerializationCycleForStreamingVersions(CassandraStreamHeader header, IVersionedSerializer<CassandraStreamHeader> serializer)
+    {
+        for (MessagingService.Version version : MessagingService.Version.supportedVersions())
+        {
+            if (version.value >= MessagingService.VERSION_40 && version.value <= MessagingService.current_version)
+                SerializationUtils.assertSerializationCycle(header, serializer, version.value);
+        }
     }
 
     private static class TestableCassandraStreamHeaderSerializer extends CassandraStreamHeaderSerializer

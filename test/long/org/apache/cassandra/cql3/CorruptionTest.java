@@ -18,8 +18,6 @@
 package org.apache.cassandra.cql3;
 
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -28,20 +26,28 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.ServerTestUtils;
+import org.apache.cassandra.io.util.File;
+
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.datastax.driver.core.*;
+import com.datastax.driver.core.BoundStatement;
+import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.ConsistencyLevel;
+import com.datastax.driver.core.PreparedStatement;
+import com.datastax.driver.core.Row;
+import com.datastax.driver.core.Session;
 import com.datastax.driver.core.policies.LoggingRetryPolicy;
 import com.datastax.driver.core.policies.Policies;
 import com.datastax.driver.core.utils.Bytes;
-import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.io.util.FileWriter;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.EmbeddedCassandraService;
 
-public class CorruptionTest extends SchemaLoader
+public class CorruptionTest
 {
 
     private static EmbeddedCassandraService cassandra;
@@ -59,10 +65,7 @@ public class CorruptionTest extends SchemaLoader
     @BeforeClass()
     public static void setup() throws ConfigurationException, IOException
     {
-        Schema.instance.clear();
-
-        cassandra = new EmbeddedCassandraService();
-        cassandra.start();
+        cassandra = ServerTestUtils.startEmbeddedCassandraService();
 
         cluster = Cluster.builder().addContactPoint("127.0.0.1")
                          .withRetryPolicy(new LoggingRetryPolicy(Policies.defaultRetryPolicy()))
@@ -100,6 +103,15 @@ public class CorruptionTest extends SchemaLoader
             s.append(x);
         }
         VALUE = s.toString();
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
+        if (cluster != null)
+            cluster.close();
+        if (cassandra != null)
+            cassandra.stop();
     }
 
     @Test
@@ -145,10 +157,12 @@ public class CorruptionTest extends SchemaLoader
                     String basename = "bad-data-tid" + Thread.currentThread().getId();
                     File put = new File(basename+"-put");
                     File get = new File(basename+"-get");
-                    try(FileWriter pw = new FileWriter(put)) {
+                    try (FileWriter pw = put.newWriter(File.WriteMode.OVERWRITE))
+                    {
                         pw.write(new String(putdata));
                     }
-                    try(FileWriter pw = new FileWriter(get)) {
+                    try (FileWriter pw = get.newWriter(File.WriteMode.OVERWRITE))
+                    {
                         pw.write(new String(getdata));
                     }
                 }

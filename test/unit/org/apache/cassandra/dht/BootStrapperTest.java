@@ -20,6 +20,7 @@ package org.apache.cassandra.dht;
 import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
@@ -30,8 +31,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.RangeStreamer.FetchReplica;
@@ -44,24 +45,42 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.StreamOperation;
+import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMRules;
+import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
-
-@RunWith(OrderedJUnit4ClassRunner.class)
+@RunWith(BMUnitRunner.class)
 public class BootStrapperTest
 {
     static IPartitioner oldPartitioner;
-
     static Predicate<Replica> originalAlivePredicate = RangeStreamer.ALIVE_PREDICATE;
+    private static AtomicBoolean nonOptimizationHit = new AtomicBoolean(false);
+    private static AtomicBoolean optimizationHit = new AtomicBoolean(false);
+    private static final IFailureDetector mockFailureDetector = new IFailureDetector()
+    {
+        public boolean isAlive(InetAddressAndPort ep)
+        {
+            return true;
+        }
+
+        public void interpret(InetAddressAndPort ep) { throw new UnsupportedOperationException(); }
+        public void report(InetAddressAndPort ep) { throw new UnsupportedOperationException(); }
+        public void registerFailureDetectionEventListener(IFailureDetectionEventListener listener) { throw new UnsupportedOperationException(); }
+        public void unregisterFailureDetectionEventListener(IFailureDetectionEventListener listener) { throw new UnsupportedOperationException(); }
+        public void remove(InetAddressAndPort ep) { throw new UnsupportedOperationException(); }
+        public void forceConviction(InetAddressAndPort ep) { throw new UnsupportedOperationException(); }
+    };
+
     @BeforeClass
     public static void setup() throws ConfigurationException
     {
         DatabaseDescriptor.daemonInitialization();
         oldPartitioner = StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
-        SchemaLoader.startGossiper();
         SchemaLoader.prepareServer();
+        SchemaLoader.startGossiper();
         SchemaLoader.schemaDefinition("BootStrapperTest");
         RangeStreamer.ALIVE_PREDICATE = Predicates.alwaysTrue();
     }
@@ -77,13 +96,70 @@ public class BootStrapperTest
     public void testSourceTargetComputation() throws UnknownHostException
     {
         final int[] clusterSizes = new int[] { 1, 3, 5, 10, 100};
-        for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
+        for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
         {
             int replicationFactor = Keyspace.open(keyspaceName).getReplicationStrategy().getReplicationFactor().allReplicas;
             for (int clusterSize : clusterSizes)
                 if (clusterSize >= replicationFactor)
                     testSourceTargetComputation(keyspaceName, clusterSize, replicationFactor);
         }
+    }
+
+    @Test
+    @BMRules(rules = { @BMRule(name = "Make sure the non-optimized path is picked up for some operations",
+                               targetClass = "org.apache.cassandra.dht.RangeStreamer",
+                               targetMethod = "convertPreferredEndpointsToWorkMap(EndpointsByReplica)",
+                               action = "org.apache.cassandra.dht.BootStrapperTest.nonOptimizationHit()"),
+                       @BMRule(name = "Make sure the optimized path is picked up for some operations",
+                               targetClass = "org.apache.cassandra.dht.RangeStreamer",
+                               targetMethod = "getOptimizedWorkMap(EndpointsByReplica,Collection,String)",
+                               action = "org.apache.cassandra.dht.BootStrapperTest.optimizationHit()") })
+    public void testStreamingCandidatesOptmizationSkip() throws UnknownHostException
+    {
+        testSkipStreamingCandidatesOptmizationFeatureFlag(true, true, false);
+        testSkipStreamingCandidatesOptmizationFeatureFlag(false, true, true);
+    }
+
+    private void testSkipStreamingCandidatesOptmizationFeatureFlag(boolean disableOptimization, boolean nonOptimizedPathHit, boolean optimizedPathHit) throws UnknownHostException
+    {
+        try
+        {
+            nonOptimizationHit.set(false);
+            optimizationHit.set(false);
+            CassandraRelevantProperties.SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION.setBoolean(disableOptimization);
+
+            for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
+            {
+                StorageService ss = StorageService.instance;
+                TokenMetadata tmd = ss.getTokenMetadata();
+
+                generateFakeEndpoints(10);
+                Token myToken = tmd.partitioner.getRandomToken();
+                InetAddressAndPort myEndpoint = InetAddressAndPort.getByName("127.0.0.1");
+
+                assertEquals(10, tmd.sortedTokens().size());
+                RangeStreamer s = new RangeStreamer(tmd, null, myEndpoint, StreamOperation.BOOTSTRAP, true, DatabaseDescriptor.getEndpointSnitch(), new StreamStateStore(), mockFailureDetector, false, 1);
+                s.addRanges(keyspaceName, Keyspace.open(keyspaceName).getReplicationStrategy().getPendingAddressRanges(tmd, myToken, myEndpoint));
+            }
+
+            assertEquals(nonOptimizedPathHit, nonOptimizationHit.get());
+            assertEquals(optimizedPathHit, optimizationHit.get());
+        }
+        finally
+        {
+            CassandraRelevantProperties.SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION.reset();
+        }
+    }
+
+    // used by byteman
+    private static void nonOptimizationHit()
+    {
+        nonOptimizationHit.set(true);
+    }
+
+    private static void optimizationHit()
+    {
+        optimizationHit.set(true);
     }
 
     private RangeStreamer testSourceTargetComputation(String keyspaceName, int numOldNodes, int replicationFactor) throws UnknownHostException
@@ -96,20 +172,6 @@ public class BootStrapperTest
         InetAddressAndPort myEndpoint = InetAddressAndPort.getByName("127.0.0.1");
 
         assertEquals(numOldNodes, tmd.sortedTokens().size());
-        IFailureDetector mockFailureDetector = new IFailureDetector()
-        {
-            public boolean isAlive(InetAddressAndPort ep)
-            {
-                return true;
-            }
-
-            public void interpret(InetAddressAndPort ep) { throw new UnsupportedOperationException(); }
-            public void report(InetAddressAndPort ep) { throw new UnsupportedOperationException(); }
-            public void registerFailureDetectionEventListener(IFailureDetectionEventListener listener) { throw new UnsupportedOperationException(); }
-            public void unregisterFailureDetectionEventListener(IFailureDetectionEventListener listener) { throw new UnsupportedOperationException(); }
-            public void remove(InetAddressAndPort ep) { throw new UnsupportedOperationException(); }
-            public void forceConviction(InetAddressAndPort ep) { throw new UnsupportedOperationException(); }
-        };
         RangeStreamer s = new RangeStreamer(tmd, null, myEndpoint, StreamOperation.BOOTSTRAP, true, DatabaseDescriptor.getEndpointSnitch(), new StreamStateStore(), mockFailureDetector, false, 1);
         assertNotNull(Keyspace.open(keyspaceName));
         s.addRanges(keyspaceName, Keyspace.open(keyspaceName).getReplicationStrategy().getPendingAddressRanges(tmd, myToken, myEndpoint));

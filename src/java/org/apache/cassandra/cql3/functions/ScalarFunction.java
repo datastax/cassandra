@@ -24,19 +24,95 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
- * Determines a single output value based on a single input value.
+ * Determines a single output value based on any number of input values.
  */
 public interface ScalarFunction extends Function
 {
-    public boolean isCalledOnNullInput();
+    boolean isCalledOnNullInput();
 
     /**
-     * Applies this function to the specified parameter.
+     * Checks if the function is monotonic.
+     * </p>
+     * A function is monotonic if it is either entirely nonincreasing or nondecreasing given an ordered set of inputs.
      *
-     * @param protocolVersion protocol version used for parameters and return value
-     * @param parameters the input parameters
-     * @return the result of applying this function to the parameter
-     * @throws InvalidRequestException if this function cannot not be applied to the parameter
+     * @return {@code true} if the function is monotonic {@code false} otherwise.
      */
-    public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters) throws InvalidRequestException;
+    default boolean isMonotonic()
+    {
+        return false;
+    }
+
+    /**
+     * Applies this function to the specified arguments.
+     *
+     * @param arguments the input arguments for the function
+     * @return the result of applying this function to the arguments
+     * @throws InvalidRequestException if this function cannot not be applied to the arguments
+     */
+    ByteBuffer execute(Arguments arguments) throws InvalidRequestException;
+
+    /**
+     * Does a partial application of the function. That is, given only some of the arguments of the function provided,
+     * return a new function that only expect the arguments not provided.
+     * <p>
+     * To take an example, if you consider the function
+     * <pre>
+     *     text foo(int a, text b, text c, int d)
+     * </pre>
+     * then {@code foo.partialApplication([3, <ommitted>, 'bar', <omitted>])} will return a function {@code bar} of signature:
+     * <pre>
+     *     text bar(text b, int d)
+     * </pre>
+     * and such that for any value of {@code b} and {@code d}, {@code bar(b, d) == foo(3, b, 'bar', d)}.
+     *
+     * @param protocolVersion protocol version used for arguments
+     * @param partialArguments a list of input arguments for the function where some arguments can be {@link #UNRESOLVED}.
+     *                         The input <b>must</b> be of size {@code this.argsType().size()}. For convenience, it is
+     *                         allowed both to pass a list with all arguments being {@link #UNRESOLVED} (the function is
+     *                         then returned directly) and with none of them unresolved (in which case, if the function is deterministic,
+     *                         it is computed and a dummy no-arg function returning the result is returned).
+     * @return a function corresponding to the partial application of this function to the arguments of
+     * {@code partialArguments} that are not {@link #UNRESOLVED}.
+     */
+    default ScalarFunction partialApplication(ProtocolVersion protocolVersion, List<ByteBuffer> partialArguments)
+    {
+        int unresolvedCount = 0;
+        for (ByteBuffer argument : partialArguments)
+        {
+            if (argument == UNRESOLVED)
+                ++unresolvedCount;
+        }
+
+        if (unresolvedCount == argTypes().size())
+            return this;
+
+        if (isDeterministic() && unresolvedCount == 0)
+        {
+            Arguments arguments = newArguments(protocolVersion);
+            for (int i = 0, m = partialArguments.size(); i < m; i++)
+            {
+                arguments.set(i, partialArguments.get(i));
+            }
+
+            return new PreComputedScalarFunction(returnType(),
+                                                 execute(arguments),
+                                                 protocolVersion,
+                                                 this,
+                                                 partialArguments);
+        }
+
+        return new PartiallyAppliedScalarFunction(this, partialArguments, unresolvedCount);
+    }
+
+    /**
+     * Checks if a partial application of the function is monotonic.
+     *
+     *<p>A function is monotonic if it is either entirely nonincreasing or nondecreasing.</p>
+     * @param partialParameters the input parameters used to create the partial application of the function
+     * @return {@code true} if the partial application of the function is monotonic {@code false} otherwise.
+     */
+    default boolean isPartialApplicationMonotonic(List<ByteBuffer> partialParameters)
+    {
+        return isMonotonic();
+    }
 }

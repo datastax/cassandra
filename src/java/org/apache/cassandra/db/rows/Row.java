@@ -17,11 +17,24 @@
  */
 package org.apache.cassandra.db.rows;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.cache.IMeasurableMemory;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DeletionPurger;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.Digest;
+import org.apache.cassandra.db.IDataSize;
+import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -30,9 +43,9 @@ import org.apache.cassandra.utils.BiLongAccumulator;
 import org.apache.cassandra.utils.LongAccumulator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.utils.SearchIterator;
+import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.btree.BTree;
-import org.apache.cassandra.utils.btree.UpdateFunction;
+import org.apache.cassandra.utils.memory.Cloner;
 
 /**
  * Storage engine representation of a row.
@@ -48,7 +61,7 @@ import org.apache.cassandra.utils.btree.UpdateFunction;
  * it's own data. For instance, a {@code Row} cannot contains a cell that is deleted by its own
  * row deletion.
  */
-public interface Row extends Unfiltered, Iterable<ColumnData>
+public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory, IDataSize
 {
     /**
      * The clustering values for this row.
@@ -111,14 +124,22 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
     public boolean isEmpty();
 
     /**
+     * Whether the row has no live data. This means no PK liveness info, no cells
+     * and no complex deletion info.
+     *
+     * @return {@code true} if the row has no data, {@code false} otherwise.
+     */
+    public boolean isEmptyAfterDeletion();
+
+    /**
      * Whether the row has some live information (i.e. it's not just deletion informations).
-     * 
+     *
      * @param nowInSec the current time to decide what is deleted and what isn't
      * @param enforceStrictLiveness whether the row should be purged if there is no PK liveness info,
-     *                              normally retrieved from {@link CFMetaData#enforceStrictLiveness()}
+     *                              normally retrieved from {@link TableMetadata#enforceStrictLiveness()}
      * @return true if there is some live information
      */
-    public boolean hasLiveData(int nowInSec, boolean enforceStrictLiveness);
+    public boolean hasLiveData(long nowInSec, boolean enforceStrictLiveness);
 
     /**
      * Returns a cell for a simple column.
@@ -148,6 +169,14 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
     public ComplexColumnData getComplexColumnData(ColumnMetadata c);
 
     /**
+     * Returns the {@link ColumnData} for the specified column.
+     *
+     * @param c the column for which to fetch the data.
+     * @return the data for the column or {@code null} if the row has no data for this column.
+     */
+    public ColumnData getColumnData(ColumnMetadata c);
+
+    /**
      * An iterable over the cells of this row.
      * <p>
      * The iterable guarantees that cells are returned in order of {@link Cell#comparator}.
@@ -157,26 +186,9 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
     public Iterable<Cell<?>> cells();
 
     /**
-     * A collection of the ColumnData representation of this row, for columns with some data (possibly not live) present
-     * <p>
-     * The data is returned in column order.
-     *
-     * @return a Collection of the non-empty ColumnData for this row.
+     * @return the number of cells in this row.
      */
-    public Collection<ColumnData> columnData();
-
-    /**
-     * An iterable over the cells of this row that return cells in "legacy order".
-     * <p>
-     * In 3.0+, columns are sorted so that all simple columns are before all complex columns. Previously
-     * however, the cells where just sorted by the column name. This iterator return cells in that
-     * legacy order. It's only ever meaningful for backward/thrift compatibility code.
-     *
-     * @param metadata the table this is a row of.
-     * @param reversed if cells should returned in reverse order.
-     * @return an iterable over the cells of this row in "legacy order".
-     */
-    public Iterable<Cell<?>> cellsInLegacyOrder(TableMetadata metadata, boolean reversed);
+    public int cellsCount();
 
     /**
      * Whether the row stores any (non-live) complex deletion for any complex column.
@@ -184,23 +196,11 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
     public boolean hasComplexDeletion();
 
     /**
-     * Whether the row stores any (non-RT) data for any complex column.
-     */
-    boolean hasComplex();
-
-    /**
      * Whether the row has any deletion info (row deletion, cell tombstone, expired cell or complex deletion).
      *
      * @param nowInSec the current time in seconds to decid if a cell is expired.
      */
-    public boolean hasDeletion(int nowInSec);
-
-    /**
-     * An iterator to efficiently search data for a given column.
-     *
-     * @return a search iterator for the cells of this row.
-     */
-    public SearchIterator<ColumnMetadata, ColumnData> searchIterator();
+    public boolean hasDeletion(long nowInSec);
 
     /**
      * Returns a copy of this row that:
@@ -217,6 +217,30 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
      *   4) uses {@code activeDeletion} as row deletion iff {@code setActiveDeletionToRow} and {@code activeDeletion} supersedes the row deletion.
      */
     public Row filter(ColumnFilter filter, DeletionTime activeDeletion, boolean setActiveDeletionToRow, TableMetadata metadata);
+
+
+    /// Interface used for cell transformations. Because we don't know the type of cell data that the row uses (it can
+    /// be a full [Cell] including path and column, or just [CellData]), the given function must convert the type the
+    /// row uses to the same type.
+    ///
+    /// This interface unfortunately cannot be given as a lambda, but we can use method references e.g.
+    /// `CellData::markCounterLocalToBeCleared`.
+    public interface CellTransformer
+    {
+        <C extends CellData<?, C>> C apply(C cellOrCellData);
+    }
+
+    /**
+     * Requires that {@code function} returns either {@code null} or {@code Cell} for the same cell.
+     *
+     * Returns a copy of this row that:
+     *   1) {@code cellFunction} has been applied to the members of
+     *   2) doesn't include any {@code null} results of {@code cellFunction}
+     *   3) has its {@code LivenessInfo} mapped through the given {@code infoFunction}
+     */
+    public Row transformAndFilter(UnaryOperator<LivenessInfo> infoFunction, CellTransformer cellFunction);
+
+    public Row clone(Cloner cloner);
 
     /**
      * Returns a copy of this row without any deletion info that should be purged according to {@code purger}.
@@ -236,7 +260,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
      * @return this row but without any deletion info purged by {@code purger}. If the purged row is empty, returns
      *         {@code null}.
      */
-    public Row purge(DeletionPurger purger, int nowInSec, boolean enforceStrictLiveness);
+    public Row purge(DeletionPurger purger, long nowInSec, boolean enforceStrictLiveness);
 
     /**
      * Returns a copy of this row which only include the data queried by {@code filter}, excluding anything _fetched_ for
@@ -247,6 +271,11 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
      * @return the row but with all data that wasn't queried by the user skipped.
      */
     public Row withOnlyQueriedData(ColumnFilter filter);
+
+    /*
+     * Returns a copy of this row without any data with a timestamp older than the one provided
+     */
+    public Row purgeDataOlderThan(long timestamp, boolean enforceStrictLiveness);
 
     /**
      * Returns a copy of this row where all counter cells have they "local" shard marked for clearing.
@@ -277,9 +306,18 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
 
     public int dataSize();
 
+    /**
+     * Returns the size of the data hold by this row that is live at {@code nowInSec}.
+     *
+     * @param nowInSec the query timestamp in seconds
+     * @return the size of the data hold by this row that is live at {@code nowInSec}.
+     */
+    int liveDataSize(long nowInSec);
+
     public long unsharedHeapSizeExcludingData();
 
     public String toString(TableMetadata metadata, boolean fullDetails);
+    public long unsharedHeapSize();
 
     /**
      * Apply a function to every column in a row
@@ -297,11 +335,15 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
 
     public long accumulate(LongAccumulator<ColumnData> accumulator, long initialValue);
 
-    public long accumulate(LongAccumulator<ColumnData> accumulator, Comparator<ColumnData> comparator, ColumnData from, long initialValue);
-
     public <A> long accumulate(BiLongAccumulator<A, ColumnData> accumulator, A arg, long initialValue);
 
-    public <A> long accumulate(BiLongAccumulator<A, ColumnData> accumulator, A arg, Comparator<ColumnData> comparator, ColumnData from, long initialValue);
+    /**
+     * Merge this row with the given update and return the result.
+     *
+     * @param update Row to merge in. Must be the same type (b-tree vs trie) as this.
+     * @return The merged row.
+     */
+    public Row mergeWith(Row update);
 
     /**
      * A row deletion/tombstone.
@@ -321,10 +363,10 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
      * <p>
      * Currently, the only use of shadowable row deletions is Materialized Views, see CASSANDRA-10261.
      */
-    public static class Deletion
+    public static class Deletion implements IMeasurableMemory
     {
         public static final Deletion LIVE = new Deletion(DeletionTime.LIVE, false);
-        private static final long EMPTY_SIZE = ObjectSizes.measure(new DeletionTime(0, 0));
+        private static final long EMPTY_SIZE = ObjectSizes.measure(DeletionTime.build(0, 0));
 
         private final DeletionTime time;
         private final boolean isShadowable;
@@ -341,7 +383,8 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
             return time.isLive() ? LIVE : new Deletion(time, false);
         }
 
-        @Deprecated
+        /** @deprecated See CAASSANDRA-10261 */
+        @Deprecated(since = "4.0")
         public static Deletion shadowable(DeletionTime time)
         {
             return new Deletion(time, true);
@@ -536,6 +579,22 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
         public void addComplexDeletion(ColumnMetadata column, DeletionTime complexDeletion);
 
         /**
+         * Convenience method to add a column (complex or simple) in one step.
+         */
+        default void addColumn(ColumnData cd)
+        {
+            if (cd.column.isSimple())
+                addCell((Cell<?>) cd);
+            else
+            {
+                ComplexColumnData ccd = (ComplexColumnData) cd;
+                addComplexDeletion(ccd.column, ccd.complexDeletion());
+                for (Cell<?> c : ccd)
+                    addCell(c);
+            }
+        }
+
+        /**
          * Builds and return built row.
          *
          * @return the last row built by this builder.
@@ -620,6 +679,14 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
         public SimpleBuilder delete();
 
         /**
+         * Deletes the whole row with a timestamp that is just before the new data's timestamp, to make sure no expired
+         * data remains on the row.
+         *
+         * @return this builder.
+         */
+        public SimpleBuilder deletePrevious();
+
+        /**
          * Removes the value for a given column (creating a tombstone).
          *
          * @param columnName the name of the column to delete.
@@ -681,7 +748,6 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
             lastRowSet = i;
         }
 
-        @SuppressWarnings("resource")
         public Row merge(DeletionTime activeDeletion)
         {
             // If for this clustering we have only one row version and have no activeDeletion (i.e. nothing to filter out),
@@ -732,7 +798,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
             // Because some data might have been shadowed by the 'activeDeletion', we could have an empty row
             return rowInfo.isEmpty() && rowDeletion.isLive() && dataBuffer.isEmpty()
                  ? null
-                 : BTreeRow.create(clustering, rowInfo, rowDeletion, BTree.build(dataBuffer, UpdateFunction.noOp()));
+                 : BTreeRow.create(clustering, rowInfo, rowDeletion, BTree.build(dataBuffer));
         }
 
         public Clustering<?> mergedClustering()
@@ -745,21 +811,21 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
             return rows;
         }
 
-        private static class ColumnDataReducer extends MergeIterator.Reducer<ColumnData, ColumnData>
+        private static class ColumnDataReducer extends Reducer<ColumnData, ColumnData>
         {
             private ColumnMetadata column;
             private final List<ColumnData> versions;
 
             private DeletionTime activeDeletion;
 
-            private final ComplexColumnData.Builder complexBuilder;
+            private final BTreeComplexColumn.Builder complexBuilder;
             private final List<Iterator<Cell<?>>> complexCells;
             private final CellReducer cellReducer;
 
             public ColumnDataReducer(int size, boolean hasComplex)
             {
                 this.versions = new ArrayList<>(size);
-                this.complexBuilder = hasComplex ? ComplexColumnData.builder() : null;
+                this.complexBuilder = hasComplex ? BTreeComplexColumn.builder() : null;
                 this.complexCells = hasComplex ? new ArrayList<>(size) : null;
                 this.cellReducer = new CellReducer();
             }
@@ -790,8 +856,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
                 return ColumnMetadataVersionComparator.INSTANCE.compare(column, dataColumn) < 0;
             }
 
-            @SuppressWarnings("resource")
-            protected ColumnData getReduced()
+            public ColumnData getReduced()
             {
                 if (column.isSimple())
                 {
@@ -839,14 +904,14 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
                 }
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 column = null;
                 versions.clear();
             }
         }
 
-        private static class CellReducer extends MergeIterator.Reducer<Cell<?>, Cell<?>>
+        private static class CellReducer extends Reducer<Cell<?>, Cell<?>>
         {
             private DeletionTime activeDeletion;
             private Cell<?> merged;
@@ -863,12 +928,12 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
                     merged = merged == null ? cell : Cells.reconcile(merged, cell);
             }
 
-            protected Cell<?> getReduced()
+            public Cell<?> getReduced()
             {
                 return merged;
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 merged = null;
             }

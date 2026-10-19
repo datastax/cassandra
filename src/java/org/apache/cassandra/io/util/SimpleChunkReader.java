@@ -26,19 +26,30 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
 {
     private final int bufferSize;
     private final BufferType bufferType;
+    private final long startOffset;
 
     SimpleChunkReader(ChannelProxy channel, long fileLength, BufferType bufferType, int bufferSize)
+    {
+        this(channel, fileLength, bufferType, bufferSize, 0);
+    }
+
+    SimpleChunkReader(ChannelProxy channel, long fileLength, BufferType bufferType, int bufferSize, long startOffset)
     {
         super(channel, fileLength);
         this.bufferSize = bufferSize;
         this.bufferType = bufferType;
+        this.startOffset = startOffset;
     }
 
     @Override
     public void readChunk(long position, ByteBuffer buffer)
     {
+        long readPosition = position - startOffset;
+        if (readPosition < 0)
+            throw new IllegalArgumentException("Trying to read from a negative read position: " + readPosition + " startOffset " + startOffset + " position " + position);
+
         buffer.clear();
-        channel.read(buffer, position);
+        channel.read(buffer, readPosition);
         buffer.flip();
     }
 
@@ -55,9 +66,25 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
     }
 
     @Override
-    public Rebufferer instantiateRebufferer()
+    public Rebufferer instantiateRebufferer(boolean forScan)
     {
-        return new BufferManagingRebufferer.Unaligned(this);
+        if (Integer.bitCount(bufferSize) == 1)
+        {
+            assert startOffset == (startOffset & -bufferSize) : "startOffset must be aligned to buffer size";
+            return new BufferManagingRebufferer.Aligned(this);
+        }
+        else
+            return new BufferManagingRebufferer.Unaligned(this);
+    }
+
+    @Override
+    public void invalidateIfCached(long position)
+    {
+    }
+
+    public ReaderType type()
+    {
+        return ReaderType.SIMPLE;
     }
 
     @Override

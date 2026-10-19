@@ -22,9 +22,7 @@ package org.apache.cassandra.db.commitlog;
 
 import java.io.DataInput;
 import java.io.EOFException;
-import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -37,12 +35,16 @@ import java.util.zip.CRC32;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSReadError;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.security.EncryptionContext;
-import org.json.simple.JSONValue;
+import org.apache.cassandra.utils.JsonUtils;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
@@ -51,22 +53,34 @@ public class CommitLogDescriptor
     private static final String SEPARATOR = "-";
     private static final String FILENAME_PREFIX = "CommitLog" + SEPARATOR;
     private static final String FILENAME_EXTENSION = ".log";
+    private static final String INDEX_FILENAME_SUFFIX = "_cdc.idx";
     // match both legacy and new version of commitlogs Ex: CommitLog-12345.log and CommitLog-4-12345.log.
     private static final Pattern COMMIT_LOG_FILE_PATTERN = Pattern.compile(FILENAME_PREFIX + "((\\d+)(" + SEPARATOR + "\\d+)?)" + FILENAME_EXTENSION);
 
     static final String COMPRESSION_PARAMETERS_KEY = "compressionParameters";
     static final String COMPRESSION_CLASS_KEY = "compressionClass";
 
+    /**
+     * the versions below ARE NOT the same thing as MessagingService versions
+     * see {@link #getMessagingVersion()}
+     */
     // We don't support anything pre-3.0
     public static final int VERSION_30 = 6;
     public static final int VERSION_40 = 7;
+    public static final int VERSION_50 = 8;
+    // Stargazer 1.0 messaging
+    static final int VERSION_DS_10 = MessagingService.VERSION_DS_10;
+    static final int VERSION_DS_11 = MessagingService.VERSION_DS_11;
+    static final int VERSION_DS_12 = MessagingService.VERSION_DS_12;
+    static final int VERSION_DS_20 = MessagingService.VERSION_DS_20;
+    // For compatibility with CNDB
+    public static final int VERSION_DSE_68 = 680;
 
     /**
      * Increment this number if there is a changes in the commit log disc layout or MessagingVersion changes.
-     * Note: make sure to handle {@link #getMessagingVersion()}
+     * Note: make sure to handle  {@link #currentVersion()} and {@link #getMessagingVersion()}
      */
-    @VisibleForTesting
-    public static final int current_version = VERSION_40;
+    public static final int CURRENT_VERSION = currentVersion();
 
     final int version;
     public final long id;
@@ -83,7 +97,19 @@ public class CommitLogDescriptor
 
     public CommitLogDescriptor(long id, ParameterizedClass compression, EncryptionContext encryptionContext)
     {
-        this(current_version, id, compression, encryptionContext);
+        this(currentStorageVersion(), id, compression, encryptionContext);
+    }
+
+    /**
+     * Returns the commit log version to use for new segments, respecting storage compatibility mode.
+     * When compatibility mode is set (e.g., HCD_1), this ensures commit logs are written in a format
+     * that older versions can read.
+     *
+     * @return the commit log version appropriate for the current storage compatibility mode
+     */
+    public static int currentStorageVersion()
+    {
+        return currentVersion(StorageCompatibilityMode.current().storageMessagingVersion());
     }
 
     public static void writeHeader(ByteBuffer out, CommitLogDescriptor descriptor)
@@ -126,14 +152,13 @@ public class CommitLogDescriptor
         if (encryptionContext != null)
             params.putAll(encryptionContext.toHeaderParameters());
         params.putAll(additionalHeaders);
-        return JSONValue.toJSONString(params);
+        return JsonUtils.writeAsJsonString(params);
     }
 
     public static CommitLogDescriptor fromHeader(File file, EncryptionContext encryptionContext)
     {
-        try (RandomAccessFile raf = new RandomAccessFile(file, "r"))
+        try (FileInputStreamPlus raf = new FileInputStreamPlus(file))
         {
-            assert raf.getFilePointer() == 0;
             return readHeader(raf, encryptionContext);
         }
         catch (EOFException e)
@@ -168,7 +193,7 @@ public class CommitLogDescriptor
 
         if (crc == (int) checkcrc.getValue())
         {
-            Map<?, ?> map = (Map<?, ?>) JSONValue.parse(new String(parametersBytes, StandardCharsets.UTF_8));
+            Map<?, ?> map = (Map<?, ?>) JsonUtils.decodeJson(parametersBytes);
             return new CommitLogDescriptor(version, id, parseCompression(map), EncryptionContext.createFromMap(map, encryptionContext));
         }
         return null;
@@ -190,27 +215,89 @@ public class CommitLogDescriptor
 
     public static CommitLogDescriptor fromFileName(String name)
     {
-        Matcher matcher;
-        if (!(matcher = COMMIT_LOG_FILE_PATTERN.matcher(name)).matches())
+        Matcher matcher = extactFromFileName(name);
+        long id = Long.parseLong(matcher.group(3).split(SEPARATOR)[1]);
+        return new CommitLogDescriptor(Integer.parseInt(matcher.group(2)), id, null, new EncryptionContext());
+    }
+
+    public static long idFromFileName(String name)
+    {
+        Matcher matcher = extactFromFileName(name);
+        return Long.parseLong(matcher.group(3).split(SEPARATOR)[1]);
+    }
+
+    private static Matcher extactFromFileName(String name)
+    {
+        Matcher matcher = COMMIT_LOG_FILE_PATTERN.matcher(name);
+        if (!matcher.matches())
             throw new RuntimeException("Cannot parse the version of the file: " + name);
 
         if (matcher.group(3) == null)
             throw new UnsupportedOperationException("Commitlog segment is too old to open; upgrade to 1.2.5+ first");
 
-        long id = Long.parseLong(matcher.group(3).split(SEPARATOR)[1]);
-        return new CommitLogDescriptor(Integer.parseInt(matcher.group(2)), id, null, new EncryptionContext());
+        return matcher;
     }
 
     public int getMessagingVersion()
     {
-        switch (version)
+        return getMessagingVersion(version);
+    }
+
+    @VisibleForTesting
+    static int getMessagingVersion(int commitLogVersion)
+    {
+        switch (commitLogVersion)
         {
             case VERSION_30:
-                return MessagingService.VERSION_30;
+                return MessagingService.Version.VERSION_30.value;
             case VERSION_40:
-                return MessagingService.VERSION_40;
+                return MessagingService.Version.VERSION_40.value;
+            case VERSION_50:
+                return MessagingService.Version.VERSION_50.value;
+            case VERSION_DS_10:
+                return MessagingService.Version.VERSION_DS_10.value;
+            case VERSION_DS_11:
+                return MessagingService.Version.VERSION_DS_11.value;
+            case VERSION_DS_12:
+                return MessagingService.VERSION_DS_12;
+            case VERSION_DS_20:
+                return MessagingService.Version.VERSION_DS_20.value;
+            case VERSION_DSE_68:
+                return MessagingService.Version.VERSION_DSE_68.value;
             default:
-                throw new IllegalStateException("Unknown commitlog version " + version);
+                throw new IllegalStateException("Unknown commitlog version " + commitLogVersion);
+        }
+    }
+
+    private static int currentVersion()
+    {
+        return currentVersion(MessagingService.current_version);
+    }
+
+    @VisibleForTesting
+    static int currentVersion(int messagingVersion)
+    {
+        switch(messagingVersion)
+        {
+            case MessagingService.VERSION_30:
+            case MessagingService.VERSION_3014:
+                return VERSION_30;
+            case MessagingService.VERSION_40:
+                return VERSION_40;
+            case MessagingService.VERSION_50:
+                return VERSION_50;
+            case MessagingService.VERSION_DSE_68:
+                return VERSION_DSE_68;
+            case MessagingService.VERSION_DS_10:
+                return VERSION_DS_10;
+            case MessagingService.VERSION_DS_11:
+                return VERSION_DS_11;
+            case MessagingService.VERSION_DS_12:
+                return VERSION_DS_12;
+            case MessagingService.VERSION_DS_20:
+                return VERSION_DS_20;
+            default:
+                throw new IllegalStateException("Unknown messaging version " + messagingVersion);
         }
     }
 
@@ -221,7 +308,21 @@ public class CommitLogDescriptor
 
     public String cdcIndexFileName()
     {
-        return FILENAME_PREFIX + version + SEPARATOR + id + "_cdc.idx";
+        return FILENAME_PREFIX + version + SEPARATOR + id + INDEX_FILENAME_SUFFIX;
+    }
+
+    /**
+     * Infer the corresponding cdc index file using its cdc commitlog file
+     * @param cdcCommitLogSegment
+     * @return cdc index file or null if the cdc index file cannot be inferred.
+     */
+    public static File inferCdcIndexFile(File cdcCommitLogSegment)
+    {
+        if (!isValid(cdcCommitLogSegment.name()))
+            return null;
+        String cdcFileName = cdcCommitLogSegment.name();
+        String indexFileName = cdcFileName.substring(0, cdcFileName.length() - FILENAME_EXTENSION.length()) + INDEX_FILENAME_SUFFIX;
+        return new File(DatabaseDescriptor.getCDCLogLocation(), indexFileName);
     }
 
     /**

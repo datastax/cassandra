@@ -23,8 +23,8 @@ import java.util.regex.Pattern;
 
 import com.google.common.base.Objects;
 
-import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.metrics.SnapshottingTimer;
 import org.apache.cassandra.schema.TableParams;
 
 public class FixedSpeculativeRetryPolicy implements SpeculativeRetryPolicy
@@ -39,9 +39,9 @@ public class FixedSpeculativeRetryPolicy implements SpeculativeRetryPolicy
     }
 
     @Override
-    public long calculateThreshold(Snapshot latency, long existingValue)
+    public long calculateThreshold(SnapshottingTimer latency, long existingValue)
     {
-        return TimeUnit.MILLISECONDS.toNanos(speculateAtMilliseconds);
+        return TimeUnit.MILLISECONDS.toMicros(speculateAtMilliseconds);
     }
 
     @Override

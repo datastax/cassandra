@@ -1,0 +1,80 @@
+= Overview
+:exper: experimental
+
+{product} is an open-source, distributed NoSQL database. 
+It implements a partitioned wide-column storage model with eventually consistent semantics.
+
+{cassandra} was initially designed at https://www.cs.cornell.edu/projects/ladis2009/papers/lakshman-ladis2009.pdf[Facebook] using a staged event-driven architecture (http://www.sosp.org/2001/papers/welsh.pdf[SEDA]).
+This initial design implemented a combination of Amazon's https://www.cs.cornell.edu/courses/cs5414/2017fa/papers/dynamo.pdf[Dynamo] distributed storage and replication techniques and Google's https://static.googleusercontent.com/media/research.google.com/en//archive/bigtable-osdi06.pdf[Bigtable] data and storage engine model. 
+Dynamo and Bigtable were both developed to meet emerging requirements for scalable, reliable and highly available storage systems, but each had areas that could be improved.
+
+{product} was designed as a best-in-class combination of both systems to meet emerging large scale, both in data footprint and query volume, storage requirements.
+As applications began to require full global replication and always available low-latency reads and writes, a new kind of database model was required to meet these new requirements.
+Relational database systems at that time struggled to meet the requirements.
+
+{product} was designed to meet these challenges with the following design objectives in mind:
+
+* Full multi-primary database replication
+* Global availability at low latency
+* Scaling out on commodity hardware
+* Linear throughput increase with each additional processor
+* Online load balancing and cluster growth
+* Partitioned key-oriented queries
+* Flexible schema
+
+== Features
+
+{cassandra} provides the Cassandra Query Language (xref:cassandra:developing/cql/ddl.adoc[CQL]), an SQL-like
+language, to create, modify, and delete database schema, as well as access data. 
+CQL allows users to organize data within a cluster of {cassandra} nodes using:
+
+* Keyspace: Specifies the replication strategy for a dataset across different datacenters.
+Replication refers to the number of copies stored within a cluster.
+Keyspaces serve as containers for tables.
+* Table: Tables are composed of rows and columns.
+Columns define the typed schema for a single datum in a table.
+Tables are partitioned based on the columns provided in the partition key.
+{cassandra} tables can flexibly add new columns to tables with zero downtime.
+* Partition: Defines the mandatory part of the primary key all rows in
+{cassandra} must have to identify the node in a cluster where the row is stored.
+All performant queries supply the partition key in the query.
+* Row: Contains a collection of columns identified by a unique primary
+key made up of the partition key and optionally additional clustering
+keys.
+* Column: A single datum with a type which belongs to a row.
+
+CQL supports numerous advanced features over a partitioned dataset such
+as:
+
+* Collection types including sets, maps, and lists
+* User-defined types, tuples, functions and aggregates
+* Storage-attached indexing (SAI) for secondary indexes
+* Local secondary indexes (2i)
+* User-defined types, functions and aggregates
+* Single-partition lightweight transactions with atomic compare and set
+semantics
+* (Experimental) materialized views
+
+{cassandra} explicitly chooses not to implement operations that require
+cross-partition coordination as they are typically slow and hard to
+provide highly available global semantics. 
+For example, {cassandra} does not support:
+
+* Cross-partition transactions
+* Distributed joins
+* Foreign keys or referential integrity.
+
+== Operating
+
+{product} configuration settings are configured in the `cassandra.yaml` file that can be edited by hand or with the aid of configuration management tools. 
+Some settings can be manipulated live using an online interface, but others require a restart of the database
+to take effect.
+
+{cassandra} provides tools for managing a cluster. 
+The `nodetool` command interacts with Cassandra's live control interface, allowing runtime
+manipulation of many settings from `cassandra.yaml`. 
+The `auditlogviewer` is used to view the audit logs. 
+The `fqltool` is used to view, replay and compare full query logs. 
+
+In addition, {cassandra} supports out of the box atomic snapshot functionality, which presents a point in time (PIT) snapshot of Cassandra's data for easy integration with many backup tools. 
+{cassandra} also supports incremental backups where data can be backed up as it is written.

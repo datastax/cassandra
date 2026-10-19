@@ -27,6 +27,7 @@ import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
+import org.apache.cassandra.schema.TableMetadata;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -71,7 +72,8 @@ public class CompactTableTest extends CQLTester
         // Verify that schema change listeners are told statements are affected with DROP COMPACT STORAGE.
         SchemaChangeListener listener = new SchemaChangeListener()
         {
-            public void onAlterTable(String keyspace, String table, boolean affectsStatements)
+            @Override
+            public void onAlterTable(TableMetadata before, TableMetadata after, boolean affectsStatements)
             {
                 assertTrue(affectsStatements);
             }
@@ -111,5 +113,22 @@ public class CompactTableTest extends CQLTester
         execute("INSERT INTO %s (pk, ck1, v) VALUES (?, ?, ?)", 2, 2, 2);
         assertRows(execute("SELECT * FROM %s WHERE pk = ?",2),
                    row(2, 2, null, 2));
+    }
+
+    @Test
+    public void testColumnDeletionWithCompactTableWithMultipleColumns() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v1 int, v2 int) WITH COMPACT STORAGE");
+
+        execute("INSERT INTO %s (pk, v1, v2) VALUES (1, 1, 1) USING TIMESTAMP 1000");
+        flush();
+        execute("INSERT INTO %s (pk, v1) VALUES (1, 2) USING TIMESTAMP 2000");
+        flush();
+        execute("DELETE v1 FROM %s USING TIMESTAMP 3000 WHERE pk = 1");
+        flush();
+
+        assertRows(execute("SELECT * FROM %s WHERE pk=1"), row(1, null, 1));
+        assertRows(execute("SELECT v1, v2 FROM %s WHERE pk=1"), row(null, 1));
+        assertRows(execute("SELECT v1 FROM %s WHERE pk=1"), row((Integer) null));
     }
 }

@@ -24,11 +24,13 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -41,8 +43,6 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
  */
 public class Tuples
 {
-    private static final Logger logger = LoggerFactory.getLogger(Tuples.class);
-
     private Tuples() {}
 
     public static ColumnSpecification componentSpecOf(ColumnSpecification column, int component)
@@ -95,7 +95,7 @@ public class Tuples
                 throw new InvalidRequestException(String.format("Expected %d elements in value tuple, but got %d: %s", receivers.size(), elements.size(), this));
 
             List<Term> values = new ArrayList<>(elements.size());
-            List<AbstractType<?>> types = new ArrayList<>(elements.size());
+            ImmutableList.Builder<AbstractType<?>> types = ImmutableList.builderWithExpectedSize(elements.size());
             boolean allTerminal = true;
             for (int i = 0; i < elements.size(); i++)
             {
@@ -106,7 +106,7 @@ public class Tuples
                 values.add(t);
                 types.add(receivers.get(i).type);
             }
-            DelayedValue value = new DelayedValue(new TupleType(types), values);
+            DelayedValue value = new DelayedValue(new TupleType(types.build()), values);
             return allTerminal ? value.bind(QueryOptions.DEFAULT) : value;
         }
 
@@ -123,7 +123,7 @@ public class Tuples
         @Override
         public AbstractType<?> getExactTypeIfKnown(String keyspace)
         {
-            List<AbstractType<?>> types = new ArrayList<>(elements.size());
+            ImmutableList.Builder<AbstractType<?>> types = ImmutableList.builderWithExpectedSize(elements.size());
             for (Term.Raw term : elements)
             {
                 AbstractType<?> type = term.getExactTypeIfKnown(keyspace);
@@ -131,7 +131,7 @@ public class Tuples
                     return null;
                 types.add(type);
             }
-            return new TupleType(types);
+            return new TupleType(types.build());
         }
 
         public String getText()
@@ -154,17 +154,17 @@ public class Tuples
 
         public static Value fromSerialized(ByteBuffer bytes, TupleType type)
         {
-            ByteBuffer[] values = type.split(bytes);
+            ByteBuffer[] values = type.split(ByteBufferAccessor.instance, bytes);
             if (values.length > type.size())
             {
                 throw new InvalidRequestException(String.format(
                         "Tuple value contained too many fields (expected %s, got %s)", type.size(), values.length));
             }
 
-            return new Value(type.split(bytes));
+            return new Value(type.split(ByteBufferAccessor.instance, bytes));
         }
 
-        public ByteBuffer get(ProtocolVersion protocolVersion)
+        public ByteBuffer get(ProtocolVersion version)
         {
             return TupleType.buildValue(elements);
         }
@@ -176,7 +176,7 @@ public class Tuples
     }
 
     /**
-     * Similar to Value, but contains at least one NonTerminal, such as a non-pure functions or bind marker.
+     * Similar to Value, but contains at least one NonTerminal, such as a non-deterministic functions or bind marker.
      */
     public static class DelayedValue extends Term.NonTerminal
     {
@@ -258,21 +258,21 @@ public class Tuples
             this.elements = items;
         }
 
-        public static InValue fromSerialized(ByteBuffer value, ListType type, QueryOptions options) throws InvalidRequestException
+        public static <T> InValue fromSerialized(ByteBuffer value, ListType<T> type) throws InvalidRequestException
         {
             try
             {
                 // Collections have this small hack that validate cannot be called on a serialized object,
                 // but the deserialization does the validation (so we're fine).
-                List<?> l = type.getSerializer().deserializeForNativeProtocol(value, ByteBufferAccessor.instance, options.getProtocolVersion());
+                List<T> l = type.getSerializer().deserialize(value, ByteBufferAccessor.instance);
 
                 assert type.getElementsType() instanceof TupleType;
                 TupleType tupleType = Tuples.getTupleType(type.getElementsType());
 
                 // type.split(bytes)
                 List<List<ByteBuffer>> elements = new ArrayList<>(l.size());
-                for (Object element : l)
-                    elements.add(Arrays.asList(tupleType.split(type.getElementsType().decompose(element))));
+                for (T element : l)
+                    elements.add(Arrays.asList(tupleType.split(ByteBufferAccessor.instance, type.getElementsType().decompose(element))));
                 return new InValue(elements);
             }
             catch (MarshalException e)
@@ -281,7 +281,7 @@ public class Tuples
             }
         }
 
-        public ByteBuffer get(ProtocolVersion protocolVersion)
+        public ByteBuffer get(ProtocolVersion version)
         {
             throw new UnsupportedOperationException();
         }
@@ -307,7 +307,7 @@ public class Tuples
 
         private static ColumnSpecification makeReceiver(List<? extends ColumnSpecification> receivers)
         {
-            List<AbstractType<?>> types = new ArrayList<>(receivers.size());
+            ImmutableList.Builder<AbstractType<?>> types = ImmutableList.builderWithExpectedSize(receivers.size());
             StringBuilder inName = new StringBuilder("(");
             for (int i = 0; i < receivers.size(); i++)
             {
@@ -320,7 +320,7 @@ public class Tuples
             inName.append(')');
 
             ColumnIdentifier identifier = new ColumnIdentifier(inName.toString(), true);
-            TupleType type = new TupleType(types);
+            TupleType type = new TupleType(types.build());
             return new ColumnSpecification(receivers.get(0).ksName, receivers.get(0).cfName, identifier, type);
         }
 
@@ -347,7 +347,7 @@ public class Tuples
 
         private static ColumnSpecification makeInReceiver(List<? extends ColumnSpecification> receivers) throws InvalidRequestException
         {
-            List<AbstractType<?>> types = new ArrayList<>(receivers.size());
+            ImmutableList.Builder<AbstractType<?>> types = ImmutableList.builderWithExpectedSize(receivers.size());
             StringBuilder inName = new StringBuilder("in(");
             for (int i = 0; i < receivers.size(); i++)
             {
@@ -364,8 +364,8 @@ public class Tuples
             inName.append(')');
 
             ColumnIdentifier identifier = new ColumnIdentifier(inName.toString(), true);
-            TupleType type = new TupleType(types);
-            return new ColumnSpecification(receivers.get(0).ksName, receivers.get(0).cfName, identifier, ListType.getInstance(type, false));
+            TupleType type = new TupleType(types.build());
+            return new ColumnSpecification(receivers.get(0).ksName, receivers.get(0).cfName, identifier, ListType.getInstance(type.freeze(), false));
         }
 
         public AbstractType<?> getExactTypeIfKnown(String keyspace)
@@ -416,7 +416,7 @@ public class Tuples
             ByteBuffer value = options.getValues().get(bindIndex);
             if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
                 throw new InvalidRequestException(String.format("Invalid unset value for %s", receiver.name));
-            return value == null ? null : InValue.fromSerialized(value, (ListType)receiver.type, options);
+            return value == null ? null : InValue.fromSerialized(value, (ListType<?>) receiver.type);
         }
     }
 
@@ -442,7 +442,7 @@ public class Tuples
     public static <T> String tupleToString(Iterable<T> items, java.util.function.Function<T, String> mapper)
     {
         return StreamSupport.stream(items.spliterator(), false)
-                            .map(e -> mapper.apply(e))
+                            .map(mapper)
                             .collect(Collectors.joining(", ", "(", ")"));
     }
 
@@ -453,10 +453,10 @@ public class Tuples
      * @param mapper the mapper used to retrieve the element types from the  items
      * @return the exact TupleType from the items if it can be known or <code>null</code>
      */
-    public static <T> AbstractType<?> getExactTupleTypeIfKnown(List<T> items,
-                                                               java.util.function.Function<T, AbstractType<?>> mapper)
+    public static <T> TupleType getExactTupleTypeIfKnown(List<T> items,
+                                                         java.util.function.Function<T, AbstractType<?>> mapper)
     {
-        List<AbstractType<?>> types = new ArrayList<>(items.size());
+        ImmutableList.Builder<AbstractType<?>> types = ImmutableList.builderWithExpectedSize(items.size());
         for (T item : items)
         {
             AbstractType<?> type = mapper.apply(item);
@@ -464,7 +464,7 @@ public class Tuples
                 return null;
             types.add(type);
         }
-        return new TupleType(types);
+        return new TupleType(types.build());
     }
 
     /**
@@ -519,13 +519,11 @@ public class Tuples
 
     public static boolean checkIfTupleType(AbstractType<?> tuple)
     {
-        return (tuple instanceof TupleType) ||
-               (tuple instanceof ReversedType && ((ReversedType) tuple).baseType instanceof TupleType);
-
+        return tuple.unwrap() instanceof TupleType;
     }
 
     public static TupleType getTupleType(AbstractType<?> tuple)
     {
-        return (tuple instanceof ReversedType ? ((TupleType) ((ReversedType) tuple).baseType) : (TupleType)tuple);
+        return (TupleType) tuple.unwrap();
     }
 }

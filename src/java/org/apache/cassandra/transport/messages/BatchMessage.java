@@ -20,10 +20,14 @@ package org.apache.cassandra.transport.messages;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Attributes;
 import org.apache.cassandra.cql3.BatchQueryOptions;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -35,16 +39,23 @@ import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
+import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.reads.thresholds.CoordinatorWarnings;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.CBUtil;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 public class BatchMessage extends Message.Request
 {
@@ -161,7 +172,13 @@ public class BatchMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+    protected boolean isTrackable()
+    {
+        return true;
+    }
+
+    @Override
+    public Future<Response> maybeExecuteAsync(QueryState state, Dispatcher.RequestTime requestTime, boolean traceRequest)
     {
         List<QueryHandler.Prepared> prepared = null;
         try
@@ -174,18 +191,18 @@ public class BatchMessage extends Message.Request
             for (int i = 0; i < queryOrIdList.size(); i++)
             {
                 Object query = queryOrIdList.get(i);
-                CQLStatement statement;
                 QueryHandler.Prepared p;
                 if (query instanceof String)
                 {
-                    statement = QueryProcessor.parseStatement((String)query, state.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace()));
-                    p = new QueryHandler.Prepared(statement, (String) query);
+                    p = QueryProcessor.parseAndPrepare((String) query,
+                                                       state.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace()),
+                                                       false, false);
                 }
                 else
                 {
-                    p = handler.getPrepared((MD5Digest)query);
+                    p = handler.getPrepared((MD5Digest) query);
                     if (null == p)
-                        throw new PreparedQueryNotFoundException((MD5Digest)query);
+                        throw new PreparedQueryNotFoundException((MD5Digest) query);
                 }
 
                 List<ByteBuffer> queryValues = values.get(i);
@@ -204,7 +221,7 @@ public class BatchMessage extends Message.Request
             {
                 CQLStatement statement = prepared.get(i).statement;
                 if (queries != null)
-                    queries.add(prepared.get(i).rawCQLStatement);
+                    queries.add(statement.getRawCQLStatement());
                 batchOptions.prepareStatement(i, statement.getBindVariables());
 
                 if (!(statement instanceof ModificationStatement))
@@ -215,20 +232,78 @@ public class BatchMessage extends Message.Request
 
             // Note: It's ok at this point to pass a bogus value for the number of bound terms in the BatchState ctor
             // (and no value would be really correct, so we prefer passing a clearly wrong one).
-            BatchStatement batch = new BatchStatement(batchType, VariableSpecifications.empty(), statements, Attributes.none());
+            BatchStatement batch = new BatchStatement(null, batchType,
+                                                      VariableSpecifications.empty(), statements, Attributes.none());
 
-            long queryTime = System.currentTimeMillis();
-            Message.Response response = handler.processBatch(batch, state, batchOptions, getCustomPayload(), queryStartNanoTime);
-            if (queries != null)
-                QueryEvents.instance.notifyBatchSuccess(batchType, statements, queries, values, options, state, queryTime, response);
-            return response;
+            Tracing.trace("Processing batch start");
+            long requestStartMillisTime = Clock.Global.currentTimeMillis();
+            Optional<Stage> asyncStage = Stage.fromStatement(batch);
+            if (asyncStage.isPresent())
+            {
+                // Execution will continue on a new thread, but Dispatcher already called CoordinatorWarnings.init
+                // on the current thread; the Dispatcher.processRequest request.execute() callback must call
+                // CoordinatorWarnings.done() on the same thread that called init(). Reset CoordinatorWarnings on the
+                // current thread, and init on the new thread. See CNDB-13432 and CNDB-10759.
+                CoordinatorWarnings.reset();
+                List<QueryHandler.Prepared> finalPrepared = prepared;
+                return asyncStage.get().submit(() ->
+                                               {
+                                                   try
+                                                   {
+                                                       if (isTrackable())
+                                                           CoordinatorWarnings.init();
+
+                                                       // at the time of the check, this includes the time spent in the NTR queue, basic query parsing/set up,
+                                                       // and any time spent in the queue for the async stage
+                                                       long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+                                                       ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                                                       if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+                                                       {
+                                                           ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
+                                                           throw new OverloadedException("Query timed out before it could start");
+                                                       }
+                                                   }
+                                                   catch (Exception e)
+                                                   {
+                                                       return handleException(state, finalPrepared, e);
+                                                   }
+                                                   return handleRequest(state, requestTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime);
+                                               });
+            }
+            else
+                return ImmediateFuture.success(handleRequest(state, requestTime, handler, batch, batchOptions, queries, statements, prepared, requestStartMillisTime));
         }
         catch (Exception e)
         {
-            QueryEvents.instance.notifyBatchFailure(prepared, batchType, queryOrIdList, values, options, state, e);
-            JVMStabilityInspector.inspectThrowable(e);
-            return ErrorMessage.fromException(e);
+            return ImmediateFuture.success(handleException(state, prepared, e));
         }
+    }
+
+    private Response handleRequest(QueryState queryState, Dispatcher.RequestTime requestTime, QueryHandler queryHandler, BatchStatement batch, BatchQueryOptions batchOptions, List<String> queries, List<ModificationStatement> statements, List<QueryHandler.Prepared> preparedList, long requestStartMillisTime)
+    {
+        try
+        {
+            Response response = queryHandler.processBatch(batch, queryState, batchOptions, getCustomPayload(), requestTime);
+            if (queries != null)
+                QueryEvents.instance.notifyBatchSuccess(batchType, statements, queries, values, options, queryState, requestStartMillisTime, response);
+
+            return response;
+        }
+        catch (Exception exception)
+        {
+            return handleException(queryState, preparedList, exception);
+        }
+        finally
+        {
+            Tracing.trace("Processing batch complete");
+        }
+    }
+
+    private ErrorMessage handleException(QueryState state, List<QueryHandler.Prepared> prepared, Exception e)
+    {
+        QueryEvents.instance.notifyBatchFailure(prepared, batchType, queryOrIdList, values, options, state, e);
+        JVMStabilityInspector.inspectThrowable(e);
+        return ErrorMessage.fromException(e);
     }
 
     private void traceQuery(QueryState state)
@@ -236,8 +311,8 @@ public class BatchMessage extends Message.Request
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
         if (options.getConsistency() != null)
             builder.put("consistency_level", options.getConsistency().name());
-        if (options.getSerialConsistency() != null)
-            builder.put("serial_consistency_level", options.getSerialConsistency().name());
+        if (options.getSerialConsistency(state) != null)
+            builder.put("serial_consistency_level", options.getSerialConsistency(state).name());
 
         // TODO we don't have [typed] access to CQL bind variables here.  CASSANDRA-4560 is open to add support.
         Tracing.instance.begin("Execute batch of CQL3 queries", state.getClientAddress(), builder.build());

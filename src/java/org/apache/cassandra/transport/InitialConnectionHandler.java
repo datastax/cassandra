@@ -74,7 +74,7 @@ public class InitialConnectionHandler extends ByteToMessageDecoder
             switch (inbound.header.type)
             {
                 case OPTIONS:
-                    logger.debug("OPTIONS received {}", inbound.header.version);
+                    logger.trace("OPTIONS received {}", inbound.header.version);
                     List<String> cqlVersions = new ArrayList<>();
                     cqlVersions.add(QueryProcessor.CQL_VERSION.toString());
 
@@ -103,6 +103,7 @@ public class InitialConnectionHandler extends ByteToMessageDecoder
                         attrConn.set(connection);
                     }
                     assert connection instanceof ServerConnection;
+                    ServerConnection serverConnection = (ServerConnection) connection;
 
                     StartupMessage startup = (StartupMessage) Message.Decoder.decodeMessage(ctx.channel(), inbound);
                     InetAddress remoteAddress = ((InetSocketAddress) ctx.channel().remoteAddress()).getAddress();
@@ -118,8 +119,8 @@ public class InitialConnectionHandler extends ByteToMessageDecoder
                         promise = AsyncChannelPromise.withListener(ctx, future -> {
                             if (future.isSuccess())
                             {
-                                logger.debug("Response to STARTUP sent, configuring pipeline for {}", inbound.header.version);
-                                configurator.configureModernPipeline(ctx, allocator, inbound.header.version, startup.options);
+                                logger.trace("Response to STARTUP sent, configuring pipeline for {}", inbound.header.version);
+                                configurator.configureModernPipeline(ctx, serverConnection, allocator, inbound.header.version, startup.options);
                                 allocator.release(inbound.header.bodySizeInBytes);
                             }
                             else
@@ -147,10 +148,21 @@ public class InitialConnectionHandler extends ByteToMessageDecoder
                         promise = new VoidChannelPromise(ctx.channel(), false);
                     }
 
-                    final Message.Response response = Dispatcher.processRequest((ServerConnection) connection, startup);
-                    outbound = response.encode(inbound.header.version);
-                    ctx.writeAndFlush(outbound, promise);
-                    logger.debug("Configured pipeline: {}", ctx.pipeline());
+                    ProtocolVersion version = inbound.header.version;
+                    Dispatcher.processInit((ServerConnection) connection, startup).addCallback((response, error) -> {
+                        if (error == null)
+                        {
+                            Envelope encoded = response.encode(version);
+                            ctx.writeAndFlush(encoded, promise);
+                            logger.debug("Configured pipeline: {}", ctx.pipeline());
+                        }
+                        else
+                        {
+                            ErrorMessage message = ErrorMessage.fromException(new ProtocolException(String.format("Unexpected error %s", error.getMessage())));
+                            Envelope encoded = message.encode(version);
+                            ctx.writeAndFlush(encoded);
+                        }
+                    });
                     break;
 
                 default:

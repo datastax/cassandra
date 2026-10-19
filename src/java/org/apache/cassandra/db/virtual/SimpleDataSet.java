@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.virtual;
 
 import java.nio.ByteBuffer;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -34,8 +35,8 @@ import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Rows;
@@ -54,10 +55,15 @@ public class SimpleDataSet extends AbstractVirtualTable.AbstractDataSet
 
     private Row currentRow;
 
+    public SimpleDataSet(TableMetadata metadata, Comparator<DecoratedKey> comparator)
+    {
+        super(new TreeMap<>(comparator));
+        this.metadata = metadata;
+    }
+
     public SimpleDataSet(TableMetadata metadata)
     {
-        super(new TreeMap<>(DecoratedKey.comparator));
-        this.metadata = metadata;
+        this(metadata, DecoratedKey.comparator);
     }
 
     public SimpleDataSet row(Object... primaryKeyValues)
@@ -176,21 +182,30 @@ public class SimpleDataSet extends AbstractVirtualTable.AbstractDataSet
         private void add(String columnName, Object value)
         {
             ColumnMetadata column = metadata.getColumn(ByteBufferUtil.bytes(columnName));
-            if (null == column || !column.isRegular())
-                throw new IllegalArgumentException();
+            if (column == null)
+                throw new IllegalArgumentException("Unknown column: " + columnName);
+            if (!column.isRegular())
+                throw new IllegalArgumentException(String.format("Expect a regular column %s, but got %s", columnName, column.kind));
             values.put(column, value);
         }
 
         private org.apache.cassandra.db.rows.Row toTableRow(RegularAndStaticColumns columns, long now)
         {
-            org.apache.cassandra.db.rows.Row.Builder builder = BTreeRow.unsortedBuilder();
+            org.apache.cassandra.db.rows.Row.Builder builder = PartitionUpdate.rowBuilder(metadata, clustering == Clustering.STATIC_CLUSTERING, false);
             builder.newRow(clustering);
 
             columns.forEach(c ->
             {
-                Object value = values.get(c);
-                if (null != value)
-                    builder.addCell(BufferCell.live(c, now, decompose(c.type, value)));
+                try
+                {
+                    Object value = values.get(c);
+                    if (null != value)
+                        builder.addCell(BufferCell.live(c, now, decompose(c.type, value)));
+                }
+                catch (Exception e)
+                {
+                    throw new SerializationException(c, e);
+                }
             });
 
             return builder.build();
@@ -202,9 +217,16 @@ public class SimpleDataSet extends AbstractVirtualTable.AbstractDataSet
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private static <T> ByteBuffer decompose(AbstractType<?> type, T value)
+    private static ByteBuffer decompose(AbstractType<?> type, Object value)
     {
-        return ((AbstractType<T>) type).decompose(value);
+        return type.decomposeUntyped(value);
+    }
+
+    public static class SerializationException extends RuntimeException
+    {
+        public SerializationException(ColumnMetadata c, Throwable t)
+        {
+            super("Unable to serialize column " + c.name + " " + c.type.asCQL3Type(), t, true, false);
+        }
     }
 }

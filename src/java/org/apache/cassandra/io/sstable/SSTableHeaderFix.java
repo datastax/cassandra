@@ -17,13 +17,13 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,12 +51,16 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DynamicCompositeType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -66,6 +70,8 @@ import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CASSANDRA_SKIP_AUTOMATIC_UDT_FIX;
+
 /**
  * Validates and fixes type issues in the serialization-header of sstables.
  */
@@ -73,8 +79,7 @@ public abstract class SSTableHeaderFix
 {
     // C* 3.0 upgrade code
 
-    private static final String SKIPAUTOMATICUDTFIX = "cassandra.skipautomaticudtfix";
-    private static final boolean SKIP_AUTOMATIC_FIX_ON_UPGRADE = Boolean.getBoolean(SKIPAUTOMATICUDTFIX);
+    private static final boolean SKIP_AUTOMATIC_FIX_ON_UPGRADE = CASSANDRA_SKIP_AUTOMATIC_UDT_FIX.getBoolean();
 
     public static void fixNonFrozenUDTIfUpgradeFrom30()
     {
@@ -84,7 +89,19 @@ public abstract class SSTableHeaderFix
         CassandraVersion previousVersion = new CassandraVersion(previousVersionString);
         if (previousVersion.major != 3 || previousVersion.minor > 0)
         {
-            // Not an upgrade from 3.0 to 3.x, nothing to do here
+            // Not an upgrade from 3.0, nothing to do here
+            return;
+        }
+
+        boolean hasDroppedFrozenColumn = false;
+        for (String keyspace : Schema.instance.getUserKeyspaces())
+            for (TableMetadata tableMetadata : Schema.instance.getTablesAndViews(keyspace))
+                if (!tableMetadata.isIndex() && !tableMetadata.isView() && !tableMetadata.isVirtual())
+                    hasDroppedFrozenColumn |= hasDroppedFrozenColumn(tableMetadata.droppedColumns.values());
+
+        if (!hasDroppedFrozenColumn)
+        {
+            logger.info("No dropped frozen columns found - NOT fixing sstable metadata serialization-headers");
             return;
         }
 
@@ -94,7 +111,7 @@ public abstract class SSTableHeaderFix
                         "sstable metadata serialization-headers",
                         previousVersionString,
                         FBUtilities.getReleaseVersionString(),
-                        SKIPAUTOMATICUDTFIX);
+                        CASSANDRA_SKIP_AUTOMATIC_UDT_FIX.getKey());
             return;
         }
 
@@ -298,9 +315,18 @@ public abstract class SSTableHeaderFix
     {
         Stream.of(path)
               .flatMap(SSTableHeaderFix::maybeExpandDirectory)
-              .filter(p -> Descriptor.fromFilenameWithComponent(p.toFile()).right.type == Component.Type.DATA)
+              .filter(p -> {
+                  try
+                  {
+                      return Descriptor.fromFileWithComponent(new File(p)).right.type == SSTableFormat.Components.DATA.type;
+                  }
+                  catch (IllegalArgumentException e) // ignore the '.keep' files
+                  {
+                      return false;
+                  }
+              })
               .map(Path::toString)
-              .map(Descriptor::fromFilename)
+              .map((String file) -> Descriptor.fromFile(new File(file)))
               .forEach(descriptors::add);
     }
 
@@ -311,6 +337,16 @@ public abstract class SSTableHeaderFix
         return LifecycleTransaction.getFiles(path, (file, fileType) -> fileType == Directories.FileType.FINAL, Directories.OnTxnErr.IGNORE)
                                    .stream()
                                    .map(File::toPath);
+    }
+
+    private static boolean hasDroppedFrozenColumn(Collection<DroppedColumn> droppedColumns)
+    {
+        boolean hasDroppedFrozenColumn = false;
+        for (DroppedColumn droppedColumn : droppedColumns)
+            hasDroppedFrozenColumn |= droppedColumn.column.type.equals(droppedColumn.column.type.freeze())
+                    && droppedColumn.column.type instanceof MultiCellCapableType;
+
+        return hasDroppedFrozenColumn;
     }
 
     private void processSSTable(Descriptor desc)
@@ -332,8 +368,14 @@ public abstract class SSTableHeaderFix
             return;
         }
 
-        Set<Component> components = SSTable.discoverComponentsFor(desc);
-        if (components.stream().noneMatch(c -> c.type == Component.Type.STATS))
+        if (!hasDroppedFrozenColumn(tableMetadata.droppedColumns.values()))
+        {
+            info.accept(String.format("Table %s.%s has no dropped frozen columns - NOT checking sstable %s", desc.ksname, desc.cfname, desc));
+            return;
+        }
+
+        Set<Component> components = desc.discoverComponents();
+        if (components.stream().noneMatch(c -> c.type == SSTableFormat.Components.STATS.type))
         {
             error("sstable %s has no -Statistics.db component.", desc);
             return;
@@ -361,8 +403,8 @@ public abstract class SSTableHeaderFix
         List<AbstractType<?>> clusteringTypes = validateClusteringColumns(desc, tableMetadata, header);
 
         // check static and regular columns
-        Map<ByteBuffer, AbstractType<?>> staticColumns = validateColumns(desc, tableMetadata, header.getStaticColumns(), ColumnMetadata.Kind.STATIC);
-        Map<ByteBuffer, AbstractType<?>> regularColumns = validateColumns(desc, tableMetadata, header.getRegularColumns(), ColumnMetadata.Kind.REGULAR);
+        LinkedHashMap<ByteBuffer, AbstractType<?>> staticColumns = validateColumns(desc, tableMetadata, header.getStaticColumns(), ColumnMetadata.Kind.STATIC);
+        LinkedHashMap<ByteBuffer, AbstractType<?>> regularColumns = validateColumns(desc, tableMetadata, header.getRegularColumns(), ColumnMetadata.Kind.REGULAR);
 
         SerializationHeader.Component newHeader = SerializationHeader.Component.buildComponentForTools(keyType,
                                                                                                        clusteringTypes,
@@ -396,8 +438,8 @@ public abstract class SSTableHeaderFix
         {
             // Note, the logic is similar as just calling 'fixType()' using the composite partition key,
             // but the log messages should use the composite partition key column names.
-            List<AbstractType<?>> headerKeyComponents = ((CompositeType) headerKeyType).types;
-            List<AbstractType<?>> schemaKeyComponents = ((CompositeType) schemaKeyType).types;
+            List<AbstractType<?>> headerKeyComponents = ((CompositeType) headerKeyType).subTypes();
+            List<AbstractType<?>> schemaKeyComponents = ((CompositeType) schemaKeyType).subTypes();
             if (headerKeyComponents.size() != schemaKeyComponents.size())
             {
                 // different number of components in composite partition keys - very suspicious
@@ -485,9 +527,9 @@ public abstract class SSTableHeaderFix
         return clusteringTypes;
     }
 
-    private Map<ByteBuffer, AbstractType<?>> validateColumns(Descriptor desc, TableMetadata tableMetadata, Map<ByteBuffer, AbstractType<?>> columns, ColumnMetadata.Kind kind)
+    private LinkedHashMap<ByteBuffer, AbstractType<?>> validateColumns(Descriptor desc, TableMetadata tableMetadata, Map<ByteBuffer, AbstractType<?>> columns, ColumnMetadata.Kind kind)
     {
-        Map<ByteBuffer, AbstractType<?>> target = new LinkedHashMap<>();
+        LinkedHashMap<ByteBuffer, AbstractType<?>> target = new LinkedHashMap<>();
         for (Map.Entry<ByteBuffer, AbstractType<?>> nameAndType : columns.entrySet())
         {
             ByteBuffer name = nameAndType.getKey();
@@ -577,8 +619,8 @@ public abstract class SSTableHeaderFix
                 info.accept(String.format("sstable %s: Column '%s' needs to be updated from type '%s' to '%s'",
                                           desc,
                                           logColumnName(name),
-                                          typeInHeader.asCQL3Type(),
-                                          fixedType.asCQL3Type()));
+                                          typeInHeader.asCQL3Type().toSchemaString(),
+                                          fixedType.asCQL3Type().toSchemaString()));
             return fixedType;
         }
 
@@ -738,15 +780,15 @@ public abstract class SSTableHeaderFix
 
     private AbstractType<?> fixTypeInnerComposite(CompositeType cHeader, CompositeType cSchema, boolean droppedColumnMode)
     {
-        if (cHeader.types.size() != cSchema.types.size())
+        if (cHeader.subTypes().size() != cSchema.subTypes().size())
             // different number of components - bummer...
             return null;
-        List<AbstractType<?>> cHeaderFixed = new ArrayList<>(cHeader.types.size());
+        List<AbstractType<?>> cHeaderFixed = new ArrayList<>(cHeader.subTypes().size());
         boolean anyChanged = false;
-        for (int i = 0; i < cHeader.types.size(); i++)
+        for (int i = 0; i < cHeader.subTypes().size(); i++)
         {
-            AbstractType<?> cHeaderComp = cHeader.types.get(i);
-            AbstractType<?> cHeaderCompFixed = fixTypeInner(cHeaderComp, cSchema.types.get(i), droppedColumnMode);
+            AbstractType<?> cHeaderComp = cHeader.subTypes().get(i);
+            AbstractType<?> cHeaderCompFixed = fixTypeInner(cHeaderComp, cSchema.subTypes().get(i), droppedColumnMode);
             if (cHeaderCompFixed == null)
                 // incompatible, bummer...
                 return null;
@@ -835,7 +877,7 @@ public abstract class SSTableHeaderFix
 
     private void writeNewMetadata(Descriptor desc, Map<MetadataType, MetadataComponent> newMetadata)
     {
-        String file = desc.filenameFor(Component.STATS);
+        File file = desc.fileFor(SSTableFormat.Components.STATS);
         info.accept(String.format("  Writing new metadata file %s", file));
         try
         {
@@ -888,26 +930,26 @@ public abstract class SSTableHeaderFix
         private void scanDataDirectory(Directories.DataDirectory dataDirectory)
         {
             info.accept(String.format("Scanning data directory %s", dataDirectory.location));
-            File[] ksDirs = dataDirectory.location.listFiles();
+            File[] ksDirs = dataDirectory.location.tryList();
             if (ksDirs == null)
                 return;
             for (File ksDir : ksDirs)
             {
-                if (!ksDir.isDirectory() || !ksDir.canRead())
+                if (!ksDir.isDirectory() || !ksDir.isReadable())
                     continue;
 
-                String name = ksDir.getName();
+                String name = ksDir.name();
 
                 // silently ignore all system keyspaces
                 if (SchemaConstants.isLocalSystemKeyspace(name) || SchemaConstants.isReplicatedSystemKeyspace(name))
                     continue;
 
-                File[] tabDirs = ksDir.listFiles();
+                File[] tabDirs = ksDir.tryList();
                 if (tabDirs == null)
                     continue;
                 for (File tabDir : tabDirs)
                 {
-                    if (!tabDir.isDirectory() || !tabDir.canRead())
+                    if (!tabDir.isDirectory() || !tabDir.isReadable())
                         continue;
 
                     processFileOrDirectory(tabDir.toPath());

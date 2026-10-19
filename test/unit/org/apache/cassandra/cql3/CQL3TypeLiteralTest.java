@@ -23,17 +23,57 @@ import java.math.BigInteger;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Date;
+import java.util.EnumMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.junit.Test;
 
-import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.serializers.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.ByteType;
+import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.DoubleType;
+import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.db.marshal.ShortType;
+import org.apache.cassandra.db.marshal.TimeUUIDType;
+import org.apache.cassandra.db.marshal.TimestampType;
+import org.apache.cassandra.db.marshal.TupleType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.serializers.AsciiSerializer;
+import org.apache.cassandra.serializers.BytesSerializer;
+import org.apache.cassandra.serializers.CollectionSerializer;
+import org.apache.cassandra.serializers.DurationSerializer;
+import org.apache.cassandra.serializers.InetAddressSerializer;
+import org.apache.cassandra.serializers.SimpleDateSerializer;
+import org.apache.cassandra.serializers.TimeSerializer;
+import org.apache.cassandra.serializers.TimestampSerializer;
+import org.apache.cassandra.serializers.UTF8Serializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.TimeUUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 
 /**
@@ -196,14 +236,14 @@ public class CQL3TypeLiteralTest
         for (int i = 0; i < 20; i++)
         {
             int v = randInt();
-            addNativeValue(SimpleDateSerializer.instance.toString(v), CQL3Type.Native.DATE, SimpleDateSerializer.instance.serialize(v));
+            addNativeValue(quote(SimpleDateSerializer.instance.toString(v)), CQL3Type.Native.DATE, SimpleDateSerializer.instance.serialize(v));
         }
         addNativeValue("null", CQL3Type.Native.DATE, null);
 
         for (int i = 0; i < 100; i++)
         {
             long v = randLong(24L * 60 * 60 * 1000 * 1000 * 1000);
-            addNativeValue(TimeSerializer.instance.toString(v), CQL3Type.Native.TIME, TimeSerializer.instance.serialize(v));
+            addNativeValue(quote(TimeSerializer.instance.toString(v)), CQL3Type.Native.TIME, TimeSerializer.instance.serialize(v));
         }
         addNativeValue("null", CQL3Type.Native.TIME, null);
 
@@ -218,14 +258,15 @@ public class CQL3TypeLiteralTest
         for (int i = 0; i < 20; i++)
         {
             long v = randLong();
-            addNativeValue(TimestampSerializer.instance.toStringUTC(new Date(v)), CQL3Type.Native.TIMESTAMP, TimestampType.instance.fromString(Long.toString(v)));
+            addNativeValue(quote(TimestampSerializer.instance.toStringUTC(new Date(v))), CQL3Type.Native.TIMESTAMP, TimestampType.instance.fromString(Long.toString(v)));
         }
         addNativeValue("null", CQL3Type.Native.TIMESTAMP, ByteBufferUtil.EMPTY_BYTE_BUFFER);
         addNativeValue("null", CQL3Type.Native.TIMESTAMP, null);
 
         for (int i = 0; i < 20; i++)
         {
-            UUID v = UUIDGen.getTimeUUID(randLong(System.currentTimeMillis()));
+//            UUID v = UUIDGen.getTimeUUID(randLong(System.currentTimeMillis()));
+            TimeUUID v = TimeUUID.Generator.nextTimeUUID();
             addNativeValue(v.toString(), CQL3Type.Native.TIMEUUID, TimeUUIDType.instance.decompose(v));
         }
         addNativeValue("null", CQL3Type.Native.TIMEUUID, ByteBufferUtil.EMPTY_BYTE_BUFFER);
@@ -258,7 +299,7 @@ public class CQL3TypeLiteralTest
             {
                 throw new RuntimeException(e);
             }
-            addNativeValue(v.getHostAddress(), CQL3Type.Native.INET, InetAddressSerializer.instance.serialize(v));
+            addNativeValue(quote(v.getHostAddress()), CQL3Type.Native.INET, InetAddressSerializer.instance.serialize(v));
         }
         addNativeValue("null", CQL3Type.Native.INET, ByteBufferUtil.EMPTY_BYTE_BUFFER);
         addNativeValue("null", CQL3Type.Native.INET, null);
@@ -375,6 +416,27 @@ public class CQL3TypeLiteralTest
         }
     }
 
+    @Test
+    public void testForEachUserType()
+    {
+        UTName name1 = new UTName(new ColumnIdentifier("ks", true), new ColumnIdentifier("name1", true));
+        UTName name2 = new UTName(new ColumnIdentifier("ks", true), new ColumnIdentifier("name2", true));
+
+        checkForEachUserType(CQL3Type.Raw.from(UTF8Type.instance.asCQL3Type()));
+        checkForEachUserType(CQL3Type.Raw.userType(name1), name1);
+        checkForEachUserType(CQL3Type.Raw.list(CQL3Type.Raw.userType(name1)), name1);
+        checkForEachUserType(CQL3Type.Raw.set(CQL3Type.Raw.userType(name1)), name1);
+        checkForEachUserType(CQL3Type.Raw.map(CQL3Type.Raw.userType(name1), CQL3Type.Raw.userType(name2)), name1, name2);
+        checkForEachUserType(CQL3Type.Raw.tuple(Arrays.asList(CQL3Type.Raw.userType(name1), CQL3Type.Raw.userType(name2)), true), name1, name2);
+    }
+
+    private void checkForEachUserType(CQL3Type.Raw t, UTName... expectedNames)
+    {
+        Set<UTName> collectedNames = new HashSet<>();
+        t.forEachUserType(collectedNames::add);
+        assertThat(collectedNames).hasSameElementsAs(Arrays.stream(expectedNames).collect(Collectors.toSet()));
+    }
+
     static void compareCqlLiteral(ProtocolVersion version, Value value)
     {
         ByteBuffer buffer = value.value != null ? value.value.duplicate() : null;
@@ -383,7 +445,7 @@ public class CQL3TypeLiteralTest
         {
             assertEquals(msg,
                          value.expected,
-                         value.cql3Type.toCQLLiteral(buffer, version));
+                         value.cql3Type.toCQLLiteral(buffer));
         }
         catch (RuntimeException e)
         {
@@ -471,7 +533,7 @@ public class CQL3TypeLiteralTest
                 buffers.add(el.value.duplicate());
                 if (expected.length() > 1)
                     expected.append(", ");
-                expected.append(el.cql3Type.toCQLLiteral(el.value, version));
+                expected.append(el.cql3Type.toCQLLiteral(el.value));
 
                 if (collectionType.kind == CollectionType.Kind.MAP)
                 {
@@ -479,11 +541,11 @@ public class CQL3TypeLiteralTest
                     el = generateAnyValue(version, values);
                     buffers.add(el.value.duplicate());
                     expected.append(": ");
-                    expected.append(el.cql3Type.toCQLLiteral(el.value, version));
+                    expected.append(el.cql3Type.toCQLLiteral(el.value));
                 }
             }
             expected.append(bracketClose);
-            buffer = CollectionSerializer.pack(buffers, added.size(), version);
+            buffer = CollectionSerializer.pack(buffers, added.size());
         }
 
         return new Value(expected.toString(), collectionType.asCQL3Type(), buffer);

@@ -22,18 +22,18 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.cassandra.utils.MD5Digest;
+import org.apache.commons.lang3.builder.ToStringBuilder;
+import org.apache.commons.lang3.builder.ToStringStyle;
 
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.service.QueryState;
-import org.apache.commons.lang3.builder.ToStringBuilder;
-import org.apache.commons.lang3.builder.ToStringStyle;
+import org.apache.cassandra.utils.MD5Digest;
 
 public abstract class BatchQueryOptions
 {
     public static BatchQueryOptions DEFAULT = withoutPerStatementVariables(QueryOptions.DEFAULT);
 
-    protected final QueryOptions wrapped;
+    public final QueryOptions wrapped;
     private final List<Object> queryOrIdList;
 
     protected BatchQueryOptions(QueryOptions wrapped, List<Object> queryOrIdList)
@@ -59,6 +59,11 @@ public abstract class BatchQueryOptions
         forStatement(i).prepare(boundNames);
     }
 
+    public void updateConsistency(ConsistencyLevel updatedLevel)
+    {
+        wrapped.updateConsistency(updatedLevel);
+    }
+
     public ConsistencyLevel getConsistency()
     {
         return wrapped.getConsistency();
@@ -69,9 +74,14 @@ public abstract class BatchQueryOptions
         return wrapped.getKeyspace();
     }
 
-    public ConsistencyLevel getSerialConsistency()
+    public ConsistencyLevel getSerialConsistency(QueryState queryState)
     {
-        return wrapped.getSerialConsistency();
+        return wrapped.getSerialConsistency(queryState);
+    }
+
+    public List<List<ByteBuffer>> getVariables()
+    {
+        return Collections.emptyList();
     }
 
     public List<Object> getQueryOrIdList()
@@ -84,7 +94,7 @@ public abstract class BatchQueryOptions
         return wrapped.getTimestamp(state);
     }
 
-    public int getNowInSeconds(QueryState state)
+    public long getNowInSeconds(QueryState state)
     {
         return wrapped.getNowInSeconds(state);
     }
@@ -105,10 +115,12 @@ public abstract class BatchQueryOptions
     private static class WithPerStatementVariables extends BatchQueryOptions
     {
         private final List<QueryOptions> perStatementOptions;
+        private final List<List<ByteBuffer>> variables;
 
         private WithPerStatementVariables(QueryOptions wrapped, List<List<ByteBuffer>> variables, List<Object> queryOrIdList)
         {
             super(wrapped, queryOrIdList);
+            this.variables = variables;
             this.perStatementOptions = new ArrayList<>(variables.size());
             for (final List<ByteBuffer> vars : variables)
             {
@@ -122,6 +134,7 @@ public abstract class BatchQueryOptions
             }
         }
 
+        @Override
         public QueryOptions forStatement(int i)
         {
             return perStatementOptions.get(i);
@@ -147,8 +160,14 @@ public abstract class BatchQueryOptions
         {
             return getQueryOrIdList().get(i) instanceof MD5Digest;
         }
+
+        @Override
+        public List<List<ByteBuffer>> getVariables()
+        {
+            return variables;
+        }
     }
-    
+
     @Override
     public String toString()
     {

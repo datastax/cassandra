@@ -17,15 +17,12 @@
  */
 package org.apache.cassandra.service;
 
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
-@RunWith(OrderedJUnit4ClassRunner.class)
 public class GCInspectorTest
 {
     
@@ -67,11 +64,16 @@ public class GCInspectorTest
     {
         gcInspector.setGcWarnThresholdInMs(0);
         Assert.assertEquals(gcInspector.getStatusThresholdInMs(), gcInspector.getGcLogThresholdInMs());
+        Assert.assertEquals(0, DatabaseDescriptor.getGCWarnThreshold());
+        Assert.assertEquals(200, DatabaseDescriptor.getGCLogThreshold());
     }
     
     @Test(expected=IllegalArgumentException.class)
     public void ensureLogLessThanWarn()
     {
+        Assert.assertEquals(200, gcInspector.getGcLogThresholdInMs());
+        gcInspector.setGcWarnThresholdInMs(1000);
+        Assert.assertEquals(1000, gcInspector.getGcWarnThresholdInMs());
         gcInspector.setGcLogThresholdInMs(gcInspector.getGcWarnThresholdInMs() + 1);
     }
     
@@ -80,6 +82,16 @@ public class GCInspectorTest
     {
         gcInspector.setGcLogThresholdInMs(200);
         gcInspector.setGcWarnThresholdInMs(1000);
+        Assert.assertEquals(200, DatabaseDescriptor.getGCLogThreshold());
+        Assert.assertEquals(200, gcInspector.getGcLogThresholdInMs());
+        Assert.assertEquals(1000, DatabaseDescriptor.getGCWarnThreshold());
+        Assert.assertEquals(1000, gcInspector.getGcWarnThresholdInMs());
     }
-    
+
+    @Test(expected=IllegalArgumentException.class)
+    public void testMaxValue()
+    {
+        gcInspector.setGcLogThresholdInMs(200);
+        gcInspector.setGcWarnThresholdInMs(Integer.MAX_VALUE+1L);
+    }
 }

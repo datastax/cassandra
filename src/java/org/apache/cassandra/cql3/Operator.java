@@ -21,9 +21,10 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
+
+import org.apache.cassandra.serializers.ListSerializer;
 
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -42,6 +43,12 @@ public enum Operator
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) == 0;
+        }
+
+        @Override
+        public boolean isSatisfiedByAnalyzed(AbstractType<?> type, List<ByteBuffer> leftTokens, List<ByteBuffer> rightTokens)
+        {
+            return ANALYZER_MATCHES.isSatisfiedByAnalyzed(type, leftTokens, rightTokens);
         }
     },
     LT(4)
@@ -110,8 +117,8 @@ public enum Operator
 
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            List<?> inValues = ListType.getInstance(type, false).getSerializer().deserialize(rightOperand);
-            return inValues.contains(type.getSerializer().deserialize(leftOperand));
+            ListSerializer<?> serializer = ListType.getInstance(type.freeze(), false).getSerializer();
+            return serializer.anyMatch(rightOperand, r -> type.compareForCQL(leftOperand, r) == 0);
         }
     },
     CONTAINS(5)
@@ -125,23 +132,8 @@ public enum Operator
         @Override
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            switch(((CollectionType<?>) type).kind)
-            {
-                case LIST :
-                    ListType<?> listType = (ListType<?>) type;
-                    List<?> list = listType.getSerializer().deserialize(leftOperand);
-                    return list.contains(listType.getElementsType().getSerializer().deserialize(rightOperand));
-                case SET:
-                    SetType<?> setType = (SetType<?>) type;
-                    Set<?> set = setType.getSerializer().deserialize(leftOperand);
-                    return set.contains(setType.getElementsType().getSerializer().deserialize(rightOperand));
-                case MAP:
-                    MapType<?, ?> mapType = (MapType<?, ?>) type;
-                    Map<?, ?> map = mapType.getSerializer().deserialize(leftOperand);
-                    return map.containsValue(mapType.getValuesType().getSerializer().deserialize(rightOperand));
-                default:
-                    throw new AssertionError();
-            }
+            CollectionType<?> collectionType = (CollectionType<?>) type;
+            return collectionType.contains(leftOperand, rightOperand);
         }
     },
     CONTAINS_KEY(6)
@@ -156,10 +148,10 @@ public enum Operator
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             MapType<?, ?> mapType = (MapType<?, ?>) type;
-            Map<?, ?> map = mapType.getSerializer().deserialize(leftOperand);
-            return map.containsKey(mapType.getKeysType().getSerializer().deserialize(rightOperand));
+            return mapType.containsKey(leftOperand, rightOperand);
         }
     },
+
     NEQ(8)
     {
         @Override
@@ -257,8 +249,241 @@ public enum Operator
         {
             throw new UnsupportedOperationException();
         }
-    };
+    },
+    ANN(15)
+    {
+        @Override
+        public String toString()
+        {
+            return "ANN";
+        }
 
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            throw new UnsupportedOperationException();
+        }
+    },
+    NOT_IN(16)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT IN";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !IN.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_CONTAINS(17)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT CONTAINS";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !CONTAINS.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+
+    },
+    NOT_CONTAINS_KEY(18)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT CONTAINS KEY";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !CONTAINS_KEY.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_PREFIX(19)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE '<term>%'";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE_PREFIX.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_SUFFIX(20)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE '%<term>'";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE_SUFFIX.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_CONTAINS(21)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE '%<term>%'";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE_CONTAINS.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_MATCHES(22)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE '<term>'";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE_MATCHES.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE(23)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    /**
+     * An operator that only performs matching against analyzed columns.
+     */
+    ANALYZER_MATCHES(100)
+    {
+        @Override
+        public String toString()
+        {
+            return ":";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            throw new UnsupportedOperationException(": operation can only be computed by an indexed column with a configured analyzer");
+        }
+
+        @Override
+        public boolean isSatisfiedByAnalyzed(AbstractType<?> type, List<ByteBuffer> leftTokens, List<ByteBuffer> rightTokens)
+        {
+            Iterator<ByteBuffer> it = rightTokens.iterator();
+
+            do
+            {
+                if (!it.hasNext())
+                    return true;
+            }
+            while (hasToken(type, leftTokens, it.next()));
+
+            return false;
+        }
+
+        private boolean hasToken(AbstractType<?> type, List<ByteBuffer> tokens, ByteBuffer token)
+        {
+            for (ByteBuffer t : tokens)
+            {
+                if (type.compareForCQL(t, token) == 0)
+                    return true;
+            }
+            return false;
+        }
+    },
+
+    /**
+     * An operator that performs a distance bounded approximate nearest neighbor search against a vector column such
+     * that all result vectors are within a given distance of the query vector. The notable difference between this
+     * operator and {@link #ANN} is that it does not introduce an arbitrary limit on the number of results returned,
+     * and as a consequence, it can be logically combined with other predicates and even unioned with other
+     * {@code #BOUNDED_ANN} predicates.
+     */
+    BOUNDED_ANN(101)
+    {
+        @Override
+        public String toString()
+        {
+            return "BOUNDED_ANN";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            throw new UnsupportedOperationException();
+        }
+    },
+    // VSTODO find a way to break this out, but for now, we're doing this to get the poc running
+    ORDER_BY_ASC(102)
+    {
+        @Override
+        public String toString()
+        {
+            return "ASC";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            throw new UnsupportedOperationException();
+        }
+    },
+    ORDER_BY_DESC(103)
+    {
+        @Override
+        public String toString()
+        {
+            return "DESC";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            throw new UnsupportedOperationException();
+        }
+    },
+    BM25(104)
+    {
+        @Override
+        public String toString()
+        {
+            return "BM25";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            throw new UnsupportedOperationException();
+        }
+    };
     /**
      * The binary representation of this <code>Enum</code> value.
      */
@@ -268,7 +493,7 @@ public enum Operator
      * Creates a new <code>Operator</code> with the specified binary representation.
      * @param b the binary representation of this <code>Enum</code> value
      */
-    private Operator(int b)
+    Operator(int b)
     {
         this.b = b;
     }
@@ -308,12 +533,37 @@ public enum Operator
 
     /**
      * Whether 2 values satisfy this operator (given the type they should be compared with).
+     *
+     * @param type the type of the values to compare.
+     * @param leftOperand the left operand of the comparison.
+     * @param rightOperand the right operand of the comparison.
      */
     public abstract boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand);
+
+    /**
+     * Whether 2 index-analyzed values satisfy this operator (given the type they should be compared with).
+     *
+     * @param type the type of the index-analyzed tokens to compare.
+     * @param leftTokens the left operand of the comparison, decomposed as index-analyzed tokens.
+     * @param rightTokens the right operand of the comparison, decomposed as index-analyzed tokens.
+     */
+    public boolean isSatisfiedByAnalyzed(AbstractType<?> type, List<ByteBuffer> leftTokens, List<ByteBuffer> rightTokens)
+    {
+        throw new UnsupportedOperationException(this + " operation does not support analyzers");
+    }
 
     public int serializedSize()
     {
         return 4;
+    }
+
+    /**
+     * Checks if this operator is a like operator.
+     * @return {@code true} if this operator is a like operator, {@code false} otherwise.
+     */
+    public boolean isLike()
+    {
+        return this == LIKE_PREFIX || this == LIKE_CONTAINS || this == LIKE_SUFFIX || this == LIKE_MATCHES;
     }
 
     /**
@@ -323,6 +573,26 @@ public enum Operator
     public boolean isSlice()
     {
         return this == LT || this == LTE || this == GT || this == GTE;
+    }
+
+    /**
+     * Checks if this operator is any of the variations of contains ({@code [NOT] CONTAINS [KEY]}).
+     *
+     * @return {@code true} if this operator is any kind of contains operator, {@code false} otherwise.
+     */
+    public boolean isAnyContains()
+    {
+        return this == CONTAINS || this == CONTAINS_KEY || this == NOT_CONTAINS || this == NOT_CONTAINS_KEY;
+    }
+
+    /**
+     * Checks if this operator is any of the variations of ORDER BY, such as ANN, BM25 and generic ORDER BY.
+     *
+     * @return {@code true} if this operator is any kind of ORDER BY, {@code false} otherwise.
+     */
+    public boolean isOrderBy()
+    {
+        return this == ANN || this == BM25 || this == ORDER_BY_ASC || this == ORDER_BY_DESC;
     }
 
     @Override
@@ -338,5 +608,24 @@ public enum Operator
     public boolean isIN()
     {
         return this == IN;
+    }
+
+    /**
+     * Checks if this operator is any of the variations of contains ({@code [NOT] CONTAINS [KEY]}).
+     *
+     * @return {@code true} if this operator is any kind of contains operator, {@code false} otherwise.
+     */
+    public boolean isContains()
+    {
+        return this == CONTAINS || this == CONTAINS_KEY || this == NOT_CONTAINS || this == NOT_CONTAINS_KEY;
+    }
+
+    /**
+     * Checks if this operator is CONTAINS KEY operator.
+     * @return {@code true} if this operator is a CONTAINS operator, {@code false} otherwise.
+     */
+    public boolean isContainsKey()
+    {
+        return this == CONTAINS_KEY;
     }
 }

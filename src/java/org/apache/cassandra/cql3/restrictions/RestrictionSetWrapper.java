@@ -20,9 +20,9 @@ package org.apache.cassandra.cql3.restrictions;
 import java.util.List;
 import java.util.Set;
 
-import org.apache.commons.lang3.builder.ToStringBuilder;
-import org.apache.commons.lang3.builder.ToStringStyle;
-
+import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.IndexHints;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
@@ -40,23 +40,28 @@ class RestrictionSetWrapper implements Restrictions
      */
     protected final RestrictionSet restrictions;
 
-    public RestrictionSetWrapper(RestrictionSet restrictions)
+    RestrictionSetWrapper(RestrictionSet restrictions)
     {
         this.restrictions = restrictions;
     }
 
-    public void addRowFilterTo(RowFilter filter,
+    @Override
+    public void addToRowFilter(RowFilter.Builder rowFilter,
                                IndexRegistry indexRegistry,
-                               QueryOptions options)
+                               QueryOptions options,
+                               ANNOptions annOptions,
+                               IndexHints indexHints)
     {
-        restrictions.addRowFilterTo(filter, indexRegistry, options);
+        restrictions.addToRowFilter(rowFilter, indexRegistry, options, annOptions, indexHints);
     }
 
+    @Override
     public List<ColumnMetadata> getColumnDefs()
     {
         return restrictions.getColumnDefs();
     }
 
+    @Override
     public void addFunctionsTo(List<Function> functions)
     {
         restrictions.addFunctionsTo(functions);
@@ -67,54 +72,67 @@ class RestrictionSetWrapper implements Restrictions
         return restrictions.isEmpty();
     }
 
+    public List<SingleRestriction> restrictions()
+    {
+        return restrictions.restrictions();
+    }
+
     public int size()
     {
         return restrictions.size();
     }
 
-    public boolean hasSupportingIndex(IndexRegistry indexRegistry)
+    @Override
+    public boolean hasSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
-        return restrictions.hasSupportingIndex(indexRegistry);
+        return restrictions.hasSupportingIndex(indexRegistry, indexHints);
     }
 
+    @Override
+    public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
+    {
+        return restrictions.needsFiltering(indexGroup, indexHints);
+    }
+
+    @Override
     public ColumnMetadata getFirstColumn()
     {
         return restrictions.getFirstColumn();
     }
 
+    @Override
     public ColumnMetadata getLastColumn()
     {
         return restrictions.getLastColumn();
     }
 
+    @Override
     public boolean hasIN()
     {
         return restrictions.hasIN();
     }
 
+    @Override
     public boolean hasContains()
     {
         return restrictions.hasContains();
     }
 
+    @Override
     public boolean hasSlice()
     {
         return restrictions.hasSlice();
     }
 
+    @Override
     public boolean hasOnlyEqualityRestrictions()
     {
         return restrictions.hasOnlyEqualityRestrictions();
     }
 
+    @Override
     public Set<Restriction> getRestrictions(ColumnMetadata columnDef)
     {
         return restrictions.getRestrictions(columnDef);
-    }
-    
-    @Override
-    public String toString()
-    {
-        return ToStringBuilder.reflectionToString(this, ToStringStyle.SHORT_PREFIX_STYLE);
     }
 }

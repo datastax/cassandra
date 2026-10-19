@@ -25,14 +25,20 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
-
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.statements.AuthenticationStatement;
 import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestFailureException;
+import org.apache.cassandra.exceptions.RequestTimeoutException;
+import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -72,13 +78,32 @@ public class QueryEvents
     {
         try
         {
+            final String maybeObfuscatedQuery = listeners.size() > 0 ? maybeObfuscatePassword(statement, query) : query;
             for (Listener listener : listeners)
-                listener.querySuccess(statement, query, options, state, queryTime, response);
+                listener.querySuccess(statement, maybeObfuscatedQuery, options, state, queryTime, response);
         }
         catch (Throwable t)
         {
             noSpam1m.error("Failed notifying listeners", t);
             JVMStabilityInspector.inspectThrowable(t);
+        }
+    }
+
+    private void updateMetrics(CQLStatement statement, Exception cause)
+    {
+        if (statement instanceof CQLStatement.SingleKeyspaceCqlStatement)
+        {
+            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(((CQLStatement.SingleKeyspaceCqlStatement) statement).keyspace());
+            if (cause instanceof InvalidRequestException)
+                metrics.allRequestsMetrics.invalid.mark();
+            else if (cause instanceof UnavailableException)
+                metrics.allRequestsMetrics.unavailables.mark();
+            else if (cause instanceof RequestTimeoutException)
+                metrics.allRequestsMetrics.timeouts.mark();
+            else if (cause instanceof RequestFailureException)
+                metrics.allRequestsMetrics.failures.mark();
+            else
+                metrics.allRequestsMetrics.otherErrors.mark();
         }
     }
 
@@ -88,10 +113,12 @@ public class QueryEvents
                                    QueryState state,
                                    Exception cause)
     {
+        updateMetrics(statement, cause);
         try
         {
+            final String maybeObfuscatedQuery = listeners.size() > 0 ? maybeObfuscatePassword(statement, query) : query;
             for (Listener listener : listeners)
-                listener.queryFailure(statement, query, options, state, cause);
+                listener.queryFailure(statement, maybeObfuscatedQuery, options, state, cause);
         }
         catch (Throwable t)
         {
@@ -101,7 +128,6 @@ public class QueryEvents
     }
 
     public void notifyExecuteSuccess(CQLStatement statement,
-                                     String query,
                                      QueryOptions options,
                                      QueryState state,
                                      long queryTime,
@@ -109,8 +135,10 @@ public class QueryEvents
     {
         try
         {
+            String query = statement.getRawCQLStatement();
+            final String maybeObfuscatedQuery = listeners.size() > 0 ? maybeObfuscatePassword(statement, query) : query;
             for (Listener listener : listeners)
-                listener.executeSuccess(statement, query, options, state, queryTime, response);
+                listener.executeSuccess(statement, maybeObfuscatedQuery, options, state, queryTime, response);
         }
         catch (Throwable t)
         {
@@ -125,11 +153,15 @@ public class QueryEvents
                                      Exception cause)
     {
         CQLStatement statement = prepared != null ? prepared.statement : null;
-        String query = prepared != null ? prepared.rawCQLStatement : null;
+
+        updateMetrics(statement, cause);
+
+        String query = prepared != null ? prepared.statement.getRawCQLStatement() : null;
         try
         {
+            final String maybeObfuscatedQuery = listeners.size() > 0 ? maybeObfuscatePassword(statement, query) : query;
             for (Listener listener : listeners)
-                listener.executeFailure(statement, query, options, state, cause);
+                listener.executeFailure(statement, maybeObfuscatedQuery, options, state, cause);
         }
         catch (Throwable t)
         {
@@ -175,9 +207,13 @@ public class QueryEvents
             {
                 prepared.forEach(p -> {
                     statements.add(p.statement);
-                    queries.add(p.rawCQLStatement);
+                    queries.add(p.statement.getRawCQLStatement());
                 });
             }
+
+            if (!statements.isEmpty())
+                updateMetrics(statements.get(0), cause);
+
             try
             {
                 for (Listener listener : listeners)
@@ -204,8 +240,9 @@ public class QueryEvents
             {
                 try
                 {
+                    final String maybeObfuscatedQuery = listeners.size() > 0 ? maybeObfuscatePassword(prepared.statement, query) : query;
                     for (Listener listener : listeners)
-                        listener.prepareSuccess(prepared.statement, query, state, queryTime, response);
+                        listener.prepareSuccess(prepared.statement, maybeObfuscatedQuery, state, queryTime, response);
                 }
                 catch (Throwable t)
                 {
@@ -225,14 +262,27 @@ public class QueryEvents
     {
         try
         {
+            final String maybeObfuscatedQuery = listeners.size() > 0 ? maybeObfuscatePassword(statement, query) : query;
             for (Listener listener : listeners)
-                listener.prepareFailure(statement, query, state, cause);
+                listener.prepareFailure(statement, maybeObfuscatedQuery, state, cause);
         }
         catch (Throwable t)
         {
             noSpam1m.error("Failed notifying listeners", t);
             JVMStabilityInspector.inspectThrowable(t);
         }
+    }
+
+    private String maybeObfuscatePassword(@Nullable CQLStatement statement, String query)
+    {
+        // Statement might be null as side-effect of failed parsing, originates from QueryMessage#execute
+        if (statement == null)
+            return PasswordObfuscator.obfuscate(query);
+
+        if (statement instanceof AuthenticationStatement)
+             return ((AuthenticationStatement) statement).obfuscatePassword(query);
+
+        return query;
     }
 
     public boolean hasListeners()

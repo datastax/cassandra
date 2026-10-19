@@ -28,12 +28,14 @@ import com.google.common.collect.Lists;
 
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.selection.Selector.InputRow;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.JsonUtils;
 
 public abstract class Selection
 {
@@ -43,10 +45,24 @@ public abstract class Selection
     private static final Predicate<ColumnMetadata> STATIC_COLUMN_FILTER = (column) -> column.isStatic();
 
     private final TableMetadata table;
+
+    // Full list of columns needed for processing the query, including selected columns, ordering columns,
+    // and columns needed for restrictions.  Wildcard columns are fully materialized here.
+    //
+    // This also includes synthetic columns, because unlike all the other not-physical-columns selectables, they are
+    // computed on the replica instead of the coordinator and so, like physical columns, they need to be sent back
+    // as part of the result.
     private final List<ColumnMetadata> columns;
+
+    // maps ColumnSpecifications (columns, function calls, aliases) to the columns backing them
     private final SelectionColumnMapping columnMapping;
+
+    // metadata matching the ColumnSpcifications
     protected final ResultSet.ResultMetadata metadata;
+
+    // creates a ColumnFilter that breaks columns into `queried` and `fetched`
     protected final ColumnFilterFactory columnFilterFactory;
+
     protected final boolean isJson;
 
     // Columns used to order the result set for JSON queries with post ordering.
@@ -102,15 +118,20 @@ public abstract class Selection
      */
     public Integer getOrderingIndex(ColumnMetadata c)
     {
-        if (!isJson)
-            return getResultSetIndex(c);
-
         // If we order post-query in json, the first and only column that we ship to the client is the json column.
         // In that case, we should keep ordering columns around to perform the ordering, then these columns will
         // be placed after the json column. As a consequence of where the colums are placed, we should give the
         // ordering index a value based on their position in the json encoding and discard the original index.
         // (CASSANDRA-14286)
-        return orderingColumns.indexOf(c) + 1;
+        if (isJson)
+            return orderingColumns.indexOf(c) + 1;
+
+        // If the column is masked it might appear twice, once masked in the selected column and once unmasked in
+        // the ordering columns. For ordering we are interested in that second unmasked value.
+        if (c.isMasked())
+            return columns.lastIndexOf(c);
+
+        return getResultSetIndex(c);
     }
 
     public ResultSet.ResultMetadata getResultMetadata()
@@ -125,29 +146,42 @@ public abstract class Selection
         return resultMetadata;
     }
 
-    public static Selection wildcard(TableMetadata table, boolean isJson)
+    public static Selection wildcard(TableMetadata table, boolean isJson, boolean returnStaticContentOnPartitionWithNoRows)
     {
-        List<ColumnMetadata> all = new ArrayList<>(table.columns().size());
-        Iterators.addAll(all, table.allColumnsInSelectOrder());
-        return new SimpleSelection(table, all, Collections.emptySet(), true, isJson);
+        return wildcard(table, Collections.emptySet(), isJson, returnStaticContentOnPartitionWithNoRows);
     }
 
-    public static Selection wildcardWithGroupBy(TableMetadata table,
-                                                VariableSpecifications boundNames,
-                                                boolean isJson)
+    public static Selection wildcard(TableMetadata table, Set<ColumnMetadata> orderingColumns, boolean isJson, boolean returnStaticContentOnPartitionWithNoRows)
+    {
+        // Add all table columns, but skip orderingColumns:
+        List<ColumnMetadata> all = new ArrayList<>(table.columns().size());
+        Iterators.addAll(all, table.allColumnsInSelectOrder());
+
+        Set<ColumnMetadata> newOrderingColumns = new HashSet<>(orderingColumns);
+        all.forEach(newOrderingColumns::remove);
+
+        return new SimpleSelection(table, all, newOrderingColumns, true, isJson, returnStaticContentOnPartitionWithNoRows);
+    }
+
+    public static Selection wildcardWithGroupByOrMaskedColumns(TableMetadata table,
+                                                               VariableSpecifications boundNames,
+                                                               Set<ColumnMetadata> orderingColumns,
+                                                               boolean isJson,
+                                                               boolean returnStaticContentOnPartitionWithNoRows)
     {
         return fromSelectors(table,
                              Lists.newArrayList(table.allColumnsInSelectOrder()),
                              boundNames,
-                             Collections.emptySet(),
+                             orderingColumns,
                              Collections.emptySet(),
                              true,
-                             isJson);
+                             isJson,
+                             returnStaticContentOnPartitionWithNoRows);
     }
 
-    public static Selection forColumns(TableMetadata table, List<ColumnMetadata> columns)
+    public static Selection forColumns(TableMetadata table, List<ColumnMetadata> columns, boolean returnStaticContentOnPartitionWithNoRows)
     {
-        return new SimpleSelection(table, columns, Collections.emptySet(), false, false);
+        return new SimpleSelection(table, columns, Collections.emptySet(), false, false, returnStaticContentOnPartitionWithNoRows);
     }
 
     public void addFunctionsTo(List<Function> functions)
@@ -170,7 +204,8 @@ public abstract class Selection
                                           Set<ColumnMetadata> orderingColumns,
                                           Set<ColumnMetadata> nonPKRestrictedColumns,
                                           boolean hasGroupBy,
-                                          boolean isJson)
+                                          boolean isJson,
+                                          boolean returnStaticContentOnPartitionWithNoRows)
     {
         List<ColumnMetadata> selectedColumns = new ArrayList<>();
 
@@ -190,13 +225,15 @@ public abstract class Selection
                                           nonPKRestrictedColumns,
                                           mapping,
                                           factories,
-                                          isJson)
+                                          isJson,
+                                          returnStaticContentOnPartitionWithNoRows)
             : new SimpleSelection(table,
                                   selectedColumns,
                                   filteredOrderingColumns,
                                   nonPKRestrictedColumns,
                                   mapping,
-                                  isJson);
+                                  isJson,
+                                  returnStaticContentOnPartitionWithNoRows);
     }
 
     /**
@@ -219,7 +256,7 @@ public abstract class Selection
         for (ColumnMetadata orderingColumn : orderingColumns)
         {
             int index = selectedColumns.indexOf(orderingColumn);
-            if (index >= 0 && factories.indexOfSimpleSelectorFactory(index) >= 0)
+            if (index >= 0 && factories.indexOfSimpleSelectorFactory(index) >= 0 && !orderingColumn.isMasked())
                 continue;
 
             filteredOrderingColumns.add(orderingColumn);
@@ -318,7 +355,7 @@ public abstract class Selection
                 columnName = "\"" + columnName + "\"";
 
             sb.append('"');
-            sb.append(Json.quoteAsJsonString(columnName));
+            sb.append(JsonUtils.quoteAsJsonString(columnName));
             sb.append("\": ");
             if (buffer == null)
                 sb.append("null");
@@ -331,49 +368,55 @@ public abstract class Selection
         return Arrays.asList(jsonRow);
     }
 
-    public static interface Selectors
+    public interface Selectors
     {
         /**
          * Returns the {@code ColumnFilter} corresponding to those selectors
+         *
          * @return the {@code ColumnFilter} corresponding to those selectors
          */
-        public ColumnFilter getColumnFilter();
+        ColumnFilter getColumnFilter();
+
+        /**
+         * Checks if this Selectors perform some processing
+         * @return {@code true} if this Selectors perform some processing, {@code false} otherwise.
+         */
+        public boolean hasProcessing();
 
         /**
          * Checks if one of the selectors perform some aggregations.
          * @return {@code true} if one of the selectors perform some aggregations, {@code false} otherwise.
          */
-        public boolean isAggregate();
+        boolean isAggregate();
 
         /**
          * Returns the number of fetched columns
          * @return the number of fetched columns
          */
-        public int numberOfFetchedColumns();
+        int numberOfFetchedColumns();
 
         /**
          * Checks if one of the selectors collect TTLs.
          * @return {@code true} if one of the selectors collect TTLs, {@code false} otherwise.
          */
-        public boolean collectTTLs();
+        boolean collectTTLs();
 
         /**
-         * Checks if one of the selectors collect timestamps.
-         * @return {@code true} if one of the selectors collect timestamps, {@code false} otherwise.
+         * Checks if one of the selectors collects write timestamps.
+         * @return {@code true} if one of the selectors collects write timestamps, {@code false} otherwise.
          */
-        public boolean collectTimestamps();
+        public boolean collectWritetimes();
 
         /**
          * Adds the current row of the specified <code>ResultSetBuilder</code>.
          *
-         * @param rs the <code>ResultSetBuilder</code>
-         * @throws InvalidRequestException
+         * @param input the input row
          */
-        public void addInputRow(ResultSetBuilder rs);
+        public void addInputRow(InputRow input);
 
-        public List<ByteBuffer> getOutputRow();
+        List<ByteBuffer> getOutputRow();
 
-        public void reset();
+        void reset();
     }
 
     // Special cased selection for when only columns are selected.
@@ -385,14 +428,15 @@ public abstract class Selection
                                List<ColumnMetadata> selectedColumns,
                                Set<ColumnMetadata> orderingColumns,
                                boolean isWildcard,
-                               boolean isJson)
+                               boolean isJson,
+                               boolean returnStaticContentOnPartitionWithNoRows)
         {
             this(table,
                  selectedColumns,
                  orderingColumns,
                  SelectionColumnMapping.simpleMapping(selectedColumns),
-                 isWildcard ? ColumnFilterFactory.wildcard(table)
-                            : ColumnFilterFactory.fromColumns(table, selectedColumns, orderingColumns, Collections.emptySet()),
+                 isWildcard ? ColumnFilterFactory.wildcard(table, orderingColumns)
+                            : ColumnFilterFactory.fromColumns(table, selectedColumns, orderingColumns, Collections.emptySet(), returnStaticContentOnPartitionWithNoRows),
                  isWildcard,
                  isJson);
         }
@@ -402,13 +446,14 @@ public abstract class Selection
                                Set<ColumnMetadata> orderingColumns,
                                Set<ColumnMetadata> nonPKRestrictedColumns,
                                SelectionColumnMapping mapping,
-                               boolean isJson)
+                               boolean isJson,
+                               boolean returnStaticContentOnPartitionWithNoRows)
         {
             this(table,
                  selectedColumns,
                  orderingColumns,
                  mapping,
-                 ColumnFilterFactory.fromColumns(table, selectedColumns, orderingColumns, nonPKRestrictedColumns),
+                 ColumnFilterFactory.fromColumns(table, selectedColumns, orderingColumns, nonPKRestrictedColumns, returnStaticContentOnPartitionWithNoRows),
                  false,
                  isJson);
         }
@@ -459,12 +504,17 @@ public abstract class Selection
                     return current;
                 }
 
-                public void addInputRow(ResultSetBuilder rs) throws InvalidRequestException
+                public void addInputRow(InputRow input)
                 {
-                    current = rs.current;
+                    current = input.getValues();
                 }
 
                 public boolean isAggregate()
+                {
+                    return false;
+                }
+
+                public boolean hasProcessing()
                 {
                     return false;
                 }
@@ -482,7 +532,7 @@ public abstract class Selection
                 }
 
                 @Override
-                public boolean collectTimestamps()
+                public boolean collectWritetimes()
                 {
                     return false;
                 }
@@ -501,7 +551,8 @@ public abstract class Selection
     private static class SelectionWithProcessing extends Selection
     {
         private final SelectorFactories factories;
-        private final boolean collectTimestamps;
+        private final boolean collectWritetimes;
+        private final boolean collectMaxWritetimes;
         private final boolean collectTTLs;
 
         public SelectionWithProcessing(TableMetadata table,
@@ -510,18 +561,20 @@ public abstract class Selection
                                        Set<ColumnMetadata> nonPKRestrictedColumns,
                                        SelectionColumnMapping metadata,
                                        SelectorFactories factories,
-                                       boolean isJson)
+                                       boolean isJson,
+                                       boolean returnStaticContentOnPartitionWithNoRows)
         {
             super(table,
                   columns,
                   orderingColumns,
                   metadata,
-                  ColumnFilterFactory.fromSelectorFactories(table, factories, orderingColumns, nonPKRestrictedColumns),
+                  ColumnFilterFactory.fromSelectorFactories(table, factories, orderingColumns, nonPKRestrictedColumns, returnStaticContentOnPartitionWithNoRows),
                   isJson);
 
             this.factories = factories;
-            this.collectTimestamps = factories.containsWritetimeSelectorFactory();
-            this.collectTTLs = factories.containsTTLSelectorFactory();;
+            this.collectWritetimes = factories.containsWritetimeSelectorFactory();
+            this.collectMaxWritetimes = factories.containsMaxWritetimeSelectorFactory();
+            this.collectTTLs = factories.containsTTLSelectorFactory();
 
             for (ColumnMetadata orderingColumn : orderingColumns)
             {
@@ -563,6 +616,11 @@ public abstract class Selection
                     return factories.doesAggregation();
                 }
 
+                public boolean hasProcessing()
+                {
+                    return true;
+                }
+
                 public List<ByteBuffer> getOutputRow()
                 {
                     List<ByteBuffer> outputRow = new ArrayList<>(selectors.size());
@@ -573,10 +631,10 @@ public abstract class Selection
                     return isJson ? rowToJson(outputRow, options.getProtocolVersion(), metadata, orderingColumns) : outputRow;
                 }
 
-                public void addInputRow(ResultSetBuilder rs) throws InvalidRequestException
+                public void addInputRow(InputRow input)
                 {
                     for (Selector selector : selectors)
-                        selector.addInput(options.getProtocolVersion(), rs);
+                        selector.addInput(input);
                 }
 
                 @Override
@@ -592,9 +650,9 @@ public abstract class Selection
                 }
 
                 @Override
-                public boolean collectTimestamps()
+                public boolean collectWritetimes()
                 {
-                    return collectTimestamps;
+                    return collectWritetimes || collectMaxWritetimes;
                 }
 
                 @Override

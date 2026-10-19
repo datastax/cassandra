@@ -23,7 +23,6 @@ import java.util.Arrays;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.service.GCInspector;
 import org.apache.cassandra.tools.ToolRunner;
@@ -71,6 +70,11 @@ public class CassandrastressTest extends CQLTester
 
         String hostNameAndPort = String.format("localhost:%s", nativePort);
         invokeAndAssertCleanExit(baseArgs, "-node", hostNameAndPort);
+
+        invokeAndAssertCleanExit(baseArgs, "-mode", "simplenative", "prepared");
+        invokeAndAssertCleanExit(baseArgs, "-mode", "simplenative");
+        invokeAndAssertCleanExit(baseArgs, "-mode");
+        invokeAndAssertCleanExit(baseArgs, "-mode", "unprepared");
     }
 
     void invokeAndAssertCleanExit(String[] baseArgs, String ... extraArgs)

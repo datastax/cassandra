@@ -18,21 +18,27 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 public class ReversedType<T> extends AbstractType<T>
 {
     // interning instances
-    private static final Map<AbstractType<?>, ReversedType> instances = new ConcurrentHashMap<>();
+    private static final Map<AbstractType<?>, ReversedType<?>> instances = new ConcurrentHashMap<>();
 
     public final AbstractType<T> baseType;
 
@@ -46,21 +52,70 @@ public class ReversedType<T> extends AbstractType<T>
 
     public static <T> ReversedType<T> getInstance(AbstractType<T> baseType)
     {
-        ReversedType<T> t = instances.get(baseType);
-        return null == t
-             ? instances.computeIfAbsent(baseType, ReversedType::new)
-             : t;
+        ReversedType<?> type = instances.get(baseType);
+        if (type != null)
+            return (ReversedType<T>) type;
+
+        // Stacking {@code ReversedType} is not only unnecessary but can also break some of the code.
+        // For instance, {@code AbstractType#isValueCompatibleWith} would end up triggering the exception thrown by
+        // {@code ReversedType#isValueCompatibleWithInternal}. Therefore, an exception should be thrown if such stacking
+        // is detected.
+        Preconditions.checkArgument(!(baseType instanceof ReversedType),
+                                    "Detected a type with 2 ReversedType() back-to-back, which is not allowed.");
+
+        // We avoid constructor calls in Map#computeIfAbsent to avoid recursive update exceptions because the automatic
+        // fixing of subtypes done by the top-level constructor might attempt a recursive update to the instances map.
+        ReversedType<T> instance = new ReversedType<>(baseType);
+        return (ReversedType<T>) instances.computeIfAbsent(baseType, k -> instance);
     }
 
     private ReversedType(AbstractType<T> baseType)
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, baseType.isMultiCell(), ImmutableList.of(baseType));
         this.baseType = baseType;
+    }
+
+    @Override
+    public AbstractType<T> with(ImmutableList<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        Preconditions.checkArgument(subTypes.size() == 1,
+                                    "Invalid number of subTypes for ReversedType (got %s)", subTypes.size());
+
+        if (subTypes.equals(subTypes()) && isMultiCell == isMultiCell())
+            return this;
+
+        return (AbstractType<T>) getInstance(subTypes.get(0));
     }
 
     public boolean isEmptyValueMeaningless()
     {
         return baseType.isEmptyValueMeaningless();
+    }
+
+    @Override
+    public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
+    {
+        ByteSource src = baseType.asComparableBytes(accessor, data, version);
+        if (src == null)    // Note: this will only compare correctly if used within a sequence
+            return null;
+        // Invert all bytes.
+        // The comparison requirements for the original type ensure that this encoding will compare correctly with
+        // respect to the reversed comparator function (and, specifically, prefixes of escaped byte-ordered types will
+        // compare as larger). Additionally, the weak prefix-freedom requirement ensures this encoding will also be
+        // weakly prefix-free.
+        return () ->
+        {
+            int v = src.next();
+            if (v == ByteSource.END_OF_STREAM)
+                return v;
+            return v ^ 0xFF;
+        };
+    }
+
+    @Override
+    public <V> V fromComparableBytes(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes, ByteComparable.Version version)
+    {
+        return baseType.fromComparableBytes(accessor, ReversedPeekableByteSource.of(comparableBytes), version);
     }
 
     public <VL, VR> int compareCustom(VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
@@ -99,16 +154,16 @@ public class ReversedType<T> extends AbstractType<T>
     @Override
     public boolean isCompatibleWith(AbstractType<?> otherType)
     {
-        if (!(otherType instanceof ReversedType))
+        if (!otherType.isReversed())
             return false;
 
-        return this.baseType.isCompatibleWith(((ReversedType) otherType).baseType);
+        return this.baseType.isCompatibleWith(otherType.unwrap());
     }
 
     @Override
-    public boolean isValueCompatibleWith(AbstractType<?> otherType)
+    protected boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
     {
-        return this.baseType.isValueCompatibleWith(otherType);
+        throw new AssertionError("This should have never been called on the ReversedType");
     }
 
     @Override
@@ -117,32 +172,16 @@ public class ReversedType<T> extends AbstractType<T>
         return baseType.asCQL3Type();
     }
 
+    @Override
     public TypeSerializer<T> getSerializer()
     {
         return baseType.getSerializer();
     }
 
     @Override
-    public <V> boolean referencesUserType(V name, ValueAccessor<V> accessor)
+    public ArgumentDeserializer getArgumentDeserializer()
     {
-        return baseType.referencesUserType(name, accessor);
-    }
-
-    @Override
-    public AbstractType<?> expandUserTypes()
-    {
-        return getInstance(baseType.expandUserTypes());
-    }
-
-    @Override
-    public ReversedType<?> withUpdatedUserType(UserType udt)
-    {
-        if (!referencesUserType(udt.name))
-            return this;
-
-        instances.remove(baseType);
-
-        return getInstance(baseType.withUpdatedUserType(udt));
+        return baseType.getArgumentDeserializer();
     }
 
     @Override
@@ -158,8 +197,48 @@ public class ReversedType<T> extends AbstractType<T>
     }
 
     @Override
-    public String toString()
+    public String toString(boolean ignoreFreezing)
     {
-        return getClass().getName() + "(" + baseType + ")";
+        return getClass().getName() + '(' + baseType + ')';
+    }
+
+    private static final class ReversedPeekableByteSource extends ByteSource.PeekableImpl
+    {
+        private final ByteSource.Peekable original;
+
+        static ByteSource.Peekable of(ByteSource.Peekable original)
+        {
+            return original != null ? new ReversedPeekableByteSource(original) : null;
+        }
+
+        private ReversedPeekableByteSource(ByteSource.Peekable original)
+        {
+            super(null);
+            this.original = original;
+        }
+
+        @Override
+        public int next()
+        {
+            int v = original.next();
+            if (v != END_OF_STREAM)
+                return v ^ 0xFF;
+            return END_OF_STREAM;
+        }
+
+        @Override
+        public int peek()
+        {
+            int v = original.peek();
+            if (v != END_OF_STREAM)
+                return v ^ 0xFF;
+            return END_OF_STREAM;
+        }
+    }
+
+    @Override
+    public ByteBuffer getMaskedValue()
+    {
+        return baseType.getMaskedValue();
     }
 }

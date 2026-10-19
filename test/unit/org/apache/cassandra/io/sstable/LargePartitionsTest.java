@@ -22,9 +22,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import org.junit.Ignore;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.metrics.CacheMetrics;
@@ -34,7 +32,6 @@ import org.apache.cassandra.service.CacheService;
  * Test intended to manually measure GC pressure to write and read partitions of different size
  * for CASSANDRA-11206.
  */
-@RunWith(OrderedJUnit4ClassRunner.class)
 @Ignore // all these tests take very, very long - so only run them manually
 public class LargePartitionsTest extends CQLTester
 {
@@ -62,24 +59,24 @@ public class LargePartitionsTest extends CQLTester
         return new String(ch);
     }
 
-    private static final int rowKBytes = 8;
+    private static final int rowKibibytes = 8;
 
-    private void withPartitionSize(long partitionKBytes, long totalMBytes) throws Throwable
+    private void withPartitionSize(long partitionKibibytes, long totalMBytes) throws Throwable
     {
-        long totalKBytes = totalMBytes * 1024L;
+        long totalKibibytes = totalMBytes * 1024L;
 
         createTable("CREATE TABLE %s (pk text, ck text, val text, PRIMARY KEY (pk, ck))");
 
-        String name = "part=" + partitionKBytes + "k total=" + totalMBytes + 'M';
+        String name = "part=" + partitionKibibytes + "k total=" + totalMBytes + 'M';
 
         measured("INSERTs for " + name, () -> {
-            for (long writtenKBytes = 0L; writtenKBytes < totalKBytes; writtenKBytes += partitionKBytes)
+            for (long writtenKibibytes = 0L; writtenKibibytes < totalKibibytes; writtenKibibytes += partitionKibibytes)
             {
-                String pk = Long.toBinaryString(writtenKBytes);
-                for (long kbytes = 0L; kbytes < partitionKBytes; kbytes += rowKBytes)
+                String pk = Long.toBinaryString(writtenKibibytes);
+                for (long kibibytes = 0L; kibibytes < partitionKibibytes; kibibytes += rowKibibytes)
                 {
-                    String ck = Long.toBinaryString(kbytes);
-                    execute("INSERT INTO %s (pk, ck, val) VALUES (?,?,?)", pk, ck, randomText(rowKBytes * 1024));
+                    String ck = Long.toBinaryString(kibibytes);
+                    execute("INSERT INTO %s (pk, ck, val) VALUES (?,?,?)", pk, ck, randomText(rowKibibytes * 1024));
                 }
             }
         });
@@ -94,20 +91,20 @@ public class LargePartitionsTest extends CQLTester
             keyCacheMetrics("after compaction");
         });
 
-        measured("SELECTs 1 for " + name, () -> selects(partitionKBytes, totalKBytes));
+        measured("SELECTs 1 for " + name, () -> selects(partitionKibibytes, totalKibibytes));
 
-        measured("SELECTs 2 for " + name, () -> selects(partitionKBytes, totalKBytes));
+        measured("SELECTs 2 for " + name, () -> selects(partitionKibibytes, totalKibibytes));
 
         CacheService.instance.keyCache.clear();
-        measured("Scan for " + name, () -> scan(partitionKBytes, totalKBytes));
+        measured("Scan for " + name, () -> scan(partitionKibibytes, totalKibibytes));
     }
 
-    private void selects(long partitionKBytes, long totalKBytes) throws Throwable
+    private void selects(long partitionKibibytes, long totalKibibytes) throws Throwable
     {
         for (int i = 0; i < 50000; i++)
         {
-            long pk = ThreadLocalRandom.current().nextLong(totalKBytes / partitionKBytes) * partitionKBytes;
-            long ck = ThreadLocalRandom.current().nextLong(partitionKBytes / rowKBytes) * rowKBytes;
+            long pk = ThreadLocalRandom.current().nextLong(totalKibibytes / partitionKibibytes) * partitionKibibytes;
+            long ck = ThreadLocalRandom.current().nextLong(partitionKibibytes / rowKibibytes) * rowKibibytes;
             execute("SELECT val FROM %s WHERE pk=? AND ck=?",
                     Long.toBinaryString(pk),
                     Long.toBinaryString(ck)).one();
@@ -117,9 +114,9 @@ public class LargePartitionsTest extends CQLTester
         keyCacheMetrics("after all selects");
     }
 
-    private void scan(long partitionKBytes, long totalKBytes) throws Throwable
+    private void scan(long partitionKibibytes, long totalKibibytes) throws Throwable
     {
-        long pk = ThreadLocalRandom.current().nextLong(totalKBytes / partitionKBytes) * partitionKBytes;
+        long pk = ThreadLocalRandom.current().nextLong(totalKibibytes / partitionKibibytes) * partitionKibibytes;
         Iterator<UntypedResultSet.Row> iter = execute("SELECT val FROM %s WHERE pk=?", Long.toBinaryString(pk)).iterator();
         int i = 0;
         while (iter.hasNext())
@@ -134,11 +131,11 @@ public class LargePartitionsTest extends CQLTester
     private static void keyCacheMetrics(String title)
     {
         CacheMetrics metrics = CacheService.instance.keyCache.getMetrics();
-        System.out.println("Key cache metrics " + title + ": capacity:" + metrics.capacity.getValue() +
-                           " size:"+metrics.size.getValue()+
-                           " entries:" + metrics.entries.getValue() +
-                           " hit-rate:"+metrics.hitRate.getValue() +
-                           " one-min-rate:"+metrics.oneMinuteHitRate.getValue());
+        System.out.println("Key cache metrics " + title + ": capacity:" + metrics.capacity() +
+                           " size:"+metrics.size()+
+                           " entries:" + metrics.entries() +
+                           " hit-rate:"+metrics.hitRate() +
+                           " one-min-rate:"+metrics.hitOneMinuteRate());
     }
 
     @Test
