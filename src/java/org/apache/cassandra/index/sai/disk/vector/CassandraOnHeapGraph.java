@@ -508,7 +508,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 var start = nanoTime();
                 indexWriter.write(suppliers(view, compressor, nvq, writeFusedPQ));
                 SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
-                logger.info("Writing graph took {}ms", (nanoTime() - start) / 1_000_000);
+                logger.info("Writing graph took {} ms", (nanoTime() - start) / 1_000_000);
                 long termsLength = indexWriter.getOutput().position() - termsOffset;
 
                 // write remaining footers/checksums
