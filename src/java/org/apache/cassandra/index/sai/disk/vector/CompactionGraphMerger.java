@@ -69,6 +69,7 @@ import org.apache.cassandra.index.sai.metrics.VectorCompactionMetrics;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 
 import static java.util.stream.Collectors.toList;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 /**
  * Merges multiple existing on-disk HNSW graph segments into a single compacted segment using
@@ -304,7 +305,8 @@ public class CompactionGraphMerger
                 similarityFunction,
                 // All jvector fan-out work runs on the shared Cassandra-managed build pool,
                 // keeping vector work off ForkJoinPool.commonPool() and inside the managed budget.
-                JVectorVersionUtil.compactionBuildPool());
+                JVectorVersionUtil.compactionBuildPool(),
+                JVectorVersionUtil.compactionBuildThreads());
         // Install the host control surface: forwards jvector's per-phase progress to the merge
         // operation and admits its write bandwidth against the shared compaction throughput budget.
         compactor.setProgressLimiter(progressLimiter);
@@ -312,7 +314,7 @@ public class CompactionGraphMerger
         // controls: the merge always retrains the codebook and re-encodes. Nothing to configure here.
 
         long termsOffset = termsChannel.position();
-        long compactStart = System.nanoTime();
+        long compactStart = nanoTime();
         try (var _ = progressLimiter.startPhase(VectorCompactionMetrics.Phase.JVECTOR_COMPACT))
         {
             if (pqDestination != null)
@@ -320,7 +322,7 @@ public class CompactionGraphMerger
             else
                 compactor.compact(termsDestination);
         }
-        long compactMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - compactStart);
+        long compactMs = TimeUnit.NANOSECONDS.toMillis(nanoTime() - compactStart);
         long termsLength = termsChannel.size() - termsOffset;
 
         // --- Step 2b: use the ordinal mapping jvector ACTUALLY used.
