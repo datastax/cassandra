@@ -31,6 +31,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.After;
 import org.junit.Before;
@@ -38,6 +39,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class VectorDeduplicatorTest
@@ -89,7 +91,7 @@ public class VectorDeduplicatorTest
         ByteBuffer vec = vectorOf(1.0f, 2.0f, 3.0f);
         VectorHandle candidate = new VectorHandle(0, 42);
 
-        VectorHandle canonical = deduplicator.deduplicate(vec, candidate);
+        VectorHandle canonical = deduplicator.deduplicate(vec, () -> candidate);
 
         assertEquals(candidate, canonical);
     }
@@ -101,11 +103,40 @@ public class VectorDeduplicatorTest
         VectorHandle first = new VectorHandle(0, 1);
         VectorHandle second = new VectorHandle(1, 99);
 
-        VectorHandle canonical1 = deduplicator.deduplicate(vec, first);
-        VectorHandle canonical2 = deduplicator.deduplicate(vec, second);
+        VectorHandle canonical1 = deduplicator.deduplicate(vec, () -> first);
+        VectorHandle canonical2 = deduplicator.deduplicate(vec, () -> second);
 
         assertEquals(first, canonical1);
         assertEquals("duplicate vector must map to the first-seen handle", first, canonical2);
+    }
+
+    @Test
+    public void supplierNotCalledOnCacheHit()
+    {
+        ByteBuffer vec = vectorOf(1.0f, 2.0f, 3.0f);
+        VectorHandle first = new VectorHandle(0, 1);
+        AtomicInteger supplierCalls = new AtomicInteger();
+
+        deduplicator.deduplicate(vec, () -> { supplierCalls.incrementAndGet(); return first; });
+        deduplicator.deduplicate(vec, () -> { supplierCalls.incrementAndGet(); return new VectorHandle(1, 99); });
+        deduplicator.deduplicate(vec, () -> { supplierCalls.incrementAndGet(); return new VectorHandle(2, 0); });
+
+        assertEquals("supplier must be called exactly once (on the initial miss)", 1, supplierCalls.get());
+    }
+
+    @Test
+    public void nullSupplierResultReturnsNullAndInsertsNothing()
+    {
+        ByteBuffer vec = vectorOf(7.0f, 8.0f);
+
+        VectorHandle result = deduplicator.deduplicate(vec, () -> null);
+
+        assertNull("null from supplier must be returned as-is", result);
+
+        // A subsequent call with a real handle must now insert (vector was never recorded).
+        VectorHandle handle = new VectorHandle(0, 5);
+        VectorHandle canonical = deduplicator.deduplicate(vec, () -> handle);
+        assertEquals("vector must be insertable after a previous null-supplier miss", handle, canonical);
     }
 
     @Test
@@ -116,8 +147,8 @@ public class VectorDeduplicatorTest
         VectorHandle handle1 = new VectorHandle(0, 0);
         VectorHandle handle2 = new VectorHandle(0, 1);
 
-        VectorHandle canonical1 = deduplicator.deduplicate(vec1, handle1);
-        VectorHandle canonical2 = deduplicator.deduplicate(vec2, handle2);
+        VectorHandle canonical1 = deduplicator.deduplicate(vec1, () -> handle1);
+        VectorHandle canonical2 = deduplicator.deduplicate(vec2, () -> handle2);
 
         assertEquals(handle1, canonical1);
         assertEquals(handle2, canonical2);
@@ -138,10 +169,10 @@ public class VectorDeduplicatorTest
         VectorHandle src2n0  = new VectorHandle(2, 0);
         VectorHandle src0n7  = new VectorHandle(0, 7);
 
-        VectorHandle c0 = deduplicator.deduplicate(vec, src0n5);
-        VectorHandle c1 = deduplicator.deduplicate(vec, src1n10);
-        VectorHandle c2 = deduplicator.deduplicate(vec, src2n0);
-        VectorHandle c3 = deduplicator.deduplicate(vec, src0n7);
+        VectorHandle c0 = deduplicator.deduplicate(vec, () -> src0n5);
+        VectorHandle c1 = deduplicator.deduplicate(vec, () -> src1n10);
+        VectorHandle c2 = deduplicator.deduplicate(vec, () -> src2n0);
+        VectorHandle c3 = deduplicator.deduplicate(vec, () -> src0n7);
 
         assertEquals("first call must be canonical", src0n5, c0);
         assertEquals("second call must return first-seen canonical", src0n5, c1);
@@ -164,14 +195,14 @@ public class VectorDeduplicatorTest
         VectorHandle hC1 = new VectorHandle(0, 2);
         VectorHandle hC2 = new VectorHandle(1, 2);
 
-        assertEquals(hA1, deduplicator.deduplicate(vecA, hA1));
-        assertEquals(hB1, deduplicator.deduplicate(vecB, hB1));
-        assertEquals(hC1, deduplicator.deduplicate(vecC, hC1));
+        assertEquals(hA1, deduplicator.deduplicate(vecA, () -> hA1));
+        assertEquals(hB1, deduplicator.deduplicate(vecB, () -> hB1));
+        assertEquals(hC1, deduplicator.deduplicate(vecC, () -> hC1));
 
         // Duplicate presentations must all map to their own canonical
-        assertEquals(hA1, deduplicator.deduplicate(vecA, hA2));
-        assertEquals(hB1, deduplicator.deduplicate(vecB, hB2));
-        assertEquals(hC1, deduplicator.deduplicate(vecC, hC2));
+        assertEquals(hA1, deduplicator.deduplicate(vecA, () -> hA2));
+        assertEquals(hB1, deduplicator.deduplicate(vecB, () -> hB2));
+        assertEquals(hC1, deduplicator.deduplicate(vecC, () -> hC2));
     }
 
     // -----------------------------------------------------------------------
@@ -179,7 +210,7 @@ public class VectorDeduplicatorTest
     // -----------------------------------------------------------------------
 
     @Test
-    public void deduplicateDoesNotAlterBufferPositionOrLimit() throws IOException
+    public void deduplicateDoesNotAlterBufferPositionOrLimit()
     {
         ByteBuffer buf = ByteBuffer.allocate(16);
         for (int i = 0; i < 4; i++)
@@ -191,7 +222,7 @@ public class VectorDeduplicatorTest
         int originalPosition = buf.position();
         int originalLimit = buf.limit();
 
-        deduplicator.deduplicate(buf, new VectorHandle(0, 0));
+        deduplicator.deduplicate(buf, () -> new VectorHandle(0, 0));
 
         assertEquals(originalPosition, buf.position());
         assertEquals(originalLimit, buf.limit());
@@ -227,7 +258,7 @@ public class VectorDeduplicatorTest
                         VectorHandle candidate = new VectorHandle(threadIdx, vectorIdx);
                         // Make a thread-local duplicate of the shared buffer
                         ByteBuffer local = sharedVec.duplicate();
-                        return deduplicator.deduplicate(local, candidate);
+                        return deduplicator.deduplicate(local, () -> candidate);
                     }));
                 }
             }
@@ -268,8 +299,8 @@ public class VectorDeduplicatorTest
                     ByteBuffer vec = vectorOf(threadIdx * 100.0f, threadIdx * 100.0f + 1.0f);
                     VectorHandle h1 = new VectorHandle(threadIdx, 0);
                     VectorHandle h2 = new VectorHandle(threadIdx, 1);
-                    VectorHandle c1 = deduplicator.deduplicate(vec, h1);
-                    VectorHandle c2 = deduplicator.deduplicate(vec, h2);
+                    VectorHandle c1 = deduplicator.deduplicate(vec, () -> h1);
+                    VectorHandle c2 = deduplicator.deduplicate(vec, () -> h2);
                     return new VectorHandle[]{ c1, c2 };
                 }));
             }
@@ -302,7 +333,7 @@ public class VectorDeduplicatorTest
             {
                 ByteBuffer vec = randomVector(rnd, dim);
                 VectorHandle candidate = new VectorHandle(i % 4, i);
-                VectorHandle canonical = d.deduplicate(vec, candidate);
+                VectorHandle canonical = d.deduplicate(vec, () -> candidate);
 
                 assertEquals("each unique vector must return its own candidate handle", candidate, canonical);
             }
@@ -333,7 +364,7 @@ public class VectorDeduplicatorTest
                 ByteBuffer vec = distinctVectors.get(vecIdx);
                 VectorHandle candidate = new VectorHandle(i % 8, i);
 
-                VectorHandle canonical = d.deduplicate(vec, candidate);
+                VectorHandle canonical = d.deduplicate(vec, () -> candidate);
                 assertNotNull(canonical);
 
                 if (!expectedCanonicals.containsKey(vecIdx))
@@ -389,7 +420,7 @@ public class VectorDeduplicatorTest
                             ByteBuffer vec = distinctVectors.get(vecIdx);
                             VectorHandle candidate = new VectorHandle(threadIdx, op);
 
-                            VectorHandle canonical = d.deduplicate(vec, candidate);
+                            VectorHandle canonical = d.deduplicate(vec, () -> candidate);
                             assertNotNull(canonical);
 
                             // The first handle recorded for vecIdx in our map must match whatever other threads observe
@@ -428,7 +459,7 @@ public class VectorDeduplicatorTest
         org.junit.Assert.assertTrue("backing file must exist while open", file.exists());
 
         ByteBuffer vec = vectorOf(0.0f);
-        d.deduplicate(vec, new VectorHandle(0, 0));
+        d.deduplicate(vec, () -> new VectorHandle(0, 0));
 
         d.close();
         org.junit.Assert.assertFalse("backing file must be deleted on close", file.exists());

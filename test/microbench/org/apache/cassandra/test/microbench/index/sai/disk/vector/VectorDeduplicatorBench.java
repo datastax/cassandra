@@ -146,7 +146,8 @@ public class VectorDeduplicatorBench
             rng.nextBytes(vectorBytes);
 
             ByteBuffer buf = ByteBuffer.wrap(vectorBytes);
-            VectorHandle result = deduplicator.deduplicate(buf, new VectorHandle(0, i));
+            final int vectorIndex = i;
+            VectorHandle result = deduplicator.deduplicate(buf, () -> new VectorHandle(0, vectorIndex));
             bh.consume(result);
         }
     }
