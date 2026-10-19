@@ -77,7 +77,8 @@ public enum Converters
                             o -> o == null ? null : Long.toString(o.toSeconds())),
     /**
      * Same as {@link #SECONDS_CUSTOM_DURATION}, in milliseconds; unlike {@link #MILLIS_CUSTOM_DURATION}, -1 is not
-     * mapped to null. (HCD-632: repair_prepare_message_timeout_in_ms, which HCD 1.2 sets as a number of milliseconds)
+     * mapped to null. (HCD-632: repair_prepare_message_timeout_in_ms, which HCD 1.2 sets as a number of milliseconds
+     * and HCD 2.0, before the rename to repair_prepare_message_timeout, as a duration)
      * Example: repair_prepare_message_timeout_in_ms = 10000 and repair_prepare_message_timeout_in_ms = 10000ms are equal.
      */
     MILLIS_STRING_DURATION_LONG(String.class, DurationSpec.LongMillisecondsBound.class,

@@ -71,8 +71,8 @@ UPGRADING FROM HCD 1.2 (HCD-632)
 An HCD 1.2 cassandra.yaml is accepted with these differences:
     - `enable_uuid_sstable_identifiers` is a deprecated alias of `uuid_sstable_identifiers_enabled`.
     - `hints_request_timeout_in_ms` is a deprecated alias of `hints_request_timeout`.
-    - `repair_prepare_message_timeout_in_ms` accepts a number of milliseconds (HCD 1.2) as well as a duration
-      such as `10000ms`. The settings virtual table now shows it as a number of milliseconds.
+    - `repair_prepare_message_timeout_in_ms` is a deprecated alias of `repair_prepare_message_timeout`. The alias
+      accepts a number of milliseconds (HCD 1.2) as well as a duration such as `10000ms` (earlier HCD 2.0 builds).
 The following HCD 1.2 properties are not accepted and must be removed or translated before the upgrade,
 otherwise the node does not start ("Invalid yaml. Please remove properties [...]"):
     - the `guardrails:` block (commented out in the HCD 1.2 cassandra.yaml): guardrails are top-level

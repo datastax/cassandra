@@ -182,6 +182,7 @@ public class SettingsTableTest extends CQLTester
         check("hints_request_timeout", "2000ms");
         check("hints_request_timeout_in_ms", "2000");
         // test MILLIS_STRING_DURATION_LONG converter
+        check("repair_prepare_message_timeout", "10000ms");
         check("repair_prepare_message_timeout_in_ms", "10000");
 
         // test non matching auth related properties

@@ -316,10 +316,11 @@ public class YamlConfigurationLoaderTest
         assertThat(from("enable_uuid_sstable_identifiers", true).uuid_sstable_identifiers_enabled).isTrue();
         assertThat(from("hints_request_timeout_in_ms", 3000).hints_request_timeout).isEqualTo(new DurationSpec.LongMillisecondsBound("3000ms"));
 
-        // MILLIS_STRING_DURATION_LONG: HCD 1.2 sets a number of milliseconds, HCD 2.0 a duration, under the same name
-        assertThat(from("repair_prepare_message_timeout_in_ms", 5000).repair_prepare_message_timeout_in_ms)
-        .isEqualTo(from("repair_prepare_message_timeout_in_ms", "5000ms").repair_prepare_message_timeout_in_ms)
-        .isEqualTo(from("repair_prepare_message_timeout_in_ms", "5s").repair_prepare_message_timeout_in_ms)
+        // MILLIS_STRING_DURATION_LONG: under the old name HCD 1.2 sets a number of milliseconds, HCD 2.0 a duration
+        assertThat(from("repair_prepare_message_timeout_in_ms", 5000).repair_prepare_message_timeout)
+        .isEqualTo(from("repair_prepare_message_timeout_in_ms", "5000ms").repair_prepare_message_timeout)
+        .isEqualTo(from("repair_prepare_message_timeout_in_ms", "5s").repair_prepare_message_timeout)
+        .isEqualTo(from("repair_prepare_message_timeout", "5s").repair_prepare_message_timeout)
         .isEqualTo(new DurationSpec.LongMillisecondsBound(5000));
         assertThatThrownBy(() -> from("repair_prepare_message_timeout_in_ms", -2))
         .hasRootCauseInstanceOf(IllegalArgumentException.class)
@@ -331,6 +332,9 @@ public class YamlConfigurationLoaderTest
         assertThatThrownBy(() -> from("hints_request_timeout_in_ms", 3000, "hints_request_timeout", "3s"))
         .isInstanceOf(ConfigurationException.class)
         .hasMessageContaining("[hints_request_timeout_in_ms -> hints_request_timeout]");
+        assertThatThrownBy(() -> from("repair_prepare_message_timeout_in_ms", 5000, "repair_prepare_message_timeout", "5s"))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessageContaining("[repair_prepare_message_timeout_in_ms -> repair_prepare_message_timeout]");
     }
 
     @Test

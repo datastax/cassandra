@@ -173,9 +173,9 @@ public class Config
     @Replaces(oldName = "repair_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
     public volatile DurationSpec.LongMillisecondsBound repair_request_timeout = new DurationSpec.LongMillisecondsBound("120000ms");
 
-    // HCD-632: HCD 1.2 sets it as a number of milliseconds
-    @Replaces(oldName = "repair_prepare_message_timeout_in_ms", converter = Converters.MILLIS_STRING_DURATION_LONG)
-    public volatile DurationSpec.LongMillisecondsBound repair_prepare_message_timeout_in_ms = new DurationSpec.LongMillisecondsBound("10000ms");
+    // HCD-632: HCD 1.2 sets the old name as a number of milliseconds, HCD 2.0 before the rename as a duration
+    @Replaces(oldName = "repair_prepare_message_timeout_in_ms", converter = Converters.MILLIS_STRING_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound repair_prepare_message_timeout = new DurationSpec.LongMillisecondsBound("10000ms");
 
     public Integer streaming_connections_per_host = 1;
     @Replaces(oldName = "streaming_keep_alive_period_in_secs", converter = Converters.SECONDS_DURATION, deprecated = true)

@@ -2396,12 +2396,12 @@ public class DatabaseDescriptor
 
     public static long getRepairPrepareMessageTimeout(TimeUnit unit)
     {
-        return conf.repair_prepare_message_timeout_in_ms.to(unit);
+        return conf.repair_prepare_message_timeout.to(unit);
     }
 
     public static void setRepairPrepareMessageTimeout(Long timeOutInMillis)
     {
-        conf.repair_prepare_message_timeout_in_ms = new DurationSpec.LongMillisecondsBound(timeOutInMillis);
+        conf.repair_prepare_message_timeout = new DurationSpec.LongMillisecondsBound(timeOutInMillis);
     }
 
     public static boolean hasCrossNodeTimeout()
