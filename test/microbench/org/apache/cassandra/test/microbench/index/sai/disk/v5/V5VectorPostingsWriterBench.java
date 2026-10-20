@@ -112,9 +112,9 @@ public class V5VectorPostingsWriterBench
     }
 
     @Benchmark
-    public void describeForCompactionOneToMany()
+    public void describeForCompactionZeroOrOneToMany()
     {
-        RemappedPostings.describeForCompaction(V5VectorPostingsWriter.Structure.ONE_TO_MANY, numVectors, maxRowId.get(), numVectors - 1, postingsMap);
+        RemappedPostings.describeForCompaction(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, numVectors, maxRowId.get(), numVectors - 1, postingsMap);
     }
 
     @TearDown

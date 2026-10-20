@@ -24,8 +24,6 @@ import java.util.Comparator;
 import java.util.function.IntFunction;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-
 import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -171,12 +169,12 @@ public class V5VectorPostingsWriter
      * <p>Required for {@link Structure#ZERO_OR_ONE_TO_MANY} — omitting it throws from {@link #writeTo}.
      * <p>For {@link Structure#ONE_TO_ONE} and {@link Structure#ONE_TO_MANY} it may be omitted,
      * in which case {@code maxVectorOrdinal} is used.
+     * <p>Any negative value is treated as "not supplied" (equivalent to not calling this method).
      * Returns {@code this}.
      */
     public V5VectorPostingsWriter maxRowId(int maxRowId)
     {
-        Preconditions.checkArgument(maxRowId >= 0, "maxRowId must be >= 0");
-        this.maxRowId = maxRowId;
+        this.maxRowId = maxRowId >= 0 ? maxRowId : -1;
         return this;
     }
 

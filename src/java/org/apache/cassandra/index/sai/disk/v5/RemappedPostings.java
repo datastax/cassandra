@@ -140,22 +140,8 @@ public class RemappedPostings
                                         new OrdinalMapper.IdentityMapper(graphSize - 1));
         }
 
-        if (structure == Structure.ONE_TO_MANY)
-        {
-            // compute extraOrdinals from the postingsMap
-            Int2IntHashMap extraOrdinals = new Int2IntHashMap(Integer.MIN_VALUE);
-            postingsMap.forEachEntry(entry -> {
-                VectorPostings.CompactionVectorPostings.Marshaller.recordExtraOrdinals(entry, extraOrdinals);
-            });
-
-            Set<Integer> skippedOrdinals = extraOrdinals.keySet();
-            return new RemappedPostings(Structure.ONE_TO_MANY,
-                                        maxOrdinal,
-                                        maxRowId,
-                                        extraOrdinals,
-                                        new OmissionAwareIdentityMapper(maxOrdinal, skippedOrdinals::contains));
-        }
-
+        // ONE_TO_MANY is no longer written; callers must only pass ONE_TO_ONE or ZERO_OR_ONE_TO_MANY.
+        assert structure != Structure.ONE_TO_MANY : "ONE_TO_MANY must not be used on the write path";
         assert structure == Structure.ZERO_OR_ONE_TO_MANY : structure;
         return createGenericIdentityMapping(postingsMap, maxRowId, maxOrdinal);
     }
@@ -195,32 +181,26 @@ public class RemappedPostings
         }
         assert totalRowsAssigned == 0 || totalRowsAssigned <= maxRow + 1: "rowids are not unique -- " + totalRowsAssigned + " >= " + maxRow;
 
-        // derive the correct structure
+        // derive the correct structure; ONE_TO_MANY is no longer written — use ZERO_OR_ONE_TO_MANY
+        // whenever there are duplicate vectors (extraPostings non-empty) or gaps in row assignment.
         Structure structure;
-        if (totalRowsAssigned > 0 && (minRow != 0 || totalRowsAssigned < maxRow + 1))
+        if (totalRowsAssigned == 0 || (extraPostings.isEmpty() && minRow == 0 && totalRowsAssigned == maxRow + 1))
         {
-            logger.debug("Not all rows are assigned vectors, cannot remap one-to-many");
-            structure = Structure.ZERO_OR_ONE_TO_MANY;
+            structure = Structure.ONE_TO_ONE;
         }
         else
         {
-            structure = extraPostings.isEmpty()
-                      ? Structure.ONE_TO_ONE
-                      : Structure.ONE_TO_MANY;
-            // override one-to-many to generic if there are too many holes
-            if (structure == Structure.ONE_TO_MANY && V5VectorPostingsWriter.tooManyOrdinalMappingHoles(postingsMap.size(), maxRow))
-                structure = Structure.ZERO_OR_ONE_TO_MANY;
-            logger.debug("Remapped postings include {} unique vectors and {} 'extra' rows sharing them. Structure is {}",
-                         ordinalMap.size(), extraPostings.size(), structure);
+            structure = Structure.ZERO_OR_ONE_TO_MANY;
         }
+        logger.debug("Remapped postings include {} unique vectors and {} 'extra' rows sharing them. Structure is {}",
+                     ordinalMap.size(), extraPostings.size(), structure);
 
         // create the mapping
         if (structure == Structure.ZERO_OR_ONE_TO_MANY)
             return createGenericRenumberedMapping(ordinalMap.keySet(), maxOldOrdinal, maxRow);
-        // For ONE_TO_MANY, maxVectorOrdinal must equal maxRowId (all rows including extras fit within
-        // [0, maxRow]), so use maxRow as both maxNewOrdinal and maxRowId.
+        // ONE_TO_ONE: map each oldOrdinal → rowId (rowId == ordinal for a perfect contiguous flush)
         OrdinalMapper ordinalMapper = new BiMapMapper(maxRow, ordinalMap);
-        return new RemappedPostings(structure, maxNewOrdinal, maxRow, extraPostings, ordinalMapper);
+        return new RemappedPostings(structure, maxNewOrdinal, maxRow, null, ordinalMapper);
     }
 
     /**

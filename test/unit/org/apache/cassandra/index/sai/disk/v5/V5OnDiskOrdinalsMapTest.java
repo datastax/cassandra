@@ -74,7 +74,8 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
     public void testRandomPostings() throws Exception
     {
         for (int i = 0; i < 10; i++) {
-            for (Structure structure: Structure.values()) {
+            // ONE_TO_MANY is no longer written; only test the two valid write-path structures
+            for (Structure structure: new Structure[]{ Structure.ONE_TO_ONE, Structure.ZERO_OR_ONE_TO_MANY }) {
                 testRandomPostingsOnce(structure);
             }
         }
@@ -98,25 +99,27 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
     @Test
     public void testOneToMany() throws Exception
     {
+        // ONE_TO_MANY is no longer written; duplicate vectors now produce ZERO_OR_ONE_TO_MANY
         var vv = generateVectors(4);
         Map<VectorFloat<?>, VectorPostings<String>> postingsMap = emptyPostingsMap();
         // 0 -> B
-        // 1 -> C, A
+        // 1 -> C, A  (duplicate: produces ZERO_OR_ONE_TO_MANY)
         // 2 -> D
         postingsMap.put(vv.getVector(0), createPostings(0, "B"));
         postingsMap.put(vv.getVector(1), createPostings(1, "C", "A"));
         postingsMap.put(vv.getVector(2), createPostings(2, "D"));
         computeRowIds(postingsMap);
-        validate(Structure.ONE_TO_MANY, postingsMap, vv);
+        validate(Structure.ZERO_OR_ONE_TO_MANY, postingsMap, vv);
     }
 
     @Test
     public void testOneToManyLarger() throws Exception
     {
+        // ONE_TO_MANY is no longer written; duplicate vectors now produce ZERO_OR_ONE_TO_MANY
         var vv = generateVectors(4);
         Map<VectorFloat<?>, VectorPostings<String>> postingsMap = emptyPostingsMap();
         // 0 -> B
-        // 1 -> C, A, E
+        // 1 -> C, A, E  (duplicates: produces ZERO_OR_ONE_TO_MANY)
         // 2 -> D, F
         // 3 -> G
         postingsMap.put(vv.getVector(0), createPostings(0, "B"));
@@ -124,7 +127,7 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
         postingsMap.put(vv.getVector(2), createPostings(2, "D", "F"));
         postingsMap.put(vv.getVector(3), createPostings(3, "G"));
         computeRowIds(postingsMap);
-        validate(Structure.ONE_TO_MANY, postingsMap, vv);
+        validate(Structure.ZERO_OR_ONE_TO_MANY, postingsMap, vv);
     }
 
     @Test
