@@ -80,16 +80,28 @@ import static org.assertj.core.api.Assertions.assertThat;
  * to the global {@link SensorsRegistry} by the replica verb handlers:
  * {@link MutationVerbHandler}, {@link CounterMutationVerbHandler}, {@link PrepareVerbHandler},
  * {@link ProposeVerbHandler}, and {@link CommitVerbHandler}.
+ * The Paxos LWT tests additionally assert the read sensors ({@link Type#READ_BYTES},
+ * {@link Type#READ_EXECUTION_TIME}) produced when the Paxos state is loaded from {@code system.paxos}.
  * <p>
  * Each test exercises a specific write path (standard mutation, counter mutation, Paxos LWT rounds,
  * and mutations on indexed tables) and asserts that both the per-request sensor and the corresponding
- * global registry sensor carry the expected values after the verb handler completes.
+ * global registry sensor carry the expected values after the verb handler completes. The sensors are
+ * also checked in the response message's custom params, before and after serialization.
  * <p>
  * The three Paxos LWT tests ({@code testLWTPrepare}, {@code testLWTPropose}, {@code testLWTCommit})
  * are parametrized over {@code v1} and {@code v2} to exercise both the legacy verb handlers and the
  * new CAS v2 handlers ({@link org.apache.cassandra.service.paxos.PaxosPrepare.RequestHandler},
  * {@link org.apache.cassandra.service.paxos.PaxosPropose.RequestHandler},
  * {@link org.apache.cassandra.service.paxos.PaxosCommit.RequestHandler}).
+ * <p>
+ * Two further tests are v2-only, as the messages do not exist in v1: {@code testLWTv2CommitAndPrepare}
+ * ({@link org.apache.cassandra.service.paxos.PaxosCommitAndPrepare.RequestHandler}) and
+ * {@code testLWTv2PrepareRefresh}
+ * ({@link org.apache.cassandra.service.paxos.PaxosPrepareRefresh.RequestHandler}). They always dispatch
+ * to the v2 handlers, regardless of the {@code casVersion} parameter.
+ * <p>
+ * {@code testPaxosCommitWithSAI} and {@code testPaxosCommitWithSecondaryIndex} dispatch directly to
+ * {@link CommitVerbHandler} (v1) and are likewise independent of the {@code casVersion} parameter.
  *
  * @see CoordinatorWriteSensorsTest for the coordinator-side write counterpart
  * @see ReplicaReadSensorsTest for the replica-side read counterpart
@@ -619,7 +631,7 @@ public class ReplicaWriteSensorsTest
      * INDEX_WRITE_BYTES is verified for both a plain table (zero) and an SAI-indexed table (non-zero).
      */
     @Test
-    public void testV2CommitAndPrepare()
+    public void testLWTv2CommitAndPrepare()
     {
         // Plain table: INDEX_WRITE_BYTES is registered but zero (no indexes).
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
@@ -676,7 +688,7 @@ public class ReplicaWriteSensorsTest
      * INDEX_WRITE_BYTES is verified for both a plain table (zero) and an SAI-indexed table (non-zero).
      */
     @Test
-    public void testV2PrepareRefresh()
+    public void testLWTv2PrepareRefresh()
     {
         // Plain table: INDEX_WRITE_BYTES is registered but zero (no indexes).
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);

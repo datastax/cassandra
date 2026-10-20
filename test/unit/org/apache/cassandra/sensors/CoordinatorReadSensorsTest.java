@@ -351,12 +351,12 @@ public class CoordinatorReadSensorsTest
     public void testSerialReadV1()
     {
         Paxos.setPaxosVariant(Config.PaxosVariant.v1);
-        assertSerialRead();
+        assertSerialRead(Config.PaxosVariant.v1);
     }
 
     /**
      * SERIAL read over the v2 Paxos path ({@code paxos_variant=v2}).
-     * See {@link #assertSerialRead()} for the full assertion contract.
+     * See {@link #assertSerialRead(Config.PaxosVariant)} for the full assertion contract.
      */
     @Test
     @BMRules(rules = {
@@ -379,7 +379,7 @@ public class CoordinatorReadSensorsTest
     public void testSerialReadV2()
     {
         Paxos.setPaxosVariant(Config.PaxosVariant.v2);
-        assertSerialRead();
+        assertSerialRead(Config.PaxosVariant.v2);
     }
 
     /**
@@ -393,7 +393,7 @@ public class CoordinatorReadSensorsTest
      * {@link Type#WRITE_BYTES} must be non-zero (system.paxos writes).
      * {@link Type#READ_BYTES} must be non-zero (user-table rows returned).
      */
-    private void assertSerialRead()
+    private void assertSerialRead(Config.PaxosVariant variant)
     {
         QueryProcessor.Prepared prepared = QueryProcessor.prepareInternal(
                 String.format("SELECT * FROM %s.%s WHERE key = ?", KEYSPACE, TABLE));
@@ -414,13 +414,26 @@ public class CoordinatorReadSensorsTest
         assertThat(registryReadExecTime.getValue()).as("registry READ_EXECUTION_TIME must equal request sensor")
                                                    .isEqualTo(readExecTime);
 
-        // Paxos Prepare and Propose writes each sleep 50ms, so WRITE_EXECUTION_TIME >= 50ms.
-        double writeExecTime = sensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get().getValue();
-        assertThat(writeExecTime).as("WRITE_EXECUTION_TIME must be >= 50ms for SERIAL read (Paxos Prepare/Propose writes slept 50ms)")
-                                 .isGreaterThanOrEqualTo(50_000_000.0);
-        Sensor registryWriteExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_EXECUTION_TIME).get();
-        assertThat(registryWriteExecTime.getValue()).as("registry WRITE_EXECUTION_TIME must equal request sensor")
-                                                    .isEqualTo(writeExecTime);
+        if (variant == Config.PaxosVariant.v1)
+        {
+            // Paxos Prepare and Propose writes each sleep 50ms, so WRITE_EXECUTION_TIME >= 100ms.
+            double writeExecTime = sensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get().getValue();
+            assertThat(writeExecTime).as("WRITE_EXECUTION_TIME must be >= 100ms for SERIAL read (Paxos Prepare/Propose writes slept 50ms each)")
+                                     .isGreaterThanOrEqualTo(100_000_000.0);
+            Sensor registryWriteExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_EXECUTION_TIME).get();
+            assertThat(registryWriteExecTime.getValue()).as("registry WRITE_EXECUTION_TIME must equal request sensor")
+                                                        .isEqualTo(writeExecTime);
+        }
+        else
+        {
+            // V2 doesn't propose (unless required), so time is only 50ms.
+            double writeExecTime = sensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get().getValue();
+            assertThat(writeExecTime).as("WRITE_EXECUTION_TIME must be >= 50ms for SERIAL read (Paxos Prepare write slept 50ms)")
+                                     .isGreaterThanOrEqualTo(50_000_000.0);
+            Sensor registryWriteExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_EXECUTION_TIME).get();
+            assertThat(registryWriteExecTime.getValue()).as("registry WRITE_EXECUTION_TIME must equal request sensor")
+                                                        .isEqualTo(writeExecTime);
+        }
 
         double writeBytes = sensors.getSensor(context, Type.WRITE_BYTES).get().getValue();
         assertThat(writeBytes).as("WRITE_BYTES must be > 0 for SERIAL read (system.paxos writes during Prepare+Propose)")

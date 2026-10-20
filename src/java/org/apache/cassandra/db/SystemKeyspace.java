@@ -100,11 +100,11 @@ import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.schema.UserFunctions;
 import org.apache.cassandra.schema.Views;
-import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.Commit.Accepted;
 import org.apache.cassandra.service.paxos.Commit.AcceptedWithTTL;
@@ -1350,36 +1350,20 @@ public final class SystemKeyspace
     }
 
     /**
-     * Decorates a paxos promise write with methods to track bytes written and execution time of the write to the Paxos
-     * system table under the context of the user table that initiated Paxos. Only the {@code system.paxos} write is
-     * timed, so any other work done by the caller (e.g. the user-table precondition read) is not included.
-     */
-    private static void trackPaxosBytes(TableMetadata metadata, Runnable paxosCommitConsumer)
-    {
-        // Track bytes and execution time written to the Paxos system table for the commit that initiated Paxos
-        registerPaxosSensor(Type.WRITE_BYTES);
-        registerPaxosSensor(Type.WRITE_EXECUTION_TIME);
-        long writeStartNanos = nanoTime();
-        paxosCommitConsumer.run();
-        RequestSensors sensors = RequestTracker.instance.get();
-        if (sensors != null)
-            sensors.incrementSensor(PaxosContext, Type.WRITE_EXECUTION_TIME, nanoTime() - writeStartNanos);
-        // transfer bytes and execution time written to the Paxos system table to the user table for the commit that initiated Paxos
-        transferPaxosSensorBytes(metadata, Type.WRITE_BYTES);
-        transferPaxosSensorBytes(metadata, Type.WRITE_EXECUTION_TIME);
-    }
-
-    /**
-     * Decorates a paxos proposal write with methods to track bytes written and execution time of the write to the
-     * Paxos system table under the context of the user table that initiated Paxos. Both {@link Type#WRITE_BYTES}
-     * and {@link Type#INDEX_WRITE_BYTES} are registered under {@link #PaxosContext} before the write runs and
-     * transferred to the user-table context afterward, so that any index writes on {@code system.paxos} are
-     * attributed to the user table consistently with base-table writes. Only the {@code system.paxos} write is
-     * timed, so the preceding {@code loadPaxosState} read is not included.
+     * Track bytes written and execution time of the write to the Paxos system table under the context of the user table
+     * that initiated Paxos.
      */
     private static void trackPaxosBytes(Commit commit, Runnable paxosCommitConsumer)
     {
-        // Track bytes and execution time written to the Paxos system table for the proposal that initiated Paxos
+        trackPaxosBytes(commit.update.metadata(), paxosCommitConsumer);
+    }
+
+    /**
+     * Track bytes written and execution time of the write to the Paxos system table under the context of the user table
+     * that initiated Paxos.
+     */
+    private static void trackPaxosBytes(TableMetadata metadata, Runnable paxosCommitConsumer)
+    {
         registerPaxosSensor(Type.WRITE_BYTES);
         registerPaxosSensor(Type.INDEX_WRITE_BYTES);
         registerPaxosSensor(Type.WRITE_EXECUTION_TIME);
@@ -1388,10 +1372,10 @@ public final class SystemKeyspace
         RequestSensors sensors = RequestTracker.instance.get();
         if (sensors != null)
             sensors.incrementSensor(PaxosContext, Type.WRITE_EXECUTION_TIME, nanoTime() - writeStartNanos);
-        // transfer bytes and execution time written to the Paxos system table to the user table
-        transferPaxosSensorBytes(commit.update.metadata(), Type.WRITE_BYTES);
-        transferPaxosSensorBytes(commit.update.metadata(), Type.INDEX_WRITE_BYTES);
-        transferPaxosSensorBytes(commit.update.metadata(), Type.WRITE_EXECUTION_TIME);
+        // transfer bytes and execution time written to the Paxos system table to the user table for the commit that initiated Paxos
+        transferPaxosSensorBytes(metadata, Type.WRITE_BYTES);
+        transferPaxosSensorBytes(metadata, Type.INDEX_WRITE_BYTES);
+        transferPaxosSensorBytes(metadata, Type.WRITE_EXECUTION_TIME);
     }
 
     /**

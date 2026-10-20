@@ -750,8 +750,6 @@ public class PaxosState implements PaxosOperationLock
                 // so together they cover the full commit work without double-counting.
                 Context commitContext = Context.from(commit.update.metadata());
                 RequestSensors commitSensors = RequestTracker.instance.get();
-                if (commitSensors != null)
-                    commitSensors.registerSensor(commitContext, Type.WRITE_EXECUTION_TIME);
                 long userTableWriteStart = nanoTime();
                 Keyspace.open(mutation.getKeyspaceName()).apply(mutation, WriteOptions.FOR_PAXOS_COMMIT);
                 if (commitSensors != null)

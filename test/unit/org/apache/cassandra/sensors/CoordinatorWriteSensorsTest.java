@@ -58,7 +58,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * {@link Type#WRITE_EXECUTION_TIME} is measured tightly around the actual write work:
  * {@link org.apache.cassandra.service.StorageProxy#performMutationLocally} wraps {@code mutation.apply()}
- * for standard writes; {@code commitPaxosLocal} wraps {@code PaxosState.commit()} for CAS; and
+ * for standard writes; {@code commitPaxosLocal} wraps {@code PaxosState.applyCommit()} for CAS; and
  * {@code counterWriteTask} wraps {@code applyCounterMutation()} for counter writes, accumulating the
  * leader apply time directly into the sensor.
  * {@link Type#WRITE_BYTES} is accumulated by {@link org.apache.cassandra.db.ColumnFamilyStore} during
@@ -349,9 +349,9 @@ public class CoordinatorWriteSensorsTest
         Context context = Context.from(Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE).metadata());
 
         // Prepare+Propose system.paxos writes and the commit Keyspace.apply each sleep 50ms inside
-        // their respective timing windows, so WRITE_EXECUTION_TIME >= 50ms.
+        // their respective timing windows, so WRITE_EXECUTION_TIME >= 100ms.
         double writeExecTime = sensors.getSensor(context, Type.WRITE_EXECUTION_TIME).get().getValue();
-        assertThat(writeExecTime).as("WRITE_EXECUTION_TIME must be >= 50ms for CAS (Prepare/Propose writes and commit each slept 50ms)").isGreaterThanOrEqualTo(50_000_000.0);
+        assertThat(writeExecTime).as("WRITE_EXECUTION_TIME must be >= 100ms for CAS (Prepare/Propose writes and commit each slept 50ms)").isGreaterThanOrEqualTo(100_000_000.0);
         Sensor registryWriteExecTime = SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_EXECUTION_TIME).get();
         assertThat(registryWriteExecTime.getValue()).as("registry WRITE_EXECUTION_TIME must equal request sensor").isEqualTo(writeExecTime);
 
