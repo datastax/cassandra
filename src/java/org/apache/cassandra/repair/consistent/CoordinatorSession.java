@@ -310,21 +310,23 @@ public class CoordinatorSession extends ConsistentSession
         {
             public ListenableFuture<List<RepairSessionResult>> apply(Boolean success) throws Exception
             {
-                if (success)
+                if (!success)
+                    return Futures.immediateFuture(null);
+
+                // the session may have failed after the prepare phase completed but before this task ran
+                synchronized (CoordinatorSession.this)
                 {
+                    if (getState() == State.FAILED)
+                        return Futures.immediateFailedFuture(new RuntimeException(String.format("Incremental repair session %s has failed", sessionID)));
+
                     repairStart = System.currentTimeMillis();
                     if (logger.isDebugEnabled())
                     {
                         logger.debug("Incremental repair {} prepare phase completed in {}", sessionID, formatDuration(sessionStart, repairStart));
                     }
                     setRepairing();
-                    return sessionSubmitter.get();
                 }
-                else
-                {
-                    return Futures.immediateFuture(null);
-                }
-
+                return sessionSubmitter.get();
             }
         }, repairExecutor);
 

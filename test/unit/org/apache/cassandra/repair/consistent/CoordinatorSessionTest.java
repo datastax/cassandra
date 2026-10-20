@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
@@ -226,6 +227,46 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         queued.remove(0).run();
         Assert.assertTrue(submitted.get());
         Assert.assertEquals(REPAIRING, coordinator.getState());
+    }
+
+    @Test
+    public void failureBeforeOffloadedSessionSubmission() throws Exception
+    {
+        InstrumentedCoordinatorSession coordinator = createInstrumentedSession();
+        List<Runnable> queued = new ArrayList<>();
+        AtomicBoolean submitted = new AtomicBoolean();
+        AtomicBoolean hasFailure = new AtomicBoolean();
+        ListenableFuture result = coordinator.execute(() ->
+        {
+            submitted.set(true);
+            return SettableFuture.create();
+        }, hasFailure, queued::add);
+
+        coordinator.handlePrepareResponse(PARTICIPANT1, true);
+        coordinator.handlePrepareResponse(PARTICIPANT2, true);
+        coordinator.handlePrepareResponse(PARTICIPANT3, true);
+        Assert.assertEquals(1, queued.size());
+
+        // fail between the last prepare response and the queued session submission
+        coordinator.fail();
+        Assert.assertEquals(FAILED, coordinator.getState());
+        queued.removeFirst().run();
+
+        Assert.assertFalse(coordinator.setRepairingCalled);
+        Assert.assertFalse(submitted.get());
+        Assert.assertEquals(FAILED, coordinator.getState());
+        Assert.assertTrue(hasFailure.get());
+        Assert.assertTrue(result.isDone());
+        try
+        {
+            result.get();
+            Assert.fail("Expected repair to fail");
+        }
+        catch (ExecutionException e)
+        {
+            Assert.assertEquals(String.format("Incremental repair session %s has failed", coordinator.sessionID),
+                                e.getCause().getMessage());
+        }
     }
 
     /**
