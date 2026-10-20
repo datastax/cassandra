@@ -227,11 +227,9 @@ abstract public class VectorCompactionTest extends VectorTester
         compact();
         validateQueries();
 
-        // ONE_TO_MANY is version dependent, so we need to branch based on which version we're writing
-        var expectedStructure = V5OnDiskFormat.writeV5VectorPostings(version)
-                                ? V5VectorPostingsWriter.Structure.ONE_TO_MANY
-                                : V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY;
-        validatePostingsStructureAndOrdinalToVectorMapping(index, expectedStructure, vectorsPerSstable * sstables);
+        // ONE_TO_MANY is no longer written; both V5 and older versions now produce ZERO_OR_ONE_TO_MANY
+        // for segments with duplicate vectors
+        validatePostingsStructureAndOrdinalToVectorMapping(index, V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, vectorsPerSstable * sstables);
     }
 
     @Test
@@ -454,26 +452,15 @@ abstract public class VectorCompactionTest extends VectorTester
                 // When we have a row with a null vector, it is valid for the missing row vector(s) to be at the
                 // start or end of the sstable, and in that case, we actually skip them within the segment.
                 var postingsStructure = searcher.getPostingsStructure();
+                // ONE_TO_MANY is no longer written; the write path only produces ONE_TO_ONE or ZERO_OR_ONE_TO_MANY.
                 if (!nullValueObserved
                     && isMissingRows
                     && expectedStructure != V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
                 {
                     var struct = hasUniqueVectors
                                  ? V5VectorPostingsWriter.Structure.ONE_TO_ONE
-                                 : V5VectorPostingsWriter.tooManyOrdinalMappingHoles(searcher.graph.size(), numRows)
-                                   ? V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY
-                                   : V5VectorPostingsWriter.Structure.ONE_TO_MANY;
+                                 : V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY;
                     assertEquals(struct, postingsStructure);
-                }
-                else if (!nullValueObserved && expectedStructure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
-                {
-                    assertTrue(postingsStructure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY
-                               || postingsStructure == V5VectorPostingsWriter.Structure.ONE_TO_MANY);
-                }
-                // direct graph merge does not support ONE_TO_MANY
-                else if (enableGraphMerge && expectedStructure == V5VectorPostingsWriter.Structure.ONE_TO_MANY)
-                {
-                    assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, postingsStructure);
                 }
                 else
                 {

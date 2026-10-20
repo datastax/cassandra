@@ -435,9 +435,10 @@ public class CompactionGraph implements Closeable, Accountable
                 return new InsertionResult(bytesUsed, ordinal, vector);
             }
 
-            // postings list already exists, just add the new key
+            // postings list already exists, just add the new key; duplicate vectors mean this cannot be
+            // ONE_TO_ONE, but we no longer write ONE_TO_MANY — go directly to ZERO_OR_ONE_TO_MANY.
             if (postingsStructure == Structure.ONE_TO_ONE)
-                postingsStructure = Structure.ONE_TO_MANY;
+                postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
 
             var postingsEntry = postingsQueryContext.entry();
             assert postingsEntry != null;
@@ -535,18 +536,9 @@ public class CompactionGraph implements Closeable, Accountable
             long postingsOffset = postingsOutput.getFilePointer();
             var es = ExecutorFactory.Global.executorFactory().sequential("CompactionGraphPostingsWriter");
             var postingsFuture = es.submit(() -> {
-                // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;
-                // similarly, if we've been using synthetic ordinals then we can't map to ONE_TO_MANY
-                // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
-                // if a row with null vector in sstable A gets updated with a vector in sstable B)
-                // If there are too many holes, we leave the mapping on the disk.
-                if (postingsStructure == Structure.ONE_TO_MANY
-                    && (!V5OnDiskFormat.writeV5VectorPostings(version)
-                        || useSyntheticOrdinals
-                        || V5VectorPostingsWriter.tooManyOrdinalMappingHoles(postingsMap.size(), rowsAdded)))
-                {
-                    postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
-                }
+                // ONE_TO_MANY is no longer written; the write path only produces ONE_TO_ONE or
+                // ZERO_OR_ONE_TO_MANY. Assert to catch any regression.
+                assert postingsStructure != Structure.ONE_TO_MANY : "ONE_TO_MANY must not be set at flush time";
                 var rp = RemappedPostings.describeForCompaction(postingsStructure,
                                                                 builder.getGraph().size(),
                                                                 lastRowId,

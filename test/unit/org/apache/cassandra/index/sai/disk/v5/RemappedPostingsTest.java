@@ -108,11 +108,11 @@ public class RemappedPostingsTest extends VectorTester
     }
 
     @Test
-    public void testOneToManyFromRemapForMemtable() throws Exception
+    public void testZeroOrOneToManyFromRemapForMemtable() throws Exception
     {
         // vector 0 -> rows 2 and 0, vector 1 -> row 1, vector 2 -> row 3.
-        // remapForMemtable renumbers each vector to its first row: new ordinals 0, 1 and 3; new ordinal 2 is a hole
-        // (row 2 is an extra row of vector 0).
+        // remapForMemtable now always goes to ZERO_OR_ONE_TO_MANY when extra postings exist.
+        // Ordinals are renumbered densely: new ordinal 0 = vector 0, 1 = vector 1, 2 = vector 2.
         ConcurrentVectorValues vectors = vectors(3);
         Map<VectorFloat<?>, VectorPostings<Integer>> postings = new IdentityHashMap<>();
         postings.put(vectors.getVector(0), postings(0, 2, 0));
@@ -120,15 +120,15 @@ public class RemappedPostingsTest extends VectorTester
         postings.put(vectors.getVector(2), postings(2, 3));
 
         RemappedPostings remapped = RemappedPostings.remapForMemtable(postings, Version.DC);
-        assertEquals(Structure.ONE_TO_MANY, remapped.structure);
+        assertEquals(Structure.ZERO_OR_ONE_TO_MANY, remapped.structure);
 
         try (V5OnDiskOrdinalsMap map = roundtrip(remapped.writer(vectors, postings)))
         {
-            assertEquals(Structure.ONE_TO_MANY, map.structure);
+            assertEquals(Structure.ZERO_OR_ONE_TO_MANY, map.structure);
+            // ordinals are dense [0,2]; no holes
             assertArrayEquals(new int[]{ 0, 2 }, rowIds(map, 0));
             assertArrayEquals(new int[]{ 1 }, rowIds(map, 1));
-            assertArrayEquals(ArrayUtils.EMPTY_INT_ARRAY, rowIds(map, 2));
-            assertArrayEquals(new int[]{ 3 }, rowIds(map, 3));
+            assertArrayEquals(new int[]{ 3 }, rowIds(map, 2));
         }
     }
 
