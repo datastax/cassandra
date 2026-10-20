@@ -21,6 +21,7 @@ import java.io.DataInput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -738,7 +739,7 @@ public class MerkleTree
     private static ByteBuffer allocate(int innerNodeCount, IPartitioner partitioner)
     {
         int size = offHeapBufferSize(innerNodeCount, partitioner);
-        logger.debug("Allocating direct buffer of size {} for an off-heap merkle tree", size);
+        NoSpamLogger.log(logger, NoSpamLogger.Level.DEBUG, 1, TimeUnit.SECONDS, "Allocating direct buffer of size {} for an off-heap merkle tree", size);
         ByteBuffer buffer = ByteBuffer.allocateDirect(size);
         if (Ref.DEBUG_ENABLED)
             MemoryUtil.setAttachment(buffer, new Ref.DirectBufferRef<>(null, null));
