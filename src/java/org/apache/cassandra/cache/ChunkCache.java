@@ -86,8 +86,7 @@ public class ChunkCache
      * separate allocator; it is headroom in the <em>same</em> pool for in-flight cache loads while eviction frees
      * pages (callers may briefly WaitQueue-park after reclaim if the pool is still empty).
      * <p>
-     * Default 32MiB ≈ concurrent in-flight readers × typical chunk size. Override with
-     * {@link CassandraRelevantProperties#CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB}.
+     * Override with {@link CassandraRelevantProperties#CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB}.
      */
     public static final int RESERVED_POOL_SPACE_IN_MiB = CassandraRelevantProperties.CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB.getInt();;
     private static final int INITIAL_CAPACITY = CHUNKCACHE_INITIAL_CAPACITY.getInt();;
@@ -291,7 +290,7 @@ public class ChunkCache
         return new BufferPoolExhaustedException(
         String.format("Chunk cache buffer pool exhausted after reclaim and %d ms wait " +
                       "(pool used=%s, overflow=%s, cache capacity=%s). " +
-                      "Increase file_cache_size_in_mb or reduce concurrent reads; " +
+                      "Increase cassandra.chunk_cache_reserved_pool_space_in_mb or reduce concurrent reads; " +
                       "chunk cache does not allocate outside the pool.",
                       waitMs, prettyUsed(), prettyOverflow(), prettyCapacity()));
     }
