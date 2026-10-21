@@ -93,6 +93,8 @@ abstract class ContentMappingCursor<T, C extends Cursor<T>, V> implements Cursor
     static class Range<S extends RangeState<S>, V extends RangeState<V>> extends ContentMappingCursor<S, RangeCursor<S>, V> implements RangeCursor<V>
     {
         /// The mapped state at the current position, valid if `stateMapped` is true.
+        /// In a range trie we may get multiple calls to `precedingState` (during merges, including when taking tails),
+        /// thus we map the state once and cache the result.
         private V state;
         private boolean stateMapped;
 
@@ -116,7 +118,21 @@ abstract class ContentMappingCursor<T, C extends Cursor<T>, V> implements Cursor
         @Override
         public V content()
         {
-            return RangeCursor.super.content();
+            // We don't normally end up here with a range trie (state() will usually be called instead, often following
+            // one or more precedingState() calls in merges). If we do, try to avoid remapping non-boundary states.
+            if (!stateMapped)
+            {
+                S sourceContent = source.content();
+                if (sourceContent == null)
+                    return null; // Do not set stateMapped as we may still have an applicable covering state.
+
+                // If we have content, then state must match it. Apply the mapper and save what we get.
+                state = mapper.apply(sourceContent);
+                stateMapped = true;
+                // Note that the mapper can turn a boundary (i.e. content) into a covering (i.e. non-content) state,
+                // in which case we should return null.
+            }
+            return state != null && state.isBoundary() ? state : null;
         }
 
         @Override

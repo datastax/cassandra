@@ -52,8 +52,8 @@ public class TrieBackedRowTest
     @BeforeClass
     public static void setUpClass()
     {
-        DatabaseDescriptor.daemonInitialization();
         CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
+        DatabaseDescriptor.daemonInitialization();
     }
 
     private final TableMetadata metadata = TableMetadata.builder("", "")
@@ -286,10 +286,20 @@ public class TrieBackedRowTest
         assertEquals(message, expected.primaryKeyLivenessInfo(), updated.primaryKeyLivenessInfo());
         assertEquals(message, expected.deletion(), updated.deletion());
         assertEquals(message, columnContent(expected), columnContent(updated));
+
         for (ColumnMetadata column : List.of(sMetadata, mMetadata))
         {
             assertEquals(message, effectiveDeletion(expected, column), effectiveDeletion(updated, column));
             assertEquals(message, cells(expected.getComplexColumnData(column)), cells(updated.getComplexColumnData(column)));
+
+            // test the complex-column version of updateAllTimestamp
+            ComplexColumnData ccd = row.getComplexColumnData(column);
+            if (ccd == null)
+                continue;
+            ComplexColumnData ccdUpdated = ccd.updateAllTimestamp(newTimestamp);
+            String columnMessage = "Updating column " + ccd + " gave " + ccdUpdated;
+            assertEquals(columnMessage, effectiveDeletion(expected, column), effectiveDeletion(row, ccdUpdated));
+            assertEquals(columnMessage, cells(expected.getComplexColumnData(column)), cells(ccdUpdated));
         }
 
         int columnCount = 0;
@@ -358,8 +368,13 @@ public class TrieBackedRowTest
     /// Returns the deletion that applies to the given column of the row.
     private static DeletionTime effectiveDeletion(Row row, ColumnMetadata column)
     {
-        DeletionTime rowDeletion = row.deletion().time();
         ComplexColumnData ccd = row.getComplexColumnData(column);
+        return effectiveDeletion(row, ccd);
+    }
+
+    private static DeletionTime effectiveDeletion(Row row, ComplexColumnData ccd)
+    {
+        DeletionTime rowDeletion = row.deletion().time();
         return ccd != null && ccd.complexDeletion().supersedes(rowDeletion) ? ccd.complexDeletion() : rowDeletion;
     }
 

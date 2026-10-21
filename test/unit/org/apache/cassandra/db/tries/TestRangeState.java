@@ -226,9 +226,9 @@ class TestRangeState implements RangeState<TestRangeState>
             onReturnPath = true;
         }
 
-        /// Moving to a new position clears the `onReturnPath` flag. Note that this method will not be called when we
-        /// ascend to a parent position, which can only happen when we are ascending to a return path position, where
-        /// the flag will be set to true anyway.
+        /// Moving to a new position clears the `onReturnPath` flag. Note that this method call may be skipped when we
+        /// ascend to a return path position on the current path (in particular, this will not be called when going back
+        /// to the root return position), where the flag will be set to true anyway.
         @Override
         public void addPathByte(int nextByte)
         {

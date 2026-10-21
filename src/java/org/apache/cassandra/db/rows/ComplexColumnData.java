@@ -87,4 +87,6 @@ public abstract class ComplexColumnData extends ColumnData implements Iterable<C
     public abstract ComplexColumnData purge(DeletionPurger purger, long nowInSec);
 
     public abstract ComplexColumnData purgeDataOlderThan(long timestamp);
+
+    public abstract ComplexColumnData updateAllTimestamp(long newTimestamp);
 }
