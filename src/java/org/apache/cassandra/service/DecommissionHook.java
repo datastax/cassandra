@@ -48,12 +48,13 @@ package org.apache.cassandra.service;
  *       one, and this node applies it, because {@code reject_out_of_token_range_requests} defaults
  *       to false. "No mutations" means none are routed here, not that none can land. Set that
  *       option to true if a hook needs the stronger guarantee.</li>
- *   <li>Hints do not help a hook's writes. {@code unbootstrap()} has already dealt with the hints
- *       this node held: by default ({@code transfer_hints_on_decommission}) it streamed them to a
- *       peer, otherwise it disabled hinted handoff and deleted them. Either way that happened
- *       <i>before</i> the hooks, so a hint a hook's write creates now is never transferred, and is
- *       lost when the process stops. A hook's write should meet its consistency level against live
- *       replicas rather than rely on being completed later.</li>
+ *   <li>Hints help a hook's writes only on a best-effort basis. {@code unbootstrap()} has already
+ *       dealt with the hints this node held: by default ({@code transfer_hints_on_decommission}) it
+ *       streamed them to a peer, otherwise it disabled hinted handoff and deleted them. A hint a
+ *       hook's write creates now is handed to a peer by one more transfer, run once the client
+ *       servers are shut down; that transfer cannot fail the decommission any more, so a failure is
+ *       only logged and the hints stay on this node. A hook's write should meet its consistency
+ *       level against live replicas rather than rely on being completed later.</li>
  *   <li>The native transport is only guaranteed not to have been shut down <i>by the decommission</i>;
  *       it may still be off for unrelated reasons (never started, {@code nodetool disablebinary}).
  *       A hook coordinating in-process via {@code QueryProcessor} does not depend on it.</li>

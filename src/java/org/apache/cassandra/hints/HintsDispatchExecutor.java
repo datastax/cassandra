@@ -20,6 +20,7 @@ package org.apache.cassandra.hints;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -37,8 +38,10 @@ import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.Promise;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 
@@ -58,6 +61,20 @@ final class HintsDispatchExecutor
     private final AtomicBoolean isPaused;
     private final Predicate<UUID> isAlive;
     private final Map<UUID, Future> scheduledDispatches;
+
+    /*
+     * The running transfer, if any: a transfer handles every store itself, so no dispatch is scheduled while it
+     * runs, and a transfer starts only once the dispatches already scheduled have completed. The lock orders
+     * the scheduling of a dispatch against the start of a transfer.
+     */
+    private final Object transferLock = new Object();
+    private Promise<Void> transfer; // guarded by transferLock
+
+    /*
+     * Bounds the rounds of a transfer attempt. Hints may keep being written for as long as this node coordinates,
+     * and every round can find some; see TransferHintsTask.transfer for what happens when the rounds are used up.
+     */
+    static final int MAX_TRANSFER_ROUNDS = 10;
 
     HintsDispatchExecutor(File hintsDirectory, int maxThreads, AtomicBoolean isPaused, Predicate<UUID> isAlive)
     {
@@ -100,6 +117,13 @@ final class HintsDispatchExecutor
         return dispatch(store, store.hostId);
     }
 
+    /**
+     * Schedules the dispatch of the store's hints, unless one is scheduled already.
+     *
+     * @return the future of the dispatch of this store: the one scheduled now or before, or the running transfer,
+     *         which handles every store itself; nothing is scheduled while a transfer runs, since a dispatch it
+     *         did not run could put a file it failed to deliver back after the transfer had found the store empty
+     */
     Future dispatch(HintsStore store, UUID hostId)
     {
         /*
@@ -111,12 +135,99 @@ final class HintsDispatchExecutor
          *
          * It also simplifies reasoning about dispatch sessions.
          */
-        return scheduledDispatches.computeIfAbsent(hostId, uuid -> executor.submit(new DispatchHintsTask(store, hostId)));
+        synchronized (transferLock)
+        {
+            if (transfer != null && !transfer.isDone())
+                return transfer;
+            return scheduledDispatches.computeIfAbsent(hostId, uuid -> executor.submit(new DispatchHintsTask(store, hostId)));
+        }
     }
 
-    Future transfer(HintsCatalog catalog, Supplier<UUID> hostIdSupplier)
+    /**
+     * Transfers all the hints in the catalog to the host supplied by hostIdSupplier.
+     *
+     * Waits for the transfer already running, if any (a decommission retried while the transfer of the previous
+     * attempt still runs), then for the dispatches already scheduled; no dispatch is scheduled from then on
+     * until the transfer is done, see {@link #dispatch(HintsStore, UUID)}.
+     *
+     * @param closeWriters flushes the hints written so far and closes their writers, so that they are in files
+     *                     the next round can transfer
+     * @return a future that succeeds once every hint present when a round started has been delivered (see
+     *         {@link TransferHintsTask#transfer(UUID, InetAddressAndPort)}), at once if there is nothing to
+     *         transfer, and fails if a delivery failed on two targets in a row, or if no target could be supplied.
+     *         Cancelling it does nothing: the transfer runs until done.
+     * @throws RuntimeException if closing the writers fails, or the executor refuses the task (shut down)
+     */
+    Future transfer(HintsCatalog catalog, Supplier<UUID> hostIdSupplier, Runnable closeWriters)
     {
-        return executor.submit(new TransferHintsTask(catalog, hostIdSupplier));
+        Promise<Void> transfer = AsyncPromise.uncancellable();
+        for (Future previous = register(transfer); previous != null; previous = register(transfer))
+        {
+            logger.info("Waiting for the hints transfer already running before starting a new one");
+            awaitQuietly(previous);
+        }
+
+        try
+        {
+            // wait for the dispatches already scheduled, then make a file of every hint written so far
+            scheduledDispatches.values().forEach(this::awaitQuietly);
+            closeWriters.run();
+            if (!catalog.hasFiles())
+            {
+                logger.info("No hints to transfer");
+                transfer.setSuccess(null);
+                return transfer;
+            }
+            executor.submit(new TransferHintsTask(catalog, hostIdSupplier, closeWriters, transfer));
+        }
+        catch (Throwable t)
+        {
+            transfer.tryFailure(t);
+            throw t;
+        }
+        return transfer;
+    }
+
+    /**
+     * @return null if the transfer is now the running one, else the transfer still running, to wait for first
+     */
+    private Future register(Promise<Void> transfer)
+    {
+        synchronized (transferLock)
+        {
+            if (this.transfer != null && !this.transfer.isDone())
+                return this.transfer;
+            this.transfer = transfer;
+            return null;
+        }
+    }
+
+    boolean isTransferring()
+    {
+        synchronized (transferLock)
+        {
+            return transfer != null && !transfer.isDone();
+        }
+    }
+
+    /**
+     * Waits for the future, whatever its outcome: a failed dispatch has logged its failure already, and must
+     * not fail the transfer waiting for it to finish.
+     */
+    private void awaitQuietly(Future future)
+    {
+        try
+        {
+            future.get();
+        }
+        catch (InterruptedException e)
+        {
+            throw new UncheckedInterruptedException(e);
+        }
+        catch (ExecutionException | CancellationException e)
+        {
+            logger.debug("A hints dispatch the transfer waited for did not complete: {}", e.toString());
+        }
     }
 
     void completeDispatchBlockingly(HintsStore store)
@@ -148,6 +259,8 @@ final class HintsDispatchExecutor
     private final class TransferHintsTask implements Runnable
     {
         private final HintsCatalog catalog;
+        private final Runnable closeWriters;
+        private final Promise<Void> result;
 
         /*
          * Supplies target hosts to stream to. Generally returns the one the DynamicSnitch thinks is closest.
@@ -155,20 +268,38 @@ final class HintsDispatchExecutor
          */
         private final Supplier<UUID> hostIdSupplier;
 
-        private TransferHintsTask(HintsCatalog catalog, Supplier<UUID> hostIdSupplier)
+        private TransferHintsTask(HintsCatalog catalog, Supplier<UUID> hostIdSupplier, Runnable closeWriters, Promise<Void> result)
         {
             this.catalog = catalog;
             this.hostIdSupplier = hostIdSupplier;
+            this.closeWriters = closeWriters;
+            this.result = result;
         }
 
         @Override
         public void run()
         {
+            try
+            {
+                transfer();
+                result.setSuccess(null);
+            }
+            catch (Throwable t)
+            {
+                result.setFailure(t);
+            }
+        }
+
+        private void transfer()
+        {
             UUID hostId = hostIdSupplier.get();
             InetAddressAndPort address = HintsEndpointProvider.instance.endpointForHost(hostId);
             logger.info("Transferring all hints to {}: {}", address, hostId);
-            if (transfer(hostId))
+            if (transfer(hostId, address))
+            {
+                logger.info("Finished transferring hints to {}: {}", address, hostId);
                 return;
+            }
 
             logger.warn("Failed to transfer all hints to {}: {}; will retry in {} seconds", address, hostId, 10);
 
@@ -184,20 +315,47 @@ final class HintsDispatchExecutor
             hostId = hostIdSupplier.get();
             address = HintsEndpointProvider.instance.endpointForHost(hostId);
             logger.info("Transferring all hints to {}: {}", address, hostId);
-            if (!transfer(hostId))
+            if (!transfer(hostId, address))
             {
                 logger.error("Failed to transfer all hints to {}: {}", address, hostId);
                 throw new RuntimeException("Failed to transfer all hints to " + address + ": " + hostId);
             }
+            logger.info("Finished transferring hints to {}: {}", address, hostId);
         }
 
-        private boolean transfer(UUID hostId)
+        /*
+         * This node keeps coordinating writes, and so writing hints, while the transfer runs: into the buffer
+         * pool and the open writers, which a round never sees. Close the writers after each round and go round
+         * again, so that the next round picks up what was written during the previous one; a round that finds
+         * nothing ends the transfer.
+         *
+         * Hints may keep coming for as long as the node coordinates, so the rounds are bounded, and using them up
+         * is still a success: every hint present when a round started was delivered, and only a failed delivery
+         * fails the transfer. What was written since is left for a later transfer; decommission runs one more
+         * once its client servers are shut down and nothing coordinates writes any more.
+         */
+        private boolean transfer(UUID hostId, InetAddressAndPort address)
         {
-            catalog.stores()
-                   .map(store -> new DispatchHintsTask(store, hostId, true))
-                   .forEach(Runnable::run);
+            for (int round = 0; round < MAX_TRANSFER_ROUNDS; round++)
+            {
+                // dispatchAllForTransfer(), not run(): these tasks are not scheduled, and run() would remove the
+                // scheduled dispatch of the transfer target's own hints, were there one. allMatch stops at the
+                // first store that could not be delivered, as intended: the retry, with another target, starts
+                // over from every store.
+                boolean delivered = catalog.stores()
+                                           .map(store -> new DispatchHintsTask(store, hostId, true))
+                                           .allMatch(DispatchHintsTask::dispatchAllForTransfer);
+                if (!delivered)
+                    return false;
 
-            return !catalog.hasFiles();
+                closeWriters.run();
+                if (!catalog.hasFiles())
+                    return true;
+            }
+
+            logger.warn("Hints kept being written while transferring them to {}: {}; stopping after {} rounds, " +
+                        "the hints written since are left on this node for a later transfer", address, hostId, MAX_TRANSFER_ROUNDS);
+            return true;
         }
     }
 
@@ -206,12 +364,14 @@ final class HintsDispatchExecutor
         private final HintsStore store;
         private final UUID hostId;
         private final RateLimiter rateLimiter;
+        private final boolean isTransfer;
 
         DispatchHintsTask(HintsStore store, UUID hostId, boolean isTransfer)
         {
             this.store = store;
             this.hostId = hostId;
-            this.rateLimiter = HintsRateLimiterFactory.instance.create(hostId);
+            this.rateLimiter = HintsRateLimiterFactory.instance.create(hostId, isTransfer);
+            this.isTransfer = isTransfer;
         }
 
         DispatchHintsTask(HintsStore store, UUID hostId)
@@ -223,7 +383,7 @@ final class HintsDispatchExecutor
         {
             try
             {
-                dispatch();
+                dispatchAll();
             }
             finally
             {
@@ -231,21 +391,24 @@ final class HintsDispatchExecutor
             }
         }
 
-        private void dispatch()
+        /*
+         * @return true if every file of the store was dispatched, false if dispatch was paused or failed.
+         */
+        private boolean dispatchAll()
         {
             while (true)
             {
                 if (isPaused.get())
-                    break;
+                    return false;
 
                 HintsDescriptor descriptor = store.poll();
                 if (descriptor == null)
-                    break;
+                    return true;
 
                 try
                 {
                     if (!dispatch(descriptor))
-                        break;
+                        return false;
                 }
                 catch (FSReadError e)
                 {
@@ -258,6 +421,25 @@ final class HintsDispatchExecutor
         }
 
         /*
+         * dispatchAll() for a transfer: a corrupted file has been set aside by the time its FSReadError gets
+         * here, so carry on with the next one instead of failing the transfer.
+         */
+        private boolean dispatchAllForTransfer()
+        {
+            while (true)
+            {
+                try
+                {
+                    return dispatchAll();
+                }
+                catch (FSReadError e)
+                {
+                    // logged, cleaned up and marked corrupted by dispatchAll()
+                }
+            }
+        }
+
+        /*
          * Will return true if dispatch was successful, false if we hit a failure (destination node went down, for example).
          */
         private boolean dispatch(HintsDescriptor descriptor)
@@ -265,19 +447,43 @@ final class HintsDispatchExecutor
             logger.debug("Dispatching hints file {}", descriptor.fileName());
 
             InetAddressAndPort address = HintsEndpointProvider.instance.endpointForHost(hostId);
-            if (address != null)
-                return deliver(descriptor, address);
+            if (address == null)
+            {
+                if (isTransfer)
+                {
+                    // the transfer target left the cluster: a failure, so that the transfer retries with another one
+                    logger.warn("Hints transfer target {} is no longer a member of the cluster", hostId);
+                    store.offerFirst(descriptor);
+                    return false;
+                }
 
-            // address == null means the target no longer exist; find new home for each hint entry.
+                // the host the hints are for no longer exists; find a new home for each hint entry
+                dropOrConvert(descriptor);
+                return true;
+            }
+
+            // Hints for a host that left the cluster are not transferred: the target would keep them as orphan
+            // files, since it never dispatches to a host it cannot resolve. Give them a new home here instead,
+            // as their own dispatch would.
+            if (isTransfer && HintsEndpointProvider.instance.endpointForHost(descriptor.hostId) == null)
+            {
+                dropOrConvert(descriptor);
+                return true;
+            }
+
+            return deliver(descriptor, address);
+        }
+
+        private void dropOrConvert(HintsDescriptor descriptor)
+        {
             if (SKIP_REWRITING_HINTS_ON_HOST_LEFT.getBoolean())
             {
-                logger.debug("Host {} is no longer a member of cluster, dropping hints", hostId);
+                logger.debug("Host {} is no longer a member of cluster, dropping hints", descriptor.hostId);
                 store.cleanUp(descriptor);
                 store.delete(descriptor);
             }
             else
                 convert(descriptor);
-            return true;
         }
 
         private boolean deliver(HintsDescriptor descriptor, InetAddressAndPort address)
@@ -294,6 +500,7 @@ final class HintsDispatchExecutor
             if (optVersion.isEmpty())
             {
                 logger.debug("Cannot deliver handoff to endpoint {}: its version is unknown. This should be temporary.", address);
+                store.offerFirst(descriptor);
                 return false;
             }
 

@@ -51,7 +51,8 @@ final class HintsDispatchTrigger implements Runnable
 
     public void run()
     {
-        if (isPaused.get())
+        // a transfer handles every store itself, see HintsDispatchExecutor.transfer
+        if (isPaused.get() || dispatchExecutor.isTransferring())
             return;
 
         catalog.stores()
