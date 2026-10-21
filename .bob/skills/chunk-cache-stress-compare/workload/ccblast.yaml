@@ -1,0 +1,73 @@
+# Copyright IBM Corp.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+min_version: "5.21"
+description: |
+  Chunk cache blast-radius workload (NoSQLBench 5, cqld4 adapter), modelled on
+  cassandra-upgrade-tester/workloads/uct_keyvalue.yaml.
+  Keyspace ccblast (SimpleStrategy rf 1, single node), table data (pk bigint PRIMARY KEY, tag int, payload text).
+  The payload is ~payload_size bytes of alphanumeric text, so the data set is ~keycount * payload_size bytes
+  and is much larger than the chunk cache.
+  Blocks: schema, rampup (every key once), main-read (uniform random point reads).
+  Template params: keyspace (ccblast), keycount (2000000), payload_size (1000), op_timeout (10 s),
+  chunk_kb (16, compression chunk_length_in_kb).
+
+scenarios:
+  default:
+    schema: run driver=cqld4 tags==block:schema threads==1 alias=schema
+    rampup: run driver=cqld4 tags==block:rampup cycles=TEMPLATE(keycount,2000000) threads=auto alias=rampup
+    main-read: run driver=cqld4 tags==block:main-read cycles=TEMPLATE(main_cycles,1000000) threads=auto alias=main_read
+
+bindings:
+  seq_pk: Mod(TEMPLATE(keycount,2000000)L) -> long
+  seq_tag: Mod(TEMPLATE(keycount,2000000)L); Mod(1000L); ToInt() -> int
+  seq_payload: Hash(); AlphaNumericString(TEMPLATE(payload_size,1000)) -> String
+  r_pk: HashRange(0L,TEMPLATE(keycount,2000000)L) -> long
+
+blocks:
+  schema:
+    params:
+      timeout: 60
+    ops:
+      create_keyspace:
+        simple: |
+          CREATE KEYSPACE IF NOT EXISTS TEMPLATE(keyspace,ccblast)
+          WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+      create_table:
+        simple: |
+          CREATE TABLE IF NOT EXISTS TEMPLATE(keyspace,ccblast).data (
+            pk bigint PRIMARY KEY,
+            tag int,
+            payload text
+          ) WITH compression = {'class': 'LZ4Compressor', 'chunk_length_in_kb': 'TEMPLATE(chunk_kb,16)'};
+
+  rampup:
+    params:
+      cl: ONE
+      timeout: TEMPLATE(op_timeout,10)
+      idempotent: true
+    ops:
+      rampup_insert:
+        prepared: |
+          INSERT INTO TEMPLATE(keyspace,ccblast).data (pk, tag, payload) VALUES ({seq_pk}, {seq_tag}, {seq_payload});
+
+  main-read:
+    params:
+      cl: ONE
+      timeout: TEMPLATE(op_timeout,10)
+      idempotent: true
+    ops:
+      read_select:
+        prepared: |
+          SELECT pk, tag, payload FROM TEMPLATE(keyspace,ccblast).data WHERE pk = {r_pk};
