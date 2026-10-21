@@ -272,13 +272,12 @@ public abstract class SegmentBuilder
                                            long keyCount,
                                            VectorCompressor<?> compressor,
                                            boolean unitVectors,
-                                           boolean allRowsHaveVectors,
                                            NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
             try
             {
-                graphIndex = new CompactionGraph(components, compressor, unitVectors, keyCount, allRowsHaveVectors);
+                graphIndex = new CompactionGraph(components, compressor, unitVectors, keyCount);
             }
             catch (IOException e)
             {
