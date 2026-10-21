@@ -1,0 +1,183 @@
+# Copyright IBM Corp.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+#
+# Copied from the cassandra-upgrade-tester project (workloads/uct_sai.yaml).
+
+min_version: "5.21"
+description: |
+  cassandra-upgrade-tester Storage-Attached-Index workload (NoSQLBench 5, cqld4 adapter).
+  Table uct_perf.sai (pk int, ck int, name text, score int, PRIMARY KEY (pk, ck)) with SAI indexes on
+  name and score. rampup writes keycount rows: pk = cycle / 100 (keycount/100 partitions of 100 rows),
+  name from a 50-value set (number names), score uniform in 0..9999.
+  Blocks: schema, schema-truncate, rampup, main-eq (WHERE name = ? LIMIT 100), main-range
+  (WHERE score > lo AND score < lo+50 LIMIT 100), main-write (rows with pk beyond the rampup range,
+  pk = (cycle + keycount) / 100, keeps index segments churning), main-mixed (eq 40%, range 40%,
+  write 20%), main-read (eq 50%, range 50%; used by the read-under-compaction step).
+  Template params: keyspace (uct_perf), dc (dc1), rf (3), keycount (200000), op_timeout (10 seconds),
+  eq_ratio (2), range_ratio (2), write_ratio (1).
+  Use cycles=<start>..<end> on main-write to write distinct rows across phases.
+
+scenarios:
+  default:
+    schema: run driver=cqld4 tags==block:schema threads==1 alias=schema
+    rampup: run driver=cqld4 tags==block:rampup cycles=TEMPLATE(keycount,200000) threads=auto alias=rampup
+    main-eq: run driver=cqld4 tags==block:main-eq cycles=TEMPLATE(main_cycles,120000) threads=auto alias=main_eq
+    main-range: run driver=cqld4 tags==block:main-range cycles=TEMPLATE(main_cycles,120000) threads=auto alias=main_range
+    main-write: run driver=cqld4 tags==block:main-write cycles=TEMPLATE(main_cycles,120000) threads=auto alias=main_write
+    main-mixed: run driver=cqld4 tags==block:main-mixed cycles=TEMPLATE(main_cycles,120000) threads=auto alias=main_mixed
+    main-read: run driver=cqld4 tags==block:main-read cycles=TEMPLATE(main_cycles,120000) threads=auto alias=main_read
+  truncate:
+    truncate: run driver=cqld4 tags==block:schema-truncate threads==1 alias=truncate
+
+bindings:
+  # rampup rows: 100 rows per partition
+  seq_pk: Div(100L); ToInt() -> int
+  seq_ck: Mod(100L); ToInt() -> int
+  seq_name: Mod(50L); NumberNameToString() -> String
+  seq_score: Hash(); Mod(10000L); ToInt() -> int
+  # main-write rows: partitions after the rampup range
+  new_pk: Add(TEMPLATE(keycount,200000)L); Div(100L); ToInt() -> int
+  new_ck: Mod(100L); ToInt() -> int
+  new_name: Hash(); Mod(50L); NumberNameToString() -> String
+  new_score: Hash(); Mod(10000L); ToInt() -> int
+  # queries
+  q_name: Uniform(0,50); NumberNameToString() -> String
+  q_lo: Hash(); Mod(9950L); ToInt() -> int
+  q_hi: Hash(); Mod(9950L); Add(50L); ToInt() -> int
+
+blocks:
+  schema:
+    params:
+      timeout: 120
+    ops:
+      create_keyspace:
+        simple: |
+          CREATE KEYSPACE IF NOT EXISTS TEMPLATE(keyspace,uct_perf)
+          WITH replication = {'class': 'NetworkTopologyStrategy', 'TEMPLATE(dc,dc1)': 'TEMPLATE(rf,3)'}
+          AND durable_writes = true;
+      create_table:
+        simple: |
+          CREATE TABLE IF NOT EXISTS TEMPLATE(keyspace,uct_perf).sai (
+            pk int,
+            ck int,
+            name text,
+            score int,
+            PRIMARY KEY (pk, ck)
+          );
+      create_index_name:
+        simple: |
+          CREATE CUSTOM INDEX IF NOT EXISTS sai_name_idx ON TEMPLATE(keyspace,uct_perf).sai (name)
+          USING 'StorageAttachedIndex';
+      create_index_score:
+        simple: |
+          CREATE CUSTOM INDEX IF NOT EXISTS sai_score_idx ON TEMPLATE(keyspace,uct_perf).sai (score)
+          USING 'StorageAttachedIndex';
+
+  schema-truncate:
+    params:
+      timeout: 600
+    ops:
+      truncate_sai:
+        simple: TRUNCATE TABLE TEMPLATE(keyspace,uct_perf).sai;
+
+  rampup:
+    params:
+      cl: LOCAL_QUORUM
+      timeout: TEMPLATE(op_timeout,10)
+      idempotent: true
+    ops:
+      rampup_insert:
+        prepared: |
+          INSERT INTO TEMPLATE(keyspace,uct_perf).sai (pk, ck, name, score)
+          VALUES ({seq_pk}, {seq_ck}, {seq_name}, {seq_score});
+
+  main-eq:
+    params:
+      cl: LOCAL_QUORUM
+      timeout: TEMPLATE(op_timeout,10)
+      idempotent: true
+    ops:
+      eq_select:
+        prepared: |
+          SELECT pk, ck, name, score FROM TEMPLATE(keyspace,uct_perf).sai WHERE name = {q_name} LIMIT 100;
+
+  main-range:
+    params:
+      cl: LOCAL_QUORUM
+      timeout: TEMPLATE(op_timeout,10)
+      idempotent: true
+    ops:
+      range_select:
+        prepared: |
+          SELECT pk, ck, name, score FROM TEMPLATE(keyspace,uct_perf).sai
+          WHERE score > {q_lo} AND score < {q_hi} LIMIT 100;
+
+  main-write:
+    params:
+      cl: LOCAL_QUORUM
+      timeout: TEMPLATE(op_timeout,10)
+      idempotent: true
+    ops:
+      write_insert:
+        prepared: |
+          INSERT INTO TEMPLATE(keyspace,uct_perf).sai (pk, ck, name, score)
+          VALUES ({new_pk}, {new_ck}, {new_name}, {new_score});
+
+  main-mixed:
+    params:
+      cl: LOCAL_QUORUM
+      timeout: TEMPLATE(op_timeout,10)
+      idempotent: true
+    ops:
+      mixed_eq:
+        ratio: TEMPLATE(eq_ratio,2)
+        tags:
+          optype: read
+        prepared: |
+          SELECT pk, ck, name, score FROM TEMPLATE(keyspace,uct_perf).sai WHERE name = {q_name} LIMIT 100;
+      mixed_range:
+        ratio: TEMPLATE(range_ratio,2)
+        tags:
+          optype: read
+        prepared: |
+          SELECT pk, ck, name, score FROM TEMPLATE(keyspace,uct_perf).sai
+          WHERE score > {q_lo} AND score < {q_hi} LIMIT 100;
+      mixed_write:
+        ratio: TEMPLATE(write_ratio,1)
+        tags:
+          optype: write
+        prepared: |
+          INSERT INTO TEMPLATE(keyspace,uct_perf).sai (pk, ck, name, score)
+          VALUES ({new_pk}, {new_ck}, {new_name}, {new_score});
+
+  main-read:
+    params:
+      cl: LOCAL_QUORUM
+      timeout: TEMPLATE(op_timeout,10)
+      idempotent: true
+    ops:
+      read_eq:
+        ratio: 1
+        tags:
+          optype: read
+        prepared: |
+          SELECT pk, ck, name, score FROM TEMPLATE(keyspace,uct_perf).sai WHERE name = {q_name} LIMIT 100;
+      read_range:
+        ratio: 1
+        tags:
+          optype: read
+        prepared: |
+          SELECT pk, ck, name, score FROM TEMPLATE(keyspace,uct_perf).sai
+          WHERE score > {q_lo} AND score < {q_hi} LIMIT 100;

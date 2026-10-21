@@ -1,0 +1,122 @@
+# Copyright IBM Corp.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+#
+# Copied from the cassandra-upgrade-tester project (workloads/uct_lwt.yaml).
+
+min_version: "5.21"
+description: |
+  cassandra-upgrade-tester lightweight-transaction (Paxos) workload (NoSQLBench 5, cqld4 adapter).
+  Table uct_perf.lwt (id bigint PRIMARY KEY, v int). rampup inserts every id once with
+  INSERT ... IF NOT EXISTS (v = 0). main mixes, by ratio:
+    cas_applied  (lwt_ok_ratio, 6)     UPDATE ... SET v = 0 WHERE id = ? IF v = 0   -> applied
+    cas_rejected (lwt_reject_ratio, 2) UPDATE ... SET v = 1 WHERE id = ? IF v = 1   -> [applied]=false on purpose
+    serial_select (lwt_read_ratio, 2)  SELECT ... WHERE id = ? at LOCAL_SERIAL
+  so by default 20% of the CAS conditions fail and 20% of the ops are serial reads. v never leaves 0
+  (the applied update writes 0 again), so the rejected share is exact and independent of concurrency.
+  Writes use cl LOCAL_QUORUM + scl LOCAL_SERIAL.
+  IMPORTANT: the cqld4 adapter raises ChangeUnappliedCycleException for every [applied]=false row.
+  Run every op of this file with
+    errors='ChangeUnappliedCycleException:counter;.*:counter,warn'
+  (scripts/nb5-run.sh does it) so that rejected conditions are counted in the metric
+  errors_ChangeUnappliedCycleException instead of stopping the run; they are normal result rows, the
+  comparison subtracts them from the error count and uses the 'result' timer (all ops) for latency.
+  Template params: keyspace (uct_perf), dc (dc1), rf (3), keycount (200000), lwt_ok_ratio (6),
+  lwt_reject_ratio (2), lwt_read_ratio (2), op_timeout (10 seconds).
+
+scenarios:
+  default:
+    schema: run driver=cqld4 tags==block:schema threads==1 alias=schema
+    rampup: run driver=cqld4 tags==block:rampup cycles=TEMPLATE(keycount,200000) threads=auto alias=rampup errors='ChangeUnappliedCycleException:counter;.*:counter,warn'
+    main: run driver=cqld4 tags==block:main cycles=TEMPLATE(main_cycles,120000) threads=auto alias=main errors='ChangeUnappliedCycleException:counter;.*:counter,warn'
+    main-read: run driver=cqld4 tags==block:main-read cycles=TEMPLATE(main_cycles,120000) threads=auto alias=main_read errors='ChangeUnappliedCycleException:counter;.*:counter,warn'
+  truncate:
+    truncate: run driver=cqld4 tags==block:schema-truncate threads==1 alias=truncate
+
+bindings:
+  seq_id: Mod(TEMPLATE(keycount,200000)L) -> long
+  rand_id: Uniform(0,TEMPLATE(keycount,200000)) -> long
+  v_zero: FixedValue(0); ToInt() -> int
+  v_one: FixedValue(1); ToInt() -> int
+
+blocks:
+  schema:
+    params:
+      timeout: 60
+    ops:
+      create_keyspace:
+        simple: |
+          CREATE KEYSPACE IF NOT EXISTS TEMPLATE(keyspace,uct_perf)
+          WITH replication = {'class': 'NetworkTopologyStrategy', 'TEMPLATE(dc,dc1)': 'TEMPLATE(rf,3)'}
+          AND durable_writes = true;
+      create_table:
+        simple: |
+          CREATE TABLE IF NOT EXISTS TEMPLATE(keyspace,uct_perf).lwt (
+            id bigint PRIMARY KEY,
+            v int
+          );
+
+  schema-truncate:
+    params:
+      timeout: 600
+    ops:
+      truncate_lwt:
+        simple: TRUNCATE TABLE TEMPLATE(keyspace,uct_perf).lwt;
+
+  rampup:
+    params:
+      cl: LOCAL_QUORUM
+      scl: LOCAL_SERIAL
+      timeout: TEMPLATE(op_timeout,10)
+    ops:
+      rampup_insert_if_not_exists:
+        prepared: |
+          INSERT INTO TEMPLATE(keyspace,uct_perf).lwt (id, v) VALUES ({seq_id}, {v_zero}) IF NOT EXISTS;
+
+  main:
+    params:
+      cl: LOCAL_QUORUM
+      scl: LOCAL_SERIAL
+      timeout: TEMPLATE(op_timeout,10)
+    ops:
+      cas_applied:
+        ratio: TEMPLATE(lwt_ok_ratio,6)
+        tags:
+          optype: cas
+        prepared: |
+          UPDATE TEMPLATE(keyspace,uct_perf).lwt SET v = {v_zero} WHERE id = {rand_id} IF v = {v_zero};
+      cas_rejected:
+        ratio: TEMPLATE(lwt_reject_ratio,2)
+        tags:
+          optype: cas
+        prepared: |
+          UPDATE TEMPLATE(keyspace,uct_perf).lwt SET v = {v_one} WHERE id = {rand_id} IF v = {v_one};
+      serial_select:
+        ratio: TEMPLATE(lwt_read_ratio,2)
+        cl: LOCAL_SERIAL
+        idempotent: true
+        tags:
+          optype: read
+        prepared: |
+          SELECT id, v FROM TEMPLATE(keyspace,uct_perf).lwt WHERE id = {rand_id};
+
+  main-read:
+    params:
+      cl: LOCAL_SERIAL
+      timeout: TEMPLATE(op_timeout,10)
+      idempotent: true
+    ops:
+      serial_select_only:
+        prepared: |
+          SELECT id, v FROM TEMPLATE(keyspace,uct_perf).lwt WHERE id = {rand_id};
