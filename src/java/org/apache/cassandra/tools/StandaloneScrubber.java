@@ -360,7 +360,7 @@ public class StandaloneScrubber
             options.addOption("o", OVERWRITE_TTL_OPTION, true, "Overwrite TTL info. Possible argument values:\n" +
                                                                  "- NONE: does nothing\n" +
                                                                  "- NO_TTL: removes TTL\n" +
-                                                                 "- REINSERT_OVERFLOWED_TTL: same as reinsert_overflowed_ttl option ");
+                                                                 "- REINSERT_OVERFLOWED_TTL: same as --reinsert-overflowed-ttl option");
             return options;
         }
 

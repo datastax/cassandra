@@ -50,8 +50,9 @@ public interface IScrubber extends Closeable
      *   <li>{@link #NONE} — default behaviour; TTL values are left as-is.</li>
      *   <li>{@link #REINSERT_OVERFLOWED_TTL} — fixes cells whose local deletion time overflowed a 32-bit
      *       integer (see CASSANDRA-14092).</li>
-     *   <li>{@link #NO_TTL} — strips all TTL information from every cell, useful when TTL data is
-     *       corrupt or must be removed entirely.</li>
+     *   <li>{@link #NO_TTL} — strips all TTL information from every cell (including expired cells), turning them
+     *       into permanent non-expiring data with their original timestamps. Note: all replicas should be flushed
+     *       and scrubbed to prevent un-scrubbed expiring copies from overwriting the permanent cells.</li>
      * </ul>
      */
     enum OverwriteTTLMode
@@ -118,7 +119,6 @@ public interface IScrubber extends Closeable
         public static class Builder
         {
             private boolean checkData = false;
-            private boolean reinsertOverflowedTTLRows = false;
             private boolean skipCorrupted = false;
             private boolean overrideTxnIsOffline = false;
             private OverwriteTTLMode overwriteTTLMode = OverwriteTTLMode.NONE;
@@ -137,13 +137,21 @@ public interface IScrubber extends Closeable
 
             public Builder reinsertOverflowedTTLRows()
             {
-                this.reinsertOverflowedTTLRows = true;
-                return this;
+                return reinsertOverflowedTTLRows(true);
             }
 
             public Builder reinsertOverflowedTTLRows(boolean reinsertOverflowedTTLRows)
             {
-                this.reinsertOverflowedTTLRows = reinsertOverflowedTTLRows;
+                if (reinsertOverflowedTTLRows)
+                {
+                    if (overwriteTTLMode != OverwriteTTLMode.NONE && overwriteTTLMode != OverwriteTTLMode.REINSERT_OVERFLOWED_TTL)
+                        throw new IllegalArgumentException(String.format("Cannot specify both reinsertOverflowedTTLRows and overwriteTTLMode %s", overwriteTTLMode));
+                    this.overwriteTTLMode = OverwriteTTLMode.REINSERT_OVERFLOWED_TTL;
+                }
+                else if (this.overwriteTTLMode == OverwriteTTLMode.REINSERT_OVERFLOWED_TTL)
+                {
+                    this.overwriteTTLMode = OverwriteTTLMode.NONE;
+                }
                 return this;
             }
 
@@ -173,17 +181,16 @@ public interface IScrubber extends Closeable
 
             public Builder overwriteTTLMode(OverwriteTTLMode overwriteTTLMode)
             {
-                this.overwriteTTLMode = overwriteTTLMode;
+                if (overwriteTTLMode != null && this.overwriteTTLMode != OverwriteTTLMode.NONE && this.overwriteTTLMode != overwriteTTLMode)
+                    throw new IllegalArgumentException(String.format("Cannot specify both reinsertOverflowedTTLRows and overwriteTTLMode %s", overwriteTTLMode));
+                this.overwriteTTLMode = overwriteTTLMode != null ? overwriteTTLMode : OverwriteTTLMode.NONE;
                 return this;
             }
 
             public Options build()
             {
-                // reinsertOverflowedTTLRows takes precedence when overwriteTTLMode is NONE (for backward compat)
-                OverwriteTTLMode effectiveMode = (overwriteTTLMode == OverwriteTTLMode.NONE && reinsertOverflowedTTLRows)
-                                                 ? OverwriteTTLMode.REINSERT_OVERFLOWED_TTL
-                                                 : overwriteTTLMode;
-                return new Options(checkData, reinsertOverflowedTTLRows, skipCorrupted, overrideTxnIsOffline, effectiveMode);
+                boolean reinsert = overwriteTTLMode == OverwriteTTLMode.REINSERT_OVERFLOWED_TTL;
+                return new Options(checkData, reinsert, skipCorrupted, overrideTxnIsOffline, overwriteTTLMode);
             }
         }
     }

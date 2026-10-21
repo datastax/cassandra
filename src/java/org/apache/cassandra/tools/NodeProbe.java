@@ -373,7 +373,11 @@ public class NodeProbe implements AutoCloseable
 
     public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, IScrubber.OverwriteTTLMode overwriteTTLMode, int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
     {
-        return ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode, jobs, keyspaceName, tables);
+        // Route through boolean method unless NO_TTL is requested to preserve compatibility with older nodes during rolling upgrades
+        if (overwriteTTLMode == IScrubber.OverwriteTTLMode.NO_TTL)
+            return ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode.name(), jobs, keyspaceName, tables);
+        else
+            return ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode == IScrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL, jobs, keyspaceName, tables);
     }
 
     public int verify(boolean extendedVerify, boolean validateAllRows, boolean checkVersion, boolean diskFailurePolicy, boolean mutateRepairStatus, boolean checkOwnsTokens, boolean quick, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException

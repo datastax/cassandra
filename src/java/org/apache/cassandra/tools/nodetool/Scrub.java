@@ -60,7 +60,7 @@ public class Scrub extends NodeToolCmd
             description = "Overwrite TTL info. Possible argument values:\n" +
                           "- NONE: does nothing\n" +
                           "- NO_TTL: removes TTL\n" +
-                          "- REINSERT_OVERFLOWED_TTL: same as reinsert_overflowed_ttl option ")
+                          "- REINSERT_OVERFLOWED_TTL: same as --reinsert-overflowed-ttl option")
     private IScrubber.OverwriteTTLMode overwriteTTLMode = IScrubber.OverwriteTTLMode.NONE;
 
     @Option(title = "jobs",
@@ -75,7 +75,7 @@ public class Scrub extends NodeToolCmd
         String[] tableNames = parseOptionalTables(args);
 
         if (reinsertOverflowedTTL && overwriteTTLMode != IScrubber.OverwriteTTLMode.NONE)
-            throw new IllegalArgumentException("Only one of 'reinsertOverflowedTTL' or 'overwrite-ttl' is permitted.");
+            throw new IllegalArgumentException("Only one of '--reinsert-overflowed-ttl' or '--overwrite-ttl' is permitted.");
 
         for (String keyspace : keyspaces)
         {

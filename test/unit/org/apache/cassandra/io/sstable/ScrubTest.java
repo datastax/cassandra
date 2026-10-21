@@ -102,11 +102,11 @@ import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.big.BigFormat.Components;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.io.sstable.format.SortedTableScrubber;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.sstable.format.SortedTableScrubber;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
@@ -128,6 +128,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_INVAL
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_UTIL_ALLOW_TOOL_REINIT_FOR_TEST;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -1114,21 +1115,21 @@ public class ScrubTest
 
         // Case 1: Row with NO TTL, empty primary key liveness (no liveness info, no columns)
         Row rowEmpty = BTreeRow.emptyRow(Clustering.EMPTY);
-        org.junit.Assert.assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowEmpty));
+        assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowEmpty));
 
         // Case 2: Row with non-expiring liveness info, no other columns
         Row.Builder builder = BTreeRow.sortedBuilder();
         builder.newRow(Clustering.EMPTY);
         builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, nowInSec));
         Row rowNonExpiringLiveness = builder.build();
-        org.junit.Assert.assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowNonExpiringLiveness));
+        assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowNonExpiringLiveness));
 
         // Case 3: Row with expiring liveness info, no other columns
         builder = BTreeRow.sortedBuilder();
         builder.newRow(Clustering.EMPTY);
         builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, ttl, nowInSec));
         Row rowExpiringLiveness = builder.build();
-        org.junit.Assert.assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowExpiringLiveness));
+        assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowExpiringLiveness));
 
         // Case 4: Row with non-expiring liveness and simple column cell that is non-expiring
         builder = BTreeRow.sortedBuilder();
@@ -1136,7 +1137,7 @@ public class ScrubTest
         builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, nowInSec));
         builder.addCell(BufferCell.live(valCol, timestamp, ByteBufferUtil.bytes("val")));
         Row rowWithLiveSimpleCell = builder.build();
-        org.junit.Assert.assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithLiveSimpleCell));
+        assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithLiveSimpleCell));
 
         // Case 5: Row with non-expiring liveness and simple column cell that is expiring
         builder = BTreeRow.sortedBuilder();
@@ -1144,7 +1145,7 @@ public class ScrubTest
         builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, nowInSec));
         builder.addCell(BufferCell.expiring(valCol, timestamp, ttl, nowInSec, ByteBufferUtil.bytes("val")));
         Row rowWithExpiringSimpleCell = builder.build();
-        org.junit.Assert.assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithExpiringSimpleCell));
+        assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithExpiringSimpleCell));
 
         // Case 6: Row with non-expiring liveness and complex column (map) with non-expiring cell
         builder = BTreeRow.sortedBuilder();
@@ -1152,7 +1153,7 @@ public class ScrubTest
         builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, nowInSec));
         builder.addCell(BufferCell.live(mapCol, timestamp, ByteBufferUtil.bytes("val"), CellPath.create(ByteBufferUtil.bytes("key"))));
         Row rowWithLiveComplexCell = builder.build();
-        org.junit.Assert.assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithLiveComplexCell));
+        assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithLiveComplexCell));
 
         // Case 7: Row with non-expiring liveness and complex column (map) with expiring cell
         builder = BTreeRow.sortedBuilder();
@@ -1160,7 +1161,7 @@ public class ScrubTest
         builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(timestamp, nowInSec));
         builder.addCell(BufferCell.expiring(mapCol, timestamp, ttl, nowInSec, ByteBufferUtil.bytes("val"), CellPath.create(ByteBufferUtil.bytes("key"))));
         Row rowWithExpiringComplexCell = builder.build();
-        org.junit.Assert.assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithExpiringComplexCell));
+        assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithExpiringComplexCell));
 
         // Case 8: Complex column with multiple cells, one live and one expiring
         builder = BTreeRow.sortedBuilder();
@@ -1169,6 +1170,6 @@ public class ScrubTest
         builder.addCell(BufferCell.live(mapCol, timestamp, ByteBufferUtil.bytes("val1"), CellPath.create(ByteBufferUtil.bytes("key1"))));
         builder.addCell(BufferCell.expiring(mapCol, timestamp, ttl, nowInSec, ByteBufferUtil.bytes("val2"), CellPath.create(ByteBufferUtil.bytes("key2"))));
         Row rowWithMixedComplexCells = builder.build();
-        org.junit.Assert.assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithMixedComplexCells));
+        assertTrue(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(rowWithMixedComplexCells));
     }
 }

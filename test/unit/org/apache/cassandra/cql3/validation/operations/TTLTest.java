@@ -36,11 +36,11 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ExpirationDateOverflowHandling;
 import org.apache.cassandra.db.ExpirationDateOverflowHandling.ExpirationDateOverflowPolicy;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.rows.AbstractCell;
 import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.io.sstable.IScrubber;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
@@ -49,7 +49,6 @@ import org.apache.cassandra.tools.StandaloneScrubber;
 import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 import org.apache.cassandra.utils.Clock;
-import org.assertj.core.api.Assertions;
 import org.assertj.core.data.Offset;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_UTIL_ALLOW_TOOL_REINIT_FOR_TEST;
@@ -522,7 +521,7 @@ public class TTLTest extends CQLTester
         createTable("CREATE TABLE %s (k int, c int, v int, s int static, PRIMARY KEY(k, c))");
         execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 10)");
         execute("INSERT INTO %s (k, s) VALUES (0, 7) USING TTL 3600");
-        Assertions.assertThat(execute("SELECT ttl(s) FROM %s").one().getInt("ttl(s)"))
+        assertThat(execute("SELECT ttl(s) FROM %s").one().getInt("ttl(s)"))
             .isGreaterThan(3000)
             .isLessThanOrEqualTo(3600);
 
@@ -530,7 +529,6 @@ public class TTLTest extends CQLTester
         compact();
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NO_TTL, true, 1);
-        ColumnFamilyStore.loadNewSSTables(keyspace(), currentTable());
 
         assertRows(execute("SELECT s, ttl(s) FROM %s"), row(7, null));
     }
@@ -549,7 +547,6 @@ public class TTLTest extends CQLTester
         flush();
 
         cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
-        ColumnFamilyStore.loadNewSSTables(keyspace(), currentTable());
 
         assertEquals("Non-TTL rows should be unchanged after stripTTL scrub", 3, execute("SELECT k, v FROM %s").size());
     }
@@ -568,7 +565,6 @@ public class TTLTest extends CQLTester
         flush();
 
         cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NONE, false, true, 1);
-        ColumnFamilyStore.loadNewSSTables(keyspace(), currentTable());
 
         for (UntypedResultSet.Row row : execute("SELECT k, v, ttl(v) FROM %s"))
             assertTrue("TTL should still be present when scrub is run with NONE mode", row.getInt("ttl(v)") > 0);
@@ -599,17 +595,17 @@ public class TTLTest extends CQLTester
             if (clustering)
             {
                 execute("UPDATE %s USING TTL 7200 SET b = 1 WHERE k = 1 AND a = 1;");
-                Assertions.assertThat(execute("SELECT ttl(b) FROM %s WHERE k = 1").one().getInt("ttl(b)"))
+                assertThat(execute("SELECT ttl(b) FROM %s WHERE k = 1").one().getInt("ttl(b)"))
                           .isGreaterThan(7000)
                           .isLessThanOrEqualTo(7200);
             }
             else
             {
-                Assertions.assertThat(execute("SELECT ttl(a) FROM %s WHERE k = 2").one().getInt("ttl(a)"))
+                assertThat(execute("SELECT ttl(a) FROM %s WHERE k = 2").one().getInt("ttl(a)"))
                           .isGreaterThan(3000)
                           .isLessThanOrEqualTo(3600);
                 execute("UPDATE %s USING TTL 7200 SET a = 1, b = 1 WHERE k = 1;");
-                Assertions.assertThat(execute("SELECT ttl(a) FROM %s WHERE k = 1").one().getInt("ttl(a)"))
+                assertThat(execute("SELECT ttl(a) FROM %s WHERE k = 1").one().getInt("ttl(a)"))
                           .isGreaterThan(7000)
                           .isLessThanOrEqualTo(7200);
             }
@@ -623,25 +619,24 @@ public class TTLTest extends CQLTester
             }
             else
             {
-                Assertions.assertThat(execute("SELECT ttl(a) FROM %s WHERE k = 2").one().getInt("ttl(a)"))
+                assertThat(execute("SELECT ttl(a) FROM %s WHERE k = 2").one().getInt("ttl(a)"))
                           .isGreaterThan(3000)
                           .isLessThanOrEqualTo(3600);
                 execute("UPDATE %s USING TTL 7200 SET a = 1, b = ? WHERE k = 1;", set("v11", "v12", "v13", "v14"));
-                Assertions.assertThat(execute("SELECT ttl(a) FROM %s WHERE k = 1").one().getInt("ttl(a)"))
+                assertThat(execute("SELECT ttl(a) FROM %s WHERE k = 1").one().getInt("ttl(a)"))
                           .isGreaterThan(7000)
                           .isLessThanOrEqualTo(7200);
             }
             execute("SELECT ttl(b) FROM %s WHERE k = 1").one().getList("ttl(b)", Int32Type.instance).forEach(ttl ->
-                Assertions.assertThat(ttl).isGreaterThan(7000).isLessThanOrEqualTo(7200)
+                assertThat(ttl).isGreaterThan(7000).isLessThanOrEqualTo(7200)
             );
-            Assertions.assertThat(execute("SELECT ttl(b['v11']) FROM %s WHERE k = 1").one().getInt("ttl(b['v11'])"))
+            assertThat(execute("SELECT ttl(b['v11']) FROM %s WHERE k = 1").one().getInt("ttl(b['v11'])"))
                       .isGreaterThan(7000)
                       .isLessThanOrEqualTo(7200);
         }
 
         flush();
         cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
-        ColumnFamilyStore.loadNewSSTables(keyspace(), currentTable());
 
         if (simple)
         {
@@ -665,4 +660,30 @@ public class TTLTest extends CQLTester
             assertEquals(list(null, null, null, null), execute("SELECT ttl(b) FROM %s WHERE k = 2").one().getList("ttl(b)", Int32Type.instance));
         }
     }
+
+    /**
+     * Verifies that NO_TTL scrub strips TTL and resurrects rows whose TTL has already expired.
+     */
+    @Test
+    public void testScrubResurrectsExpiredCells() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text) WITH gc_grace_seconds = 0");
+        execute("INSERT INTO %s (k, v) VALUES (0, 'expired_val') USING TTL 1");
+        execute("INSERT INTO %s (k, v) VALUES (1, 'permanent_val')");
+        flush();
+
+        // Wait for row 0 to expire
+        Thread.sleep(2000);
+
+        // Before scrub: row 0 is expired and cannot be queried
+        assertRows(execute("SELECT k, v FROM %s"), row(1, "permanent_val"));
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
+
+        // After NO_TTL scrub: row 0 has been resurrected as permanent without TTL
+        assertRows(execute("SELECT k, v, ttl(v) FROM %s WHERE k = 0"), row(0, "expired_val", null));
+        assertRows(execute("SELECT k, v, ttl(v) FROM %s WHERE k = 1"), row(1, "permanent_val", null));
+    }
+
 }
