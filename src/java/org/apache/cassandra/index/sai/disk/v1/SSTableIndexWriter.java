@@ -46,8 +46,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
-import org.apache.cassandra.index.sai.disk.v5.V5VectorIndexSearcher;
-import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger;
@@ -475,8 +473,7 @@ public class SSTableIndexWriter implements PerIndexWriter
 
                 if (pqi != null && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
                 {
-                    var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
-                    builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors, allRowsHaveVectors, limiter);
+                    builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors, limiter);
                     logBuildDecision("OFF_HEAP_REBUILD", rebuildReason,
                                      "MODERATE (vectors off-heap; graph built with all-core jvector pools)", inputSSTableCount, scan);
                 }
@@ -621,23 +618,6 @@ public class SSTableIndexWriter implements PerIndexWriter
             this.firstMissingInlineSource = firstMissingInlineSource;
             this.uncoveredInputSSTables = uncoveredInputSSTables;
         }
-    }
-
-    private static boolean allRowsHaveVectorsInWrittenSegments(IndexContext indexContext)
-    {
-        for (SSTableIndex index : indexContext.getView().getIndexes())
-        {
-            for (Segment segment : index.getSegments())
-            {
-                if (segment.getIndexSearcher() instanceof  V2VectorIndexSearcher)
-                    return true; // V2 doesn't know, so we err on the side of being optimistic.  See comments in CompactionGraph
-                var searcher = (V5VectorIndexSearcher) segment.getIndexSearcher();
-                var structure = searcher.getPostingsStructure();
-                if (structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
-                    return false;
-            }
-        }
-        return true;
     }
 
     private CassandraOnHeapGraph.PqInfo maybeReadPqFromLastSegment() throws IOException

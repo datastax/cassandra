@@ -144,8 +144,9 @@ public class CompactionGraph implements Closeable, Accountable
     private int lastRowId = -1;
     private int rowsAdded = 0;
     private int maxOrdinal = -1; // Inclusive
-    // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
-    private final boolean useSyntheticOrdinals;
+    // Ordinals are always dense (assigned from `nextOrdinal`), because jvector does not handle sparse ordinals:
+    // they make the graph's id upper bound differ from its size. When every row has a distinct vector,
+    // ordinal == rowId and the structure is ONE_TO_ONE.
     private int nextOrdinal = 0;
 
     // protects the fine-tuning changes (done in maybeAddVector) from addGraphNode threads
@@ -183,7 +184,7 @@ public class CompactionGraph implements Closeable, Accountable
 
     private final VectorFloat<?> globalMean;
 
-    public CompactionGraph(IndexComponents.ForWrite perIndexComponents, VectorCompressor<?> compressor, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
+    public CompactionGraph(IndexComponents.ForWrite perIndexComponents, VectorCompressor<?> compressor, boolean unitVectors, long keyCount) throws IOException
     {
         this.perIndexComponents = perIndexComponents;
         this.context = perIndexComponents.context();
@@ -209,13 +210,6 @@ public class CompactionGraph implements Closeable, Accountable
         similarityFunction = indexConfig.getSimilarityFunction();
         postingsStructure = Structure.ONE_TO_ONE; // until proven otherwise
         this.compressor = compressor;
-        // `allRowsHaveVectors` only tells us about data for which we have already built indexes; if we
-        // are adding previously unindexed data then we could still encounter rows with null vectors,
-        // so this is just a best guess.  If the guess is wrong then the penalty is that we end up
-        // with "holes" in the ordinal sequence (and pq and data files) which we would prefer to avoid
-        // (hence the effort to predict `allRowsHaveVectors`) but will not cause correctness issues,
-        // and the next compaction will fill in the holes.
-        this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings(context.version()) || !allRowsHaveVectors;
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
         postingsFile = perIndexComponents.tmpFileFor("postings_chonicle_map");
@@ -348,7 +342,7 @@ public class CompactionGraph implements Closeable, Accountable
             {
                 // add a new entry
                 // this all runs on the same compaction thread, so we don't need to worry about concurrency
-                int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
+                int ordinal = nextOrdinal++;
                 assert ordinal > maxOrdinal : "Unexpected ordinal " + ordinal + " previous max " + maxOrdinal;
                 maxOrdinal = ordinal;
                 CompactionVectorPostings postings = new CompactionVectorPostings(ordinal, segmentRowId);
@@ -499,8 +493,8 @@ public class CompactionGraph implements Closeable, Accountable
 
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
-        assert !useSyntheticOrdinals || nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
-                                                                                                 nextOrdinal, builder.getGraph().size());
+        assert nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
+                                                                        nextOrdinal, builder.getGraph().size());
         assert compressedVectors.count() == builder.getGraph().getIdUpperBound() : String.format("Largest vector id %d != largest graph id %d",
                                                                                                  compressedVectors.count(), builder.getGraph().getIdUpperBound());
         assert postingsMap.keySet().size() == builder.getGraph().size() : String.format("postings map entry count %d != vector count %d",
