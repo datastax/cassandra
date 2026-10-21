@@ -87,8 +87,15 @@ abstract class ContentMappingCursor<T, C extends Cursor<T>, V> implements Cursor
         }
     }
 
+    /// Range version of the mapping cursor. The mapping can convert a boundary into a covering state, e.g. when it
+    /// makes the states on the two sides of the boundary equal. Such a position no longer has content, thus this
+    /// cursor maps only the state of the source and derives its content and preceding state from it.
     static class Range<S extends RangeState<S>, V extends RangeState<V>> extends ContentMappingCursor<S, RangeCursor<S>, V> implements RangeCursor<V>
     {
+        /// The mapped state at the current position, valid if `stateMapped` is true.
+        private V state;
+        private boolean stateMapped;
+
         Range(Function<S, V> mapper, RangeCursor<S> source)
         {
             super(mapper, source);
@@ -97,19 +104,40 @@ abstract class ContentMappingCursor<T, C extends Cursor<T>, V> implements Cursor
         @Override
         public V state()
         {
-            S state = source.state();
-            if (state == null)
-                return null;
-            return mapper.apply(state);
+            if (!stateMapped)
+            {
+                S sourceState = source.state();
+                state = sourceState != null ? mapper.apply(sourceState) : null;
+                stateMapped = true;
+            }
+            return state;
         }
 
         @Override
-        public V precedingState()
+        public V content()
         {
-            S state = source.precedingState();
-            if (state == null)
-                return null;
-            return mapper.apply(state);
+            return RangeCursor.super.content();
+        }
+
+        @Override
+        public long advance()
+        {
+            stateMapped = false;
+            return super.advance();
+        }
+
+        @Override
+        public long advanceMultiple(TransitionsReceiver receiver)
+        {
+            stateMapped = false;
+            return super.advanceMultiple(receiver);
+        }
+
+        @Override
+        public long skipTo(long encodedSkipPosition)
+        {
+            stateMapped = false;
+            return super.skipTo(encodedSkipPosition);
         }
 
         @Override
