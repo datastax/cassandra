@@ -649,7 +649,7 @@ public class UnfilteredSerializer
         {
             // A pool-exhaustion failure is a resource problem, not data corruption: re-throw it as-is so it is
             // not misclassified as a CorruptSSTableException further up the call stack.
-            Throwables.propagateIfPossible(e, BufferPoolExhaustedException.class);
+            Throwables.throwIfInstanceOf(e, BufferPoolExhaustedException.class);
             // Corrupted data could be such that it triggers an assertion in the row Builder, or break one of its assumption.
             // Of course, a bug in said builder could also trigger this, but it's impossible a priori to always make the distinction
             // between a real bug and data corrupted in just the bad way. Besides, re-throwing as an IOException doesn't hide the
