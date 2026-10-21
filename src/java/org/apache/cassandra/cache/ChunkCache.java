@@ -86,9 +86,13 @@ public class ChunkCache
      * separate allocator; it is headroom in the <em>same</em> pool for in-flight cache loads while eviction frees
      * pages (callers may briefly WaitQueue-park after reclaim if the pool is still empty).
      * <p>
-     * Override with {@link CassandraRelevantProperties#CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB}.
+     * Override with {@link CassandraRelevantProperties#CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB}. When that property is
+     * negative (the default, {@code -1}) the value is derived from the number of threads that read through the cache,
+     * see {@link #calculateReservedPoolSpace(int, int, int)}. It is computed once, when this class is initialized.
      */
-    public static final int RESERVED_POOL_SPACE_IN_MiB = CassandraRelevantProperties.CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB.getInt();;
+    public static final int RESERVED_POOL_SPACE_IN_MB = reservedPoolSpaceInMiB();
+    /** Fixed part of the automatically calculated reserved pool space. Does not apply to an explicit override. */
+    static final int FIXED_RESERVED_POOL_SPACE_IN_MB = 32;
     private static final int INITIAL_CAPACITY = CHUNKCACHE_INITIAL_CAPACITY.getInt();;
     private static final boolean ASYNC_CLEANUP =CHUNKCACHE_ASYNC_CLEANUP.getBoolean();
     private static final int CLEANER_THREADS = CHUNKCACHE_CLEANER_THREADS.getInt();
@@ -113,7 +117,7 @@ public class ChunkCache
         {
             logger.info("-Dcassandra.chunkcache.async_cleanup={} dse.chunk.cache.cleaner.threads={} " +
                         "reserved_pool_space_in_mb={} pool_wait_timeout_ms={}",
-                        ASYNC_CLEANUP, CLEANER_THREADS, RESERVED_POOL_SPACE_IN_MiB, CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS);
+                        ASYNC_CLEANUP, CLEANER_THREADS, RESERVED_POOL_SPACE_IN_MB, CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS);
             PERFORM_CLEANUP_TASK_CLASS = Class.forName("com.github.benmanes.caffeine.cache.BoundedLocalCache$PerformCleanupTask");
         }
         catch (ClassNotFoundException e)
@@ -165,10 +169,10 @@ public class ChunkCache
 
     public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
     {
-        cacheSize = 1024L * 1024L * Math.max(0, cacheSizeInMB - RESERVED_POOL_SPACE_IN_MiB);
-        if (cacheSizeInMB < RESERVED_POOL_SPACE_IN_MiB)
+        cacheSize = 1024L * 1024L * Math.max(0, cacheSizeInMB - RESERVED_POOL_SPACE_IN_MB);
+        if (cacheSizeInMB < RESERVED_POOL_SPACE_IN_MB)
             logger.warn("File cache size {} MiB is less than the reserved pool space {} MiB. " +
-                        "No chunks will be cached.", cacheSizeInMB, RESERVED_POOL_SPACE_IN_MiB);
+                        "No chunks will be cached.", cacheSizeInMB, RESERVED_POOL_SPACE_IN_MB);
         cleanupExecutor = ParkedExecutor.createParkedExecutor("ChunkCacheCleanup", CLEANER_THREADS);
         enabled = cacheSize > 0;
         bufferPool = pool;
@@ -195,6 +199,56 @@ public class ChunkCache
             cleanupExecutor.execute(r);
         else
             r.run();
+    }
+
+    private static int reservedPoolSpaceInMiB()
+    {
+        int configured = CassandraRelevantProperties.CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB.getInt();
+        if (configured >= 0)
+            return configured;
+
+        return calculateReservedPoolSpace(DatabaseDescriptor.getConcurrentReaders(),
+                                          DatabaseDescriptor.getConcurrentCompactors(),
+                                          DatabaseDescriptor.getConcurrentIndexBuilders());
+    }
+
+    /**
+     * Calculates the MiB of the chunk cache pool that are withheld from the cache as headroom for in-flight loads,
+     * using the thread factor from {@link CassandraRelevantProperties#CHUNK_CACHE_RESERVED_POOL_SPACE_THREAD_FACTOR}.
+     *
+     * @see #calculateReservedPoolSpace(int, int, int, double)
+     */
+    @VisibleForTesting
+    static int calculateReservedPoolSpace(int concurrentReads, int concurrentCompactors, int concurrentIndexBuilders)
+    {
+        return calculateReservedPoolSpace(concurrentReads,
+                                          concurrentCompactors,
+                                          concurrentIndexBuilders,
+                                          CassandraRelevantProperties.CHUNK_CACHE_RESERVED_POOL_SPACE_THREAD_FACTOR.getDouble());
+    }
+
+    /**
+     * Calculates the MiB of the chunk cache pool that are withheld from the cache as headroom for in-flight loads:
+     * <pre>
+     *   reserved = FIXED_RESERVED_POOL_SPACE_IN_MB + ceil(threadFactor * threads)
+     *   threads  = concurrent_reads + concurrent_compactors + concurrent_index_builders
+     * </pre>
+     * <ul>
+     *   <li>{@code threads} are the threads that can hold chunks of the pool at the same time: read stage threads,
+     *       compactions and SAI index builds all read through the chunk cache.</li>
+     *   <li>{@code threadFactor} is the MiB reserved per thread. It depends on the storage latency: the slower the
+     *       storage, the longer each thread holds a pool page while its load is in flight. Negative values are
+     *       treated as 0.</li>
+     * </ul>
+     *
+     * @return the reserved pool space in MiB, never less than {@link #FIXED_RESERVED_POOL_SPACE_IN_MB}
+     */
+    @VisibleForTesting
+    static int calculateReservedPoolSpace(int concurrentReads, int concurrentCompactors, int concurrentIndexBuilders, double threadFactor)
+    {
+        double threads = Math.max(0, (double) concurrentReads + concurrentCompactors + concurrentIndexBuilders);
+        double perThreadMib = Math.max(0, threadFactor) * threads;
+        return (int) Math.min(Integer.MAX_VALUE, FIXED_RESERVED_POOL_SPACE_IN_MB + Math.ceil(perThreadMib));
     }
 
     /**
