@@ -1046,7 +1046,7 @@ abstract public class Plan
     @VisibleForTesting
     public static class NumericIndexScan extends IndexScan
     {
-        public NumericIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access, Orderer ordering)
+        private NumericIndexScan(Factory factory, int id, Expression predicate, long matchingKeysCount, Access access, Orderer ordering)
         {
             super(factory, id, predicate, matchingKeysCount, access, ordering);
         }
@@ -1623,7 +1623,7 @@ abstract public class Plan
     @VisibleForTesting
     public static final class Bm25IndexScan extends ScoredIndexScan
     {
-        protected Bm25IndexScan(Factory factory, int id, Access access, Orderer ordering)
+        private Bm25IndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
             super(factory, id, access, ordering);
         }
