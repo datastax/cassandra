@@ -23,7 +23,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.junit.After;
 import org.junit.AfterClass;
-import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -60,12 +59,6 @@ public class RebuildWithImmutableComponentsPerKeyspaceTest extends SAITester
         {
             return KEYSPACES.contains(keyspace);
         }
-
-        @Override
-        public boolean useImmutableComponentsForTenant(String tenant)
-        {
-            throw new UnsupportedOperationException();
-        }
     }
 
     @BeforeClass
@@ -80,12 +73,6 @@ public class RebuildWithImmutableComponentsPerKeyspaceTest extends SAITester
     public static void tearDownConfigProvider()
     {
         CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS_CONFIG_PROVIDER_CLASS.clearValue();
-    }
-
-    @Before
-    public void setup() throws Throwable
-    {
-        requireNetwork();
     }
 
     @After
