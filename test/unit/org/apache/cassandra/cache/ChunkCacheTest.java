@@ -1102,7 +1102,7 @@ public class ChunkCacheTest
     public void testLastChunkLimit(int chunkSize) throws IOException
     {
         // Cache large enough that RESERVED_POOL_SPACE_IN_MB still leaves room for a few pages of weight.
-        final int cacheSizeMb = 64;
+        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MiB + 32;
         BufferPool pool = new BufferPool("last_chunk_limit_test", 8 * 1024 * 1024, true);
         ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
 
