@@ -63,6 +63,25 @@ import org.openjdk.jmh.infra.Blackhole;
  *
  * <p>Each benchmark performs {@value #LOOKUPS_PER_INVOCATION} random probes per invocation.
  *
+ * <p><b>Which path does {@code ZERO_OR_ONE_TO_MANY} take?</b> On open, {@link V5OnDiskOrdinalsMap} scans the
+ * row-to-ordinal table and counts "discontinuities": rows that are not the primary (first) row of a new ordinal,
+ * i.e. rows with no vector ({@code -1}) plus extra rows of an already-seen ordinal. If
+ * {@code discontinuities / (maxRowId + 1) <= GLOBAL_HOLES_ALLOWED} (default {@code 0.01}, i.e. ~1%), the in-memory
+ * fast path ({@code DeltaOrdinalsView} / {@code DeltaRowIdsView}) is used; otherwise the generic on-disk views
+ * are used. A {@code DEBUG} line from {@code V5OnDiskOrdinalsMap} reports which path was chosen.
+ * Since this benchmark gives every non-primary row either an extra ordinal row or no vector, the number of
+ * discontinuities is {@code numRows - numVectorOrdinals}, i.e. {@code ordinalHoleRatio * numRows}, regardless of
+ * {@code emptyRowRatio} (which only changes how those rows are split between {@code -1} and extra rows):
+ * <ul>
+ *   <li>{@code ordinalHoleRatio=0.0} – 0% discontinuities: <b>fast path</b> (any {@code emptyRowRatio}).</li>
+ *   <li>{@code ordinalHoleRatio=0.01} – exactly ~1%, right at the limit (the check is {@code >}, so it is still
+ *       accepted): <b>fast path</b>, but any lower {@code cassandra.sai.vector.ordinal_hole_density_limit}
+ *       switches it to the generic path.</li>
+ *   <li>{@code ordinalHoleRatio=0.99} – ~99% discontinuities: <b>generic disk path</b> (any
+ *       {@code emptyRowRatio}).</li>
+ * </ul>
+ * {@code ONE_TO_MANY} never uses the delta views.
+ *
  * <p>Example invocations:
  * <pre>
  *   # ZERO_OR_ONE_TO_MANY (on-disk seeks)
@@ -99,7 +118,7 @@ public class V5OrdinalsMapLookupBench
     public String structure;
 
     /** Total number of rows in the segment; also the size of the ordinal slot space. */
-    @Param({ "100000", "1000000" })
+    @Param({ "1000000" })
     public int numRows;
 
     /**
@@ -114,7 +133,7 @@ public class V5OrdinalsMapLookupBench
      *   <li>{@code 0.9}  – 90 % of ordinals are empty; ≈ 10 rows/ordinal on average.</li>
      * </ul>
      */
-    @Param({ "0.0", "0.01", "0.99" })
+    @Param({ "0.0", "0.0099", "0.99" })
     public double ordinalHoleRatio;
 
     /**
@@ -125,7 +144,7 @@ public class V5OrdinalsMapLookupBench
      *   <li>{@code 0.1}   – 10 % of rows have no vector (heavy-delete scenario).</li>
      * </ul>
      */
-    @Param({ "0.0", "0.01", "0.99" })
+    @Param({ "0.0", "0.0099", "0.99" })
     public double emptyRowRatio;
 
     // ---- trial-level state ----
