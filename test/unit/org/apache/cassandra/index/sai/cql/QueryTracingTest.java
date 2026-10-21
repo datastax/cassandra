@@ -154,43 +154,31 @@ public class QueryTracingTest extends SAITester
 
     private void assertTraceHasMetrics(String query, String... expected)
     {
-        TracingTestImpl tracing = (TracingTestImpl) Tracing.instance;
-        tracing.getTraces().clear();
-
-        execute(query);
-
-        for (String trace : tracing.getTraces())
-        {
-            if (!trace.startsWith("SAI query metrics:"))
-                continue;
-
-            for (String s : expected)
-            {
-                Assertions.assertThat(trace).as("Trace should contain {} but found: {}", expected, trace).contains(s);
-            }
-            return;
-        }
-        Assert.fail("Query metrics not found in traces");
+        assertTraceHas(query, "Index query accessed", expected);
     }
 
     private void assertTraceHasPlan(String query, String... expected)
     {
-        TracingTestImpl tracing = (TracingTestImpl) Tracing.instance;
+        assertTraceHas(query, "Query execution plan", expected);
+    }
+
+    private void assertTraceHas(String query, String expectedStart, String... expectedContents)
+    {
         tracing.getTraces().clear();
 
         execute(query);
 
         for (String trace : tracing.getTraces())
         {
-            if (!trace.startsWith("Query execution plan"))
+            if (!trace.startsWith(expectedStart))
                 continue;
 
-            for (String s : expected)
+            for (String s : expectedContents)
             {
-                Assertions.assertThat(trace).as("Trace should contain {} but found: {}", expected, trace).contains(s);
+                Assertions.assertThat(trace).as("Trace should contain %s but found: %s", s, trace).contains(s);
             }
             return;
         }
-        Assert.fail("Query plan not found in traces");
+        Assert.fail(expectedStart + " not found in traces");
     }
 }
