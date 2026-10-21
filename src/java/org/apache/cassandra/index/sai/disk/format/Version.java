@@ -239,7 +239,7 @@ public class Version implements Comparable<Version>
     public boolean useImmutableComponentFiles(String keyspace)
     {
         Preconditions.checkNotNull(keyspace, "Keyspace name must not be null");
-        return ImmutableSAIComponentsConfigProvider.INSTANCE.useImmutableComponentsForKeyspace(keyspace) && supportsImmutableComponentFiles();
+        return supportsImmutableComponentFiles() && ImmutableSAIComponentsConfigProvider.INSTANCE.useImmutableComponentsForKeyspace(keyspace);
     }
 
     public boolean supportsImmutableComponentFiles()

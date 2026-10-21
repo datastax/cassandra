@@ -44,19 +44,11 @@ public interface ImmutableSAIComponentsConfigProvider
      */
     boolean useImmutableComponentsForKeyspace(String keyspace);
 
-    boolean useImmutableComponentsForTenant(String tenant);
-
     class Default implements ImmutableSAIComponentsConfigProvider
     {
 
         @Override
         public boolean useImmutableComponentsForKeyspace(String keyspace)
-        {
-            return CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS.getBoolean();
-        }
-
-        @Override
-        public boolean useImmutableComponentsForTenant(String tenant)
         {
             return CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS.getBoolean();
         }
