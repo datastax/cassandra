@@ -19,6 +19,7 @@ package org.apache.cassandra.hints;
 
 import java.net.UnknownHostException;
 import java.util.Collections;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -27,6 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
@@ -211,6 +213,34 @@ public class HintsServiceTest
         // wait until hints have been send
         spy.interceptMessageOut(100).get();
         spy.interceptNoMsg(500, TimeUnit.MILLISECONDS).get();
+    }
+
+    @Test
+    public void testTransferHintsForDownHost() throws Exception
+    {
+        // only the transfer target is alive, the host the hints were written for is down
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID downHost = UUID.randomUUID();
+        restartWithLiveHosts(target);
+
+        MockMessagingSpy spy = MockMessagingService.when(verb(HINT_REQ))
+                                                   .respond(Message.internalResponse(HINT_RSP, NoPayload.noPayload));
+        HintsStore store = writeAndFlushHints(downHost, 100);
+        assertTrue(store.hasFiles());
+
+        // the transfer must not be aborted because the host the hints are for is down (HCD-473)
+        HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
+
+        spy.interceptMessageOut(100).get(30, TimeUnit.SECONDS);
+        assertFalse(store.hasFiles());
+    }
+
+    private void restartWithLiveHosts(UUID... liveHosts) throws Exception
+    {
+        Set<UUID> live = ImmutableSet.copyOf(liveHosts);
+        HintsService.instance.shutdownBlocking();
+        HintsService.instance = new HintsService(live::contains);
+        HintsService.instance.startDispatch();
     }
 
     @Test
