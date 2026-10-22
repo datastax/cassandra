@@ -53,7 +53,7 @@ public class TeeDataInputPlus implements DataInputPlus
     }
 
     /**
-     * Checks if writing {@code length} bytes to the tee buffer will remain within the configured {@code limit}.
+     * Checks if writing {@code length} bytes to the tee buffer will remain below the configured {@code limit}.
      * Returns true if writing is permitted, or false if the byte limit would be exceeded.
      * Sets {@code limitReached} to true upon the first boundary breach to fast-path subsequent reads.
      */
@@ -63,7 +63,7 @@ public class TeeDataInputPlus implements DataInputPlus
             return true;
         if (limitReached)
             return false;
-        if ((teeBuffer.position() + length) <= limit)
+        if ((teeBuffer.position() + length) < limit)
             return true;
         limitReached = true;
         return false;

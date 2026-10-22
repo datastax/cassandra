@@ -159,6 +159,10 @@ public class OnDiskCursor<T> implements Cursor<T>
 
     /// The position in the trie of the next byte the reader handed to a [DataDeserializer] reads, for a deserializer
     /// that checks how much of its payload it has read.
+    ///
+    /// Valid only for the stream this cursor hands a [DataDeserializer], which it casts to the cursor's shared
+    /// stream; it exists so that a deserializer can check it consumed exactly the payload length it was given. Any
+    /// other stream throws a `ClassCastException`.
     public static long position(DataInputPlus rdr)
     {
         return ((OnDiskCursor<?>.SharedStream) rdr).position();

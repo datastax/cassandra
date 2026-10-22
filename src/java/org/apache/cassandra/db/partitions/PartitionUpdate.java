@@ -486,6 +486,13 @@ public interface PartitionUpdate extends Partition
             this.tableMetadataResolver = tableMetadataResolver;
         }
 
+        /// Whether a partition update serialized at this version carries the format byte [#serialize] describes.
+        /// [MessagingService#VERSION_DSE_68] is numerically above the DS versions but has no format byte.
+        static boolean hasFormatByte(int version)
+        {
+            return version >= MessagingService.VERSION_DS_21 && version != MessagingService.VERSION_DSE_68;
+        }
+
         /// From [MessagingService#VERSION_DS_21] on, a format byte after the table id says which encoding follows:
         /// 1 for the trie encoding, which a [TriePartitionUpdate] is always written in, and 0 for the BTree encoding,
         /// which every other update is written in. The encoding is a property of the update's class, not of its
@@ -498,12 +505,12 @@ public interface PartitionUpdate extends Partition
                                         "Can't serialize to version " + version);
             update.metadata().id.serialize(out);
 
-            if (version >= MessagingService.VERSION_DS_21)
+            if (hasFormatByte(version))
             {
                 if (update instanceof TriePartitionUpdate)
                 {
                     out.writeByte(1);
-                    TriePartitionUpdateSerializer.serialize(update, out, version);
+                    TriePartitionUpdateSerializer.serialize((TriePartitionUpdate) update, out, version);
                     return;
                 }
                 out.writeByte(0);
@@ -511,6 +518,8 @@ public interface PartitionUpdate extends Partition
 
             try (UnfilteredRowIterator iter = update.unfilteredIterator())
             {
+                assert !iter.isReverseOrder();
+
                 UnfilteredRowIteratorSerializer.serializer.serialize(iter, null, out, version, update.rowCount());
             }
         }
@@ -518,8 +527,7 @@ public interface PartitionUpdate extends Partition
         public PartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
         {
             TableMetadata metadata = tableMetadataResolver.apply(TableId.deserialize(in));
-            // VERSION_DSE_68 is numerically above the DS versions but has no format byte.
-            if (version >= MessagingService.VERSION_DS_21 && version != MessagingService.VERSION_DSE_68)
+            if (hasFormatByte(version))
             {
                 int format = in.readByte();
                 if (format == 1)
@@ -554,8 +562,7 @@ public interface PartitionUpdate extends Partition
                 throw new EOFException();
 
             int format = 0;
-            // VERSION_DSE_68 is numerically above the DS versions but has no format byte.
-            if (version >= MessagingService.VERSION_DS_21 && version != MessagingService.VERSION_DSE_68)
+            if (hasFormatByte(version))
             {
                 format = in.get(position++);
                 if (format != 0 && format != 1)
@@ -589,11 +596,10 @@ public interface PartitionUpdate extends Partition
         {
             long size = update.metadata().id.serializedSize();
 
-            // VERSION_DSE_68 is numerically above the DS versions but has no format byte.
-            if (version >= MessagingService.VERSION_DS_21 && version != MessagingService.VERSION_DSE_68)
+            if (hasFormatByte(version))
             {
                 if (update instanceof TriePartitionUpdate)
-                    return size + 1L + TriePartitionUpdateSerializer.serializedSize(update, version);
+                    return size + 1L + TriePartitionUpdateSerializer.serializedSize((TriePartitionUpdate) update, version);
 
                 size += 1L; // format byte (0 = BTree)
             }
