@@ -358,6 +358,17 @@ public enum CassandraRelevantProperties
      * custom native library for os access
      */
     CUSTOM_NATIVE_LIBRARY("cassandra.custom_native_library"),
+    /**
+     * Comma-separated list of {@link org.apache.cassandra.tools.NodeToolExtension} implementations that add their
+     * own commands to nodetool. Read by the nodetool JVM.
+     */
+    CUSTOM_NODETOOL_EXTENSION_CLASSES("cassandra.custom_nodetool_extension_classes"),
+    /**
+     * Comma-separated list of {@link org.apache.cassandra.service.NodeToolServerExtension} implementations that the
+     * node sets up at startup: the server-side half of the nodetool extensions, typically registering the MBeans
+     * their commands talk to. Read by the server JVM.
+     */
+    CUSTOM_NODETOOL_SERVER_EXTENSION_CLASSES("cassandra.custom_nodetool_server_extension_classes"),
     CUSTOM_QUERY_HANDLER_CLASS("cassandra.custom_query_handler_class"),
     CUSTOM_READ_OBSERVER_FACTORY("cassandra.custom_read_observer_factory_class"),
     CUSTOM_REPLAY_FILTER_CLASS("cassandra.custom_replay_filter_class"),

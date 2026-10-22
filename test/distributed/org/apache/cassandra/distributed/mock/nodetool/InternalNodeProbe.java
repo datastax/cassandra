@@ -22,6 +22,8 @@ import java.lang.management.ManagementFactory;
 import java.util.Iterator;
 import java.util.Map;
 
+import javax.management.MBeanServerConnection;
+
 import com.google.common.collect.Multimap;
 
 import org.apache.cassandra.batchlog.BatchlogManager;
@@ -47,6 +49,7 @@ import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.StreamManager;
 import org.apache.cassandra.tools.NodeProbe;
+import org.apache.cassandra.utils.MBeanWrapper;
 
 public class InternalNodeProbe extends NodeProbe
 {
@@ -89,6 +92,17 @@ public class InternalNodeProbe extends NodeProbe
     public void close()
     {
         StorageService.instance.skipNotificationListeners = previousSkipNotificationListeners;
+    }
+
+    /**
+     * The MBean server of the instance, if it has one ({@code Feature.JMX}), for the commands that need the raw
+     * connection: the ones of a {@link org.apache.cassandra.tools.NodeToolExtension}, and the built-in {@code sjk}.
+     * The other built-in commands keep going through the proxies set by {@link #connect()}.
+     */
+    @Override
+    public MBeanServerConnection getMbeanServerConn()
+    {
+        return MBeanWrapper.instance.getMBeanServer();
     }
 
     @Override

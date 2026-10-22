@@ -126,6 +126,7 @@ import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.DefaultFSErrorHandler;
+import org.apache.cassandra.service.NodeToolServerExtensions;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
@@ -713,6 +714,9 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                     propagateMessagingVersions(cluster); // fake messaging needs to know messaging version for filters
 
                 internodeMessagingStarted = true;
+
+                // see org.apache.cassandra.service.CassandraDaemon.setup: before the node joins the ring
+                NodeToolServerExtensions.setupAll(NodeToolServerExtensions.load());
 
                 // TODO: this is more than just gossip
                 StorageService.instance.registerDaemon(CassandraDaemon.getInstanceForTesting());

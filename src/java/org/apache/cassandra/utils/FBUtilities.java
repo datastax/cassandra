@@ -41,6 +41,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -48,6 +49,7 @@ import java.util.NavigableSet;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Scanner;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -64,6 +66,7 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Splitter;
 import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableList;
 import com.vdurmont.semver4j.Semver;
@@ -728,9 +731,30 @@ public class FBUtilities
      */
     public static <T> Class<T> classForName(String classname, String readable) throws ConfigurationException
     {
+        return classForName(classname, true, readable);
+    }
+
+    /**
+     * Loads the given class and checks it is a {@code type}, without initializing it (so that a class listed by
+     * mistake does not run its static initializers).
+     * @param classname Fully qualified classname.
+     * @param type The type the class must implement or extend.
+     * @param readable Descriptive noun for the role the class plays.
+     * @throws ConfigurationException If the class cannot be found or is not a {@code type}.
+     */
+    public static <T> Class<? extends T> classForName(String classname, Class<T> type, String readable) throws ConfigurationException
+    {
+        Class<?> cls = classForName(classname, false, readable);
+        if (!type.isAssignableFrom(cls))
+            throw new ConfigurationException(String.format("%s class '%s' is not a %s", readable, classname, type.getName()));
+        return cls.asSubclass(type);
+    }
+
+    private static <T> Class<T> classForName(String classname, boolean initialize, String readable) throws ConfigurationException
+    {
         try
         {
-            return (Class<T>)Class.forName(classname);
+            return (Class<T>)Class.forName(classname, initialize, FBUtilities.class.getClassLoader());
         }
         catch (ClassNotFoundException | NoClassDefFoundError e)
         {
@@ -771,6 +795,52 @@ public class FBUtilities
         return construct(cls, classname, readable);
     }
 
+    /**
+     * Constructs an instance of the given class, which must have a no-arg or default constructor and be a {@code type}.
+     * @param classname Fully qualified classname.
+     * @param type The type the class must implement or extend.
+     * @param readable Descriptive noun for the role the class plays.
+     * @throws ConfigurationException If the class cannot be found or instantiated, or is not a {@code type}.
+     */
+    public static <T> T construct(String classname, Class<T> type, String readable) throws ConfigurationException
+    {
+        return construct(classForName(classname, type, readable), classname, readable);
+    }
+
+    /**
+     * Constructs an instance of each class of a comma-separated list of fully qualified class names, in the order
+     * they are listed (see {@link #splitCommaSeparated(String)}). Each class must have a no-arg or default constructor
+     * and be a {@code type}; a class listed twice is rejected.
+     *
+     * @param classnames comma-separated fully qualified class names, or null
+     * @param type the type every listed class must implement or extend
+     * @param readable descriptive noun for the role the classes play
+     * @throws ConfigurationException if a class cannot be found or instantiated, is not a {@code type}, or is listed twice
+     */
+    public static <T> List<T> constructAll(@Nullable String classnames, Class<T> type, String readable) throws ConfigurationException
+    {
+        ImmutableList.Builder<T> instances = ImmutableList.builder();
+        Set<String> seen = new HashSet<>();
+        for (String classname : splitCommaSeparated(classnames))
+        {
+            if (!seen.add(classname))
+                throw new ConfigurationException(String.format("%s class '%s' is listed twice", readable, classname));
+            instances.add(construct(classname, type, readable));
+        }
+        return instances.build();
+    }
+
+    /**
+     * @return the entries of a comma-separated list, trimmed and in order, without the blank ones; empty for a null
+     * or blank list
+     */
+    public static List<String> splitCommaSeparated(@Nullable String list)
+    {
+        if (list == null)
+            return Collections.emptyList();
+        return ImmutableList.copyOf(Splitter.on(',').trimResults().omitEmptyStrings().split(list));
+    }
+
     private static <T> T construct(Class<T> cls, String classname, String readable) throws ConfigurationException
     {
         try
@@ -784,6 +854,11 @@ public class FBUtilities
         catch (InstantiationException e)
         {
             throw new ConfigurationException(String.format("Cannot use abstract class '%s' as %s.", classname, readable));
+        }
+        catch (LinkageError e)
+        {
+            // e.g. a static initializer that fails, or a dependency missing from the classpath
+            throw new ConfigurationException(String.format("Error initializing %s class '%s'.", readable, classname), e);
         }
         catch (Exception e)
         {
