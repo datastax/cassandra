@@ -19,22 +19,30 @@
 package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
+import java.util.TreeSet;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.db.tries.TrieUtil.RANGE_SERDE;
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /// Covers the state machine of [OnDiskCursor.Range] over nodes with more children than a sparse node
 /// can hold.
@@ -256,6 +264,101 @@ public class OnDiskRangeTrieTest
             TrieUtil.assertTriesEqual(expected, actual);
         }
     }
+
+    /// Corrupt bytes, as a damaged commit-log record or message payload would present them, must be reported as
+    /// corruption, as [OnDiskTrieTest#testCorruptTriesFailAsCorruption] checks for plain tries: a walk over them must
+    /// neither hang nor fail with any other exception. A range cursor also reads the file to work out the state active
+    /// after a skip and when it is closed, so the walk here skips, asks for the state at every position, closes
+    /// cursors early and takes tails of closed ones.
+    @Test
+    public void testCorruptTriesFailAsCorruption() throws IOException
+    {
+        final int maxSteps = 1_000_000;
+        Random rand = new Random(7);
+        int rejected = 0;
+        for (int iteration = 0; iteration < 500; ++iteration)
+        {
+            // Keys of one length, so that none is a prefix of another and the markers can be placed in key order.
+            int keyLength = 1 + rand.nextInt(6);
+            int count = 2 + rand.nextInt(29);
+            TreeSet<String> keys = new TreeSet<>();
+            while (keys.size() < count)
+            {
+                StringBuilder key = new StringBuilder();
+                for (int j = 0; j < keyLength; ++j)
+                    key.append((char) (rand.nextInt(4) == 0 ? rand.nextInt(256) : 'a' + rand.nextInt(4)));
+                keys.add(key.toString());
+            }
+            List<TestRangeState> markers = new ArrayList<>();
+            int active = -1;
+            for (String key : keys)
+            {
+                boolean last = key.equals(keys.last());
+                if (last && active == -1)
+                    break;
+                int next = -1;
+                if (active == -1 || !last && rand.nextBoolean())
+                {
+                    do
+                    {
+                        next = rand.nextInt(100);
+                    }
+                    while (next == active);
+                }
+                markers.add(new TestRangeState(TrieUtil.directComparable(key), active, next));
+                active = next;
+            }
+
+            byte[] bytes;
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                OnDiskTrieWriter.write(TestRangeState.fromList(TestRangeState.verify(markers)), true, RANGE_SERDE, out);
+                bytes = out.toByteArray();
+            }
+            // Over the bytes as written the walk must go through, which also shows that the skips it makes are valid.
+            walkRandomly(rand, bytes, maxSteps);
+
+            int flips = 1 + rand.nextInt(3);
+            for (int i = 0; i < flips; ++i)
+                bytes[rand.nextInt(bytes.length)] = (byte) rand.nextInt(256);
+            try
+            {
+                walkRandomly(rand, bytes, maxSteps);
+            }
+            catch (UncheckedIOException e)
+            {
+                assertTrue(e.getMessage(), e.getCause() instanceof IOException);
+                ++rejected;
+            }
+        }
+        // Make sure the test is not passing because no corruption is detected.
+        assertTrue("Only " + rejected + " corrupt tries rejected", rejected > 100);
+    }
+
+    private static void walkRandomly(Random rand, byte[] bytes, int maxSteps)
+    {
+        ByteBuffer buffer = ByteBuffer.wrap(bytes);
+        OnDiskRangeTrie<TestRangeState> trie = new OnDiskRangeTrie.WithoutChannel<>(new ByteBufferRebufferer(buffer), RANGE_UNTRUSTED, VERSION, buffer.limit());
+        Direction direction = rand.nextBoolean() ? Direction.FORWARD : Direction.REVERSE;
+        // Not verified: corrupt bytes can list transitions out of order, which the reader does not check.
+        TrieUtil.walkRandomlyAndClose(rand, trie.makeCursor(direction), new int[1], maxSteps, (cursor, position) -> cursor.state());
+    }
+
+    /// [TrieUtil#RANGE_SERDE] for walks over corrupt data. It takes the content's bytes out of the reader's stream,
+    /// which is the reader's to get right, and rejects bytes it cannot parse as corrupt, as a production deserializer
+    /// does; `RANGE_SERDE` trusts its input and can fail on it in other ways.
+    private static final OnDiskCursor.DataDeserializer<TestRangeState> RANGE_UNTRUSTED = (rdr, length) -> {
+        byte[] bytes = new byte[length];
+        rdr.readFully(bytes);
+        try (DataInputBuffer in = new DataInputBuffer(bytes))
+        {
+            return RANGE_SERDE.deserialize(in, length);
+        }
+        catch (RuntimeException e)
+        {
+            throw new IOException(e);
+        }
+    };
 
     /// A range spanning every consecutive pair of the given transitions, over the keys [#key] builds.
     private static List<TestRangeState> markers(int prefixLength, int[] transitions, int suffixLength)

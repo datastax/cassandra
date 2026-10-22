@@ -31,6 +31,7 @@ import java.util.Random;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -60,6 +61,7 @@ public class OnDiskDeletionAwareTrieTest
     @BeforeClass
     public static void setUp()
     {
+        CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
         // The on-disk readers pull in BufferPools, whose static initializer needs configuration.
         DatabaseDescriptor.toolInitialization();
     }
@@ -292,6 +294,91 @@ public class OnDiskDeletionAwareTrieTest
             assertTriesEqual(expected, actual);
             read.close();
         }
+    }
+
+    /// The deletion-only shapes a partition update carries for a range tombstone, a row deletion and a partition
+    /// deletion: no live content, and a deletion branch at the root, as partition updates keep them. Each is written,
+    /// reopened and walked the ways the partition iterators walk it -- merged with its deletions, sliced by a set and
+    /// split into tails -- and must give what the trie it was written from gives.
+    @Test(timeout = 60_000)
+    public void testDeletionOnlyShapes() throws IOException, TrieSpaceExhaustedException
+    {
+        DeletionMarker covering = new DeletionMarker(TrieUtil.directComparable("x"), 5, 5);
+        ByteComparable prefix = TrieUtil.directComparable("ab");
+        List<DeletionAwareTrie<LivePoint, DeletionMarker>> shapes = new ArrayList<>();
+        // range tombstone
+        shapes.add(DeletionAwareTrie.deletedRange(ByteComparable.EMPTY, TrieUtil.directComparable("abc"), TrieUtil.directComparable("abe"), VERSION, covering));
+        // row deletion
+        shapes.add(DeletionAwareTrie.deletionBranch(ByteComparable.EMPTY, VERSION, RangeTrie.branch(prefix, VERSION, covering)));
+        // partition deletion
+        shapes.add(DeletionAwareTrie.deletionBranch(ByteComparable.EMPTY, VERSION, RangeTrie.branch(ByteComparable.EMPTY, VERSION, covering)));
+
+        List<TrieSet> sets = new ArrayList<>();
+        sets.add(TrieSet.full(VERSION));
+        sets.add(TrieSet.range(VERSION, TrieUtil.directComparable("a"), true, TrieUtil.directComparable("b"), true));
+        sets.add(TrieSet.range(VERSION, null, true, TrieUtil.directComparable("abd"), false));
+        sets.add(TrieSet.range(VERSION, TrieUtil.directComparable("abd"), true, null, true));
+        sets.add(TrieSet.branch(VERSION, prefix));
+
+        // Each shape on its own, and next to a live row outside the deletion, so that the row iterators also skip past
+        // a returned tail.
+        LivePoint row = new LivePoint(TrieUtil.directComparable("zz"), 1);
+        List<InMemoryDeletionAwareTrie<LivePoint, DeletionMarker>> sources = new ArrayList<>();
+        for (DeletionAwareTrie<LivePoint, DeletionMarker> shape : shapes)
+        {
+            sources.add(applyTo(InMemoryDeletionAwareTrie.shortLived(VERSION), shape));
+            sources.add(applyTo(applyTo(InMemoryDeletionAwareTrie.shortLived(VERSION), shape),
+                                DeletionAwareTrie.singleton(row.position, VERSION, row)));
+        }
+
+        for (InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source : sources)
+        {
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+                OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                    OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
+                assertTriesEqual(source, read);
+                for (TrieSet set : sets)
+                {
+                    DeletionAwareTrie<LivePoint, DeletionMarker> expected = source.intersect(set);
+                    DeletionAwareTrie<LivePoint, DeletionMarker> actual = read.intersect(set);
+                    for (Direction direction : Direction.values())
+                    {
+                        List<String> expectedValues = mergedValues(expected, direction);
+                        assertEquals(expectedValues, mergedValues(actual, direction));
+                        List<String> expectedSwitchableValues = switchableMergedValues(expected, direction);
+                        assertEquals(expectedSwitchableValues, switchableMergedValues(actual, direction));
+                        List<String> expectedTails = mergedTails(expected, direction);
+                        assertEquals(expectedTails, mergedTails(actual, direction));
+                    }
+                }
+                read.close();
+            }
+        }
+    }
+
+    private static List<String> switchableMergedValues(DeletionAwareTrie<LivePoint, DeletionMarker> trie, Direction direction)
+    {
+        List<String> values = new ArrayList<>();
+        trie.mergedTrieSwitchable((live, deletion) -> live + "|" + deletion).values(direction).forEach(values::add);
+        return values;
+    }
+
+    /// The tails of the switchable merged view at live content, the way the partition row iterators split a partition
+    /// into rows. (A tail cannot be taken at a deletion boundary, which may be on the return path.)
+    private static List<String> mergedTails(DeletionAwareTrie<LivePoint, DeletionMarker> trie, Direction direction)
+    {
+        List<String> tails = new ArrayList<>();
+        for (Map.Entry<ByteComparable.Preencoded, Trie<String>> entry :
+             trie.mergedTrieSwitchable((live, deletion) -> live != null ? live + "|" + deletion : null)
+                 .tailTries(direction, x -> true))
+        {
+            List<String> values = new ArrayList<>();
+            entry.getValue().values(direction).forEach(values::add);
+            tails.add(entry.getKey().byteComparableAsString(VERSION) + " -> " + values);
+        }
+        return tails;
     }
 
     private static List<DataPoint> partitionDeletionPoints()
@@ -639,9 +726,9 @@ public class OnDiskDeletionAwareTrieTest
                 corrupt.put(pointerPos, (byte) delta);
                 OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                     OnDiskDeletionAwareTrie.open(corrupt, LIVE, MARKER, VERSION, -1);
-                DeletionAwareCursor<LivePoint, DeletionMarker> cursor = read.cursor(Direction.FORWARD);
+                // With verification on, taking the cursor already reads the branch pointer.
                 UncheckedIOException e = assertThrows(UncheckedIOException.class,
-                                                      () -> cursor.deletionBranchCursor(Direction.FORWARD));
+                                                      () -> read.cursor(Direction.FORWARD).deletionBranchCursor(Direction.FORWARD));
                 assertTrue(e.getMessage(), e.getMessage().contains("Corrupt serialized trie"));
                 read.close();
             }
@@ -851,6 +938,107 @@ public class OnDiskDeletionAwareTrieTest
         }
     }
 
+    /// Corrupt bytes, as a damaged commit-log record or message payload would present them, must be reported as
+    /// corruption, as [OnDiskTrieTest#testCorruptTriesFailAsCorruption] checks for plain tries: a walk over them must
+    /// neither hang nor fail with any other exception. The walk here also skips, closes cursors early and takes tails
+    /// of closed ones, and walks every deletion branch it meets the same way, asking for the active state on the way.
+    @Test
+    public void testCorruptTriesFailAsCorruption() throws IOException
+    {
+        final int maxSteps = 1_000_000;
+        Random rand = new Random(7);
+        int rejected = 0;
+        for (int iteration = 0; iteration < 500; ++iteration)
+        {
+            byte[] bytes;
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(mixedPoints(rand, 1 + rand.nextInt(30))), LIVE_UNTRUSTED, MARKER_UNTRUSTED, out);
+                bytes = out.toByteArray();
+            }
+            // Over the bytes as written the walk must go through, which also shows that the skips it makes are valid.
+            walkRandomly(rand, bytes, maxSteps);
+
+            int flips = 1 + rand.nextInt(3);
+            for (int i = 0; i < flips; ++i)
+                bytes[rand.nextInt(bytes.length)] = (byte) rand.nextInt(256);
+            try
+            {
+                walkRandomly(rand, bytes, maxSteps);
+            }
+            catch (UncheckedIOException e)
+            {
+                assertTrue(e.getMessage(), e.getCause() instanceof IOException);
+                ++rejected;
+            }
+        }
+        // Make sure the test is not passing because no corruption is detected. Fewer are than for plain tries: the keys
+        // here are strings of six digits, and a changed byte in a chain is a different key rather than corruption.
+        assertTrue("Only " + rejected + " corrupt tries rejected", rejected > 50);
+    }
+
+    private static void walkRandomly(Random rand, byte[] bytes, int maxSteps)
+    {
+        OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> trie =
+            OnDiskDeletionAwareTrie.open(ByteBuffer.wrap(bytes), LIVE_UNTRUSTED, MARKER_UNTRUSTED, VERSION, -1);
+        Direction direction = rand.nextBoolean() ? Direction.FORWARD : Direction.REVERSE;
+        int[] steps = new int[1];
+        // Not verified: corrupt bytes can list transitions out of order, which the reader does not check.
+        TrieUtil.walkRandomlyAndClose(rand, trie.makeCursor(direction), steps, maxSteps, (cursor, position) -> {
+            RangeCursor<DeletionMarker> branch = DeletionAwareCursor.deletionBranchCursor(cursor, position);
+            if (branch != null)
+                TrieUtil.walkRandomlyAndClose(rand, branch, steps, maxSteps, (b, p) -> b.state());
+        });
+    }
+
+    /// Content for walks over corrupt data: only the values, so that most of the bytes that get corrupted are the trie's
+    /// own, and read without trusting a length inside them, as [LiveSerDe] and [MarkerSerDe] do -- a corrupt one there
+    /// would ask for an array of any size. The content's bytes are taken out of the reader's stream as given; getting
+    /// them right is the reader's job.
+    static class UntrustedLiveSerDe implements OnDiskTrieWriter.DataSerializer<LivePoint>, OnDiskCursor.DataDeserializer<LivePoint>
+    {
+        @Override
+        public void serialize(DataOutputPlus out, LivePoint value) throws IOException
+        {
+            out.writeInt(value.timestamp);
+        }
+
+        @Override
+        public LivePoint deserialize(DataInputPlus rdr, int length) throws IOException
+        {
+            return new LivePoint(ByteComparable.EMPTY, readContent(rdr, length, 4).getInt());
+        }
+    }
+
+    static class UntrustedMarkerSerDe implements OnDiskTrieWriter.DataSerializer<DeletionMarker>, OnDiskCursor.DataDeserializer<DeletionMarker>
+    {
+        @Override
+        public void serialize(DataOutputPlus out, DeletionMarker value) throws IOException
+        {
+            out.writeInt(value.leftSide);
+            out.writeInt(value.rightSide);
+        }
+
+        @Override
+        public DeletionMarker deserialize(DataInputPlus rdr, int length) throws IOException
+        {
+            ByteBuffer content = readContent(rdr, length, 8);
+            return new DeletionMarker(ByteComparable.EMPTY, content.getInt(), content.getInt());
+        }
+    }
+
+    private static ByteBuffer readContent(DataInputPlus rdr, int length, int minLength) throws IOException
+    {
+        byte[] bytes = new byte[length];
+        rdr.readFully(bytes);
+        if (length < minLength)
+            throw new IOException("Content of " + length + " bytes, at least " + minLength + " expected");
+        return ByteBuffer.wrap(bytes);
+    }
+
+    static final UntrustedLiveSerDe LIVE_UNTRUSTED = new UntrustedLiveSerDe();
+    static final UntrustedMarkerSerDe MARKER_UNTRUSTED = new UntrustedMarkerSerDe();
+
     /// Walks the cursor and every deletion branch it presents to the end, then gives all of them back. The trie a
     /// [BaseTrie#tailTrie] hands out makes its cursors from a closed one, so a mistake in that hand-over surfaces
     /// here as a read through a buffer that has already gone back to the pool.
@@ -888,7 +1076,11 @@ public class OnDiskDeletionAwareTrieTest
     /// deletion branches end up far from the data nodes that introduce them.
     private static List<DataPoint> largeMixedPoints(int count)
     {
-        Random rand = new Random(5);
+        return mixedPoints(new Random(5), count);
+    }
+
+    private static List<DataPoint> mixedPoints(Random rand, int count)
+    {
         java.util.TreeSet<String> keys = new java.util.TreeSet<>();
         while (keys.size() < count)
             keys.add(String.format("%06d", rand.nextInt(count * 4)));

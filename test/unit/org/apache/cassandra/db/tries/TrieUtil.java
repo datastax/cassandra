@@ -35,6 +35,7 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.Function;
+import java.util.function.ObjLongConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -1001,6 +1002,82 @@ public class TrieUtil
         catch (IOException e)
         {
             throw new RuntimeException(e);
+        }
+    }
+
+    /// Walks the cursor the ways a reader of a damaged commit-log record or message payload can: advancing, skipping to
+    /// random positions the cursor accepts, and closing it before it is exhausted, after which a tail taken from it is
+    /// walked the same way. Content is read at every position, `atPosition` is called there, and the cursor is closed
+    /// on every path.
+    ///
+    /// The steps taken, including those of the tails and of whatever `atPosition` walks, are counted in `steps`; a walk
+    /// that takes more than `maxSteps` fails, as a reader caught in a loop would never finish.
+    @SuppressWarnings("unchecked")  // a cursor's tail is a cursor of the same kind
+    static <C extends Cursor<?>> void walkRandomlyAndClose(Random rand, C cursor, int[] steps, int maxSteps,
+                                                           ObjLongConsumer<C> atPosition)
+    {
+        try
+        {
+            Direction direction = cursor.direction();
+            int[] path = new int[16];
+            long position = cursor.encodedPosition();
+            while (!Cursor.isExhausted(position))
+            {
+                if (++steps[0] > maxSteps)
+                    fail("Walk did not finish in " + maxSteps + " steps");
+                int depth = Cursor.depth(position);
+                if (depth > path.length)
+                    path = Arrays.copyOf(path, Math.max(depth, path.length * 2));
+                if (depth > 0)
+                    path[depth - 1] = Cursor.incomingTransition(position);
+                if ((position & Cursor.MAY_HAVE_CONTENT_BIT) != 0)
+                    cursor.content();
+                atPosition.accept(cursor, position);
+
+                boolean onReturnPath = Cursor.isOnReturnPath(position);
+                // Mostly advance, so that the walk covers most of the trie before it skips past it or stops.
+                int choice = rand.nextInt(256);
+                if (choice == 0)
+                {
+                    cursor.close();
+                    // A tail can be taken from a closed cursor, but not on the return path.
+                    if (!onReturnPath && rand.nextBoolean())
+                        walkRandomlyAndClose(rand, (C) cursor.tailCursor(rand.nextBoolean() ? Direction.FORWARD : Direction.REVERSE),
+                                             steps, maxSteps, atPosition);
+                    return;
+                }
+                else if (choice <= 4)
+                {
+                    position = cursor.skipTo(Cursor.positionForSkippingBranch(position));
+                }
+                else if (choice <= 8 && !onReturnPath)
+                {
+                    position = cursor.skipTo(Cursor.encode(depth + 1, rand.nextInt(256), direction));
+                }
+                else if (choice <= 12 && depth > 0)
+                {
+                    // Move to a depth the walk has reached, to a transition after the one it took there.
+                    int targetDepth = 1 + rand.nextInt(depth);
+                    int visited = path[targetDepth - 1];
+                    int remaining = direction.select(0xFF - visited, visited);
+                    long target = remaining == 0
+                                  ? Cursor.positionForSkippingBranch(Cursor.encode(targetDepth, visited, direction))
+                                  : Cursor.encode(targetDepth, visited + direction.select(1, -1) * (1 + rand.nextInt(remaining)), direction);
+                    position = cursor.skipTo(target);
+                }
+                else if (choice <= 14 && !onReturnPath)
+                {
+                    position = cursor.skipTo((position & ~Cursor.FLAGS_MASK) | Cursor.ON_RETURN_PATH_BIT);
+                }
+                else
+                {
+                    position = cursor.advance();
+                }
+            }
+        }
+        finally
+        {
+            cursor.close();
         }
     }
 

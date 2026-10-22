@@ -593,28 +593,32 @@ interface VerificationCursor
             var deletionBranch = source.deletionBranchCursor(direction);
             if (deletionBranch != null)
             {
-                assert (source.encodedPosition() & Cursor.MAY_HAVE_DELETION_BRANCH_BIT) != 0 :
-                    String.format("Deletion branch found but MAY_HAVE_DELETION_BRANCH_BIT was not set on position: %s\n%s",
-                                  Cursor.toString(source.encodedPosition()),
-                                  this);
-                assert deletionBranchDepth == -1 :
-                    String.format("Deletion branch at position %s covered by another deletion branch at parent depth %s\n%s",
-                                  Cursor.toString(position),
-                                  deletionBranchDepth,
-                                  this);
-                assert Cursor.compare(deletionBranch.encodedPosition(), Cursor.rootPosition(direction)) == 0 :
-                    String.format("Invalid deletion branch initial position %s\n%s",
-                                  Cursor.toString(deletionBranch.encodedPosition()),
-                                  this);
-                assert deletionBranch.precedingState() == null :
-                    String.format("Deletion branch starts with active deletion %s\n%s",
-                                  deletionBranch.precedingState(),
-                                  this);
-                deletionBranch.skipTo(Cursor.exhaustedPosition(direction));
-                assert deletionBranch.precedingState() == null :
-                    String.format("Deletion branch ends with active deletion %s\n%s",
-                                  deletionBranch.precedingState(),
-                                  this);
+                // The branch is ours to release; over a file it holds a buffer.
+                try (deletionBranch)
+                {
+                    assert (source.encodedPosition() & Cursor.MAY_HAVE_DELETION_BRANCH_BIT) != 0 :
+                        String.format("Deletion branch found but MAY_HAVE_DELETION_BRANCH_BIT was not set on position: %s\n%s",
+                                      Cursor.toString(source.encodedPosition()),
+                                      this);
+                    assert deletionBranchDepth == -1 :
+                        String.format("Deletion branch at position %s covered by another deletion branch at parent depth %s\n%s",
+                                      Cursor.toString(position),
+                                      deletionBranchDepth,
+                                      this);
+                    assert Cursor.compare(deletionBranch.encodedPosition(), Cursor.rootPosition(direction)) == 0 :
+                        String.format("Invalid deletion branch initial position %s\n%s",
+                                      Cursor.toString(deletionBranch.encodedPosition()),
+                                      this);
+                    assert deletionBranch.precedingState() == null :
+                        String.format("Deletion branch starts with active deletion %s\n%s",
+                                      deletionBranch.precedingState(),
+                                      this);
+                    deletionBranch.skipTo(Cursor.exhaustedPosition(direction));
+                    assert deletionBranch.precedingState() == null :
+                        String.format("Deletion branch ends with active deletion %s\n%s",
+                                      deletionBranch.precedingState(),
+                                      this);
+                }
                 deletionBranchDepth = Cursor.depth(position);
             }
             return position;
