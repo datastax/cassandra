@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 import org.junit.BeforeClass;
@@ -26,6 +27,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -52,10 +54,9 @@ public class OnDiskTrieWriterTest
     static class ByteSerializer implements OnDiskTrieWriter.DataSerializer<Integer>
     {
         @Override
-        public int serialize(DataOutputPlus out, Integer value) throws IOException
+        public void serialize(DataOutputPlus out, Integer value) throws IOException
         {
             out.writeByte(value);
-            return 1;
         }
     }
 
@@ -140,10 +141,9 @@ public class OnDiskTrieWriterTest
     static class BytesSerDe implements OnDiskTrieWriter.DataSerializer<byte[]>, OnDiskCursor.DataDeserializer<byte[]>
     {
         @Override
-        public int serialize(DataOutputPlus out, byte[] value) throws IOException
+        public void serialize(DataOutputPlus out, byte[] value) throws IOException
         {
             out.write(value);
-            return value.length;
         }
 
         @Override
@@ -189,19 +189,25 @@ public class OnDiskTrieWriterTest
         }
     }
 
-    /// Writing into a stream that already holds data: an empty trie writes nothing, so there is no root to report, and
-    /// a non-empty one reports the position `out` is left at.
+    /// Writing into a stream that already holds data: an empty trie writes nothing and reports root 0, which the readers
+    /// take as the empty trie, and a non-empty one reports the position `out` is left at. Both roots open as written.
     @Test
     public void testWriteAtNonZeroOffset() throws Exception
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             out.writeLong(0);
-            assertEquals(-1, OnDiskTrieWriter.write(trie(false), false, BYTE_SERIALIZER, out));
+            long emptyRoot = OnDiskTrieWriter.write(trie(false), false, BYTE_SERIALIZER, out);
+            assertEquals(0, emptyRoot);
             assertEquals(8, out.getLength());
 
             long root = OnDiskTrieWriter.write(trie(false, "a", 1), false, BYTE_SERIALIZER, out);
             assertEquals(out.getLength(), root);
+
+            ByteBuffer buffer = out.asNewBuffer();
+            OnDiskCursor.DataDeserializer<Integer> oneByte = (rdr, length) -> (int) rdr.readByte();
+            TrieUtil.assertTriesEqual(trie(false), new OnDiskTrie.WithoutChannel<>(new ByteBufferRebufferer(buffer), oneByte, VERSION, false, emptyRoot));
+            TrieUtil.assertTriesEqual(trie(false, "a", 1), new OnDiskTrie.WithoutChannel<>(new ByteBufferRebufferer(buffer), oneByte, VERSION, false, root));
         }
     }
 }

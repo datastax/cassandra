@@ -65,13 +65,12 @@ public class OnDiskDeletionAwareTrieTest
     static class LiveSerDe implements OnDiskTrieWriter.DataSerializer<LivePoint>, OnDiskCursor.DataDeserializer<LivePoint>
     {
         @Override
-        public int serialize(DataOutputPlus out, LivePoint value) throws IOException
+        public void serialize(DataOutputPlus out, LivePoint value) throws IOException
         {
             byte[] pos = positionBytes(value.position);
             out.writeInt(value.timestamp);
             out.writeInt(pos.length);
             out.write(pos);
-            return 4 + 4 + pos.length;
         }
 
         @Override
@@ -87,14 +86,13 @@ public class OnDiskDeletionAwareTrieTest
     static class MarkerSerDe implements OnDiskTrieWriter.DataSerializer<DeletionMarker>, OnDiskCursor.DataDeserializer<DeletionMarker>
     {
         @Override
-        public int serialize(DataOutputPlus out, DeletionMarker value) throws IOException
+        public void serialize(DataOutputPlus out, DeletionMarker value) throws IOException
         {
             byte[] pos = positionBytes(value.position);
             out.writeInt(value.leftSide);
             out.writeInt(value.rightSide);
             out.writeInt(pos.length);
             out.write(pos);
-            return 4 + 4 + 4 + pos.length;
         }
 
         @Override
@@ -199,6 +197,92 @@ public class OnDiskDeletionAwareTrieTest
                 assertDeletionBranchesEqual(source.cursor(d), read.cursor(d));
             read.close();
         }
+    }
+
+    /// The deletion-aware counterpart of [OnDiskTrieWriterTest#testWriteAtNonZeroOffset]: an empty trie reports root 0,
+    /// which the reader takes as the empty trie, and a non-empty one the position the stream is left at.
+    @Test
+    public void testWriteAtNonZeroOffset() throws IOException
+    {
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source =
+            DataPoint.fromList(points(live("aa", 1), marker("abc", -1, 5), marker("abd", 5, -1), live("xyz", 3)));
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            out.writeLong(0);
+            long emptyRoot = OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(new ArrayList<>()), LIVE, MARKER, out);
+            assertEquals(0, emptyRoot);
+            assertEquals(8, out.getLength());
+
+            long root = OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            assertEquals(out.getLength(), root);
+
+            ByteBuffer buffer = out.asNewBuffer();
+            assertTriesEqual(DataPoint.fromList(new ArrayList<>()), OnDiskDeletionAwareTrie.open(buffer, LIVE, MARKER, VERSION, emptyRoot));
+            assertTriesEqual(source, OnDiskDeletionAwareTrie.open(buffer, LIVE, MARKER, VERSION, root));
+        }
+    }
+
+    /// The shape of a partition deletion: no live content at all, so the data trie is a single node that carries a
+    /// deletion branch and has no children. Walking it, the cursor runs out of the data node at once, and the walks that
+    /// drive several cursors in parallel read the exhausted position back from [Cursor#encodedPosition] rather than
+    /// from the return value -- a cursor still reporting the node there makes them go round forever.
+    @Test(timeout = 60_000)
+    public void testMergedTrieOverChildlessBranchNode() throws IOException
+    {
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(partitionDeletionPoints());
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
+            for (Direction direction : Direction.values())
+                assertEquals(mergedValues(source, direction), mergedValues(read, direction));
+            read.close();
+        }
+    }
+
+    /// The same shape applied to an in-memory trie, which is how a deserialized partition deletion reaches a memtable.
+    @Test(timeout = 60_000)
+    public void testApplyChildlessBranchNode() throws IOException, TrieSpaceExhaustedException
+    {
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(partitionDeletionPoints());
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
+
+            InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> expected = applyTo(liveOnlyTrie(live("010", 1)), source);
+            InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> actual = applyTo(liveOnlyTrie(live("010", 1)), read);
+            assertTriesEqual(expected, actual);
+            read.close();
+        }
+    }
+
+    private static List<DataPoint> partitionDeletionPoints()
+    {
+        return points(marker("006", -1, 90), marker("032", 90, -1));
+    }
+
+    private static List<String> mergedValues(DeletionAwareTrie<LivePoint, DeletionMarker> trie, Direction direction)
+    {
+        List<String> values = new ArrayList<>();
+        trie.mergedTrie((live, deletion) -> live + "|" + deletion).values(direction).forEach(values::add);
+        return values;
+    }
+
+    private static InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> applyTo(InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> target,
+                                                                              DeletionAwareTrie<LivePoint, DeletionMarker> mutation)
+    throws TrieSpaceExhaustedException
+    {
+        target.mutator(DataPoint::combineLive,
+                       DataPoint::combineDeletion,
+                       DataPoint::deleteLive,
+                       DataPoint::deleteLive,
+                       false,
+                       v -> false)
+              .apply(mutation);
+        return target;
     }
 
     /// A deletion branch the walk enters but which turns out to have nothing to write. `intersect` gives such a
@@ -650,7 +734,9 @@ public class OnDiskDeletionAwareTrieTest
         }
     }
 
-    /// Walks both branches in lockstep, taking the tail in both directions at every position.
+    /// Walks both branches in lockstep, taking the tail in both directions at every position. A tail must also start
+    /// with the same active deletion: the walk does not compare states, and the deletion a tail reports at its root is
+    /// what a merge applies to everything below it.
     private static void assertTailsEqual(RangeCursor<DeletionMarker> expected, RangeCursor<DeletionMarker> actual)
     {
         long position = expected.encodedPosition();
@@ -660,8 +746,13 @@ public class OnDiskDeletionAwareTrieTest
             // Taking a tail on the return path is not permitted.
             if (!Cursor.isOnReturnPath(position))
                 for (Direction tailDirection : Direction.values())
-                    TrieUtil.assertCursorWalksEqual(expected.tailCursor(tailDirection),
-                                                    actual.tailCursor(tailDirection));
+                {
+                    RangeCursor<DeletionMarker> expectedTail = expected.tailCursor(tailDirection);
+                    RangeCursor<DeletionMarker> actualTail = actual.tailCursor(tailDirection);
+                    assertEquals("State at the root of the tail at " + Cursor.toString(position),
+                                 expectedTail.state(), actualTail.state());
+                    TrieUtil.assertCursorWalksEqual(expectedTail, actualTail);
+                }
             position = expected.advance();
             assertEquals(Cursor.toString(position), Cursor.toString(actual.advance()));
         }

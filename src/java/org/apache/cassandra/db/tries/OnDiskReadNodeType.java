@@ -42,12 +42,14 @@ public enum OnDiskReadNodeType
                     // Root content needs to be presented on the way back.
                     // Note: This takes advantage of the fact that leaf codes are 00llllll, which reads correctly as a
                     // varint length.
-                    state.addBacktrack(state.postCodePos + 1, ASCENT_LEAF_CODE, state.currentEncodedPosition | Cursor.ON_RETURN_PATH_BIT);
+                    state.addReturnPathBacktrack(state.postCodePos + 1);
                     return;
                 }
                 state.currentEncodedPosition |= Cursor.ON_RETURN_PATH_BIT;
             }
             int length = state.nodeCode & LEAF_LENGTH_MASK;
+            if (length > state.postCodePos)
+                throw OnDiskCursor.corrupt("leaf content length " + length + " before position " + state.postCodePos);
             state.getContentAtPosWithLength(state.postCodePos, length);
         }
 
@@ -143,10 +145,12 @@ public enum OnDiskReadNodeType
         public long skipTo(OnDiskCursor<?> state, long encodedSkipPosition)
         {
             int nextByte = state.readByteBefore(state.postCodePos);
-            long nextPos = Cursor.positionForDescentWithByte(state.currentEncodedPosition, nextByte);
-            if (Cursor.compare(nextPos, encodedSkipPosition) < 0)
+            // Compare the transition only: the child is still the one to descend into when the target is its return
+            // path position.
+            if (Cursor.direction(state.currentEncodedPosition).lt(nextByte, Cursor.incomingTransition(encodedSkipPosition)))
                 return state.exhausted;
 
+            long nextPos = Cursor.positionForDescentWithByte(state.currentEncodedPosition, nextByte);
             if (length(state.nodeCode) > 1)
                 return state.descendInto(nextPos, state.postCodePos - 1, state.nodeCode - 1);
             else
@@ -221,7 +225,7 @@ public enum OnDiskReadNodeType
             int bytes = bytes(nodeCode);
             long childDelta = state.readSizedIntImplicit0(postCodePos - length, currIndex, bytes);
             long base = base(postCodePos, length, bytes);
-            return state.descendInto(nextPosition, base - childDelta);
+            return state.descendInto(nextPosition, OnDiskCursor.checkChild(base - childDelta, base));
         }
 
         private long encodedPositionForChild(OnDiskCursor<?> state, int index)
@@ -236,16 +240,17 @@ public enum OnDiskReadNodeType
             Direction direction = Cursor.direction(state.currentEncodedPosition);
             int currIndex = index(state.nodeImplData);
             int length = length(state.nodeCode);
-            long nextPosition = encodedPositionForChild(state, currIndex);
-            while (Cursor.compare(nextPosition, encodedSkipPosition) < 0)
+            int skipTransition = Cursor.incomingTransition(encodedSkipPosition);
+            // Compare the transition only: the child is still the one to descend into when the target is its return
+            // path position.
+            while (direction.lt(state.readByteBefore(state.postCodePos - currIndex), skipTransition))
             {
                 currIndex += direction.increase;
                 if (!direction.inLoop(currIndex, 0, length - 1))
                     return state.exhausted;
-                nextPosition = encodedPositionForChild(state, currIndex);
             }
 
-            return descendToChild(state, currIndex, direction, length, nextPosition);
+            return descendToChild(state, currIndex, direction, length, encodedPositionForChild(state, currIndex));
         }
 
         @Override
@@ -255,7 +260,7 @@ public enum OnDiskReadNodeType
             int bytes = bytes(nodeCode);
             int index = direction.select(0, length - 1);
             long base = base(postCodePos, length, bytes);
-            return base - state.readSizedIntImplicit0(postCodePos - length, index, bytes);
+            return OnDiskCursor.checkChild(base - state.readSizedIntImplicit0(postCodePos - length, index, bytes), base);
         }
 
         @Override
@@ -293,6 +298,8 @@ public enum OnDiskReadNodeType
         {
             Direction direction = Cursor.direction(state.currentEncodedPosition);
             state.nodeImplData = findNext(state, direction, state.nodeCode, state.postCodePos, direction.select(0, 255));
+            if (!direction.inLoop((int) state.nodeImplData, 0, 255))
+                throw OnDiskCursor.corrupt("dense node with no children before position " + state.postCodePos);
         }
 
         @Override
@@ -314,7 +321,7 @@ public enum OnDiskReadNodeType
             int bytes = bytes(nodeCode);
             long base = postCodePos - 256 * bytes;
             long childDelta = state.readSizedInt(postCodePos - transition * bytes, bytes);
-            return state.descendInto(nextPosition, base - childDelta);
+            return state.descendInto(nextPosition, OnDiskCursor.checkChild(base - childDelta, base));
         }
 
         @Override
@@ -338,7 +345,6 @@ public enum OnDiskReadNodeType
         private int findNext(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos, int index)
         {
             int bytes = bytes(nodeCode);
-            long base = postCodePos - 256 * bytes;
             long notPresent = notPresent(bytes);
             while (direction.inLoop(index, 0, 255))
             {
@@ -356,9 +362,11 @@ public enum OnDiskReadNodeType
         public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
         {
             int index = findNext(state, direction, nodeCode, postCodePos, direction.select(0, 255));
+            if (!direction.inLoop(index, 0, 255))
+                throw OnDiskCursor.corrupt("dense node with no children before position " + postCodePos);
             int bytes = bytes(nodeCode);
             long base = postCodePos - 256 * bytes;
-            return base - state.readSizedInt(postCodePos - index * bytes, bytes);
+            return OnDiskCursor.checkChild(base - state.readSizedInt(postCodePos - index * bytes, bytes), base);
         }
 
         @Override
@@ -410,6 +418,8 @@ public enum OnDiskReadNodeType
         {
             Direction direction = Cursor.direction(state.currentEncodedPosition);
             int length = cardinality(state);
+            if (length == 0)
+                throw OnDiskCursor.corrupt("bitmap node with no children before position " + state.postCodePos);
             state.nodeImplData = encode(findNextEntry(state,
                                                       state.postCodePos,
                                                       direction,
@@ -449,7 +459,8 @@ public enum OnDiskReadNodeType
             int bytes = bytes(state.nodeCode);
             long base = base(postCodePos, length, bytes);
             long childDelta = state.readSizedIntImplicit0(postCodePos - 32, currIndex, bytes);
-            return state.descendInto(Cursor.positionForDescentWithByte(state.currentEncodedPosition, currTransition), base - childDelta);
+            return state.descendInto(Cursor.positionForDescentWithByte(state.currentEncodedPosition, currTransition),
+                                     OnDiskCursor.checkChild(base - childDelta, base));
         }
 
         private int cardinality(OnDiskCursor<?> state)
@@ -556,10 +567,12 @@ public enum OnDiskReadNodeType
         public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
         {
             int length = cardinality(state, postCodePos, 256);
+            if (length == 0)
+                throw OnDiskCursor.corrupt("bitmap node with no children before position " + postCodePos);
             int index = direction.isForward() ? 0 : length - 1;
             int bytes = bytes(nodeCode);
             long base = base(postCodePos, length, bytes);
-            return base - state.readSizedIntImplicit0(postCodePos - 32, index, bytes);
+            return OnDiskCursor.checkChild(base - state.readSizedIntImplicit0(postCodePos - 32, index, bytes), base);
         }
 
         private long base(long postCodePos, int length, int bytes)
@@ -608,7 +621,9 @@ public enum OnDiskReadNodeType
             boolean hasDescent = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0;
             boolean hasChild = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_CHILD) != 0;
             boolean swap = state.swapContentSides;
-            assert hasAscent | hasDescent;
+            // The writer only emits this code for content; with neither flag it is reserved for backtrack entries.
+            if (!hasAscent && !hasDescent)
+                throw OnDiskCursor.corrupt("prefix node " + nodeCode + " with no content before position " + currentPos);
             state.nodeImplData = -1;
 
             if (state.alternateInAscentSlot)
@@ -638,7 +653,7 @@ public enum OnDiskReadNodeType
                     if (Cursor.isRootPosition(state.currentEncodedPosition))
                     {
                         // the root position needs to be presented; add backtrack for the content
-                        state.addBacktrack(currentPos, ASCENT_LEAF_CODE, state.currentEncodedPosition | Cursor.ON_RETURN_PATH_BIT);
+                        state.addReturnPathBacktrack(currentPos);
                         return;
                     }
 
@@ -673,7 +688,7 @@ public enum OnDiskReadNodeType
         private long addBacktrackAndMaybeAdvanceOver(OnDiskCursor<?> state, long currentPos, boolean shouldAdvanceOverContent)
         {
             // Make up a node on the return path; its advance or skipTo will be called
-            state.addBacktrack(currentPos, ASCENT_LEAF_CODE, state.currentEncodedPosition | Cursor.ON_RETURN_PATH_BIT);
+            state.addReturnPathBacktrack(currentPos);
             return maybeSkipOverContent(state, currentPos, shouldAdvanceOverContent);
         }
 
@@ -706,7 +721,10 @@ public enum OnDiskReadNodeType
         @Override
         public long skipTo(OnDiskCursor<?> state, long encodedSkipPosition)
         {
-            assert Cursor.compare(encodedSkipPosition, state.nodeImplData) <= 0;
+            // nodeImplData is the return-path position; it may be before the target, in which case there is nothing
+            // here for the skip.
+            if (Cursor.compare(state.nodeImplData, encodedSkipPosition) < 0)
+                return state.exhausted;
             return advance(state);
         }
 
