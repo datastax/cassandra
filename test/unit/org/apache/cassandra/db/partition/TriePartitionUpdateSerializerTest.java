@@ -54,9 +54,12 @@ import org.apache.cassandra.db.partitions.TriePartitionUpdateSerializer;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.ColumnData;
+import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.DeserializationHelper;
+import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.tries.OnDiskDeletionAwareTrie;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
@@ -73,6 +76,7 @@ import org.apache.cassandra.utils.ObjectSizes;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -625,6 +629,282 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         }
 
         assertRows(execute("SELECT a, b FROM %s WHERE k = 'key0' AND c = 1"), row(null, 10L));
+    }
+
+    /**
+     * Data written before a column was dropped must not come back if the column is added again: the reader drops
+     * the cells of a dropped column that are not newer than the drop, as the BTree encoding's reader does.
+     */
+    @Test
+    public void testCellsOfDroppedAndReAddedColumnAreDropped() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k text, c int, v int, w int, PRIMARY KEY(k, c))");
+        TriePartitionUpdate update = build(builder -> {
+            builder.timestamp(10);
+            builder.row(1).add("v", 7).add("w", 8);
+            builder.row(2).add("v", 9);
+            builder.row(3).noPrimaryKeyLivenessInfo().add("v", 10);
+        });
+        byte[] trieBytes = serialize(update);
+        byte[] btreeBytes;
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            PartitionUpdate.serializer.serialize(BTreePartitionUpdate.asBTreeUpdate(update), out, MessagingService.VERSION_DS_20);
+            btreeBytes = out.toByteArray();
+        }
+
+        alterTable("ALTER TABLE %s DROP v");
+        alterTable("ALTER TABLE %s ADD v int");
+
+        PartitionUpdate fromBTree;
+        try (DataInputBuffer in = new DataInputBuffer(btreeBytes))
+        {
+            fromBTree = PartitionUpdate.serializer.deserialize(in, MessagingService.VERSION_DS_20, DeserializationHelper.Flag.FROM_REMOTE);
+        }
+        TriePartitionUpdate fromTrie = deserialize(trieBytes);
+
+        assertEquals(TriePartitionUpdate.asTrieUpdate(fromBTree), fromTrie);
+        assertEquals(2, Iterators.size(fromTrie.rowIterator()));
+        for (Iterator<Row> rows = fromTrie.rowIterator(); rows.hasNext();)
+            assertNull(rows.next().getCell(currentTableMetadata().getColumn(ByteBufferUtil.bytes("v"))));
+    }
+
+    /**
+     * As {@link #testCellsOfDroppedAndReAddedColumnAreDropped}, for a complex column, whose complex deletions not newer
+     * than the drop must not come back either. The rows left with nothing are dropped, and the counts the update
+     * carries must not include them.
+     */
+    @Test
+    public void testComplexDeletionsOfDroppedAndReAddedColumnAreDropped() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k text, c int, v int, m map<text, text>, PRIMARY KEY(k, c))");
+        TriePartitionUpdate update = build(builder -> {
+            builder.timestamp(10).nowInSec(1500);
+            builder.row(1).add("v", 7).add("m", ImmutableMap.of("a", "1"));
+            builder.row(2).add("v", 9).delete("m");
+            builder.row(3).noPrimaryKeyLivenessInfo().add("m", ImmutableMap.of("b", "2"));
+            builder.row(4).noPrimaryKeyLivenessInfo().delete("m");
+        });
+        byte[] trieBytes = serialize(update);
+        byte[] btreeBytes;
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            PartitionUpdate.serializer.serialize(BTreePartitionUpdate.asBTreeUpdate(update), out, MessagingService.VERSION_DS_20);
+            btreeBytes = out.toByteArray();
+        }
+
+        alterTable("ALTER TABLE %s DROP m");
+        alterTable("ALTER TABLE %s ADD m map<text, text>");
+
+        PartitionUpdate fromBTree;
+        try (DataInputBuffer in = new DataInputBuffer(btreeBytes))
+        {
+            fromBTree = PartitionUpdate.serializer.deserialize(in, MessagingService.VERSION_DS_20, DeserializationHelper.Flag.FROM_REMOTE);
+        }
+        TriePartitionUpdate fromTrie = deserialize(trieBytes);
+
+        assertEquals(TriePartitionUpdate.asTrieUpdate(fromBTree), fromTrie);
+        assertEquals(2, Iterators.size(fromTrie.rowIterator()));
+        ColumnMetadata m = currentTableMetadata().getColumn(ByteBufferUtil.bytes("m"));
+        for (Iterator<Row> rows = fromTrie.rowIterator(); rows.hasNext();)
+            assertNull(rows.next().getComplexColumnData(m));
+
+        // What a sender that never had the dropped data would have sent.
+        TriePartitionUpdate expected = build(builder -> {
+            builder.timestamp(10).nowInSec(1500);
+            builder.row(1).add("v", 7);
+            builder.row(2).add("v", 9);
+        });
+        assertEquals(expected, fromTrie);
+        assertEquals(expected.rowCount(), fromTrie.rowCount());
+        assertEquals(expected.affectedRowCount(), fromTrie.affectedRowCount());
+        // The data size is an estimate, and how much it counts for the same content depends on how the update was
+        // built, so only check that the dropped data is not counted.
+        assertTrue(fromTrie.dataSize() < update.dataSize());
+    }
+
+    /**
+     * A column dropped and added again keeps its drop on record, but an update all of whose timestamps are newer than
+     * the drop has nothing of it to leave out, and is read in place rather than rebuilt.
+     */
+    @Test
+    public void testUpdateNewerThanDropOfReAddedColumnIsReadInPlace() throws Throwable
+    {
+        long dropTime = FBUtilities.timestampMicros();
+        createDroppedAndReAddedTable(dropTime);
+        TriePartitionUpdate update = build(builder -> {
+            builder.timestamp(dropTime + 1).nowInSec(1500);
+            builder.row().add("s", 7);
+            builder.row(1).add("v", 11);
+            builder.row(2).noPrimaryKeyLivenessInfo().add("v", 22);
+            builder.row(3).delete();
+        });
+
+        TriePartitionUpdate read = deserialize(serialize(update));
+
+        assertTrue(isReadInPlace(read));
+        assertEquals(update, read);
+        assertEquals(update.staticRow(), read.staticRow());
+        assertEquals(update.rowCount(), read.rowCount());
+        assertEquals(update.operationCount(), read.operationCount());
+    }
+
+    /**
+     * An update with data both at the drop of a column dropped and added again and after it is rebuilt, leaving out
+     * the data at the drop, as the BTree encoding's reader does.
+     */
+    @Test
+    public void testUpdateAtDropOfReAddedColumnIsRebuilt() throws Throwable
+    {
+        long dropTime = FBUtilities.timestampMicros();
+        createDroppedAndReAddedTable(dropTime);
+        TriePartitionUpdate update = build(builder -> {
+            builder.timestamp(dropTime).nowInSec(1500);
+            builder.row().add("s", 7);
+            builder.row(1).add("v", 11);
+            builder.timestamp(dropTime + 1);
+            builder.row(2).add("v", 22);
+        });
+
+        TriePartitionUpdate fromBTree = readViaBTreeEncoding(update);
+        TriePartitionUpdate read = deserialize(serialize(update));
+
+        assertFalse(isReadInPlace(read));
+        assertEquals(fromBTree, read);
+        assertEquals(fromBTree.staticRow(), read.staticRow());
+        assertNull(read.staticRow().getCell(currentTableMetadata().getColumn(ByteBufferUtil.bytes("s"))));
+        ColumnMetadata v = currentTableMetadata().getColumn(ByteBufferUtil.bytes("v"));
+        assertNull(read.getRow(Clustering.make(ByteBufferUtil.bytes(1))).getCell(v));
+        assertEquals(ByteBufferUtil.bytes(22), read.getRow(Clustering.make(ByteBufferUtil.bytes(2))).getCell(v).buffer());
+        assertEquals(fromBTree.rowCount(), read.rowCount());
+        assertEquals(fromBTree.operationCount(), read.operationCount());
+    }
+
+    /**
+     * Writing a whole collection deletes what was there one microsecond before the write, so an update newer than the
+     * drop of a collection column added again can still hold a complex deletion at the drop. Its stats' minimum
+     * timestamp is that of the deletion, so it is rebuilt, and the deletion is left out as the BTree encoding's reader
+     * leaves it out.
+     */
+    @Test
+    public void testComplexDeletionAtDropOfReAddedColumnIsLeftOut() throws Throwable
+    {
+        long dropTime = FBUtilities.timestampMicros();
+        createTable("CREATE TABLE %s (k text, c int, m map<text, text>, PRIMARY KEY(k, c))");
+        alterTable("ALTER TABLE %s DROP m USING TIMESTAMP " + dropTime);
+        alterTable("ALTER TABLE %s ADD m map<text, text>");
+        TriePartitionUpdate update = build(builder -> builder.timestamp(dropTime + 1).nowInSec(1500)
+                                                             .row(1).add("m", ImmutableMap.of("a", "1")));
+        assertEquals(dropTime, update.stats().minTimestamp);
+
+        TriePartitionUpdate fromBTree = readViaBTreeEncoding(update);
+        TriePartitionUpdate read = deserialize(serialize(update));
+
+        assertFalse(isReadInPlace(read));
+        assertEquals(fromBTree, read);
+        ColumnMetadata m = currentTableMetadata().getColumn(ByteBufferUtil.bytes("m"));
+        ComplexColumnData data = read.getRow(Clustering.make(ByteBufferUtil.bytes(1))).getComplexColumnData(m);
+        assertTrue(data.complexDeletion().isLive());
+        assertEquals(1, data.cellsCount());
+    }
+
+    /**
+     * Stats that saw no timestamp carry TIMESTAMP_EPOCH as their minimum timestamp, so that value bounds nothing, and
+     * an update whose stats carry it is rebuilt even when the drop is older still.
+     */
+    @Test
+    public void testUpdateWithEpochMinTimestampIsRebuilt() throws Throwable
+    {
+        createDroppedAndReAddedTable(EncodingStats.TIMESTAMP_EPOCH - 1);
+        TriePartitionUpdate update = build(builder -> builder.timestamp(EncodingStats.TIMESTAMP_EPOCH).row(1).add("v", 11));
+        assertEquals(EncodingStats.TIMESTAMP_EPOCH, update.stats().minTimestamp);
+
+        TriePartitionUpdate read = deserialize(serialize(update));
+
+        assertFalse(isReadInPlace(read));
+        assertEquals(readViaBTreeEncoding(update), read);
+        assertEquals(update, read);
+    }
+
+    /**
+     * The update is checked against the latest drop of its columns: with timestamps newer than the drop of one column
+     * but not of another dropped later, it is rebuilt, and the cells of the column dropped later are left out. The
+     * column iterated first, v, is the one dropped later, so taking the last drop seen rather than the latest fails.
+     */
+    @Test
+    public void testUpdateBetweenDropsOfReAddedColumnsIsRebuilt() throws Throwable
+    {
+        long firstDropTime = FBUtilities.timestampMicros();
+        long secondDropTime = firstDropTime + 10;
+        createTable("CREATE TABLE %s (k text, c int, v int, w int, PRIMARY KEY(k, c))");
+        alterTable("ALTER TABLE %s DROP w USING TIMESTAMP " + firstDropTime);
+        alterTable("ALTER TABLE %s ADD w int");
+        alterTable("ALTER TABLE %s DROP v USING TIMESTAMP " + secondDropTime);
+        alterTable("ALTER TABLE %s ADD v int");
+        TriePartitionUpdate update = build(builder -> builder.timestamp(firstDropTime + 1).nowInSec(1500)
+                                                             .row(1).add("v", 11).add("w", 12));
+
+        TriePartitionUpdate fromBTree = readViaBTreeEncoding(update);
+        TriePartitionUpdate read = deserialize(serialize(update));
+
+        assertFalse(isReadInPlace(read));
+        assertEquals(fromBTree, read);
+        Row row = read.getRow(Clustering.make(ByteBufferUtil.bytes(1)));
+        assertNull(row.getCell(currentTableMetadata().getColumn(ByteBufferUtil.bytes("v"))));
+        assertEquals(ByteBufferUtil.bytes(12), row.getCell(currentTableMetadata().getColumn(ByteBufferUtil.bytes("w"))).buffer());
+    }
+
+    /**
+     * An update made from a BTree update built without stats carries NO_STATS whatever its content, so its minimum
+     * timestamp bounds nothing even when the drop is below it, and the update is rebuilt to leave out the cell not
+     * newer than the drop.
+     */
+    @Test
+    public void testUpdateWithNoStatsIsRebuilt() throws Throwable
+    {
+        long dropTime = EncodingStats.TIMESTAMP_EPOCH - 10;
+        createDroppedAndReAddedTable(dropTime);
+        TableMetadata metadata = currentTableMetadata();
+        Row.Builder row = BTreeRow.unsortedBuilder();
+        row.newRow(Clustering.make(ByteBufferUtil.bytes(1)));
+        row.addPrimaryKeyLivenessInfo(LivenessInfo.create(dropTime, 1500));
+        row.addCell(BufferCell.live(metadata.getColumn(ByteBufferUtil.bytes("v")), dropTime, ByteBufferUtil.bytes(11)));
+        TriePartitionUpdate update = TriePartitionUpdate.asTrieUpdate(BTreePartitionUpdate.singleRowUpdate(metadata, ByteBufferUtil.bytes("key0"), row.build()));
+        assertEquals(EncodingStats.NO_STATS, update.stats());
+
+        TriePartitionUpdate fromBTree = readViaBTreeEncoding(update);
+        TriePartitionUpdate read = deserialize(serialize(update));
+
+        assertFalse(isReadInPlace(read));
+        assertEquals(fromBTree, read);
+        assertNull(read.getRow(Clustering.make(ByteBufferUtil.bytes(1))).getCell(metadata.getColumn(ByteBufferUtil.bytes("v"))));
+    }
+
+    /** A table whose regular column v and static column s were both dropped at the given time and added again. */
+    private void createDroppedAndReAddedTable(long dropTime)
+    {
+        createTable("CREATE TABLE %s (k text, c int, v int, s int static, PRIMARY KEY(k, c))");
+        alterTable("ALTER TABLE %s DROP (v, s) USING TIMESTAMP " + dropTime);
+        alterTable("ALTER TABLE %s ADD (v int, s int static)");
+    }
+
+    /** Whether the update reads the bytes it was deserialized from in place, rather than having been rebuilt in memory. */
+    private static boolean isReadInPlace(TriePartitionUpdate update)
+    {
+        return TriePartitionUpdate.asMergableTrieWithoutPartitionPrefix(update) instanceof OnDiskDeletionAwareTrie;
+    }
+
+    /** Write the update in the BTree encoding and read it back, as a node on the version before the trie encoding would. */
+    private static TriePartitionUpdate readViaBTreeEncoding(TriePartitionUpdate update) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            PartitionUpdate.serializer.serialize(BTreePartitionUpdate.asBTreeUpdate(update), out, MessagingService.VERSION_DS_20);
+            try (DataInputBuffer in = new DataInputBuffer(out.toByteArray()))
+            {
+                return TriePartitionUpdate.asTrieUpdate(PartitionUpdate.serializer.deserialize(in, MessagingService.VERSION_DS_20, DeserializationHelper.Flag.FROM_REMOTE));
+            }
+        }
     }
 
     /**
