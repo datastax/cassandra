@@ -321,6 +321,32 @@ interface VerificationCursor
         }
     }
 
+    /// A [Plain] verification cursor for sources that provide [DeletionAwareTrie.DeletionsStopControl]. The control
+    /// is reached by a cast of the cursor the trie hands out (see `TrieBackedPartitionStage3`), so a wrapper that
+    /// does not present it makes the partition read path unusable with verification enabled.
+    class PlainSwitchable<T> extends Plain<T, Cursor<T>> implements DeletionAwareTrie.DeletionsStopControl
+    {
+        PlainSwitchable(Cursor<T> cursor)
+        {
+            super(cursor);
+        }
+
+        @Override
+        public void stopIssuingDeletions(Cursor.ResettingTransitionsReceiver receiver)
+        {
+            ((DeletionAwareTrie.DeletionsStopControl) source).stopIssuingDeletions(receiver);
+        }
+
+        @Override
+        public Plain<T, Cursor<T>> tailCursor(Direction direction)
+        {
+            Cursor<T> tail = source.tailCursor(direction);
+            return tail instanceof DeletionAwareTrie.DeletionsStopControl
+                   ? new PlainSwitchable<>(tail)
+                   : new Plain<>(tail);
+        }
+    }
+
     abstract class WithRanges<S extends RangeState<S>, C extends RangeCursor<S>>
     extends Plain<S, C>
     implements RangeCursor<S>

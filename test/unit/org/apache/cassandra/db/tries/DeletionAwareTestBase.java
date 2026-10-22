@@ -92,6 +92,13 @@ public class DeletionAwareTestBase
             assertEquals(msg + " deletions",
                          merged.stream().map(DataPoint::marker).filter(x -> x != null).collect(Collectors.toList()),
                          deletionOnlyList(trie));
+            // DeletionMarker.equals ignores the position, so compare the printed form too, which includes the key.
+            assertEquals(msg + " keys",
+                         merged.stream().map(DataPoint::toString).collect(Collectors.toList()),
+                         toList(trie).stream().map(DataPoint::toString).collect(Collectors.toList()));
+            assertEquals(msg + " deletion keys",
+                         merged.stream().map(DataPoint::marker).filter(x -> x != null).map(DeletionMarker::toString).collect(Collectors.toList()),
+                         deletionOnlyList(trie).stream().map(DeletionMarker::toString).collect(Collectors.toList()));
             System.out.println(msg + " matched.");
         }
         catch (AssertionError e)

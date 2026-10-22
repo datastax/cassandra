@@ -173,11 +173,14 @@ extends InMemoryBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>> 
     @Override
     public RangeTrie<D> deletionBranchAtRoot()
     {
-        int db = getAlternateBranch(root);
-        if (isNull(db))
-            return dir -> RangeCursor.empty(dir, byteComparableVersion);
-        else
-            return dir -> new InMemoryRangeTrie.InMemoryRangeCursor<>((InMemoryReadTrie<D>) this, dir, db);
+        // The root is read when a cursor is opened, as everywhere else, so that the returned trie is a live view.
+        return dir -> {
+            int db = getAlternateBranch(root);
+            if (isNull(db))
+                return RangeCursor.empty(dir, byteComparableVersion);
+            else
+                return new InMemoryRangeTrie.InMemoryRangeCursor<>((InMemoryReadTrie<D>) this, dir, db);
+        };
     }
 
     @Override
