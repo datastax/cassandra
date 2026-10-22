@@ -856,7 +856,10 @@ public class Config
     public volatile boolean auto_optimise_full_repair_streams = false;
     public volatile boolean auto_optimise_preview_repair_streams = false;
 
-    // see CASSANDRA-17048 and the comment in cassandra.yaml
+    // CC4 introduced this as 'enable_uuid_sstable_identifiers' (default true) before Apache C* 4.1 added
+    // 'uuid_sstable_id_enabled' (default false, see CASSANDRA-17048). CC5 inherits the Apache C* 5.0 name
+    // 'uuid_sstable_identifiers_enabled' and preserves the CC4 default of true.
+    @Replaces(oldName = "enable_uuid_sstable_identifiers", converter = Converters.IDENTITY, deprecated = true)
     public boolean uuid_sstable_identifiers_enabled = true;
 
     /**
