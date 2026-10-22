@@ -36,10 +36,10 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -105,21 +105,23 @@ public class HintsBufferTest
         for (int i = 0; i < load.length; i++)
             load[i] = hostIds[random.nextInt(HOST_ID_COUNT)];
 
-        // calculate the size of a single hint (they will all have an equal size in this test)
-        int hintSize = (int) Hint.serializer.serializedSize(createHint(0, System.currentTimeMillis()), MessagingService.current_version);
-        int entrySize = hintSize + HintsBuffer.ENTRY_OVERHEAD_SIZE;
-
-        // allocate a slab to fit *precisely* HINTS_COUNT hints
-        int slabSize = entrySize * HINTS_COUNT;
-        HintsBuffer buffer = HintsBuffer.create(slabSize);
-
         // use a fixed timestamp base for all mutation timestamps
         long baseTimestamp = System.currentTimeMillis();
+
+        // the buffer writes hints at the storage version; in the trie encoding of VERSION_DS_21 the size of a hint
+        // varies with the zero bytes in its clustering, which the trie stores escaped in its byte-comparable form
+        int version = StorageCompatibilityMode.current().storageMessagingVersion();
+
+        // allocate a slab to fit *precisely* HINTS_COUNT hints
+        int slabSize = 0;
+        for (int i = 0; i < HINTS_COUNT; i++)
+            slabSize += (int) Hint.serializer.serializedSize(createHint(i, baseTimestamp), version) + HintsBuffer.ENTRY_OVERHEAD_SIZE;
+        HintsBuffer buffer = HintsBuffer.create(slabSize);
 
         // create HINT_THREADS_COUNT, start them, and wait for them to finish
         List<Thread> threads = new ArrayList<>(HINT_THREADS_COUNT);
         for (int i = 0; i < HINT_THREADS_COUNT; i ++)
-            threads.add(NamedThreadFactory.createAnonymousThread(new Writer(buffer, load, hintSize, i, baseTimestamp)));
+            threads.add(NamedThreadFactory.createAnonymousThread(new Writer(buffer, load, version, i, baseTimestamp)));
         threads.forEach(java.lang.Thread::start);
         for (Thread thread : threads)
             thread.join();
@@ -147,7 +149,7 @@ public class HintsBufferTest
             Iterator<ByteBuffer> iter = buffer.consumingHintsIterator(hostId);
             while (iter.hasNext())
             {
-                int idx = validateEntry(hostId, iter.next(), baseTimestamp, load);
+                int idx = validateEntry(hostId, iter.next(), baseTimestamp, load, version);
                 load[idx] = null; // nullify each visited entry
             }
         }
@@ -160,7 +162,7 @@ public class HintsBufferTest
         buffer.free();
     }
 
-    private static int validateEntry(UUID hostId, ByteBuffer buffer, long baseTimestamp, UUID[] load) throws IOException
+    private static int validateEntry(UUID hostId, ByteBuffer buffer, long baseTimestamp, UUID[] load, int version) throws IOException
     {
         CRC32 crc = new CRC32();
         DataInputPlus di = new DataInputBuffer(buffer, true);
@@ -174,7 +176,7 @@ public class HintsBufferTest
         assertEquals((int) crc.getValue(), di.readInt());
 
         // read the hint and update/validate overall crc
-        Hint hint = Hint.serializer.deserialize(di, MessagingService.current_version);
+        Hint hint = Hint.serializer.deserialize(di, version);
         updateChecksum(crc, buffer, buffer.position() + 8, hintSize);
         assertEquals((int) crc.getValue(), di.readInt());
 
@@ -212,15 +214,15 @@ public class HintsBufferTest
     {
         final HintsBuffer buffer;
         final UUID[] load;
-        final int hintSize;
+        final int version;
         final int index;
         final long baseTimestamp;
 
-        Writer(HintsBuffer buffer, UUID[] load, int hintSize, int index, long baseTimestamp)
+        Writer(HintsBuffer buffer, UUID[] load, int version, int index, long baseTimestamp)
         {
             this.buffer = buffer;
             this.load = load;
-            this.hintSize = hintSize;
+            this.version = version;
             this.index = index;
             this.baseTimestamp = baseTimestamp;
         }
@@ -230,9 +232,9 @@ public class HintsBufferTest
             int hintsPerThread = HINTS_COUNT / HINT_THREADS_COUNT;
             for (int i = index * hintsPerThread; i < (index + 1) * hintsPerThread; i++)
             {
-                try (HintsBuffer.Allocation allocation = buffer.allocate(hintSize))
+                Hint hint = createHint(i, baseTimestamp);
+                try (HintsBuffer.Allocation allocation = buffer.allocate((int) Hint.serializer.serializedSize(hint, version)))
                 {
-                    Hint hint = createHint(i, baseTimestamp);
                     allocation.write(Collections.singleton(load[i]), hint);
                 }
             }

@@ -42,6 +42,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
@@ -95,13 +96,21 @@ public class BatchlogTest
 
         assertEquals(batch1.id, batch2.id);
         assertEquals(batch1.creationTime, batch2.creationTime);
-        assertEquals(batch1.decodedMutations.size(), batch2.encodedMutations.size());
+        assertEquals(batch1.decodedMutations.size(), batch2.size());
+        // the mutations stay encoded only when the current and the storage versions agree
+        assertEquals(version == StorageCompatibilityMode.current().storageMessagingVersion(), !batch2.isLocal());
 
         Iterator<Mutation> it1 = batch1.decodedMutations.iterator();
-        Iterator<ByteBuffer> it2 = batch2.encodedMutations.iterator();
+        Iterator<Mutation> it2 = batch2.decodedMutations.iterator();
+        Iterator<ByteBuffer> it3 = batch2.encodedMutations.iterator();
         while (it1.hasNext())
         {
-            try (DataInputBuffer in = new DataInputBuffer(it2.next().array()))
+            if (batch2.isLocal())
+            {
+                assertEquals(it1.next().toString(), it2.next().toString());
+                continue;
+            }
+            try (DataInputBuffer in = new DataInputBuffer(it3.next().array()))
             {
                 assertEquals(it1.next().toString(), Mutation.serializer.deserialize(in, version).toString());
             }

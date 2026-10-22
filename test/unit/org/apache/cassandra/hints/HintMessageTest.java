@@ -31,12 +31,16 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.hints.HintsTestUtil.assertHintsEqual;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
@@ -120,4 +124,38 @@ public class HintMessageTest
         assertHintsEqual(hint, deserializedMessage.hint());
     }
 
+    @Test
+    public void testEncodedSizedAtOtherVersionButNotSerialized() throws IOException
+    {
+        HintMessage.Encoded message = encodedAt(MessagingService.VERSION_40);
+
+        // sizing does not depend on the version, but the receiver would decode the bytes at the version of the
+        // connection, not the one they were encoded at
+        assertEquals(HintMessage.serializer.serializedSize(message, MessagingService.VERSION_40),
+                     HintMessage.serializer.serializedSize(message, MessagingService.current_version));
+        assertThatThrownBy(() -> HintMessage.serializer.serialize(message, new DataOutputBuffer(), MessagingService.current_version))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("version " + MessagingService.current_version + " for a hint encoded at version " + MessagingService.VERSION_40);
+    }
+
+    @Test
+    public void testEncodedMessageSizedAtCurrentVersion() throws IOException
+    {
+        // the outbound connection sizes every message at the current version, whatever the version of the connection
+        Message<HintMessage.Encoded> message = Message.out(Verb.HINT_REQ, encodedAt(MessagingService.VERSION_40));
+        assertThat(message.serializedSize(MessagingService.current_version)).isPositive();
+    }
+
+    private static HintMessage.Encoded encodedAt(int version) throws IOException
+    {
+        long now = FBUtilities.timestampMicros();
+        TableMetadata table = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+        Mutation mutation = new RowUpdateBuilder(table, now, bytes("key")).clustering("column").add("val", "val").build();
+
+        try (DataOutputBuffer dob = new DataOutputBuffer())
+        {
+            Hint.serializer.serialize(Hint.create(mutation, now / 1000), dob, version);
+            return new HintMessage.Encoded(UUID.randomUUID(), dob.buffer(), version);
+        }
+    }
 }

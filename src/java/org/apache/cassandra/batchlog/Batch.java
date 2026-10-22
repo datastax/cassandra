@@ -29,6 +29,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.db.TypeSizes.sizeof;
@@ -144,10 +145,11 @@ public final class Batch
             long creationTime = in.readLong();
 
             /*
-             * If version doesn't match the current one, we cannot not just read the encoded mutations verbatim,
-             * so we decode them instead, to deal with compatibility.
+             * Encoded mutations are decoded at the current version and stored by the batchlog labelled with the
+             * storage version, so we keep them verbatim only when version is both; otherwise we decode them.
              */
             return version == MessagingService.current_version
+                   && version == StorageCompatibilityMode.current().storageMessagingVersion()
                  ? createRemote(id, creationTime, readEncodedMutations(in))
                  : createLocal(id, creationTime, decodeMutations(in, version));
         }
