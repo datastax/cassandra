@@ -23,6 +23,7 @@ import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.function.ToLongFunction;
 
 import com.google.common.collect.Iterables;
 import org.junit.BeforeClass;
@@ -38,6 +39,7 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
 
 /// Covers the back-to-front integer decoding of [OnDiskCursor], which the round-trip tests only reach
@@ -226,6 +228,45 @@ public class OnDiskCursorTest
         }
     }
 
+    /// An advance, unlike a skip, starts from a known state, and one that fails part way must not leave that state
+    /// to be reported for wherever the cursor stopped.
+    @Test
+    public void testRangeCursorStateAfterAFailedAdvance() throws IOException
+    {
+        testRangeCursorStateAfterAFailedMove(cursor -> cursor.advance());
+        testRangeCursorStateAfterAFailedMove(cursor -> cursor.advanceMultiple(null));
+    }
+
+    private static void testRangeCursorStateAfterAFailedMove(ToLongFunction<OnDiskCursor.Range<TestRangeState>> move) throws IOException
+    {
+        RangeTrie<TestRangeState> trie = TestRangeState.fromList(TestRangeState.verify(Arrays.asList(
+            new TestRangeState(TrieUtil.directComparable("a"), -1, 1),
+            new TestRangeState(TrieUtil.directComparable("c"), 1, -1))));
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskTrieWriter.write(trie, true, TrieUtil.RANGE_SERDE, out);
+            ByteBuffer buffer = out.asNewBuffer();
+            int[] reads = new int[1];
+            OnDiskCursor.DataDeserializer<TestRangeState> deserializer = (rdr, length) -> {
+                if (++reads[0] > 1)
+                    throw new IOException("Corrupt content");
+                return TrieUtil.RANGE_SERDE.deserialize(rdr, length);
+            };
+            TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(buffer));
+            OnDiskCursor.Range<TestRangeState> cursor = new OnDiskCursor.Range<>(deserializer, factory,
+                                                                                 VERSION, Direction.FORWARD, buffer.limit());
+            move.applyAsLong(cursor);     // to "a", whose range is active until the move to "c"
+            assertNotNull(cursor.state());
+            assertThrows(UncheckedIOException.class, () -> move.applyAsLong(cursor));
+            assertEquals(2, reads[0]);
+            assertThrows(UncheckedIOException.class, cursor::state);
+            cursor.close();
+            assertEquals(0, factory.outstanding);
+            assertThrows(UncheckedIOException.class, cursor::state);
+            assertThrows(UncheckedIOException.class, () -> cursor.tailCursor(Direction.FORWARD));
+        }
+    }
+
     /// A dense node (code `11101111`: eight bytes per pointer) whose child for transition 0x00 is the node itself and
     /// which has no other children.
     private static ByteBuffer selfPointingDenseNode()
@@ -263,6 +304,31 @@ public class OnDiskCursorTest
         assertThrows(UncheckedIOException.class,
                      () -> new OnDiskCursor<Void>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
                                                   Direction.FORWARD, false, false, buffer.limit()));
+    }
+
+    /// A range tail presents its root's ascent content through a backtrack entry that reads no bytes. A prefix whose
+    /// descent content starts the data and which claims ascent content as well asks for that content at position 0,
+    /// which must be rejected, not answered with the tail's root content.
+    @Test
+    public void testRangeTailReadAtStartOfDataIsRejected()
+    {
+        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ 0,                                          // descent content
+                                                        1,                                          // its length
+                                                        (byte) (OnDiskWriteNodeType.PREFIX.bits
+                                                                | OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT
+                                                                | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT),
+                                                        'a',
+                                                        (byte) OnDiskWriteNodeType.CHAIN.bits });   // root, child "a"
+        TestRangeState content = new TestRangeState(TrieUtil.directComparable("a"), -1, 1);
+        TestRangeState rootAscentContent = new TestRangeState(ByteComparable.EMPTY, 1, -1);
+        OnDiskCursor.Range<TestRangeState> cursor = new OnDiskCursor.Range<>((rdr, length) -> content,
+                                                                             new ByteBufferRebufferer(buffer), VERSION,
+                                                                             Direction.FORWARD, buffer.limit() - 1,
+                                                                             OnDiskWriteNodeType.CHAIN.bits,
+                                                                             null, rootAscentContent);
+        cursor.advance();
+        assertEquals(content, cursor.content());
+        assertThrows(UncheckedIOException.class, cursor::advance);
     }
 
     /// The deletion branch pointer is a delta back from its slot. Eight bytes of it can read back negative, which would
@@ -353,7 +419,7 @@ public class OnDiskCursorTest
                     return super.rebuffer(position);
                 }
             };
-            OnDiskTrie<String> read = new OnDiskTrie.WithoutChannel<>(rebufferer, TrieUtil.STRING_SERDE, VERSION, false, buffer.limit());
+            OnDiskTrie<String> read = new OnDiskTrie<>(rebufferer, TrieUtil.STRING_SERDE, VERSION, false, buffer.limit(), null);
             assertEquals(Iterables.size(trie.values()), Iterables.size(read.values()));
             assertEquals(1, rebuffers[0]);
         }

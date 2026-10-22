@@ -27,7 +27,6 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -360,8 +359,8 @@ public class OnDiskTrieWriterTest
 
             ByteBuffer buffer = out.asNewBuffer();
             OnDiskCursor.DataDeserializer<Integer> oneByte = (rdr, length) -> (int) rdr.readByte();
-            TrieUtil.assertTriesEqual(trie(false), new OnDiskTrie.WithoutChannel<>(new ByteBufferRebufferer(buffer), oneByte, VERSION, false, emptyRoot));
-            TrieUtil.assertTriesEqual(trie(false, "a", 1), new OnDiskTrie.WithoutChannel<>(new ByteBufferRebufferer(buffer), oneByte, VERSION, false, root));
+            TrieUtil.assertTriesEqual(trie(false), OnDiskTrie.open(buffer, oneByte, VERSION, false, emptyRoot));
+            TrieUtil.assertTriesEqual(trie(false, "a", 1), OnDiskTrie.open(buffer, oneByte, VERSION, false, root));
         }
     }
 }
