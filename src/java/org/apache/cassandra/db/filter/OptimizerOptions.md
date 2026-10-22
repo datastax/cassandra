@@ -39,7 +39,7 @@ Controls whether the SAI query optimizer is active for this query.
 
 | Value | Meaning |
 |-------|---------|
-| `0`   | Optimizer disabled — the first eligible index is used without cost estimation. |
+| `0`   | Optimizer disabled — no cost-based plan search is done. The query keeps the most selective index clauses (ranked by estimated cardinality), up to `intersection_clause_limit`. |
 | `1`   | Optimizer enabled (default). |
 
 The cluster-wide default is controlled by the system property
@@ -73,14 +73,18 @@ SELECT * FROM products
 
 ### `use_term_statistics`
 
-When `true`, the optimizer uses per-term posting-list statistics (available in index format `EB`
-and later) to produce more accurate cost estimates.  When `false`, it falls back to per-segment
-row-count estimates.
+Controls how the optimizer estimates the number of rows matched by a predicate.
+
+When `true`, the estimate is computed from in-memory per-term histograms (available in index format
+`EB` and later). This is very cheap, but the estimate is less accurate.  When `false`, the optimizer
+runs the index search and counts the matching rows, which is exact but more costly.  The search
+results are reused if the index ends up in the final plan, but the work is wasted if the optimizer
+discards the index.
 
 | Value   | Meaning |
 |---------|---------|
-| `true`  | Use per-term statistics when available. |
-| `false` | Use per-segment statistics only. |
+| `true`  | Estimate from in-memory term statistics when available: fast but less accurate. |
+| `false` | Run the index search to count matching rows: exact but slower. |
 
 The cluster-wide default is controlled by the system property
 `cassandra.sai.query_optimization.use_term_statistics` (dynamically updatable at runtime).
@@ -107,6 +111,9 @@ The default `auto` leaves the choice to the optimizer.
 | `auto`             | Let the optimizer decide (default). |
 | `sort_then_filter` | Score via the ordering index first, then filter by predicates. |
 | `filter_then_sort` | Evaluate predicates first, then score the surviving rows. |
+
+As a rule of thumb, `filter_then_sort` (pre-filtering) is better when the predicate matches very few
+rows, and `sort_then_filter` (post-filtering) is better when the predicate filters out very few rows.
 
 **Example** — force filter-before-score for a hybrid ANN query:
 ```

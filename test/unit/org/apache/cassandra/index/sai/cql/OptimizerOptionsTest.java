@@ -15,6 +15,7 @@
  */
 package org.apache.cassandra.index.sai.cql;
 
+import org.junit.Assume;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -23,16 +24,22 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.OptimizerOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
+import org.apache.cassandra.inject.Injections;
 
+import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Integration tests for per-query SAI optimizer options via {@code WITH optimizer_options = {...}}.
  *
- * <p>This class covers parsing, validation and how the options are carried on the {@code RowFilter}.
- * Tests that check how the options change the query plan live in {@link PerQueryOptimizerOptionsTest}.
+ * <p>This class covers parsing, validation, the interaction with index hints and the effect of
+ * {@code query_optimization_level}, {@code intersection_clause_limit} and {@code use_term_statistics}.
+ * Tests that check how {@code hybrid_sort_order} changes the plan of hybrid queries live in
+ * {@link PerQueryHybridVectorOptimizerOptionsTest}.
  *
  * <p>Verifies:
  * <ul>
@@ -40,13 +47,23 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>Invalid keys and out-of-range values are rejected at prepare time.</li>
  *   <li>{@code query_optimization_level=0} disables the optimizer for that query only,
  *       without mutating the global {@link CassandraRelevantProperties#SAI_QUERY_OPT_LEVEL}.</li>
- *   <li>{@code intersection_clause_limit} and {@code use_term_statistics} are wired
- *       through to the effective values the controller reads.</li>
- *   <li>The global properties are never mutated by per-query options (thread isolation).</li>
+ *   <li>{@code intersection_clause_limit} caps the number of indexes in the plan.</li>
+ *   <li>{@code use_term_statistics} selects between histogram-based and search-based selectivity estimation.</li>
+ *   <li>The global properties are never mutated by per-query options.</li>
  * </ul>
  */
 public class OptimizerOptionsTest extends SAITester
 {
+    /**
+     * Counts how many times the selectivity of a predicate has been estimated by running the index search,
+     * which is what happens when term statistics are not used.
+     */
+    private static final Injections.Counter SEARCH_BASED_ESTIMATE_COUNTER =
+            Injections.newCounter("SearchBasedEstimateCounter")
+                      .add(newInvokePoint().onClass(QueryController.class)
+                                           .onMethod("estimateMatchingRowCountUsingIndex"))
+                      .build();
+
     // -------------------------------------------------------------------------
     // Parsing and validation
     // -------------------------------------------------------------------------
@@ -125,6 +142,14 @@ public class OptimizerOptionsTest extends SAITester
     // query_optimization_level — optimizer disabled per-query
     // -------------------------------------------------------------------------
 
+    /**
+     * Verify that {@code query_optimization_level=0} really disables the optimizer for that query only, and that an
+     * explicit {@code query_optimization_level=1} behaves like the default.
+     *
+     * <p>{@code v2 = 'common'} matches almost every row, so with the optimizer enabled intersecting it with the very
+     * selective {@code v1 = 'rare'} is not worth its cost, and the optimizer drops it from the plan. With the optimizer
+     * disabled there is no cost-based pruning, so both clauses are kept, as they fit in the intersection clause limit.
+     */
     @Test
     public void testOptLevelZeroDisablesOptimizerForThatQueryOnly() throws Throwable
     {
@@ -132,88 +157,138 @@ public class OptimizerOptionsTest extends SAITester
         String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
         String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
 
-        int numRows = 100;
-        for (int i = 0; i < numRows; i++)
+        for (int i = 0; i < 1000; i++)
         {
             execute("INSERT INTO %s (k, v1, v2) VALUES (?, ?, ?)",
                     i,
-                    i < 2 ? "rare" : "common",    // v1='rare' matches 2 rows
-                    i < 4 ? "rare" : "common");    // v2='rare' matches 4 rows
+                    i == 0 || i == 1 ? "rare" : "common",
+                    i == 0 || i == 2 ? "rare" : "common");
         }
 
-        // Sanity: with optimizer ON (level=1), the more selective index is chosen.
+        String query = "SELECT * FROM %s WHERE v1 = 'rare' AND v2 = 'common'";
+        String optimizerOff = " WITH optimizer_options = {'query_optimization_level': '0', 'intersection_clause_limit': '2'}";
+
         assertThat(CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.getInt()).isEqualTo(1);
 
         beforeAndAfterFlush(() -> {
-            // With optimizer, idx1 (more selective) should win for a v1 AND v2 query.
-            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare'", 2).usesAnyOf(idx1, idx2);
+            // Optimizer on: the non-selective clause is dropped.
+            assertThatPlanFor(query, 1).uses(idx1);
 
-            // With per-query opt_level=0, the optimizer is disabled for this query only.
-            // Query must still return the right results.
-            int rowsReturned = execute("SELECT * FROM %s WHERE v1='rare' AND v2='rare' " +
-                                       "WITH optimizer_options = {'query_optimization_level': '0'}").size();
-            assertThat(rowsReturned).isEqualTo(2);
+            // Explicit level 1 behaves like the default.
+            assertThatPlanFor(query + " WITH optimizer_options = {'query_optimization_level': '1', " +
+                              "'intersection_clause_limit': '2'}", 1).uses(idx1);
 
-            // The global must not have been mutated.
+            // Optimizer off for this query only: both clauses are kept.
+            assertThatPlanFor(query + optimizerOff, 1).uses(idx1, idx2);
+
+            // The next query without options is optimized again, and the global is untouched.
+            assertThatPlanFor(query, 1).uses(idx1);
             assertThat(CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.getInt()).isEqualTo(1);
         });
     }
 
-    @Test
-    public void testOptLevelOneExplicitlyMatchesDefaultBehaviour() throws Throwable
-    {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 text, v2 text)");
-        String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
+    // -------------------------------------------------------------------------
+    // intersection_clause_limit — limits the number of intersected clauses
+    // -------------------------------------------------------------------------
 
-        execute("INSERT INTO %s (k, v1, v2) VALUES (1, 'x', 'y')");
+    /**
+     * Verify that {@code intersection_clause_limit} caps the number of indexes used by the plan.
+     *
+     * <p>The optimizer is disabled so that the number of indexes in the plan is determined by the limit alone.
+     */
+    @Test
+    public void testIntersectionClauseLimitCapsIndexesInPlan() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
+        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX idx3 ON %s(v3) USING 'StorageAttachedIndex'");
+
+        for (int i = 0; i < 10; i++)
+            execute("INSERT INTO %s (k, v1, v2, v3) VALUES (?, 0, 0, 0)", i);
+
+        String query = "SELECT * FROM %s WHERE v1 = 0 AND v2 = 0 AND v3 = 0";
+        int globalLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
 
         beforeAndAfterFlush(() -> {
-            // Explicit opt_level=1 should behave the same as the default.
-            assertThatPlanFor("SELECT * FROM %s WHERE v1='x' WITH optimizer_options = {'query_optimization_level': '1'}", 1).uses(idx1);
+            for (int limit = 1; limit <= 3; limit++)
+            {
+                assertThatPlanFor(query + " WITH optimizer_options = {'query_optimization_level': '0', " +
+                                  "'intersection_clause_limit': '" + limit + "'}", 10).uses(limit);
+            }
+
+            assertThat(CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt()).isEqualTo(globalLimit);
         });
     }
 
     // -------------------------------------------------------------------------
-    // intersection_clause_limit — wired through correctly
+    // use_term_statistics — selects the selectivity estimator
     // -------------------------------------------------------------------------
 
     /**
-     * Verify that {@code intersection_clause_limit} is wired through correctly.
+     * Verify that {@code use_term_statistics} selects the estimator used while building the plan.
+     *
+     * <p>With term statistics the row count is estimated from in-memory histograms, so no index search is done.
+     * Without term statistics the optimizer runs the index search to count the matching rows.
      */
     @Test
-    public void testIntersectionClauseLimitStoredOnRowFilter()
+    public void testUseTermStatisticsControlsHowSelectivityIsEstimated() throws Throwable
     {
+        Assume.assumeTrue("Term histograms require index format EB or later",
+                          Version.current(KEYSPACE).onOrAfter(Version.EB));
+
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
-        ReadCommand command = parseReadCommand(
-                formatQuery("SELECT * FROM %s WHERE v = 1 WITH optimizer_options = {'intersection_clause_limit': '7'}"));
+        for (int i = 0; i < 100; i++)
+            execute("INSERT INTO %s (k, v) VALUES (?, ?)", i, i % 10);
 
-        assertThat(command.rowFilter().optimizerOptions.intersectionClauseLimit()).isEqualTo(7);
-        // Global must be unchanged.
-        assertThat(CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt())
-                .isNotEqualTo(7);
+        Injections.inject(SEARCH_BASED_ESTIMATE_COUNTER);
+        boolean globalUseTermStats = CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean();
+        assertThat(globalUseTermStats).isTrue();
+
+        beforeAndAfterFlush(() -> {
+            assertThat(searchBasedEstimates("SELECT * FROM %s WHERE v = 1"))
+                    .as("default (term statistics) must not run an index search to estimate")
+                    .isZero();
+
+            assertThat(searchBasedEstimates("SELECT * FROM %s WHERE v = 1 " +
+                                            "WITH optimizer_options = {'use_term_statistics': 'true'}"))
+                    .as("explicit use_term_statistics=true must not run an index search to estimate")
+                    .isZero();
+
+            assertThat(searchBasedEstimates("SELECT * FROM %s WHERE v = 1 " +
+                                            "WITH optimizer_options = {'use_term_statistics': 'false'}"))
+                    .as("use_term_statistics=false must run an index search to estimate")
+                    .isPositive();
+
+            assertThat(CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean())
+                    .isEqualTo(globalUseTermStats);
+        });
     }
 
-    // -------------------------------------------------------------------------
-    // use_term_statistics — wired through correctly
-    // -------------------------------------------------------------------------
-
     /**
-     * Verify that {@code use_term_statistics} is wired through correctly.
+     * Builds the query plan for the specified query, without executing it, and returns how many times the
+     * selectivity of a predicate was estimated by running the index search.
      */
-    @Test
-    public void testUseTermStatisticsStoredOnRowFilter()
+    private long searchBasedEstimates(String query)
     {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        SEARCH_BASED_ESTIMATE_COUNTER.reset();
 
-        ReadCommand command = parseReadCommand(
-                formatQuery("SELECT * FROM %s WHERE v = 1 WITH optimizer_options = {'use_term_statistics': 'false'}"));
+        ReadCommand command = parseReadCommand(formatQuery(query));
+        StorageAttachedIndexQueryPlan queryPlan = (StorageAttachedIndexQueryPlan) command.indexQueryPlan();
+        assertThat(queryPlan).isNotNull();
 
-        assertThat(command.rowFilter().optimizerOptions.useTermStatistics()).isFalse();
-        // Global must be unchanged (default is true as set by SAITester.resetQueryOptimizationLevel).
-        assertThat(CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean()).isTrue();
+        StorageAttachedIndexSearcher searcher = queryPlan.searcherFor(command);
+        try
+        {
+            assertThat(searcher.buildPlan()).isNotNull();
+        }
+        finally
+        {
+            searcher.abort();
+        }
+        return SEARCH_BASED_ESTIMATE_COUNTER.get();
     }
 
     // -------------------------------------------------------------------------
@@ -246,45 +321,6 @@ public class OptimizerOptionsTest extends SAITester
         assertThat(CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL.getInt()).isEqualTo(globalOptLevel);
         assertThat(CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean()).isEqualTo(globalUseTermStats);
         assertThat(CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt()).isEqualTo(globalIntersectionLimit);
-    }
-
-    // -------------------------------------------------------------------------
-    // Effective values inside QueryController
-    // -------------------------------------------------------------------------
-
-    /**
-     * Verify that effective values inside {@code QueryController} reflect per-query optimizer options.
-     */
-    @Test
-    public void testEffectiveValuesReflectPerQueryOptimizerOptions()
-    {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        execute("INSERT INTO %s (k, v) VALUES (1, 1)");
-
-        String query = formatQuery("SELECT * FROM %s WHERE v = 1 " +
-                                   "WITH optimizer_options = {" +
-                                   "'query_optimization_level': '0', " +
-                                   "'intersection_clause_limit': '3', " +
-                                   "'use_term_statistics': 'false'" +
-                                   "}");
-
-        ReadCommand command = parseReadCommand(query);
-        StorageAttachedIndexQueryPlan saiPlan =
-                (StorageAttachedIndexQueryPlan) command.indexQueryPlan();
-        assertThat(saiPlan).isNotNull();
-
-        StorageAttachedIndexSearcher searcher = saiPlan.searcherFor(command);
-        try
-        {
-            // buildPlan() reads the effective values from the controller; it must not throw
-            // and must use the per-query overrides internally (verified by global-isolation test above).
-            assertThat(searcher.buildPlan()).isNotNull();
-        }
-        finally
-        {
-            searcher.abort();
-        }
     }
 
     // -------------------------------------------------------------------------

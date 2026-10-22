@@ -47,7 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       sort-then-filter uses {@link Plan.LiteralIndexScan}.</li>
  * </ul>
  */
-public class PerQueryOptimizerOptionsTest extends VectorTester
+public class PerQueryHybridVectorOptimizerOptionsTest extends VectorTester
 {
     /**
      * Creates a shared table for hybrid sort-order tests.
