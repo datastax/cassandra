@@ -816,6 +816,10 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                 abortMutation();
                 throw t;
             }
+            finally
+            {
+                releaseMutationCursor();
+            }
         }
     }
 

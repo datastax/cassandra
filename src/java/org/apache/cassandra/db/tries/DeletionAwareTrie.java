@@ -285,8 +285,13 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
                                                       boolean deletionsAtRoot)
     {
         // TODO: Optimize/simplify
+        ByteComparable.Version version;
+        try (RangeCursor<D> probe = deletionTrie.cursor(Direction.FORWARD))
+        {
+            version = probe.byteComparableVersion();
+        }
         return mergeWith(deletionBranch(ByteComparable.EMPTY,
-                                        deletionTrie.cursor(Direction.FORWARD).byteComparableVersion(),
+                                        version,
                                         deletionTrie),
                          throwingResolver(),
                          deletionResolver,
@@ -564,9 +569,12 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     default RangeTrie<D> deletionBranchAtRoot()
     {
         return dir -> {
-            DeletionAwareCursor<T, D> cursor = cursor(dir);
-            RangeCursor<D> deletionBranch = cursor.deletionBranchCursor(dir);
-            return deletionBranch != null ? deletionBranch : RangeCursor.empty(dir, cursor.byteComparableVersion());
+            // The data cursor is only needed to reach the branch, which does not depend on it.
+            try (DeletionAwareCursor<T, D> cursor = cursor(dir))
+            {
+                RangeCursor<D> deletionBranch = cursor.deletionBranchCursor(dir);
+                return deletionBranch != null ? deletionBranch : RangeCursor.empty(dir, cursor.byteComparableVersion());
+            }
         };
     }
 

@@ -24,7 +24,9 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.function.Function;
 
@@ -38,7 +40,9 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.ByteBufferRebufferer;
+import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -434,6 +438,66 @@ public class OnDiskTrieTest
         }
         // Most single-byte changes are detected; make sure the test is not passing because none are.
         assertTrue("Only " + rejected + " corrupt tries rejected", rejected > 100);
+    }
+
+    /// Every way of reading a trie that does not hand a cursor to its caller must give back the buffers of the cursors
+    /// it takes, once the walk has run to its end. Over a file each cursor holds a buffer until it is closed.
+    @Test
+    public void testReadsReleaseTheirCursors() throws IOException, TrieSpaceExhaustedException
+    {
+        InMemoryTrie<String> source = isOrdered ? InMemoryTrie.shortLivedOrdered(VERSION) : InMemoryTrie.shortLived(VERSION);
+        for (String key : new String[]{ "a", "ab", "abc", "abd", "b", "bb", "bbc", "c" })
+            source.putRecursive(TrieUtil.directComparable(key), key, (x, y) -> y);
+        File file = OnDiskTrieWriter.write(source, isOrdered, TrieUtil.STRING_SERDE, new File(java.io.File.createTempFile("release", ".trie")));
+
+        TrieUtil.CountingRebuffererFactory factory =
+            new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(new ChannelProxy(file)));
+        try (OnDiskTrie<String> trie = new OnDiskTrie.WithOwnChannel<>(factory, TrieUtil.STRING_SERDE, VERSION, isOrdered, factory.fileLength()))
+        {
+            ByteComparable.Preencoded a = TrieUtil.directComparable("a");
+            ByteComparable.Preencoded b = TrieUtil.directComparable("b");
+            Map<String, Runnable> reads = new LinkedHashMap<>();
+            for (Direction direction : Direction.values())
+            {
+                reads.put("values " + direction, () -> trie.values(direction).forEach(v -> {}));
+                reads.put("entrySet " + direction, () -> trie.entrySet(direction).forEach(e -> {}));
+                reads.put("filteredValues " + direction, () -> trie.filteredValues(direction, String.class).forEach(v -> {}));
+                reads.put("filteredEntrySet " + direction, () -> trie.filteredEntrySet(direction, String.class).forEach(e -> {}));
+                reads.put("forEachValue " + direction, () -> trie.forEachValue(direction, v -> {}));
+                reads.put("forEachEntry " + direction, () -> trie.forEachEntry(direction, (k, v) -> {}));
+                reads.put("forEachEntrySkippingBranches " + direction, () -> trie.forEachEntrySkippingBranches(direction, (k, v) -> {}));
+                reads.put("tailTries " + direction, () -> trie.tailTries(direction, v -> v.length() == 2)
+                                                              .forEach(e -> e.getValue().values(direction).forEach(v -> {})));
+                reads.put("subtrie values " + direction, () -> trie.subtrie(a, b).values(direction).forEach(v -> {}));
+                reads.put("tailTrie values " + direction, () -> trie.tailTrie(a).values(direction).forEach(v -> {}));
+                reads.put("mergeWith values " + direction, () -> trie.mergeWith(source, (x, y) -> x).values(direction).forEach(v -> {}));
+            }
+            reads.put("valueIterator", () -> trie.valueIterator().forEachRemaining(v -> {}));
+            reads.put("entryIterator", () -> trie.entryIterator().forEachRemaining(e -> {}));
+            reads.put("get", () -> trie.get(a));
+            reads.put("dump", trie::dump);
+            reads.put("process", () -> trie.process(Direction.FORWARD, new TrieDumper.Plain<>(Object::toString)));
+            reads.put("write", () -> {
+                try (DataOutputBuffer out = new DataOutputBuffer())
+                {
+                    OnDiskTrieWriter.write(trie, isOrdered, TrieUtil.STRING_SERDE, out);
+                }
+                catch (IOException e)
+                {
+                    throw new UncheckedIOException(e);
+                }
+            });
+
+            List<String> leaking = new ArrayList<>();
+            for (Map.Entry<String, Runnable> read : reads.entrySet())
+            {
+                int before = factory.outstanding;
+                read.getValue().run();
+                if (factory.outstanding != before)
+                    leaking.add(read.getKey() + " (" + (factory.outstanding - before) + ")");
+            }
+            assertEquals("Reads leaving rebufferers outstanding", new ArrayList<>(), leaking);
+        }
     }
 
     /// A key over a three-letter alphabet, so that random keys share prefixes and land on each other's paths.

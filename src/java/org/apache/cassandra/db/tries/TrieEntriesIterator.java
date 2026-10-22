@@ -60,7 +60,10 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
             if (next != null)
                 gotNext = predicate.test(next);
             else
+            {
                 gotNext = true;
+                cursor.close();     // exhausted; a file-backed cursor holds a buffer until closed
+            }
         }
 
         return next != null;
@@ -171,7 +174,10 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
                     gotNext = next != null;
                 }
                 else
+                {
                     gotNext = true;
+                    cursor.close();     // exhausted; a file-backed cursor holds a buffer until closed
+                }
             }
 
             return next != null;

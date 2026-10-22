@@ -354,47 +354,49 @@ public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor
         OnDiskTrieWriter<T> fw = new OnDiskTrieWriter<>(out, serializer, isOrdered);
         long startPosition = out.position();
 
-        Cursor<T> c = trie.cursor(Direction.REVERSE);
-        T content = c.content();   // handle content on the root node
-        if (content != null)
-            fw.content(content);
-
-        long prevPosition = c.encodedPosition();
-        while (true)
+        try (Cursor<T> c = trie.cursor(Direction.REVERSE))
         {
-            long currPosition = c.advanceMultiple(fw);
-
-            if (Cursor.ascended(currPosition, prevPosition))
-            {
-                // write the nodes that have been completed
-                fw.ascendTo(currPosition);
-
-                if (Cursor.isExhausted(currPosition))
-                {
-                    // An empty trie leaves the stream untouched, and the position there is not a node.
-                    long position = out.position();
-                    return position > startPosition ? position : 0;
-                }
-
-                // update key tracker
-                int depth = Cursor.depth(currPosition);
-                if (depth > 0)
-                {
-                    fw.resetPathLength(depth - 1);
-                    fw.addPathByte(Cursor.incomingTransition(currPosition));
-                }
-            }
-            else
-                fw.addPathByte(Cursor.incomingTransition(currPosition));
-
-            if (Cursor.isOnReturnPath(currPosition))
-                fw.onReturnPath();
-
-            content = c.content();
+            T content = c.content();   // handle content on the root node
             if (content != null)
                 fw.content(content);
 
-            prevPosition = currPosition;
+            long prevPosition = c.encodedPosition();
+            while (true)
+            {
+                long currPosition = c.advanceMultiple(fw);
+
+                if (Cursor.ascended(currPosition, prevPosition))
+                {
+                    // write the nodes that have been completed
+                    fw.ascendTo(currPosition);
+
+                    if (Cursor.isExhausted(currPosition))
+                    {
+                        // An empty trie leaves the stream untouched, and the position there is not a node.
+                        long position = out.position();
+                        return position > startPosition ? position : 0;
+                    }
+
+                    // update key tracker
+                    int depth = Cursor.depth(currPosition);
+                    if (depth > 0)
+                    {
+                        fw.resetPathLength(depth - 1);
+                        fw.addPathByte(Cursor.incomingTransition(currPosition));
+                    }
+                }
+                else
+                    fw.addPathByte(Cursor.incomingTransition(currPosition));
+
+                if (Cursor.isOnReturnPath(currPosition))
+                    fw.onReturnPath();
+
+                content = c.content();
+                if (content != null)
+                    fw.content(content);
+
+                prevPosition = currPosition;
+            }
         }
     }
 
