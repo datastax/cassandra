@@ -70,41 +70,28 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// A branch trie is complete in itself, so its root is the position reached once it has
 /// been fully written — the same convention [OnDiskTrie#open] uses when it takes the
 /// file length as the root.
-/// Note this *holds* a [OnDiskTrieWriter] rather than extending it: the underlying writer is a
-/// `Walker<Slot<T>>` while this is a `Walker<T>`, and Java does not permit inheriting the
-/// same interface with two different type arguments.
+///
+/// This holds the data trie's [OnDiskTrieWriter], whose slots take either the caller's content or a [BranchRoot],
+/// and another that it reuses for each deletion branch.
 public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>>
-implements Cursor.Walker<T, DataOutputPlus>
 {
-    /// The contents of one of a node's two payload slots: live content on the descent side, or the
-    /// absolute position of the node's deletion branch on the ascent side, which [SlotSerializer] turns into a
-    /// delta when it knows where the slot is written. Exactly one of the two is set.
-    static class Slot<T>
+    /// The content of a node's ascent-side payload slot: the absolute position of the node's deletion branch, which
+    /// [SlotSerializer] turns into a delta when it knows where the slot is written. The descent-side slot holds the
+    /// caller's content as is; being private, this class can never be mistaken for it.
+    private static final class BranchRoot
     {
-        final T content;
-        final long deletionBranchRoot;   // absolute stream position; -1 unless this is an ascent-side slot
+        final long position;
 
-        private Slot(T content, long deletionBranchRoot)
+        BranchRoot(long position)
         {
-            this.content = content;
-            this.deletionBranchRoot = deletionBranchRoot;
-        }
-
-        static <T> Slot<T> content(T content)
-        {
-            return new Slot<>(content, -1);
-        }
-
-        static <T> Slot<T> branch(long deletionBranchRoot)
-        {
-            return new Slot<>(null, deletionBranchRoot);
+            this.position = position;
         }
     }
 
     /// Writes whichever of the two kinds of slot it is handed: the caller's content, or the branch pointer as a
     /// minimal-width reversed integer, whose length the node's own length prefix records. The pointer is the delta
     /// from the position the slot starts at back to the branch root.
-    private static class SlotSerializer<T> implements OnDiskTrieWriter.DataSerializer<Slot<T>>
+    private static class SlotSerializer<T> implements OnDiskTrieWriter.DataSerializer<Object>
     {
         final OnDiskTrieWriter.DataSerializer<T> contentSerializer;
 
@@ -114,20 +101,21 @@ implements Cursor.Walker<T, DataOutputPlus>
         }
 
         @Override
-        public void serialize(DataOutputPlus out, Slot<T> value) throws IOException
+        @SuppressWarnings("unchecked")
+        public void serialize(DataOutputPlus out, Object value) throws IOException
         {
-            if (value.content != null)
+            if (!(value instanceof BranchRoot))
             {
-                contentSerializer.serialize(out, value.content);
+                contentSerializer.serialize(out, (T) value);
                 return;
             }
 
             // OnDiskWriteNodeType.writePayload emits the ascent-side slot first, so this is where the node's data
             // starts. The branch was written before the node; when the node has no children, the branch ends right
             // here and the delta is 0.
-            long delta = out.position() - value.deletionBranchRoot;
-            assert delta >= 0 : "Deletion branch root " + value.deletionBranchRoot
-                                + " is after its node at " + out.position();
+            long branchRoot = ((BranchRoot) value).position;
+            long delta = out.position() - branchRoot;
+            assert delta >= 0 : "Deletion branch root " + branchRoot + " is after its node at " + out.position();
             OnDiskTrieWriter.writeReversedSized(out, delta, OnDiskTrieWriter.bytesFor(delta));
         }
     }
@@ -136,18 +124,15 @@ implements Cursor.Walker<T, DataOutputPlus>
     final OnDiskTrieWriter.DataSerializer<D> deletionSerializer;
 
     /// The writer for the data trie itself.
-    final OnDiskTrieWriter<Slot<T>> inner;
+    final OnDiskTrieWriter<Object> inner;
 
-    /// Non-null only while a deletion branch is being written.
-    private OnDiskTrieWriter<D> branchWriter;
-    /// Stream position when the current deletion branch was entered, to tell a branch that wrote
-    /// nothing from one that did.
-    private long branchStartPosition;
+    /// The writer for each deletion branch in turn. Null until the first deletion branch, so that a trie without
+    /// any does not allocate it.
+    OnDiskTrieWriter<D> branchWriter;
 
-
-    public OnDiskDeletionAwareTrieWriter(DataOutputPlus out,
-                                         OnDiskTrieWriter.DataSerializer<T> contentSerializer,
-                                         OnDiskTrieWriter.DataSerializer<D> deletionSerializer)
+    private OnDiskDeletionAwareTrieWriter(DataOutputPlus out,
+                                          OnDiskTrieWriter.DataSerializer<T> contentSerializer,
+                                          OnDiskTrieWriter.DataSerializer<D> deletionSerializer)
     {
         this.out = out;
         this.deletionSerializer = deletionSerializer;
@@ -157,95 +142,10 @@ implements Cursor.Walker<T, DataOutputPlus>
         this.inner = new OnDiskTrieWriter<>(out, new SlotSerializer<>(contentSerializer), false);
     }
 
-    /// Write out every node the walk has finished with. Called by the driving loop on ascent,
-    /// mirroring [OnDiskTrieWriter#ascendTo].
-    public void ascendTo(long newEncodedPosition) throws IOException
-    {
-        inner.ascendTo(newEncodedPosition);
-    }
-
-    // ---- walker callbacks -------------------------------------------------------------
-
-    @Override
-    public void content(T content)
-    {
-        inner.content(Slot.content(content));
-    }
-
-    /// Not [DeletionAwareCursor.DeletionAwareWalker]: that contract reports a branch's markers but
-    /// never its ascents, and [OnDiskTrieWriter] only emits nodes on ascent. The driver below walks both
-    /// levels explicitly instead, feeding the branch to [#branchWriter], so these are plain methods rather than
-    /// interface overrides.
-    public void enterDeletionsBranch()
-    {
-        // Start a nested trie in the same stream. Its bytes land before the node that will
-        // reference them, so the recorded root is a backward pointer like every other.
-        //
-        // Always written ordered, independently of the data trie: a deletion branch is a range
-        // trie, it is read back through OnDiskCursor.Range, and that always reads with
-        // isOrdered = true. Writing it unordered loses the ascent-path stops and the read-back
-        // positions disagree on ON_RETURN_PATH_BIT.
-        branchWriter = new OnDiskTrieWriter<>(out, deletionSerializer, true);
-        branchStartPosition = out.position();
-    }
-
-    /// @return the position of the branch just written, to be recorded in the node's ascent-side slot (which
-    ///         stores it as a delta from the slot), or
-    ///         0 if the branch turned out to have no content, as [#write] reports an empty trie.
-    public long exitDeletionsBranch()
-    {
-        branchWriter.complete();
-        // A branch can be entered and produce nothing: `intersect` gives one when the set matches only a prefix
-        // of the branch's data, so the walk descends into the branch and then finds no marker below (see
-        // OnDiskDeletionAwareTrieTest.testDeletionBranchEmptiedByIntersection).
-        //
-        // A trie with no content leaves the stream untouched (see OnDiskTrieWriter.ascendTo), so the
-        // position is that of whatever node was written last, or 0 if nothing has been written
-        // yet. Report "no branch" rather than a root that is not a node: a recorded root makes
-        // the reader set MAY_HAVE_DELETION_BRANCH_BIT and decode that byte as a node code.
-        long position = out.position();
-        long root = position > branchStartPosition ? position : 0;
-        branchWriter = null;
-        return root;
-    }
-
-    // ---- path tracking ----------------------------------------------------------------
-    // These describe the data trie; a deletion branch is walked straight into [#branchWriter].
-
-    @Override
-    public void addPathByte(int nextByte)
-    {
-        inner.addPathByte(nextByte);
-    }
-
-    @Override
-    public void addPathBytes(org.agrona.DirectBuffer buffer, int pos, int count)
-    {
-        inner.addPathBytes(buffer, pos, count);
-    }
-
-    @Override
-    public void resetPathLength(int newLength)
-    {
-        inner.resetPathLength(newLength);
-    }
-
-    @Override
-    public void onReturnPath()
-    {
-        inner.onReturnPath();
-    }
-
-    @Override
-    public DataOutputPlus complete()
-    {
-        return inner.complete();
-    }
-
     /// Serialize a deletion-aware trie.
     ///
-    /// [DeletionAwareCursor#process] cannot drive this: it never calls `ascendTo`, and [OnDiskTrieWriter]
-    /// only emits nodes on ascent — which is why [OnDiskTrieWriter#write] has its own loop. The same
+    /// [DeletionAwareCursor#process] cannot drive this: it never reports ascents, and [OnDiskTrieWriter]
+    /// only emits nodes on ascent — which is why the writers are driven by [OnDiskTrieWriter#step]. The same
     /// applies to a deletion branch, so both levels are walked explicitly here.
     ///
     /// Writes in [Direction#REVERSE] like [OnDiskTrieWriter#write], so the root ends up last and the trie
@@ -264,34 +164,10 @@ implements Cursor.Walker<T, DataOutputPlus>
         try (DeletionAwareCursor<T, D> c = trie.cursor(Direction.REVERSE))
         {
             emitAt(fw, c);
-            long prevPosition = c.encodedPosition();
-            while (true)
-            {
-                long currPosition = c.advanceMultiple(fw);
-                if (Cursor.ascended(currPosition, prevPosition))
-                {
-                    fw.ascendTo(currPosition);
-                    if (Cursor.isExhausted(currPosition))
-                        break;
-
-                    int depth = Cursor.depth(currPosition);
-                    if (depth > 0)
-                    {
-                        fw.resetPathLength(depth - 1);
-                        fw.addPathByte(Cursor.incomingTransition(currPosition));
-                    }
-                }
-                else
-                    fw.addPathByte(Cursor.incomingTransition(currPosition));
-
-                if (Cursor.isOnReturnPath(currPosition))
-                    fw.onReturnPath();
-
+            long position = c.encodedPosition();
+            while (!Cursor.isExhausted(position = fw.inner.step(c, position)))
                 emitAt(fw, c);
-                prevPosition = currPosition;
-            }
         }
-        fw.complete();
         // An empty trie leaves the stream untouched, and the position there is not a node.
         long position = out.position();
         return position > startPosition ? position : 0;
@@ -319,9 +195,22 @@ implements Cursor.Walker<T, DataOutputPlus>
             {
                 try (branch)
                 {
-                    fw.enterDeletionsBranch();
-                    writeBranch(fw.branchWriter, branch);
-                    branchRoot = fw.exitDeletionsBranch();
+                    // Always written ordered, independently of the data trie: a deletion branch is a range
+                    // trie, it is read back through OnDiskCursor.Range, and that always reads with
+                    // isOrdered = true. Writing it unordered loses the ascent-path stops and the read-back
+                    // positions disagree on ON_RETURN_PATH_BIT.
+                    if (fw.branchWriter == null)
+                        fw.branchWriter = new OnDiskTrieWriter<>(fw.out, fw.deletionSerializer, true);
+                    // A nested trie in the same stream. Its bytes land before the node that will reference them, so
+                    // the recorded root is a backward pointer like every other.
+                    long branchStart = fw.out.position();
+                    fw.branchWriter.writeFrom(branch);
+                    // A branch can be entered and produce nothing: `intersect` gives one when the set matches only a
+                    // prefix of the branch's data (see testDeletionBranchEmptiedByIntersection). It leaves the stream
+                    // untouched, at whatever node was written last, and a root recorded there would make the reader
+                    // set MAY_HAVE_DELETION_BRANCH_BIT and decode that byte as a node code.
+                    if (fw.out.position() > branchStart)
+                        branchRoot = fw.out.position();
                 }
             }
         }
@@ -332,46 +221,9 @@ implements Cursor.Walker<T, DataOutputPlus>
         // slots to the in-progress node, whose bytes are emitted later on ascent, so the recorded
         // root remains a backward pointer.
         if (content != null)
-            fw.inner.content(Slot.content(content));
+            fw.inner.content(content);
         if (branchRoot > 0)
-            fw.inner.ascentContent(Slot.branch(branchRoot));
-    }
-
-    /// The same ascent-driven loop as above, over one deletion branch, feeding the nested writer.
-    private static <D extends RangeState<D>> void writeBranch(OnDiskTrieWriter<D> bw, RangeCursor<D> c) throws IOException
-    {
-        D content = c.content();
-        if (content != null)
-            bw.content(content);
-
-        long prevPosition = c.encodedPosition();
-        while (true)
-        {
-            long currPosition = c.advanceMultiple(bw);
-            if (Cursor.ascended(currPosition, prevPosition))
-            {
-                bw.ascendTo(currPosition);
-                if (Cursor.isExhausted(currPosition))
-                    return;
-
-                int depth = Cursor.depth(currPosition);
-                if (depth > 0)
-                {
-                    bw.resetPathLength(depth - 1);
-                    bw.addPathByte(Cursor.incomingTransition(currPosition));
-                }
-            }
-            else
-                bw.addPathByte(Cursor.incomingTransition(currPosition));
-
-            if (Cursor.isOnReturnPath(currPosition))
-                bw.onReturnPath();
-
-            content = c.content();
-            if (content != null)
-                bw.content(content);
-            prevPosition = currPosition;
-        }
+            fw.inner.ascentContent(new BranchRoot(branchRoot));
     }
 
 }
