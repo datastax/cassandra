@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
@@ -32,6 +33,7 @@ import java.util.function.Supplier;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
+import com.google.common.primitives.Bytes;
 
 import org.junit.Test;
 
@@ -41,14 +43,18 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.CounterMutation;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.RangeTombstone;
+import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.PartitionUpdateSizeCache;
+import org.apache.cassandra.db.partitions.TrieBackedPartition;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdateSerializer;
 import org.apache.cassandra.db.rows.BTreeRow;
@@ -58,8 +64,14 @@ import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.TrieBackedRow;
+import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.tries.DeletionAwareTrie;
+import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.OnDiskDeletionAwareTrie;
+import org.apache.cassandra.db.tries.RangeTrie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
@@ -71,7 +83,9 @@ import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -193,6 +207,141 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
     }
 
     /**
+     * Every other test here compares the encoding with itself: sizes with bytes written, and what is read with what
+     * was written. A change that alters the writer and the reader alike passes all of them, and still leaves commit
+     * logs already written unreadable. These are the bytes {@link MessagingService#VERSION_DS_21} writes for each shape
+     * an update can take, and they must not change. A counter is pinned as the update a client write makes, as the
+     * context its leader replaces that with carries the leader's host id.
+     */
+    @Test
+    public void testWireBytesArePinned() throws Throwable
+    {
+        createRichTable();
+
+        assertWireBytes("rich update", viaBTree(richUpdate()),
+                        "046b657930030380fdfffffadfb5522583e8ffffffffffa9ff6bdc00020173027373020176016d000100018160070183"
+                        + "e800010100000000000c604007010000000183e8000100000c6040070183e800010100000000000c2040070100000001"
+                        + "83e8000100000c2040070183e700030100000000000c07010000000183e7000300000cf6014007010000000100000000"
+                        + "010b07010000000100000000010bf73840655647381e140905018c00008042070183e700030100000000000c07010000"
+                        + "000183e7000300000cf6014007010000000100000000010b07010000000100000000010bf73640188007010000000000"
+                        + "0008070001000000000008f703000083e800000021090040040083e804f5384003020083e80162013209380041030200"
+                        + "83e801610131093800410d62618040400501f503000083e80000000b090a010080040083e804f5384039030180000080"
+                        + "4203030483e801790738004103030483e80178073800410b79788040400501f503010083e800000007090a0100800400"
+                        + "83e804f5334018808c010601f7");
+        assertWireBytes("row deletion only", viaBTree(build(builder -> builder.timestamp(1999).nowInSec(1500).row(1).delete())),
+                        "046b657930010119fffffadfb5522587cfffffffffffa9ff6bdc0000001f070100000200000108070001000002000108"
+                        + "f63801000080404500010601f6");
+        assertWireBytes("expiring row", viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).ttl(60).row(1).add("v", 11))),
+                        "046b65793001003dfffffadfb5522587d0ffffffffffa9ff6c183c00010176001f0300020000000000000b0a00400401"
+                        + "00000005f538010000804440400601f5");
+        assertWireBytes("row without primary key liveness",
+                        viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).noPrimaryKeyLivenessInfo().add("v", 11))),
+                        "046b657930010031fffffadfb5522587d00000000101760019030000000000000b0800400801f5380100008044404006"
+                        + "01f5");
+        assertWireBytes("deletions only", viaBTree(build(builder -> {
+                            builder.timestamp(1000).nowInSec(1500).delete();
+                            builder.timestamp(2000).nowInSec(1500);
+                            builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
+                        })),
+                        "046b657930000200fffffadfb5522583e8ffffffffffa9ff6bdc00000040070183e800010100000000000c2040070100"
+                        + "00000183e8000100000c20400f090580000080424040070100000000000008070001000000000008f700010601f6");
+        assertWireBytes("point deletion inside a range tombstone", pointDeletionInsideRange(),
+                        "046b657930000200fffffadfb5522587cfffffffffffa9ff6bdc00020173027373020176016d00010001370701000001"
+                        + "00000008604007010000010100000101010002000e384007000100000100000820401c0b090605840000804043000106"
+                        + "01f6");
+        // The trie keys a column by its index among the table's columns, and a cell names its column by its index
+        // among the header's: 1 and 0 here, for the static column and the regular one alike.
+        assertWireBytes("second static and second regular column only",
+                        viaBTree(build(builder -> {
+                            builder.timestamp(2000).nowInSec(1500);
+                            builder.row().add("ss", ImmutableSet.of("x"));
+                            builder.row(1).add("m", ImmutableMap.of("a", "1"));
+                        })),
+                        "046b657930020071fffffadfb5522587cfffffffffffa9ff6bdc000102737301016d0101808d07010000030000000807"
+                        + "0001000003000008f60140070000000105070000000105f7380100008044070100000300000008070001000003000008"
+                        + "f60140070000000105070000000105f7224018800300000101610131083800614240400501f5014004000103f5380100"
+                        + "008044030104010178063800784240400501f5014004000103f5174018803a010601f7");
+        assertWireBytes("cell tombstone", viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).delete("v"))),
+                        "046b65793001002dfffffadfb5522587d0ffffffffffa9ff6bdc00000101760018030005000005004004000003f53801"
+                        + "0000804440400601f5");
+        assertWireBytes("map element deletion",
+                        viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).appendAll("m", Collections.singletonMap("a", null)))),
+                        "046b65793001003afffffadfb5522587d0ffffffffffa9ff6bdc000001016d0123030005000001610738006142404005"
+                        + "01f5014004000003f538010000804440400601f5");
+
+        // Through the entry point the mutation path uses: the table id, then the format byte of the trie encoding.
+        TriePartitionUpdate update = richUpdate();
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            PartitionUpdate.serializer.serialize(update, out, VERSION);
+            byte[] written = out.toByteArray();
+            int idLength = update.metadata().id.serializedSize();
+            try (DataOutputBuffer id = new DataOutputBuffer())
+            {
+                update.metadata().id.serialize(id);
+                assertArrayEquals(id.toByteArray(), Arrays.copyOf(written, idLength));
+            }
+            assertEquals(1, written[idLength]);
+            assertArrayEquals(serialize(update), Arrays.copyOfRange(written, idLength + 1, written.length));
+        }
+
+        createTable("CREATE TABLE %s (k text, c int, cnt counter, PRIMARY KEY(k, c))");
+        assertWireBytes("counter update",
+                        viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("cnt", CounterContext.instance().createUpdate(5L)))),
+                        "046b657930010051fffffadfb5522587d00000000103636e74003c0300000024000100000000000000000000c0000000"
+                        + "000000000000000000000001000000000000000529004004000003f538010000804440400601f5");
+    }
+
+    /**
+     * The update as converted from a BTree update. The row and tombstone counts and the data size an update carries
+     * depend on how it was built, and a simple builder builds with the table's partition update factory, which the
+     * storage compatibility mode chooses. Converting from the same BTree update gives the same update in every mode.
+     */
+    private static TriePartitionUpdate viaBTree(TriePartitionUpdate update)
+    {
+        return TriePartitionUpdate.asTrieUpdate(BTreePartitionUpdate.asBTreeUpdate(update));
+    }
+
+    /**
+     * A row deleted inside a range tombstone, the row deletion being a point deletion (the form the stage 3 trie
+     * partitions give one), so that the marker carries the range's deletion on both of its sides.
+     */
+    private TriePartitionUpdate pointDeletionInsideRange() throws TrieSpaceExhaustedException
+    {
+        TableMetadata metadata = currentTableMetadata();
+        InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> rowDeletion = TrieBackedRow.newTrie();
+        rowDeletion.mutator((Object existing, Object update) -> update,
+                            (TrieTombstoneMarker existing, TrieTombstoneMarker update) -> update,
+                            (Object existing, TrieTombstoneMarker update) -> existing,
+                            (TrieTombstoneMarker deletion, Object update) -> update,
+                            true,
+                            features -> false)
+                   .apply(DeletionAwareTrie.deletionBranch(ByteComparable.EMPTY,
+                                                           TrieBackedPartition.BYTE_COMPARABLE_VERSION,
+                                                           RangeTrie.point(ByteComparable.EMPTY,
+                                                                           TrieBackedPartition.BYTE_COMPARABLE_VERSION,
+                                                                           true,
+                                                                           TrieTombstoneMarker.point(DeletionTime.build(2000, 1500),
+                                                                                                     TrieTombstoneMarker.Kind.ROW))));
+
+        PartitionUpdate.Builder builder = TriePartitionUpdate.FACTORY.builder(metadata,
+                                                                              metadata.partitioner.decorateKey(ByteBufferUtil.bytes("key0")),
+                                                                              metadata.regularAndStaticColumns(),
+                                                                              1);
+        builder.add(new RangeTombstone(Slice.make(Clustering.make(ByteBufferUtil.bytes(5)), Clustering.make(ByteBufferUtil.bytes(9))),
+                                       DeletionTime.build(1999, 1500)));
+        builder.add(TrieBackedRow.create(metadata, Clustering.make(ByteBufferUtil.bytes(6)), rowDeletion));
+        return (TriePartitionUpdate) builder.build();
+    }
+
+    private void assertWireBytes(String shape, TriePartitionUpdate update, String expectedHex) throws IOException
+    {
+        byte[] bytes = serialize(update);
+        assertEquals(shape, expectedHex, Hex.bytesToHex(bytes));
+        assertEquals(shape, update, deserialize(bytes));
+    }
+
+    /**
      * The sizing path writes the trie a second time to measure it ({@code serializedTrieSize}).
      * If the two runs ever disagreed, the commit log would get a wrong length.
      */
@@ -290,17 +439,14 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         TriePartitionUpdate update = richUpdate();
         long heapSize = update.unsharedHeapSize();
         TriePartitionUpdateSerializer.serializedSize(update, MessagingService.VERSION_DS_21);
-        TriePartitionUpdateSerializer.serializedSize(update, MessagingService.VERSION_DS_20);
 
         assertTrue(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_21));
-        assertTrue(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_20));
         assertTrue(PartitionUpdateSizeCache.hasRetainedTrie(update));
         assertEquals(heapSize + ObjectSizes.sizeOnHeapOf(PartitionUpdateSizeCache.retainedTrie(update)), update.unsharedHeapSize());
 
         PartitionUpdateSizeCache.invalidate(update);
 
         assertFalse(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_21));
-        assertFalse(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_20));
         assertFalse(PartitionUpdateSizeCache.hasRetainedTrie(update));
         assertEquals(heapSize, update.unsharedHeapSize());
 
@@ -1141,6 +1287,90 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         catch (UncheckedIOException e)
         {
             assertTrue(e.getMessage(), e.getMessage().contains("Corrupt serialized trie"));
+        }
+    }
+
+    /**
+     * A deletion marker never holds a live deletion, which is what a deletion time whose timestamp is
+     * {@link Long#MIN_VALUE} reads back as.
+     */
+    @Test
+    public void testLiveDeletionTimeInMarkerIsRejected() throws Throwable
+    {
+        createRichTable();
+        // Timestamps are written as deltas from the update's smallest one, which is the deletion's own here.
+        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(Long.MAX_VALUE).nowInSec(1500).row(1).delete()));
+        assertEquals(Long.MAX_VALUE, update.stats().minTimestamp);
+        byte[] bytes = serialize(update);
+
+        // The first marker: its tag, the presence of its left side, and the delta of that side's timestamp. Raising
+        // the delta by one wraps the timestamp round to Long.MIN_VALUE.
+        int marker = trieStart(update, bytes);
+        assertArrayEquals(new byte[]{ 7, 1, 0 }, Arrays.copyOfRange(bytes, marker, marker + 3));
+        bytes[marker + 2] = 1;
+
+        assertCorruptionRejected(bytes, "Live deletion time");
+    }
+
+    /**
+     * A deletion marker with the same deletion on both sides and neither a point deletion nor a level marker changes
+     * nothing, and the writer never writes one.
+     */
+    @Test
+    public void testMarkerChangingNothingIsRejected() throws Throwable
+    {
+        createRichTable();
+        byte[] bytes = serialize(pointDeletionInsideRange());
+
+        // The row deletion's marker: the range's deletion on its left and right, the row's as its point deletion, and
+        // no level marker. Dropping the point deletion leaves the bytes of its deletion time unread.
+        byte[] pointMarker = { 7, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 2, 0 };
+        int marker = Bytes.indexOf(bytes, pointMarker);
+        assertTrue(marker > 0);
+        bytes[marker + 9] = 0;
+        bytes[marker + 10] = 0;
+
+        assertCorruptionRejected(bytes, "nothing else");
+    }
+
+    /**
+     * Every payload is read to the end of the slot the trie gives it and no further; one that is not has bytes that
+     * are not what the writer wrote.
+     */
+    @Test
+    public void testPayloadNotReadToItsEndIsRejected() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(1999).nowInSec(1500).row(1).delete()));
+        byte[] bytes = serialize(update);
+
+        // The row deletion's first marker: present on its left with a deletion time and kind, absent on its right,
+        // no point deletion, and a row level marker. Marking the left side absent has the rest of it read as the right
+        // side, the point deletion and the level marker, three bytes short of its end.
+        int marker = trieStart(update, bytes);
+        assertArrayEquals(new byte[]{ 7, 1, 0, 0, 2, 0, 0, 1 }, Arrays.copyOfRange(bytes, marker, marker + 8));
+        bytes[marker + 1] = 0;
+
+        assertCorruptionRejected(bytes, "Read 5 bytes of a payload of 8");
+    }
+
+    /** Where the trie starts in the bytes written for the update, the trie being written last. */
+    private static int trieStart(TriePartitionUpdate update, byte[] bytes)
+    {
+        TriePartitionUpdateSerializer.serializedSize(update, VERSION);
+        return bytes.length - PartitionUpdateSizeCache.retainedTrie(update).remaining();
+    }
+
+    private void assertCorruptionRejected(byte[] bytes, String expectedMessage) throws IOException
+    {
+        try
+        {
+            walk(deserialize(bytes));
+            fail("Corrupt bytes were accepted");
+        }
+        catch (UncheckedIOException e)
+        {
+            assertTrue(e.getMessage(), e.getMessage().contains(expectedMessage));
         }
     }
 }

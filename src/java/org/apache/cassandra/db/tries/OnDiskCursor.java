@@ -123,6 +123,11 @@ public class OnDiskCursor<T> implements Cursor<T>
             buffer.position((int) (pos - currentBufferOffset));
         }
 
+        long position()
+        {
+            return currentBufferOffset + buffer.position();
+        }
+
         /// Drop the reference to the cursor's buffer when the cursor gives it back.
         void releaseBuffer()
         {
@@ -150,6 +155,13 @@ public class OnDiskCursor<T> implements Cursor<T>
     public interface DataDeserializer<T>
     {
         T deserialize(DataInputPlus rdr, int length) throws IOException;
+    }
+
+    /// The position in the trie of the next byte the reader handed to a [DataDeserializer] reads, for a deserializer
+    /// that checks how much of its payload it has read.
+    public static long position(DataInputPlus rdr)
+    {
+        return ((OnDiskCursor<?>.SharedStream) rdr).position();
     }
 
     final SharedStream rdr;
