@@ -18,11 +18,14 @@
 
 package org.apache.cassandra.db.partitions;
 
+import java.nio.ByteBuffer;
+
 /**
  * Benchmark-only access to {@link TriePartitionUpdate}'s memoized serialized sizes.
  *
  * {@link TriePartitionUpdateSerializer#serializedSize} caches its result per messaging version on
- * the update itself, so re-sizing the same instance returns a field read rather than doing the work.
+ * the update itself, along with the trie it laid out to arrive at it, so re-sizing the same instance
+ * returns a field read rather than doing the work.
  * A benchmark that reuses one update would therefore measure nothing after its first invocation.
  * Production never sees that: every mutation carries a fresh update, sized at most twice.
  *
@@ -34,11 +37,33 @@ public class PartitionUpdateSizeCache
     public static void invalidate(PartitionUpdate update)
     {
         if (update instanceof TriePartitionUpdate)
+            ((TriePartitionUpdate) update).invalidateSerializationCaches();
+    }
+
+    /** Returns true if the update has a cached serialized size for the given version. */
+    public static boolean isSized(PartitionUpdate update, int version)
+    {
+        if (update instanceof TriePartitionUpdate)
         {
             TriePartitionUpdate trieUpdate = (TriePartitionUpdate) update;
-            trieUpdate.serializedSizeDS21 = -1;
-            trieUpdate.serializedSizeDS20 = -1;
+            if (version == org.apache.cassandra.net.MessagingService.VERSION_DS_21)
+                return trieUpdate.serializedSizeDS21 >= 0;
+            if (version == org.apache.cassandra.net.MessagingService.VERSION_DS_20)
+                return trieUpdate.serializedSizeDS20 >= 0;
         }
+        return false;
+    }
+
+    /** Returns the trie layout the update currently holds, or null if it holds none. */
+    public static ByteBuffer retainedTrie(PartitionUpdate update)
+    {
+        return update instanceof TriePartitionUpdate ? ((TriePartitionUpdate) update).serializedTrieDS21 : null;
+    }
+
+    /** Returns true if the update currently holds a retained trie layout. */
+    public static boolean hasRetainedTrie(PartitionUpdate update)
+    {
+        return update instanceof TriePartitionUpdate && ((TriePartitionUpdate) update).serializedTrieDS21 != null;
     }
 
     private PartitionUpdateSizeCache()
