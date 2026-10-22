@@ -48,10 +48,10 @@ extends SkipListMemtable        // to test framework
     }
 
     @Override
-    protected long performPut(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
+    public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
     {
         // TODO: implement
-        return super.performPut(update, indexer, opGroup);
+        return super.put(update, indexer, opGroup);
     }
 
     public MemtableUnfilteredPartitionIterator partitionIterator(ColumnFilter columnFilter, DataRange dataRange)

@@ -82,10 +82,10 @@ public class StreamingRepairTask implements StreamEventHandler
 
     public StreamResultFuture execute()
     {
-        logger.info("[streaming task #{}] Performing {}streaming repair of {} ranges with {}", desc.sessionId, asymmetric ? "asymmetric " : "", ranges.size(), dst);
+        logger.info("[streaming task #{}] parentSession={} Performing {}streaming repair of {} ranges with {}", desc.sessionId, desc.parentSessionId, asymmetric ? "asymmetric " : "", ranges.size(), dst);
         long start = approxTime.now();
         StreamPlan streamPlan = createStreamPlan(dst);
-        logger.info("[streaming task #{}] Stream plan created in {}ms", desc.sessionId, MILLISECONDS.convert(approxTime.now() - start, NANOSECONDS));
+        logger.info("[streaming task #{}] parentSession={} Stream plan created in {}ms", desc.sessionId, desc.parentSessionId, MILLISECONDS.convert(approxTime.now() - start, NANOSECONDS));
         state.phase.start();
         return ctx.streamExecutor().execute(streamPlan);
     }
@@ -119,7 +119,7 @@ public class StreamingRepairTask implements StreamEventHandler
     @Override
     public void onSuccess(StreamState state)
     {
-        logger.info("[repair #{}] streaming task succeed, returning response to {}", desc.sessionId, initiator);
+        logger.info("[repair #{}] parentSession={} streaming task succeed, returning response to {}", desc.sessionId, desc.parentSessionId, initiator);
         this.state.phase.success();
         RepairMessage.sendMessageWithRetries(ctx, new SyncResponse(desc, src, dst, true, state.createSummaries()), SYNC_RSP, initiator);
     }
@@ -132,5 +132,7 @@ public class StreamingRepairTask implements StreamEventHandler
     {
         this.state.phase.fail(t);
         RepairMessage.sendMessageWithRetries(ctx, new SyncResponse(desc, src, dst, false, Collections.emptyList()), SYNC_RSP, initiator);
+        logger.error("[streaming task #{}] parentSession={} stream {} -> {} failed: {}",
+                     desc.sessionId, desc.parentSessionId, src, dst, t.getMessage(), t);
     }
 }

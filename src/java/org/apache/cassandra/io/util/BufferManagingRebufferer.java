@@ -102,6 +102,18 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     }
 
     @Override
+    public long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        return source.positionForSkip(currentPosition, bytesToSkip);
+    }
+
+    @Override
+    public long remainingBytes(long position)
+    {
+        return source.remainingBytes(position);
+    }
+
+    @Override
     public String toString()
     {
         return "BufferManagingRebufferer." + getClass().getSimpleName() + ":" + source;

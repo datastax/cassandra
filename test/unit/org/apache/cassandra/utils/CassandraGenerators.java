@@ -358,7 +358,7 @@ public final class CassandraGenerators
 
             String ks = ksNameGen.generate(rnd);
             String tableName = tableNameGen.generate(rnd);
-            TableParams.Builder params = TableParams.builder();
+            TableParams.Builder params = TableParams.builder(ks);
             if (memtableKeyGen != null)
                 params.memtable(MemtableParams.get(memtableKeyGen.generate(rnd)));
             TableMetadata.Builder builder = TableMetadata.builder(ks, tableName, tableIdGen.generate(rnd))

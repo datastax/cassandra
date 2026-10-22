@@ -44,6 +44,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.IndexStatusFormat;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -548,6 +549,41 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
             Set<Map.Entry<ApplicationState, VersionedValue>> filteredStates = new HashSet<>();
             for (Map.Entry<ApplicationState, VersionedValue> state : states)
                 filteredStates.addAll(filterOutgoingState(state, version).entrySet());
+            return filteredStates;
+        }
+        if (version < MessagingService.VERSION_DS_20)
+            return withLegacyIndexStatus(states);
+        return states;
+    }
+
+    /**
+     * Peers older than {@link MessagingService#VERSION_DS_20} (HCD 1.2) can only parse the legacy index status
+     * format ("keyspace.index" -> status name), so the compact format is rewritten for them. The version of the
+     * value is kept: both formats carry the same statuses, so whichever reaches a node first is equally valid.
+     * <p>
+     * This includes {@link MessagingService#VERSION_40} and {@link MessagingService#VERSION_50}: the latter is also
+     * used by Apache Cassandra 5.0.3+, which parses the compact format, but it has the same value as the HCD 1.2
+     * VERSION_41, which HCD 1.2 nodes use when their current messaging version is lowered with
+     * {@code -Dds.current_messaging_version}. The legacy format is
+     * understood by every version that knows INDEX_STATUS, so it is the safe choice when the peer is ambiguous.
+     */
+    private static Set<Map.Entry<ApplicationState, VersionedValue>> withLegacyIndexStatus(Set<Map.Entry<ApplicationState, VersionedValue>> states)
+    {
+        for (Map.Entry<ApplicationState, VersionedValue> state : states)
+        {
+            if (state.getKey() != ApplicationState.INDEX_STATUS)
+                continue;
+
+            // there is at most one INDEX_STATUS entry, so we are done whether or not it needs rewriting
+            VersionedValue vv = state.getValue();
+            String legacy = IndexStatusFormat.toLegacySerializedFormat(vv.value);
+            if (legacy.equals(vv.value))
+                return states;
+
+            Set<Map.Entry<ApplicationState, VersionedValue>> filteredStates = new HashSet<>(states);
+            filteredStates.remove(state);
+            filteredStates.add(new AbstractMap.SimpleImmutableEntry<>(ApplicationState.INDEX_STATUS,
+                                                                      VersionedValue.unsafeMakeVersionedValue(legacy, vv.version)));
             return filteredStates;
         }
         return states;

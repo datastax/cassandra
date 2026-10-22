@@ -36,6 +36,7 @@ import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.io.util.PageAware;
+import org.apache.cassandra.utils.ChecksumType;
 
 /**
  * Encryption-only writer. This is not a normal file writer in the sense that it is not meant to just accept a sequence
@@ -70,7 +71,6 @@ public class EncryptedSequentialWriter extends SequentialWriter
     // Having the size fixed to 4k also prevents fragmentation in the chunk cache, but may be wasteful if the
     // encryptor needs to store a lot of information each frame.
 
-
     private final ChecksumWriter crcMetadata;
 
     private final ICompressor encryptor;
@@ -104,7 +104,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
         this.encrypted = BufferType.preferredForCompression().allocate(CHUNK_SIZE);
 
         maxBytesInChunk = buffer.capacity();
-        crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)));
+        crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)), ChecksumType.CRC32);
     }
 
     public static int maxBytesInPage(ICompressor encryptor)
@@ -179,7 +179,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
         buffer.clear();
     }
 
-    public void updateFileHandle(FileHandle.Builder fhBuilder, long dataLength)
+    public void updateFileHandle(FileHandle.Builder fhBuilder)
     {
         // Set length to last content position to avoid having to read and decrypt the last chunk to find it.
         fhBuilder.withLengthOverride(lastContent);
@@ -221,14 +221,19 @@ public class EncryptedSequentialWriter extends SequentialWriter
             checksum.update(encrypted);
             encrypted.limit(CHUNK_SIZE);
 
-            if (encrypted.getInt(CHUNK_SIZE - 4) != (int) checksum.getValue())
+            int storedChecksum = encrypted.getInt(CHUNK_SIZE - 4);
+            int computedChecksum = (int) checksum.getValue();
+            if (storedChecksum != computedChecksum)
+                throw new CorruptBlockException(getFile(), truncateChunk, CHUNK_SIZE, storedChecksum, computedChecksum);
+
+            int length = encrypted.getInt(CHUNK_SIZE - FOOTER_LENGTH);
+            if (length < 0 || length > CHUNK_SIZE - FOOTER_LENGTH)
                 throw new CorruptBlockException(getFile(), truncateChunk, CHUNK_SIZE);
 
             try
             {
                 // Repopulate buffer from encrypted data
                 buffer.clear();
-                int length = encrypted.getInt(CHUNK_SIZE - FOOTER_LENGTH);
                 encrypted.position(0).limit(length);
                 encryptor.uncompress(encrypted, buffer);
             }
@@ -288,6 +293,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
         return bufferOffset + (buffer.position() == 0 ? 0 : CHUNK_SIZE);
     }
 
+    @Override
     public void establishEndAddressablePosition(int bytesNeeded) throws IOException
     {
         // Make sure the data does not span a page boundary (and the encryption data put there).

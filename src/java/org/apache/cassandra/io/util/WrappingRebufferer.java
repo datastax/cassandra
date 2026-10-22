@@ -81,6 +81,23 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     }
 
     @Override
+    public long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        return wrapped.positionForSkip(currentPosition, bytesToSkip);
+    }
+
+    /**
+     * Delegates to the wrapped rebufferer, which is only correct for subclasses that change neither
+     * {@link #fileLength()} nor the positions; subclasses that do (e.g. {@link TailOverridingRebufferer}) must override
+     * it (see {@link ReaderFileProxy#remainingBytes}).
+     */
+    @Override
+    public long remainingBytes(long position)
+    {
+        return wrapped.remainingBytes(position);
+    }
+
+    @Override
     public void close()
     {
         assert buffer == null : "Rebufferer is attempted to be closed but the buffer holder has not been released";

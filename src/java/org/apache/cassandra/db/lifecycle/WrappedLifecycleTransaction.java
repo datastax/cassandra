@@ -40,6 +40,12 @@ public class WrappedLifecycleTransaction implements ILifecycleTransaction
         delegate.checkpoint();
     }
 
+    @Override
+    public Throwable abortCheckpoint(Throwable accumulate)
+    {
+        return delegate.abortCheckpoint(accumulate);
+    }
+
     public void update(SSTableReader reader, boolean original)
     {
         delegate.update(reader, original);

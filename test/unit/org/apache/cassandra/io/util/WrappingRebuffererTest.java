@@ -143,6 +143,16 @@ public class WrappingRebuffererTest
             return position;
         }
 
+        public long positionForSkip(long currentPosition, int bytesToSkip)
+        {
+            return currentPosition + bytesToSkip;
+        }
+
+        public long remainingBytes(long position)
+        {
+            return Math.max(0, fileLength() - position);
+        }
+
         public void close()
         {
             // nothing

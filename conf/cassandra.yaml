@@ -683,7 +683,8 @@ commitlog_segment_size: 32MiB
 commitlog_disk_access_mode: legacy
 
 # Compression to apply to SSTables as they flush for compressed tables.
-# Note that tables without compression enabled do not respect this flag.
+# Note that tables without compression enabled, or whose compression includes
+# an encryption component, do not respect this flag.
 #
 # As high ratio compressors like LZ4HC, Zstd, and Deflate can potentially
 # block flushes for too long, the default is to flush with a known fast
@@ -806,6 +807,9 @@ memtable:
 # accepting writes when the limit is exceeded until a flush completes,
 # and will trigger a flush based on memtable_cleanup_threshold
 # If omitted, Cassandra will set both to 1/4 the size of the heap.
+# memtable_heap_space must be positive. memtable_offheap_space may be 0
+# only for the memtable_allocation_type values that never allocate
+# off-heap: heap_buffers and unslabbed_heap_buffers.
 # Min unit: MiB
 # memtable_heap_space: 2048MiB
 # Min unit: MiB

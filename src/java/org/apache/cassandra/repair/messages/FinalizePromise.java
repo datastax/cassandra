@@ -51,6 +51,14 @@ public class FinalizePromise extends RepairMessage
         return sessionID;
     }
 
+    @Override
+    public String toString()
+    {
+        return "FinalizePromise{sessionID=" + sessionID +
+               ", participant=" + participant +
+               ", promised=" + promised + '}';
+    }
+
     public boolean equals(Object o)
     {
         if (this == o) return true;

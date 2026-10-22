@@ -124,6 +124,7 @@ public class IndexHintsDistributedTest extends TestBaseImpl
 
             // test excluded indexes
             assertSelect(cluster, expectedErrorMessage, select + " WITH excluded_indexes = {legacy_idx, non_analyzed_sai_idx}", matchRows);
+            assertSelect(cluster, expectedErrorMessage, select + " ALLOW FILTERING WITH excluded_indexes = {*}", eqRows);
         });
     }
 

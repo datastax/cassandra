@@ -24,6 +24,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -181,7 +182,8 @@ public class PaxosPrepareRefresh implements RequestCallbackWithFailure<PaxosPrep
 
             try (PaxosState state = PaxosState.get(commit))
             {
-                state.commit(commit);
+                // The refreshing peer is where this apply came from -- possibly another datacenter.
+                state.commit(commit, WriteOrigin.fromPeer(from));
                 Ballot latest = state.current(request.promised).latestWitnessedOrLowBound();
                 if (isAfter(latest, request.promised))
                 {

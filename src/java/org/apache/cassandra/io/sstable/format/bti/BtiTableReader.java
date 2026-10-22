@@ -60,6 +60,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.OutputHandler;
 
+import static org.apache.cassandra.io.sstable.CorruptSSTableException.maybeWrapInCorruptSSTableException;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.EQ;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GE;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.Operator.GT;
@@ -84,7 +85,7 @@ public class BtiTableReader extends SSTableReaderWithFilter
         this.approximateBloomFilterMemorySize = isBloomFilterLoaded() ? filter.offHeapSize() : computeExpectedBloomFilterMemorySize();
     }
 
-    protected final Builder unbuildTo(Builder builder, boolean sharedCopy)
+    public final Builder unbuildTo(Builder builder, boolean sharedCopy)
     {
         Builder b = super.unbuildTo(builder, sharedCopy);
         if (builder.getPartitionIndex() == null)
@@ -114,13 +115,16 @@ public class BtiTableReader extends SSTableReaderWithFilter
     }
 
     /**
-     * Whether to filter out data after {@link #last}. Early-open sstables may contain data beyond the switch point
-     * (because an early-opened sstable is not ready until buffers have been flushed), and leaving that data visible
-     * will give a redundant copy with all associated overheads.
+     * Whether to filter out data after {@link #last}. We only do this for zero-copy-streamed sstables where the index
+     * contains more keys than we have streamed.
+     *
+     * Early-open sstables may contain data beyond the switch point, but the partition index is created in a way that
+     * does not surface that data.
      */
-    protected boolean filterLast()
+    @VisibleForTesting
+    public boolean filterLast()
     {
-        return openReason == OpenReason.EARLY && partitionIndex instanceof PartitionIndexEarly || sstableMetadata.zeroCopyMetadata.exists();
+        return sstableMetadata.zeroCopyMetadata.exists();
     }
 
     public long estimatedKeys()
@@ -154,20 +158,26 @@ public class BtiTableReader extends SSTableReaderWithFilter
             try (PartitionIndex.Reader reader = partitionIndex.openReader())
             {
                 TrieIndexEntry rie = reader.ceiling(searchKey, (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch));
-                if (rie != null)
-                    notifySelected(SelectionReason.INDEX_ENTRY_FOUND, listener, operator, updateStats, rie);
-                else
-                    notifySkipped(SkippingReason.INDEX_ENTRY_NOT_FOUND, listener, operator, updateStats);
+                notifyIndexEntryLookup(rie, listener, operator, updateStats);
                 return rie;
             }
-            catch (IOException e)
+            catch (IOException | CorruptSSTableException e)
             {
+                // CorruptSSTableException: e.g. a chunk of an encrypted index failing its checksum or decryption
                 markSuspect();
-                throw new CorruptSSTableException(e, rowIndexFile.path());
+                throw maybeWrapInCorruptSSTableException(e, rowIndexFile.path());
             }
         }
 
         throw new IllegalArgumentException("Invalid op: " + operator);
+    }
+
+    private void notifyIndexEntryLookup(TrieIndexEntry rie, SSTableReadsListener listener, Operator operator, boolean updateStats)
+    {
+        if (rie != null)
+            notifySelected(SelectionReason.INDEX_ENTRY_FOUND, listener, operator, updateStats, rie);
+        else
+            notifySkipped(SkippingReason.INDEX_ENTRY_NOT_FOUND, listener, operator, updateStats);
     }
 
     private TrieIndexEntry getApproximatePosition(PartitionPosition key, Operator op, boolean isLeftBound)
@@ -208,10 +218,11 @@ public class BtiTableReader extends SSTableReaderWithFilter
                 return isLeftBound || assumeNoMatch ? new TrieIndexEntry(~pos) : null;
             });
         }
-        catch (IOException e)
+        catch (IOException | CorruptSSTableException e)
         {
+            // CorruptSSTableException: e.g. a chunk of an encrypted index failing its checksum or decryption
             markSuspect();
-            throw new CorruptSSTableException(e, rowIndexFile.path());
+            throw maybeWrapInCorruptSSTableException(e, rowIndexFile.path());
         }
     }
 
@@ -255,7 +266,15 @@ public class BtiTableReader extends SSTableReaderWithFilter
             try (FileDataInput in = rowIndexFile.createReader(pos))
             {
                 if (assumeNoMatch)
-                    ByteBufferUtil.skipShortLength(in);
+                {
+                    int skip = ByteBufferUtil.readShortLength(in);
+                    // TrieIndexEntry.deserialize below needs getFilePointer() to be exactly the position the writer
+                    // recorded after the key (rowIndexWriter.position()), which is where reading the key would
+                    // leave it. RandomAccessReader.skipBytes guarantees that also for encrypted index files, where a
+                    // key ending at the usable end of a chunk leaves the pointer at the start of the chunk's hole
+                    // rather than at the start of the next chunk (see ReaderFileProxy.positionForSkip).
+                    in.skipBytesFully(skip);
+                }
                 else
                 {
                     ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
@@ -352,10 +371,11 @@ public class BtiTableReader extends SSTableReaderWithFilter
                 }
             }
         }
-        catch (IOException | IllegalArgumentException | ArrayIndexOutOfBoundsException | AssertionError e)
+        catch (IOException | IllegalArgumentException | ArrayIndexOutOfBoundsException | AssertionError | CorruptSSTableException e)
         {
+            // CorruptSSTableException: e.g. a chunk of an encrypted index failing its checksum or decryption
             markSuspect();
-            throw new CorruptSSTableException(e, rowIndexFile.path());
+            throw maybeWrapInCorruptSSTableException(e, rowIndexFile.path());
         }
     }
 

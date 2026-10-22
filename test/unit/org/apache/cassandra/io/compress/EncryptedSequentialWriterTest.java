@@ -15,6 +15,7 @@
  */
 package org.apache.cassandra.io.compress;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -46,6 +47,7 @@ import static org.apache.cassandra.io.compress.EncryptedSequentialWriter.CHUNK_S
 import static org.apache.cassandra.io.compress.EncryptedSequentialWriter.FOOTER_LENGTH;
 import static org.apache.commons.io.FileUtils.readFileToByteArray;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class EncryptedSequentialWriterTest extends SequentialWriterTest
@@ -110,6 +112,31 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
 
         // Test to confirm pipeline on non-chunk boundaries works
         testWrite(createTempFile(testName + "_large", "2"), CHUNK_SIZE * 3 + 100, true);
+
+        assertEquals(0, BufferPools.forChunkCache().usedSizeInBytes());
+    }
+
+    /**
+     * With a multi-key provider every page names its own key and must be encrypted with it; the read-back checks it.
+     */
+    @Test
+    public void testRotatingKeys() throws IOException
+    {
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CompressionParams.CLASS, Encryptor.class.getName());
+        opts.put(EncryptionConfig.CIPHER_ALGORITHM, "AES/CBC/PKCS5Padding");
+        opts.put(EncryptionConfig.SECRET_KEY_STRENGTH, Integer.toString(128));
+        opts.put(EncryptionConfig.KEY_PROVIDER, RotatingKeyProviderFactory.class.getName());
+
+        assertEquals(0, BufferPools.forChunkCache().usedSizeInBytes());
+        compressionParams = CompressionParams.fromMap(opts);
+        encryptor = compressionParams.getSstableCompressor();
+
+        for (boolean useMemmap : new boolean[]{ false, true })
+        {
+            testWrite(createTempFile("rotating_small", useMemmap ? "2" : "1"), 25, useMemmap);
+            testWrite(createTempFile("rotating_large", useMemmap ? "2" : "1"), CHUNK_SIZE * 3 + 100, useMemmap);
+        }
 
         assertEquals(0, BufferPools.forChunkCache().usedSizeInBytes());
     }
@@ -201,19 +228,30 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
         }
 
         assert f.exists();
-        FileHandle.Builder builder = new FileHandle.Builder(f)
-                .withCompressionMetadata(CompressionMetadata.encryptedOnly(compressionParams))
-                .maybeEncrypted(true)
-                .mmapped(useMemmap);
-        try (FileHandle fh = builder.complete();
+        try (CompressionMetadata cm = CompressionMetadata.encryptedOnly(compressionParams);
+             FileHandle fh = new FileHandle.Builder(f)
+                                  .withCompressionMetadata(cm)
+                                  .encryptionOnly()
+                                  .mmapped(useMemmap)
+                                  .complete();
              RandomAccessReader reader = fh.createReader())
         {
-            // No longer true: assertEquals(dataPre.length + rawPost.length, reader.length());
+            // Without a length override, length() is the usable end of the last chunk, which the writer padded after
+            // the data: bytesRemaining() counts that padding (but not the holes), which cannot be read.
+            int maxBytesInPage = EncryptedSequentialWriter.maxBytesInPage(encryptor);
+            assertEquals(f.length() - CHUNK_SIZE + maxBytesInPage, reader.length());
+            // the padding is what is left before length() after the data and the holes of all chunks but the last
+            long holes = (f.length() / CHUNK_SIZE - 1) * (CHUNK_SIZE - maxBytesInPage);
+            long padding = reader.length() - holes - (dataPre.length + rawPost.length);
+            assertTrue(padding >= 0 && padding < maxBytesInPage);
+            assertEquals(dataPre.length + rawPost.length + padding, reader.bytesRemaining());
             byte[] result = new byte[dataPre.length + rawPost.length];
 
             reader.readFully(result);
 
-            // Encrypted writer does not guarantee assert(reader.isEOF());
+            assertEquals(padding, reader.bytesRemaining());
+            assertEquals(padding == 0, reader.isEOF());
+            assertThrows(EOFException.class, reader::readByte);
             reader.close();
 
             byte[] fullInput = new byte[bytesToTest * 2];
@@ -295,10 +333,11 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
             writer.finish();
         }
 
-        FileHandle.Builder builder = new FileHandle.Builder(tempFile)
-                .withCompressionMetadata(CompressionMetadata.encryptedOnly(AESEncryptorParams))
-                .maybeEncrypted(true);
-        try (FileHandle fh = builder.complete();
+        try (CompressionMetadata cm = CompressionMetadata.encryptedOnly(AESEncryptorParams);
+             FileHandle fh = new FileHandle.Builder(tempFile)
+                                  .withCompressionMetadata(cm)
+                                  .encryptionOnly()
+                                  .complete();
              RandomAccessReader reader = fh.createReader())
         {
             assertTrue(reader.isEOF());

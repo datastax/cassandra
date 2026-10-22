@@ -18,14 +18,10 @@
 
 package org.apache.cassandra.io.sstable.format;
 
-import java.util.Optional;
-
-import org.apache.cassandra.config.Config.FlushCompression;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
-import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
-import org.apache.cassandra.io.compress.Encryptor;
-import org.apache.cassandra.io.compress.ICompressor;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -34,43 +30,51 @@ import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ChecksumType;
 
 public class DataComponent
 {
+    private static final ChecksumType checksumType = CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE.getEnum(ChecksumType.CRC32);
+    static final Component digestComponent = getDigestComponent();
+
+    private static Component getDigestComponent()
+    {
+        switch (checksumType)
+        {
+            case CRC32:
+                return Components.DIGEST;
+            case CRC32C:
+                return Components.DIGEST_CRC32C;
+            case CRC64NVME:
+                return Components.DIGEST_CRC64NVME;
+            default:
+                throw new IllegalStateException("Unexpected checksumType for digest file: " + checksumType);
+        }
+    }
+
     public static SequentialWriter buildWriter(Descriptor descriptor,
                                                TableMetadata metadata,
                                                SequentialWriterOption options,
                                                MetadataCollector metadataCollector,
-                                               OperationType operationType,
-                                               FlushCompression flushCompression)
+                                               OperationType operationType)
     {
         if (metadata.params.compression.isEnabled())
         {
-            final CompressionParams compressionParams = buildCompressionParams(metadata, operationType, flushCompression);
-            final ICompressor compressor = compressionParams.getSstableCompressor();
-
-            // Check if this is encryption-only (no actual compression)
-            if (compressor instanceof Encryptor)
-            {
-                return new EncryptedSequentialWriter(descriptor.fileFor(Components.DATA),
-                                                     options,
-                                                     compressor);
-            }
-            else
-            {
-                return new CompressedSequentialWriter(descriptor.fileFor(Components.DATA),
-                                                      descriptor.fileFor(Components.COMPRESSION_INFO),
-                                                      descriptor.fileFor(Components.DIGEST),
-                                                      options,
-                                                      compressionParams,
-                                                      metadataCollector);
-            }
+            final CompressionParams compressionParams = buildCompressionParams(metadata, operationType);
+            return new CompressedSequentialWriter(descriptor.fileFor(Components.DATA),
+                                                  descriptor.fileFor(Components.COMPRESSION_INFO),
+                                                  descriptor.fileFor(digestComponent),
+                                                      checksumType,
+                                                  options,
+                                                  compressionParams,
+                                                  metadataCollector);
         }
         else
         {
             return new ChecksummedSequentialWriter(descriptor.fileFor(Components.DATA),
                                                    descriptor.fileFor(Components.CRC),
-                                                   descriptor.fileFor(Components.DIGEST),
+                                                   descriptor.fileFor(digestComponent),
+                                                   checksumType,
                                                    options);
         }
     }
@@ -80,45 +84,24 @@ public class DataComponent
      *
      * @return {@link CompressionParams}
      */
-    private static CompressionParams buildCompressionParams(TableMetadata metadata, OperationType operationType, FlushCompression flushCompression)
+    private static CompressionParams buildCompressionParams(TableMetadata metadata, OperationType operationType)
     {
         CompressionParams compressionParams = metadata.params.compression;
-        final ICompressor compressor = compressionParams.getSstableCompressor();
 
-        if (null != compressor && operationType == OperationType.FLUSH)
+        if (compressionParams.getSstableCompressor() != null)
         {
-            // When we are flushing out of the memtable throughput of the compressor is critical as flushes,
-            // especially of large tables, can queue up and potentially block writes.
-            // This optimization allows us to fall back to a faster compressor if a particular
-            // compression algorithm indicates we should. See CASSANDRA-15379 for more details.
-            switch (flushCompression)
+            if (operationType == OperationType.FLUSH)
             {
-                // It is relatively easier to insert a Noop compressor than to disable compressed writing
-                // entirely as the "compression" member field is provided outside the scope of this class.
-                // It may make sense in the future to refactor the ownership of the compression flag so that
-                // We can bypass the CompressedSequentialWriter in this case entirely.
-                case none:
-                    compressionParams = CompressionParams.NOOP;
-                    break;
-                case fast:
-                    if (!compressor.recommendedUses().contains(ICompressor.Uses.FAST_COMPRESSION))
-                    {
-                        compressionParams = CompressionParams.FAST;
-                        break;
-                    }
-                    // else fall through
-                case adaptive:
-                    if (!compressor.recommendedUses().contains(ICompressor.Uses.FAST_COMPRESSION))
-                    {
-                        compressionParams = CompressionParams.FAST_ADAPTIVE;
-                        break;
-                    }
-                    // else fall through
-                case table:
-                default:
-                    compressionParams = Optional.ofNullable(compressionParams.forUse(ICompressor.Uses.FAST_COMPRESSION))
-                                                .orElse(compressionParams);
-                    break;
+                // When we are flushing out of the memtable throughput of the compressor is critical as flushes,
+                // especially of large tables, can queue up and potentially block writes.
+                // This optimization allows us to fall back to a faster compressor if a particular
+                // compression algorithm indicates we should. See CASSANDRA-15379 for more details.
+                compressionParams = compressionParams.forFlush(metadata.keyspace);
+            }
+            else
+            {
+                // Allows to plugin custom per-keyspace resolution of compressionParams
+                compressionParams = compressionParams.forCompaction(metadata.keyspace);
             }
         }
         return compressionParams;

@@ -23,6 +23,7 @@ import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
@@ -35,7 +36,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -45,6 +45,8 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.PageAware;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.lang.String.format;
 
@@ -81,9 +83,104 @@ public final class CompressionParams
                                                                        DEFAULT_MIN_COMPRESS_RATIO,
                                                                        Collections.emptyMap());
 
-    public static final CompressionParams DEFAULT = !CassandraRelevantProperties.DETERMINISM_SSTABLE_COMPRESSION_DEFAULT.getBoolean()
-                                                    ? noCompression()
-                                                    : DatabaseDescriptor.shouldUseAdaptiveCompressionByDefault() ? ADAPTIVE : FAST;
+    // This is volatile rather than final so that tests may use reflection to change it and safely publish across threads,
+    // but it should not be changed outside of tests.
+    @SuppressWarnings("FieldMayBeFinal")
+    private static volatile Selector SELECTOR = Selector.fromProperty();
+
+    /**
+     * Returns the default {@link CompressionParams} for tables and views in the given keyspace,
+     * as determined by the active {@link Selector}.
+     *
+     * @param keyspace the keyspace name, used by the selector to determine the appropriate default compression.
+     *                 May be {@code null} when no keyspace context is available (e.g. schema loading or
+     *                 {@link TableParams.Builder} default construction); selectors should treat {@code null}
+     *                 as a request for the global default.
+     * @return the default compression params for the given keyspace.
+     */
+    public static CompressionParams forNewTables(String keyspace)
+    {
+        return SELECTOR.newTableCompression(keyspace);
+    }
+
+    /**
+     * Returns the {@link CompressionParams} to use when flushing a memtable for the given keyspace, as determined
+     * by the active {@link Selector}.
+     *
+     * @param keyspace the keyspace whose memtable is being flushed.
+     * @return the compression params that should be used for the flush SSTable.
+     */
+    public CompressionParams forFlush(String keyspace)
+    {
+        return SELECTOR.flushCompression(keyspace, this);
+    }
+
+    /**
+     * Returns the {@link CompressionParams} to use when compacting SSTables for the given keyspace, as determined
+     * by the active {@link Selector}.
+     *
+     * @param keyspace the keyspace being compacted.
+     * @return the compression params that should be used for the compaction output SSTable.
+     */
+    public CompressionParams forCompaction(String keyspace)
+    {
+        return SELECTOR.compactionCompression(keyspace, this);
+    }
+
+    /**
+     * Interface for selecting the SSTable compression for newly created tables, for flushing, and for compacting
+     * tables in the given keyspace.
+     * <p>
+     * Implementations are loaded via the system property
+     * {@link CassandraRelevantProperties#SSTABLE_COMPRESSION_SELECTOR_CLASS}.
+     * If not set {@link DefaultCompressionSelector} is used.
+     */
+    public interface Selector
+    {
+        /**
+         * @param keyspace the keyspace for which to select the default compression.
+         * @return the default {@link CompressionParams} to use for new tables and views in the given keyspace.
+         */
+        CompressionParams newTableCompression(String keyspace);
+
+        /**
+         * Selects the {@link CompressionParams} to use when flushing a memtable to an SSTable.
+         * <p>
+         * During a flush, throughput of the compressor is critical: large flushes can queue up and block
+         * writes. Implementations may therefore return a faster or lighter compression scheme than the
+         * table's configured params (e.g. switching to an LZ4 or adaptive compressor).
+         *
+         * @param keyspace    the keyspace whose memtable is being flushed.
+         * @param tableParams the compression params configured on the table being flushed.
+         * @return the compression params that should be written into the flush SSTable.
+         */
+        CompressionParams flushCompression(String keyspace, CompressionParams tableParams);
+
+        /**
+         * Selects the {@link CompressionParams} to use when writing a compaction output SSTable.
+         * <p>
+         * The default implementation returns {@code tableParams} unchanged. Override this method to apply a
+         * per-keyspace compaction compression policy (e.g. in CNDB).
+         *
+         * @param keyspace    the keyspace being compacted.
+         * @param tableParams the compression params configured on the table being compacted.
+         * @return the compression params that should be written into the compaction output SSTable.
+         */
+        CompressionParams compactionCompression(String keyspace, CompressionParams tableParams);
+
+        static Selector fromProperty()
+        {
+            String selectorClass = CassandraRelevantProperties.SSTABLE_COMPRESSION_SELECTOR_CLASS.getString();
+            if (selectorClass.isEmpty())
+            {
+                logger.info("Using default compression selector");
+                return new DefaultCompressionSelector();
+            }
+
+            logger.info("Using compression selector: {}", selectorClass);
+            return FBUtilities.construct(selectorClass, "compression selector");
+        }
+    }
 
     public static final CompressionParams NOOP = new CompressionParams(NoopCompressor.create(Collections.emptyMap()),
                                                                        // 4 KiB is often the underlying disk block size
@@ -98,7 +195,37 @@ public final class CompressionParams
     private final double minCompressRatio;  // In configuration we store min ratio, the input parameter.
     private final ImmutableMap<String, String> otherOptions; // Unrecognized options, can be used by the compressor
 
+    /**
+     * Parses and validates compression options given by a user, i.e. through DDL or JMX.
+     *
+     * @throws ConfigurationException if the options are invalid
+     */
     public static CompressionParams fromMap(Map<String, String> opts)
+    {
+        return fromMap(opts, true, null, null);
+    }
+
+    /**
+     * Parses compression options stored in the schema tables, which may have been written by an older version with
+     * more permissive validation. Instead of refusing to load such a table, the options are normalised to a valid
+     * equivalent and a warning names the table so that the operator can fix its definition.
+     * <p>
+     * Currently this only concerns {@link #MIN_COMPRESS_RATIO} on encrypting compressors, which older versions
+     * accepted when the (defaulted) encryption options were not spelled out: it is ignored, so that every chunk is
+     * encrypted. Non-finite ratios (NaN, Infinity), which older versions also accepted, are kept as they are rather
+     * than rejected.
+     *
+     * @param opts the stored compression options
+     * @param keyspace the keyspace of the table the options belong to, for logging
+     * @param table the table (or view) the options belong to, for logging
+     * @throws ConfigurationException if the options are invalid in a way that cannot be normalised
+     */
+    public static CompressionParams fromStoredMap(Map<String, String> opts, String keyspace, String table)
+    {
+        return fromMap(opts, false, keyspace, table);
+    }
+
+    private static CompressionParams fromMap(Map<String, String> opts, boolean strict, String keyspace, String table)
     {
         Map<String, String> options = copyOptions(opts);
 
@@ -113,12 +240,44 @@ public final class CompressionParams
             sstableCompressionClass = removeSSTableCompressionClass(options);
 
         int chunkLength = removeChunkLength(options);
-        double minCompressRatio = removeMinCompressRatio(options);
+        double minCompressRatio = removeMinCompressRatio(options, strict);
+        int maxCompressedLength = calcMaxCompressedLength(chunkLength, minCompressRatio);
+        Class<?> compressorClass = parseCompressorClass(sstableCompressionClass);
 
-        CompressionParams cp = new CompressionParams(sstableCompressionClass, options, chunkLength, minCompressRatio);
+        // Reject before creating the compressor: creating an Encryptor may have side effects on the key provider,
+        // e.g. generating a key. The general case (any encrypting compressor) is checked by validate(), with the same
+        // predicate on maxCompressedLength.
+        if (strict && compressorClass != null && Encryptor.class.isAssignableFrom(compressorClass) && maxCompressedLength != Integer.MAX_VALUE)
+            throw minCompressRatioWithEncryptionException(compressorClass);
+
+        ICompressor compressor = createCompressor(compressorClass, options);
+
+        if (!strict && compressor != null && compressor.encryptionOnly() != null && maxCompressedLength != Integer.MAX_VALUE)
+        {
+            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, "min_compress_ratio-encryption:" + keyspace + '.' + table,
+                             1, TimeUnit.HOURS,
+                             "{}.{} has {}={} stored with encrypting compressor {}, which is no longer allowed because " +
+                             "chunks not meeting the ratio are stored unencrypted. The option is ignored on this node " +
+                             "and every chunk is encrypted; any ALTER of {}.{} rewrites the stored definition without it " +
+                             "(use ALTER MATERIALIZED VIEW for a view), then run nodetool upgradesstables -a {} {} to " +
+                             "re-encrypt chunks that older versions may have written in plaintext.",
+                             keyspace, table, MIN_COMPRESS_RATIO, minCompressRatio, compressor.getClass().getSimpleName(),
+                             keyspace, table, keyspace, table);
+            minCompressRatio = DEFAULT_MIN_COMPRESS_RATIO;
+            maxCompressedLength = Integer.MAX_VALUE;
+        }
+
+        CompressionParams cp = new CompressionParams(compressor, chunkLength, maxCompressedLength, minCompressRatio, options);
         cp.validate();
 
         return cp;
+    }
+
+    private static ConfigurationException minCompressRatioWithEncryptionException(Class<?> compressorClass)
+    {
+        return new ConfigurationException(MIN_COMPRESS_RATIO + " must be 0 or omitted when using encrypting compressor " +
+                                          compressorClass.getSimpleName() + ": chunks not meeting the ratio are " +
+                                          "stored as-is, i.e. unencrypted");
     }
 
     public Class<? extends ICompressor> klass()
@@ -292,7 +451,7 @@ public final class CompressionParams
         if (className == null || className.isEmpty())
             return null;
 
-        className = className.contains(".") ? className : "org.apache.cassandra.io.compress." + className;
+        className = expandCompressorName(className);
         try
         {
             return Class.forName(className);
@@ -353,6 +512,22 @@ public final class CompressionParams
         {
             throw new ConfigurationException("Cannot initialize class " + compressorClass.getName());
         }
+    }
+
+    public static String prepareCompressorName(Class<?> clazz)
+    {
+        String compressorName = clazz.getTypeName();
+        String simpleName = clazz.getSimpleName();
+
+        if (expandCompressorName(simpleName).equals(compressorName))
+            return simpleName;
+        else
+            return compressorName;
+    }
+
+    private static String expandCompressorName(String className)
+    {
+        return className.contains(".") ? className : "org.apache.cassandra.io.compress." + className;
     }
 
     public static ICompressor createCompressor(ParameterizedClass compression) throws ConfigurationException
@@ -420,16 +595,30 @@ public final class CompressionParams
      * Removes the min compress ratio option from the specified set of option.
      *
      * @param options the options
+     * @param strict whether to reject non-finite values, which older versions accepted and may have stored
      * @return the min compress ratio, used to calculate max chunk size to write compressed
      */
-    private static double removeMinCompressRatio(Map<String, String> options)
+    private static double removeMinCompressRatio(Map<String, String> options, boolean strict)
     {
-        String ratio = options.remove(MIN_COMPRESS_RATIO);
-        if (ratio != null)
+        String ratioString = options.remove(MIN_COMPRESS_RATIO);
+        if (ratioString == null)
+            return DEFAULT_MIN_COMPRESS_RATIO;
+
+        double ratio;
+        try
         {
-            return Double.parseDouble(ratio);
+            ratio = Double.parseDouble(ratioString);
         }
-        return DEFAULT_MIN_COMPRESS_RATIO;
+        catch (NumberFormatException e)
+        {
+            throw new ConfigurationException("Invalid value for " + MIN_COMPRESS_RATIO + ": " + ratioString, e);
+        }
+
+        // Older versions accepted (and may have stored) non-finite values, so only reject them for new definitions.
+        if (strict && !Double.isFinite(ratio))
+            throw new ConfigurationException("Invalid value for " + MIN_COMPRESS_RATIO + ": " + ratioString);
+
+        return ratio;
     }
 
     /**
@@ -494,6 +683,14 @@ public final class CompressionParams
         if (maxCompressedLength < 0)
             throw new ConfigurationException("Invalid negative " + MIN_COMPRESS_RATIO);
 
+        // A chunk that does not reach the ratio is stored as is, which for an encrypting compressor means in
+        // plaintext. Decide this from the compressor itself rather than from the presence of an encryption option:
+        // all of them have defaults (cipher_algorithm, secret_key_strength, and key_provider, which falls back to
+        // LocalFileSystemKeyProvider), so an encrypted table can be declared without any of them.
+        // This is checked before the range of the ratio, so that any non-zero ratio gets this more relevant error.
+        if (sstableCompressor != null && sstableCompressor.encryptionOnly() != null && maxCompressedLength != Integer.MAX_VALUE)
+            throw minCompressRatioWithEncryptionException(sstableCompressor.getClass());
+
         if (maxCompressedLength > chunkLength && maxCompressedLength < Integer.MAX_VALUE)
             throw new ConfigurationException(MIN_COMPRESS_RATIO + " can either be 0 or greater than or equal to 1");
     }
@@ -504,7 +701,9 @@ public final class CompressionParams
             return Collections.singletonMap(ENABLED, "false");
 
         Map<String, String> options = new HashMap<>(otherOptions);
-        options.put(CLASS, sstableCompressor.getClass().getName());
+        // Store the full name here. We could also use prepareCompressorName, but that would change the names users
+        // see and may cause something to break unnecessarily.
+        options.put(CLASS, sstableCompressor.getClass().getTypeName());
         options.put(CHUNK_LENGTH_IN_KB, chunkLengthInKB());
         if (minCompressRatio != DEFAULT_MIN_COMPRESS_RATIO)
             options.put(MIN_COMPRESS_RATIO, String.valueOf(minCompressRatio));
@@ -555,12 +754,25 @@ public final class CompressionParams
             .toHashCode();
     }
 
+    /**
+     * Returns every option, as {@link #asMap()} does, including those of an encrypting compressor: the cipher, the
+     * key strength, the key provider and its options. These appear wherever the parameters are logged, e.g. with the
+     * table parameters of schema changes. The options of the in-tree key provider only name a key file; key providers
+     * must not take secrets as compression options, since these are logged.
+     */
+    @Override
+    public String toString()
+    {
+        return asMap().toString();
+    }
+
     static class Serializer implements IVersionedSerializer<CompressionParams>
     {
         public void serialize(CompressionParams parameters, DataOutputPlus out, int version) throws IOException
         {
             assert version >= MessagingService.VERSION_40;
-            out.writeUTF(parameters.sstableCompressor.getClass().getSimpleName());
+            String compressorName = prepareCompressorName(parameters.sstableCompressor.getClass());
+            out.writeUTF(compressorName);
             out.writeInt(parameters.otherOptions.size());
             for (Map.Entry<String, String> entry : parameters.otherOptions.entrySet())
             {

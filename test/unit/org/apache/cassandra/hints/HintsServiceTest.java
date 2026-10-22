@@ -29,6 +29,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import com.google.common.util.concurrent.Futures;
@@ -42,10 +43,14 @@ import org.junit.Test;
 
 import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
+import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.HintsServiceMetrics;
@@ -68,6 +73,7 @@ import static org.junit.Assert.assertEquals;
 import org.awaitility.Awaitility;
 import org.awaitility.core.ConditionFactory;
 
+import static org.apache.cassandra.Util.dk;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SKIP_REWRITING_HINTS_ON_HOST_LEFT;
 import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.apache.cassandra.net.Verb.HINT_REQ;
@@ -81,7 +87,6 @@ public class HintsServiceTest
 {
     private static final String KEYSPACE = "hints_service_test";
     private static final String TABLE = "table";
-
     private final MockFailureDetector failureDetector = new MockFailureDetector();
     private static TableMetadata metadata;
     private final AtomicBoolean isAlive = new AtomicBoolean(true);
@@ -269,7 +274,7 @@ public class HintsServiceTest
             }
         });
 
-        writeHints(metadata, hostId, noOfHints);
+        writeHints(hostId, noOfHints);
 
         Set<String> keys = new HashSet<>();
         for (int i = 0; i < noOfHints; i++)
@@ -390,5 +395,116 @@ public class HintsServiceTest
         assertFalse(anotherStore.hasFiles());
         assertThat(HintsServiceMetrics.hintsOnDisk.getCount()).isEqualTo(0);
         assertThat(HintsServiceMetrics.corruptedHintsOnDisk.getCount()).isZero();
+    }
+
+    @Test
+    public void testReplayWaitsForWriteAffinity() throws Exception
+    {
+        UUID hostId = StorageService.instance.getLocalHostUUID();
+        InetAddressAndPort endpoint = HintsEndpointProvider.instance.endpointForHost(hostId);
+        IEndpointSnitch savedSnitch = DatabaseDescriptor.getEndpointSnitch();
+
+        try
+        {
+            DatabaseDescriptor.setEndpointSnitch(new WriteAffinityExcludingSnitch(endpoint));
+            HintsStore store = writeAndFlushHints(hostId, 1);
+            MockMessagingSpy spy = MockMessagingService.when(verb(HINT_REQ))
+                                                       .respond(Message.internalResponse(HINT_RSP, NoPayload.noPayload));
+
+            HintsService.instance.dispatcherExecutor().dispatch(store).get();
+            spy.interceptNoMsg(500, TimeUnit.MILLISECONDS).get();
+            assertTrue(store.hasFiles());
+
+            DatabaseDescriptor.setEndpointSnitch(savedSnitch);
+            HintsService.instance.dispatcherExecutor().dispatch(store).get();
+            spy.interceptMessageOut(1).get();
+            assertFalse(store.hasFiles());
+        }
+        finally
+        {
+            DatabaseDescriptor.setEndpointSnitch(savedSnitch);
+        }
+    }
+
+    private static class WriteAffinityExcludingSnitch extends AbstractNetworkTopologySnitch
+    {
+        private final InetAddressAndPort excluded;
+
+        WriteAffinityExcludingSnitch(InetAddressAndPort excluded)
+        {
+            this.excluded = excluded;
+        }
+
+        public String getRack(InetAddressAndPort endpoint)
+        {
+            return "rack1";
+        }
+
+        public String getDatacenter(InetAddressAndPort endpoint)
+        {
+            return "datacenter1";
+        }
+
+        @Override
+        public Predicate<InetAddressAndPort> filterByAffinityForWrites(String keyspace)
+        {
+            return endpoint -> !endpoint.equals(excluded);
+        }
+    }
+
+    private MockMessagingSpy sendHintsAndResponses(TableMetadata ignored, int noOfHints, int noOfResponses)
+    {
+        return sendHintsAndResponses(noOfHints, noOfResponses);
+    }
+
+    private MockMessagingSpy sendHintsAndResponses(int noOfHints, int noOfResponses)
+    {
+        // create spy for hint messages, but only create responses for noOfResponses hints
+        Message<NoPayload> message = Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+
+        MockMessagingSpy spy;
+        if (noOfResponses != -1)
+        {
+            spy = MockMessagingService.when(verb(HINT_REQ)).respondN(message, noOfResponses);
+        }
+        else
+        {
+            spy = MockMessagingService.when(verb(HINT_REQ)).respond(message);
+        }
+
+        writeHints(StorageService.instance.getLocalHostUUID(), noOfHints);
+        return spy;
+    }
+
+    private HintsStore writeAndFlushHints(TableMetadata ignored, UUID hostId, int noOfHints)
+    {
+        return writeAndFlushHints(hostId, noOfHints);
+    }
+
+    private HintsStore writeAndFlushHints(UUID hostId, int noOfHints)
+    {
+        writeHints(hostId, noOfHints);
+        HintsService.instance.flushAndFsyncBlockingly(Collections.singleton(hostId));
+
+        // close the write so hints are available for dispatching
+        HintsStore store = HintsService.instance.getCatalog().get(hostId);
+        store.closeWriter();
+
+        return store;
+    }
+
+    private void writeHints(UUID hostId, int noOfHints)
+    {
+        // create and write noOfHints using service
+        for (int i = 0; i < noOfHints; i++)
+        {
+            long now = System.currentTimeMillis();
+            DecoratedKey dkey = dk(String.valueOf(i));
+            TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+            PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, dkey).timestamp(now);
+            builder.row("column0").add("val", "value0");
+            Hint hint = Hint.create(builder.buildAsMutation(), now);
+            HintsService.instance.write(hostId, hint);
+        }
     }
 }

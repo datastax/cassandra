@@ -16,8 +16,6 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -47,7 +45,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MovingAverage;
 import org.apache.cassandra.utils.Overlaps;
-import org.apache.cassandra.utils.ReflectionUtils;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.Mockito;
@@ -55,6 +52,7 @@ import org.mockito.MockitoAnnotations;
 import org.mockito.internal.creation.MockSettingsImpl;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_SCALING_PARAMETER_PERSISTENCE;
 import static org.apache.cassandra.SchemaLoader.standardCFMD;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertArrayEquals;
@@ -925,7 +923,7 @@ public abstract class ControllerTest
     public void testScalingParameterPersistence() throws Exception
     {
         // Verify that by default (SCALING_PARAMETER_PERSISTENCE = true), storeOptions creates a file
-        assertTrue("Scaling parameter persistence should be enabled by default", Controller.SCALING_PARAMETER_PERSISTENCE);
+        assertTrue("Scaling parameter persistence should be enabled by default", Controller.isScalingParameterPersistenceEnabled());
 
         TableMetadata testMetadata = standardCFMD("test_ks", "test_table").build();
         int[] scalingParameters = new int[] { 0, 2, 4 };
@@ -958,26 +956,16 @@ public abstract class ControllerTest
 
         try
         {
-            setScalingParameterPersistenceForTest(false);
+            UCS_SCALING_PARAMETER_PERSISTENCE.setBoolean(false);
             Controller.storeOptions(testMetadata, scalingParameters, flushSize);
             assertFalse("Config file should not exist when persistence is disabled", configPath.exists());
         }
         finally
         {
-            setScalingParameterPersistenceForTest(true);
+            UCS_SCALING_PARAMETER_PERSISTENCE.reset();
             if (configPath.exists())
                 configPath.delete();
         }
-    }
-
-    private static void setScalingParameterPersistenceForTest(boolean enabled) throws Exception
-    {
-        Field field = Controller.class.getDeclaredField("SCALING_PARAMETER_PERSISTENCE");
-        field.setAccessible(true);
-        Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
-        field.set(null, enabled);
     }
 
     @Test

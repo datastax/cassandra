@@ -20,6 +20,7 @@ package org.apache.cassandra.service.paxos;
 
 import java.io.IOException;
 
+import org.apache.cassandra.db.WriteOrigin;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -136,7 +137,8 @@ public class PaxosCommitAndPrepare
 
             try (PaxosState state = PaxosState.get(commit))
             {
-                state.commit(commit);
+                // The next round's coordinator is where this apply came from -- possibly another datacenter.
+                state.commit(commit, WriteOrigin.fromPeer(from));
                 return PaxosPrepare.RequestHandler.execute(request, state);
             }
         }

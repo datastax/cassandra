@@ -50,6 +50,7 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.io.sstable.CorruptSSTableException.maybeWrapInCorruptSSTableException;
 import static org.apache.cassandra.utils.vint.VIntCoding.VIntOutOfRangeException;
 
 
@@ -73,7 +74,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
 
     protected final Slices slices;
 
-                                  // file on every path where we created it.
+    // On failure, the constructor closes the reader it created, or else the file if it opened it.
     protected AbstractSSTableIterator(SSTableReader sstable,
                                       FileDataInput file,
                                       DecoratedKey key,
@@ -99,6 +100,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
         else
         {
             boolean shouldCloseFile = file == null;
+            Reader reader = null;
             try
             {
                 // We seek to the beginning to the partition if either:
@@ -120,14 +122,14 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
 
                     // Note that this needs to be called after file != null and after the partitionDeletion has been set, but before readStaticRow
                     // (since it uses it) so we can't move that up (but we'll be able to simplify as soon as we drop support for the old file format).
-                    this.reader = createReader(indexEntry, file, shouldCloseFile);
+                    reader = createReader(indexEntry, file, shouldCloseFile);
                     this.staticRow = readStaticRow(sstable, file, helper, columns.fetchedColumns().statics);
                 }
                 else
                 {
                     this.partitionLevelDeletion = indexEntry.deletionTime();
                     this.staticRow = Rows.EMPTY_STATIC_ROW;
-                    this.reader = createReader(indexEntry, file, shouldCloseFile);
+                    reader = createReader(indexEntry, file, shouldCloseFile);
                 }
                 if (!partitionLevelDeletion.validate())
                     UnfilteredValidation.handleInvalid(metadata(), key, sstable, "partitionLevelDeletion="+partitionLevelDeletion.toString());
@@ -137,24 +139,46 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
 
                 if (reader == null && file != null && shouldCloseFile)
                     file.close();
+                this.reader = reader;
             }
-            catch (IOException e)
+            catch (IOException | CorruptSSTableException e)
             {
+                // CorruptSSTableException: e.g. a chunk of an encrypted row index failing its checksum or decryption
                 sstable.markSuspect();
-                File filePath = file.getFile();
-                if (shouldCloseFile)
-                {
-                    try
-                    {
-                        file.close();
-                    }
-                    catch (IOException suppressed)
-                    {
-                        e.addSuppressed(suppressed);
-                    }
-                }
-                throw new CorruptSSTableException(e, filePath);
+                // when file == null the failure may come from a file the reader opened itself (Data.db or index)
+                File filePath = file != null ? file.getFile() : sstable.getDataFile();
+                closeOnConstructionFailure(reader, file, shouldCloseFile, e);
+                throw maybeWrapInCorruptSSTableException(e, filePath);
             }
+            catch (Throwable t)
+            {
+                // Anything else, e.g. an unchecked exception from a row index walker reading garbage from a corrupted
+                // index that is not checksummed: the caller never gets this iterator to close, so release what we
+                // hold. The sstable is not marked suspect: unlike the typed failures above, such an exception does not
+                // say that the sstable is corrupted (it can as well be a bug, or the read being aborted).
+                closeOnConstructionFailure(reader, file, shouldCloseFile, t);
+                throw t;
+            }
+        }
+    }
+
+    /**
+     * Releases the resources acquired by a constructor that failed: the reader if it was created (which closes its
+     * index reader and any file it owns, including one it may have opened itself), otherwise the file if we opened it.
+     */
+    private static void closeOnConstructionFailure(Reader reader, FileDataInput file, boolean shouldCloseFile, Throwable failure)
+    {
+        try
+        {
+            if (reader != null)
+                reader.close();
+            else if (shouldCloseFile && file != null)
+                file.close();
+        }
+        catch (Throwable suppressed)
+        {
+            // do not let a failure to close hide the original failure
+            failure.addSuppressed(suppressed);
         }
     }
 
@@ -262,8 +286,9 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
             if (reader != null)
                 reader.setForSlice(slice);
         }
-        catch (IOException e)
+        catch (IOException | CorruptSSTableException e)
         {
+            sstable.markSuspect();
             try
             {
                 closeInternal();
@@ -272,8 +297,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
             {
                 e.addSuppressed(suppressed);
             }
-            sstable.markSuspect();
-            throw new CorruptSSTableException(e, reader.toString());
+            throw maybeWrapInCorruptSSTableException(e, reader.toString());
         }
     }
 
@@ -376,8 +400,9 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
             {
                 return hasNextInternal();
             }
-            catch (IOException | IndexOutOfBoundsException | VIntOutOfRangeException e)
+            catch (IOException | IndexOutOfBoundsException | VIntOutOfRangeException | CorruptSSTableException e)
             {
+                sstable.markSuspect();
                 try
                 {
                     closeInternal();
@@ -386,8 +411,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
                 {
                     e.addSuppressed(suppressed);
                 }
-                sstable.markSuspect();
-                throw new CorruptSSTableException(e, toString());
+                throw maybeWrapInCorruptSSTableException(e, toString());
             }
         }
 
@@ -397,8 +421,9 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
             {
                 return nextInternal();
             }
-            catch (IOException e)
+            catch (IOException | CorruptSSTableException e)
             {
+                sstable.markSuspect();
                 try
                 {
                     closeInternal();
@@ -407,8 +432,7 @@ public abstract class AbstractSSTableIterator<RIE extends AbstractRowIndexEntry>
                 {
                     e.addSuppressed(suppressed);
                 }
-                sstable.markSuspect();
-                throw new CorruptSSTableException(e, toString());
+                throw maybeWrapInCorruptSSTableException(e, toString());
             }
         }
 

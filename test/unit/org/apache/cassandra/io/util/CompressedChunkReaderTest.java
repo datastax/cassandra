@@ -27,6 +27,7 @@ import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.filesystem.ListenableFileSystem;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.utils.ChecksumType;
 import org.assertj.core.api.Assertions;
 
 import org.junit.Assert;
@@ -61,7 +62,7 @@ public class CompressedChunkReaderTest
             });
             long length = lengthGen.nextLong(rs);
             CompressionMetadata metadata1, metadata2;
-            try (CompressedSequentialWriter writer = new CompressedSequentialWriter(f, new File("/file.offset"), new File("/file.digest"), option, params, new MetadataCollector(new ClusteringComparator())))
+            try (CompressedSequentialWriter writer = new CompressedSequentialWriter(f, new File("/file.offset"), new File("/file.digest"), ChecksumType.CRC32, option, params, new MetadataCollector(new ClusteringComparator())))
             {
                 for (long i = 0; i < length; i++)
                     writer.writeLong(i);

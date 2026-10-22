@@ -1300,6 +1300,18 @@ public class TrieUtil
         }
 
         @Override
+        public long remainingBytes(long position)
+        {
+            return wrapped.remainingBytes(position);
+        }
+
+        @Override
+        public long positionForSkip(long currentPosition, int bytesToSkip)
+        {
+            return wrapped.positionForSkip(currentPosition, bytesToSkip);
+        }
+
+        @Override
         public long adjustPosition(long position)
         {
             return wrapped.adjustPosition(position);

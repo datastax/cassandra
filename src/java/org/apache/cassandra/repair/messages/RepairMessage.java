@@ -133,6 +133,12 @@ public abstract class RepairMessage
         return desc.parentSessionId;
     }
 
+    @Override
+    public String toString()
+    {
+        return getClass().getSimpleName() + (desc != null ? "{desc=" + desc + '}' : "{}");
+    }
+
     public interface RepairFailureCallback
     {
         void onFailure(Exception e);

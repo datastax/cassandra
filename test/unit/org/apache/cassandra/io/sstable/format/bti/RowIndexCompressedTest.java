@@ -32,6 +32,7 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ChecksumType;
 
 import static org.junit.Assert.assertEquals;
 
@@ -56,6 +57,7 @@ public class RowIndexCompressedTest extends RowIndexTest
               new CompressedSequentialWriter(file,
                       offsetsFile,
                       null,
+                      ChecksumType.CRC32,
                       SequentialWriterOption.newBuilder().finishOnClose(true).build(),
                       CompressionParams.lz4(4096, 4096), new MetadataCollector(
                               TableMetadata.builder("k", "t")

@@ -78,12 +78,7 @@ public abstract class MemtableAllocator
         return offHeap;
     }
 
-    /**
-     * Enforce the memtable memory limits once, before a mutation starts.
-     * 
-     * Called by AbstractAllocatorMemtable.put() before a mutation starts, prior to any
-     * memtable-internal locks; individual allocations no longer wait for room.
-     */
+    /** Enforce the memtable memory limits, once, before a mutation starts. */
     public void awaitRoomToStart(OpOrder.Group opGroup)
     {
         onHeap.awaitRoom(opGroup);
@@ -194,49 +189,47 @@ public abstract class MemtableAllocator
                 allocate(size, opGroup);
         }
 
-        // account memory in the tracker, and mark ourselves as owning it
+        // account memory in the tracker, and mark ourselves as owning it; this only tracks usage, which
+        // still drives cleaning, the limit is enforced in awaitRoom() (CASSANDRA-21019). opGroup is unused,
+        // kept for compatibility within this release series.
         public void allocate(long size, OpOrder.Group opGroup)
         {
             assert size >= 0;
 
-            // CASSANDRA-21019: individual allocations only track usage (which still drives
-            // cleaner/flush triggering via maybeClean); the memory limit is enforced once,
-            // in awaitRoom(), before a mutation starts. Blocking here mid-mutation,
-            // potentially while holding memtable-internal locks such as TrieMemtable's
-            // shard write lock, can deadlock the flush writeBarrier: a pre-barrier
-            // writer queued behind such a lock cannot be released by Barrier.markBlocking(),
-            // which only reaches threads parked in this allocator. Letting a started
-            // mutation run to completion also retains less memory than parking it with a
-            // partial copy already written and locks held.
             allocated(size);
         }
 
         /**
-         * Wait, if necessary, until the parent pool is below its limit, without reserving
-         * any memory.
-         * 
-         * This is the single point at which the memory limit
-         * pauses writes, memtables call it before starting to apply a mutation, before
-         * any internal locks are taken. Groups marked blocking by Barrier.markBlocking()
-         * skip or are released from this wait, exactly as they were from allocate(), so a
-         * flush can always drain the ops its barrier awaits.
+         * Wait, if necessary, until the parent pool is below its limit, reserving nothing. CASSANDRA-21019:
+         * the single point at which the memory limit pauses writes; call before a mutation starts, before any
+         * memtable-internal lock is taken. Groups marked blocking by Barrier.markBlocking() skip or are
+         * released from this wait, as they were from allocate(), so a flush can always drain the ops its
+         * barrier awaits.
+         * <p>
+         * Both sub-pools share one hasRoom queue, so a release on the other sub-pool wakes waiters here; the
+         * loop re-tests belowLimit() and parks again.
          */
         public void awaitRoom(OpOrder.Group opGroup)
         {
-            // A pool with no limit configured is never allocated from and never signalled
-            // (e.g. the off-heap pool under heap_buffers / unslabbed_heap_buffers, both
-            // created with an off-heap limit of 0)
-            if (parent.limit <= 0)
+            // A limit of 0 marks a sub-pool this allocation type does not use: heap_buffers,
+            // unslabbed_heap_buffers and unslabbed_heap_buffers_logged all build their off-heap sub-pool
+            // with a limit of 0, see AbstractAllocatorMemtable.createMemtableAllocatorPoolInternal. belowLimit() is
+            // false for such a pool even with nothing allocated, so without this every write would park on
+            // it. DatabaseDescriptor.applyMemtableSpace rejects a limit of 0 for the allocation types that
+            // do allocate from both sub-pools, so no enforced pool reaches this return.
+            if (parent.limit == 0)
                 return;
 
             while (true)
             {
-                if (parent.belowLimit() || opGroup.isBlocking())
+                if (parent.belowLimit())
+                    return;
+                if (opGroup.isBlocking())
                     return;
 
                 WaitQueue.Signal signal = parent.hasRoom().register(parent.markMemoryBlockedOnAllocating(), Timer.Context::stop);
                 opGroup.notifyIfBlocking(signal);
-                if (parent.belowLimit() || opGroup.isBlocking())
+                if (parent.belowLimit())
                 {
                     signal.cancel();
                     return;

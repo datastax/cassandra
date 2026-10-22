@@ -30,10 +30,9 @@ import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.virtual.LogMessagesTable;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.compress.AdaptiveCompressor;
-import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.DefaultCompressionSelector;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.FileSystemOwnershipCheck;
 import org.apache.cassandra.service.context.OperationContext;
@@ -239,6 +238,37 @@ public enum CassandraRelevantProperties
     COMPACTION_VALIDATION_MODE("cassandra.compaction_validation_mode", "NONE"),
 
     /**
+     * Cache size for compression chunk offsets if BLOCK_CACHE is configured. By default, it uses 15% of max direct
+     * memory.
+     *
+     * Alternatively, an absolute cache size can be configured, e.g. "10GiB".
+     */
+    COMPRESSION_CHUNK_OFFSETS_BLOCK_CACHE_SIZE("cassandra.compression_chunk_offsets_block_cache_size",
+                                               "auto@0.15"),
+    /**
+     * Number of bytes per compression chunk offsets cache block. The value divided by {@link Long#BYTES} determines
+     * how many chunk offsets are loaded from the compression info file on each cache miss. Values that are not
+     * divisible by {@link Long#BYTES} are rounded down to a whole offset and floored at one offset.
+     */
+    COMPRESSION_CHUNK_OFFSETS_CACHE_BLOCK_SIZE("cassandra.compression_chunk_offsets_cache_block_size_bytes", "65536"),
+    /**
+     * Factory for initializing {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} instances.
+     */
+    COMPRESSION_CHUNK_OFFSETS_FACTORY("cassandra.compression_chunk_offsets_factory"),
+    /**
+     * Maximum size in bytes of a single memory-mapped segment used by the {@code mmap}
+     * {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} implementation. A {@code MappedByteBuffer} can
+     * map at most {@link Integer#MAX_VALUE} bytes, so larger offset sections are split into multiple segments. The
+     * effective value is rounded down to a whole number of 8-byte offsets.
+     */
+    COMPRESSION_CHUNK_OFFSETS_MMAP_SEGMENT_SIZE("cassandra.compression_chunk_offsets.mmapped_max_segment_size", String.valueOf(Integer.MAX_VALUE)),
+    /**
+     * Selects the {@link org.apache.cassandra.io.compress.CompressionChunkOffsets} implementation. One of
+     * {@code in_memory}, {@code mmap}, or {@code block_cache}.
+     */
+    COMPRESSION_CHUNK_OFFSETS_TYPE("cassandra.compression_chunk_offsets_type", "in_memory"),
+
+    /**
      * This property indicates the location for the access file. If com.sun.management.jmxremote.authenticate is false,
      * then this property and the password and access files, are ignored. Otherwise, the access file must exist and
      * be in the valid format. If the access file is empty or nonexistent, then no access is allowed.
@@ -374,11 +404,6 @@ public enum CassandraRelevantProperties
     DEFAULT_COMPACTION_LOG_MINUTES("default.compaction.log_minutes"),
     DEFAULT_INDEX_CLASS("cassandra.default_index_implementation_class"),
     DEFAULT_PROVIDE_OVERLAPPING_TOMBSTONES("default.provide.overlapping.tombstones"),
-    /**
-     * Which compression algorithm to use for SSTable compression when not specified explicitly in the sstable options.
-     * Can be "fast", which selects {@link LZ4Compressor}, or "adaptive" which selects {@link AdaptiveCompressor}.
-     */
-    DEFAULT_SSTABLE_COMPRESSION("cassandra.default_sstable_compression", "fast"),
     // Allow disabling deletions of corrupt index components for troubleshooting
     DELETE_CORRUPT_SAI_COMPONENTS("cassandra.sai.delete_corrupt_components", "true"),
     /** determinism properties for testing */
@@ -605,6 +630,12 @@ public enum CassandraRelevantProperties
     MBEAN_REGISTRATION_CLASS("org.apache.cassandra.mbean_registration_class"),
     MEMTABLE_OVERHEAD_COMPUTE_STEPS("cassandra.memtable_row_overhead_computation_step", "100000"),
     MEMTABLE_OVERHEAD_SIZE("cassandra.memtable.row_overhead_size", "-1"),
+    /**
+     * Number of memtable reclaim threads to use. To be able to make progress when one ColumnFamilyStore's read order
+     * is blocked, each CFS is served by an assigned thread, chosen pseudo randomly (based on
+     * the table id's hash code).
+     */
+    MEMTABLE_RECLAIM_THREADS("cassandra.memtable_reclaim_threads", "1"),
     MEMTABLE_SHARD_COUNT("cassandra.memtable.shard.count"),
     MEMTABLE_TRIE_SIZE_LIMIT("cassandra.trie_size_limit_mb"),
     MIGRATION_DELAY("cassandra.migration_delay_ms", "60000"),
@@ -997,7 +1028,19 @@ public enum CassandraRelevantProperties
     SNAPSHOT_MIN_ALLOWED_TTL_SECONDS("cassandra.snapshot.min_allowed_ttl_seconds", "60"),
     SSL_ENABLE("ssl.enable"),
     SSL_STORAGE_PORT("cassandra.ssl_storage_port"),
+    SSTABLE_CHECKSUM_AWS_CRT_DETECTION_ENABLED("cassandra.sstable.checksums.aws_crt_detection_enabled", "true"),
+    SSTABLE_CHECKSUM_TYPE("cassandra.sstable.checksums.type", "CRC32"),
+    /**
+     * Fully-qualified class name of a {@link org.apache.cassandra.schema.CompressionParams.Selector} implementation
+     * to use for selecting the default SSTable compression per keyspace.
+     * If not set, {@link org.apache.cassandra.schema.DefaultCompressionSelector} is used.
+     * <p>
+     * This property is read once at startup and cannot be changed dynamically, but the selector implementation
+     * can select the compressor dynamically.
+     */
+    SSTABLE_COMPRESSION_SELECTOR_CLASS("cassandra.sstable.compression.selector.class", DefaultCompressionSelector.class.getName()),
     SSTABLE_FORMAT_DEFAULT("cassandra.sstable.format.default"),
+    SSTABLE_FORMAT_STREAM_NEW_CHECKSUMS("cassandra.sstable.format.stream_new_checksums", "false"),
 
     // in OSS, when UUID based SSTable generation identifiers are enabled, they use TimeUUID
     // though, for CNDB we want to use ULID - this property allows for that

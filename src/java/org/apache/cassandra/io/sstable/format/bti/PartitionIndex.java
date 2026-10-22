@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format.bti;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -28,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
@@ -68,7 +70,6 @@ import org.apache.cassandra.utils.concurrent.SharedCloseable;
  * The indexes are created by {@link PartitionIndexBuilder}. To read the index one must obtain a thread-unsafe
  * {@link Reader} or {@link IndexPosIterator}.
  */
-@VisibleForTesting
 public class PartitionIndex implements SharedCloseable
 {
     private static final Logger logger = LoggerFactory.getLogger(PartitionIndex.class);
@@ -89,12 +90,13 @@ public class PartitionIndex implements SharedCloseable
     public static final int FOOTER_LENGTH = 3 * 8;
     private static final int FLAG_HAS_HASH_BYTE = 8;
 
+    @VisibleForTesting
     public PartitionIndex(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last, ByteComparable.Version version)
     {
         this(fh, trieRoot, keyCount, first, last, null, null, version);
     }
 
-    public PartitionIndex(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last, DecoratedKey filterFirst, DecoratedKey filterLast, ByteComparable.Version version)
+    PartitionIndex(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last, DecoratedKey filterFirst, DecoratedKey filterLast, ByteComparable.Version version)
     {
         this.keyCount = keyCount;
         this.fh = fh.sharedCopy();
@@ -185,6 +187,12 @@ public class PartitionIndex implements SharedCloseable
         fh.addTo(identities);
     }
 
+    @VisibleForTesting
+    FileHandle fileHandle()
+    {
+        return fh;
+    }
+
     public static PartitionIndex load(FileHandle.Builder fhBuilder,
                                       IPartitioner partitioner,
                                       boolean preload,
@@ -205,11 +213,44 @@ public class PartitionIndex implements SharedCloseable
         }
     }
 
+    /**
+     * Reads the first and last key of the partition index of an existing sstable, without preloading it. The index
+     * is decrypted if the sstable's indexes are encrypted (see
+     * {@link BtiTableReaderLoadingBuilder#withIndexEncryption(FileHandle.Builder, Descriptor, CompressionMetadata)}).
+     *
+     * @param descriptor  the sstable
+     * @param component   the partition index component
+     * @param partitioner the partitioner used to decorate the keys
+     * @param version     the byte-comparable version of the sstable
+     */
     public static Pair<DecoratedKey, DecoratedKey> readFirstAndLastKey(Descriptor descriptor, Component component, IPartitioner partitioner, ByteComparable.Version version) throws IOException
     {
-        try (PartitionIndex index = load(StorageProvider.instance.fileHandleBuilderFor(descriptor, component), partitioner, false, version))
+        return readFirstAndLastKey(descriptor, component, partitioner, null, version);
+    }
+
+    /**
+     * Reads the first and last key of the partition index of an existing sstable, without preloading it, like
+     * {@link #readFirstAndLastKey(Descriptor, Component, IPartitioner, ByteComparable.Version)}. If the sstable is a
+     * zero-copy slice of another sstable, whose partition index it shares, the keys are those of the slice, as given
+     * by its zero-copy metadata (see {@link #load(FileHandle, IPartitioner, boolean, ZeroCopyMetadata, ByteComparable.Version)}).
+     *
+     * @param descriptor       the sstable
+     * @param component        the partition index component
+     * @param partitioner      the partitioner used to decorate the keys
+     * @param zeroCopyMetadata the zero-copy metadata of the sstable (from its stats metadata), or {@code null}
+     * @param version          the byte-comparable version of the sstable
+     */
+    public static Pair<DecoratedKey, DecoratedKey> readFirstAndLastKey(Descriptor descriptor, Component component, IPartitioner partitioner, @Nullable ZeroCopyMetadata zeroCopyMetadata, ByteComparable.Version version) throws IOException
+    {
+        try (CompressionMetadata encryptionMetadata = BtiTableReaderLoadingBuilder.maybeLoadIndexEncryptionMetadata(descriptor))
         {
-            return Pair.create(index.firstKey(), index.lastKey());
+            FileHandle.Builder builder = BtiTableReaderLoadingBuilder.withIndexEncryption(StorageProvider.instance.fileHandleBuilderFor(descriptor, component),
+                                                                                          descriptor,
+                                                                                          encryptionMetadata);
+            try (PartitionIndex index = load(builder, partitioner, false, zeroCopyMetadata, version))
+            {
+                return Pair.create(index.firstKey(), index.lastKey());
+            }
         }
     }
 

@@ -58,6 +58,18 @@ public class EmptyRebufferer implements Rebufferer, RebuffererFactory
     }
 
     @Override
+    public long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        return currentPosition + bytesToSkip;
+    }
+
+    @Override
+    public long remainingBytes(long position)
+    {
+        return 0;
+    }
+
+    @Override
     public BufferHolder rebuffer(long position)
     {
         return EMPTY;

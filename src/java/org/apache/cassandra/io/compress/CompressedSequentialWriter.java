@@ -27,7 +27,9 @@ import java.nio.channels.FileChannel;
 import java.util.Optional;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
+import java.util.zip.Checksum;
 
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +46,7 @@ import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ChecksumType;
 
 import static org.apache.cassandra.utils.Throwables.merge;
 
@@ -59,6 +62,7 @@ public class CompressedSequentialWriter extends SequentialWriter
 
     // index file writer (random I/O)
     private final CompressionMetadata.Writer metadataWriter;
+    private final CompressionParams parameters;
     private final ICompressor compressor;
 
     // used to store compressed data
@@ -71,6 +75,7 @@ public class CompressedSequentialWriter extends SequentialWriter
 
     private final ByteBuffer crcCheckBuffer = ByteBuffer.allocate(4);
     private final Optional<File> digestFile;
+    private final ChecksumType checksumType;
 
     private final int maxCompressedLength;
 
@@ -93,6 +98,7 @@ public class CompressedSequentialWriter extends SequentialWriter
     public CompressedSequentialWriter(File file,
                                       File offsetsFile,
                                       File digestFile,
+                                      ChecksumType checksumType,
                                       SequentialWriterOption option,
                                       CompressionParams parameters,
                                       MetadataCollector sstableMetadataCollector)
@@ -104,19 +110,36 @@ public class CompressedSequentialWriter extends SequentialWriter
                                           .bufferType(parameters.getSstableCompressor().preferredBufferType())
                                           .finishOnClose(option.finishOnClose())
                                           .build());
+        this.parameters = parameters;
         this.compressor = parameters.getSstableCompressor();
         this.digestFile = Optional.ofNullable(digestFile);
+        this.checksumType = checksumType;
 
         // buffer for compression should be the same size as buffer itself
         compressed = compressor.preferredBufferType().allocate(compressor.initialCompressedBufferLength(buffer.capacity()));
 
         maxCompressedLength = parameters.maxCompressedLength();
+        if (this.compressor.encryptionOnly() != null)
+        {
+            // This should have already been verified by CompressionParams. Make sure the invalid setting didn't somehow get through.
+            Preconditions.checkState(parameters.maxCompressedLength() == Integer.MAX_VALUE,
+                                     CompressionParams.MIN_COMPRESS_RATIO + " cannot be used in combination with encryption.\n" +
+                                     "Compression parameters: %s", parameters.asMap());
+        }
 
         /* Index File (-CompressionInfo.db component) and it's header */
         metadataWriter = CompressionMetadata.Writer.open(parameters, offsetsFile);
 
         this.sstableMetadataCollector = sstableMetadataCollector;
-        crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)));
+        crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)), checksumType);
+    }
+
+    /**
+     * @return the compression parameters the file is written with, i.e. those stored in its compression info file
+     */
+    public CompressionParams parameters()
+    {
+        return parameters;
     }
 
     @Override
@@ -464,7 +487,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             try (FileChannel fileChannel = StorageProvider.instance.writeTimeReadFileChannelFor(file);
                  InputStream stream = Channels.newInputStream(fileChannel))
             {
-                CRC32 checksum = new CRC32();
+                Checksum checksum = checksumType.newInstance();
                 try (CheckedInputStream checkedInputStream = new CheckedInputStream(stream, checksum))
                 {
                     byte[] chunk = new byte[64 * 1024];

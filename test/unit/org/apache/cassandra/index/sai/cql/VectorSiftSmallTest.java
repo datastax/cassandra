@@ -26,6 +26,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -33,11 +34,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import org.junit.Test;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 
 import static org.junit.Assert.assertEquals;
@@ -47,6 +51,15 @@ import static org.junit.Assert.assertTrue;
 public class VectorSiftSmallTest extends VectorTester.Versioned
 {
     private static final String DATASET = "siftsmall"; // change to "sift" for larger dataset. requires manual download
+
+    // The full version matrix takes longer than the test fork timeout on slow CI hosts, so the
+    // suite is sharded by version: this class covers ED and later, older versions are covered by
+    // VectorSiftSmallEbEcTest and VectorSiftSmallLegacyTest.
+    @Parameterized.Parameters(name = "{0} {1}")
+    public static Collection<Object[]> data()
+    {
+        return data(v -> v.onOrAfter(Version.ED));
+    }
 
     @Override
     public void setup() throws Throwable
@@ -233,18 +246,21 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
             assertTrue("Post-compaction recall is " + recall, recall > postCompactionRecall);
         }
 
-        // Set force PQ training size to ensure we hit the refine code path and apply it to half the vectors.
-        // TODO this test fails as of this commit due to recall issues. Will investigate further.
-        // CompactionGraph.PQ_TRAINING_SIZE = baseVectors.size() / 2;
-
-        // Compact again to take the CompactionGraph code path that calls the refine logic
-        compact();
+        // Force the PQ training size so that the CompactionGraph refine path runs halfway through the build
+        int savedTrainingSize = CompactionGraph.PQ_TRAINING_SIZE;
+        CompactionGraph.PQ_TRAINING_SIZE = baseVectors.size() / 2;
+        try
+        {
+            compact();
+        }
+        finally
+        {
+            CompactionGraph.PQ_TRAINING_SIZE = savedTrainingSize;
+        }
         for (int topK : List.of(1, 100))
         {
             var recall = testRecall(topK, queryVectors, groundTruth);
-            // This assertion will fail until we address the design the bug discussed
-            // in https://github.com/riptano/cndb/issues/16637.
-            // assertTrue("Post-compaction recall is " + recall, recall > postCompactionRecall);
+            assertTrue("Post-refinement recall is " + recall, recall > postCompactionRecall);
         }
     }
 
@@ -308,7 +324,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
         return vectors;
     }
 
-    private static ArrayList<List<Integer>> readIvecs(String filename)
+    static ArrayList<List<Integer>> readIvecs(String filename)
     {
         var groundTruthTopK = new ArrayList<List<Integer>>();
 

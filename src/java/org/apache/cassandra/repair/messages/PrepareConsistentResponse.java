@@ -51,6 +51,14 @@ public class PrepareConsistentResponse extends RepairMessage
         return parentSession;
     }
 
+    @Override
+    public String toString()
+    {
+        return "PrepareConsistentResponse{parentSession=" + parentSession +
+               ", participant=" + participant +
+               ", success=" + success + '}';
+    }
+
     public boolean equals(Object o)
     {
         if (this == o) return true;

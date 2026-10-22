@@ -101,6 +101,17 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
         class FilterNotIndexed extends Transformation
         {
             @Override
+            protected RegularAndStaticColumns applyToPartitionColumns(RegularAndStaticColumns columns)
+            {
+                // The rows and the static row are filtered with the column filter below, so the columns advertised
+                // by the resulting iterator must be the fetched ones. Keeping the columns of the source iterator (for
+                // instance all the table columns when the source is a full partition read done to populate the row
+                // cache) would make the result claim columns the column filter does not fetch, which breaks the
+                // serialization of the read response (see Columns.Serializer#serializeSubset).
+                return columnFilter.fetchedColumns();
+            }
+
+            @Override
             public Row applyToRow(Row row)
             {
                 return tester.includes(row.clustering()) ? row.filter(columnFilter, iterator.metadata()) : null;

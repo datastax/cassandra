@@ -172,7 +172,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
      * commitLogSegmentPosition should only be null if this is a secondary index, in which case it is *expected* to be null
      */
     @Override
-    protected long performPut(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
+    public long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
     {
         Cloner cloner = allocator.cloner(opGroup);
         AtomicBTreePartition previous = partitions.get(update.partitionKey());

@@ -585,6 +585,16 @@ public enum Operator
         return this == CONTAINS || this == CONTAINS_KEY || this == NOT_CONTAINS || this == NOT_CONTAINS_KEY;
     }
 
+    /**
+     * Checks if this operator is any of the variations of ORDER BY, such as ANN, BM25 and generic ORDER BY.
+     *
+     * @return {@code true} if this operator is any kind of ORDER BY, {@code false} otherwise.
+     */
+    public boolean isOrderBy()
+    {
+        return this == ANN || this == BM25 || this == ORDER_BY_ASC || this == ORDER_BY_DESC;
+    }
+
     @Override
     public String toString()
     {

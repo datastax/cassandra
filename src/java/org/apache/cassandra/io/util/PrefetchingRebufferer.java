@@ -325,7 +325,19 @@ public class PrefetchingRebufferer implements Rebufferer
     @Override
     public long adjustPosition(long position)
     {
-        return position;
+        return source.adjustPosition(position);
+    }
+
+    @Override
+    public long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        return source.positionForSkip(currentPosition, bytesToSkip);
+    }
+
+    @Override
+    public long remainingBytes(long position)
+    {
+        return source.remainingBytes(position);
     }
 
     @Override

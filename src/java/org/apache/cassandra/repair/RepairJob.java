@@ -66,6 +66,7 @@ import static org.apache.cassandra.service.paxos.Paxos.useV2;
 public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
 {
     private static final Logger logger = LoggerFactory.getLogger(RepairJob.class);
+    private static final String LOG_FMT_VALIDATION = "{} parentSession={} {}{}";
 
     private final SharedContext ctx;
     public final JobState state;
@@ -79,6 +80,15 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
 
     @VisibleForTesting
     final List<SyncTask> syncTasks = new CopyOnWriteArrayList<>();
+
+    /**
+     * Returns " [entityId: &lt;id&gt;, repairType: &lt;type&gt;]" (with a leading space for inline log message formatting)
+     * when entityId is set on the session, or an empty string otherwise.
+     */
+    private String entityTag()
+    {
+        return session.entityId != null ? " [entityId: " + session.entityId + ", repairType: " + session.repairType + ']' : "";
+    }
 
     /**
      * Create repair job to run on specific columnfamily
@@ -126,13 +136,17 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
         Future<Void> paxosRepair;
         if (paxosRepairEnabled() && ((useV2() && session.repairPaxos) || session.paxosOnly))
         {
-            logger.info("{} {}.{} starting paxos repair", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+            logger.info("{} parentSession={} {}.{} starting paxos repair{}",
+                        session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                        desc.keyspace, desc.columnFamily, entityTag());
             TableMetadata metadata = Schema.instance.getTableMetadata(desc.keyspace, desc.columnFamily);
             paxosRepair = PaxosCleanup.cleanup(ctx, allEndpoints, metadata, desc.ranges, session.state.commonRange.hasSkippedReplicas, taskExecutor);
         }
         else
         {
-            logger.info("{} {}.{} not running paxos repair", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+            logger.info("{} parentSession={} {}.{} not running paxos repair{}",
+                        session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                        desc.keyspace, desc.columnFamily, entityTag());
             paxosRepair = ImmediateFuture.success(null);
         }
 
@@ -142,7 +156,9 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
             {
                 public void onSuccess(Void v)
                 {
-                    logger.info("{} {}.{} paxos repair completed", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+                    logger.info("{} parentSession={} {}.{} paxos repair completed{}",
+                                session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                                desc.keyspace, desc.columnFamily, entityTag());
                     trySuccess(new RepairResult(desc, Collections.emptyList()));
                 }
 
@@ -151,7 +167,9 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                  */
                 public void onFailure(Throwable t)
                 {
-                    logger.warn("{} {}.{} paxos repair failed", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+                    logger.warn("{} parentSession={} {}.{} paxos repair failed{}",
+                                session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                                desc.keyspace, desc.columnFamily, entityTag());
                     tryFailure(t);
                 }
             }, taskExecutor);
@@ -205,7 +223,9 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
                 state.phase.success();
                 if (!session.previewKind.isPreview())
                 {
-                    logger.info("{} {}.{} is fully synced", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+                    logger.info("{} parentSession={} {}.{} is fully synced with endpoints {} {}",
+                                session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                                desc.keyspace, desc.columnFamily, session.state.commonRange.endpoints, entityTag());
                     RepairProgressReporter.instance.onRepairSucceeded(session.getId(), desc.keyspace, desc.columnFamily);
                 }
                 cfs.metric.repairsCompleted.inc();
@@ -223,7 +243,9 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
 
                 if (!session.previewKind.isPreview())
                 {
-                    logger.warn("{} {}.{} sync failed", session.previewKind.logPrefix(session.getId()), desc.keyspace, desc.columnFamily);
+                    logger.warn("{} parentSession={} {}.{} sync failed with endpoints {} {}: {}",
+                                session.previewKind.logPrefix(session.getId()), desc.parentSessionId,
+                                desc.keyspace, desc.columnFamily, session.state.commonRange.endpoints, entityTag(), t.getMessage());
                     RepairProgressReporter.instance.onRepairFailed(session.getId(), desc.keyspace, desc.columnFamily, t);
                 }
                 cfs.metric.repairsCompleted.inc();
@@ -499,7 +521,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
     {
         state.phase.validationSubmitted();
         String message = String.format("Requesting merkle trees for %s (to %s)", desc.columnFamily, endpoints);
-        logger.info("{} {}", session.previewKind.logPrefix(desc.sessionId), message);
+        logger.info(LOG_FMT_VALIDATION, session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
         Tracing.traceRepair(message);
         long nowInSec = getNowInSeconds();
         List<ValidationTask> tasks = new ArrayList<>(endpoints.size());
@@ -520,7 +542,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
     {
         state.phase.validationSubmitted();
         String message = String.format("Requesting merkle trees for %s (to %s)", desc.columnFamily, endpoints);
-        logger.info("{} {}", session.previewKind.logPrefix(desc.sessionId), message);
+        logger.info(LOG_FMT_VALIDATION, session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
         Tracing.traceRepair(message);
         long nowInSec = getNowInSeconds();
         List<Future<TreeResponse>> tasks = new ArrayList<>(endpoints.size());
@@ -563,7 +585,7 @@ public class RepairJob extends AsyncFuture<RepairResult> implements Runnable
     {
         state.phase.validationSubmitted();
         String message = String.format("Requesting merkle trees for %s (to %s)", desc.columnFamily, endpoints);
-        logger.info("{} {}", session.previewKind.logPrefix(desc.sessionId), message);
+        logger.info(LOG_FMT_VALIDATION, session.previewKind.logPrefix(desc.sessionId), desc.parentSessionId, message, entityTag());
         Tracing.traceRepair(message);
         long nowInSec = getNowInSeconds();
         List<Future<TreeResponse>> tasks = new ArrayList<>(endpoints.size());

@@ -18,9 +18,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Arrays;
 
-import org.apache.cassandra.net.MessagingService;
 import org.junit.Assume;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -52,13 +50,6 @@ import static java.lang.String.format;
  */
 public class PlanWithIndexHintsTest extends SAITester.Versioned
 {
-    @BeforeClass
-    public static void setUpClass()
-    {
-        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
-        SAITester.setUpClass();
-    }
-
     @Test
     public void testQueryPlanning() throws Throwable
     {
@@ -164,6 +155,20 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
             assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 1).usesNone();
             assertANNOrderingNeedsIndex("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx1,idx2}", "v1");
             assertANNOrderingNeedsIndex("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx1,idx2}", "v2");
+
+            // excluding all indexes with the wildcard should behave exactly like excluding idx1 and idx2 explicitly
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' ALLOW FILTERING WITH excluded_indexes = {*}", 2).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v2='rare' ALLOW FILTERING WITH excluded_indexes = {*}", 2).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={*}", 1).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common' ALLOW FILTERING WITH excluded_indexes={*}", numRows - 3).usesNone();
+            assertANNOrderingNeedsIndex("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={*}", "v1");
+            assertANNOrderingNeedsIndex("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={*}", "v2");
+
+            // the wildcard is not allowed in included_indexes
+            assertWildcardIncludedIndexesError("SELECT * FROM %s WHERE v1='rare' WITH included_indexes = {*}");
+
+            // a wildcard exclusion conflicts with an included index that exists on the table
+            assertConflictingHints("SELECT * FROM %s WHERE v1='rare' WITH included_indexes={idx1} AND excluded_indexes={*}", "idx1");
         });
     }
 
@@ -818,6 +823,20 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
                   .hasMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR);
+    }
+
+    private void assertWildcardIncludedIndexesError(String query)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessage(IndexHints.WILDCARD_INCLUDED_INDEXES_ERROR);
+    }
+
+    private void assertConflictingHints(String query, String indexName)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(IndexHints.CONFLICTING_INDEXES_ERROR + indexName);
     }
 
     private void assertANNOrderingNeedsIndex(String query, String column)

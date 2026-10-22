@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.crypto.NoSuchPaddingException;
 
@@ -34,6 +35,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.crypto.LocalSystemKey;
 import org.apache.cassandra.crypto.TDEConfigurationProvider;
 import org.apache.cassandra.db.Keyspace;
@@ -42,8 +44,11 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.tools.SSTableMetadataViewer;
+import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.ChecksumType;
 
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
@@ -78,16 +83,35 @@ public class SSTableEncryptionTest extends TestBaseImpl
     }
 
     @Test
+    public void shouldFlushToQueryableEncryptedSSTables() throws Throwable
+    {
+        // test reading sstables as set up by flush/compaction on the running node
+        testQueryableEncryptedSSTables(false);
+    }
+
+    @Test
     public void shouldCreateQueryableEncryptedSSTables() throws Throwable
     {
-        try (Cluster cluster = builder().withNodes(2)
+        // test reading sstables from disk without write-time set-up
+        testQueryableEncryptedSSTables(true);
+    }
+
+    public void testQueryableEncryptedSSTables(boolean restartNodes) throws Throwable
+    {
+        // Without a restart, every node holds a replica of all the data, and each node's flushed encrypted sstables
+        // are read locally below. The restart variant keeps to one node, whose restart makes it open the sstables
+        // from disk.
+        int nodes = restartNodes ? 1 : 2;
+        try (Cluster cluster = builder().withNodes(nodes)
                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                                         .start())
         {
-            // given a table with data encrypted using local key
-            String keyspace = createKeyspace(cluster);
+            // given a table with data encrypted using local key, replicated to every node
+            String keyspace = createKeyspace(cluster, nodes);
             Path secretKey = createLocalSecretKey(cluster);
             String table = createEncryptedTable(cluster, keyspace, secretKey);
+            // keep the sstables stable, so that the paths collected for the sstablemetadata check below stay valid
+            cluster.forEach(instance -> instance.nodetoolResult("disableautocompaction", keyspace, table).asserts().success());
             int numberOfRows = 10;
 
             for (int i = 0; i < numberOfRows; i++)
@@ -98,9 +122,26 @@ public class SSTableEncryptionTest extends TestBaseImpl
                 }
             }
             // flush to make sure we have sstables
-            cluster.get(1).flush(keyspace);
+            cluster.forEach(instance -> instance.flush(keyspace));
 
             insertAndFlush(cluster, keyspace, table, numberOfRows);
+
+            if (restartNodes)
+            {
+                // the offline sstablemetadata tool must be able to read the encrypted sstables, including the first
+                // and last keys, which for BTI sstables are read from the (encrypted) partition index; it is run
+                // while the node is down, so that no log output of the node can end up in the tool's stderr
+                // (the cluster has a single node)
+                List<String> sstablePaths = getPathsFor(cluster, keyspace, table, SSTableFormat.Components.DATA);
+                restartWithDeletedCommitLog(cluster, 1, () -> assertSSTableMetadataToolSucceeds(sstablePaths, true));
+            }
+
+            // every node can read all the rows from its own sstables (the memtables were flushed), without the
+            // coordinator, whose digest reads and read repair could hide a replica returning fewer rows
+            cluster.forEach(instance -> {
+                assertThat(instance.executeInternal(String.format("SELECT * FROM %s.%s", keyspace, table)).length).isEqualTo(100);
+                assertThat(instance.executeInternal(String.format("SELECT * FROM %s.%s WHERE id = '5'", keyspace, table)).length).isEqualTo(10);
+            });
 
             // when querying all
             Object[][] rows = cluster.coordinator(1).execute(String.format("SELECT * FROM %s.%s ", keyspace, table), ALL);
@@ -127,11 +168,104 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertThat(byIdRows[0][0]).isEqualTo(String.valueOf(5));
             assertThat(byIdRows[0][1]).isEqualTo(String.valueOf(2));
             assertThat(byIdRows[0][2]).isEqualTo(String.valueOf(2));
+
+            if (!restartNodes)
+            {
+                // same check as above, on the sstables of the running node 1: the log output of the nodes may
+                // reach the tool's stderr (the tool runner swaps System.err JVM-wide), so stderr is not checked
+                assertSSTableMetadataToolSucceeds(getPathsFor(cluster, keyspace, table, SSTableFormat.Components.DATA), false);
+            }
         }
+    }
+
+    /**
+     * Runs the {@code sstablemetadata} tool, in the test JVM, on each of the given sstables.
+     *
+     * @param sstablePaths     paths of the Data.db files of the sstables
+     * @param checkCleanStdErr whether to check that the tool wrote nothing to stderr; only reliable when no node of the
+     *                         cluster is running, as their log output may be routed to the tool's stderr
+     */
+    private static void assertSSTableMetadataToolSucceeds(List<String> sstablePaths, boolean checkCleanStdErr)
+    {
+        assertThat(sstablePaths).isNotEmpty();
+        for (String sstablePath : sstablePaths)
+        {
+            ToolRunner.ToolResult tool = ToolRunner.invokeClass(SSTableMetadataViewer.class, sstablePath);
+            tool.assertOnExitCode();
+            if (checkCleanStdErr)
+                tool.assertCleanStdErr();
+            assertThat(tool.getStdout()).contains("First token")
+                                        .contains("Last token");
+        }
+    }
+
+    private static void restartWithDeletedCommitLog(Cluster cluster, int i)
+    {
+        restartWithDeletedCommitLog(cluster, i, () -> {});
+    }
+
+    /**
+     * @param whileDown run after the node has been shut down, before it is started again
+     */
+    private static void restartWithDeletedCommitLog(Cluster cluster, int i, Runnable whileDown)
+    {
+        String commitlogpath = cluster.get(i).callOnInstance(() -> DatabaseDescriptor.getCommitLogLocation().path());
+        waitOn(cluster.get(i).shutdown());
+        whileDown.run();
+        // delete the commit log to make sure we are not recreating the data from it
+        PathUtils.deleteRecursive(Path.of(commitlogpath));
+        // start-up must now read the sstables
+        cluster.get(i).startup();
     }
 
     @Test
     public void shouldEncryptSensitiveData() throws Exception
+    {
+        shouldEncryptSensitiveData(null);
+    }
+
+    @Test
+    public void shouldEncryptSensitiveDataMinCompressRatio0() throws Exception
+    {
+        shouldEncryptSensitiveData(0.0);
+    }
+
+    @Test
+    public void shouldRejectMinCompressRatioWithEncryption() throws Exception
+    {
+        try (Cluster cluster = builder().withNodes(1)
+                                        .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                        .start())
+        {
+            String keyspace = createKeyspace(cluster);
+            Path secretKey = createLocalSecretKey(cluster);
+
+            // A chunk that does not reach min_compress_ratio is stored as is, i.e. unencrypted, so the option must be
+            // refused for encrypting compressors. The encryption options all have defaults, so the check must not
+            // depend on cipher_algorithm being spelled out.
+            for (boolean withCipherAlgorithm : new boolean[]{ true, false })
+            {
+                // Deterministic, distinct names per iteration, so that no two statements can target the same table
+                String suffix = withCipherAlgorithm ? "with_cipher" : "without_cipher";
+                String clause = localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString(), 1.1, withCipherAlgorithm);
+                String createTable = String.format("CREATE TABLE %s.%s (id text, cc text, value text, PRIMARY KEY ((id), cc))%s",
+                                                   keyspace, "rejected_" + suffix, clause);
+                Throwable throwable = catchThrowable(() -> cluster.schemaChange(createTable));
+                assertThat(throwable).hasMessageContaining("min_compress_ratio").hasMessageContaining("unencrypted");
+
+                // Same for ALTER TABLE on a valid encrypted table: the rejected change must leave the table usable.
+                String table = createEncryptedTable(cluster, keyspace, secretKey, "altered_" + suffix);
+                String alterTable = String.format("ALTER TABLE %s.%s%s", keyspace, table, clause);
+                throwable = catchThrowable(() -> cluster.schemaChange(alterTable));
+                assertThat(throwable).hasMessageContaining("min_compress_ratio").hasMessageContaining("unencrypted");
+                insertAndFlush(cluster, keyspace, table, 10);
+                Object[][] rows = cluster.coordinator(1).execute(String.format("SELECT * FROM %s.%s", keyspace, table), ALL);
+                assertThat(rows.length).isEqualTo(10);
+            }
+        }
+    }
+
+    public void shouldEncryptSensitiveData(Double minCompressRatio) throws Exception
     {
         try (Cluster cluster = builder().withNodes(1)
                                         .withDataDirCount(1)
@@ -143,7 +277,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
             String keyspace = createKeyspace(cluster);
             TestTable nonEncryptedTable = createTableWithSampleData(cluster, keyspace, "");
             Path secretKey = createLocalSecretKey(cluster);
-            TestTable encryptedTable = createTableWithSampleData(cluster, keyspace, localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString()));
+            TestTable encryptedTable = createTableWithSampleData(cluster, keyspace, localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString(), minCompressRatio));
 
             // then
             // sensitive key should not be present in encrypted data
@@ -152,13 +286,23 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertThat(Bytes.indexOf(encryptedTable.sstableBytes, sensitiveBytes)).isEqualTo(-1);
             // sensitive key should not be present in encrypted partition index
             assertThat(Bytes.indexOf(encryptedTable.partitionIndexBytes, sensitiveBytes)).isEqualTo(-1);
-            // BTI does not list full keys so we usually won't find sensitive key without encryption either
-            // assertThat(Bytes.indexOf(nonEncryptedTable.partitionIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
+            // BTI does not list full keys, but it does include the first and last key in its metadata
+            assertThat(Bytes.indexOf(nonEncryptedTable.partitionIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
             // sensitive key should not be present in encrypted row index
             assertThat(Bytes.indexOf(encryptedTable.rowIndexBytes, sensitiveBytes)).isEqualTo(-1);
-            // BTI does not list full keys so we usually won't find sensitive key without encryption either
-            // assertThat(Bytes.indexOf(nonEncryptedTable.rowIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
+            // The row index includes full partition keys, thus we will find the key in the index
+            assertThat(Bytes.indexOf(nonEncryptedTable.rowIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
 
+            String btiEncodedKeyPattern = "";
+            for (int i = SENSITIVE_KEY.length() - 1; i >= 0; --i)
+                btiEncodedKeyPattern += "." + SENSITIVE_KEY.charAt(i);
+            Pattern btiEncodedKey = Pattern.compile(btiEncodedKeyPattern);
+
+            checkPresence(encryptedTable.rowIndexBytes, btiEncodedKey, false);
+            checkPresence(nonEncryptedTable.rowIndexBytes, btiEncodedKey, true);
+            checkPresence(encryptedTable.partitionIndexBytes, btiEncodedKey, false);
+            // Keys in the partition index differ in the token, the BTI encoding of the key won't be found in the non-
+            // encrypted table.
 
             // indexes with encryption should pass the checksum check
             assertThat(checkEncryptionCrc(encryptedTable.partitionIndexBytes)).isTrue();
@@ -168,6 +312,12 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertThat(checkEncryptionCrc(nonEncryptedTable.partitionIndexBytes)).isFalse();
             assertThat(checkEncryptionCrc(nonEncryptedTable.rowIndexBytes)).isFalse();
         }
+    }
+
+    private static void checkPresence(byte[] fileBytes, Pattern btiEncodedKey, boolean expected)
+    {
+        String fileString = new String(fileBytes, StandardCharsets.US_ASCII);
+        assertThat(btiEncodedKey.matcher(fileString).find()).isEqualTo(expected);
     }
 
     private boolean checkEncryptionCrc(byte[] bytes)
@@ -188,8 +338,9 @@ public class SSTableEncryptionTest extends TestBaseImpl
         }
     }
 
+    // The deleted key file is recreated with a fresh random key by LocalFileSystemKeyProvider at startup: a wrong-key scenario.
     @Test
-    public void shouldNotReadRowsFromEncryptedTableWithoutTheSecretKey() throws Exception
+    public void shouldNotReadRowsWhenSecretKeyIsRecreated() throws Exception
     {
         try (Cluster cluster = builder().withNodes(1)
                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
@@ -210,19 +361,34 @@ public class SSTableEncryptionTest extends TestBaseImpl
             // delete secret key file
             assertTrue("secret key should be deleted", Files.deleteIfExists(secretKey));
 
-            // restart to clear in memory secret key cache
-            waitOn(cluster.get(1).shutdown());
-            cluster.get(1).startup();
+            // restart to clear in memory secret key cache; the commit log is deleted too, otherwise replaying it
+            // could restore the rows of the encrypted table in the memtable (its sstable cannot be opened, so it
+            // does not tell the replayer that those mutations were already persisted)
+            restartWithDeletedCommitLog(cluster, 1);
+            assertTrue("the secret key file should have been recreated at startup", Files.exists(secretKey));
 
-            // when
-            Object[][] rows = cluster. get(1).executeInternal(String.format("SELECT * FROM %s.%s", keyspace, nonEncryptedTableName));
-            Throwable throwable = catchThrowable(() -> cluster.get(0).executeInternal(String.format("SELECT * FROM %s.%s ", keyspace, encryptedTableName)));
-
-            // then it should be possible to read the table without encryption
-            assertThat(rows.length).isEqualTo(numberOfRows);
-            // then it should not be possible to read the encrypted table
-            assertThat(throwable).isInstanceOf(IndexOutOfBoundsException.class);
+            assertEncryptedTableUnreadable(cluster, keyspace, encryptedTableName, nonEncryptedTableName, numberOfRows);
         }
+    }
+
+    /**
+     * Without the right key, the sstable of the encrypted table cannot be opened at startup: its encrypted metadata
+     * and partition index cannot be decrypted (a missing key file is recreated with a new random key), so
+     * SSTableReaderLoadingBuilder turns the failure into a CorruptSSTableException and SSTableReader.openAll logs it
+     * and skips the sstable. The table then reads as empty, while the table without encryption is unaffected.
+     */
+    private static void assertEncryptedTableUnreadable(Cluster cluster, String keyspace, String encryptedTableName, String nonEncryptedTableName, int numberOfRows)
+    {
+        // when
+        Object[][] rows = cluster.get(1).executeInternal(String.format("SELECT * FROM %s.%s", keyspace, nonEncryptedTableName));
+        Object[][] encryptedRows = cluster.get(1).executeInternal(String.format("SELECT * FROM %s.%s", keyspace, encryptedTableName));
+
+        // then it should be possible to read the table without encryption
+        assertThat(rows.length).isEqualTo(numberOfRows);
+        // then the sstable of the encrypted table was skipped as corrupted and none of its rows can be read
+        List<String> skipped = cluster.get(1).logs().grep("Corrupt sstable .*" + encryptedTableName + "-.*; skipping table").getResult();
+        assertThat(skipped).isNotEmpty();
+        assertThat(encryptedRows.length).isEqualTo(0);
     }
 
     @Test
@@ -252,17 +418,9 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertEquals(secretKey, secretKey2);
 
             // restart to clear in memory secret key cache
-            waitOn(cluster.get(1).shutdown());
-            cluster.get(1).startup();
+            restartWithDeletedCommitLog(cluster, 1);
 
-            // when
-            Object[][] rows = cluster. get(1).executeInternal(String.format("SELECT * FROM %s.%s", keyspace, nonEncryptedTableName));
-            Throwable throwable = catchThrowable(() -> cluster.get(0).executeInternal(String.format("SELECT * FROM %s.%s ", keyspace, encryptedTableName)));
-
-            // then it should be possible to read the table without encryption
-            assertThat(rows.length).isEqualTo(numberOfRows);
-            // then it should not be possible to read the encrypted table
-            assertThat(throwable).isInstanceOf(IndexOutOfBoundsException.class);
+            assertEncryptedTableUnreadable(cluster, keyspace, encryptedTableName, nonEncryptedTableName, numberOfRows);
         }
     }
 
@@ -322,7 +480,13 @@ public class SSTableEncryptionTest extends TestBaseImpl
         {
             for (int j = 0; j < ROWS_COUNT; j++)
             {
-                cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')", keyspace, tableName, i, j, k), ALL);
+                cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')",
+                                                             keyspace,
+                                                             tableName,
+                                                             SENSITIVE_KEY + '_' + i,
+                                                             SENSITIVE_KEY + '_' + j,
+                                                             SENSITIVE_KEY + '_' + k),
+                                               ALL);
                 k++;
             }
         }
@@ -349,49 +513,29 @@ public class SSTableEncryptionTest extends TestBaseImpl
         return new TestTable(tableName, sstableBytes, sstablePath, partitionIndexBytes, partitionIndexPath, rowIndexBytes, rowIndexPath);
     }
 
-    private enum ComponentType { DATA, PARTITION_INDEX, ROW_INDEX }
-    
+    /**
+     * Returns the paths of the given component of the live sstables of node 1.
+     */
     private List<String> getPathsFor(Cluster cluster, String keyspace, String tableName, Component component)
     {
-        // Determine component type before passing to lambda
-        ComponentType componentType;
-        if (component == SSTableFormat.Components.DATA) {
-            componentType = ComponentType.DATA;
-        } else if (component == BtiFormat.Components.PARTITION_INDEX) {
-            componentType = ComponentType.PARTITION_INDEX;
-        } else if (component == BtiFormat.Components.ROW_INDEX) {
-            componentType = ComponentType.ROW_INDEX;
-        } else {
-            throw new IllegalArgumentException("Unsupported component: " + component);
-        }
-        
-        return cluster.get(1).callOnInstance(() -> {
-            Component comp;
-            switch (componentType) {
-                case DATA:
-                    comp = SSTableFormat.Components.DATA;
-                    break;
-                case PARTITION_INDEX:
-                    comp = BtiFormat.Components.PARTITION_INDEX;
-                    break;
-                case ROW_INDEX:
-                    comp = BtiFormat.Components.ROW_INDEX;
-                    break;
-                default:
-                    throw new IllegalArgumentException("Unsupported component type");
-            }
-            return Keyspace.open(keyspace).getColumnFamilyStore(tableName).getLiveSSTables()
-                           .stream()
-                           .map(SSTableReader::getDescriptor)
-                           .map(d -> d.pathFor(comp).toString())
-                           .collect(Collectors.toList());
-        });
+        // a Component does not cross the instance boundary; its name does, and is parsed again on the instance
+        String componentName = component.name;
+        return cluster.get(1).callOnInstance(() -> Keyspace.open(keyspace).getColumnFamilyStore(tableName).getLiveSSTables()
+                                                           .stream()
+                                                           .map(SSTableReader::getDescriptor)
+                                                           .map(d -> d.pathFor(Component.parse(componentName, d.getFormat())).toString())
+                                                           .collect(Collectors.toList()));
     }
 
     private String createKeyspace(Cluster cluster)
     {
+        return createKeyspace(cluster, 1);
+    }
+
+    private String createKeyspace(Cluster cluster, int replicationFactor)
+    {
         String randomKeyspaceName = KEYSPACE_PREFIX + "_" + RandomStringUtils.randomNumeric(5);
-        cluster.schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = {'class':'SimpleStrategy','replication_factor':'1'}", randomKeyspaceName));
+        cluster.schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = {'class':'SimpleStrategy','replication_factor':'%d'}", randomKeyspaceName, replicationFactor));
         return randomKeyspaceName;
     }
 
@@ -413,7 +557,11 @@ public class SSTableEncryptionTest extends TestBaseImpl
 
     private String createEncryptedTable(Cluster cluster, String keyspace, Path secretKey)
     {
-        String table = randomTableName();
+        return createEncryptedTable(cluster, keyspace, secretKey, randomTableName());
+    }
+
+    private String createEncryptedTable(Cluster cluster, String keyspace, Path secretKey, String table)
+    {
         cluster.schemaChange(String.format("CREATE TABLE %s.%s (id text, cc text, value text, PRIMARY KEY ((id), cc)) WITH compression = " +
                           "{'class' : 'Encryptor', " +
                           "'cipher_algorithm' : 'AES/ECB/PKCS5Padding', " +
@@ -442,15 +590,20 @@ public class SSTableEncryptionTest extends TestBaseImpl
             cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')", keyspace, table, i, i, i), ALL);
         }
         // flush to make sure we have sstables
-         cluster.get(1).flush(keyspace);
+        cluster.forEach(instance -> instance.flush(keyspace));
     }
 
-    private String localSystemKeyEncryptionCompressionSuffix(String className, String secretKeyPath)
+    private String localSystemKeyEncryptionCompressionSuffix(String className, String secretKeyPath, Double minCompressRatio)
+    {
+        return localSystemKeyEncryptionCompressionSuffix(className, secretKeyPath, minCompressRatio, true);
+    }
+
+    private String localSystemKeyEncryptionCompressionSuffix(String className, String secretKeyPath, Double minCompressRatio, boolean withCipherAlgorithm)
     {
         return String.format(" WITH compression = " +
                              "{'class' : '%s', " +
-                             "'cipher_algorithm' : 'AES/ECB/PKCS5Padding', " +
-                             "'secret_key_strength' : 128, " +
+                             (minCompressRatio != null ? "'min_compress_ratio': '" + minCompressRatio + "', " : "") +
+                             (withCipherAlgorithm ? "'cipher_algorithm' : 'AES/ECB/PKCS5Padding', 'secret_key_strength' : 128, " : "") +
                              "'key_provider' : 'LocalFileSystemKeyProviderFactory', " +
                              "'secret_key_file': '%s' };", className, secretKeyPath);
     }

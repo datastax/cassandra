@@ -18,6 +18,7 @@
 */
 package org.apache.cassandra.db.lifecycle;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -72,6 +73,10 @@ public class CompositeLifecycleTransactionTest
 
         testBadUpdate(partials[2], readers2[0], false);  // same reader && instances
         testBadUpdate(partials[2], readers2[1], true);  // early open unsupported
+        // a reader opened early by a periodic early open (original=false) is rejected too, before being staged
+        SSTableReader early = withOpenReason(readers2[4], SSTableReader.OpenReason.EARLY);
+        testBadUpdate(partials[1], early, false);
+        testThrows(() -> txn.current(early));  // unknown to the shared transaction
 
         Assert.assertEquals(3, tracker.getView().compacting.size());
         partials[0].checkpoint();
@@ -250,6 +255,21 @@ public class CompositeLifecycleTransactionTest
         Assert.assertTrue(failed);
     }
 
+
+    private static SSTableReader withOpenReason(SSTableReader reader, SSTableReader.OpenReason openReason)
+    {
+        try
+        {
+            Field field = SSTableReader.class.getDeclaredField("openReason");
+            field.setAccessible(true);
+            field.set(reader, openReason);
+            return reader;
+        }
+        catch (ReflectiveOperationException e)
+        {
+            throw new AssertionError(e);
+        }
+    }
 
     private static SSTableReader[] readersArray(int lb, int ub, ColumnFamilyStore cfs)
     {

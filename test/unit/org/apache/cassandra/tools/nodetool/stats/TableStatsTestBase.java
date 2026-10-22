@@ -354,6 +354,7 @@ public class TableStatsTestBase
         table5.saiIndexSegmentsHit = 4.0D;
         table5.saiRowsFiltered = 55.0D;
         table5.saiTotalQueryTimeouts = 4L;
+        table5.hasSaiIndexes = true;
         table5.saiTotalIndexCount = 5;
         table5.saiTotalQueryableIndexRatio = "5/5";
 

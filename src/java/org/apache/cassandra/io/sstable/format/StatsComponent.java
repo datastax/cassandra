@@ -33,11 +33,15 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
+import org.apache.cassandra.io.sstable.metadata.IMetadataSerializer;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
+
+import static com.google.common.base.Preconditions.checkNotNull;
 
 public class StatsComponent
 {
@@ -120,11 +124,36 @@ public class StatsComponent
         return new StatsComponent(descriptor, newMetadata);
     }
 
+    /**
+     * Saves the metadata of a complete sstable; if the metadata is encrypted, the encryptor is read from the
+     * sstable's compression info file (see {@link IMetadataSerializer#rewriteSSTableMetadata(Descriptor, Map)}).
+     */
     public void save(Descriptor desc)
     {
         try
         {
             desc.getMetadataSerializer().rewriteSSTableMetadata(desc, metadata);
+        }
+        catch (IOException e)
+        {
+            throw new FSWriteError(e);
+        }
+    }
+
+    /**
+     * Saves the metadata of an sstable whose data file is (being) written with the given compression parameters;
+     * if the metadata is encrypted, the encryptor is taken from them (see
+     * {@link IMetadataSerializer#rewriteSSTableMetadata(Descriptor, Map, CompressionParams)}).
+     *
+     * @param dataCompressionParams the compression parameters of the data file, not null:
+     *                              {@link CompressionParams#noCompression()} if it is not compressed
+     */
+    public void save(Descriptor desc, CompressionParams dataCompressionParams)
+    {
+        checkNotNull(dataCompressionParams, "dataCompressionParams must not be null, use CompressionParams.noCompression() for uncompressed sstables");
+        try
+        {
+            desc.getMetadataSerializer().rewriteSSTableMetadata(desc, metadata, dataCompressionParams);
         }
         catch (IOException e)
         {

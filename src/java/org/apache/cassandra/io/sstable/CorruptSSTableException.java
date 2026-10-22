@@ -49,4 +49,28 @@ public class CorruptSSTableException extends RuntimeException
     {
         this(cause, new File(path));
     }
+
+    /**
+     * Returns the given failure as a {@link CorruptSSTableException}: unchanged if it already is one (e.g. a chunk
+     * failing its checksum or decryption, reported by a lower level that already knows the corrupted file), otherwise
+     * wrapped in a new one for the given file.
+     * <p>
+     * Meant for the read paths that catch both {@link java.io.IOException} (or similar failures caused by corrupted
+     * data) and {@code CorruptSSTableException}, mark the sstable suspect and rethrow, so that both cases can be
+     * handled by a single catch clause without wrapping a {@code CorruptSSTableException} twice.
+     */
+    public static CorruptSSTableException maybeWrapInCorruptSSTableException(Throwable failure, File file)
+    {
+        return failure instanceof CorruptSSTableException ? (CorruptSSTableException) failure
+                                                          : new CorruptSSTableException(failure, file);
+    }
+
+    /**
+     * As {@link #maybeWrapInCorruptSSTableException(Throwable, File)}, for a file given by its path.
+     */
+    public static CorruptSSTableException maybeWrapInCorruptSSTableException(Throwable failure, String path)
+    {
+        return failure instanceof CorruptSSTableException ? (CorruptSSTableException) failure
+                                                          : new CorruptSSTableException(failure, path);
+    }
 }

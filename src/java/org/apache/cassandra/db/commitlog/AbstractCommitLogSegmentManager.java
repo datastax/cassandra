@@ -225,7 +225,15 @@ public abstract class AbstractCommitLogSegmentManager
                     case SHUTTING_DOWN:
                         // If shutdown() started and finished during segment creation, we are now left with a
                         // segment that no one will consume. Discard it.
-                        discardAvailableSegment();
+                        // Synchronize on 'this' (the AllocatorRunnable) for the same reason as the NORMAL path:
+                        // the InfiniteLoopExecutor uses SYNCHRONIZED interrupts, meaning thread.interrupt() is
+                        // delivered while holding this monitor. Holding it here prevents a new interrupt from
+                        // arriving mid-IO (channel.force / channel.write) and causing ClosedByInterruptException.
+                        synchronized (this)
+                        {
+                            interrupted = Thread.interrupted();
+                            discardAvailableSegment();
+                        }
                         return;
 
                     case NORMAL:
@@ -256,7 +264,11 @@ public abstract class AbstractCommitLogSegmentManager
             {
                 if (!CommitLog.handleCommitError("Failed managing commit log segments", t))
                 {
-                    discardAvailableSegment();
+                    synchronized (this)
+                    {
+                        Thread.interrupted();
+                        discardAvailableSegment();
+                    }
                     throw new TerminateException();
                 }
 
@@ -283,7 +295,11 @@ public abstract class AbstractCommitLogSegmentManager
 
             if (interrupted)
             {
-                discardAvailableSegment();
+                synchronized (this)
+                {
+                    Thread.interrupted(); // clear any residual interrupt flag before IO
+                    discardAvailableSegment();
+                }
                 throw new InterruptedException();
             }
         }

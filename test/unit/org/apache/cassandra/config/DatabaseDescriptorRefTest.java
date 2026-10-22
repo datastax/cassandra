@@ -199,6 +199,8 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.locator.Replica",
     "org.apache.cassandra.locator.SeedProvider",
     "org.apache.cassandra.metrics.TableMetrics$MetricsAggregation",
+    "org.apache.cassandra.schema.CompressionParams$Selector",
+    "org.apache.cassandra.schema.DefaultCompressionSelector",
     "org.apache.cassandra.security.AbstractCryptoProvider",
     "org.apache.cassandra.security.EncryptionContext",
     "org.apache.cassandra.security.ISslContextFactory",

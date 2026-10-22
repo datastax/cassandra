@@ -22,6 +22,7 @@ package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture; // checkstyle: permit this import
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -150,7 +151,6 @@ public class ChunkCache
         cacheAsMap = cache.asMap();
     }
 
-
     private Chunk load(ChunkReader file, long position)
     {
         Chunk chunk = null;
@@ -158,6 +158,7 @@ public class ChunkCache
         {
             chunk = newChunk(file.chunkSize(), position);  // Note: we need `chunk` to be assigned before we call read to release on error
             chunk.read(file);
+            return chunk;
         }
         catch (RuntimeException | Error t)
         {
@@ -165,7 +166,6 @@ public class ChunkCache
                 chunk.release();
             throw t;
         }
-        return chunk;
     }
 
     Chunk newChunk(int chunkSize, long position)
@@ -173,7 +173,14 @@ public class ChunkCache
         if (chunkSize == PageAware.PAGE_SIZE)
             return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
         if (chunkSize < PageAware.PAGE_SIZE)
-            return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP).limit(chunkSize).slice());
+        {
+            // Always reserve a full page from the pool, even when the reader requests a smaller chunk.
+            // Encode the logical chunk size in the owned buffer's limit (capacity stays PAGE_SIZE so
+            // BufferPool.put sees the size it handed out). buffer() builds a transient capacity-narrowed
+            // view from that limit; releasing a slice/duplicate confuses slot/size accounting and can
+            // leak direct memory on the overflow path (see Chunk.free()).
+            return new SingleRegionSubChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP), chunkSize);
+        }
 
         ByteBuffer[] buffers = bufferPool.getMultiple(chunkSize, PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
         if (buffers.length > 1)
@@ -349,16 +356,12 @@ public class ChunkCache
         /** The offset in the file where the chunk is read */
         final long offset;
 
-        /** The number of bytes read from disk, this could be less than the memory space allocated */
-        int bytesRead;
-
         private volatile int references;
         private static final AtomicIntegerFieldUpdater<Chunk> referencesUpdater = AtomicIntegerFieldUpdater.newUpdater(Chunk.class, "references");
 
         Chunk(long offset)
         {
             this.offset = offset;
-            this.bytesRead = 0; // To be filled by the read method
             this.references = 1; // Start referenced
         }
 
@@ -408,7 +411,12 @@ public class ChunkCache
         }
 
         /**
-         * Load the data for this chunk.
+         * Load the data for this chunk. This must be called only once, immediately after chunk construction
+         * (see {@link #load}).
+         *
+         * After this read, the chunk will return buffers whose limit is set to the amount of available data.
+         * The chunk must not be published or used before a read operation completes, including if the read throws an
+         * exception, because its buffers may contain stale data and/or invalid limits.
          */
         abstract void read(ChunkReader file);
 
@@ -446,6 +454,8 @@ public class ChunkCache
         {
             super(offset);
             this.buffers = buffers;
+            for (ByteBuffer buf : buffers)
+                buf.order(ByteOrder.BIG_ENDIAN);
         }
 
         void releaseBuffers()
@@ -471,8 +481,14 @@ public class ChunkCache
                     FastByteOperations.copy(scratchBuffer, pageStart, buffers[idx++], 0, PageAware.PAGE_SIZE);
 
                 if (pageStart < limit)   // if the limit is not a multiple of the page size
-                    FastByteOperations.copy(scratchBuffer, pageStart, buffers[idx++], 0, limit - pageStart);
-                bytesRead = limit;
+                {
+                    int length = limit - pageStart;
+                    ByteBuffer buf = buffers[idx++];
+                    FastByteOperations.copy(scratchBuffer, pageStart, buf, 0, length);
+                    buf.limit(length);
+                }
+                while (idx < buffers.length)
+                    buffers[idx++].limit(0);
             }
             finally
             {
@@ -506,19 +522,13 @@ public class ChunkCache
             {
                 this.buffer = buffer;
                 this.offset = offset;
-                buffer.order(ByteOrder.BIG_ENDIAN);
             }
 
             @Override
             public ByteBuffer buffer()
             {
                 assert isReferenced() : "Already unreferenced";
-                // Calculate the appropriate limit for this specific buffer based on its position
-                int bufferIndex = (int) ((offset - MultiRegionChunk.this.offset) / PageAware.PAGE_SIZE);
-                int startOfBuffer = bufferIndex * PageAware.PAGE_SIZE;
-                int endOfBuffer = Math.min(startOfBuffer + PageAware.PAGE_SIZE, bytesRead);
-                int bufferLimit = Math.max(0, endOfBuffer - startOfBuffer);
-                return buffer.duplicate().limit(bufferLimit);
+                return buffer.duplicate();
             }
 
             @Override
@@ -536,17 +546,18 @@ public class ChunkCache
     }
 
     /**
-     * A chunk with a single memory region. This is always used for reading chunks of up to PageAware.PAGE_SIZE (note
-     * that the memory allocated will be always at least PageAware.PAGE_SIZE even if the reader requests a smaller
-     * buffer), and may also be used for larger chunks if the buffer pool can produce a contiguous memory buffer.
+     * A chunk with a single memory region. This is always used for reading chunks of size PageAware.PAGE_SIZE, and may
+     * also be used for larger chunks if the buffer pool can produce a contiguous memory buffer.
      * See {@link this#newChunk}.
      * <p/>
      * This class is a chunk but also behaves as a {@link Rebufferer.BufferHolder} to save an allocation when
      * {@link this#getBuffer(long)} is invoked.
+     * <p/>
+     * Only one {@link ByteBuffer} is owned: the object returned by the buffer pool (typically a full page).
      */
-    class SingleRegionChunk extends Chunk implements Rebufferer.BufferHolder
+    private class SingleRegionChunk extends Chunk implements Rebufferer.BufferHolder
     {
-        private final ByteBuffer buffer;
+        final ByteBuffer buffer;
 
         public SingleRegionChunk(long offset, ByteBuffer buffer)
         {
@@ -573,9 +584,7 @@ public class ChunkCache
 
         void read(ChunkReader file)
         {
-            ByteBuffer buffer = buffer();
             file.readChunk(offset, buffer);
-            bytesRead = buffer.limit();
         }
 
         @Nullable
@@ -586,7 +595,46 @@ public class ChunkCache
 
         int capacity()
         {
+            // Weight / pool accounting use allocated size, not the logical read size in buffer.limit().
             return buffer.capacity();
+        }
+    }
+
+    /**
+     * A chunk with a single memory region. This is used for reading chunks smaller than PageAware.PAGE_SIZE, but it
+     * is always allocated with a size of PageAware.PAGE_SIZE to avoid fragmenting cache memory.
+     * See {@link this#newChunk}.
+     * <p/>
+     * This class is a chunk but also behaves as a {@link Rebufferer.BufferHolder} to save an allocation when
+     * {@link this#getBuffer(long)} is invoked.
+     * <p/>
+     * Only one {@link ByteBuffer} is owned: the object returned by the buffer pool, a full page.
+     * Logical chunk size is encoded in {@code buffer.limit()} (with {@code position == 0}); capacity stays at the
+     * allocated size so the pool sees what it handed out on release. {@link #buffer()} and {@link #read} build a
+     * transient {@code slice()} view whose capacity equals that logical size, so that {@code readChunk} cannot read
+     * more than that and the view's {@code clear()} semantics stay correct; {@link #read} then applies the actual
+     * read size to the limit. The slice is never returned to the pool.
+     */
+    private class SingleRegionSubChunk extends SingleRegionChunk
+    {
+        public SingleRegionSubChunk(long offset, ByteBuffer buffer, int capacity)
+        {
+            super(offset, buffer.limit(capacity));
+        }
+
+        @Override
+        public ByteBuffer buffer()
+        {
+            assert isReferenced() : "Already unreferenced";
+            return buffer.slice();
+        }
+
+        @Override
+        void read(ChunkReader file)
+        {
+            ByteBuffer slicedBuf = buffer.slice(); // We were given a limit when the buffer was passed. Make sure we don't read more.
+            file.readChunk(offset, slicedBuf);
+            buffer.limit(slicedBuf.limit()); // apply the number of bytes read to all buffers we return
         }
     }
 
@@ -701,6 +749,18 @@ public class ChunkCache
         }
 
         @Override
+        public long positionForSkip(long currentPosition, int bytesToSkip)
+        {
+            return source.positionForSkip(currentPosition, bytesToSkip);
+        }
+
+        @Override
+        public long remainingBytes(long position)
+        {
+            return source.remainingBytes(position);
+        }
+
+        @Override
         public void close()
         {
             source.close();
@@ -780,5 +840,33 @@ public class ChunkCache
         long fileId = fileIdMaybeNull << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS);
         long mask = - (1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
         return (int) cacheAsMap.keySet().stream().filter(x -> (x.readerId & mask) == fileId).count();
+    }
+
+    /**
+     * Returns the number of chunks of the given file, as seen by the handles opened since the last
+     * {@link #invalidateFile}, that are currently cached and referenced by a reader, i.e. whose buffers a reader has
+     * not released. Only intended for tests checking that readers release what they hold.
+     */
+    @VisibleForTesting
+    public int chunksInUse(File file)
+    {
+        Long fileIdMaybeNull = fileIdMap.get(file);
+        if (fileIdMaybeNull == null)
+            return 0;
+        long fileId = fileIdMaybeNull << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS);
+        long mask = - (1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
+        int inUse = 0;
+        for (Map.Entry<Key, CompletableFuture<Chunk>> entry : cacheAsMap.entrySet())
+        {
+            if ((entry.getKey().readerId & mask) != fileId)
+                continue;
+            CompletableFuture<Chunk> future = entry.getValue();
+            if (!future.isDone() || future.isCompletedExceptionally())
+                continue;
+            // the cache holds one reference of its own
+            if (future.join().references > 1)
+                inUse++;
+        }
+        return inUse;
     }
 }

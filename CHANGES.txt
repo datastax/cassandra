@@ -1,3 +1,5 @@
+5.0.9
+ * Separate memtable memory usage tracking from limit checking, and fixes a a flush writeBarrier deadlock (CASSANDRA-21019)
 5.0.7
  * Clear BTree.FastBuilder saved overflow state on reset to prevent cross-table column contamination after schema disagreement (CASSANDRA-21216, CASSANDRA-21260)
  * Refactor SAI ANN query execution to use score ordered iterators for correctness and speed (CASSANDRA-20086)

@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -33,11 +34,14 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IScrubber;
 import org.apache.cassandra.io.sstable.MetricsProviders;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Pair;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_FORMAT_STREAM_NEW_CHECKSUMS;
 
 /**
  * Provides the accessors to data on disk.
@@ -128,8 +132,27 @@ public interface SSTableFormat<R extends SSTableReader, W extends SSTableWriter>
         /**
          * Retrieves a key range for the given sstable at the lowest cost - that is, without opening all sstables files
          * if possible.
+         *
+         * @return the first and last key of the sstable, or {@code null} if the component the key range is read from
+         * (the partition index or the index summary, depending on the format) does not exist
          */
         Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException;
+
+        /**
+         * Like {@link #readKeyRange(Descriptor, IPartitioner)}, for an sstable that may be a zero-copy slice of
+         * another sstable: then the key range is the one of the slice, as given by its zero-copy metadata, rather
+         * than the one of the component the key range is read from, which the slice shares with the original
+         * sstable.
+         * <p>
+         * The default implementation ignores the zero-copy metadata, for formats that do not support zero-copy
+         * slices.
+         *
+         * @param zeroCopyMetadata the zero-copy metadata of the sstable (from its stats metadata), or {@code null}
+         */
+        default Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner, @Nullable ZeroCopyMetadata zeroCopyMetadata) throws IOException
+        {
+            return readKeyRange(descriptor, partitioner);
+        }
 
         Class<R> getReaderClass();
     }
@@ -166,6 +189,10 @@ public interface SSTableFormat<R extends SSTableReader, W extends SSTableWriter>
             public static final Component.Type FILTER = Component.Type.createSingleton("FILTER", "Filter.db", true, null);
             // holds CRC32 checksum of the data file
             public static final Component.Type DIGEST = Component.Type.createSingleton("DIGEST", "Digest.crc32", true, null);
+            // holds CRC32C checksum of the data file
+            public static final Component.Type DIGEST_CRC32C = Component.Type.createSingleton("DIGEST_CRC32C", "Digest.crc32c", SSTABLE_FORMAT_STREAM_NEW_CHECKSUMS.getBoolean(), null);
+            // holds CRC64-NVME checksum of the data file
+            public static final Component.Type DIGEST_CRC64NVME = Component.Type.createSingleton("DIGEST_CRC64NVME", "Digest.crc64nvme", SSTABLE_FORMAT_STREAM_NEW_CHECKSUMS.getBoolean(), null);
             // holds the CRC32 for chunks in an uncompressed file.
             public static final Component.Type CRC = Component.Type.createSingleton("CRC", "CRC.db", true, null);
             // table of contents, stores the list of all components for the sstable
@@ -182,6 +209,8 @@ public interface SSTableFormat<R extends SSTableReader, W extends SSTableWriter>
         public final static Component STATS = Types.STATS.getSingleton();
         public final static Component FILTER = Types.FILTER.getSingleton();
         public final static Component DIGEST = Types.DIGEST.getSingleton();
+        public final static Component DIGEST_CRC32C = Types.DIGEST_CRC32C.getSingleton();
+        public final static Component DIGEST_CRC64NVME = Types.DIGEST_CRC64NVME.getSingleton();
         public final static Component CRC = Types.CRC.getSingleton();
         public final static Component TOC = Types.TOC.getSingleton();
     }

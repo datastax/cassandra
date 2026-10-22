@@ -318,6 +318,26 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     }
 
     /**
+     * Whether the given messaging version belongs to the 5.0 family, i.e. it carries the serialization changes
+     * introduced by {@link #VERSION_50}.
+     * <p>
+     * The DataStax versions are numbered above the Apache ones, so a plain {@code version >= VERSION_50} check is wrong:
+     * {@link #VERSION_DS_10}, {@link #VERSION_DS_11} and {@link #VERSION_DS_12} are spoken by DS Converged Cassandra 4.0
+     * (HCD 1.x) nodes and {@link #VERSION_DSE_68} by DSE 6.8 nodes, none of which know about the 5.0 changes.
+     *
+     * @param version the serialization version
+     * @return {@code true} if {@code version} is {@link #VERSION_50}, {@link #VERSION_DS_20} or a later 5.0-based version
+     */
+    public static boolean isVersion50OrLater(int version)
+    {
+        if (version < VERSION_50)
+            return false;
+        if (version >= VERSION_DS_10 && version < VERSION_DS_20)
+            return false;
+        return version != VERSION_DSE_68;
+    }
+
+    /**
      * This is an optimisation to speed up the translation of the serialization
      * version to the {@link Version} enum ordinal.
      *
