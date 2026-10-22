@@ -59,6 +59,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_12;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_20;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_21;
 import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 import static org.apache.cassandra.utils.vint.VIntCoding.computeUnsignedVIntSize;
@@ -1168,6 +1169,7 @@ public class Message<T>
     private int serializedSizeDS11;
     private int serializedSizeDS12;
     private int serializedSizeDS20;
+    private int serializedSizeDS21;
     private int serializedSizeDSE68;
 
     /**
@@ -1201,6 +1203,10 @@ public class Message<T>
                 if (serializedSizeDS20 == 0)
                     serializedSizeDS20 = (int) serializer.serializedSize(this, VERSION_DS_20);
                 return serializedSizeDS20;
+            case VERSION_DS_21:
+                if (serializedSizeDS21 == 0)
+                    serializedSizeDS21 = (int) serializer.serializedSize(this, VERSION_DS_21);
+                return serializedSizeDS21;
             case VERSION_DSE_68:
                 if (serializedSizeDSE68 == 0)
                     serializedSizeDSE68 = serializer.serializedSize(this, VERSION_DSE_68);
@@ -1216,6 +1222,7 @@ public class Message<T>
     private int payloadSizeDS11 = -1;
     private int payloadSizeDS12 = -1;
     private int payloadSizeDS20 = -1;
+    private int payloadSizeDS21 = -1;
     private int payloadSizeDSE68 = -1;
 
     public int payloadSize(int version)
@@ -1246,6 +1253,10 @@ public class Message<T>
                 if (payloadSizeDS20 < 0)
                     payloadSizeDS20 = serializer.payloadSize(this, VERSION_DS_20);
                 return payloadSizeDS20;
+            case VERSION_DS_21:
+                if (payloadSizeDS21 < 0)
+                    payloadSizeDS21 = serializer.payloadSize(this, VERSION_DS_21);
+                return payloadSizeDS21;
             case VERSION_DSE_68:
                 if (payloadSizeDSE68 < 0)
                     payloadSizeDSE68 = serializer.payloadSize(this, VERSION_DSE_68);

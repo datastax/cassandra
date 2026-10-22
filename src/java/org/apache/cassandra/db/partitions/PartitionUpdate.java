@@ -486,15 +486,31 @@ public interface PartitionUpdate extends Partition
             this.tableMetadataResolver = tableMetadataResolver;
         }
 
+        /// From [MessagingService#VERSION_DS_21] on, a format byte after the table id says which encoding follows:
+        /// 1 for the trie encoding, which a [TriePartitionUpdate] is always written in, and 0 for the BTree encoding,
+        /// which every other update is written in. The encoding is a property of the update's class, not of its
+        /// content, so [#serialize] and [#serializedSize] reach the same answer whichever of them runs first, and two
+        /// threads serializing one update cannot write different formats -- which is what makes the size handed to
+        /// [org.apache.cassandra.db.Mutation] and the commit log the size of the bytes that are then written.
         public void serialize(PartitionUpdate update, DataOutputPlus out, int version) throws IOException
         {
             Preconditions.checkArgument(version != MessagingService.VERSION_DSE_68,
                                         "Can't serialize to version " + version);
+            update.metadata().id.serialize(out);
+
+            if (version >= MessagingService.VERSION_DS_21)
+            {
+                if (update instanceof TriePartitionUpdate)
+                {
+                    out.writeByte(1);
+                    TriePartitionUpdateSerializer.serialize(update, out, version);
+                    return;
+                }
+                out.writeByte(0);
+            }
+
             try (UnfilteredRowIterator iter = update.unfilteredIterator())
             {
-                assert !iter.isReverseOrder();
-
-                update.metadata().id.serialize(out);
                 UnfilteredRowIteratorSerializer.serializer.serialize(iter, null, out, version, update.rowCount());
             }
         }
@@ -502,6 +518,16 @@ public interface PartitionUpdate extends Partition
         public PartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
         {
             TableMetadata metadata = tableMetadataResolver.apply(TableId.deserialize(in));
+            // VERSION_DSE_68 is numerically above the DS versions but has no format byte.
+            if (version >= MessagingService.VERSION_DS_21 && version != MessagingService.VERSION_DSE_68)
+            {
+                int format = in.readByte();
+                if (format == 1)
+                    return TriePartitionUpdateSerializer.deserialize(in, version, flag, metadata);
+                if (format != 0)
+                    throw new IOException("Unknown PartitionUpdate format byte: " + format);
+            }
+
             if (version == MessagingService.VERSION_DSE_68)
             {
                 // ignore maxTimestamp
@@ -537,11 +563,23 @@ public interface PartitionUpdate extends Partition
 
         public long serializedSize(PartitionUpdate update, int version)
         {
+            long size = update.metadata().id.serializedSize();
+
+            // VERSION_DSE_68 is numerically above the DS versions but has no format byte.
+            if (version >= MessagingService.VERSION_DS_21 && version != MessagingService.VERSION_DSE_68)
+            {
+                if (update instanceof TriePartitionUpdate)
+                    return size + 1L + TriePartitionUpdateSerializer.serializedSize(update, version);
+
+                size += 1L; // format byte (0 = BTree)
+            }
+
+            if (version == MessagingService.VERSION_DSE_68)
+                size += TypeSizes.LONG_SIZE;
+
             try (UnfilteredRowIterator iter = update.unfilteredIterator())
             {
-                return update.metadata().id.serializedSize()
-                       + (version == MessagingService.VERSION_DSE_68 ? TypeSizes.LONG_SIZE : 0)
-                       + UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, version, update.rowCount());
+                return size + UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, version, update.rowCount());
             }
         }
     }
