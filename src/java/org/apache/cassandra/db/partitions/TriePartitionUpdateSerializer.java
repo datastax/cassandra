@@ -29,6 +29,7 @@ import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
+import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
@@ -58,9 +59,10 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * Serializer for {@link TriePartitionUpdate} across messaging versions (VERSION_DS_21+).
- * Encodes partition key, row and tombstone counts, data size footprint, {@link SerializationHeader},
- * and writes the update's deletion-aware trie in the on-disk trie format with {@link OnDiskDeletionAwareTrieWriter},
- * node payloads being encoded by a type-tagged {@link ContentManagerPojo.PojoSerializer}.
+ * Encodes partition key, row and tombstone counts, data size footprint, {@link SerializationHeader}, the index the
+ * trie keys each of the header's columns by, and writes the update's deletion-aware trie in the on-disk trie format
+ * with {@link OnDiskDeletionAwareTrieWriter}, node payloads being encoded by a type-tagged
+ * {@link ContentManagerPojo.PojoSerializer}.
  */
 public class TriePartitionUpdateSerializer
 {
@@ -72,6 +74,10 @@ public class TriePartitionUpdateSerializer
     private static final int TYPE_COMPLEX_MARKER = 5;
     private static final int TYPE_PARTITION_MARKER = 6;
     private static final int TYPE_TRIE_TOMBSTONE_MARKER = 7;
+    /// [LivenessInfo#EMPTY], which marks a row written without primary key liveness (an UPDATE rather than an
+    /// INSERT). Readers compare against it by identity, so it must come back as that instance, and it carries
+    /// nothing worth encoding.
+    private static final int TYPE_EMPTY_LIVENESS = 8;
 
     /// The largest trie layout [#serializedSize] will keep on the update for the write that follows it.
     private static final long RETAINED_TRIE_SIZE_LIMIT = CassandraRelevantProperties.CACHEABLE_MUTATION_SIZE_LIMIT.getLong();
@@ -96,11 +102,61 @@ public class TriePartitionUpdateSerializer
 
         SerializationHeader header = new SerializationHeader(false, trieUpdate.metadata(), trieUpdate.columns(), trieUpdate.stats());
         SerializationHeader.serializer.serializeForMessaging(header, null, out, true);
+        serializeColumnIndexes(trieUpdate.metadata(), header.columns(), out);
         SerializationHelper helper = new SerializationHelper(header);
 
         ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(trieUpdate.metadata(), helper, header, version, null);
 
         writeTrie(trieUpdate, pojoSerializer, out, version);
+    }
+
+    /// Writes the index the update's trie keys each of the header's columns by, static ones first: the column's position
+    /// among all the static or regular columns of the update's table, as [TrieBackedRow] numbers them. A receiver
+    /// whose schema numbers the columns differently -- one that has added or dropped a column the sender has not, or
+    /// the other way round -- cannot use the trie's keys as they are, and needs these to translate them.
+    private static void serializeColumnIndexes(TableMetadata metadata, RegularAndStaticColumns columns, DataOutputPlus out) throws IOException
+    {
+        for (ColumnMetadata column : columns.statics)
+            out.writeUnsignedVInt32(columnIndex(metadata, column));
+        for (ColumnMetadata column : columns.regulars)
+            out.writeUnsignedVInt32(columnIndex(metadata, column));
+    }
+
+    private static long columnIndexesSerializedSize(TableMetadata metadata, RegularAndStaticColumns columns)
+    {
+        long size = 0;
+        for (ColumnMetadata column : columns)
+            size += TypeSizes.sizeofUnsignedVInt(columnIndex(metadata, column));
+        return size;
+    }
+
+    private static int columnIndex(TableMetadata metadata, ColumnMetadata column)
+    {
+        int index = metadata.regularAndStaticColumns().columns(column.isStatic()).simpleIdx(column);
+        if (index < 0)
+            throw new IllegalStateException("Column " + column.name + " of a partition update is not a column of " + metadata);
+        return index;
+    }
+
+    private static int[] deserializeColumnIndexes(DataInputPlus in, Columns columns) throws IOException
+    {
+        int[] indexes = new int[columns.size()];
+        for (int i = 0; i < indexes.length; ++i)
+            indexes[i] = in.readUnsignedVInt32();
+        return indexes;
+    }
+
+    /// Whether the sender keyed the given columns by the indices this node gives them, so that the trie can be read
+    /// as it is. A column this node does not have, i.e. one dropped here, has no index of its own.
+    private static boolean hasLocalIndexes(TableMetadata metadata, Columns columns, int[] indexes)
+    {
+        int i = 0;
+        for (ColumnMetadata column : columns)
+        {
+            if (metadata.regularAndStaticColumns().columns(column.isStatic()).simpleIdx(column) != indexes[i++])
+                return false;
+        }
+        return true;
     }
 
     /// Writes the trie in the on-disk trie format, length-prefixed.
@@ -204,11 +260,16 @@ public class TriePartitionUpdateSerializer
         int tombstoneCount = in.readUnsignedVInt32();
         int dataSize = in.readUnsignedVInt32();
 
-        if (rowCountIncludingStatic < 0 || tombstoneCount < 0 || dataSize < 0)
-            throw new IOException(String.format("Corrupt TriePartitionUpdate header counts: rows=%d, tombstones=%d, dataSize=%d",
-                                                rowCountIncludingStatic, tombstoneCount, dataSize));
+        // dataSize is an estimate that nothing on the read path depends on, so it is not validated here.
+        if (rowCountIncludingStatic < 0 || tombstoneCount < 0)
+            throw new IOException(String.format("Corrupt TriePartitionUpdate header counts: rows=%d, tombstones=%d",
+                                                rowCountIncludingStatic, tombstoneCount));
 
         SerializationHeader header = SerializationHeader.serializer.deserializeForMessaging(in, metadata, null, true);
+        Columns statics = header.columns().statics;
+        Columns regulars = header.columns().regulars;
+        int[] staticIndexes = deserializeColumnIndexes(in, statics);
+        int[] regularIndexes = deserializeColumnIndexes(in, regulars);
         DeserializationHelper desHelper = new DeserializationHelper(metadata, version, flag);
 
         ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(metadata, null, header, version, desHelper);
@@ -223,6 +284,21 @@ public class TriePartitionUpdateSerializer
                                          deletionDeserializer(pojoSerializer),
                                          TrieBackedPartition.BYTE_COMPARABLE_VERSION,
                                          -1);
+
+        // If the sender's schema numbers the columns differently from this node's, the trie's keys point at the wrong
+        // columns here, and the update is rebuilt with this node's numbering; the result is in memory.
+        if (!hasLocalIndexes(metadata, statics, staticIndexes) || !hasLocalIndexes(metadata, regulars, regularIndexes))
+        {
+            TriePartitionUpdate senderKeyed = new TriePartitionUpdate(metadata, key, header.columns(), header.stats(), rowCountIncludingStatic, tombstoneCount, dataSize, trie);
+            return TriePartitionUpdate.withLocalColumnIndexes(senderKeyed,
+                                                              TrieBackedRow.columnIds(statics, staticIndexes),
+                                                              TrieBackedRow.columnIds(regulars, regularIndexes));
+        }
+
+        // The counter leader rewrites the counter cells of the update it receives in place (CounterMark.setValue),
+        // which bytes read in place cannot take.
+        if (metadata.isCounter())
+            trie = TriePartitionUpdate.copyToMemory(trie);
 
         return new TriePartitionUpdate(metadata, key, header.columns(), header.stats(), rowCountIncludingStatic, tombstoneCount, dataSize, trie);
     }
@@ -247,6 +323,7 @@ public class TriePartitionUpdateSerializer
                + TypeSizes.sizeofUnsignedVInt(trieUpdate.tombstoneCount)
                + TypeSizes.sizeofUnsignedVInt(trieUpdate.dataSize())
                + SerializationHeader.serializer.serializedSizeForMessaging(header, null, true)
+               + columnIndexesSerializedSize(trieUpdate.metadata(), header.columns())
                + serializedTrieSize(trieUpdate, pojoSerializer, version);
 
         if (version == MessagingService.VERSION_DS_21)
@@ -355,6 +432,7 @@ public class TriePartitionUpdateSerializer
         {
             if (content == null)                                 { out.writeByte(TYPE_NULL); return; }
             if (content instanceof Cell)                         { out.writeByte(TYPE_CELL); serializeCell((Cell<?>) content, out); return; }
+            if (isEmptyLiveness(content))                        { out.writeByte(TYPE_EMPTY_LIVENESS); return; }
             if (content instanceof LivenessInfo)                 { out.writeByte(TYPE_LIVENESS); serializeLiveness((LivenessInfo) content, out); return; }
             if (content == TrieBackedRow.COMPLEX_COLUMN_MARKER)  { out.writeByte(TYPE_COMPLEX_MARKER); return; }
             if (content == TrieBackedPartition.PARTITION_MARKER) { out.writeByte(TYPE_PARTITION_MARKER); return; }
@@ -375,6 +453,7 @@ public class TriePartitionUpdateSerializer
                 case TYPE_NULL:                  return null;
                 case TYPE_CELL:                  return deserializeCell(in);
                 case TYPE_LIVENESS:              return deserializeLiveness(in);
+                case TYPE_EMPTY_LIVENESS:        return LivenessInfo.EMPTY;
                 case TYPE_ROW:                   return UnfilteredSerializer.serializer.deserialize(in, header, desHelper, BTreeRow.sortedBuilder());
                 case TYPE_MARKER:                return UnfilteredSerializer.serializer.deserialize(in, header, desHelper, BTreeRow.sortedBuilder());
                 case TYPE_COMPLEX_MARKER:        return TrieBackedRow.COMPLEX_COLUMN_MARKER;
@@ -387,7 +466,7 @@ public class TriePartitionUpdateSerializer
         @Override
         public long serializedSize(Object content)
         {
-            if (content == null || content == TrieBackedRow.COMPLEX_COLUMN_MARKER || content == TrieBackedPartition.PARTITION_MARKER)
+            if (content == null || content == TrieBackedRow.COMPLEX_COLUMN_MARKER || content == TrieBackedPartition.PARTITION_MARKER || isEmptyLiveness(content))
                 return 1L;
 
             if (content instanceof Cell)                 return 1L + serializedSizeCell((Cell<?>) content);
@@ -429,6 +508,11 @@ public class TriePartitionUpdateSerializer
             int idx = indexOfColumn(targetCols, col);
             return TypeSizes.sizeofUnsignedVInt((idx << 1) | (isStatic ? 1 : 0))
                    + Cell.serializer.serializedSize(cell, cell.column(), LivenessInfo.EMPTY, header);
+        }
+
+        private static boolean isEmptyLiveness(Object content)
+        {
+            return content instanceof LivenessInfo && ((LivenessInfo) content).isEmpty();
         }
 
         private void serializeLiveness(LivenessInfo info, DataOutputPlus out) throws IOException

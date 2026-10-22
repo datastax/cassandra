@@ -546,17 +546,41 @@ public interface PartitionUpdate extends Partition
             }
         }
 
-        public static boolean isEmpty(ByteBuffer in, DeserializationHelper.Flag flag, DecoratedKey key) throws IOException
+        public static boolean isEmpty(ByteBuffer in, int version, DeserializationHelper.Flag flag, DecoratedKey key) throws IOException
         {
             int position = in.position();
             position += 16; // CFMetaData.serializer.deserialize(in, version);
             if (position >= in.limit())
                 throw new EOFException();
+
+            int format = 0;
+            // VERSION_DSE_68 is numerically above the DS versions but has no format byte.
+            if (version >= MessagingService.VERSION_DS_21 && version != MessagingService.VERSION_DSE_68)
+            {
+                format = in.get(position++);
+                if (format != 0 && format != 1)
+                    throw new IOException("Unknown PartitionUpdate format byte: " + format);
+                if (position >= in.limit())
+                    throw new EOFException();
+            }
+
             // DecoratedKey key = metadata.decorateKey(ByteBufferUtil.readWithVIntLength(in));
             int keyLength = VIntCoding.getUnsignedVInt32(in, position);
             position += keyLength + VIntCoding.computeUnsignedVIntSize(keyLength);
             if (position >= in.limit())
                 throw new EOFException();
+
+            if (format == 1)
+            {
+                // The trie encoding: the row count including the static row, then the tombstone count, which is
+                // what TriePartitionUpdate.isEmpty tests.
+                int rowCountIncludingStatic = VIntCoding.getUnsignedVInt32(in, position);
+                position += VIntCoding.computeUnsignedVIntSize(rowCountIncludingStatic);
+                if (position >= in.limit())
+                    throw new EOFException();
+                return rowCountIncludingStatic == 0 && VIntCoding.getUnsignedVInt32(in, position) == 0;
+            }
+
             int flags = in.get(position) & 0xff;
             return (flags & IS_EMPTY) != 0;
         }

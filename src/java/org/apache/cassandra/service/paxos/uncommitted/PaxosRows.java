@@ -182,7 +182,7 @@ public class PaxosRows
             if (!proposalValue.hasRemaining())
                 return true;
 
-            return isEmpty(proposalValue, DeserializationHelper.Flag.LOCAL, key);
+            return isEmpty(proposalValue, proposalVersion, DeserializationHelper.Flag.LOCAL, key);
         }
         catch (IOException e)
         {
