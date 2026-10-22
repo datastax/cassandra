@@ -138,6 +138,11 @@ public class OnDiskDeletionAwareTrieTest
         }
 
         assertRoundTripsInMemory(source);
+
+        // The same data with the deletion branch hoisted to the root, which is where a partition-level deletion
+        // sits. DataPoint.fromList(points) builds it below the root; testDeletionBranchAtRoot pins the root shape
+        // for one data set, and this runs every case here through it as well.
+        assertRoundTripsInMemory(DataPoint.fromList(points, false, true));
     }
 
     /// The same round trip without a file, which is how the commit log and messaging will use this:
@@ -1173,6 +1178,8 @@ public class OnDiskDeletionAwareTrieTest
                     RangeCursor<DeletionMarker> actualTail = actual.tailCursor(tailDirection);
                     assertEquals("State at the root of the tail at " + Cursor.toString(position),
                                  expectedTail.state(), actualTail.state());
+                    assertEquals("Preceding state at the root of the tail at " + Cursor.toString(position),
+                                 expectedTail.precedingState(), actualTail.precedingState());
                     TrieUtil.assertCursorWalksEqual(expectedTail, actualTail);
                 }
             position = expected.advance();
