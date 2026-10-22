@@ -60,6 +60,7 @@ import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -83,6 +84,18 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     final int cellCount;
     int serializedSizeDS21 = -1;
     int serializedSizeDS20 = -1;
+
+    /// The trie as [TriePartitionUpdateSerializer#serializedSize] laid it out at
+    /// [org.apache.cassandra.net.MessagingService#VERSION_DS_21], kept so that the write that follows does not have to
+    /// lay it out again. Sizing the trie means writing it -- the on-disk writer only knows the total once it has
+    /// emitted the root -- and [org.apache.cassandra.db.Mutation] sizes a mutation and then immediately serializes it,
+    /// so without this every update is laid out twice. Keyed by version like [#serializedSizeDS21], as writing one
+    /// version's bytes under another would put a message on the wire that the peer cannot read.
+    ///
+    /// Cleared by the write that consumes it. Volatile because the same update can be serialized from more than one
+    /// thread: the volatile write is what publishes the buffer, whose position and limit are not final and could
+    /// otherwise be seen before they are set.
+    volatile ByteBuffer serializedTrieDS21;
 
     /**
      * Package-private constructor used by {@link TriePartitionUpdateSerializer} and {@link TrieBuilder}
@@ -340,11 +353,14 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     @Override
     public long unsharedHeapSize()
     {
+        // The layout sizing keeps for the write that follows is held by the update until that write.
+        long laidOutSize = ObjectSizes.sizeOnHeapOf(serializedTrieDS21);
+
         assert trie instanceof InMemoryDeletionAwareTrie;
         InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> inMemoryTrie = (InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>) trie;
         class Collector implements DeletionAwareTrie.ValueConsumer<Object, TrieTombstoneMarker>
         {
-            long heapSize = inMemoryTrie.usedSizeOnHeap();
+            long heapSize = laidOutSize + inMemoryTrie.usedSizeOnHeap();
 
             @Override
             public void deletionMarker(TrieTombstoneMarker marker)
@@ -449,6 +465,17 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             throw new AssertionError(e);
         }
+        // The cell just changed, so any size or layout computed before it no longer describes this update.
+        invalidateSerializationCaches();
+    }
+
+    /// Forgets the sizes and the layout [TriePartitionUpdateSerializer#serializedSize] kept on this update, which no
+    /// longer describe it once its content has changed.
+    void invalidateSerializationCaches()
+    {
+        serializedSizeDS21 = -1;
+        serializedSizeDS20 = -1;
+        serializedTrieDS21 = null;
     }
 
     @Override
