@@ -755,7 +755,15 @@ public enum OnDiskReadNodeType
             // failure there, so reject it the way readContentLength rejects an impossible length.
             if (len < 1 || len > 8)
                 throw OnDiskCursor.corrupt("alternate branch pointer of " + len + " bytes before position " + pos);
-            return state.readSizedInt(pos - vintlen, len);
+            // The pointer is a delta back from the start of the slot. A branch takes at least one byte, so its root
+            // is above 0, and it is written before the node, so its root is at or before the slot; anything else would
+            // have us seek to a position that is not in the data, or read the node as its own branch. An eight-byte
+            // delta can read back negative.
+            long slotStart = pos - vintlen - len;
+            long delta = state.readSizedInt(pos - vintlen, len);
+            if (delta < 0 || delta >= slotStart)
+                throw OnDiskCursor.corrupt("alternate branch pointer delta " + delta + " from position " + slotStart);
+            return slotStart - delta;
         }
 
         @Override
@@ -844,7 +852,8 @@ public enum OnDiskReadNodeType
         return null; // overridden by leaf and prefix
     }
 
-    /// The alternate-branch pointer in this node's ascent-side content slot, or -1 if it has none.
+    /// The position of the alternate branch whose pointer is in this node's ascent-side content slot, resolved from
+    /// the delta stored there, or -1 if it has none.
     /// Only PREFIX nodes can carry one.
     public long getAlternateBranch(OnDiskCursor<?> state, int nodeCode, long postCodePos)
     {

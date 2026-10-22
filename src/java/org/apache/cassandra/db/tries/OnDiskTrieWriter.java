@@ -21,6 +21,7 @@ package org.apache.cassandra.db.tries;
 import java.io.IOException;
 import java.util.Arrays;
 
+import org.agrona.DirectBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -114,6 +115,13 @@ public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor
     public void addPathByte(int nextByte)
     {
         super.addPathByte(nextByte);
+        onAscentPath = false;
+    }
+
+    @Override
+    public void addPathBytes(DirectBuffer buffer, int pos, int count)
+    {
+        super.addPathBytes(buffer, pos, count);
         onAscentPath = false;
     }
 
@@ -212,7 +220,9 @@ public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor
         long furthestChild = node.child(0);
         assert furthestChild >= 0 && furthestChild <= basePos;
         int bytesPerPointer = bytesFor(basePos - furthestChild);
-        OnDiskWriteNodeType type = OnDiskWriteNodeType.selectChildrenType(bytesPerPointer, count);
+        // A dense node marks absent children with all-ones, so its pointers are sized for one more than the delta.
+        int denseBytesPerPointer = bytesFor(basePos - furthestChild + 1);
+        OnDiskWriteNodeType type = OnDiskWriteNodeType.selectChildrenType(bytesPerPointer, denseBytesPerPointer, count);
         type.writeChildren(out, node, basePos, bytesPerPointer);
     }
 

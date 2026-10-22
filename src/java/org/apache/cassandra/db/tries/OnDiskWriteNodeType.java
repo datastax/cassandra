@@ -155,13 +155,17 @@ public enum OnDiskWriteNodeType
             out.writeByte(LEAF.bits | (int) descentDataSize);
     }
 
-    static OnDiskWriteNodeType selectChildrenType(int bytesPerPointer, int pointerCount)
+    /// Choose the node type for the given number of children. A bitmap node takes the 32-byte bitmap and a pointer for
+    /// every child but the first, which is implicit; a dense node takes a pointer for each of the 256 transitions, sized
+    /// by `denseBytesPerPointer`, which can be one byte wider than `bytesPerPointer` (see [#DENSE]). The bitmap is used
+    /// when it saves at least one byte.
+    static OnDiskWriteNodeType selectChildrenType(int bytesPerPointer, int denseBytesPerPointer, int pointerCount)
     {
         if (pointerCount == 1)
             return CHAIN;
         else if (pointerCount <= MAX_SPARSE_LENGTH_INCLUSIVE && bytesPerPointer <= MAX_SPARSE_BYTES)
             return SPARSE;
-        else if ((256 - pointerCount) * bytesPerPointer > 32) // if we will save at least one byte over DENSE
+        else if (32 + (pointerCount - 1) * bytesPerPointer < 256 * denseBytesPerPointer)
             return BITMAP;
         else
             return DENSE;
