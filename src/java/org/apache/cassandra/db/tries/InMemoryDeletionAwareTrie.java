@@ -426,7 +426,15 @@ extends InMemoryBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>> 
         private void applyDeletions(RangeCursor<E> incomingAlternateBranch) throws TrieSpaceExhaustedException
         {
             // Apply the deletion branch to our data.
-            deleter.continueFromCurrentState(incomingAlternateBranch, forcedCopyDepth).apply();
+            try
+            {
+                deleter.continueFromCurrentState(incomingAlternateBranch, forcedCopyDepth).apply();
+            }
+            finally
+            {
+                // This mutator outlives the mutation; do not keep the branch, and the trie behind it, until the next one.
+                deleter.releaseMutationCursor();
+            }
 
             // Make sure the data pass that follows walks the updated branch.
             state.prepareToWalkBranchAgain();
@@ -436,7 +444,15 @@ extends InMemoryBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>> 
         {
             // If forced copying is in force, apply it to the deletion branch too.
             int deletionForcedCopyDepth = forcedCopyDepth <= state.currentDepth ? 0 : Integer.MAX_VALUE;
-            deletionMutator.start(existingAlternateBranch, deletionBranch, deletionForcedCopyDepth).apply();
+            try
+            {
+                deletionMutator.start(existingAlternateBranch, deletionBranch, deletionForcedCopyDepth).apply();
+            }
+            finally
+            {
+                // As in applyDeletions, do not keep the branch past this mutation.
+                deletionMutator.releaseMutationCursor();
+            }
 
             return deletionMutator.completeBranch();
         }
@@ -505,6 +521,10 @@ extends InMemoryBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>> 
                 abortMutation();
                 throw t;
             }
+            finally
+            {
+                releaseMutationCursor();
+            }
         }
 
         /// Modify this trie to apply the given deletion branch. This has the same effect as applying a deletion-aware
@@ -534,6 +554,10 @@ extends InMemoryBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>> 
             {
                 abortMutation();
                 throw t;
+            }
+            finally
+            {
+                releaseMutationCursor();
             }
         }
 
