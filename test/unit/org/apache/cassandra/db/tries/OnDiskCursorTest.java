@@ -227,6 +227,24 @@ public class OnDiskCursorTest
                                                   Direction.FORWARD, false, false, buffer.limit()));
     }
 
+    /// The deletion branch pointer is a delta back from its slot. Eight bytes of it can read back negative, which would
+    /// put the branch after the node that refers to it.
+    @Test
+    public void testNegativeAlternateBranchPointerIsRejected() throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            out.writeByte(OnDiskWriteNodeType.LEAF.bits);       // a branch root, at position 1
+            OnDiskTrieWriter.writeReversedSized(out, -1L, 8);   // the slot: delta -1
+            OnDiskTrieWriter.writeReversedVint(out, 8);
+            out.writeByte(OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
+            ByteBuffer buffer = out.asNewBuffer();
+            OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
+                                                           Direction.FORWARD, false, true, buffer.limit());
+            assertThrows(UncheckedIOException.class, cursor::alternateBranch);
+        }
+    }
+
     /// A rebufferer can hand out data past the file's length: chunks are read in full, and cached chunks and mapped
     /// regions are shared by the readers of a file, which can have different lengths. A root past the length must be
     /// rejected even though the buffer holds a valid node there.
