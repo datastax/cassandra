@@ -43,15 +43,9 @@ public class PartitionUpdateSizeCache
     /** Returns true if the update has a cached serialized size for the given version. */
     public static boolean isSized(PartitionUpdate update, int version)
     {
-        if (update instanceof TriePartitionUpdate)
-        {
-            TriePartitionUpdate trieUpdate = (TriePartitionUpdate) update;
-            if (version == org.apache.cassandra.net.MessagingService.VERSION_DS_21)
-                return trieUpdate.serializedSizeDS21 >= 0;
-            if (version == org.apache.cassandra.net.MessagingService.VERSION_DS_20)
-                return trieUpdate.serializedSizeDS20 >= 0;
-        }
-        return false;
+        return update instanceof TriePartitionUpdate
+               && version == org.apache.cassandra.net.MessagingService.VERSION_DS_21
+               && ((TriePartitionUpdate) update).serializedSizeDS21 >= 0;
     }
 
     /** Returns the trie layout the update currently holds, or null if it holds none. */
