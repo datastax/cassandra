@@ -307,7 +307,10 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
         {
             throw new AssertionError(e);
         }
-        return new TriePartitionUpdateStage2(metadata, partitionKey, columns, stats, rowCountIncludingStatic, dataSize, t, canHaveShadowedData);
+        // Every timestamp is now newTimestamp or newTimestamp - 1, possibly below the old ones, and local deletion
+        // times and TTLs are unchanged; the minimum timestamp must bound them all (see EncodingStats).
+        EncodingStats newStats = new EncodingStats(newTimestamp - 1, stats.minLocalDeletionTime, stats.minTTL);
+        return new TriePartitionUpdateStage2(metadata, partitionKey, columns, newStats, rowCountIncludingStatic, dataSize, t, canHaveShadowedData);
     }
 
     /**

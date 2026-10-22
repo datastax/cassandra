@@ -112,6 +112,7 @@ public interface PartitionUpdate extends Partition
     @Override
     RegularAndStaticColumns columns();
 
+    /** Its minimum timestamp is at or below every timestamp of the update, or unknown; see {@link EncodingStats}. */
     @Override
     EncodingStats stats();
 

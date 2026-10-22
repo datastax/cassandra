@@ -17,18 +17,28 @@
  */
 package org.apache.cassandra.db.partition;
 
+import com.google.common.collect.ImmutableMap;
+
 import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
+import org.apache.cassandra.db.partitions.TriePartitionUpdateStage2;
+import org.apache.cassandra.db.partitions.TriePartitionUpdateStage3;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.ColumnData;
+import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.DeserializationHelper;
+import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIteratorSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -113,6 +123,93 @@ public class PartitionUpdateTest extends CQLTester
 
         Assert.assertTrue(pu.maxTimestamp() > 0);
         Assert.assertTrue(pu2.maxTimestamp() == 0);
+    }
+
+    /**
+     * Paxos rewrites an update's timestamps to the ballot time, which can be below the ones it was written with. The
+     * memtable takes its minimum timestamp from stats(), so the rewritten update's stats must still bound its content.
+     */
+    @Test
+    public void testUpdatedTimestampsStatsBoundTheContent()
+    {
+        createTable("CREATE TABLE %s (key text, clustering int, a int, b int, m map<int, int>, s int static, PRIMARY KEY(key, clustering))");
+        TableMetadata cfm = currentTableMetadata();
+
+        long timestamp = FBUtilities.timestampMicros();
+        PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(cfm, "key0");
+        // Below the rest, so that it does not shadow them.
+        builder.timestamp(timestamp - 10).delete();
+        builder.timestamp(timestamp);
+        builder.row().add("s", 1);
+        builder.row(1).add("a", 1).delete("b").add("m", ImmutableMap.of(1, 1));
+        builder.row(2).delete();
+        builder.addRangeTombstone().start(3).end(5);
+        PartitionUpdate update = builder.build();
+
+        long newTimestamp = timestamp - 1000;
+        for (PartitionUpdate pu : new PartitionUpdate[]{ BTreePartitionUpdate.asBTreeUpdate(update),
+                                                         TriePartitionUpdate.asTrieUpdate(update),
+                                                         TriePartitionUpdateStage2.asTrieUpdate(update),
+                                                         TriePartitionUpdateStage3.asTrieUpdate(update) })
+        {
+            PartitionUpdate updated = pu.withUpdatedTimestamps(newTimestamp);
+            String name = pu.getClass().getSimpleName();
+            // The deletions are rewritten to newTimestamp - 1, below everything the update held before.
+            Assert.assertEquals(name, newTimestamp - 1, minTimestamp(updated));
+            Assert.assertTrue(name, updated.stats().minTimestamp <= minTimestamp(updated));
+        }
+    }
+
+    /**
+     * The smallest timestamp anywhere in the update: liveness, cells, complex, row, range and partition deletions.
+     */
+    private static long minTimestamp(PartitionUpdate update)
+    {
+        try (UnfilteredRowIterator iter = update.unfilteredIterator())
+        {
+            long min = minTimestamp(Long.MAX_VALUE, iter.partitionLevelDeletion());
+            min = minTimestamp(min, iter.staticRow());
+            while (iter.hasNext())
+            {
+                Unfiltered unfiltered = iter.next();
+                if (unfiltered.isRow())
+                {
+                    min = minTimestamp(min, (Row) unfiltered);
+                    continue;
+                }
+                RangeTombstoneMarker marker = (RangeTombstoneMarker) unfiltered;
+                if (marker.isOpen(false))
+                    min = minTimestamp(min, marker.openDeletionTime(false));
+                if (marker.isClose(false))
+                    min = minTimestamp(min, marker.closeDeletionTime(false));
+            }
+            return min;
+        }
+    }
+
+    private static long minTimestamp(long min, Row row)
+    {
+        if (!row.primaryKeyLivenessInfo().isEmpty())
+            min = Math.min(min, row.primaryKeyLivenessInfo().timestamp());
+        min = minTimestamp(min, row.deletion().time());
+        for (ColumnData cd : row)
+        {
+            if (cd.column().isSimple())
+            {
+                min = Math.min(min, ((Cell<?>) cd).timestamp());
+                continue;
+            }
+            ComplexColumnData complex = (ComplexColumnData) cd;
+            min = minTimestamp(min, complex.complexDeletion());
+            for (Cell<?> cell : complex)
+                min = Math.min(min, cell.timestamp());
+        }
+        return min;
+    }
+
+    private static long minTimestamp(long min, DeletionTime deletion)
+    {
+        return deletion.isLive() ? min : Math.min(min, deletion.markedForDeleteAt());
     }
 
     @Test
