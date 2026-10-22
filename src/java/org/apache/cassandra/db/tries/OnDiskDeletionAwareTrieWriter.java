@@ -261,34 +261,35 @@ implements Cursor.Walker<T, DataOutputPlus>
         OnDiskDeletionAwareTrieWriter<T, D> fw =
             new OnDiskDeletionAwareTrieWriter<>(out, contentSerializer, deletionSerializer);
         long startPosition = out.position();
-        DeletionAwareCursor<T, D> c = trie.cursor(Direction.REVERSE);
-
-        emitAt(fw, c);
-        long prevPosition = c.encodedPosition();
-        while (true)
+        try (DeletionAwareCursor<T, D> c = trie.cursor(Direction.REVERSE))
         {
-            long currPosition = c.advanceMultiple(fw);
-            if (Cursor.ascended(currPosition, prevPosition))
-            {
-                fw.ascendTo(currPosition);
-                if (Cursor.isExhausted(currPosition))
-                    break;
-
-                int depth = Cursor.depth(currPosition);
-                if (depth > 0)
-                {
-                    fw.resetPathLength(depth - 1);
-                    fw.addPathByte(Cursor.incomingTransition(currPosition));
-                }
-            }
-            else
-                fw.addPathByte(Cursor.incomingTransition(currPosition));
-
-            if (Cursor.isOnReturnPath(currPosition))
-                fw.onReturnPath();
-
             emitAt(fw, c);
-            prevPosition = currPosition;
+            long prevPosition = c.encodedPosition();
+            while (true)
+            {
+                long currPosition = c.advanceMultiple(fw);
+                if (Cursor.ascended(currPosition, prevPosition))
+                {
+                    fw.ascendTo(currPosition);
+                    if (Cursor.isExhausted(currPosition))
+                        break;
+
+                    int depth = Cursor.depth(currPosition);
+                    if (depth > 0)
+                    {
+                        fw.resetPathLength(depth - 1);
+                        fw.addPathByte(Cursor.incomingTransition(currPosition));
+                    }
+                }
+                else
+                    fw.addPathByte(Cursor.incomingTransition(currPosition));
+
+                if (Cursor.isOnReturnPath(currPosition))
+                    fw.onReturnPath();
+
+                emitAt(fw, c);
+                prevPosition = currPosition;
+            }
         }
         fw.complete();
         // An empty trie leaves the stream untouched, and the position there is not a node.
@@ -316,9 +317,12 @@ implements Cursor.Walker<T, DataOutputPlus>
             RangeCursor<D> branch = c.deletionBranchCursor(Direction.REVERSE);
             if (branch != null)
             {
-                fw.enterDeletionsBranch();
-                writeBranch(fw.branchWriter, branch);
-                branchRoot = fw.exitDeletionsBranch();
+                try (branch)
+                {
+                    fw.enterDeletionsBranch();
+                    writeBranch(fw.branchWriter, branch);
+                    branchRoot = fw.exitDeletionsBranch();
+                }
             }
         }
 

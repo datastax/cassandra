@@ -20,6 +20,7 @@ package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
@@ -30,6 +31,9 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.io.util.RebufferingInputStream;
+import org.apache.cassandra.utils.ReflectionUtils;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
@@ -178,14 +182,48 @@ public class OnDiskCursorTest
     }
 
     /// Closing a range cursor descends to the nearest content to work out the deletions at its position, along the same
-    /// pointers.
+    /// pointers. The close must still give the buffer back, and a tail asked for afterwards must report the corruption.
     @Test(timeout = 60_000)
     public void testSelfPointingChildIsRejectedOnRangeClose()
     {
         ByteBuffer buffer = selfPointingDenseNode();
-        OnDiskCursor.Range<TestRangeState> cursor = new OnDiskCursor.Range<>(TrieUtil.RANGE_SERDE, new ByteBufferRebufferer(buffer),
+        TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(buffer));
+        OnDiskCursor.Range<TestRangeState> cursor = new OnDiskCursor.Range<>(TrieUtil.RANGE_SERDE, factory,
                                                                              VERSION, Direction.FORWARD, buffer.limit());
-        assertThrows(UncheckedIOException.class, cursor::close);
+        cursor.close();
+        assertEquals(0, factory.outstanding);
+        assertThrows(UncheckedIOException.class, () -> cursor.tailCursor(Direction.FORWARD));
+    }
+
+    /// A move that fails on corrupt bytes can leave a range cursor part way: here a skip to the return path of "b" has
+    /// read the content on the way down into "b" when the content on the way back up is rejected, and the state the
+    /// cursor would work out from either is not set. Closing it must still give the buffer back without failing, and
+    /// a tail asked for afterwards must report the corruption.
+    @Test
+    public void testRangeCursorClosesAfterAFailedSkip() throws IOException
+    {
+        ByteComparable branchKey = TrieUtil.directComparable("b");
+        RangeTrie<TestRangeState> trie = RangeTrie.branch(branchKey, VERSION, new TestRangeState(branchKey, false, 1, 1));
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskTrieWriter.write(trie, true, TrieUtil.RANGE_SERDE, out);
+            ByteBuffer buffer = out.asNewBuffer();
+            int[] reads = new int[1];
+            OnDiskCursor.DataDeserializer<TestRangeState> deserializer = (rdr, length) -> {
+                if (++reads[0] > 1)
+                    throw new IOException("Corrupt content");
+                return TrieUtil.RANGE_SERDE.deserialize(rdr, length);
+            };
+            TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(buffer));
+            OnDiskCursor.Range<TestRangeState> cursor = new OnDiskCursor.Range<>(deserializer, factory,
+                                                                                 VERSION, Direction.FORWARD, buffer.limit());
+            long target = Cursor.encode(1, 'b', Direction.FORWARD) | Cursor.ON_RETURN_PATH_BIT;
+            assertThrows(UncheckedIOException.class, () -> cursor.skipTo(target));
+            assertEquals(2, reads[0]);
+            cursor.close();
+            assertEquals(0, factory.outstanding);
+            assertThrows(UncheckedIOException.class, () -> cursor.tailCursor(Direction.FORWARD));
+        }
     }
 
     /// A dense node (code `11101111`: eight bytes per pointer) whose child for transition 0x00 is the node itself and
@@ -318,6 +356,33 @@ public class OnDiskCursorTest
             OnDiskTrie<String> read = new OnDiskTrie.WithoutChannel<>(rebufferer, TrieUtil.STRING_SERDE, VERSION, false, buffer.limit());
             assertEquals(Iterables.size(trie.values()), Iterables.size(read.values()));
             assertEquals(1, rebuffers[0]);
+        }
+    }
+
+    /// The deserializer's stream reads through the cursor's buffer. Closing the cursor gives the buffer back, and the
+    /// stream must not keep it reachable afterwards.
+    @Test
+    public void testClosedCursorDoesNotKeepItsBuffer() throws IOException, ReflectiveOperationException, TrieSpaceExhaustedException
+    {
+        InMemoryTrie<String> trie = InMemoryTrie.shortLived(VERSION);
+        trie.putRecursive(TrieUtil.directComparable("a"), "a", (x, y) -> y);
+        trie.putRecursive(TrieUtil.directComparable("b"), "b", (x, y) -> y);
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskTrieWriter.write(trie, false, TrieUtil.STRING_SERDE, out);
+            ByteBuffer buffer = out.asNewBuffer();
+            OnDiskCursor<String> cursor = new OnDiskCursor<>(TrieUtil.STRING_SERDE, new ByteBufferRebufferer(buffer), VERSION,
+                                                             Direction.FORWARD, false, false, buffer.limit());
+            long position = cursor.advance();
+            while (!Cursor.isExhausted(position) && cursor.content() == null)
+                position = cursor.advance();
+            assertEquals("a", cursor.content());
+
+            Field streamBuffer = ReflectionUtils.getField(RebufferingInputStream.class, "buffer");
+            streamBuffer.setAccessible(true);
+            assertEquals(buffer.capacity(), ((ByteBuffer) streamBuffer.get(cursor.rdr)).capacity());
+            cursor.close();
+            assertEquals(0, ((ByteBuffer) streamBuffer.get(cursor.rdr)).capacity());
         }
     }
 

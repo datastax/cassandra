@@ -220,6 +220,10 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T, Cursor<T>, Trie<T>> imp
                 abortMutation();
                 throw t;
             }
+            finally
+            {
+                releaseMutationCursor();
+            }
         }
 
         /// Map-like put method, using the apply machinery above which cannot run into stack overflow. When the correct
@@ -417,6 +421,10 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T, Cursor<T>, Trie<T>> imp
             {
                 state.trie.abortMutation();
                 throw t;
+            }
+            finally
+            {
+                releaseMutationCursor();
             }
         }
     }

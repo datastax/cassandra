@@ -104,10 +104,17 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
                 walker.content(content);
 
             RangeCursor<D> deletionBranch = deletionBranchCursor(this, currentPosition);
-            if (deletionBranch != null && walker.enterDeletionsBranch())
+            if (deletionBranch != null)
             {
-                processDeletionBranch(walker, deletionBranch);
-                walker.exitDeletionsBranch();
+                // The branch is ours to release; over a file it holds a buffer.
+                try (deletionBranch)
+                {
+                    if (walker.enterDeletionsBranch())
+                    {
+                        processDeletionBranch(walker, deletionBranch);
+                        walker.exitDeletionsBranch();
+                    }
+                }
             }
 
             long prevPosition = currentPosition;

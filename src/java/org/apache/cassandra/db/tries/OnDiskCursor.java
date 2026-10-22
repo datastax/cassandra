@@ -119,6 +119,12 @@ public class OnDiskCursor<T> implements Cursor<T>
             buffer.position((int) (pos - currentBufferOffset));
         }
 
+        /// Drop the reference to the cursor's buffer when the cursor gives it back.
+        void releaseBuffer()
+        {
+            buffer = Rebufferer.EMPTY.buffer();
+        }
+
         public T deserialize(SharedStream rdr, long startPos, int len)
         {
             seekTo(startPos);
@@ -570,6 +576,7 @@ public class OnDiskCursor<T> implements Cursor<T>
         currentBH.release();
         currentBH = Rebufferer.EMPTY;
         currentBuffer = currentBH.buffer();
+        rdr.releaseBuffer();
         Rebufferer toRelease = rebufferer;
         rebufferer = null;
         toRelease.closeReader();
@@ -584,7 +591,10 @@ public class OnDiskCursor<T> implements Cursor<T>
     /// Used for debugging.
     String dumpNode(long node)
     {
-        return new OnDiskCursor<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction(), isOrdered, alternateInAscentSlot, node).dumpNode();
+        try (OnDiskCursor<T> cursor = new OnDiskCursor<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction(), isOrdered, alternateInAscentSlot, node))
+        {
+            return cursor.dumpNode();
+        }
     }
 
     static class Range<S extends RangeState<S>> extends OnDiskCursor<S> implements RangeCursor<S>
@@ -597,6 +607,13 @@ public class OnDiskCursor<T> implements Cursor<T>
         /// The ascent-side content a tail taken at the position this cursor was closed on must present at its root,
         /// worked out by [#close] because [#tailCursor] can no longer read the file. Only meaningful after close.
         S closedRootAscentContent;
+
+        /// Why [#close] could not work out what a tail needs, if it could not -- the bytes can be corrupt. A tail asked
+        /// for after such a close throws this rather than read a buffer that has already been given back.
+        ///
+        /// Also set by a move that fails, which can leave the cursor part way, e.g. on a node whose content it has read
+        /// without the state that follows from it. [#close] then does not try, and [#state] and [#tailCursor] throw this.
+        RuntimeException closeFailure;
 
         public Range(DataDeserializer<S> deserializer, RebuffererFactory rebuffererFactory, ByteComparable.Version byteComparableVersion, Direction direction, long root)
         {
@@ -629,28 +646,56 @@ public class OnDiskCursor<T> implements Cursor<T>
         /// The ascent side is skipped when the cursor is exhausted or on the return path, because `tailCursor` is an
         /// error in those states anyway, and being exhausted is how a cursor is usually left when the walk that owns
         /// it is done -- there is no reason to make the ordinary end of a walk pay for a descent to nearest content.
+        ///
+        /// The buffer is given back whether or not that succeeds. If it fails, the failure is kept for a tail asked for
+        /// afterwards instead of being thrown from here: the caller is usually done with the cursor and closing it on
+        /// its way out, possibly after another failure from the same bytes.
         @Override
         public void close()
         {
-            if (rebufferer != null)
+            try
             {
-                state();
-                if (!Cursor.isExhausted(currentEncodedPosition) && !Cursor.isOnReturnPath(currentEncodedPosition))
-                    closedRootAscentContent = getTailRootContent(direction().opposite(), getAscentPathContent(), false, null);
+                if (rebufferer != null && closeFailure == null)
+                {
+                    state();
+                    if (!Cursor.isExhausted(currentEncodedPosition) && !Cursor.isOnReturnPath(currentEncodedPosition))
+                        closedRootAscentContent = getTailRootContent(direction().opposite(), getAscentPathContent(), false, null);
+                }
             }
-            super.close();
+            catch (RuntimeException e)
+            {
+                closeFailure = e;
+            }
+            finally
+            {
+                super.close();
+            }
         }
 
         @Override
         public long advance()
         {
-            return updateActiveAndReturn(super.advance());
+            try
+            {
+                return updateActiveAndReturn(super.advance());
+            }
+            catch (RuntimeException e)
+            {
+                throw failed(e);
+            }
         }
 
         @Override
         public long advanceMultiple(TransitionsReceiver receiver)
         {
-            return updateActiveAndReturn(super.advanceMultiple(receiver));
+            try
+            {
+                return updateActiveAndReturn(super.advanceMultiple(receiver));
+            }
+            catch (RuntimeException e)
+            {
+                throw failed(e);
+            }
         }
 
         @Override
@@ -659,14 +704,32 @@ public class OnDiskCursor<T> implements Cursor<T>
             activeIsSet = false;    // since we are skipping, we have no idea where we will end up
             activeRange = null;
             prevContent = null;
-            return updateActiveAndReturn(super.skipTo(encodedSkipPosition));
+            try
+            {
+                return updateActiveAndReturn(super.skipTo(encodedSkipPosition));
+            }
+            catch (RuntimeException e)
+            {
+                throw failed(e);
+            }
+        }
+
+        /// Record a failed move in [#closeFailure].
+        private RuntimeException failed(RuntimeException e)
+        {
+            closeFailure = e;
+            return e;
         }
 
         @Override
         public S state()
         {
             if (!activeIsSet)
+            {
+                if (closeFailure != null)
+                    throw closeFailure;
                 setActiveState();
+            }
             return activeRange;
         }
 
@@ -769,6 +832,8 @@ public class OnDiskCursor<T> implements Cursor<T>
         @Override
         public RangeCursor<S> tailCursor(Direction direction)
         {
+            if (closeFailure != null)
+                throw closeFailure;
             // Deletion ranges active at entry and exit must be presented by the tail at its root. To do this, get
             // the closest content in both forward and reverse direction and adjust the content that the tail reports
             // for them.

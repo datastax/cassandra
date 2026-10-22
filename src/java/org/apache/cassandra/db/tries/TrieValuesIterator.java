@@ -40,6 +40,8 @@ class TrieValuesIterator<T> implements Iterator<T>
         {
             next = cursor.advanceToContent(null);
             gotNext = true;
+            if (next == null)
+                cursor.close();     // exhausted; a file-backed cursor holds a buffer until closed
         }
 
         return next != null;
@@ -78,6 +80,8 @@ class TrieValuesIterator<T> implements Iterator<T>
             {
                 next = cursor.advanceToContent(null);
                 gotNext = next == null || clazz.isInstance(next);
+                if (next == null)
+                    cursor.close();     // exhausted; a file-backed cursor holds a buffer until closed
             }
 
             return next != null;

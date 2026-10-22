@@ -23,7 +23,9 @@ import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 import org.junit.BeforeClass;
@@ -739,6 +741,113 @@ public class OnDiskDeletionAwareTrieTest
                                  outstandingBefore, factory.outstanding);
                 }
             }
+        }
+    }
+
+    /// Every way of reading a deletion-aware trie that does not hand a cursor to its caller must give back the buffers
+    /// of the cursors it takes, including those of the deletion branches it visits, once the walk has run to its end.
+    @Test
+    public void testReadsReleaseTheirCursors() throws IOException
+    {
+        List<DataPoint> points = points(live("aa", 1), marker("abc", -1, 5), marker("abd", 5, -1), live("abz", 3),
+                                        marker("xbc", -1, 6), marker("xbd", 6, -1), live("xyz", 3));
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
+        File file = new File(java.io.File.createTempFile("deletionawarerelease", ".trie"));
+        try (SequentialWriter writer = new SequentialWriter(file))
+        {
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer);
+            writer.finish();
+        }
+
+        ChannelProxy channel = new ChannelProxy(file);
+        TrieUtil.CountingRebuffererFactory factory =
+            new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(channel));
+        try (OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                 new OnDiskDeletionAwareTrie<>(factory, LIVE, MARKER, VERSION, factory.fileLength(), channel))
+        {
+            InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> rootDeletion = DataPoint.fromList(points, false, true);
+            Map<String, Runnable> reads = new LinkedHashMap<>();
+            for (Direction direction : Direction.values())
+            {
+                reads.put("values " + direction, () -> read.values(direction).forEach(v -> {}));
+                reads.put("entrySet " + direction, () -> read.entrySet(direction).forEach(e -> {}));
+                reads.put("forEachEntry " + direction, () -> read.forEachEntry(direction, (k, v) -> {}));
+                reads.put("mergedTrie values " + direction, () -> mergedValues(read, direction));
+                reads.put("deletionOnlyTrie values " + direction, () -> read.deletionOnlyTrie().values(direction).forEach(v -> {}));
+                reads.put("tailTries " + direction, () -> read.tailTries(direction, v -> true)
+                                                              .forEach(e -> mergedValues(e.getValue(), direction)));
+                reads.put("mergeWith values " + direction,
+                          () -> mergedValues(read.mergeWith(source, DataPoint::combineLive, DataPoint::combineDeletion, DataPoint::deleteLive, false),
+                                             direction));
+                reads.put("mergeWithDeletion values " + direction,
+                          () -> mergedValues(read.mergeWithDeletion(rootDeletion.deletionBranchAtRoot(), DataPoint::deleteLive, DataPoint::combineDeletion, false),
+                                             direction));
+            }
+            reads.put("dump", read::dump);
+            reads.put("deletionAtRoot", read::deletionAtRoot);
+            reads.put("deletionBranchAtRoot values", () -> read.deletionBranchAtRoot().values().forEach(v -> {}));
+            reads.put("mergeWithDeletion from file", () -> mergedValues(source.mergeWithDeletion(read.deletionOnlyTrie(), DataPoint::deleteLive, DataPoint::combineDeletion, false),
+                                                                        Direction.FORWARD));
+            reads.put("write", () -> {
+                try (DataOutputBuffer out = new DataOutputBuffer())
+                {
+                    OnDiskDeletionAwareTrieWriter.write(read, LIVE, MARKER, out);
+                }
+                catch (IOException e)
+                {
+                    throw new UncheckedIOException(e);
+                }
+            });
+            reads.put("apply", () -> {
+                try
+                {
+                    applyTo(InMemoryDeletionAwareTrie.shortLived(VERSION), read);
+                }
+                catch (TrieSpaceExhaustedException e)
+                {
+                    throw new AssertionError(e);
+                }
+            });
+
+            List<String> leaking = new ArrayList<>();
+            for (Map.Entry<String, Runnable> r : reads.entrySet())
+            {
+                int before = factory.outstanding;
+                r.getValue().run();
+                if (factory.outstanding != before)
+                    leaking.add(r.getKey() + " (" + (factory.outstanding - before) + ")");
+            }
+            assertEquals("Reads leaving rebufferers outstanding", new ArrayList<>(), leaking);
+        }
+    }
+
+    /// A mutator is kept for further mutations -- a partition updater holds one per shard -- so once a mutation has
+    /// been applied it must not keep any of its cursors, including the deletion branch cursors handed to the mutators
+    /// it uses for the branches. A closed cursor over a file-backed trie still references that trie.
+    @Test
+    public void testMutatorDoesNotKeepTheMutationCursors() throws IOException, TrieSpaceExhaustedException
+    {
+        List<DataPoint> points = points(live("aa", 1), marker("abc", -1, 5), marker("abd", 5, -1), live("abz", 3),
+                                        marker("xbc", -1, 6), marker("xbd", 6, -1), live("xyz", 3));
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(points), LIVE, MARKER, out);
+            OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
+
+            InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> target = InMemoryDeletionAwareTrie.shortLived(VERSION);
+            InMemoryDeletionAwareTrie<LivePoint, DeletionMarker>.Mutator<LivePoint, DeletionMarker> mutator =
+                target.mutator(DataPoint::combineLive,
+                               DataPoint::combineDeletion,
+                               DataPoint::deleteLive,
+                               DataPoint::deleteLive,
+                               false,
+                               v -> false);
+            mutator.apply(read);
+            assertNull("data mutation cursor", mutator.mutationCursor);
+            assertNull("deletion branch cursor applied to the data", mutator.deleter.mutationCursor);
+            assertNull("deletion branch cursor merged into the deletions", mutator.deletionMutator.mutationCursor);
+            read.close();
         }
     }
 

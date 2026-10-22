@@ -95,6 +95,7 @@ public abstract class TrieTailsIterator<T, V, C extends Cursor<T>> extends TrieP
     {
         gotNext = true;
         next = null;
+        cursor.close();     // exhausted; a file-backed cursor holds a buffer until closed
         return false;
     }
 

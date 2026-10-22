@@ -1476,6 +1476,17 @@ public abstract class InMemoryBaseTrie<T, C extends Cursor<T>, Q extends BaseTri
             state.attachAndUpdateRoot(forcedCopyDepth);
         }
 
+        /// Close the cursor of the mutation that was just applied and let go of it, so that a mutator kept for further
+        /// mutations does not hold on to it. The mutation can be file-backed, in which case its cursor holds a buffer
+        /// until it is closed. Called whether the mutation succeeded or not.
+        void releaseMutationCursor()
+        {
+            C cursor = mutationCursor;
+            mutationCursor = null;
+            if (cursor != null)
+                cursor.close();
+        }
+
         @Override
         public boolean isBranching()
         {
