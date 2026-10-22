@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
  * the update itself, along with the trie it laid out to arrive at it, so re-sizing the same instance
  * returns a field read rather than doing the work.
  * A benchmark that reuses one update would therefore measure nothing after its first invocation.
- * Production never sees that: every mutation carries a fresh update, sized at most twice.
+ * Production never sees that: every mutation carries a fresh update, sized at most once per version.
  *
  * Lives in this package to reach the package-private fields without reflection.
  */
@@ -44,7 +44,7 @@ public class PartitionUpdateSizeCache
     public static boolean isSized(PartitionUpdate update, int version)
     {
         return update instanceof TriePartitionUpdate
-               && version == org.apache.cassandra.net.MessagingService.VERSION_DS_21
+               && TriePartitionUpdateSerializer.cachedAt(version)
                && ((TriePartitionUpdate) update).serializedSizeDS21 >= 0;
     }
 

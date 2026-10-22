@@ -92,6 +92,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -132,12 +133,12 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
                     "s int static, ss set<text> static, PRIMARY KEY(k, c))");
     }
 
-    private static byte[] serialize(PartitionUpdate update) throws IOException
+    private static byte[] serialize(TriePartitionUpdate update) throws IOException
     {
         return serialize(update, VERSION);
     }
 
-    private static byte[] serialize(PartitionUpdate update, int version) throws IOException
+    private static byte[] serialize(TriePartitionUpdate update, int version) throws IOException
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
@@ -290,6 +291,25 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
                         viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("cnt", CounterContext.instance().createUpdate(5L)))),
                         "046b657930010051fffffadfb5522587d00000000103636e74003c0300000024000100000000000000000000c0000000"
                         + "000000000000000000000001000000000000000529004004000003f538010000804440400601f5");
+    }
+
+    /**
+     * The trie encoding exists at the versions whose partition updates carry a format byte to say which encoding
+     * follows, and only there.
+     */
+    @Test
+    public void testVersionWithoutTheEncodingIsRejected() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = richUpdate();
+        byte[] bytes = serialize(update);
+
+        for (int version : new int[]{ MessagingService.VERSION_DS_20, MessagingService.VERSION_DSE_68 })
+        {
+            assertThrows(IllegalArgumentException.class, () -> serialize(update, version));
+            assertThrows(IllegalArgumentException.class, () -> TriePartitionUpdateSerializer.serializedSize(update, version));
+            assertThrows(IllegalArgumentException.class, () -> deserialize(bytes, version));
+        }
     }
 
     /**
@@ -1291,6 +1311,38 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
     }
 
     /**
+     * A deletion branch holds deletion markers only, so a payload in one that is tagged as live content is corrupt. It
+     * must be rejected the way the reader rejects other corrupt bytes, rather than be read as live content.
+     */
+    @Test
+    public void testLiveContentTagInDeletionBranchIsRejected() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(1999).nowInSec(1500).row(1).delete()));
+        byte[] bytes = serialize(update);
+
+        // The trie is written last. The writer emits a deletion branch before the node that holds it, so this one
+        // starts with the tag of the row deletion's first marker.
+        TriePartitionUpdateSerializer.serializedSize(update, VERSION);
+        int trieStart = bytes.length - PartitionUpdateSizeCache.retainedTrie(update).remaining();
+        assertEquals(7, bytes[trieStart]);
+
+        for (int tag : new int[]{ 3, 4, 5, 6, 8 })
+        {
+            bytes[trieStart] = (byte) tag;
+            try
+            {
+                walk(deserialize(bytes));
+                fail("Tag " + tag + " in a deletion branch was accepted");
+            }
+            catch (UncheckedIOException e)
+            {
+                assertTrue(e.getMessage(), e.getMessage().contains("in a deletion branch"));
+            }
+        }
+    }
+
+    /**
      * A deletion marker never holds a live deletion, which is what a deletion time whose timestamp is
      * {@link Long#MIN_VALUE} reads back as.
      */
@@ -1331,6 +1383,24 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         bytes[marker + 10] = 0;
 
         assertCorruptionRejected(bytes, "nothing else");
+    }
+
+    /**
+     * The live branch holds live content only, so a payload in it that is tagged as a deletion marker is corrupt.
+     */
+    @Test
+    public void testMarkerTagInDataBranchIsRejected() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11)));
+        byte[] bytes = serialize(update);
+
+        // The update has no deletion branch, so the trie starts with the tag of its first live payload, a cell.
+        int payload = trieStart(update, bytes);
+        assertEquals(3, bytes[payload]);
+        bytes[payload] = 7;
+
+        assertCorruptionRejected(bytes, "Unknown content type tag: 7");
     }
 
     /**
