@@ -36,6 +36,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -61,15 +62,20 @@ public class ReturnPathSeekTest
     public boolean useUnion = false;
     @Parameterized.Parameter(2)
     public boolean intersectTrie = false;
+    /// Write the trie under test out and read it back as an [OnDiskTrie], whose cursor keeps its own backtracking
+    /// state for return-path content.
+    @Parameterized.Parameter(3)
+    public boolean onDisk = false;
 
-    @Parameterized.Parameters(name="inMemorySingleton={0}, useUnion={1}, intersectTrie={2}")
+    @Parameterized.Parameters(name="inMemorySingleton={0}, useUnion={1}, intersectTrie={2}, onDisk={3}")
     public static List<Object[]> generateData()
     {
         var list = new ArrayList<Object[]>();
         for (boolean inMemorySingleton : new boolean[] {true, false})
             for (boolean useUnion : new boolean[] {true, false})
                 for (boolean intersectTrie : new boolean[] {true, false})
-                    list.add(new Object[] {inMemorySingleton, useUnion, intersectTrie});
+                    for (boolean onDisk : new boolean[] {false, true})
+                        list.add(new Object[] {inMemorySingleton, useUnion, intersectTrie, onDisk});
         return list;
     }
 
@@ -77,6 +83,13 @@ public class ReturnPathSeekTest
     public static void enableVerification()
     {
         CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
+        // The on-disk tries are read from a file, which pulls in BufferPools, whose static initializer needs configuration.
+        DatabaseDescriptor.toolInitialization();
+    }
+
+    Trie<String> maybeOnDisk(Trie<String> trie)
+    {
+        return onDisk ? TrieUtil.onDiskRoundtripStrings(trie, true) : trie;
     }
 
     Trie<String> makeSingleton(ByteComparable.Preencoded e, String v) throws TrieSpaceExhaustedException
@@ -99,7 +112,7 @@ public class ReturnPathSeekTest
         {
             ByteComparable.Preencoded e = TrieUtil.directComparable(test);
             System.out.println("Testing singleton " + asString(e) + ": " + test);
-            Trie<String> tt = makeSingleton(e, test);
+            Trie<String> tt = maybeOnDisk(makeSingleton(e, test));
             if (intersectTrie)
                 tt = tt.slice(e, true, e, true); // ineffective but might mess it up
 
@@ -112,7 +125,7 @@ public class ReturnPathSeekTest
     @Test
     public void testMultiple() throws TrieSpaceExhaustedException
     {
-        Trie<String> trie = useUnion ? buildMergeTrie() : buildInMemoryTrie();
+        Trie<String> trie = maybeOnDisk(useUnion ? buildMergeTrie() : buildInMemoryTrie());
 
         System.out.println("Forward\n" + trie.dump());
         System.out.println("Reverse\n" + trie.process(Direction.REVERSE, new TrieDumper.Plain<>(Objects::toString)));
@@ -226,7 +239,7 @@ public class ReturnPathSeekTest
     @Test
     public void testSkipBranchFromReturnPath() throws TrieSpaceExhaustedException
     {
-        Trie<String> trie = useUnion ? buildMergeTrie(adjacentBranchTests) : buildInMemoryTrie(adjacentBranchTests);
+        Trie<String> trie = maybeOnDisk(useUnion ? buildMergeTrie(adjacentBranchTests) : buildInMemoryTrie(adjacentBranchTests));
         if (intersectTrie)
             trie = trie.slice(TrieUtil.directComparable("aa"), true, TrieUtil.directComparable("ac"), true);
 
@@ -257,7 +270,7 @@ public class ReturnPathSeekTest
     @Test
     public void testSeeksAfterDescent() throws TrieSpaceExhaustedException
     {
-        Trie<String> trie = useUnion ? buildMergeTrie() : buildInMemoryTrie();
+        Trie<String> trie = maybeOnDisk(useUnion ? buildMergeTrie() : buildInMemoryTrie());
 
         for (String first : tests)
         {
@@ -288,8 +301,8 @@ public class ReturnPathSeekTest
                 ByteComparable.Preencoded firstKey = TrieUtil.directComparable(first);
                 ByteComparable.Preencoded secondKey = TrieUtil.directComparable(second);
 
-                Trie<String> tt = makeSingleton(firstKey, first).mergeWith(makeSingleton(secondKey, second),
-                                                                           Trie.throwingResolver());
+                Trie<String> tt = maybeOnDisk(makeSingleton(firstKey, first).mergeWith(makeSingleton(secondKey, second),
+                                                                                       Trie.throwingResolver()));
                 if (intersectTrie)
                     tt = tt.subtrie(firstKey, secondKey); // ineffective but might mess it up
 

@@ -48,7 +48,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
      *
      * @param rebufferer Rebufferer to use
      */
-    public RandomAccessReader(Rebufferer rebufferer, ByteOrder order, BufferHolder bufferHolder)
+    RandomAccessReader(Rebufferer rebufferer, ByteOrder order, BufferHolder bufferHolder)
     {
         super(bufferHolder.buffer(), false);
         this.bufferHolder = bufferHolder;

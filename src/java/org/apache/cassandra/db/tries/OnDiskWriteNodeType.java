@@ -100,7 +100,7 @@ public enum OnDiskWriteNodeType
 
     static final int MAX_LEAF_LENGTH_INCLUSIVE = 63;
     static final int MAX_CHAIN_LENGTH_INCLUSIVE = 64;
-    // sparse: 0x80 - 0xE0 (96 positions) 1lllllbb, lllll is count - 2 and must be < 24, bb is bytes per pointer
+    // sparse: 0x80 - 0xDF (96 positions) 1lllllbb, lllll is count - 2 and must be < 24, bb is bytes per pointer
     static final int MAX_SPARSE_LENGTH_INCLUSIVE = 25;
     static final int MAX_SPARSE_BYTES = 4;
     static final int SHIFT_SPARSE_LENGTH = 2;
@@ -126,20 +126,17 @@ public enum OnDiskWriteNodeType
         if (ascentData != null)
         {
             long ascentStart = out.position();
-            int ascentDataSize = serializer.serialize(out, ascentData);
-            assert ascentDataSize == out.position() - ascentStart
-                : "Serializer reported " + ascentDataSize + " bytes but wrote " + (out.position() - ascentStart);
-            OnDiskTrieWriter.writeReversedVint(out, ascentDataSize);
+            serializer.serialize(out, ascentData);
+            OnDiskTrieWriter.writeReversedVint(out, out.position() - ascentStart);
             code |= PREFIX_HAS_ASCENT_CONTENT;
         }
 
-        int descentDataSize = -1;
+        long descentDataSize = -1;
         if (descentData != null)
         {
             long descentStart = out.position();
-            descentDataSize = serializer.serialize(out, descentData);
-            assert descentDataSize == out.position() - descentStart
-                : "Serializer reported " + descentDataSize + " bytes but wrote " + (out.position() - descentStart);
+            serializer.serialize(out, descentData);
+            descentDataSize = out.position() - descentStart;
         }
 
         if (hasChild || ascentData != null || descentDataSize > MAX_LEAF_LENGTH_INCLUSIVE)
@@ -155,7 +152,7 @@ public enum OnDiskWriteNodeType
             out.writeByte(code);
         }
         else
-            out.writeByte(LEAF.bits | descentDataSize);
+            out.writeByte(LEAF.bits | (int) descentDataSize);
     }
 
     static OnDiskWriteNodeType selectChildrenType(int bytesPerPointer, int pointerCount)

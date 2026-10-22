@@ -100,14 +100,16 @@ implements Cursor.Walker<T, DataOutputPlus>
         }
 
         @Override
-        public int serialize(DataOutputPlus out, Slot<T> value) throws IOException
+        public void serialize(DataOutputPlus out, Slot<T> value) throws IOException
         {
             if (value.content != null)
-                return contentSerializer.serialize(out, value.content);
+            {
+                contentSerializer.serialize(out, value.content);
+                return;
+            }
 
             int bytes = OnDiskTrieWriter.bytesFor(value.deletionBranchRoot);
             OnDiskTrieWriter.writeReversedSized(out, value.deletionBranchRoot, bytes);
-            return bytes;
         }
     }
 
@@ -249,13 +251,17 @@ implements Cursor.Walker<T, DataOutputPlus>
     ///
     /// Writes in [Direction#REVERSE] like [OnDiskTrieWriter#write], so the root ends up last and the trie
     /// is read from the end of the stream.
-    public static <T, D extends RangeState<D>> void write(DeletionAwareTrie<T, D> trie,
+    ///
+    /// @return the position of the root, which is the position of `out` when this returns, or 0 if the trie is empty,
+    ///         as [OnDiskTrieWriter#write] returns it.
+    public static <T, D extends RangeState<D>> long write(DeletionAwareTrie<T, D> trie,
                                                           OnDiskTrieWriter.DataSerializer<T> contentSerializer,
                                                           OnDiskTrieWriter.DataSerializer<D> deletionSerializer,
                                                           DataOutputPlus out) throws IOException
     {
         OnDiskDeletionAwareTrieWriter<T, D> fw =
             new OnDiskDeletionAwareTrieWriter<>(out, contentSerializer, deletionSerializer);
+        long startPosition = out.position();
         DeletionAwareCursor<T, D> c = trie.cursor(Direction.REVERSE);
 
         emitAt(fw, c);
@@ -286,6 +292,9 @@ implements Cursor.Walker<T, DataOutputPlus>
             prevPosition = currPosition;
         }
         fw.complete();
+        // An empty trie leaves the stream untouched, and the position there is not a node.
+        long position = out.position();
+        return position > startPosition ? position : 0;
     }
 
     /// Report the content and, if present, the whole deletion branch at the cursor's position.

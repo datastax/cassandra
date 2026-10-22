@@ -905,10 +905,9 @@ public class TrieUtil
     static class IntegerSerDe implements OnDiskTrieWriter.DataSerializer<Integer>, OnDiskCursor.DataDeserializer<Integer>
     {
         @Override
-        public int serialize(DataOutputPlus out, Integer value) throws IOException
+        public void serialize(DataOutputPlus out, Integer value) throws IOException
         {
             out.writeInt(value);
-            return 4;
         }
 
         @Override
@@ -922,11 +921,9 @@ public class TrieUtil
     static class StringSerDe implements OnDiskTrieWriter.DataSerializer<String>, OnDiskCursor.DataDeserializer<String>
     {
         @Override
-        public int serialize(DataOutputPlus out, String value) throws IOException
+        public void serialize(DataOutputPlus out, String value) throws IOException
         {
-            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            out.write(bytes);
-            return bytes.length;
+            out.write(value.getBytes(StandardCharsets.UTF_8));
         }
 
         @Override
@@ -942,15 +939,12 @@ public class TrieUtil
     static class RangeSerDe implements OnDiskTrieWriter.DataSerializer<TestRangeState>, OnDiskCursor.DataDeserializer<TestRangeState>
     {
         @Override
-        public int serialize(DataOutputPlus out, TestRangeState value) throws IOException
+        public void serialize(DataOutputPlus out, TestRangeState value) throws IOException
         {
-            long start = out.position();
             out.writeVInt32(value.leftSide);
             out.writeVInt32(value.rightSide);
             out.writeBoolean(value.appliesAfter);
-            byte[] bytes = value.position.asByteComparableArray(VERSION);
-            out.write(bytes);
-            return (int) (out.position() - start);
+            out.write(value.position.asByteComparableArray(VERSION));
         }
 
         @Override

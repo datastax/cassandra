@@ -191,6 +191,13 @@ interface VerificationCursor
 
         private long verify(long newPosition)
         {
+            assert source.encodedPosition() == newPosition :
+                String.format("Cursor returned position %s (%016x) but reports %s (%016x)\n%s",
+                              Cursor.toString(newPosition),
+                              newPosition,
+                              Cursor.toString(source.encodedPosition()),
+                              source.encodedPosition(),
+                              this);
             int newDepth = Cursor.depth(newPosition);
             int oldDepth = Cursor.depth(returnedPosition);
             assert newDepth <= oldDepth + 1 :
