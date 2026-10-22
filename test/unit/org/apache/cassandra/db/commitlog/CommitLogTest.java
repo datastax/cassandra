@@ -37,6 +37,7 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 import java.util.zip.CRC32;
@@ -63,6 +64,7 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.Config.DiskFailurePolicy;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
@@ -96,6 +98,7 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MemtableParams;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
@@ -124,6 +127,7 @@ import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -141,6 +145,7 @@ public abstract class CommitLogTest
     private static final String KEYSPACE1_REPLAY_TABLE2 = "CommitLogTestReplay1Table2";
     private static final String KEYSPACE2_REPLAY = "CommitLogTestReplay2";
     private static final String KEYSPACE2_REPLAY_TABLE2 = "CommitLogTestReplay2Table2";
+    private static final AtomicInteger ALTERED_TABLES = new AtomicInteger();
 
     private static JVMKiller oldKiller;
     private static KillerForTests testKiller;
@@ -916,6 +921,41 @@ public abstract class CommitLogTest
         assertEquals("Format the update was replayed in, at messaging version " + storageVersion,
                      storageVersion >= MessagingService.VERSION_DS_21,
                      replayed instanceof TriePartitionUpdate);
+    }
+
+    /// The trie encoding keys each column by its position among the table's columns when the mutation was logged. A
+    /// schema change before replay that renumbers them -- here an added column that sorts before the others -- must
+    /// not make the replayed cells land in the wrong columns.
+    @Test
+    public void replayTriePartitionUpdateAcrossAlter() throws IOException
+    {
+        String table = "TrieAlter" + ALTERED_TABLES.incrementAndGet();
+        TableMetadata before = TableMetadata.builder(KEYSPACE1, table)
+                                            .addPartitionKeyColumn("k", AsciiType.instance)
+                                            .addClusteringColumn("c", AsciiType.instance)
+                                            .addRegularColumn("b", BytesType.instance)
+                                            .addRegularColumn("d", BytesType.instance)
+                                            .build();
+        SchemaTestUtil.announceNewTable(before);
+
+        PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(before, "trieKey");
+        builder.timestamp(2000).nowInSec(1500).row("aaa").add("b", bytes("first")).add("d", bytes("second"));
+        CommitLog.instance.add(new Mutation(TriePartitionUpdate.asTrieUpdate(builder.build())));
+        CommitLog.instance.sync(true);
+
+        SchemaTestUtil.announceTableUpdate(before.unbuild().addRegularColumn("a", BytesType.instance).build());
+        TableMetadata after = Schema.instance.getTableMetadata(KEYSPACE1, table);
+
+        List<String> activeSegments = CommitLog.instance.getActiveSegmentNames();
+        File[] files = CommitLog.instance.getSegmentManager().storageDirectory.tryList((file, name) -> activeSegments.contains(name));
+        CapturingReplayer replayer = new CapturingReplayer(CommitLog.instance, after);
+        replayer.replayFiles(files);
+
+        assertEquals(1, replayer.updates.size());
+        Row row = replayer.updates.get(0).getRow(Clustering.make(bytes("aaa")));
+        assertNull(row.getCell(after.getColumn(bytes("a"))));
+        assertEquals(bytes("first"), row.getCell(after.getColumn(bytes("b"))).buffer());
+        assertEquals(bytes("second"), row.getCell(after.getColumn(bytes("d"))).buffer());
     }
 
     @Test
