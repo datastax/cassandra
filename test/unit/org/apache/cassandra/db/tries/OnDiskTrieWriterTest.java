@@ -21,6 +21,7 @@ package org.apache.cassandra.db.tries;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -339,6 +340,37 @@ public class OnDiskTrieWriterTest
             OnDiskTrieWriter.write(trie, false, SIZED_SERIALIZER, out);
             byte[] bytes = out.toByteArray();
             return bytes[bytes.length - 1] & ~0x7 & 0xFF;
+        }
+    }
+
+    /// One writer writing several tries, as the deletion-aware writer does with its deletion branches, writes each as a
+    /// new writer would. Walked in reverse, the first range trie ends on its root's return path, presenting the open
+    /// marker there, and the second starts with content at its root, the close marker of a point deletion.
+    @Test
+    public void testWriterWritesSeveralTries() throws Exception
+    {
+        RangeTrie<TestRangeState> first = TestRangeState.fromList(TestRangeState.verify(Arrays.asList(
+            new TestRangeState(ByteComparable.EMPTY, -1, 1),
+            new TestRangeState(key("a"), 1, -1))));
+        RangeTrie<TestRangeState> second = TestRangeState.fromList(TestRangeState.verify(Arrays.asList(
+            new TestRangeState(ByteComparable.EMPTY, false, -1, 1),
+            new TestRangeState(ByteComparable.EMPTY, true, 1, -1))));
+        try (DataOutputBuffer expected = new DataOutputBuffer();
+             DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskTrieWriter.write(first, true, TrieUtil.RANGE_SERDE, expected);
+            OnDiskTrieWriter.write(second, true, TrieUtil.RANGE_SERDE, expected);
+
+            OnDiskTrieWriter<TestRangeState> writer = new OnDiskTrieWriter<>(out, TrieUtil.RANGE_SERDE, true);
+            try (Cursor<TestRangeState> c = first.cursor(Direction.REVERSE))
+            {
+                writer.writeFrom(c);
+            }
+            try (Cursor<TestRangeState> c = second.cursor(Direction.REVERSE))
+            {
+                writer.writeFrom(c);
+            }
+            assertEquals(Hex.bytesToHex(expected.toByteArray()), Hex.bytesToHex(out.toByteArray()));
         }
     }
 

@@ -19,12 +19,10 @@
 package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.BitSet;
 
 import org.apache.cassandra.io.util.DataOutputPlus;
 
-public enum OnDiskWriteNodeType
+enum OnDiskWriteNodeType
 {
     // Note: Any changes to bits must be reflected in OnDiskReadNodeType.IMPLEMENTATIONS.
 
@@ -49,9 +47,8 @@ public enum OnDiskWriteNodeType
         void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
         {
             int size = node.childCount();
-            // An absent child is written as all-ones, so the furthest real delta must stay below that: size the
-            // pointers for one more than the furthest delta (see OnDiskReadNodeType.DENSE.notPresent).
-            bytesPerPointer = OnDiskTrieWriter.bytesFor(basePos - node.child(0) + 1);
+            // bytesPerPointer is sized for one more than the furthest delta, so that no real delta is all-ones, which
+            // marks an absent child (see OnDiskReadNodeType.DENSE.notPresent).
             // first pointer is not implicit here
             int index = 0;
             for (int i = 255; i >= 0; --i)
@@ -72,12 +69,13 @@ public enum OnDiskWriteNodeType
         void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
         {
             int size = writePointers(out, node, basePos, bytesPerPointer);
-            BitSet bits = new BitSet(256);
+            // Bit t of the bitmap is bit t % 64 of word t / 64, the layout of BitSet.toLongArray.
+            long[] bitsAsLong = new long[4];
             for (int i = 0; i < size; ++i)
-                bits.set(node.childTransition(i));
-            // toLongArray() trims to the highest set bit, so a node whose transitions all fall in the
-            // low half returns fewer than 4 longs. The format always reserves 32 bytes here, so pad back out to 4.
-            long[] bitsAsLong = Arrays.copyOf(bits.toLongArray(), 4);
+            {
+                int transition = node.childTransition(i);
+                bitsAsLong[transition >>> 6] |= 1L << (transition & 63);
+            }
             for (int i = 3; i >= 0; --i)
                 out.writeLong(bitsAsLong[i]);   // lowest-order bytes ends up last
             out.writeByte(this.bits | (bytesPerPointer - 1));

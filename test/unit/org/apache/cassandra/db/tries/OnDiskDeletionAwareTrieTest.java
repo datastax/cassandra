@@ -411,8 +411,8 @@ public class OnDiskDeletionAwareTrieTest
     /// branch when only a prefix of the branch's data is matched by the set: the walk descends into the branch,
     /// which the set covers at that point, and then finds no marker below.
     ///
-    /// [OnDiskDeletionAwareTrieWriter#exitDeletionsBranch] must report no root for it. The position it would otherwise
-    /// hand back is that of whatever node was written last -- here the live point's, written before the walk
+    /// [OnDiskDeletionAwareTrieWriter#write] must record no root for it. The position it would otherwise
+    /// record is that of whatever node was written last -- here the live point's, written before the walk
     /// reaches the branch -- and the reader has no way to tell that apart from a real root: it sets
     /// [Cursor#MAY_HAVE_DELETION_BRANCH_BIT] and decodes the byte there as a node code.
     @Test
