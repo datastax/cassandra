@@ -26,7 +26,6 @@ import java.util.stream.Stream;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Streams;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -45,8 +44,9 @@ import static org.junit.Assert.assertTrue;
  */
 public class DeletionAwareTailTrieTest
 {
-    @BeforeClass
-    public static void enableVerification()
+    // A static initializer rather than @BeforeClass: the trie below is built during class initialisation, which
+    // reads Trie.DEBUG, so the property has to be set before that or the whole class runs unverified.
+    static
     {
         CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
     }
@@ -69,6 +69,14 @@ public class DeletionAwareTailTrieTest
     static ByteComparable partition = directComparable("partition");
 
     static InMemoryDeletionAwareTrie<String, TestRangeState> trie = makeTrie();
+
+    /// The trie the tail operations under test are taken over. Overridden by
+    /// [OnDiskDeletionAwareTailTrieTest] so that the expectations below are also checked against a trie that has been
+    /// written out and read back, where the tail's root is a position in a file rather than a node reference.
+    DeletionAwareTrie<String, TestRangeState> trieUnderTest()
+    {
+        return trie;
+    }
 
     @Test
     public void testTailAtPartitionWithCoveringDeletionIncluded()
@@ -303,7 +311,7 @@ public class DeletionAwareTailTrieTest
     void testTailTrie(Direction tailDirection, String key, boolean includeCoveringDeletions, Object... expectedData)
     {
         // Get tail trie at "partition" with includeCoveringDeletions=true
-        DeletionAwareTrie<String, TestRangeState> tail = trie.tailTrie(directComparable(key), includeCoveringDeletions);
+        DeletionAwareTrie<String, TestRangeState> tail = trieUnderTest().tailTrie(directComparable(key), includeCoveringDeletions);
         assertNotNull("Tail trie should not be null", tail);
 
         // Verify the tail has the deletion branch at its root
@@ -315,7 +323,7 @@ public class DeletionAwareTailTrieTest
             assertNotNull("Deletion branch should be present at root when including covering deletions", deletionBranchCursor);
         }
 
-        System.out.println(trie.dump());
+        System.out.println(trieUnderTest().dump());
         System.out.println(tail.dump());
 
         // Verify the content of the tail includes all data.
@@ -347,7 +355,7 @@ public class DeletionAwareTailTrieTest
     private void testTailTries(Direction direction, boolean includeCoveringDeletions, TailExpectations... tails)
     {
         int idx = direction.select(0, tails.length - 1);
-        for (var tailEntry : trie.tailTries(direction, Predicates.alwaysTrue(), includeCoveringDeletions))
+        for (var tailEntry : trieUnderTest().tailTries(direction, Predicates.alwaysTrue(), includeCoveringDeletions))
         {
             var tail = tails[idx];
             System.out.println("Trie at " + tailEntry.getKey().byteComparableAsString(VERSION));
@@ -486,8 +494,8 @@ public class DeletionAwareTailTrieTest
     @Test
     public void testTailTriesWithCoveringDeletionsIncluded() throws Exception
     {
-        InMemoryDeletionAwareTrie<String, TestRangeState> trie = makeTrie();
-        
+        DeletionAwareTrie<String, TestRangeState> trie = trieUnderTest();
+
         // Iterate with includeCoveringDeletions=true
         List<ByteComparable> keys = new ArrayList<>();
         for (var entry : trie.tailTries(Direction.FORWARD, v -> v instanceof String, true))
@@ -505,8 +513,8 @@ public class DeletionAwareTailTrieTest
     @Test
     public void testTailTriesWithCoveringDeletionsExcluded() throws Exception
     {
-        InMemoryDeletionAwareTrie<String, TestRangeState> trie = makeTrie();
-        
+        DeletionAwareTrie<String, TestRangeState> trie = trieUnderTest();
+
         // Iterate with includeCoveringDeletions=false
         List<ByteComparable> keys = new ArrayList<>();
         for (var entry : trie.tailTries(Direction.FORWARD, v -> v instanceof String, false))
