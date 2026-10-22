@@ -33,7 +33,7 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 /// Every node is written as soon as the walk leaves it: the only state kept is the path to the current position and,
 /// for each node on it, the content seen so far and the positions of the children already written. Everything except
 /// value is written reversed. See [OnDiskTrie.md](./OnDiskTrie.md) for details.
-public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor.Walker<T, DataOutputPlus>
+public class OnDiskTrieWriter<T> extends TriePathReconstructor
 {
     interface DataSerializer<T>
     {
@@ -59,7 +59,6 @@ public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor
     // On the way down we only collect the path (base class). A node is created when content is found or when a
     // child completes, so a path that leads to nothing leaves nothing behind.
 
-    @Override
     public void content(T content)
     {
         Node<T> node = nodeAtCurrentPosition();
@@ -223,7 +222,7 @@ public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor
         // A dense node marks absent children with all-ones, so its pointers are sized for one more than the delta.
         int denseBytesPerPointer = bytesFor(basePos - furthestChild + 1);
         OnDiskWriteNodeType type = OnDiskWriteNodeType.selectChildrenType(bytesPerPointer, denseBytesPerPointer, count);
-        type.writeChildren(out, node, basePos, bytesPerPointer);
+        type.writeChildren(out, node, basePos, type == OnDiskWriteNodeType.DENSE ? denseBytesPerPointer : bytesPerPointer);
     }
 
     @Override
@@ -232,9 +231,59 @@ public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor
         onAscentPath = true;
     }
 
-    public DataOutputPlus complete()
+    /// Advance the cursor from `prevPosition` with this as the receiver of the transitions it takes, write out the
+    /// nodes it ascended out of, and bring the path up to the new position. Returns the new position.
+    ///
+    /// [Cursor#process] cannot drive a writer: it never reports ascents, and nodes are only written on ascent.
+    long step(Cursor<?> c, long prevPosition) throws IOException
     {
-        return out;
+        long currPosition = c.advanceMultiple(this);
+
+        if (Cursor.ascended(currPosition, prevPosition))
+        {
+            // write the nodes that have been completed
+            ascendTo(currPosition);
+
+            if (Cursor.isExhausted(currPosition))
+                return currPosition;
+
+            // update key tracker
+            int depth = Cursor.depth(currPosition);
+            if (depth > 0)
+            {
+                resetPathLength(depth - 1);
+                addPathByte(Cursor.incomingTransition(currPosition));
+            }
+        }
+        else
+            addPathByte(Cursor.incomingTransition(currPosition));
+
+        if (Cursor.isOnReturnPath(currPosition))
+            onReturnPath();
+
+        return currPosition;
+    }
+
+    /// Write the trie the given fresh cursor walks, which must be in [Direction#REVERSE]. A writer can write several
+    /// tries this way, one after the other.
+    void writeFrom(Cursor<T> c) throws IOException
+    {
+        // A finished walk has written every node on its path, but leaves the path's length and side as it ended.
+        assert lastNodeOnPath == -1 : "Previous walk did not finish";
+        resetPathLength(0);
+        onAscentPath = false;
+
+        T content = c.content();   // handle content on the root node
+        if (content != null)
+            content(content);
+
+        long position = c.encodedPosition();
+        while (!Cursor.isExhausted(position = step(c, position)))
+        {
+            content = c.content();
+            if (content != null)
+                content(content);
+        }
     }
 
     static void writeReversedSized(DataOutputPlus out, long value, int bytes) throws IOException
@@ -257,17 +306,13 @@ public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor
                 long mask = (long) VIntCoding.encodeExtraBytesToRead(extraBytes) << (extraBytes << 3);
                 writeReversedSized(out, value | mask, size);
             }
-            else if (size == 9)
+            else
             {
                 // The leading byte goes last, like the one writeReversedSized puts in the top byte
                 // of the shorter encodings: the reader takes the byte immediately before the value
                 // as the leading one.
                 out.writeLong(Long.reverseBytes(value));
                 out.write((byte) 0xFF);
-            }
-            else
-            {
-                throw new AssertionError();
             }
         }
     }
@@ -356,48 +401,11 @@ public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor
 
         try (Cursor<T> c = trie.cursor(Direction.REVERSE))
         {
-            T content = c.content();   // handle content on the root node
-            if (content != null)
-                fw.content(content);
-
-            long prevPosition = c.encodedPosition();
-            while (true)
-            {
-                long currPosition = c.advanceMultiple(fw);
-
-                if (Cursor.ascended(currPosition, prevPosition))
-                {
-                    // write the nodes that have been completed
-                    fw.ascendTo(currPosition);
-
-                    if (Cursor.isExhausted(currPosition))
-                    {
-                        // An empty trie leaves the stream untouched, and the position there is not a node.
-                        long position = out.position();
-                        return position > startPosition ? position : 0;
-                    }
-
-                    // update key tracker
-                    int depth = Cursor.depth(currPosition);
-                    if (depth > 0)
-                    {
-                        fw.resetPathLength(depth - 1);
-                        fw.addPathByte(Cursor.incomingTransition(currPosition));
-                    }
-                }
-                else
-                    fw.addPathByte(Cursor.incomingTransition(currPosition));
-
-                if (Cursor.isOnReturnPath(currPosition))
-                    fw.onReturnPath();
-
-                content = c.content();
-                if (content != null)
-                    fw.content(content);
-
-                prevPosition = currPosition;
-            }
+            fw.writeFrom(c);
         }
+        // An empty trie leaves the stream untouched, and the position there is not a node.
+        long position = out.position();
+        return position > startPosition ? position : 0;
     }
 
     public static <T> File write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, File file) throws IOException
