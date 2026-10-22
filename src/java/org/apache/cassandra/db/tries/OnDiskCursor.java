@@ -260,34 +260,65 @@ public class OnDiskCursor<T> implements Cursor<T>
     private long ascend()
     {
         if (stackLength <= 0)
-            return exhausted;
+            return exhaust();
 
         --stackLength;
         currentImpl = loadStackImpl(stackLength);
         return currentImpl.advance(this);
     }
 
+    /// Move to the exhausted position, which [#encodedPosition] must then report like any other position the cursor
+    /// returns: the walks that drive several cursors at once read it from there rather than from the return value.
+    private long exhaust()
+    {
+        stackLength = 0;
+        content = null;
+        return currentEncodedPosition = exhausted;
+    }
+
+    /// Follows the in-memory cursor's `skipTo` (see [InMemoryReadTrie]). The node implementations' `skipTo` find the
+    /// first child whose transition is at or after the target's, ignoring the return-path bit, so when the target is
+    /// a node's return-path position the walk descends into that node and then looks for the target among the
+    /// backtrack entries the descent added.
     @Override
     public long skipTo(long encodedSkipPosition)
     {
-        if (Cursor.ascended(encodedSkipPosition, currentEncodedPosition))
+        if (!Cursor.ascended(encodedSkipPosition, currentEncodedPosition))
         {
-            int skipDepth = Cursor.depth(encodedSkipPosition);
-            while (--stackLength >= 0 && getStackDepth(stackLength) >= skipDepth)
-            {
-                // pos decreased in while
-            }
-            if (stackLength < 0)
-                return currentEncodedPosition = Cursor.exhaustedPosition(currentEncodedPosition);
-
-            currentImpl = loadStackImpl(stackLength);
-
-            // if we ascended above the target depth, we only need to advance
-            if (Cursor.depth(currentEncodedPosition) < skipDepth - 1)
-                return currentImpl.advance(this);
+            // Descent requested. Jump to the given child transition or greater, and backtrack if there's no such.
+            long position = currentImpl.skipTo(this, encodedSkipPosition);
+            if (position != exhausted && Cursor.compare(position, encodedSkipPosition) >= 0)
+                return position;
+            // Either there is no such child, or the target is the return path of the child we descended into. In the
+            // latter case the child's return-path content, if it has any, is the backtrack entry on top of the stack;
+            // if it has none, the entry there gives the next position after the target.
+            return ascend();
         }
 
-        return returnOrAscend(currentImpl.skipTo(this, encodedSkipPosition));
+        // Backtrack until we reach the requested depth. A node can leave more than one entry at the depth of its
+        // parent (the parent's remaining children, and the node's own return-path content), so check each in turn.
+        int skipDepth = Cursor.depth(encodedSkipPosition);
+        while (--stackLength >= 0)
+        {
+            int depth = getStackDepth(stackLength);
+            if (depth < skipDepth - 1)
+            {
+                // We ascended above the target depth, we only need to advance.
+                currentImpl = loadStackImpl(stackLength);
+                return currentImpl.advance(this);
+            }
+
+            if (depth == skipDepth - 1)
+            {
+                currentImpl = loadStackImpl(stackLength);
+                long position = currentImpl.skipTo(this, encodedSkipPosition);
+                if (position != exhausted && Cursor.compare(position, encodedSkipPosition) >= 0)
+                    return position;
+                // We found nothing here, or descended into the child whose return path is the target and which may
+                // just have added a backtrack entry for it. The next iteration of the loop will find it.
+            }
+        }
+        return exhaust();
     }
 
     @Override
@@ -354,12 +385,31 @@ public class OnDiskCursor<T> implements Cursor<T>
         return stack[stackIndex * 3 + 2];
     }
 
+    /// Record a node to come back to for its remaining children.
     void addBacktrack(long nodeBasePos, int nodeCode, long nodeImplData)
+    {
+        addBacktrack(Cursor.depth(currentEncodedPosition), nodeBasePos, nodeCode, nodeImplData);
+    }
+
+    /// Record the content at `contentPos` to be presented on the return path of the current position.
+    ///
+    /// Like the in-memory cursor, this stores the entry at the depth of the parent: on the parent's level the return
+    /// path of a child is ordered after the descent into it and before the next sibling, which is what [#skipTo] relies
+    /// on when the target is that return-path position. For the root the depth is -1.
+    void addReturnPathBacktrack(long contentPos)
+    {
+        addBacktrack(Cursor.depth(currentEncodedPosition) - 1,
+                     contentPos,
+                     OnDiskReadNodeType.ASCENT_LEAF_CODE,
+                     currentEncodedPosition | Cursor.ON_RETURN_PATH_BIT);
+    }
+
+    private void addBacktrack(int depth, long nodeBasePos, int nodeCode, long nodeImplData)
     {
         // store depth & nodeCode in one long, nodeBasePos, nodeImplData
         if (stack.length <= stackLength * 3)
             stack = Arrays.copyOf(stack, stack.length * 2);
-        stack[stackLength * 3 + 0] = Cursor.depth(currentEncodedPosition) | (((long) nodeCode) << 32);
+        stack[stackLength * 3 + 0] = (depth & 0xFFFFFFFFL) | (((long) nodeCode) << 32);
         stack[stackLength * 3 + 1] = nodeBasePos;
         stack[stackLength * 3 + 2] = nodeImplData;
         ++stackLength;
@@ -381,23 +431,10 @@ public class OnDiskCursor<T> implements Cursor<T>
 
     /// Read the first byte of a variable-length-encoded unsigned integer, positioned immediately before position `pos`
     /// in the file, and return the length of the encoded int.
-    ///
-    /// The byte is read without a bounds check of our own; the buffer is left to reject a position it does not hold.
-    /// [#seekTo] does not make one readable: it does not re-check the index after rebuffering, and
-    /// [org.apache.cassandra.io.util.ByteBufferRebufferer], which serves a commit-log record or a message payload,
-    /// returns the same buffer whatever position it is asked for. The bytes can be corrupt, so the rejection is
-    /// reported as corruption like every other bad length.
     int readVIntLength(long pos)
     {
         seekTo(pos);
-        try
-        {
-            return VIntCoding.computeUnsignedVIntSizeUnchecked(currentBuffer, (int) (pos - 1 - currentBufferOffset));
-        }
-        catch (IndexOutOfBoundsException e)
-        {
-            throw corrupt("no length byte before position " + pos);
-        }
+        return VIntCoding.computeUnsignedVIntSizeUnchecked(currentBuffer, (int) (pos - 1 - currentBufferOffset));
     }
 
     /// Read a variable-length-encoded unsigned integer with the given length (obtained using [#readVIntLength]),
@@ -429,6 +466,17 @@ public class OnDiskCursor<T> implements Cursor<T>
     static UncheckedIOException corrupt(String message)
     {
         return new UncheckedIOException(new IOException("Corrupt serialized trie: " + message));
+    }
+
+    /// Check a child pointer read from the file. Children are written before their parent, so a child must end at or
+    /// before `nodeDataStart`, where the parent's own bytes begin, and after the start of the data. Every descent thus
+    /// moves strictly towards the start of the data, which is what guarantees that a walk over corrupt bytes
+    /// terminates: a pointer that does not would let a node be its own descendant.
+    static long checkChild(long child, long nodeDataStart)
+    {
+        if (child <= 0 || child > nodeDataStart)
+            throw corrupt("child position " + child + " outside of (0, " + nodeDataStart + "]");
+        return child;
     }
 
     /// Reads a long int from an int array with the given number of bytes per item, where the first element of the
@@ -466,16 +514,37 @@ public class OnDiskCursor<T> implements Cursor<T>
     }
 
     /// Seek in the file to make the data preceding `pos` available in `currentBuffer`.
+    ///
+    /// The positions asked for come from the bytes being read, which can be a corrupt commit-log record or message
+    /// payload, so one outside the data is rejected as corruption. The check is made again after rebuffering, because
+    /// a rebufferer does not necessarily refuse such a position: [org.apache.cassandra.io.util.ByteBufferRebufferer]
+    /// returns the same buffer whatever position it is asked for.
+    ///
+    /// A buffer can also hold data past the file's length: chunks are read in full, and cached chunks and mapped
+    /// regions are shared by the readers of a file, which can have different lengths. The buffer's limit is therefore
+    /// brought down to the length, so that neither the check above nor the deserializer's stream reads past it.
     void seekTo(long filePos)
     {
+        // Compare with the limit, not what remains: the buffer is shared with the deserializer's stream, which moves
+        // its position as it reads, and the reads here are absolute.
         long ofs = filePos - currentBufferOffset;
-        if (ofs > 0 && ofs <= currentBuffer.remaining())
+        if (ofs > 0 && ofs <= currentBuffer.limit())
             return;
+        if (filePos <= 0)
+            throw corrupt("read before the start of the data, at position " + filePos);
+        long fileLength = rebufferer.fileLength();
+        if (filePos > fileLength)
+            throw corrupt("read past the end of the data, at position " + filePos + ", length " + fileLength);
         currentBH.release();
         currentBH = Rebufferer.EMPTY;
         currentBH = rebufferer.rebuffer(filePos - 1);
         currentBuffer = currentBH.buffer();
         currentBufferOffset = currentBH.offset();
+        ofs = filePos - currentBufferOffset;
+        if (ofs <= 0 || ofs > currentBuffer.limit())
+            throw corrupt("read past the end of the data, at position " + filePos);
+        if (currentBufferOffset + currentBuffer.limit() > fileLength)
+            currentBuffer.limit((int) (fileLength - currentBufferOffset));
     }
 
     /// Give this cursor's buffer back to the factory it came from. A cursor over a file holds a buffer for as long as
@@ -515,7 +584,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     /// Used for debugging.
     String dumpNode(long node)
     {
-        return new OnDiskCursor<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction(), swapContentSides, alternateInAscentSlot, node).dumpNode();
+        return new OnDiskCursor<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction(), isOrdered, alternateInAscentSlot, node).dumpNode();
     }
 
     static class Range<S extends RangeState<S>> extends OnDiskCursor<S> implements RangeCursor<S>
@@ -657,7 +726,8 @@ public class OnDiskCursor<T> implements Cursor<T>
                 if (content != null)
                     return content;
                 long node = type.getFirstChild(this, direction, code, postCodePos);
-                assert node > 0;
+                if (node <= 0)
+                    throw corrupt("node at " + postCodePos + " has neither content nor children");
                 postCodePos = node - 1;
                 code = readByteBefore(node);
             }
@@ -677,8 +747,8 @@ public class OnDiskCursor<T> implements Cursor<T>
             int index = stackLength - 1;
             if (getStackNodeCode(index) != OnDiskReadNodeType.ASCENT_LEAF_CODE)
                 return null;    // a child backtrack entry, not return-path content
-            if (getStackDepth(index) != Cursor.depth(currentEncodedPosition))
-                return null;    // recorded by an ancestor, not by this node
+            if (getStackDepth(index) != Cursor.depth(currentEncodedPosition) - 1)
+                return null;    // recorded by an ancestor, not by this node (see addReturnPathBacktrack)
             return readContentAtPos(getStackPostCodePos(index));
         }
 
@@ -739,9 +809,12 @@ public class OnDiskCursor<T> implements Cursor<T>
                                           : currentEncodedPosition & ~MAY_HAVE_CONTENT_BIT;
             this.rootAscentContent = rootAscentContent;
             if (rootAscentContent != null)
-                addBacktrack(0, OnDiskReadNodeType.ASCENT_LEAF_CODE, currentEncodedPosition | ON_RETURN_PATH_BIT);
+                addReturnPathBacktrack(0);
 
-            // Redo this as we now have different content() value
+            // Redo this as we now have different content() value. The state the base constructor derived from the
+            // node's own content no longer applies either: with no root content the tail starts with no active range.
+            activeIsSet = true;
+            activeRange = null;
             prevContent = null;
             updateActiveAndReturn(encodedPosition());
         }

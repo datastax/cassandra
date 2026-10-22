@@ -36,8 +36,8 @@ public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor
 {
     interface DataSerializer<T>
     {
-        /// Writes `value` to `out` and returns the number of bytes written.
-        int serialize(DataOutputPlus out, T value) throws IOException;
+        /// Writes `value` to `out`. The writer takes the content's length from how far `out` moved.
+        void serialize(DataOutputPlus out, T value) throws IOException;
     }
 
     final DataOutputPlus out;
@@ -337,7 +337,8 @@ public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor
     }
 
     /// Serialize a trie into `out`. Returns the position of the root, which is the position of `out` when this
-    /// returns, or -1 if the trie is empty; a non-empty trie always writes at least one byte.
+    /// returns, or 0 if the trie is empty; a non-empty trie always writes at least one byte, so its root is never 0.
+    /// The value can be given to the readers as is: they take a root of 0 as the empty trie.
     public static <T> long write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, DataOutputPlus out) throws IOException
     {
         OnDiskTrieWriter<T> fw = new OnDiskTrieWriter<>(out, serializer, isOrdered);
@@ -362,7 +363,7 @@ public class OnDiskTrieWriter<T> extends TriePathReconstructor implements Cursor
                 {
                     // An empty trie leaves the stream untouched, and the position there is not a node.
                     long position = out.position();
-                    return position > startPosition ? position : -1;
+                    return position > startPosition ? position : 0;
                 }
 
                 // update key tracker

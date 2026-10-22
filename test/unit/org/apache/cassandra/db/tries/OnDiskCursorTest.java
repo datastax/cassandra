@@ -23,6 +23,7 @@ import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
+import com.google.common.collect.Iterables;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -162,6 +163,143 @@ public class OnDiskCursorTest
                                                       true,
                                                       false,
                                                       buffer.limit()));
+        }
+    }
+
+    /// A child pointer must point before its parent. A dense node with eight-byte pointers can hold any delta, including
+    /// one that makes the node its own child; following it would walk the same node forever.
+    @Test(timeout = 60_000)
+    public void testSelfPointingChildIsRejected()
+    {
+        ByteBuffer buffer = selfPointingDenseNode();
+        OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
+                                                       Direction.FORWARD, false, false, buffer.limit());
+        assertThrows(UncheckedIOException.class, cursor::advance);
+    }
+
+    /// Closing a range cursor descends to the nearest content to work out the deletions at its position, along the same
+    /// pointers.
+    @Test(timeout = 60_000)
+    public void testSelfPointingChildIsRejectedOnRangeClose()
+    {
+        ByteBuffer buffer = selfPointingDenseNode();
+        OnDiskCursor.Range<TestRangeState> cursor = new OnDiskCursor.Range<>(TrieUtil.RANGE_SERDE, new ByteBufferRebufferer(buffer),
+                                                                             VERSION, Direction.FORWARD, buffer.limit());
+        assertThrows(UncheckedIOException.class, cursor::close);
+    }
+
+    /// A dense node (code `11101111`: eight bytes per pointer) whose child for transition 0x00 is the node itself and
+    /// which has no other children.
+    private static ByteBuffer selfPointingDenseNode()
+    {
+        int size = 256 * 8 + 1;
+        ByteBuffer buffer = ByteBuffer.allocate(size);
+        for (int i = 0; i < 256 * 8; ++i)
+            buffer.put(i, (byte) 0xFF);     // absent
+        buffer.put(size - 1, (byte) (OnDiskWriteNodeType.DENSE.bits | 7));
+        long postCodePos = size - 1;
+        long base = postCodePos - 256 * 8;
+        long delta = base - size;           // child = base - delta = size, i.e. this node
+        // Pointers are stored reversed, the one for transition 0x00 in the eight bytes just before the code.
+        for (int i = 0; i < 8; ++i)
+            buffer.put((int) postCodePos - 8 + i, (byte) (delta >>> (8 * i)));
+        return buffer;
+    }
+
+    /// A leaf's length is in its code; one longer than the data before it would place the content before the start.
+    @Test
+    public void testLeafLongerThanTheDataIsRejected()
+    {
+        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ 0, 0, (byte) (OnDiskWriteNodeType.LEAF.bits | 5) });
+        assertThrows(UncheckedIOException.class,
+                     () -> new OnDiskCursor<Void>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
+                                                  Direction.FORWARD, false, false, buffer.limit()));
+    }
+
+    /// A prefix code with neither content flag is never written; the reader only uses it for its own backtrack entries.
+    @Test
+    public void testPrefixWithoutContentIsRejected()
+    {
+        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ (byte) OnDiskWriteNodeType.LEAF.bits,
+                                                        (byte) (OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_CHILD) });
+        assertThrows(UncheckedIOException.class,
+                     () -> new OnDiskCursor<Void>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
+                                                  Direction.FORWARD, false, false, buffer.limit()));
+    }
+
+    /// A rebufferer can hand out data past the file's length: chunks are read in full, and cached chunks and mapped
+    /// regions are shared by the readers of a file, which can have different lengths. A root past the length must be
+    /// rejected even though the buffer holds a valid node there.
+    @Test
+    public void testRootPastTheFileLengthIsRejected()
+    {
+        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ (byte) OnDiskWriteNodeType.LEAF.bits, (byte) OnDiskWriteNodeType.LEAF.bits });
+        ByteBufferRebufferer rebufferer = rebuffererWithLength(buffer, 1);
+        new OnDiskCursor<Void>((rdr, length) -> null, rebufferer, VERSION, Direction.FORWARD, false, false, 1).close();
+        assertThrows(UncheckedIOException.class,
+                     () -> new OnDiskCursor<Void>((rdr, length) -> null, rebufferer, VERSION,
+                                                  Direction.FORWARD, false, false, 2));
+    }
+
+    /// The same for the deserializer's stream, which reads through the buffer the cursor holds: a deserializer that
+    /// reads past its content -- as one given corrupt bytes can -- must not be handed the data past the file's length.
+    @Test
+    public void testContentReadPastTheFileLengthIsRejected()
+    {
+        // A leaf with one byte of content; the bytes that follow the leaf are past the file's length.
+        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ 0, (byte) (OnDiskWriteNodeType.LEAF.bits | 1), 0, 0 });
+        ByteBufferRebufferer rebufferer = rebuffererWithLength(buffer, 2);
+        assertThrows(UncheckedIOException.class,
+                     () -> new OnDiskCursor<Void>((rdr, length) -> {
+                                                      rdr.readFully(new byte[3]);
+                                                      return null;
+                                                  },
+                                                  rebufferer, VERSION, Direction.FORWARD, false, false, 2));
+    }
+
+    private static ByteBufferRebufferer rebuffererWithLength(ByteBuffer buffer, long fileLength)
+    {
+        return new ByteBufferRebufferer(buffer)
+        {
+            @Override
+            public long fileLength()
+            {
+                return fileLength;
+            }
+        };
+    }
+
+    /// A trie in a single buffer is read with a single rebuffer. The deserializer's stream shares the cursor's buffer
+    /// and moves its position as it reads content, which must not make the cursor think the data it still holds is gone.
+    @Test
+    public void testSingleBufferIsRebufferedOnce() throws IOException, TrieSpaceExhaustedException
+    {
+        InMemoryTrie<String> trie = InMemoryTrie.shortLived(VERSION);
+        java.util.Random rand = new java.util.Random(1);
+        for (int i = 0; i < 2000; ++i)
+        {
+            StringBuilder key = new StringBuilder();
+            for (int j = 0; j < 6; ++j)
+                key.append((char) ('a' + rand.nextInt(26)));
+            trie.putRecursive(TrieUtil.directComparable(key.toString()), key.toString(), (x, y) -> y);
+        }
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskTrieWriter.write(trie, false, TrieUtil.STRING_SERDE, out);
+            ByteBuffer buffer = out.asNewBuffer();
+            int[] rebuffers = new int[1];
+            ByteBufferRebufferer rebufferer = new ByteBufferRebufferer(buffer)
+            {
+                @Override
+                public BufferHolder rebuffer(long position)
+                {
+                    ++rebuffers[0];
+                    return super.rebuffer(position);
+                }
+            };
+            OnDiskTrie<String> read = new OnDiskTrie.WithoutChannel<>(rebufferer, TrieUtil.STRING_SERDE, VERSION, false, buffer.limit());
+            assertEquals(Iterables.size(trie.values()), Iterables.size(read.values()));
+            assertEquals(1, rebuffers[0]);
         }
     }
 
