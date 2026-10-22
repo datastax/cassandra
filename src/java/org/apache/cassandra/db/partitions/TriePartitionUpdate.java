@@ -525,7 +525,8 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     /// Rebuild an update whose trie keys its columns by indices other than the ones its table metadata gives them --
     /// those of the node that serialized it, when the schemas of the two nodes disagree -- with this node's indices.
     /// `staticColumnIds` and `regularColumnIds` give the index the update's trie keys each of its columns by (see
-    /// [TrieBackedRow#columnIds]). Columns this node does not have, i.e. ones dropped here, are left out.
+    /// [TrieBackedRow#columnIds]). Columns this node does not have, i.e. ones dropped here, are left out, and so is
+    /// the data of a column dropped here and added again that is not newer than the drop.
     static TriePartitionUpdate withLocalColumnIndexes(TriePartitionUpdate source,
                                                       Object2IntHashMap<ColumnIdentifier> staticColumnIds,
                                                       Object2IntHashMap<ColumnIdentifier> regularColumnIds)
@@ -543,15 +544,19 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         builder.addPartitionDeletion(deletionInfo.getPartitionDeletion());
         for (Iterator<RangeTombstone> it = deletionInfo.rangeIterator(false); it.hasNext();)
             builder.add(it.next());
+        ColumnFilter allColumns = ColumnFilter.all(metadata);
         for (Iterator<Row> it = source.rowsIncludingStatic(); it.hasNext();)
         {
             TrieBackedRow row = (TrieBackedRow) it.next();
             boolean isStatic = row.isStatic();
-            builder.add(TrieBackedRow.withColumnIndexes(metadata,
+            Row local = TrieBackedRow.withColumnIndexes(metadata,
                                                         row.clustering(),
                                                         row.trie(),
                                                         source.columns().columns(isStatic),
-                                                        isStatic ? staticColumnIds : regularColumnIds));
+                                                        isStatic ? staticColumnIds : regularColumnIds)
+                                     .filter(allColumns, metadata);
+            if (local != null)
+                builder.add(local);
         }
         return builder.build();
     }
