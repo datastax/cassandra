@@ -51,6 +51,7 @@ import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
@@ -64,11 +65,14 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MovingAverage;
 import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Transactional;
 import org.mockito.Mockito;
+import org.mockito.stubbing.Answer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -2355,5 +2359,206 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         Mockito.when(backgroundCompactions.getSkippedAggregatesDueToDiskSpace()).thenReturn(1L);
         assertThat(strategy.getSkippedAggregatesDueToDiskSpace()).isEqualTo(1);
+    }
+
+    // The tests below check that the shard count calculations are given densities normalized to the shard set (i.e.
+    // the token space that is split into shards: the locally-owned token space, or the token space of a disk) rather
+    // than the densities used to assign sstables to levels, which are normalized to the whole token ring. To make the
+    // two differ, they use local ranges that cover a quarter of the token ring, split between two disks with equal
+    // token share when useDiskBoundaries is set.
+
+    /// The locally-owned ranges for the shard set normalization tests, as positions in the token ring.
+    private static final double[][] PARTIAL_LOCAL_RANGES = { { 0.125, 0.1875 }, { 0.5, 0.625 }, { 0.75, 0.8125 } };
+    private static final double PARTIAL_LOCAL_COVERAGE = 0.25;
+    /// The sstable size the controller returned by [#mockShardingController] aims for.
+    private static final long SHARDING_TARGET_SIZE = 100 * ONE_MB;
+
+    @Test
+    public void testShardingStatsShardCountNormalization()
+    {
+        double shardSetCoverage = setUpPartialOwnership();
+        Controller controller = mockShardingController();
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+        ShardManager shardManager = strategy.getShardManager();
+        assertEquals(PARTIAL_LOCAL_COVERAGE, shardManager.localSpaceCoverage(), 1e-9);
+        assertEquals(shardSetCoverage, shardManager.shardSetCoverage(), 1e-9);
+
+        // Three 200 MiB sstables that cover a whole shard set. Their density normalized to the shard set is thus
+        // equal to their total size, 600 MiB, which should result in 4 shards (600 MiB / 100 MiB = 6 rounded down to a
+        // power of two). Their density normalized to the whole token ring is 2400 MiB (4800 MiB with two disks).
+        List<SSTableReader> sstables = new ArrayList<>();
+        for (int i = 0; i < 3; ++i)
+            sstables.add(mockLocalSSTable(200 * ONE_MB, 0, shardSetCoverage));
+
+        UnifiedCompactionStrategy.ShardingStats stats = strategy.makeShardingStats(sstables);
+        assertEquals(600 * ONE_MB / shardSetCoverage, stats.density, 0.01 * ONE_MB);
+        assertEquals(4, stats.shardCountForDensity);
+        assertEquals(4, stats.coveredShardCount);
+
+        // The same applies to compactions restricted to an operation range, here 3/8 of the shard set.
+        Range<Token> operationRange = new Range<>(localTokenAt(0), localTokenAt(shardSetCoverage * 3 / 8));
+        UnifiedCompactionStrategy.ShardingStats rangeStats = new UnifiedCompactionStrategy.ShardingStats(sstables,
+                                                                                                         operationRange,
+                                                                                                         shardManager,
+                                                                                                         1.0,
+                                                                                                         controller);
+        assertEquals(stats.density, rangeStats.density, 0.01 * ONE_MB);
+        assertEquals(4, rangeStats.shardCountForDensity);
+        assertEquals(2, rangeStats.coveredShardCount);
+
+        // The density given to cloneWithAdjustedDensity is normalized to the whole token ring too. Quadrupling it
+        // should result in 16 shards (2400 MiB / 100 MiB = 24 rounded down to a power of two).
+        UnifiedCompactionStrategy.ShardingStats adjustedStats = stats.cloneWithAdjustedDensity(stats.density * 4,
+                                                                                               shardManager,
+                                                                                               controller);
+        assertEquals(16, adjustedStats.shardCountForDensity);
+        assertEquals(16, adjustedStats.coveredShardCount);
+    }
+
+    @Test
+    public void testMaxOverlapsMapShardCountNormalization()
+    {
+        double shardSetCoverage = setUpPartialOwnership();
+        Controller controller = mockShardingController();
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+
+        // Three overlapping 200 MiB sstables that cover a whole shard set. The maximum density normalized to the shard
+        // set is thus 200 MiB, which should result in 2 shards, each of which is covered by all three sstables.
+        List<SSTableReader> sstables = new ArrayList<>();
+        for (int i = 0; i < 3; ++i)
+            sstables.add(mockLocalSSTable(200 * ONE_MB, 0, shardSetCoverage));
+        dataTracker.addInitialSSTables(sstables);
+
+        assertEquals("3 (per shard: [3, 3])", strategy.getMaxOverlapsMap().get("all"));
+    }
+
+    @Test
+    public void testOversizeShardsShardCountNormalization()
+    {
+        double shardSetCoverage = setUpPartialOwnership();
+        Controller controller = mockShardingController();
+        // Compact any shard that has more than fanout (i.e. 4) sstables.
+        when(controller.getMaxSstablesPerShardFactor()).thenReturn(1.0);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+
+        // 16 non-overlapping 10 MiB sstables that together cover a shard set. Each has a density of about
+        // 10 MiB * 16 / shardSetCoverage (640 MiB, or 1280 MiB with two disks), which puts them all in level 0, whose
+        // maximum density is 4 * 90 MiB / 0.25 = 1440 MiB.
+        int count = 16;
+        double width = shardSetCoverage / count;
+        List<SSTableReader> sstables = new ArrayList<>();
+        for (int i = 0; i < count; ++i)
+            sstables.add(mockLocalSSTable(10 * ONE_MB, (i + 0.01) * width, (i + 0.99) * width));
+        dataTracker.addInitialSSTables(sstables);
+
+        Map<UnifiedCompactionStrategy.Arena, List<UnifiedCompactionStrategy.Level>> arenas = strategy.getLevels();
+        assertEquals(1, arenas.size());
+        List<UnifiedCompactionStrategy.Level> levels = arenas.values().iterator().next();
+        assertEquals(1, levels.size());
+        assertEquals(0, levels.get(0).index);
+        assertEquals(count, levels.get(0).sstables.size());
+
+        // To find oversized shards, the level is split into the number of shards for its maximum density normalized
+        // to the shard set. Without disks, this is 1440 MiB * 0.25 = 360 MiB, i.e. 2 shards of 8 sstables. With two
+        // disks, it is 1440 MiB * 0.125 = 180 MiB, i.e. a single shard of 16 sstables. Either way, all shards have
+        // more than 4 sstables and should be compacted.
+        List<Integer> compactedCounts = strategy.getPendingCompactionAggregates()
+                                                .stream()
+                                                .map(CompactionAggregate::getSelected)
+                                                .filter(pick -> pick != null && !pick.isEmpty())
+                                                .map(pick -> pick.sstables().size())
+                                                .collect(Collectors.toList());
+        assertEquals(useDiskBoundaries ? List.of(16) : List.of(8, 8), compactedCounts);
+    }
+
+    @Test
+    public void testFlushShardCountNormalization()
+    {
+        setUpPartialOwnership();
+        Controller controller = mockShardingController();
+        TableMetrics metrics = Mockito.mock(TableMetrics.class);
+        MovingAverage flushSize = Mockito.mock(MovingAverage.class);
+        when(realm.metrics()).thenReturn(metrics);
+        when(metrics.flushSizeOnDisk()).thenReturn(flushSize);
+        when(flushSize.get()).thenReturn(600.0 * ONE_MB);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+
+        // A flush covers the whole local token space, thus without disks its density normalized to the shard set is
+        // equal to its size, 600 MiB, which should result in 4 shards. With two disks, the density is that of the
+        // half of the flush that falls in each disk, 300 MiB, which should result in 2 shards per disk, 4 in total.
+        // Either way the flush is split into sstables of 150 MiB.
+        assertEquals(4, strategy.getFlushShardBoundaries().count());
+    }
+
+    /// Set up local ranges covering a quarter of the token ring for the shard set normalization tests. If
+    /// useDiskBoundaries is set, split them between two disks with equal token share.
+    ///
+    /// @return the share of the token ring covered by a shard set
+    private double setUpPartialOwnership()
+    {
+        List<Splitter.WeightedRange> ranges = new ArrayList<>();
+        for (double[] range : PARTIAL_LOCAL_RANGES)
+            ranges.add(new Splitter.WeightedRange(1.0, new Range<>(tokenAt(range[0]), tokenAt(range[1]))));
+        localRanges = SortedLocalRanges.forTesting(realm, ranges);
+        when(diskBoundaries.getLocalRanges()).thenReturn(localRanges);
+
+        if (!useDiskBoundaries)
+            return PARTIAL_LOCAL_COVERAGE;
+
+        // The first disk ends in the middle of the second local range.
+        diskBoundaryPositions = ImmutableList.of(localTokenAt(PARTIAL_LOCAL_COVERAGE / 2), partitioner.getMaximumToken());
+        return PARTIAL_LOCAL_COVERAGE / 2;
+    }
+
+    /// Create a mock controller whose shard count calculation splits shard sets into the power-of-two number of shards
+    /// that results in sstables between one and two times [#SHARDING_TARGET_SIZE]. Like the real controller, it
+    /// expects to be given densities normalized to the shard set.
+    private Controller mockShardingController()
+    {
+        Controller controller = mockController();
+        Answer<Integer> numShards = invocation -> {
+            double shardSetDensity = invocation.getArgument(0);
+            return Math.max(1, Integer.highestOneBit((int) (shardSetDensity / SHARDING_TARGET_SIZE)));
+        };
+        when(controller.getNumShards(anyDouble())).thenAnswer(numShards);
+        when(controller.getFlushShards(anyDouble())).thenAnswer(numShards);
+        when(controller.getScalingParameter(anyInt())).thenReturn(2); // F = T = 4
+        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
+        when(controller.getBaseSstableSize(anyInt())).thenReturn((double) (90 * ONE_MB));
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.TRANSITIVE);
+        when(controller.getOverheadSizeInBytes(any(), anyLong())).thenAnswer(invocation -> invocation.getArgument(1));
+        return controller;
+    }
+
+    private Token tokenAt(double position)
+    {
+        return partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), position);
+    }
+
+    /// Get the token at the given position in the local token space set up by [#setUpPartialOwnership]. The position
+    /// is measured as a fraction of the whole token ring, i.e. 0 is the start of the first local range, and
+    /// [#PARTIAL_LOCAL_COVERAGE] is the end of the last one.
+    private Token localTokenAt(double localPosition)
+    {
+        for (double[] range : PARTIAL_LOCAL_RANGES)
+        {
+            double rangeSize = range[1] - range[0];
+            if (localPosition <= rangeSize)
+                return tokenAt(range[0] + localPosition);
+            localPosition -= rangeSize;
+        }
+        throw new AssertionError("Position is outside the local token space");
+    }
+
+    /// Mock an sstable of the given size that covers the given span of the local token space (see [#localTokenAt]).
+    private SSTableReader mockLocalSSTable(long size, double localStart, double localEnd)
+    {
+        ByteBuffer emptyBuffer = ByteBuffer.allocate(0);
+        // The token space covered by an sstable starts just before its first token, thus the next token is used to
+        // make the covered space start at the given position.
+        return mockSSTable(size,
+                           System.currentTimeMillis(),
+                           new BufferDecoratedKey(localTokenAt(localStart).nextValidToken(), emptyBuffer),
+                           new BufferDecoratedKey(localTokenAt(localEnd), emptyBuffer));
     }
 }

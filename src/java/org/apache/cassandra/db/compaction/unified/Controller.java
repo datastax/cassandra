@@ -47,6 +47,7 @@ import org.apache.cassandra.db.compaction.CompactionPick;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.CompactionStrategy;
+import org.apache.cassandra.db.compaction.ShardManager;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -612,13 +613,23 @@ public abstract class Controller
         return UnifiedCompactionStrategy.thresholdFromScalingParameter(getPreviousScalingParameter(index));
     }
 
-    public int getFlushShards(double density)
+    /**
+     * Calculate the number of shards to split flushed sstables into. This is the result of {@link #getNumShards} if
+     * L0 shards are enabled, and 1 otherwise.
+     *
+     * @param shardSetDensity the expected density of the flushed data, normalized to the shard set as described in
+     *                        {@link #getNumShards}. Because a flush covers the whole local token space, this is the
+     *                        flush size multiplied by the fraction of the local token space that a shard set covers.
+     */
+    public int getFlushShards(double shardSetDensity)
     {
-        return areL0ShardsEnabled() ? getNumShards(density) : 1;
+        return areL0ShardsEnabled() ? getNumShards(shardSetDensity) : 1;
     }
 
     /**
-     * Calculate the number of shards to split the local token space in for the given sstable density.
+     * Calculate the number of shards to split a shard set into for data of the given density. The shard set is the
+     * token space that is split into shards: the locally-owned token space, or the token space of a data directory if
+     * multiple are defined (see {@link ShardManager#shardSetCoverage()}).
      * This is calculated as a power-of-two multiple of baseShardCount, so that the expected size of resulting sstables
      * is between sqrt(0.5) and sqrt(2) times the target size, which is calculated from targetSSTableSize to grow
      * at the given sstableGrowthModifier of the exponential growth of the density.
@@ -627,20 +638,30 @@ public abstract class Controller
      * sstables smaller than that minimum. Note that in the case of a non-power-of-two base count this will cause
      * smaller sstables to not be aligned with the ones whose size is enough for the base count.
      * <p>
-     * Note that to get the sstables resulting from this splitting within the bounds, the density argument must be
-     * normalized to the span that is being split. In other words, if no disks are defined, the density should be
-     * scaled by the token coverage of the locally-owned ranges. If multiple data directories are defined, the density
-     * should be scaled by the token coverage of the respective data directory. That is, localDensity = size / span,
-     * where the span is normalized so that span = 1 when the data covers the range that is being split.
+     * To get the sstables resulting from this splitting within the bounds, the density argument must be normalized
+     * to the shard set, i.e. it must be the size the data would have if it covered the whole shard set at the same
+     * density. This is {@code size / span}, where the span is measured as a fraction of the shard set's coverage (so
+     * that span = 1, and the density is equal to the size, when the data covers the whole shard set).
+     * <p>
+     * Note that this is different from the density calculated by {@link ShardManager#density}, which is used to assign
+     * sstables to levels and is normalized to the whole token ring. That density must be multiplied by
+     * {@link ShardManager#shardSetCoverage()} before it is passed to this method, which
+     * {@link UnifiedCompactionStrategy#shardCountForDensity} does. For example, if a node owns a quarter of the token
+     * ring and has a single data directory, a flush of size {@code m}, which covers the whole locally-owned token
+     * space, has a density of {@code 4m} for the purposes of assigning it to a level, but its shard set density, which
+     * is to be passed to this method, is {@code m}.
+     *
+     * @param shardSetDensity the density of the data, normalized to the shard set
+     * @return the number of shards to split each shard set into
      */
-    public int getNumShards(double localDensity)
+    public int getNumShards(double shardSetDensity)
     {
         int shards;
         // Check the minimum size first.
         long minSize = getMinSstableSizeBytes();
         if (minSize > 0)
         {
-            double count = localDensity / minSize;
+            double count = shardSetDensity / minSize;
             // Minimum size only applies if the base count would result in smaller sstables.
             // We also want to use the min size if we don't yet know the flush size (density is NaN).
             // Note: the minimum size cannot be larger than the target size's minimum.
@@ -659,10 +680,10 @@ public abstract class Controller
                     shards = Math.min(Integer.highestOneBit((int) count | 1), baseShardCount & -baseShardCount);
                 }
                 if (logger.isDebugEnabled())
-                    logger.debug("Shard count {} for density {}, {} times min size {}",
+                    logger.debug("Shard count {} for shard set density {}, {} times min size {}",
                                  shards,
-                                 FBUtilities.prettyPrintBinary(localDensity, "B", " "),
-                                 localDensity / minSize,
+                                 FBUtilities.prettyPrintBinary(shardSetDensity, "B", " "),
+                                 shardSetDensity / minSize,
                                  FBUtilities.prettyPrintBinary(minSize, "B", " "));
 
                 return shards;
@@ -672,9 +693,9 @@ public abstract class Controller
         if (sstableGrowthModifier == 1)
         {
             shards = baseShardCount;
-            logger.debug("Shard count {} for density {} in fixed shards mode. SStableGrowthModifier {}",
+            logger.debug("Shard count {} for shard set density {} in fixed shards mode. SStableGrowthModifier {}",
                          shards,
-                         FBUtilities.prettyPrintBinary(localDensity, "B", " "),
+                         FBUtilities.prettyPrintBinary(shardSetDensity, "B", " "),
                          sstableGrowthModifier);
             return shards;
         }
@@ -683,7 +704,7 @@ public abstract class Controller
             // How many we would have to aim for the target size. Divided by the base shard count, so that we can ensure
             // the result is a multiple of it by multiplying back below. Adjusted by sqrt(0.5) to calculate the split
             // points needed for the minimum size.
-            double count = localDensity / (targetSSTableSize * INVERSE_SQRT_2 * baseShardCount);
+            double count = shardSetDensity / (targetSSTableSize * INVERSE_SQRT_2 * baseShardCount);
             if (count > MAX_SHARD_SPLIT)
                 count = MAX_SHARD_SPLIT;
             assert !(count < 0);    // Must be positive, 0 or NaN, which should translate to baseShardCount
@@ -695,10 +716,10 @@ public abstract class Controller
             shards = baseShardCount * Integer.highestOneBit((int) count | 1);
 
             if (logger.isDebugEnabled())
-                logger.debug("Shard count {} for density {}, {} times target {}. SStableGrowthModifier {}",
+                logger.debug("Shard count {} for shard set density {}, {} times target {}. SStableGrowthModifier {}",
                              shards,
-                             FBUtilities.prettyPrintBinary(localDensity, "B", " "),
-                             localDensity / targetSSTableSize,
+                             FBUtilities.prettyPrintBinary(shardSetDensity, "B", " "),
+                             shardSetDensity / targetSSTableSize,
                              FBUtilities.prettyPrintBinary(targetSSTableSize, "B", " "),
                              sstableGrowthModifier);
             return shards;
@@ -707,7 +728,7 @@ public abstract class Controller
         {
             // How many we would have to aim for the target size. Divided by the base shard count, so that we can ensure
             // the result is a multiple of it by multiplying back below.
-            double count = localDensity / (targetSSTableSize * baseShardCount);
+            double count = shardSetDensity / (targetSSTableSize * baseShardCount);
             // Take a logarithm of the count (in base 2), and adjust it by the given growth modifier.
             // Adjust by 0.5 to round the exponent so that the result falls between targetSSTableSize * sqrt(0.5) and
             // targetSSTableSize * sqrt(2). Finally, make sure the exponent is at least 0 and not greater than the
@@ -728,10 +749,10 @@ public abstract class Controller
             if (logger.isDebugEnabled())
             {
                 long targetSize = (long) (targetSSTableSize * Math.exp(countLog * sstableGrowthModifier));
-                logger.debug("Shard count {} for density {}, {} times target {}. SStableGrowthModifier {}",
+                logger.debug("Shard count {} for shard set density {}, {} times target {}. SStableGrowthModifier {}",
                              shards,
-                             FBUtilities.prettyPrintBinary(localDensity, "B", " "),
-                             localDensity / targetSize,
+                             FBUtilities.prettyPrintBinary(shardSetDensity, "B", " "),
+                             shardSetDensity / targetSize,
                              FBUtilities.prettyPrintBinary(targetSize, "B", " "),
                              sstableGrowthModifier);
             }

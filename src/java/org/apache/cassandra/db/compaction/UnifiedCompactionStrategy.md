@@ -212,6 +212,16 @@ a target ratio of $\frac{1200}{100} \cdot \frac 1 4 = 2^{\log_2 3}$, rounded to 
 local token space, thus 4 for the 1/4 span that the compaction covers. Assuming no overwrites and
 deletions, the resulting sstables will be of size 75 MiB, token share 1/16 and density 1200 MiB.
 
+The example above assumes that the node owns the whole token space. Because it is the local token space that is
+split, the density $d$ used to calculate $S$ must be normalized to it, i.e. it must be the size the data would have if
+it covered the whole local token space. The density used to assign sstables to levels is instead normalized to the
+whole token ring (recall that non-locally-owned ranges are excluded from $v$), and must be multiplied by the locally
+owned share of the token ring to calculate $S$. For example, if the node owned a quarter of the token ring, the
+200 MiB memtable above would have a density of 800 MiB for the purpose of assigning it to a level, but it would still
+be split into 4 shards, because it covers the whole local token space and its normalized density is thus 200 MiB.
+If multiple data directories are defined, each directory's token space is split separately, and the density must be
+normalized to the token share of a directory instead.
+
 This sharding mechanism is independent of the compaction specification.
 
 ## Full sharding scheme
@@ -513,7 +523,7 @@ size, the younger maximum density, and the older minimum density:
 $$\text{baseSSTableSize}_B = \max(\text{baseSSTableSize}, \text{youngerMaxDensity}, \text{olderMinDensity})$$
 
 All three quantities are compared in density units, i.e. the configured base sstable size is divided by the
-shard's local token coverage before the maximum is taken.
+locally-owned share of the token ring before the maximum is taken.
 
 This ensures that:
 - Any SSTable entering an older bucket that is smaller than or equal to the size of data produced

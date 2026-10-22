@@ -88,6 +88,7 @@ public interface ShardManager
     }
 
     /// The token range fraction spanned by the given range, adjusted for the local range ownership.
+    /// This is a fraction of the whole token ring, i.e. any non-locally-owned part of the range is excluded.
     double rangeSpanned(Range<Token> tableRange);
 
     /// The total fraction of the token space covered by the local ranges.
@@ -97,6 +98,9 @@ public interface ShardManager
     /// shards.
     ///
     /// If no disks are defined, this is the same as localSpaceCoverage(). Otherwise, it is the token coverage of a disk.
+    ///
+    /// Densities, as calculated by [#density], must be multiplied by this to form the shard-set-normalized density
+    /// that [org.apache.cassandra.db.compaction.unified.Controller#getNumShards] needs.
     double shardSetCoverage();
 
     /// The minimum token space share per partition that should be assigned to sstables with small numbers of partitions
@@ -158,6 +162,11 @@ public interface ShardManager
     /// compactions (where size grows, share is constant), LCS-like size-threshold splitting (where size is constant
     /// but share shrinks), UCS-like compactions (where size may grow and covered shards i.e. share may decrease)
     /// and can reproduce levelling structure that corresponds to all, including their mixtures.
+    ///
+    /// The covered share is a fraction of the whole token ring (see [#rangeSpanned]), thus the density is the size the
+    /// sstable would have if it covered the whole ring. This is the measure used to assign sstables to levels; to
+    /// calculate the number of shards for a given density, it must first be normalized to the shard set by multiplying
+    /// it by [#shardSetCoverage] (see [UnifiedCompactionStrategy#shardCountForDensity]).
     default double density(CompactionSSTable rdr)
     {
         return rdr.onDiskLength() / rangeSpanned(rdr);
