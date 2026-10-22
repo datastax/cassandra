@@ -114,6 +114,17 @@ public class ByteBufferRebufferer implements Rebufferer, RebuffererFactory
         return position;
     }
 
+    /// There are no holes to step over.
+    public long positionForSkip(long currentPosition, int bytesToSkip)
+    {
+        return currentPosition + bytesToSkip;
+    }
+
+    public long remainingBytes(long position)
+    {
+        return Math.max(0, fileLength() - position);
+    }
+
     @Override
     public void closeReader()
     {
