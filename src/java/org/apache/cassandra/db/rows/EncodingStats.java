@@ -39,6 +39,14 @@ import org.apache.cassandra.utils.ObjectSizes;
  * they are, the less effective the storage will be, but provided the stats are not completly wacky,
  * this shouldn't have too huge an impact on performance) and in fact they will not always be
  * accurate for reasons explained in {@link SerializationHeader#make}.
+ * <p>
+ * {@code minTimestamp} is relied on beyond the encoding, though: it is at or below every timestamp of
+ * the content (liveness, cells, complex, row, range and partition deletions), or is {@link #TIMESTAMP_EPOCH},
+ * meaning unknown. It may be loose, but never above. The memtable's minimum timestamp is merged from the
+ * stats of each update it takes, and compaction uses it to decide which tombstones it may purge; and
+ * {@code TriePartitionUpdateSerializer} reads in place an update of a column dropped and added again when
+ * the bound is above the drop. {@link #mergeWith} and {@link #merge} treat {@link #TIMESTAMP_EPOCH} as absent,
+ * so a merge over-states the bound when one side is unknown or has content exactly at that value.
  */
 public class EncodingStats implements IMeasurableMemory
 {
@@ -79,10 +87,11 @@ public class EncodingStats implements IMeasurableMemory
                          long minLocalDeletionTime,
                          int minTTL)
     {
-        // Note that the exact value of those don't impact correctness, just the efficiency of the encoding. So when we
-        // get a value for timestamp (resp. minLocalDeletionTime) that means 'no object had a timestamp' (resp. 'a local
-        // deletion time'), then what value we store for minTimestamp (resp. minLocalDeletionTime) doesn't matter, and
-        // it's thus more efficient to use our EPOCH numbers, since it will result in a guaranteed 1 byte encoding.
+        // Note that, beyond the lower bound the class javadoc requires of minTimestamp, the exact value of those don't
+        // impact correctness, just the efficiency of the encoding. So when we get a value for timestamp (resp.
+        // minLocalDeletionTime) that means 'no object had a timestamp' (resp. 'a local deletion time'), then what value
+        // we store for minTimestamp (resp. minLocalDeletionTime) doesn't matter, and it's thus more efficient to use
+        // our EPOCH numbers, since it will result in a guaranteed 1 byte encoding.
 
         this.minTimestamp = minTimestamp == LivenessInfo.NO_TIMESTAMP ? TIMESTAMP_EPOCH : minTimestamp;
         this.minLocalDeletionTime = minLocalDeletionTime == LivenessInfo.NO_EXPIRATION_TIME ? DELETION_TIME_EPOCH : minLocalDeletionTime;

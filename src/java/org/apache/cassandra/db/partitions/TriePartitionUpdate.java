@@ -275,8 +275,11 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             throw new AssertionError(e);
         }
+        // Every timestamp is now newTimestamp or newTimestamp - 1, possibly below the old ones, and local deletion
+        // times and TTLs are unchanged; the minimum timestamp must bound them all (see EncodingStats).
+        EncodingStats newStats = new EncodingStats(newTimestamp - 1, stats.minLocalDeletionTime, stats.minTTL);
         // Note: the tombstoneCount here may be an overestimation (some boundaries become covering deletions).
-        return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, dataSize, t);
+        return new TriePartitionUpdate(metadata, partitionKey, columns, newStats, rowCountIncludingStatic, tombstoneCount, dataSize, t);
     }
 
     @Override
