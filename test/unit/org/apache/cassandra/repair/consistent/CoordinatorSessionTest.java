@@ -250,7 +250,7 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         // fail between the last prepare response and the queued session submission
         coordinator.fail();
         Assert.assertEquals(FAILED, coordinator.getState());
-        queued.removeFirst().run();
+        queued.remove(0).run();
 
         Assert.assertFalse(coordinator.setRepairingCalled);
         Assert.assertFalse(submitted.get());
