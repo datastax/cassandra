@@ -21,32 +21,59 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Iterator;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterators;
 
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.CounterMutation;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.LivenessInfo;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.context.CounterContext;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.PartitionUpdateSizeCache;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdateSerializer;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.DeserializationHelper;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.paxos.Ballot;
+import org.apache.cassandra.service.paxos.Commit;
+import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CounterId;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -323,15 +350,120 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
             builder.row(1).add("m", ImmutableMap.of("a", "1", "b", "2"));
         }));
 
-        // An update that carries a deletion and no live row does not read back: walking the deserialized trie
-        // repeats the deletion branch and then trips the return-path assertion in RangesCursor.tailCopyOf. That is
-        // a defect in the read path rather than in sizing, so only the sizing invariant is checked for these two.
-        assertSizeMatchesBytesWritten("range tombstone without rows", build(builder -> {
+        assertSizeAndRoundTrip("range tombstone without rows", build(builder -> {
             builder.timestamp(2000).nowInSec(1500);
             builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
         }));
 
-        assertSizeMatchesBytesWritten("partition deletion", build(builder -> builder.timestamp(1000).nowInSec(1500).delete()));
+        assertSizeAndRoundTrip("row deletion without rows", build(builder -> builder.timestamp(2000).nowInSec(1500).row(6).delete()));
+
+        assertSizeAndRoundTrip("partition deletion", build(builder -> builder.timestamp(1000).nowInSec(1500).delete()));
+    }
+
+    /**
+     * A received or replayed update is consumed in several ways besides being merged into a memtable: re-serialized
+     * at the storage version for the commit log (VERSION_40 in the HCD_1 storage mode, whose size check every
+     * received mutation goes through), forwarded, hinted or batched at the peer's version, converted to a BTree
+     * update, and walked by indexes and views. Each has to work on every shape, and above all on the ones with
+     * deletions and no live rows, which schema changes and deletes produce, and agree with the update it was read
+     * from. Each step runs under a time limit, as some of these walks have failed by never returning.
+     */
+    @Test
+    public void testDeserializedUpdateConsumers() throws Throwable
+    {
+        createRichTable();
+        assertConsumersOfDeserialized("plain row", builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11));
+        assertConsumersOfDeserialized("row deletion and insert", builder -> {
+            builder.timestamp(1999).nowInSec(1500).row(1).delete();
+            builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11);
+        });
+        assertConsumersOfDeserialized("row deletion only", builder -> builder.timestamp(1999).nowInSec(1500).row(1).delete());
+        assertConsumersOfDeserialized("partition deletion only", builder -> builder.timestamp(1999).nowInSec(1500).delete());
+        assertConsumersOfDeserialized("range tombstone only", builder -> {
+            builder.timestamp(1999).nowInSec(1500);
+            builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
+        });
+        assertConsumersOfDeserialized("map overwrite", builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("m", ImmutableMap.of("a", "1")));
+        assertConsumersOfDeserialized("everything", builder -> {
+            builder.timestamp(1000).nowInSec(1500).delete();
+            builder.timestamp(2000).nowInSec(1500);
+            builder.row().add("s", 7).add("ss", ImmutableSet.of("x", "y"));
+            builder.row(1).add("v", 11).add("m", ImmutableMap.of("a", "1", "b", "2"));
+            builder.row(2).delete();
+            builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
+        });
+    }
+
+    private void assertConsumersOfDeserialized(String shape, Consumer<PartitionUpdate.SimpleBuilder> content) throws Throwable
+    {
+        TriePartitionUpdate original = build(content);
+        byte[] bytes = serialize(original);
+        Supplier<TriePartitionUpdate> received = () -> {
+            try
+            {
+                return deserialize(bytes);
+            }
+            catch (IOException e)
+            {
+                throw new UncheckedIOException(e);
+            }
+        };
+
+        withTimeLimit(shape + ": unfilteredIterator", () -> {
+            try (UnfilteredRowIterator expected = original.unfilteredIterator();
+                 UnfilteredRowIterator actual = received.get().unfilteredIterator())
+            {
+                assertEquals(expected.partitionLevelDeletion(), actual.partitionLevelDeletion());
+                assertEquals(expected.staticRow(), actual.staticRow());
+                assertTrue(Iterators.elementsEqual(expected, actual));
+            }
+        });
+        withTimeLimit(shape + ": rowsIncludingStatic", () -> assertTrue(Iterators.elementsEqual(original.rowsIncludingStatic(), received.get().rowsIncludingStatic())));
+        withTimeLimit(shape + ": maxTimestamp", () -> assertEquals(original.maxTimestamp(), received.get().maxTimestamp()));
+        withTimeLimit(shape + ": asBTreeUpdate", () -> assertEquals(BTreePartitionUpdate.asBTreeUpdate(original), BTreePartitionUpdate.asBTreeUpdate(received.get())));
+        for (int version : Arrays.asList(MessagingService.VERSION_40, MessagingService.VERSION_DS_20, VERSION))
+        {
+            withTimeLimit(shape + ": re-serialized at " + version, () -> {
+                TriePartitionUpdate update = received.get();
+                try (DataOutputBuffer expected = new DataOutputBuffer(); DataOutputBuffer actual = new DataOutputBuffer())
+                {
+                    PartitionUpdate.serializer.serialize(original, expected, version);
+                    long size = PartitionUpdate.serializer.serializedSize(update, version);
+                    PartitionUpdate.serializer.serialize(update, actual, version);
+                    assertEquals(size, actual.getLength());
+                    assertArrayEquals(expected.toByteArray(), actual.toByteArray());
+                }
+            });
+        }
+    }
+
+    private interface Step
+    {
+        void run() throws Exception;
+    }
+
+    private static void withTimeLimit(String step, Step body) throws Throwable
+    {
+        FutureTask<Void> task = new FutureTask<>(() -> {
+            body.run();
+            return null;
+        });
+        Thread thread = new Thread(task, "TriePartitionUpdateSerializerTest " + step);
+        thread.setDaemon(true);
+        thread.start();
+        try
+        {
+            task.get(30, TimeUnit.SECONDS);
+        }
+        catch (TimeoutException e)
+        {
+            thread.interrupt();
+            fail(step + " did not return");
+        }
+        catch (ExecutionException e)
+        {
+            throw new AssertionError(step, e.getCause());
+        }
     }
 
     private TriePartitionUpdate build(Consumer<PartitionUpdate.SimpleBuilder> content)
@@ -361,6 +493,27 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
             assertEquals(shape, size, out.getLength());
             return out.toByteArray();
         }
+    }
+
+    /**
+     * A row written without primary key liveness (an UPDATE) carries {@link LivenessInfo#EMPTY}, which the trie row
+     * and partition code recognise by identity. It must read back as that instance, or an UPDATE turns into an
+     * INSERT when it is re-proposed or re-timestamped; and it must not cost more than a row with real liveness.
+     */
+    @Test
+    public void testEmptyLivenessRoundTrip() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate withoutLiveness = build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).noPrimaryKeyLivenessInfo().add("v", 11));
+        TriePartitionUpdate withLiveness = build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11));
+        assertSame(LivenessInfo.EMPTY, withoutLiveness.rowIterator().next().primaryKeyLivenessInfo());
+
+        TriePartitionUpdate read = deserialize(serialize(withoutLiveness));
+        assertSame(LivenessInfo.EMPTY, read.rowIterator().next().primaryKeyLivenessInfo());
+        assertSame(LivenessInfo.EMPTY, read.withUpdatedTimestamps(3000).rowIterator().next().primaryKeyLivenessInfo());
+        assertEquals(withoutLiveness, read);
+
+        assertTrue(serialize(withoutLiveness).length < serialize(withLiveness).length);
     }
 
     /**
@@ -396,6 +549,215 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         }
     }
 
+    /**
+     * A counter write whose leader is not the coordinator reaches the leader as a deserialized update, whose trie is
+     * read in place from the message. The leader then rewrites the update's counter cells in place.
+     */
+    @Test
+    public void testCounterUpdateReceivedByLeader() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k text, c int, cnt counter, PRIMARY KEY(k, c))");
+
+        for (int i = 0; i < 2; ++i)
+        {
+            Mutation received = roundTrip(new Mutation(counterUpdate()));
+            new CounterMutation(received, ConsistencyLevel.ONE).applyCounterMutation();
+        }
+
+        assertRows(execute("SELECT cnt FROM %s WHERE k = 'key0' AND c = 1"), row(10L));
+    }
+
+    /**
+     * A Paxos replica accepts a proposal it received from the coordinator and keeps it in its in-memory state, whose
+     * cache weighs it by its heap size, and in system.paxos.
+     */
+    @Test
+    public void testPaxosProposalReceivedByReplica() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = build(builder -> builder.row(1).add("v", 11));
+        Ballot ballot = Ballot.atUnixMicrosWithLsb(FBUtilities.timestampMicros(), 0, Ballot.Flag.GLOBAL);
+        Commit proposal = Commit.newProposal(ballot, update);
+
+        Commit received;
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            Commit.serializer.serialize(proposal, out, VERSION);
+            try (DataInputBuffer in = new DataInputBuffer(out.toByteArray()))
+            {
+                received = Commit.serializer.deserialize(in, VERSION);
+            }
+        }
+        assertTrue(received.update.unsharedHeapSize() > 0);
+
+        assertTrue(PaxosState.legacyPrepare(received).promised);
+        assertTrue(PaxosState.legacyPropose(received));
+        PaxosState.Snapshot state = PaxosState.unsafeGetIfPresent(update.partitionKey(), update.metadata());
+        assertEquals(proposal.update, TriePartitionUpdate.asTrieUpdate(state.accepted.update));
+
+        PaxosState.unsafeReset();
+        state = SystemKeyspace.loadPaxosState(update.partitionKey(), update.metadata(), 0);
+        assertEquals(proposal.update, TriePartitionUpdate.asTrieUpdate(state.accepted.update));
+    }
+
+    @Test
+    public void testWithOnlyPresentColumnsOfDeserializedUpdate() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = richUpdate();
+        assertEquals(update.withOnlyPresentColumns(), deserialize(serialize(update)).withOnlyPresentColumns());
+    }
+
+    /**
+     * The leader finds each counter cell it rewrites by its column's index among the table's columns, which is how
+     * the trie keys it, and not among the columns the update happens to touch.
+     */
+    @Test
+    public void testCounterUpdateOfOneOfSeveralCounters() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k text, c int, a counter, b counter, PRIMARY KEY(k, c))");
+
+        for (int i = 0; i < 2; ++i)
+        {
+            PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(currentTableMetadata(), "key0");
+            builder.timestamp(2000).row(1).add("b", CounterContext.instance().createUpdate(5L));
+            new CounterMutation(new Mutation(TriePartitionUpdate.asTrieUpdate(builder.build())), ConsistencyLevel.ONE).applyCounterMutation();
+        }
+
+        assertRows(execute("SELECT a, b FROM %s WHERE k = 'key0' AND c = 1"), row(null, 10L));
+    }
+
+    /**
+     * The trie keys each column by its position among the table's columns on the node that built it. A node that has
+     * added a column the sender has not yet seen numbers the columns differently, and has to read the update with its
+     * own numbering: here the added columns sort first, so every existing column moves.
+     */
+    @Test
+    public void testReceiverHasAddedColumns() throws Throwable
+    {
+        createSchemaChangeTable();
+        byte[] bytes = serialize(build(this::schemaChangeContent));
+
+        alterTable("ALTER TABLE %s ADD a int");
+        alterTable("ALTER TABLE %s ADD a_s int static");
+
+        assertReadAsLocalUpdate(bytes, build(this::schemaChangeContent));
+        assertRows(execute("SELECT c, a, a_s, b, d, m, s FROM %s WHERE k = 'key0'"),
+                   row(1, null, null, 1, 42, map("x", "1"), 7),
+                   row(2, null, null, 2, null, null, 7));
+    }
+
+    /** As {@link #testReceiverHasAddedColumns}, with a column the receiver has dropped and the sender has not. */
+    @Test
+    public void testReceiverHasDroppedColumn() throws Throwable
+    {
+        createSchemaChangeTable();
+        byte[] bytes = serialize(build(this::schemaChangeContent));
+
+        alterTable("ALTER TABLE %s DROP b");
+
+        TriePartitionUpdate expected = build(builder -> {
+            builder.timestamp(1000).nowInSec(1500).delete();
+            builder.timestamp(2000).nowInSec(1500);
+            builder.row().add("s", 7);
+            builder.row(1).add("d", 42).add("m", ImmutableMap.of("x", "1"));
+            builder.row(2).delete("m");
+            builder.row(3).delete();
+            builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
+        });
+        assertReadAsLocalUpdate(bytes, expected);
+        assertRows(execute("SELECT c, d, m, s FROM %s WHERE k = 'key0'"),
+                   row(1, 42, map("x", "1"), 7),
+                   row(2, null, null, 7));
+    }
+
+    /** A sender that has added columns the receiver has not seen yet, which the update does not use. */
+    @Test
+    public void testSenderHasAddedColumns() throws Throwable
+    {
+        createSchemaChangeTable();
+        TableMetadata senderMetadata = currentTableMetadata().unbuild()
+                                                             .addRegularColumn("a", Int32Type.instance)
+                                                             .addStaticColumn("a_s", Int32Type.instance)
+                                                             .build();
+
+        assertReadAsLocalUpdate(serialize(build(senderMetadata, this::schemaChangeContent)), build(this::schemaChangeContent));
+    }
+
+    /** A sender that has dropped a column the receiver still has. */
+    @Test
+    public void testSenderHasDroppedColumn() throws Throwable
+    {
+        createSchemaChangeTable();
+        TableMetadata senderMetadata = currentTableMetadata().unbuild()
+                                                             .removeRegularOrStaticColumn(ColumnIdentifier.getInterned("b", true))
+                                                             .build();
+        Consumer<PartitionUpdate.SimpleBuilder> content = builder -> {
+            builder.timestamp(2000).nowInSec(1500);
+            builder.row().add("s", 7);
+            builder.row(1).add("d", 42).add("m", ImmutableMap.of("x", "1"));
+            builder.row(2).delete("m");
+        };
+
+        assertReadAsLocalUpdate(serialize(build(senderMetadata, content)), build(content));
+    }
+
+    private void createSchemaChangeTable()
+    {
+        createTable("CREATE TABLE %s (k text, c int, b int, d int, m map<text, text>, s int static, PRIMARY KEY(k, c))");
+    }
+
+    /** Every kind of content whose trie key carries a column: simple and complex cells, static and regular, and a
+     * complex-column deletion, next to the row, range and partition deletions that carry none. */
+    private void schemaChangeContent(PartitionUpdate.SimpleBuilder builder)
+    {
+        builder.timestamp(1000).nowInSec(1500).delete();
+        builder.timestamp(2000).nowInSec(1500);
+        builder.row().add("s", 7);
+        builder.row(1).add("b", 1).add("d", 42).add("m", ImmutableMap.of("x", "1"));
+        builder.row(2).add("b", 2).delete("m");
+        builder.row(3).delete();
+        builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
+    }
+
+    /** Read the bytes as a node with the current schema would, check the result, and apply it. */
+    private void assertReadAsLocalUpdate(byte[] bytes, TriePartitionUpdate expected) throws IOException
+    {
+        TriePartitionUpdate read = deserialize(bytes);
+        assertEquals(expected, read);
+        assertEquals(expected.staticRow(), read.staticRow());
+        assertEquals(expected.deletionInfo(), read.deletionInfo());
+        // A cell carries its column, so comparing rows does not show that the trie keys it by this node's numbering;
+        // looking each column up by its key does.
+        for (Iterator<Row> rows = expected.rowsIncludingStatic(); rows.hasNext();)
+        {
+            Row row = rows.next();
+            Row readRow = row.isStatic() ? read.staticRow() : read.getRow(row.clustering());
+            for (ColumnData data : row)
+                assertEquals(data, readRow.getColumnData(data.column()));
+        }
+        new Mutation(read).apply();
+    }
+
+    private TriePartitionUpdate build(TableMetadata metadata, Consumer<PartitionUpdate.SimpleBuilder> content)
+    {
+        PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, "key0");
+        content.accept(builder);
+        return TriePartitionUpdate.asTrieUpdate(builder.build());
+    }
+
+    private Mutation roundTrip(Mutation mutation) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            Mutation.serializer.serialize(mutation, out, VERSION);
+            try (DataInputBuffer in = new DataInputBuffer(out.toByteArray()))
+            {
+                return Mutation.serializer.deserialize(in, VERSION, DeserializationHelper.Flag.FROM_REMOTE);
+            }
+        }
+    }
+
     private TriePartitionUpdate counterUpdate()
     {
         PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(currentTableMetadata(), "key0");
@@ -407,6 +769,44 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
     {
         for (PartitionUpdate.CounterMark mark : update.collectCounterMarks())
             mark.setValue(CounterContext.instance().createGlobal(CounterId.fromInt(1), 1234567L, 5L));
+    }
+
+    /**
+     * Merging a row's liveness into an existing one adjusted the update's data size by assignment instead of by
+     * increment, which drove it negative whenever the merged liveness was smaller than the one it replaced (an
+     * expiring liveness overwritten by a newer non-expiring one), and the reader then rejected the update as corrupt.
+     */
+    @Test
+    public void testLivenessMergeKeepsDataSize() throws Throwable
+    {
+        createRichTable();
+        TableMetadata metadata = currentTableMetadata();
+        DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.bytes("key0"));
+        ColumnMetadata v = metadata.getColumn(ByteBufferUtil.bytes("v"));
+        Clustering<?> clustering = Clustering.make(ByteBufferUtil.bytes(1));
+
+        PartitionUpdate.Builder merging = TriePartitionUpdate.FACTORY.builder(metadata, key, metadata.regularAndStaticColumns(), 2);
+        Row.Builder first = BTreeRow.unsortedBuilder();
+        first.newRow(clustering);
+        first.addPrimaryKeyLivenessInfo(LivenessInfo.expiring(1000, 100, 1500));
+        first.addCell(BufferCell.live(v, 1000, ByteBufferUtil.bytes(5)));
+        merging.add(first.build());
+        Row.Builder second = BTreeRow.unsortedBuilder();
+        second.newRow(clustering);
+        second.addPrimaryKeyLivenessInfo(LivenessInfo.create(2000, 1500));
+        merging.add(second.build());
+        TriePartitionUpdate merged = (TriePartitionUpdate) merging.build();
+
+        // The same content added as a single row, so no merge happens.
+        PartitionUpdate.Builder single = TriePartitionUpdate.FACTORY.builder(metadata, key, metadata.regularAndStaticColumns(), 1);
+        Row.Builder row = BTreeRow.unsortedBuilder();
+        row.newRow(clustering);
+        row.addPrimaryKeyLivenessInfo(LivenessInfo.create(2000, 1500));
+        row.addCell(BufferCell.live(v, 1000, ByteBufferUtil.bytes(5)));
+        single.add(row.build());
+
+        assertEquals(single.build().dataSize(), merged.dataSize());
+        assertEquals(merged, deserialize(serialize(merged)));
     }
 
     /**

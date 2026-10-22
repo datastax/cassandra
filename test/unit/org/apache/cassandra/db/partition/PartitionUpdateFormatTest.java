@@ -251,6 +251,31 @@ public class PartitionUpdateFormatTest extends CQLTester
     }
 
     /**
+     * Paxos v2 tells whether a proposal kept in system.paxos is empty without deserializing it, by reading the update's
+     * serialized form directly. It has to step over the format byte, and read emptiness from whichever encoding follows.
+     */
+    @Test
+    public void testIsEmptyReadsEitherFormat() throws Throwable
+    {
+        createRichTable();
+        TableMetadata metadata = currentTableMetadata();
+        TriePartitionUpdate empty = TriePartitionUpdate.asTrieUpdate(PartitionUpdate.emptyUpdate(metadata, metadata.partitioner.decorateKey(ByteBufferUtil.bytes("key0"))));
+        TriePartitionUpdate oneRow = build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11));
+
+        for (PartitionUpdate update : Arrays.asList(empty, oneRow, richUpdate(),
+                                                    BTreePartitionUpdate.asBTreeUpdate(empty),
+                                                    BTreePartitionUpdate.asBTreeUpdate(oneRow)))
+        {
+            for (int version : Arrays.asList(MessagingService.VERSION_40, VERSION))
+            {
+                String shape = update.getClass().getSimpleName() + " " + (update.isEmpty() ? "empty" : "non-empty") + " at version " + version;
+                ByteBuffer bytes = PartitionUpdate.toBytes(update, version);
+                assertEquals(shape, update.isEmpty(), PartitionUpdate.PartitionUpdateSerializer.isEmpty(bytes, version, DeserializationHelper.Flag.LOCAL, update.partitionKey()));
+            }
+        }
+    }
+
+    /**
      * Size the update the way the mutation path does, write it, and check that the size describes the bytes written,
      * that the format byte is the trie encoding's, that the body is that encoding's bytes, and that it reads back.
      *

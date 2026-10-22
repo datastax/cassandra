@@ -68,6 +68,12 @@ implements DeletionAwareTrie<T, D>
         return byteComparableVersion;
     }
 
+    /// The length of the buffer or file the trie is read from.
+    public long sizeInBytes()
+    {
+        return rebuffererFactory.fileLength();
+    }
+
     /// Open a trie that is already fully in memory — a commit-log record or a message payload —
     /// rather than a file. The buffer must outlive every cursor taken from the result, and is not
     /// released by [#close].
