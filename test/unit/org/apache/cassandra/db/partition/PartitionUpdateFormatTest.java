@@ -225,8 +225,10 @@ public class PartitionUpdateFormatTest extends CQLTester
 
     /**
      * The BTree format is read back through the table's own partition update factory, so on a table that asks for a
-     * trie memtable an update written in either format has to come back trie-backed. Were that not so, an update a
-     * BTree-backed sender wrote would quietly hand the memtable a different kind of update.
+     * trie memtable an update written in that format has to come back as the kind of update the memtable builds
+     * itself: trie-backed when the storage version has the trie encoding, the legacy update below it. Were that not
+     * so, an update a BTree-backed sender wrote would quietly hand the memtable a different kind of update. The trie
+     * format always reads back trie-backed.
      */
     @Test
     public void testTrieBackedTableReadsBothFormatsBackAsTrieUpdates() throws Throwable
@@ -238,8 +240,10 @@ public class PartitionUpdateFormatTest extends CQLTester
             builder.row("c", "r").add("v", 1);
         }));
         assertEquals(BTREE_FORMAT, formatOf(singleRow, serialize(singleRow)));
-        assertTrue("an update written in the BTree format must read back trie-backed on a trie-backed table",
-                   deserialize(serialize(singleRow)) instanceof TriePartitionUpdate);
+        TableMetadata metadata = currentTableMetadata();
+        Class<?> tableUpdateClass = metadata.partitionUpdateFactory().emptyUpdate(metadata, singleRow.partitionKey()).getClass();
+        assertEquals("an update written in the BTree format must read back as the table's own kind of update",
+                     tableUpdateClass, deserialize(serialize(singleRow)).getClass());
 
         TriePartitionUpdate sharedPrefixes = sharedPrefixUpdate();
         assertEquals(TRIE_FORMAT, formatOf(sharedPrefixes, serialize(sharedPrefixes)));
