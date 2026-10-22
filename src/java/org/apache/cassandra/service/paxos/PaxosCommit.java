@@ -265,17 +265,6 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
     }
 
     /**
-     * Record a success response
-     */
-    public void onResponse(Message<NoPayload> response)
-    {
-        logger.trace("{} Success from {}", commit, response.from());
-
-        execTimeAccumulator.onResponse(requestSensors);
-        response(true, response.from());
-    }
-
-    /**
      * Execute locally and record response
      */
     public void executeOnSelf()
@@ -286,6 +275,9 @@ public class PaxosCommit<OnDone extends Consumer<? super PaxosCommit.Status>> ex
     @Override
     public void onResponse(NoPayload response, InetAddressAndPort from)
     {
+        logger.trace("{} Success from {}", commit, from);
+
+        execTimeAccumulator.onResponse(requestSensors);
         response(response != null, from);
     }
 

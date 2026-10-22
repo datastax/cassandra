@@ -1699,7 +1699,7 @@ public class StorageProxy implements StorageProxyMBean
             logger.trace("Sending batchlog store request {} to {} for {} mutations", batch.id, replica, batch.size());
 
             if (replica.isSelf())
-                storeBatchLocally(Stage.MUTATION, replica, () -> BatchlogManager.store(batch), handler, "Batchlog store", requestTime);
+                removeBatchLocally(Stage.MUTATION, replica, () -> BatchlogManager.store(batch), handler, requestTime);
             else
                 MessagingService.instance().sendWithCallback(message, replica.endpoint(), handler);
         }
@@ -1715,7 +1715,7 @@ public class StorageProxy implements StorageProxyMBean
                 logger.trace("Sending batchlog remove request {} to {}", uuid, target);
 
             if (target.isSelf())
-                storeBatchLocally(Stage.MUTATION, target, () -> BatchlogManager.remove(uuid), "Batchlog remove", requestTime);
+                removeBatchLocally(Stage.MUTATION, target, () -> BatchlogManager.remove(uuid), requestTime);
             else
                 MessagingService.instance().send(message, target.endpoint());
         }
@@ -2027,7 +2027,7 @@ public class StorageProxy implements StorageProxyMBean
         return select.get(ThreadLocalRandom.current().nextInt(0, select.size()));
     }
 
-    private static void storeBatchLocally(Stage stage, Replica localReplica, final Runnable runnable, String description, Dispatcher.RequestTime requestTime)
+    private static void removeBatchLocally(Stage stage, Replica localReplica, final Runnable runnable, Dispatcher.RequestTime requestTime)
     {
         stage.maybeExecuteImmediately(new LocalMutationRunnable(localReplica, requestTime)
         {
@@ -2046,7 +2046,7 @@ public class StorageProxy implements StorageProxyMBean
             @Override
             public String description()
             {
-                return description;
+                return "Batchlog remove";
             }
 
             @Override
@@ -2057,7 +2057,7 @@ public class StorageProxy implements StorageProxyMBean
         });
     }
 
-    private static void storeBatchLocally(Stage stage, Replica localReplica, final Runnable runnable, final RequestCallback<?> handler, Object description, Dispatcher.RequestTime requestTime)
+    private static void removeBatchLocally(Stage stage, Replica localReplica, final Runnable runnable, final RequestCallback<?> handler, Dispatcher.RequestTime requestTime)
     {
         stage.maybeExecuteImmediately(new LocalMutationRunnable(localReplica, requestTime)
         {
@@ -2081,7 +2081,7 @@ public class StorageProxy implements StorageProxyMBean
             {
                 // description is an Object and toString() called so we do not have to evaluate the Mutation.toString()
                 // unless expliclitly checked
-                return description.toString();
+                return "Batchlog store";
             }
 
             @Override

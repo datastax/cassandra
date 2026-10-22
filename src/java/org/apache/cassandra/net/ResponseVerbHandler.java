@@ -138,7 +138,7 @@ public class ResponseVerbHandler implements IVerbHandler
             accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.READ_EXECUTION_TIME, message);
         }
         // Covers Paxos V2 Prepare, Propose and Commit callbacks.
-        // INDEX_WRITE_BYTES is not tracked for Prepare/Propose: they only write to system.paxos, which has no indexes.
+        // INDEX_WRITE_BYTES is tracked in case PaxosCommitAndPrepare executes a commit as part of a prepare
         // INTERNODE_BYTES is tracked (same as V1 and regular reads/writes) to account for the internode cost of each round-trip.
         // READ_EXECUTION_TIME tracks: for Prepare, both the system.paxos read (loadPaxosState) and the user-table
         // precondition read (request.read.executeLocally()) when present; for Propose, the system.paxos read only.
@@ -148,6 +148,7 @@ public class ResponseVerbHandler implements IVerbHandler
             Context context = Context.from(paxosCallback.getTableMetadata());
             incrementSensor(sensors, context, Type.READ_BYTES, message);
             incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+            incrementSensor(sensors, context, Type.INDEX_WRITE_BYTES, message);
             incrementSensor(sensors, context, Type.INTERNODE_BYTES, message);
             accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
             accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.READ_EXECUTION_TIME, message);
