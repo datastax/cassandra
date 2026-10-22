@@ -34,6 +34,9 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.SkipListMemtable;
 import org.apache.cassandra.db.memtable.TestMemtable;
+import org.apache.cassandra.db.memtable.TrieMemtable;
+import org.apache.cassandra.db.rows.ComplexColumnData;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -42,6 +45,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.MemtableParams;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static java.lang.String.format;
@@ -243,6 +247,29 @@ public class AlterTest extends CQLTester
                    row(1, 3, 3, 3, 3),
                    row(1, 4, 4, 4, 4),
                    row(1, 100, 100, 100, 100));
+    }
+
+    @Test
+    public void testComplexDeletionAtDropOfReAddedColumnIsNotReturnedFromTrieMemtable() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, m map<text, text>) WITH memtable = 'trie';");
+        assertTrue(getCurrentColumnFamilyStore().getTracker().getView().getCurrentMemtable() instanceof TrieMemtable);
+        alterTable("ALTER TABLE %s DROP m USING TIMESTAMP 20000;");
+        alterTable("ALTER TABLE %s ADD m map<text, text>;");
+        // Writing the whole collection deletes what was there one microsecond before the write, i.e. at the drop.
+        execute("INSERT INTO %s (id, m) VALUES (?, ?) USING TIMESTAMP ?", 1, map("a", "1"), 20001L);
+
+        Row row = Util.getOnlyRowUnfiltered(Util.cmd(getCurrentColumnFamilyStore(), 1).build());
+        ComplexColumnData data = row.getComplexColumnData(currentTableMetadata().getColumn(ByteBufferUtil.bytes("m")));
+        assertTrue(data.complexDeletion().isLive());
+        assertEquals(1, data.cellsCount());
+
+        // The sstable reader must agree with the trie memtable.
+        flush();
+        Row flushedRow = Util.getOnlyRowUnfiltered(Util.cmd(getCurrentColumnFamilyStore(), 1).build());
+        ComplexColumnData flushedData = flushedRow.getComplexColumnData(currentTableMetadata().getColumn(ByteBufferUtil.bytes("m")));
+        assertTrue(flushedData.complexDeletion().isLive());
+        assertEquals(data.complexDeletion(), flushedData.complexDeletion());
     }
 
 

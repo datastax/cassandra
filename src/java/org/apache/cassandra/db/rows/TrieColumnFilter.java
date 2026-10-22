@@ -179,8 +179,12 @@ public class TrieColumnFilter
         }
     }
 
-    /// Apply dropping columns by applying a deletion over them with the drop time. Anything older will be removed, and
-    /// anything with a newer timestamp (i.e. if the column was then re-added and data inserted) will be preserved.
+    /// Apply dropping columns by applying a deletion over them with the drop time. Everything of the column at or below
+    /// the drop time is left out, as the BTree encoding's reader does (cells with `timestamp <= droppedTime`, complex
+    /// deletions with `markedForDeleteAt <= droppedTime`), and anything with a newer timestamp (i.e. if the column was
+    /// then re-added and data inserted) is preserved. The deletion takes the greatest possible local deletion time,
+    /// `NO_DELETION_TIME`, so that it supersedes every complex deletion at the drop time, including one carrying an
+    /// invalid local deletion time.
     ///
     /// @param columns The set of columns that can be in the filtered trie. If we didn't do any filtering on
     /// construction (i.e. all cells are queried), this must include the full column set, otherwise it can be
@@ -194,7 +198,7 @@ public class TrieColumnFilter
             if (dropped != null)
             {
                 ByteComparable columnKey = TrieBackedRow.columnKey(columnIds, c);
-                Covering deletion = deletion(dropped.droppedTime, 0);
+                Covering deletion = deletion(dropped.droppedTime, CellData.NO_DELETION_TIME);
                 // applying the deletion will merge INCLUDED markers with the deletion time
                 mutator.apply(RangeTrie.branch(columnKey, TrieBackedPartition.BYTE_COMPARABLE_VERSION, deletion));
             }

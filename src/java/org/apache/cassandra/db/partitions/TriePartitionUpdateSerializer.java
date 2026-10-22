@@ -36,6 +36,7 @@ import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.DeserializationHelper;
+import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.SerializationHelper;
@@ -54,6 +55,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -105,7 +107,7 @@ public class TriePartitionUpdateSerializer
         serializeColumnIndexes(trieUpdate.metadata(), header.columns(), out);
         SerializationHelper helper = new SerializationHelper(header);
 
-        ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(trieUpdate.metadata(), helper, header, version, null);
+        ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(trieUpdate.metadata(), helper, header, version, null, false);
 
         writeTrie(trieUpdate, pojoSerializer, out, version);
     }
@@ -271,8 +273,16 @@ public class TriePartitionUpdateSerializer
         int[] staticIndexes = deserializeColumnIndexes(in, statics);
         int[] regularIndexes = deserializeColumnIndexes(in, regulars);
         DeserializationHelper desHelper = new DeserializationHelper(metadata, version, flag);
+        // Only an update holding some timestamp not newer than the latest drop of its columns can hold data of a
+        // dropped column to leave out. The minimum timestamp of its stats bounds those of its cells, liveness and
+        // deletions (the memtable's minimum timestamp is merged from it, and compaction uses that to decide which
+        // tombstones it may purge), except TIMESTAMP_EPOCH, which NO_STATS and stats that saw no timestamp carry.
+        long latestDropTime = latestDropTime(header.columns(), metadata);
+        long minTimestamp = header.stats().minTimestamp;
+        boolean mayHoldDroppedData = latestDropTime != Long.MIN_VALUE
+                                     && (minTimestamp == EncodingStats.TIMESTAMP_EPOCH || minTimestamp <= latestDropTime);
 
-        ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(metadata, null, header, version, desHelper);
+        ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(metadata, null, header, version, desHelper, mayHoldDroppedData);
 
         // The trie is walked in place over these bytes rather than rebuilt, so the update holds a
         // view over the buffer. TrieBackedPartition stores a DeletionAwareTrie, not specifically an
@@ -286,8 +296,14 @@ public class TriePartitionUpdateSerializer
                                          -1);
 
         // If the sender's schema numbers the columns differently from this node's, the trie's keys point at the wrong
-        // columns here, and the update is rebuilt with this node's numbering; the result is in memory.
-        if (!hasLocalIndexes(metadata, statics, staticIndexes) || !hasLocalIndexes(metadata, regulars, regularIndexes))
+        // columns here, and the update is rebuilt with this node's numbering; the result is in memory. An update that
+        // may hold data of a column dropped here not newer than the drop is rebuilt as well, to leave that data out:
+        // the payload deserializer leaves out its cells (see deserializeCell), and the rebuild its complex deletions
+        // and the rows left empty, and counts the rows and tombstones that remain. A column that is dropped here and
+        // not added again has no index here, so the update is rebuilt whatever its timestamps.
+        if (mayHoldDroppedData
+            || !hasLocalIndexes(metadata, statics, staticIndexes)
+            || !hasLocalIndexes(metadata, regulars, regularIndexes))
         {
             TriePartitionUpdate senderKeyed = new TriePartitionUpdate(metadata, key, header.columns(), header.stats(), rowCountIncludingStatic, tombstoneCount, dataSize, trie);
             return TriePartitionUpdate.withLocalColumnIndexes(senderKeyed,
@@ -303,6 +319,21 @@ public class TriePartitionUpdateSerializer
         return new TriePartitionUpdate(metadata, key, header.columns(), header.stats(), rowCountIncludingStatic, tombstoneCount, dataSize, trie);
     }
 
+    /// The latest time any of the given columns was dropped here, or `Long.MIN_VALUE` if none of them was.
+    private static long latestDropTime(RegularAndStaticColumns columns, TableMetadata metadata)
+    {
+        long latest = Long.MIN_VALUE;
+        if (metadata.droppedColumns.isEmpty())
+            return latest;
+        for (ColumnMetadata column : columns)
+        {
+            DroppedColumn dropped = metadata.droppedColumns.get(column.name.bytes);
+            if (dropped != null)
+                latest = Math.max(latest, dropped.droppedTime);
+        }
+        return latest;
+    }
+
     /**
      * Computes serialized size of {@link TriePartitionUpdate} wire format.
      */
@@ -316,7 +347,7 @@ public class TriePartitionUpdateSerializer
 
         SerializationHeader header = new SerializationHeader(false, trieUpdate.metadata(), trieUpdate.columns(), trieUpdate.stats());
         SerializationHelper helper = new SerializationHelper(header);
-        ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(trieUpdate.metadata(), helper, header, version, null);
+        ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(trieUpdate.metadata(), helper, header, version, null, false);
 
         long size = ByteBufferUtil.serializedSizeWithVIntLength(trieUpdate.partitionKey().getKey())
                + TypeSizes.sizeofUnsignedVInt(trieUpdate.rowCountIncludingStatic)
@@ -396,9 +427,10 @@ public class TriePartitionUpdateSerializer
                                                                                   SerializationHelper helper,
                                                                                   SerializationHeader header,
                                                                                   int version,
-                                                                                  DeserializationHelper desHelper)
+                                                                                  DeserializationHelper desHelper,
+                                                                                  boolean mayHoldDroppedData)
     {
-        return new TriePayloadSerializer(header, helper, version, desHelper);
+        return new TriePayloadSerializer(header, helper, version, desHelper, mayHoldDroppedData);
     }
 
     /**
@@ -413,13 +445,17 @@ public class TriePartitionUpdateSerializer
         private final DeserializationHelper desHelper;
         private final ColumnMetadata[] regularCols;
         private final ColumnMetadata[] staticCols;
+        /// Whether the update may hold data of a column dropped here that is not newer than the drop, without which
+        /// no cell is left out.
+        private final boolean mayHoldDroppedData;
 
-        TriePayloadSerializer(SerializationHeader header, SerializationHelper helper, int version, DeserializationHelper desHelper)
+        TriePayloadSerializer(SerializationHeader header, SerializationHelper helper, int version, DeserializationHelper desHelper, boolean mayHoldDroppedData)
         {
             this.header = header;
             this.helper = helper;
             this.version = version;
             this.desHelper = desHelper;
+            this.mayHoldDroppedData = mayHoldDroppedData;
 
             Columns regs = header.columns().regulars;
             Columns stats = header.columns().statics;
@@ -497,7 +533,11 @@ public class TriePartitionUpdateSerializer
             if (idx < 0 || idx >= targetCols.length)
                 throw new IOException(String.format("Invalid column index %d for %s static columns (total %d)", idx, isStatic ? "" : "non-", targetCols.length));
             ColumnMetadata column = targetCols[idx];
-            return Cell.serializer.deserialize(in, LivenessInfo.EMPTY, column, header, desHelper, ByteBufferAccessor.instance);
+            Cell<?> cell = Cell.serializer.deserialize(in, LivenessInfo.EMPTY, column, header, desHelper, ByteBufferAccessor.instance);
+            // A cell of a column dropped since it was written is not returned, as the BTree encoding's reader does not
+            // return it. isComplex is false even for a complex column: the helper then looks the column up by name,
+            // which is what its stateful complex-column path does too, and the trie can be read from several threads.
+            return mayHoldDroppedData && desHelper.isDropped(cell, false) ? null : cell;
         }
 
         private long serializedSizeCell(Cell<?> cell)
