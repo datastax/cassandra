@@ -36,8 +36,12 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// descent and the ascent (return) path, and the data trie of a deletion-aware trie only ever presents
 /// content on descent (see the `presentContentOnDescentPath` argument
 /// [InMemoryDeletionAwareTrie] passes to its base) — so nothing ever fills its ascent-side slot. The
-/// deletion branch's root position goes there, as a minimal-width reversed integer whose length the
-/// node's own length prefix carries. This is the same reuse the in-memory trie makes of a prefix node's
+/// deletion branch's root goes there, as a delta subtracted from the position where the slot starts, stored
+/// as a minimal-width reversed integer whose length the node's own length prefix carries. That is how every
+/// other pointer in the format is encoded, and for the same reasons: a branch written just before its node is
+/// a byte or two away where an absolute position in a large trie takes four or five, and a subtree with only
+/// backward deltas inside is self-contained, so it can be relocated, or copied unmodified in compaction, which
+/// a single absolute pointer would prevent. This is the same reuse the in-memory trie makes of a prefix node's
 /// secondary pointer, which holds return-path content in a range trie and the alternate branch in a
 /// deletion-aware one (see `PREFIX_ALTERNATE_OFFSET` and the prefix node section of `InMemoryTrie.md`).
 ///
@@ -46,6 +50,14 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// [Cursor#MAY_HAVE_CONTENT_BIT] and [Cursor#MAY_HAVE_DELETION_BRANCH_BIT], so the reader produces both
 /// flags without decoding anything.
 ///
+/// ## Live content is descent-side only
+///
+/// It follows that the live data can only be presented on the descent path, before the node's children in both
+/// directions, as every [InMemoryDeletionAwareTrie] presents it. A trie that presents live content on the return
+/// path -- for example an ordered plain trie passed through [DeletionAwareTrie#wrap], whose content comes after its
+/// branch when walked in reverse, as this writer walks -- has no slot to put that content in, and [#write] rejects it
+/// with an [IllegalArgumentException] rather than write it where the reader expects a branch pointer.
+///
 /// ## Ordering
 ///
 /// [OnDiskTrieWriter] writes nodes bottom-up as the walk ascends, so every pointer it emits
@@ -53,7 +65,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// deletion branch, then descends into its children, and the node itself is written
 /// after its children. Serializing the deletion branch when the walk leaves it therefore
 /// places those bytes before both the children and the node that references them, and
-/// the recorded root is a valid backward pointer.
+/// the pointer stored for the recorded root is a non-negative backward delta like every other.
 ///
 /// A branch trie is complete in itself, so its root is the position reached once it has
 /// been fully written — the same convention [OnDiskTrie#open] uses when it takes the
@@ -65,11 +77,12 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>>
 implements Cursor.Walker<T, DataOutputPlus>
 {
     /// The contents of one of a node's two payload slots: live content on the descent side, or the
-    /// position of the node's deletion branch on the ascent side. Exactly one of the two is set.
+    /// absolute position of the node's deletion branch on the ascent side, which [SlotSerializer] turns into a
+    /// delta when it knows where the slot is written. Exactly one of the two is set.
     static class Slot<T>
     {
         final T content;
-        final long deletionBranchRoot;   // -1 unless this is an ascent-side slot
+        final long deletionBranchRoot;   // absolute stream position; -1 unless this is an ascent-side slot
 
         private Slot(T content, long deletionBranchRoot)
         {
@@ -89,7 +102,8 @@ implements Cursor.Walker<T, DataOutputPlus>
     }
 
     /// Writes whichever of the two kinds of slot it is handed: the caller's content, or the branch pointer as a
-    /// minimal-width reversed integer, whose length the node's own length prefix records.
+    /// minimal-width reversed integer, whose length the node's own length prefix records. The pointer is the delta
+    /// from the position the slot starts at back to the branch root.
     private static class SlotSerializer<T> implements OnDiskTrieWriter.DataSerializer<Slot<T>>
     {
         final OnDiskTrieWriter.DataSerializer<T> contentSerializer;
@@ -108,8 +122,13 @@ implements Cursor.Walker<T, DataOutputPlus>
                 return;
             }
 
-            int bytes = OnDiskTrieWriter.bytesFor(value.deletionBranchRoot);
-            OnDiskTrieWriter.writeReversedSized(out, value.deletionBranchRoot, bytes);
+            // OnDiskWriteNodeType.writePayload emits the ascent-side slot first, so this is where the node's data
+            // starts. The branch was written before the node; when the node has no children, the branch ends right
+            // here and the delta is 0.
+            long delta = out.position() - value.deletionBranchRoot;
+            assert delta >= 0 : "Deletion branch root " + value.deletionBranchRoot
+                                + " is after its node at " + out.position();
+            OnDiskTrieWriter.writeReversedSized(out, delta, OnDiskTrieWriter.bytesFor(delta));
         }
     }
 
@@ -119,10 +138,8 @@ implements Cursor.Walker<T, DataOutputPlus>
     /// The writer for the data trie itself.
     final OnDiskTrieWriter<Slot<T>> inner;
 
-    /// Non-null only while the walk is inside a deletion branch.
+    /// Non-null only while a deletion branch is being written.
     private OnDiskTrieWriter<D> branchWriter;
-    /// Depth of the node the current deletion branch hangs from, to rebase the nested walk.
-    private int branchDepthAdjustment;
     /// Stream position when the current deletion branch was entered, to tell a branch that wrote
     /// nothing from one that did.
     private long branchStartPosition;
@@ -157,8 +174,9 @@ implements Cursor.Walker<T, DataOutputPlus>
 
     /// Not [DeletionAwareCursor.DeletionAwareWalker]: that contract reports a branch's markers but
     /// never its ascents, and [OnDiskTrieWriter] only emits nodes on ascent. The driver below walks both
-    /// levels explicitly instead, so these are plain methods rather than interface overrides.
-    public boolean enterDeletionsBranch()
+    /// levels explicitly instead, feeding the branch to [#branchWriter], so these are plain methods rather than
+    /// interface overrides.
+    public void enterDeletionsBranch()
     {
         // Start a nested trie in the same stream. Its bytes land before the node that will
         // reference them, so the recorded root is a backward pointer like every other.
@@ -169,17 +187,11 @@ implements Cursor.Walker<T, DataOutputPlus>
         // positions disagree on ON_RETURN_PATH_BIT.
         branchWriter = new OnDiskTrieWriter<>(out, deletionSerializer, true);
         branchStartPosition = out.position();
-        branchDepthAdjustment = inner.keyPos;
-        return true;
     }
 
-    public void deletionMarker(D marker)
-    {
-        branchWriter.content(marker);
-    }
-
-    /// @return the position of the branch just written, to be recorded in the node's ascent-side slot, or
-    ///         -1 if the branch turned out to have no content.
+    /// @return the position of the branch just written, to be recorded in the node's ascent-side slot (which
+    ///         stores it as a delta from the slot), or
+    ///         0 if the branch turned out to have no content, as [#write] reports an empty trie.
     public long exitDeletionsBranch()
     {
         branchWriter.complete();
@@ -192,49 +204,36 @@ implements Cursor.Walker<T, DataOutputPlus>
         // yet. Report "no branch" rather than a root that is not a node: a recorded root makes
         // the reader set MAY_HAVE_DELETION_BRANCH_BIT and decode that byte as a node code.
         long position = out.position();
-        long root = position > branchStartPosition ? position : -1;
+        long root = position > branchStartPosition ? position : 0;
         branchWriter = null;
-        branchDepthAdjustment = 0;
         return root;
     }
 
     // ---- path tracking ----------------------------------------------------------------
-    // While inside a deletion branch these describe the nested trie, not the outer one.
+    // These describe the data trie; a deletion branch is walked straight into [#branchWriter].
 
     @Override
     public void addPathByte(int nextByte)
     {
-        if (branchWriter != null)
-            branchWriter.addPathByte(nextByte);
-        else
-            inner.addPathByte(nextByte);
+        inner.addPathByte(nextByte);
     }
 
     @Override
     public void addPathBytes(org.agrona.DirectBuffer buffer, int pos, int count)
     {
-        if (branchWriter != null)
-            branchWriter.addPathBytes(buffer, pos, count);
-        else
-            inner.addPathBytes(buffer, pos, count);
+        inner.addPathBytes(buffer, pos, count);
     }
 
     @Override
     public void resetPathLength(int newLength)
     {
-        if (branchWriter != null)
-            branchWriter.resetPathLength(newLength);
-        else
-            inner.resetPathLength(newLength);
+        inner.resetPathLength(newLength);
     }
 
     @Override
     public void onReturnPath()
     {
-        if (branchWriter != null)
-            branchWriter.onReturnPath();
-        else
-            inner.onReturnPath();
+        inner.onReturnPath();
     }
 
     @Override
@@ -304,8 +303,14 @@ implements Cursor.Walker<T, DataOutputPlus>
         long position = c.encodedPosition();
 
         T content = Cursor.content(c, position);
+        // The ascent-side slot is the branch pointer's (see the class documentation); live content on the return path
+        // would be written into it and read back as a pointer.
+        if (content != null && Cursor.isOnReturnPath(position))
+            throw new IllegalArgumentException("Deletion-aware tries can only be serialized with live content on the descent " +
+                                               "path; content " + content + " is presented on the return path at " +
+                                               Cursor.toString(position));
 
-        long branchRoot = -1;
+        long branchRoot = 0;
         if ((position & Cursor.MAY_HAVE_DELETION_BRANCH_BIT) != 0)
         {
             RangeCursor<D> branch = c.deletionBranchCursor(Direction.REVERSE);
@@ -324,7 +329,7 @@ implements Cursor.Walker<T, DataOutputPlus>
         // root remains a backward pointer.
         if (content != null)
             fw.inner.content(Slot.content(content));
-        if (branchRoot >= 0)
+        if (branchRoot > 0)
             fw.inner.ascentContent(Slot.branch(branchRoot));
     }
 

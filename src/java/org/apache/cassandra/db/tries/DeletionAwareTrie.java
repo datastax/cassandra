@@ -60,6 +60,12 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// It is also expected that a deletion-aware trie does not contain any live data that is deleted by its own deletion
 /// branches. If such data exists, whether it is preserved after transformations is undefined.
 ///
+/// Live data is presented on the descent path, i.e. before the node's children in both directions, which is where
+/// [InMemoryDeletionAwareTrie] always presents it. [#wrap] passes through whatever the wrapped trie does, so an
+/// ordered trie wrapped this way presents content after its branch when walked in reverse; such a trie can be walked,
+/// but cannot be serialized by [OnDiskDeletionAwareTrieWriter], whose format keeps a node's ascent-side slot for the
+/// deletion branch pointer.
+///
 /// See [DeletionAwareCursor] for details on cursor operations and [InMemoryDeletionAwareTrie] for the
 /// concrete in-memory implementation.
 ///

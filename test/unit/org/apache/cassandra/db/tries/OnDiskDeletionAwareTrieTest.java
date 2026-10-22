@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -44,6 +45,7 @@ import static org.apache.cassandra.io.util.RandomAccessReader.DEFAULT_BUFFER_SIZ
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -196,6 +198,37 @@ public class OnDiskDeletionAwareTrieTest
             for (Direction d : Direction.values())
                 assertDeletionBranchesEqual(source.cursor(d), read.cursor(d));
             read.close();
+        }
+    }
+
+    /// Live content presented on the return path has no slot to go to: the ascent-side one holds the branch pointer.
+    /// An ordered plain trie wrapped as deletion-aware presents its content there when walked in reverse, as the writer
+    /// walks. Writing it must fail rather than put the content where the reader expects a pointer; an unordered one,
+    /// whose content is on the descent path, writes and reads back.
+    @Test
+    public void testLiveContentOnTheReturnPathIsRejected() throws IOException, TrieSpaceExhaustedException
+    {
+        for (boolean ordered : new boolean[]{ false, true })
+        {
+            InMemoryTrie<LivePoint> plain = ordered ? InMemoryTrie.shortLivedOrdered(VERSION) : InMemoryTrie.shortLived(VERSION);
+            for (String key : new String[]{ "a", "ab", "ac" })
+            {
+                LivePoint point = live(key, 1);
+                plain.putRecursive(point.position, point, (x, y) -> y);
+            }
+            DeletionAwareTrie<LivePoint, DeletionMarker> wrapped = DeletionAwareTrie.wrap(plain);
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                if (ordered)
+                {
+                    assertThrows(IllegalArgumentException.class, () -> OnDiskDeletionAwareTrieWriter.write(wrapped, LIVE, MARKER, out));
+                }
+                else
+                {
+                    OnDiskDeletionAwareTrieWriter.write(wrapped, LIVE, MARKER, out);
+                    assertTriesEqual(wrapped, OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1));
+                }
+            }
         }
     }
 
@@ -522,6 +555,94 @@ public class OnDiskDeletionAwareTrieTest
                 for (int length = 3; length <= KEY_LENGTH + 1; ++length)
                     assertApplicableDeletionEqual(source, read, wideKey(transition, length));
             read.close();
+        }
+    }
+
+    /// Every pointer in the format is a backward delta from the node that holds it, so a serialized trie does not
+    /// depend on where it starts and can be read from any offset it is embedded at -- the property that lets a
+    /// branch be copied unchanged. The deletion branch pointer used to be the one absolute position in the format;
+    /// shifting the bytes moved every node but left that pointer aiming at the old place. The larger shift also
+    /// makes an absolute position need a wider integer than the unshifted one.
+    @Test
+    public void testDeletionBranchesSurviveRelocation() throws IOException
+    {
+        List<InMemoryDeletionAwareTrie<LivePoint, DeletionMarker>> sources = new ArrayList<>();
+        sources.add(DataPoint.fromList(points(live("abc", 1),
+                                              marker("abd", -1, 7),
+                                              live("abe", 2),
+                                              marker("abf", 7, -1),
+                                              live("xyz", 3))));
+        sources.add(DataPoint.fromList(points(marker("abc", -1, 5), marker("abd", 5, -1), live("xyz", 3)),
+                                       false, true));
+        sources.add(DataPoint.fromList(wideBranchPoints(WIDE_TRANSITIONS, KEY_LENGTH)));
+        sources.add(DataPoint.fromList(wideBranchPoints(allTransitions(), KEY_LENGTH)));
+
+        for (InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source : sources)
+        {
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+                ByteBuffer serialized = out.asNewBuffer();
+                for (int shift : new int[]{ 7, 300 })
+                {
+                    ByteBuffer shifted = ByteBuffer.allocate(shift + serialized.remaining());
+                    for (int i = 0; i < shift; ++i)
+                        shifted.put((byte) (i * 31 + 17));
+                    shifted.put(serialized.duplicate());
+                    shifted.flip();
+
+                    // The root node ends where the buffer does, as it did before the shift.
+                    OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                        OnDiskDeletionAwareTrie.open(shifted, LIVE, MARKER, VERSION, -1);
+                    assertTriesEqual(source, read);
+                    for (Direction d : Direction.values())
+                        assertDeletionBranchesEqual(source.cursor(d), read.cursor(d));
+                    read.close();
+                }
+            }
+        }
+    }
+
+    /// A deletion branch pointer whose delta would put the branch root at or before the start of the data must be
+    /// rejected as corruption, not followed to a position the reader cannot seek to. The bytes can be a corrupt
+    /// commit-log record or message payload.
+    ///
+    /// The trie has its deletion branch at the root and no live content there, so the root node is a prefix node
+    /// with an ascent-side slot and no descent-side one, and it ends the buffer:
+    /// `... <pointer> <slot length 01> <node code>`. The trie is small enough for the pointer to take one byte.
+    @Test
+    public void testCorruptDeletionBranchPointerThrows() throws IOException
+    {
+        List<DataPoint> points = points(marker("abc", -1, 5), marker("abd", 5, -1), live("xyz", 3));
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points, false, true);
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            ByteBuffer buffer = out.asNewBuffer();
+            int codePos = buffer.limit() - 1;
+            int code = buffer.get(codePos) & 0xFF;
+            assertEquals("root is a prefix node", OnDiskWriteNodeType.PREFIX.bits, code & ~0x7);
+            assertEquals("root has an ascent-side slot", OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT,
+                         code & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
+            assertEquals("root has no descent-side slot", 0, code & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT);
+            assertEquals("pointer is one byte", 1, buffer.get(codePos - 1));
+            int pointerPos = codePos - 2;
+            int slotStart = pointerPos;
+            assertTrue("slot start must fit a one-byte delta", slotStart <= 0xFF);
+
+            // Delta slotStart would put the root at 0, where no branch can end; anything larger is negative.
+            for (int delta : new int[]{ slotStart, 0xFF })
+            {
+                ByteBuffer corrupt = buffer.duplicate();
+                corrupt.put(pointerPos, (byte) delta);
+                OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                    OnDiskDeletionAwareTrie.open(corrupt, LIVE, MARKER, VERSION, -1);
+                DeletionAwareCursor<LivePoint, DeletionMarker> cursor = read.cursor(Direction.FORWARD);
+                UncheckedIOException e = assertThrows(UncheckedIOException.class,
+                                                      () -> cursor.deletionBranchCursor(Direction.FORWARD));
+                assertTrue(e.getMessage(), e.getMessage().contains("Corrupt serialized trie"));
+                read.close();
+            }
         }
     }
 
