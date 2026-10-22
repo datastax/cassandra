@@ -34,24 +34,17 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.EncodingStats;
-import org.apache.cassandra.db.rows.RangeTombstoneMarker;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.TrieBackedRow;
 import org.apache.cassandra.db.rows.TrieTombstoneMarker;
-import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.db.tries.DeletionAwareTrie;
 import org.apache.cassandra.db.tries.OnDiskCursor;
 import org.apache.cassandra.db.tries.OnDiskDeletionAwareTrie;
 import org.apache.cassandra.db.tries.OnDiskDeletionAwareTrieWriter;
 import org.apache.cassandra.db.tries.OnDiskTrieWriter;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.db.tries.ContentManagerPojo;
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
@@ -64,14 +57,12 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * Serializer for {@link TriePartitionUpdate} across messaging versions (VERSION_DS_21+).
  * Encodes partition key, row and tombstone counts, data size footprint, {@link SerializationHeader}, the index the
  * trie keys each of the header's columns by, and writes the update's deletion-aware trie in the on-disk trie format
- * with {@link OnDiskDeletionAwareTrieWriter}, node payloads being encoded by a type-tagged
- * {@link ContentManagerPojo.PojoSerializer}.
+ * with {@link OnDiskDeletionAwareTrieWriter}, node payloads being encoded by {@link ContentSerDe} in the live branch
+ * and by {@link MarkerSerDe} in the deletion branches.
  */
 public class TriePartitionUpdateSerializer
 {
-    private static final int TYPE_NULL = 0;
-    private static final int TYPE_ROW = 1;
-    private static final int TYPE_MARKER = 2;
+    // Tags 0 to 2 are unused.
     private static final int TYPE_CELL = 3;
     private static final int TYPE_LIVENESS = 4;
     private static final int TYPE_COMPLEX_MARKER = 5;
@@ -89,15 +80,30 @@ public class TriePartitionUpdateSerializer
     {
     }
 
+    /// Whether [#serializedSize] keeps the size it arrives at, and the trie layout, on the update for the write that
+    /// follows. Only at [MessagingService#VERSION_DS_21], the one version the trie encoding is written at today, which
+    /// the fields that keep them are named after; another version would need fields of its own.
+    static boolean cachedAt(int version)
+    {
+        return version == MessagingService.VERSION_DS_21;
+    }
+
+    /// The trie encoding exists at the versions whose partition updates carry the format byte that says which encoding
+    /// follows, and only there.
+    private static void checkVersion(int version)
+    {
+        if (!PartitionUpdate.PartitionUpdateSerializer.hasFormatByte(version))
+            throw new IllegalArgumentException("No trie encoding of a partition update at messaging version " + version);
+    }
+
     /**
      * Serializes a partition update using the trie-native wire format.
-     * Converts {@link PartitionUpdate} to {@link TriePartitionUpdate} if needed, writes partition key and counters,
-     * emits messaging {@link SerializationHeader}, and writes the deletion-aware trie structure.
+     * Writes partition key and counters, emits messaging {@link SerializationHeader}, and writes the deletion-aware
+     * trie structure.
      */
-    public static void serialize(PartitionUpdate update, DataOutputPlus out, int version) throws IOException
+    public static void serialize(TriePartitionUpdate trieUpdate, DataOutputPlus out, int version) throws IOException
     {
-        TriePartitionUpdate trieUpdate = TriePartitionUpdate.asTrieUpdate(update);
-
+        checkVersion(version);
         ByteBufferUtil.writeWithVIntLength(trieUpdate.partitionKey().getKey(), out);
         out.writeUnsignedVInt32(trieUpdate.rowCountIncludingStatic);
         out.writeUnsignedVInt32(trieUpdate.tombstoneCount);
@@ -106,11 +112,8 @@ public class TriePartitionUpdateSerializer
         SerializationHeader header = new SerializationHeader(false, trieUpdate.metadata(), trieUpdate.columns(), trieUpdate.stats());
         SerializationHeader.serializer.serializeForMessaging(header, null, out, true);
         serializeColumnIndexes(trieUpdate.metadata(), header.columns(), out);
-        SerializationHelper helper = new SerializationHelper(header);
 
-        ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(trieUpdate.metadata(), helper, header, version, null, false);
-
-        writeTrie(trieUpdate, pojoSerializer, out, version);
+        writeTrie(trieUpdate, header, out, version);
     }
 
     /// Writes the index the update's trie keys each of the header's columns by, static ones first: the column's position
@@ -128,17 +131,26 @@ public class TriePartitionUpdateSerializer
     private static long columnIndexesSerializedSize(TableMetadata metadata, RegularAndStaticColumns columns)
     {
         long size = 0;
-        for (ColumnMetadata column : columns)
+        for (ColumnMetadata column : columns.statics)
+            size += TypeSizes.sizeofUnsignedVInt(columnIndex(metadata, column));
+        for (ColumnMetadata column : columns.regulars)
             size += TypeSizes.sizeofUnsignedVInt(columnIndex(metadata, column));
         return size;
     }
 
     private static int columnIndex(TableMetadata metadata, ColumnMetadata column)
     {
-        int index = metadata.regularAndStaticColumns().columns(column.isStatic()).simpleIdx(column);
+        int index = localIndex(metadata, column);
         if (index < 0)
             throw new IllegalStateException("Column " + column.name + " of a partition update is not a column of " + metadata);
         return index;
+    }
+
+    /// The column's position among the static or regular columns of this node's version of the table, or a negative
+    /// number if this node does not have the column.
+    private static int localIndex(TableMetadata metadata, ColumnMetadata column)
+    {
+        return metadata.regularAndStaticColumns().columns(column.isStatic()).simpleIdx(column);
     }
 
     private static int[] deserializeColumnIndexes(DataInputPlus in, Columns columns) throws IOException
@@ -156,7 +168,7 @@ public class TriePartitionUpdateSerializer
         int i = 0;
         for (ColumnMetadata column : columns)
         {
-            if (metadata.regularAndStaticColumns().columns(column.isStatic()).simpleIdx(column) != indexes[i++])
+            if (localIndex(metadata, column) != indexes[i++])
                 return false;
         }
         return true;
@@ -171,10 +183,11 @@ public class TriePartitionUpdateSerializer
     ///
     /// If [#serializedSize] has already laid this trie out for this version, its bytes are written
     /// instead of laying it out again, and the update stops holding them. Duplicated because the
-    /// retained buffer can be written from more than one thread at a time and not every
-    /// [DataOutputPlus] leaves the source's position alone.
+    /// retained buffer can be written from more than one thread at a time -- two writers can both
+    /// take it before either clears the field -- and not every [DataOutputPlus] leaves the
+    /// source's position alone.
     private static void writeTrie(TriePartitionUpdate trieUpdate,
-                                  ContentManagerPojo.PojoSerializer<Object> pojoSerializer,
+                                  SerializationHeader header,
                                   DataOutputPlus out,
                                   int version) throws IOException
     {
@@ -185,23 +198,27 @@ public class TriePartitionUpdateSerializer
             return;
         }
 
-        try (DataOutputBuffer trieBytes = new DataOutputBuffer())
+        try (DataOutputBuffer trieBytes = layOut(trieUpdate, header))
         {
-            OnDiskDeletionAwareTrieWriter.write(trieUpdate.trie(),
-                                                contentSerializer(pojoSerializer),
-                                                deletionSerializer(pojoSerializer),
-                                                trieBytes);
             // out.write copies the buffer synchronously and leaves its position alone, and nothing
             // touches trieBytes after this, so the trie does not have to be copied out first.
             ByteBufferUtil.writeWithVIntLength(trieBytes.unsafeGetBufferAndFlip(), out);
         }
     }
 
+    /// Lays the update's trie out in the on-disk trie format.
+    private static DataOutputBuffer layOut(TriePartitionUpdate trieUpdate, SerializationHeader header) throws IOException
+    {
+        DataOutputBuffer trieBytes = new DataOutputBuffer();
+        OnDiskDeletionAwareTrieWriter.write(trieUpdate.trie(), new ContentSerDe(header), new MarkerSerDe(header), trieBytes);
+        return trieBytes;
+    }
+
     /// The trie [#serializedSize] laid out for this version, if it did, taken off the update so that it is not held
     /// any longer than the write that uses it.
     private static ByteBuffer takeRetainedTrie(TriePartitionUpdate trieUpdate, int version)
     {
-        if (version != MessagingService.VERSION_DS_21)
+        if (!cachedAt(version))
             return null;
         ByteBuffer laidOut = trieUpdate.serializedTrieDS21;
         if (laidOut != null)
@@ -216,58 +233,18 @@ public class TriePartitionUpdateSerializer
     /// which grows by doubling and can be up to twice their size. Kept only at the version whose size is kept too.
     private static void retainTrie(TriePartitionUpdate trieUpdate, int version, DataOutputBuffer laidOut)
     {
-        if (version == MessagingService.VERSION_DS_21 && laidOut.getLength() < RETAINED_TRIE_SIZE_LIMIT)
+        if (cachedAt(version) && laidOut.getLength() < RETAINED_TRIE_SIZE_LIMIT)
             trieUpdate.serializedTrieDS21 = laidOut.asNewBuffer();
     }
 
-    /// The trie format keeps live content and deletion markers in separate branches, each with its
-    /// own serializer, while the payload codec is one type-tagged serializer over both. These adapt
-    /// the one to the other so the cell encoding stays in a single place.
-    private static OnDiskTrieWriter.DataSerializer<Object> contentSerializer(ContentManagerPojo.PojoSerializer<Object> pojo)
-    {
-        return (out, value) -> pojo.serialize(value, out);
-    }
-
-    private static OnDiskTrieWriter.DataSerializer<TrieTombstoneMarker> deletionSerializer(ContentManagerPojo.PojoSerializer<Object> pojo)
-    {
-        return (out, value) -> pojo.serialize(value, out);
-    }
-
-    private static OnDiskCursor.DataDeserializer<Object> contentDeserializer(ContentManagerPojo.PojoSerializer<Object> pojo)
-    {
-        return (rdr, length) -> {
-            long start = OnDiskCursor.position(rdr);
-            Object content = pojo.deserialize(rdr);
-            checkReadToEnd(rdr, start, length);
-            return content;
-        };
-    }
-
-    private static OnDiskCursor.DataDeserializer<TrieTombstoneMarker> deletionDeserializer(ContentManagerPojo.PojoSerializer<Object> pojo)
-    {
-        return (rdr, length) -> {
-            long start = OnDiskCursor.position(rdr);
-            TrieTombstoneMarker marker = (TrieTombstoneMarker) pojo.deserialize(rdr);
-            checkReadToEnd(rdr, start, length);
-            return marker;
-        };
-    }
-
     /**
-     * Deserializes a {@link TriePartitionUpdate} from an input stream using messaging version, table metadata, and default ON_HEAP buffer type.
-     */
-    public static TriePartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag, TableMetadata metadata) throws IOException
-    {
-        return deserialize(in, version, flag, metadata, BufferType.ON_HEAP);
-    }
-
-    /**
-     * Deserializes a {@link TriePartitionUpdate} from an input stream using messaging version, table metadata, and target buffer type.
+     * Deserializes a {@link TriePartitionUpdate} from an input stream using messaging version and table metadata.
      * Reconstructs the decorated key and header, and opens the trie bytes as an
      * {@link OnDiskDeletionAwareTrie} that is walked in place rather than rebuilt.
      */
-    public static TriePartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag, TableMetadata metadata, BufferType bufferType) throws IOException
+    public static TriePartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag, TableMetadata metadata) throws IOException
     {
+        checkVersion(version);
         DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.readWithVIntLength(in));
         int rowCountIncludingStatic = in.readUnsignedVInt32();
         int tombstoneCount = in.readUnsignedVInt32();
@@ -293,16 +270,14 @@ public class TriePartitionUpdateSerializer
         boolean mayHoldDroppedData = latestDropTime != Long.MIN_VALUE
                                      && (minTimestamp == EncodingStats.TIMESTAMP_EPOCH || minTimestamp <= latestDropTime);
 
-        ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(metadata, null, header, version, desHelper, mayHoldDroppedData);
-
         // The trie is walked in place over these bytes rather than rebuilt, so the update holds a
         // view over the buffer. TrieBackedPartition stores a DeletionAwareTrie, not specifically an
         // in-memory one, which is what makes reading without materialising possible.
         ByteBuffer trieBytes = ByteBufferUtil.readWithVIntLength(in);
         DeletionAwareTrie<Object, TrieTombstoneMarker> trie =
             OnDiskDeletionAwareTrie.open(trieBytes,
-                                         contentDeserializer(pojoSerializer),
-                                         deletionDeserializer(pojoSerializer),
+                                         new ContentSerDe(header, desHelper, mayHoldDroppedData),
+                                         new MarkerSerDe(header),
                                          TrieBackedPartition.BYTE_COMPARABLE_VERSION,
                                          -1);
 
@@ -348,15 +323,13 @@ public class TriePartitionUpdateSerializer
     /**
      * Computes serialized size of {@link TriePartitionUpdate} wire format.
      */
-    public static long serializedSize(PartitionUpdate update, int version)
+    public static long serializedSize(TriePartitionUpdate trieUpdate, int version)
     {
-        TriePartitionUpdate trieUpdate = TriePartitionUpdate.asTrieUpdate(update);
-        if (version == MessagingService.VERSION_DS_21 && trieUpdate.serializedSizeDS21 >= 0)
+        checkVersion(version);
+        if (cachedAt(version) && trieUpdate.serializedSizeDS21 >= 0)
             return trieUpdate.serializedSizeDS21;
 
         SerializationHeader header = new SerializationHeader(false, trieUpdate.metadata(), trieUpdate.columns(), trieUpdate.stats());
-        SerializationHelper helper = new SerializationHelper(header);
-        ContentManagerPojo.PojoSerializer<Object> pojoSerializer = createPojoSerializer(trieUpdate.metadata(), helper, header, version, null, false);
 
         long size = ByteBufferUtil.serializedSizeWithVIntLength(trieUpdate.partitionKey().getKey())
                + TypeSizes.sizeofUnsignedVInt(trieUpdate.rowCountIncludingStatic)
@@ -364,9 +337,9 @@ public class TriePartitionUpdateSerializer
                + TypeSizes.sizeofUnsignedVInt(trieUpdate.dataSize())
                + SerializationHeader.serializer.serializedSizeForMessaging(header, null, true)
                + columnIndexesSerializedSize(trieUpdate.metadata(), header.columns())
-               + serializedTrieSize(trieUpdate, pojoSerializer, version);
+               + serializedTrieSize(trieUpdate, header, version);
 
-        if (version == MessagingService.VERSION_DS_21)
+        if (cachedAt(version))
             trieUpdate.serializedSizeDS21 = Ints.saturatedCast(size);
 
         return size;
@@ -378,14 +351,10 @@ public class TriePartitionUpdateSerializer
     /// instead of building the same bytes a second time -- [org.apache.cassandra.db.Mutation]
     /// sizes a mutation and then immediately serializes it, so the second build was the common
     /// case rather than a rare one.
-    private static long serializedTrieSize(TriePartitionUpdate trieUpdate, ContentManagerPojo.PojoSerializer<Object> pojoSerializer, int version)
+    private static long serializedTrieSize(TriePartitionUpdate trieUpdate, SerializationHeader header, int version)
     {
-        try (DataOutputBuffer trieBytes = new DataOutputBuffer())
+        try (DataOutputBuffer trieBytes = layOut(trieUpdate, header))
         {
-            OnDiskDeletionAwareTrieWriter.write(trieUpdate.trie(),
-                                                contentSerializer(pojoSerializer),
-                                                deletionSerializer(pojoSerializer),
-                                                trieBytes);
             int trieLength = trieBytes.getLength();
             retainTrie(trieUpdate, version, trieBytes);
             return TypeSizes.sizeofUnsignedVInt(trieLength) + trieLength;
@@ -410,54 +379,14 @@ public class TriePartitionUpdateSerializer
 
     private static final ColumnMetadata[] EMPTY_COLS = new ColumnMetadata[0];
 
-    /// Locates a column index within the serialization header columns.
-    ///
-    /// @param targetCols regular or static column metadata from the serialization header
-    /// @param col column metadata to search for
-    /// @return 0-based index of the column in the header array
-    /// @throws IllegalArgumentException if the column is missing from the header
-    private static int indexOfColumn(ColumnMetadata[] targetCols, ColumnMetadata col)
-    {
-        int pos = col.position();
-        if (pos >= 0 && pos < targetCols.length && (targetCols[pos] == col || targetCols[pos].equals(col)))
-            return pos;
-
-        int len = targetCols.length;
-        for (int i = 0; i < len; i++)
-        {
-            if (targetCols[i] == col)
-                return i;
-        }
-        for (int i = 0; i < len; i++)
-        {
-            if (targetCols[i].equals(col))
-                return i;
-        }
-        throw new IllegalArgumentException("Column not found in serialization header: " + col.name);
-    }
-
     /**
-     * Creates a {@link ContentManagerPojo.PojoSerializer} adapter for trie node payloads.
+     * Encodes and decodes the payloads of the trie's live branch, each behind a tag: {@link Cell}, {@link LivenessInfo},
+     * and the row and partition markers.
      */
-    private static ContentManagerPojo.PojoSerializer<Object> createPojoSerializer(TableMetadata metadata,
-                                                                                  SerializationHelper helper,
-                                                                                  SerializationHeader header,
-                                                                                  int version,
-                                                                                  DeserializationHelper desHelper,
-                                                                                  boolean mayHoldDroppedData)
-    {
-        return new TriePayloadSerializer(header, helper, version, desHelper, mayHoldDroppedData);
-    }
-
-    /**
-     * Static PojoSerializer implementation for heterogeneous trie node payloads.
-     * Encodes and decodes {@link Cell}, {@link Row}, {@link RangeTombstoneMarker}, {@link LivenessInfo}, and {@link TrieTombstoneMarker}.
-     */
-    private static class TriePayloadSerializer implements ContentManagerPojo.PojoSerializer<Object>
+    private static final class ContentSerDe implements OnDiskTrieWriter.DataSerializer<Object>, OnDiskCursor.DataDeserializer<Object>
     {
         private final SerializationHeader header;
-        private final SerializationHelper helper;
-        private final int version;
+        /// Only set, with the arrays below, for reading.
         private final DeserializationHelper desHelper;
         private final ColumnMetadata[] regularCols;
         private final ColumnMetadata[] staticCols;
@@ -465,11 +394,20 @@ public class TriePartitionUpdateSerializer
         /// no cell is left out.
         private final boolean mayHoldDroppedData;
 
-        TriePayloadSerializer(SerializationHeader header, SerializationHelper helper, int version, DeserializationHelper desHelper, boolean mayHoldDroppedData)
+        /// For writing.
+        ContentSerDe(SerializationHeader header)
         {
             this.header = header;
-            this.helper = helper;
-            this.version = version;
+            this.desHelper = null;
+            this.regularCols = null;
+            this.staticCols = null;
+            this.mayHoldDroppedData = false;
+        }
+
+        /// For reading.
+        ContentSerDe(SerializationHeader header, DeserializationHelper desHelper, boolean mayHoldDroppedData)
+        {
+            this.header = header;
             this.desHelper = desHelper;
             this.mayHoldDroppedData = mayHoldDroppedData;
 
@@ -480,64 +418,49 @@ public class TriePartitionUpdateSerializer
         }
 
         @Override
-        public void serialize(Object content, DataOutputPlus out) throws IOException
+        public void serialize(DataOutputPlus out, Object content) throws IOException
         {
-            if (content == null)                                 { out.writeByte(TYPE_NULL); return; }
             if (content instanceof Cell)                         { out.writeByte(TYPE_CELL); serializeCell((Cell<?>) content, out); return; }
-            if (isEmptyLiveness(content))                        { out.writeByte(TYPE_EMPTY_LIVENESS); return; }
-            if (content instanceof LivenessInfo)                 { out.writeByte(TYPE_LIVENESS); serializeLiveness((LivenessInfo) content, out); return; }
+            if (content instanceof LivenessInfo)                 { serializeLiveness((LivenessInfo) content, out); return; }
             if (content == TrieBackedRow.COMPLEX_COLUMN_MARKER)  { out.writeByte(TYPE_COMPLEX_MARKER); return; }
             if (content == TrieBackedPartition.PARTITION_MARKER) { out.writeByte(TYPE_PARTITION_MARKER); return; }
-
-            if (content instanceof Row)                  { out.writeByte(TYPE_ROW); UnfilteredSerializer.serializer.serialize((Row) content, helper, out, version); return; }
-            if (content instanceof RangeTombstoneMarker) { out.writeByte(TYPE_MARKER); UnfilteredSerializer.serializer.serialize((RangeTombstoneMarker) content, helper, out, version); return; }
-            if (content instanceof TrieTombstoneMarker)  { out.writeByte(TYPE_TRIE_TOMBSTONE_MARKER); serializeTrieTombstoneMarker((TrieTombstoneMarker) content, out, header); return; }
 
             throw new IllegalArgumentException("Unknown content type in trie: " + content.getClass().getName());
         }
 
         @Override
-        public Object deserialize(DataInputPlus in) throws IOException
+        public Object deserialize(DataInputPlus in, int length) throws IOException
+        {
+            long start = OnDiskCursor.position(in);
+            Object content = deserializeContent(in);
+            checkReadToEnd(in, start, length);
+            return content;
+        }
+
+        private Object deserializeContent(DataInputPlus in) throws IOException
         {
             int type = in.readByte();
             switch (type)
             {
-                case TYPE_NULL:                  return null;
                 case TYPE_CELL:                  return deserializeCell(in);
                 case TYPE_LIVENESS:              return deserializeLiveness(in);
                 case TYPE_EMPTY_LIVENESS:        return LivenessInfo.EMPTY;
-                case TYPE_ROW:                   return UnfilteredSerializer.serializer.deserialize(in, header, desHelper, BTreeRow.sortedBuilder());
-                case TYPE_MARKER:                return UnfilteredSerializer.serializer.deserialize(in, header, desHelper, BTreeRow.sortedBuilder());
                 case TYPE_COMPLEX_MARKER:        return TrieBackedRow.COMPLEX_COLUMN_MARKER;
                 case TYPE_PARTITION_MARKER:      return TrieBackedPartition.PARTITION_MARKER;
-                case TYPE_TRIE_TOMBSTONE_MARKER: return deserializeTrieTombstoneMarker(in, header);
                 default:                         throw new IOException("Unknown content type tag: " + type);
             }
-        }
-
-        @Override
-        public long serializedSize(Object content)
-        {
-            if (content == null || content == TrieBackedRow.COMPLEX_COLUMN_MARKER || content == TrieBackedPartition.PARTITION_MARKER || isEmptyLiveness(content))
-                return 1L;
-
-            if (content instanceof Cell)                 return 1L + serializedSizeCell((Cell<?>) content);
-            if (content instanceof LivenessInfo)         return 1L + serializedSizeLiveness((LivenessInfo) content);
-            if (content instanceof Row)                  return 1L + UnfilteredSerializer.serializer.serializedSize((Row) content, helper, version);
-            if (content instanceof RangeTombstoneMarker) return 1L + UnfilteredSerializer.serializer.serializedSize((RangeTombstoneMarker) content, helper, version);
-            if (content instanceof TrieTombstoneMarker)  return 1L + serializedSizeTrieTombstoneMarker((TrieTombstoneMarker) content, header);
-
-            throw new IllegalArgumentException("Unknown content type in trie: " + content.getClass().getName());
         }
 
         private void serializeCell(Cell<?> cell, DataOutputPlus out) throws IOException
         {
             ColumnMetadata col = cell.column();
             boolean isStatic = col.isStatic();
-            ColumnMetadata[] targetCols = isStatic ? staticCols : regularCols;
-            int idx = indexOfColumn(targetCols, col);
+            // The column's position among the header's columns, which is its index in the arrays the reader builds.
+            int idx = header.columns().columns(isStatic).simpleIdx(col);
+            if (idx < 0)
+                throw new IllegalArgumentException("Column not found in serialization header: " + col.name);
             out.writeUnsignedVInt32((idx << 1) | (isStatic ? 1 : 0));
-            Cell.serializer.serialize(cell, cell.column(), out, LivenessInfo.EMPTY, header);
+            Cell.serializer.serialize(cell, col, out, LivenessInfo.EMPTY, header);
         }
 
         private Cell<?> deserializeCell(DataInputPlus in) throws IOException
@@ -546,7 +469,7 @@ public class TriePartitionUpdateSerializer
             boolean isStatic = (encoded & 1) != 0;
             int idx = encoded >>> 1;
             ColumnMetadata[] targetCols = isStatic ? staticCols : regularCols;
-            if (idx < 0 || idx >= targetCols.length)
+            if (idx >= targetCols.length)
                 throw new IOException(String.format("Invalid column index %d for %s static columns (total %d)", idx, isStatic ? "" : "non-", targetCols.length));
             ColumnMetadata column = targetCols[idx];
             Cell<?> cell = Cell.serializer.deserialize(in, LivenessInfo.EMPTY, column, header, desHelper, ByteBufferAccessor.instance);
@@ -556,23 +479,16 @@ public class TriePartitionUpdateSerializer
             return mayHoldDroppedData && desHelper.isDropped(cell, false) ? null : cell;
         }
 
-        private long serializedSizeCell(Cell<?> cell)
-        {
-            ColumnMetadata col = cell.column();
-            boolean isStatic = col.isStatic();
-            ColumnMetadata[] targetCols = isStatic ? staticCols : regularCols;
-            int idx = indexOfColumn(targetCols, col);
-            return TypeSizes.sizeofUnsignedVInt((idx << 1) | (isStatic ? 1 : 0))
-                   + Cell.serializer.serializedSize(cell, cell.column(), LivenessInfo.EMPTY, header);
-        }
-
-        private static boolean isEmptyLiveness(Object content)
-        {
-            return content instanceof LivenessInfo && ((LivenessInfo) content).isEmpty();
-        }
-
+        /// Writes the tag as well, as there is one for [LivenessInfo#EMPTY] and one for any other liveness.
         private void serializeLiveness(LivenessInfo info, DataOutputPlus out) throws IOException
         {
+            if (info.isEmpty())
+            {
+                out.writeByte(TYPE_EMPTY_LIVENESS);
+                return;
+            }
+
+            out.writeByte(TYPE_LIVENESS);
             boolean isExpiring = info.isExpiring();
             out.writeBoolean(isExpiring);
             header.writeTimestamp(info.timestamp(), out);
@@ -595,109 +511,119 @@ public class TriePartitionUpdateSerializer
             }
             return LivenessInfo.create(ts, 0);
         }
+    }
 
-        private long serializedSizeLiveness(LivenessInfo info)
+    /**
+     * Encodes and decodes the deletion markers of the trie's deletion branches, each behind
+     * {@link #TYPE_TRIE_TOMBSTONE_MARKER}, the only tag a deletion branch can hold.
+     */
+    private static final class MarkerSerDe implements OnDiskTrieWriter.DataSerializer<TrieTombstoneMarker>, OnDiskCursor.DataDeserializer<TrieTombstoneMarker>
+    {
+        static
         {
-            long size = 1L + header.timestampSerializedSize(info.timestamp());
-            if (info.isExpiring())
-                size += header.ttlSerializedSize(info.ttl()) + header.localDeletionTimeSerializedSize(info.localExpirationTime());
-            return size;
-        }
-    }
-
-    /**
-     * Serializes a {@link TrieTombstoneMarker.Covering} instance (boolean presence tag, {@link DeletionTime}, and {@link TrieTombstoneMarker.Kind} code).
-     */
-    private static void serializeCovering(TrieTombstoneMarker.Covering covering, DataOutputPlus out, SerializationHeader header) throws IOException
-    {
-        if (covering == null)
-        {
-            out.writeBoolean(false);
-        }
-        else
-        {
-            out.writeBoolean(true);
-            header.writeDeletionTime(covering, out);
-            out.writeByte(covering.deletionKind().code);
-        }
-    }
-
-    /**
-     * Deserializes a {@link TrieTombstoneMarker.Covering} instance from stream.
-     */
-    private static TrieTombstoneMarker.Covering deserializeCovering(DataInputPlus in, SerializationHeader header) throws IOException
-    {
-        if (!in.readBoolean())
-            return null;
-        DeletionTime dt = header.readDeletionTime(in);
-        if (dt.isLive())
-            throw new IOException("Live deletion time in a deletion marker");
-        int code = in.readByte() & 0xFF;
-        TrieTombstoneMarker.Kind kind = TrieTombstoneMarker.Kind.fromCode(code);
-        if (kind == null)
-            throw new IOException("Invalid TrieTombstoneMarker.Kind code: " + code);
-        return TrieTombstoneMarker.covering(dt, kind);
-    }
-
-    /**
-     * Computes serialized size of {@link TrieTombstoneMarker.Covering}.
-     */
-    private static long serializedSizeCovering(TrieTombstoneMarker.Covering covering, SerializationHeader header)
-    {
-        if (covering == null)
-            return 1L;
-        return 1L + header.deletionTimeSerializedSize(covering) + 1L;
-    }
-
-    /**
-     * Serializes a {@link TrieTombstoneMarker} across left, right, and point deletion bounds.
-     */
-    private static void serializeTrieTombstoneMarker(TrieTombstoneMarker marker, DataOutputPlus out, SerializationHeader header) throws IOException
-    {
-        serializeCovering(marker.leftDeletion(), out, header);
-        serializeCovering(marker.rightDeletion(), out, header);
-        serializeCovering(marker.pointDeletion(), out, header);
-        boolean hasRowLevelMarker = marker.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW);
-        // A point deletion is read back without a level marker; one that had it would lose it unnoticed.
-        assert marker.pointDeletion() == null || !hasRowLevelMarker : "Point deletion with a row level marker: " + marker;
-        out.writeBoolean(hasRowLevelMarker);
-    }
-
-    /**
-     * Deserializes a {@link TrieTombstoneMarker} from stream.
-     */
-    private static TrieTombstoneMarker deserializeTrieTombstoneMarker(DataInputPlus in, SerializationHeader header) throws IOException
-    {
-        TrieTombstoneMarker.Covering left = deserializeCovering(in, header);
-        TrieTombstoneMarker.Covering right = deserializeCovering(in, header);
-        TrieTombstoneMarker.Covering point = deserializeCovering(in, header);
-        boolean hasRowLevelMarker = in.readBoolean();
-        TrieTombstoneMarker.LevelMarker levelMarker = hasRowLevelMarker ? TrieTombstoneMarker.LevelMarker.ROW : null;
-
-        if (point != null)
-        {
-            // A point deletion with the same deletion on both sides is built with one instance for both.
-            if (left != null && left.equals(right))
-                return new TrieTombstoneMarker.Point(point, left);
-            return new TrieTombstoneMarker.Point(point, left, right);
+            // MarkerSerDe records the level marker as one boolean, so it can only encode ROW. A second constant needs a format change.
+            assert TrieTombstoneMarker.LevelMarker.values().length == 1 : "MarkerSerDe encodes only the ROW level marker";
         }
 
-        // Every marker the writer writes changes something; make would return a bare covering deletion, or nothing,
-        // for one that does not.
-        if (levelMarker == null && Objects.equals(left, right))
-            throw new IOException("Deletion marker with the same deletion on both sides and nothing else: " + left);
+        private final SerializationHeader header;
 
-        return TrieTombstoneMarker.make(left, right, levelMarker);
-    }
+        MarkerSerDe(SerializationHeader header)
+        {
+            this.header = header;
+        }
 
-    /**
-     * Computes serialized size of {@link TrieTombstoneMarker}.
-     */
-    private static long serializedSizeTrieTombstoneMarker(TrieTombstoneMarker marker, SerializationHeader header)
-    {
-        return serializedSizeCovering(marker.leftDeletion(), header)
-               + serializedSizeCovering(marker.rightDeletion(), header)
-               + serializedSizeCovering(marker.pointDeletion(), header)
-               + 1L;
+        @Override
+        public void serialize(DataOutputPlus out, TrieTombstoneMarker marker) throws IOException
+        {
+            out.writeByte(TYPE_TRIE_TOMBSTONE_MARKER);
+            serializeTrieTombstoneMarker(marker, out);
+        }
+
+        @Override
+        public TrieTombstoneMarker deserialize(DataInputPlus in, int length) throws IOException
+        {
+            long start = OnDiskCursor.position(in);
+            int type = in.readByte();
+            if (type != TYPE_TRIE_TOMBSTONE_MARKER)
+                throw new IOException("Unexpected content type tag " + type + " in a deletion branch");
+            TrieTombstoneMarker marker = deserializeTrieTombstoneMarker(in);
+            checkReadToEnd(in, start, length);
+            return marker;
+        }
+
+        /**
+         * Serializes a {@link TrieTombstoneMarker.Covering} instance (boolean presence tag, {@link DeletionTime}, and {@link TrieTombstoneMarker.Kind} code).
+         */
+        private void serializeCovering(TrieTombstoneMarker.Covering covering, DataOutputPlus out) throws IOException
+        {
+            if (covering == null)
+            {
+                out.writeBoolean(false);
+            }
+            else
+            {
+                out.writeBoolean(true);
+                header.writeDeletionTime(covering, out);
+                out.writeByte(covering.deletionKind().code);
+            }
+        }
+
+        /**
+         * Deserializes a {@link TrieTombstoneMarker.Covering} instance from stream.
+         */
+        private TrieTombstoneMarker.Covering deserializeCovering(DataInputPlus in) throws IOException
+        {
+            if (!in.readBoolean())
+                return null;
+            DeletionTime dt = header.readDeletionTime(in);
+            if (dt.isLive())
+                throw new IOException("Live deletion time in a deletion marker");
+            int code = in.readByte() & 0xFF;
+            TrieTombstoneMarker.Kind kind = TrieTombstoneMarker.Kind.fromCode(code);
+            if (kind == null)
+                throw new IOException("Invalid TrieTombstoneMarker.Kind code: " + code);
+            return TrieTombstoneMarker.covering(dt, kind);
+        }
+
+        /**
+         * Serializes a {@link TrieTombstoneMarker} across left, right, and point deletion bounds.
+         */
+        private void serializeTrieTombstoneMarker(TrieTombstoneMarker marker, DataOutputPlus out) throws IOException
+        {
+            serializeCovering(marker.leftDeletion(), out);
+            serializeCovering(marker.rightDeletion(), out);
+            serializeCovering(marker.pointDeletion(), out);
+            boolean hasRowLevelMarker = marker.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW);
+            // A point deletion is read back without a level marker; one that had it would lose it unnoticed.
+            assert marker.pointDeletion() == null || !hasRowLevelMarker : "Point deletion with a row level marker: " + marker;
+            out.writeBoolean(hasRowLevelMarker);
+        }
+
+        /**
+         * Deserializes a {@link TrieTombstoneMarker} from stream.
+         */
+        private TrieTombstoneMarker deserializeTrieTombstoneMarker(DataInputPlus in) throws IOException
+        {
+            TrieTombstoneMarker.Covering left = deserializeCovering(in);
+            TrieTombstoneMarker.Covering right = deserializeCovering(in);
+            TrieTombstoneMarker.Covering point = deserializeCovering(in);
+            boolean hasRowLevelMarker = in.readBoolean();
+            TrieTombstoneMarker.LevelMarker levelMarker = hasRowLevelMarker ? TrieTombstoneMarker.LevelMarker.ROW : null;
+
+            if (point != null)
+            {
+                // A point deletion with the same deletion on both sides is built with one instance for both.
+                if (left != null && left.equals(right))
+                    return new TrieTombstoneMarker.Point(point, left);
+                return new TrieTombstoneMarker.Point(point, left, right);
+            }
+
+            // Every marker the writer writes changes something; make would return a bare covering deletion, or nothing,
+            // for one that does not.
+            if (levelMarker == null && Objects.equals(left, right))
+                throw new IOException("Deletion marker with the same deletion on both sides and nothing else: " + left);
+
+            return TrieTombstoneMarker.make(left, right, levelMarker);
+        }
     }
 }

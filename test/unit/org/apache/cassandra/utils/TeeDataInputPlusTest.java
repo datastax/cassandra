@@ -138,4 +138,17 @@ public class TeeDataInputPlusTest
         assertTrue(limitedTee.isLimitReached());
         assertTrue(Arrays.equals(Arrays.copyOf(testData, LIMITED_SIZE - 1 ), limitedTeeData));
     }
+
+    /**
+     * The tee keeps what it read only while that stays below the limit, as a mutation keeps its serialized bytes only
+     * while they are smaller than the limit: input of exactly the limit's size is not kept whole.
+     */
+    @Test
+    public void testInputOfTheLimitsSizeReachesTheLimit() throws Exception
+    {
+        byte[] testData = new byte[8];
+        TeeDataInputPlus tee = new TeeDataInputPlus(new DataInputBuffer(testData), new DataOutputBuffer(), testData.length);
+        tee.readLong();
+        assertTrue(tee.isLimitReached());
+    }
 }
