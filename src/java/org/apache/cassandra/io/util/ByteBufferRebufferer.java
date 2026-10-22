@@ -95,7 +95,7 @@ public class ByteBufferRebufferer implements Rebufferer, RebuffererFactory
     }
 
     /// There is no file behind this, so there is no channel. Nothing on the trie read path calls
-    /// this — [org.apache.cassandra.db.tries.OnDiskBaseTrie.WithoutChannel] has nothing to close.
+    /// this — a trie over a buffer owns no channel and has nothing to close.
     @Override
     public ChannelProxy channel()
     {

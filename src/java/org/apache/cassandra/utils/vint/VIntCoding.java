@@ -233,11 +233,7 @@ public class VIntCoding
     }
     public static int computeUnsignedVIntSize(ByteBuffer input, int readerIndex, int readerLimit)
     {
-        if (readerIndex >= readerLimit)
-            return -1;
-
-        int firstByte = input.get(readerIndex);
-        return 1 + Integer.numberOfLeadingZeros(~(firstByte << 24));
+        return readerIndex >= readerLimit ? -1 : computeUnsignedVIntSizeUnchecked(input, readerIndex);
     }
 
     /**

@@ -32,7 +32,6 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -224,7 +223,7 @@ public class OnDiskRangeTrieTest
         File file = OnDiskTrieWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")));
 
         TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(new ChannelProxy(file)));
-        try (OnDiskRangeTrie<TestRangeState> actual = new OnDiskRangeTrie.WithOwnChannel<>(factory, RANGE_SERDE, VERSION, factory.fileLength()))
+        try (OnDiskRangeTrie<TestRangeState> actual = new OnDiskRangeTrie<>(factory, RANGE_SERDE, VERSION, factory.fileLength(), factory.channel()))
         {
             for (int transition = 0; transition <= 0xFF; ++transition)
             {
@@ -338,7 +337,7 @@ public class OnDiskRangeTrieTest
     private static void walkRandomly(Random rand, byte[] bytes, int maxSteps)
     {
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
-        OnDiskRangeTrie<TestRangeState> trie = new OnDiskRangeTrie.WithoutChannel<>(new ByteBufferRebufferer(buffer), RANGE_UNTRUSTED, VERSION, buffer.limit());
+        OnDiskRangeTrie<TestRangeState> trie = OnDiskRangeTrie.open(buffer, RANGE_UNTRUSTED, VERSION, buffer.limit());
         Direction direction = rand.nextBoolean() ? Direction.FORWARD : Direction.REVERSE;
         // Not verified: corrupt bytes can list transitions out of order, which the reader does not check.
         TrieUtil.walkRandomlyAndClose(rand, trie.makeCursor(direction), new int[1], maxSteps, (cursor, position) -> cursor.state());

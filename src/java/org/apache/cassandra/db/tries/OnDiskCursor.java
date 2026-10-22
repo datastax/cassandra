@@ -40,7 +40,7 @@ public class OnDiskCursor<T> implements Cursor<T>
                         boolean alternateInAscentSlot,
                         long root)
     {
-        this(deserializer, rebuffererFactory, byteComparableVersion, direction, isOrdered, alternateInAscentSlot);
+        this(deserializer, rebuffererFactory, byteComparableVersion, direction, isOrdered, alternateInAscentSlot, null);
         try
         {
             descendInto(Cursor.rootPosition(direction), root);
@@ -54,7 +54,8 @@ public class OnDiskCursor<T> implements Cursor<T>
 
     /// Start at a node given as the pair that identifies it, as [#currentFullNodePostCodePos] and
     /// [#currentFullNodeCode] hold it. Used for tails, whose root can be a position inside a chain node, which has
-    /// no code byte of its own in the file.
+    /// no code byte of its own in the file. `tailRootAscentContent` is null except for a range tail; see
+    /// [#tailRootAscentContent].
     public OnDiskCursor(DataDeserializer<T> deserializer,
                         RebuffererFactory rebuffererFactory,
                         ByteComparable.Version byteComparableVersion,
@@ -62,9 +63,10 @@ public class OnDiskCursor<T> implements Cursor<T>
                         boolean isOrdered,
                         boolean alternateInAscentSlot,
                         long rootPostCodePos,
-                        int rootNodeCode)
+                        int rootNodeCode,
+                        T tailRootAscentContent)
     {
-        this(deserializer, rebuffererFactory, byteComparableVersion, direction, isOrdered, alternateInAscentSlot);
+        this(deserializer, rebuffererFactory, byteComparableVersion, direction, isOrdered, alternateInAscentSlot, tailRootAscentContent);
         try
         {
             descendInto(Cursor.rootPosition(direction), rootPostCodePos, rootNodeCode);
@@ -81,7 +83,8 @@ public class OnDiskCursor<T> implements Cursor<T>
                          ByteComparable.Version byteComparableVersion,
                          Direction direction,
                          boolean isOrdered,
-                         boolean alternateInAscentSlot)
+                         boolean alternateInAscentSlot,
+                         T tailRootAscentContent)
     {
         this.rebuffererFactory = rebuffererFactory;
         this.rebufferer = rebuffererFactory.instantiateRebufferer(false);
@@ -94,6 +97,7 @@ public class OnDiskCursor<T> implements Cursor<T>
         this.alternateInAscentSlot = alternateInAscentSlot;
         this.swapContentSides = direction.select(false, isOrdered);
         this.exhausted = Cursor.exhaustedPosition(direction);
+        this.tailRootAscentContent = tailRootAscentContent;
     }
 
     class SharedStream extends RebufferingInputStream
@@ -125,12 +129,12 @@ public class OnDiskCursor<T> implements Cursor<T>
             buffer = Rebufferer.EMPTY.buffer();
         }
 
-        public T deserialize(SharedStream rdr, long startPos, int len)
+        public T deserialize(long startPos, int len)
         {
             seekTo(startPos);
             try
             {
-                return deserializer.deserialize(rdr, len);
+                return deserializer.deserialize(this, len);
             }
             catch (IOException e)
             {
@@ -198,6 +202,16 @@ public class OnDiskCursor<T> implements Cursor<T>
     long currentFullNodePostCodePos;   // for tails
     int currentFullNodeCode;
 
+    /// The content a range tail presents on its root's ascent side, read in place of the item at
+    /// [#TAIL_ROOT_ASCENT_CONTENT_POS], which is where the tail's backtrack entry for it points (see the tail
+    /// constructor of [Range]). Null in any other cursor.
+    final T tailRootAscentContent;
+
+    /// A content position no read of the file can produce -- [#readContentLength] keeps every item's start at or after
+    /// 0 -- so that only the backtrack entry of [#tailRootAscentContent] reaches it, and a corrupt read at position 0
+    /// still throws.
+    static final long TAIL_ROOT_ASCENT_CONTENT_POS = -1;
+
     long descendInto(long encodedPosition, long nodePos)
     {
         return descendInto(encodedPosition, nodePos - 1, readByteBefore(nodePos));
@@ -213,7 +227,7 @@ public class OnDiskCursor<T> implements Cursor<T>
         this.currentEncodedPosition = encodedPosition & ~(MAY_HAVE_CONTENT_BIT | MAY_HAVE_DELETION_BRANCH_BIT);
         this.postCodePos = postCodePos;
         this.nodeCode = nodeCode;
-        this.currentImpl = selectNodeImpl(nodeCode);
+        this.currentImpl = OnDiskReadNodeType.selectNodeImpl(nodeCode);
         this.currentImpl.load(this); // may modify currentEncodedPosition
         return currentEncodedPosition;
     }
@@ -223,7 +237,7 @@ public class OnDiskCursor<T> implements Cursor<T>
         // leave content and encodedPosition unchanged
         this.postCodePos = nodePos - 1;
         this.nodeCode = readByteBefore(nodePos);
-        this.currentImpl = selectNodeImpl(nodeCode);
+        this.currentImpl = OnDiskReadNodeType.selectNodeImpl(nodeCode);
         this.currentImpl.load(this); // may modify currentEncodedPosition
     }
 
@@ -336,39 +350,48 @@ public class OnDiskCursor<T> implements Cursor<T>
     @Override
     public Cursor<T> tailCursor(Direction direction)
     {
-        return new OnDiskCursor<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction, isOrdered, alternateInAscentSlot, currentFullNodePostCodePos, currentFullNodeCode);
+        return new OnDiskCursor<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction, isOrdered, alternateInAscentSlot, currentFullNodePostCodePos, currentFullNodeCode, null);
     }
 
     /// The position of the alternate branch the current node carries in its ascent-side content slot, or -1 if it
     /// has none. Only meaningful when [#alternateInAscentSlot] is set.
     long alternateBranch()
     {
-        return OnDiskReadNodeType.selectNodeImpl(currentFullNodeCode)
-                                 .getAlternateBranch(this, currentFullNodeCode, currentFullNodePostCodePos);
+        // Selecting the type also rejects a reserved code.
+        return OnDiskReadNodeType.selectNodeImpl(currentFullNodeCode) == OnDiskReadNodeType.PREFIX
+               ? OnDiskReadNodeType.prefixAlternateBranch(this, currentFullNodeCode, currentFullNodePostCodePos)
+               : -1;
     }
 
-    long getContentAtPos(long currentPos)
+    final long getContentAtPos(long currentPos)
     {
+        if (currentPos == TAIL_ROOT_ASCENT_CONTENT_POS && tailRootAscentContent != null)
+        {
+            content = tailRootAscentContent;
+            return currentPos;
+        }
         int vintlen = readVIntLength(currentPos);
         int len = readContentLength(currentPos, vintlen);
         currentPos -= vintlen + len;
-        content = rdr.deserialize(rdr, currentPos, len);
+        content = rdr.deserialize(currentPos, len);
         if (content != null)
             currentEncodedPosition |= MAY_HAVE_CONTENT_BIT;
         return currentPos;
     }
 
-    T readContentAtPos(long currentPos)
+    final T readContentAtPos(long currentPos)
     {
+        if (currentPos == TAIL_ROOT_ASCENT_CONTENT_POS && tailRootAscentContent != null)
+            return tailRootAscentContent;
         int vintlen = readVIntLength(currentPos);
         int len = readContentLength(currentPos, vintlen);
         currentPos -= vintlen + len;
-        return rdr.deserialize(rdr, currentPos, len);
+        return rdr.deserialize(currentPos, len);
     }
 
     void getContentAtPosWithLength(long currentPos, int len)
     {
-        content = rdr.deserialize(rdr, currentPos - len, len);
+        content = rdr.deserialize(currentPos - len, len);
         if (content != null)
             currentEncodedPosition |= MAY_HAVE_CONTENT_BIT;
     }
@@ -430,11 +453,6 @@ public class OnDiskCursor<T> implements Cursor<T>
         return OnDiskReadNodeType.selectNodeImpl(nodeCode);
     }
 
-    OnDiskReadNodeType selectNodeImpl(int nodeCode)
-    {
-        return OnDiskReadNodeType.selectNodeImpl(nodeCode);
-    }
-
     /// Read the first byte of a variable-length-encoded unsigned integer, positioned immediately before position `pos`
     /// in the file, and return the length of the encoded int.
     int readVIntLength(long pos)
@@ -493,10 +511,11 @@ public class OnDiskCursor<T> implements Cursor<T>
         return index > 0 ? readSizedInt(pos - (index - 1) * bytes, bytes) : 0;
     }
 
-    /// Read `bytes` many bytes preceding position `pos` in the file into a long unsigned integer.
+    /// Read `bytes` many bytes preceding position `pos` in the file into a long unsigned integer. `bytes` is at most 8:
+    /// the callers take it from a node's pointer-size bits or a vint's length, or check it, as
+    /// [OnDiskReadNodeType#prefixAlternateBranch] does.
     long readSizedInt(long pos, int bytes)
     {
-        assert bytes <= 8 : "Cannot read " + bytes + " bytes into a long";
         seekTo(pos);
         if (pos - currentBufferOffset >= 8)
         {
@@ -504,12 +523,16 @@ public class OnDiskCursor<T> implements Cursor<T>
             return (Long.reverseBytes(l) >>> (64 - bytes * 8));
         }
         else
-        {
-            long l = 0;
-            while (bytes-- > 0)
-                l = (l << 8) | readByteBefore(pos--);
-            return l;
-        }
+            return readSizedIntByBytes(pos, bytes);
+    }
+
+    /// [#readSizedInt] for an int that is within 8 bytes of the start of the buffer, where it cannot be read as a long.
+    private long readSizedIntByBytes(long pos, int bytes)
+    {
+        long l = 0;
+        while (bytes-- > 0)
+            l = (l << 8) | readByteBefore(pos--);
+        return l;
     }
 
     /// Read one byte positioned immediately before `filePos`.
@@ -534,8 +557,14 @@ public class OnDiskCursor<T> implements Cursor<T>
         // Compare with the limit, not what remains: the buffer is shared with the deserializer's stream, which moves
         // its position as it reads, and the reads here are absolute.
         long ofs = filePos - currentBufferOffset;
-        if (ofs > 0 && ofs <= currentBuffer.limit())
-            return;
+        if (ofs <= 0 || ofs > currentBuffer.limit())
+            rebufferTo(filePos);
+    }
+
+    /// The part of [#seekTo] that runs when the data is not in the current buffer, kept apart so that the check above
+    /// is small enough to be inlined into every read.
+    private void rebufferTo(long filePos)
+    {
         if (filePos <= 0)
             throw corrupt("read before the start of the data, at position " + filePos);
         long fileLength = rebufferer.fileLength();
@@ -546,7 +575,7 @@ public class OnDiskCursor<T> implements Cursor<T>
         currentBH = rebufferer.rebuffer(filePos - 1);
         currentBuffer = currentBH.buffer();
         currentBufferOffset = currentBH.offset();
-        ofs = filePos - currentBufferOffset;
+        long ofs = filePos - currentBufferOffset;
         if (ofs <= 0 || ofs > currentBuffer.limit())
             throw corrupt("read past the end of the data, at position " + filePos);
         if (currentBufferOffset + currentBuffer.limit() > fileLength)
@@ -621,9 +650,21 @@ public class OnDiskCursor<T> implements Cursor<T>
             initActiveState();
         }
 
-        public Range(DataDeserializer<S> deserializer, RebuffererFactory rebuffererFactory, ByteComparable.Version byteComparableVersion, Direction direction, long rootPostCodePos, int rootNodeCode)
+        /// A tail rooted at the given node, presenting the given content on its root's two sides in place of what the
+        /// node itself holds; see [#tailCursor].
+        public Range(DataDeserializer<S> deserializer, RebuffererFactory rebuffererFactory, ByteComparable.Version byteComparableVersion, Direction direction, long rootPostCodePos, int rootNodeCode, S rootDescentContent, S rootAscentContent)
         {
-            super(deserializer, rebuffererFactory, byteComparableVersion, direction, true, false, rootPostCodePos, rootNodeCode);
+            super(deserializer, rebuffererFactory, byteComparableVersion, direction, true, false, rootPostCodePos, rootNodeCode, rootAscentContent);
+            // LEAF or PREFIX may have put a backtrack entry, remove if so
+            this.stackLength = 0;
+            this.content = rootDescentContent;
+            this.currentEncodedPosition = rootDescentContent != null
+                                          ? currentEncodedPosition | MAY_HAVE_CONTENT_BIT
+                                          : currentEncodedPosition & ~MAY_HAVE_CONTENT_BIT;
+            if (rootAscentContent != null)
+                addReturnPathBacktrack(TAIL_ROOT_ASCENT_CONTENT_POS);
+            // The state follows from the content set above, not from the node's own: with no root content the tail
+            // starts with no active range.
             initActiveState();
         }
 
@@ -714,10 +755,14 @@ public class OnDiskCursor<T> implements Cursor<T>
             }
         }
 
-        /// Record a failed move in [#closeFailure].
+        /// Record a failed move in [#closeFailure], and drop the active state so that [#state] throws it too: an
+        /// advance keeps the state it starts from, which no longer applies wherever the move stopped.
         private RuntimeException failed(RuntimeException e)
         {
             closeFailure = e;
+            activeIsSet = false;
+            activeRange = null;
+            prevContent = null;
             return e;
         }
 
@@ -778,14 +823,12 @@ public class OnDiskCursor<T> implements Cursor<T>
 
         private S getNearestContent(Direction direction)
         {
-//            return tailCursor(direction).advanceToContent(null);
-
             long postCodePos = currentFullNodePostCodePos;
             int code = currentFullNodeCode;
             while (true)
             {
                 OnDiskReadNodeType type = OnDiskReadNodeType.selectNodeImpl(code);
-                S content = type.getContent(this, direction, true, code, postCodePos);
+                S content = type.getContent(this, direction, code, postCodePos);
                 if (content != null)
                     return content;
                 long node = type.getFirstChild(this, direction, code, postCodePos);
@@ -837,11 +880,11 @@ public class OnDiskCursor<T> implements Cursor<T>
             // Deletion ranges active at entry and exit must be presented by the tail at its root. To do this, get
             // the closest content in both forward and reverse direction and adjust the content that the tail reports
             // for them.
-            // A RangeBranch is built unconditionally, even when both sides come out null and a plain Range over the
-            // same node would walk identically. Guarding on the root node carrying no content of its own on either
-            // side would save an object and a second updateActiveAndReturn per plain range tail, but the guard has
-            // to restate what getTailRootContent already worked out, and this path is not on any hot query today.
-            // Revisit the narrower guard when it becomes the SSTable read path.
+            // The root content is applied unconditionally, even when both sides come out null and a plain Range over
+            // the same node would walk identically. Guarding on the root node carrying no content of its own on either
+            // side would save resetting the root's state per plain range tail, but the guard has to restate what
+            // getTailRootContent already worked out, and this path is not on any hot query today. Revisit the
+            // narrower guard when it becomes the SSTable read path.
             Direction ourDirection = direction();
             S rootDescentContent = getTailRootContent(ourDirection, content, activeIsSet, activeRange);
             // After close the ascent side can no longer be read; use what close() worked out while it still could.
@@ -855,49 +898,7 @@ public class OnDiskCursor<T> implements Cursor<T>
                 rootAscentContent = swap;
             }
 
-            return new RangeBranch<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction, currentFullNodePostCodePos, currentFullNodeCode, rootDescentContent, rootAscentContent);
-        }
-    }
-
-    static class RangeBranch<S extends RangeState<S>> extends Range<S>
-    {
-        final S rootAscentContent;
-
-        public RangeBranch(DataDeserializer<S> deserializer, RebuffererFactory rebuffererFactory, ByteComparable.Version byteComparableVersion, Direction direction, long rootPostCodePos, int rootNodeCode, S rootDescentContent, S rootAscentContent)
-        {
-            super(deserializer, rebuffererFactory, byteComparableVersion, direction, rootPostCodePos, rootNodeCode);
-            // LEAF or PREFIX may have put a backtrack entry, remove if so
-            this.stackLength = 0;
-            this.content = rootDescentContent;
-            this.currentEncodedPosition = rootDescentContent != null
-                                          ? currentEncodedPosition | MAY_HAVE_CONTENT_BIT
-                                          : currentEncodedPosition & ~MAY_HAVE_CONTENT_BIT;
-            this.rootAscentContent = rootAscentContent;
-            if (rootAscentContent != null)
-                addReturnPathBacktrack(0);
-
-            // Redo this as we now have different content() value. The state the base constructor derived from the
-            // node's own content no longer applies either: with no root content the tail starts with no active range.
-            activeIsSet = true;
-            activeRange = null;
-            prevContent = null;
-            updateActiveAndReturn(encodedPosition());
-        }
-
-        @Override
-        long getContentAtPos(long currentPos)
-        {
-            if (currentPos > 0)
-                return super.getContentAtPos(currentPos);
-
-            content = rootAscentContent;
-            return currentPos;
-        }
-
-        @Override
-        S readContentAtPos(long currentPos)
-        {
-            return currentPos > 0 ? super.readContentAtPos(currentPos) : rootAscentContent;
+            return new Range<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction, currentFullNodePostCodePos, currentFullNodeCode, rootDescentContent, rootAscentContent);
         }
     }
 
