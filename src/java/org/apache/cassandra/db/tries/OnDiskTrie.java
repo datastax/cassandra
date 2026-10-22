@@ -18,19 +18,23 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.nio.ByteBuffer;
+
+import javax.annotation.Nullable;
+
+import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RebuffererFactory;
-import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-public abstract class OnDiskTrie<T> extends OnDiskBaseTrie<T, Cursor<T>, Trie<T>> implements Trie<T>, Closeable
+public class OnDiskTrie<T> extends OnDiskBaseTrie<T, Cursor<T>, Trie<T>> implements Trie<T>
 {
     final boolean isOrdered;
 
-    public OnDiskTrie(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
+    OnDiskTrie(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root, @Nullable ChannelProxy ownedChannel)
     {
-        super(rebuffererFactory, deserializer, byteComparableVersion, root);
+        super(rebuffererFactory, deserializer, byteComparableVersion, root, ownedChannel);
         this.isOrdered = isOrdered;
     }
 
@@ -43,34 +47,24 @@ public abstract class OnDiskTrie<T> extends OnDiskBaseTrie<T, Cursor<T>, Trie<T>
             return new Cursor.Empty<>(direction, byteComparableVersion);
     }
 
-    static class WithoutChannel<T> extends OnDiskTrie<T> implements OnDiskBaseTrie.WithoutChannel
-    {
-        public WithoutChannel(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
-        {
-            super(rebuffererFactory, deserializer, byteComparableVersion, isOrdered, root);
-        }
-    }
-
-    static class WithOwnChannel<T> extends OnDiskTrie<T> implements OnDiskBaseTrie.WithOwnChannel
-    {
-        public WithOwnChannel(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
-        {
-            super(rebuffererFactory, deserializer, byteComparableVersion, isOrdered, root);
-        }
-    }
-
     public static <T> OnDiskTrie<T> open(File file, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version version, boolean isOrdered, long root)
     {
         ChannelProxy channel = new ChannelProxy(file);
         try
         {
-            RebuffererFactory rebuffererFactory = openChunkReader(channel);
-            return new WithOwnChannel(rebuffererFactory, deserializer, version, isOrdered, root >= 0 ? root : rebuffererFactory.fileLength());
+            return new OnDiskTrie<>(openChunkReader(channel), deserializer, version, isOrdered, root, channel);
         }
         catch (Throwable t)
         {
             channel.close();
             throw t;
         }
+    }
+
+    /// Open a trie that is already fully in memory rather than a file. The buffer must outlive every cursor taken from
+    /// the result, and is not released by [#close].
+    public static <T> OnDiskTrie<T> open(ByteBuffer buffer, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version version, boolean isOrdered, long root)
+    {
+        return new OnDiskTrie<>(new ByteBufferRebufferer(buffer), deserializer, version, isOrdered, root, null);
     }
 }

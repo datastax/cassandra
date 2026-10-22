@@ -39,7 +39,6 @@ import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.File;
@@ -415,7 +414,7 @@ public class OnDiskTrieTest
                 bytes[rand.nextInt(bytes.length)] = (byte) rand.nextInt(256);
 
             ByteBuffer buffer = ByteBuffer.wrap(bytes);
-            OnDiskTrie<String> trie = new OnDiskTrie.WithoutChannel<>(new ByteBufferRebufferer(buffer), TrieUtil.STRING_SERDE, VERSION, isOrdered, buffer.limit());
+            OnDiskTrie<String> trie = OnDiskTrie.open(buffer, TrieUtil.STRING_SERDE, VERSION, isOrdered, buffer.limit());
             Direction direction = rand.nextBoolean() ? Direction.FORWARD : Direction.REVERSE;
             // Not verified: corrupt bytes can list transitions out of order, which the reader does not check.
             try (Cursor<String> cursor = trie.makeCursor(direction))
@@ -452,7 +451,7 @@ public class OnDiskTrieTest
 
         TrieUtil.CountingRebuffererFactory factory =
             new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(new ChannelProxy(file)));
-        try (OnDiskTrie<String> trie = new OnDiskTrie.WithOwnChannel<>(factory, TrieUtil.STRING_SERDE, VERSION, isOrdered, factory.fileLength()))
+        try (OnDiskTrie<String> trie = new OnDiskTrie<>(factory, TrieUtil.STRING_SERDE, VERSION, isOrdered, factory.fileLength(), factory.channel()))
         {
             ByteComparable.Preencoded a = TrieUtil.directComparable("a");
             ByteComparable.Preencoded b = TrieUtil.directComparable("b");

@@ -18,17 +18,21 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.nio.ByteBuffer;
+
+import javax.annotation.Nullable;
+
+import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RebuffererFactory;
-import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-public abstract class OnDiskRangeTrie<S extends RangeState<S>> extends OnDiskBaseTrie<S, RangeCursor<S>, RangeTrie<S>> implements RangeTrie<S>, Closeable
+public class OnDiskRangeTrie<S extends RangeState<S>> extends OnDiskBaseTrie<S, RangeCursor<S>, RangeTrie<S>> implements RangeTrie<S>
 {
-    public OnDiskRangeTrie(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<S> deserializer, ByteComparable.Version byteComparableVersion, long root)
+    OnDiskRangeTrie(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<S> deserializer, ByteComparable.Version byteComparableVersion, long root, @Nullable ChannelProxy ownedChannel)
     {
-        super(rebuffererFactory, deserializer, byteComparableVersion, root);
+        super(rebuffererFactory, deserializer, byteComparableVersion, root, ownedChannel);
     }
 
     @Override
@@ -40,35 +44,24 @@ public abstract class OnDiskRangeTrie<S extends RangeState<S>> extends OnDiskBas
             return new RangeCursor.Empty<>(null, byteComparableVersion, direction);
     }
 
-    static class WithoutChannel<S extends RangeState<S>> extends OnDiskRangeTrie<S> implements OnDiskBaseTrie.WithoutChannel
-    {
-        public WithoutChannel(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<S> deserializer, ByteComparable.Version byteComparableVersion, long root)
-        {
-            super(rebuffererFactory, deserializer, byteComparableVersion, root);
-        }
-    }
-
-    static class WithOwnChannel<S extends RangeState<S>> extends OnDiskRangeTrie<S> implements OnDiskBaseTrie.WithOwnChannel
-    {
-        public WithOwnChannel(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<S> deserializer, ByteComparable.Version byteComparableVersion, long root)
-        {
-            super(rebuffererFactory, deserializer, byteComparableVersion, root);
-        }
-    }
-
-
     public static <S extends RangeState<S>> OnDiskRangeTrie<S> open(File file, OnDiskCursor.DataDeserializer<S> deserializer, ByteComparable.Version version, long root)
     {
         ChannelProxy channel = new ChannelProxy(file);
         try
         {
-            RebuffererFactory rebuffererFactory = openChunkReader(channel);
-            return new WithOwnChannel(rebuffererFactory, deserializer, version, root >= 0 ? root : rebuffererFactory.fileLength());
+            return new OnDiskRangeTrie<>(openChunkReader(channel), deserializer, version, root, channel);
         }
         catch (Throwable t)
         {
             channel.close();
             throw t;
         }
+    }
+
+    /// Open a trie that is already fully in memory rather than a file. The buffer must outlive every cursor taken from
+    /// the result, and is not released by [#close].
+    public static <S extends RangeState<S>> OnDiskRangeTrie<S> open(ByteBuffer buffer, OnDiskCursor.DataDeserializer<S> deserializer, ByteComparable.Version version, long root)
+    {
+        return new OnDiskRangeTrie<>(new ByteBufferRebufferer(buffer), deserializer, version, root, null);
     }
 }

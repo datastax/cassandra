@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.tries;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.RebuffererFactory;
@@ -34,13 +36,21 @@ implements BaseTrie<T, C, Q>, Closeable
     final OnDiskCursor.DataDeserializer<T> deserializer;
     final ByteComparable.Version byteComparableVersion;
     final long root;
+    /// The channel the trie was opened over, which [#close] closes along with [#rebuffererFactory], or null when the
+    /// trie reads a buffer someone else owns -- a commit-log record or a message payload -- and there is nothing to
+    /// release: the cursors give their rebufferers back as they are closed.
+    @Nullable
+    final ChannelProxy ownedChannel;
 
-    public OnDiskBaseTrie(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, long root)
+    /// A negative `root` stands for the end of the data, which is where the writer puts the root of a trie that takes
+    /// up the whole buffer or file.
+    OnDiskBaseTrie(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, long root, @Nullable ChannelProxy ownedChannel)
     {
         this.rebuffererFactory = rebuffererFactory;
         this.deserializer = deserializer;
         this.byteComparableVersion = byteComparableVersion;
-        this.root = root;
+        this.root = root >= 0 ? root : rebuffererFactory.fileLength();
+        this.ownedChannel = ownedChannel;
     }
 
     /// The trie's buffer source. Each cursor takes a rebufferer of its own from it; see [OnDiskCursor#rebufferer].
@@ -62,33 +72,21 @@ implements BaseTrie<T, C, Q>, Closeable
         return new SimpleChunkReader(channel, -1, BufferType.OFF_HEAP, DEFAULT_BUFFER_SIZE);
     }
 
-    /// A trie over a buffer someone else owns -- a commit-log record or a message payload. The cursors give their
-    /// rebufferers back as they are closed, and there is nothing else here to release.
-    protected interface WithoutChannel extends Closeable
+    /// Close the factory, then the channel it holds a shared copy of, if the trie owns one. The cursors have given
+    /// their rebufferers back as they were closed; the caller must have stopped reading by now.
+    @Override
+    public void close()
     {
-        @Override
-        default void close()
+        if (ownedChannel == null)
+            return;
+
+        try
         {
-            // nothing to release
+            rebuffererFactory.close();
         }
-    }
-
-    protected interface WithOwnChannel extends Closeable
-    {
-        RebuffererFactory rebuffererFactory();
-
-        @Override
-        default void close()
+        finally
         {
-            RebuffererFactory factory = rebuffererFactory();
-            try
-            {
-                factory.close();
-            }
-            finally
-            {
-                factory.channel().close();
-            }
+            ownedChannel.close();
         }
     }
 }

@@ -20,11 +20,12 @@ package org.apache.cassandra.db.tries;
 
 import java.nio.ByteBuffer;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RebuffererFactory;
-import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /// Reads a [DeletionAwareTrie] written by [OnDiskDeletionAwareTrieWriter].
@@ -37,30 +38,20 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// See [OnDiskDeletionAwareTrieWriter] for why the branch position lives in that slot rather than in the node
 /// encoding.
 public class OnDiskDeletionAwareTrie<T, D extends RangeState<D>>
-implements DeletionAwareTrie<T, D>, Closeable
+extends OnDiskBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
+implements DeletionAwareTrie<T, D>
 {
-    final RebuffererFactory rebuffererFactory;
-    final OnDiskCursor.DataDeserializer<T> contentDeserializer;
     final OnDiskCursor.DataDeserializer<D> deletionDeserializer;
-    final ByteComparable.Version byteComparableVersion;
-    final long root;
-    private final boolean ownsChannel;
-    private final ChannelProxy channel;
 
     OnDiskDeletionAwareTrie(RebuffererFactory rebuffererFactory,
                             OnDiskCursor.DataDeserializer<T> contentDeserializer,
                             OnDiskCursor.DataDeserializer<D> deletionDeserializer,
                             ByteComparable.Version byteComparableVersion,
                             long root,
-                            ChannelProxy channel)
+                            @Nullable ChannelProxy ownedChannel)
     {
-        this.rebuffererFactory = rebuffererFactory;
-        this.contentDeserializer = contentDeserializer;
+        super(rebuffererFactory, contentDeserializer, byteComparableVersion, root, ownedChannel);
         this.deletionDeserializer = deletionDeserializer;
-        this.byteComparableVersion = byteComparableVersion;
-        this.root = root;
-        this.channel = channel;
-        this.ownsChannel = channel != null;
     }
 
     @Override
@@ -68,7 +59,8 @@ implements DeletionAwareTrie<T, D>, Closeable
     {
         if (root == 0)
             return new DeletionAwareCursor.Empty<>(direction, byteComparableVersion);
-        return new OnDiskDeletionAwareCursor<>(this, direction, root);
+        return new OnDiskDeletionAwareCursor<>(deserializer, deletionDeserializer, rebuffererFactory,
+                                               byteComparableVersion, direction, root);
     }
 
     public ByteComparable.Version byteComparableVersion()
@@ -76,40 +68,21 @@ implements DeletionAwareTrie<T, D>, Closeable
         return byteComparableVersion;
     }
 
-    /// Mirrors [OnDiskBaseTrie.WithOwnChannel]: the factory first, then the channel, which the factory holds a shared
-    /// copy of. The cursors have given their rebufferers back as they were closed; the caller must have stopped
-    /// reading by now.
-    @Override
-    public void close()
-    {
-        if (!ownsChannel)
-            return;
-
-        try
-        {
-            rebuffererFactory.close();
-        }
-        finally
-        {
-            channel.close();
-        }
-    }
-
     /// Open a trie that is already fully in memory — a commit-log record or a message payload —
     /// rather than a file. The buffer must outlive every cursor taken from the result, and is not
     /// released by [#close].
     ///
-    /// `root` is the position the trie's root node ends at; pass -1 when the trie occupies the
-    /// whole buffer, since the writer emits the root last.
+    /// `root` is the position the trie's root node ends at, as [OnDiskDeletionAwareTrieWriter#write] returns it. A
+    /// negative value stands for the end of the buffer, which is where the root is when the trie takes up the whole
+    /// buffer, since the writer emits the root last.
     public static <T, D extends RangeState<D>> OnDiskDeletionAwareTrie<T, D> open(ByteBuffer buffer,
                                                                                   OnDiskCursor.DataDeserializer<T> contentDeserializer,
                                                                                   OnDiskCursor.DataDeserializer<D> deletionDeserializer,
                                                                                   ByteComparable.Version version,
                                                                                   long root)
     {
-        ByteBufferRebufferer rebufferer = new ByteBufferRebufferer(buffer);
-        return new OnDiskDeletionAwareTrie<>(rebufferer, contentDeserializer, deletionDeserializer, version,
-                                             root >= 0 ? root : rebufferer.fileLength(), null);
+        return new OnDiskDeletionAwareTrie<>(new ByteBufferRebufferer(buffer), contentDeserializer, deletionDeserializer,
+                                             version, root, null);
     }
 
     public static <T, D extends RangeState<D>> OnDiskDeletionAwareTrie<T, D> open(File file,
@@ -121,9 +94,8 @@ implements DeletionAwareTrie<T, D>, Closeable
         ChannelProxy channel = new ChannelProxy(file);
         try
         {
-            RebuffererFactory rebuffererFactory = OnDiskBaseTrie.openChunkReader(channel);
-            return new OnDiskDeletionAwareTrie<>(rebuffererFactory, contentDeserializer, deletionDeserializer, version,
-                                                 root >= 0 ? root : rebuffererFactory.fileLength(), channel);
+            return new OnDiskDeletionAwareTrie<>(openChunkReader(channel), contentDeserializer, deletionDeserializer,
+                                                 version, root, channel);
         }
         catch (Throwable t)
         {
@@ -135,84 +107,49 @@ implements DeletionAwareTrie<T, D>, Closeable
     /// Presents the data trie as a deletion-aware cursor.
     ///
     /// A node's descent- and ascent-content bits are exactly [Cursor#MAY_HAVE_CONTENT_BIT] and
-    /// [Cursor#MAY_HAVE_DELETION_BRANCH_BIT], so the underlying cursor already reports both flags and the
-    /// positions it returns are passed through unchanged. The branch itself is only read when the caller
-    /// asks for it.
-    static class OnDiskDeletionAwareCursor<T, D extends RangeState<D>> implements DeletionAwareCursor<T, D>
+    /// [Cursor#MAY_HAVE_DELETION_BRANCH_BIT], so the plain cursor already reports both flags and its positions are
+    /// the deletion-aware ones. The branch itself is only read when the caller asks for it.
+    static class OnDiskDeletionAwareCursor<T, D extends RangeState<D>> extends OnDiskCursor<T> implements DeletionAwareCursor<T, D>
     {
-        final OnDiskDeletionAwareTrie<T, D> trie;
-        final OnDiskCursor<T> source;
+        final OnDiskCursor.DataDeserializer<D> deletionDeserializer;
 
-        OnDiskDeletionAwareCursor(OnDiskDeletionAwareTrie<T, D> trie, Direction direction, long root)
+        OnDiskDeletionAwareCursor(OnDiskCursor.DataDeserializer<T> contentDeserializer,
+                                  OnDiskCursor.DataDeserializer<D> deletionDeserializer,
+                                  RebuffererFactory rebuffererFactory,
+                                  ByteComparable.Version byteComparableVersion,
+                                  Direction direction,
+                                  long root)
         {
-            this.trie = trie;
-            this.source = new OnDiskCursor<>(trie.contentDeserializer, trie.rebuffererFactory,
-                                             trie.byteComparableVersion, direction, false, true, root);
+            super(contentDeserializer, rebuffererFactory, byteComparableVersion, direction, false, true, root);
+            this.deletionDeserializer = deletionDeserializer;
         }
 
-        OnDiskDeletionAwareCursor(OnDiskDeletionAwareTrie<T, D> trie, Direction direction, long rootPostCodePos, int rootNodeCode)
+        OnDiskDeletionAwareCursor(OnDiskCursor.DataDeserializer<T> contentDeserializer,
+                                  OnDiskCursor.DataDeserializer<D> deletionDeserializer,
+                                  RebuffererFactory rebuffererFactory,
+                                  ByteComparable.Version byteComparableVersion,
+                                  Direction direction,
+                                  long rootPostCodePos,
+                                  int rootNodeCode)
         {
-            this.trie = trie;
-            this.source = new OnDiskCursor<>(trie.contentDeserializer, trie.rebuffererFactory,
-                                             trie.byteComparableVersion, direction, false, true, rootPostCodePos, rootNodeCode);
+            super(contentDeserializer, rebuffererFactory, byteComparableVersion, direction, false, true, rootPostCodePos, rootNodeCode, null);
+            this.deletionDeserializer = deletionDeserializer;
         }
 
         @Override
         public RangeCursor<D> deletionBranchCursor(Direction direction)
         {
-            long root = source.alternateBranch();
+            long root = alternateBranch();
             if (root < 0)
                 return null;
-            return new OnDiskCursor.Range<>(trie.deletionDeserializer, trie.rebuffererFactory,
-                                            trie.byteComparableVersion, direction, root);
-        }
-
-        @Override
-        public T content()
-        {
-            return source.content();
-        }
-
-        @Override
-        public long encodedPosition()
-        {
-            return source.encodedPosition();
-        }
-
-        @Override
-        public ByteComparable.Version byteComparableVersion()
-        {
-            return source.byteComparableVersion();
-        }
-
-        @Override
-        public long advance()
-        {
-            return source.advance();
-        }
-
-        @Override
-        public long advanceMultiple(TransitionsReceiver receiver)
-        {
-            return source.advanceMultiple(receiver);
-        }
-
-        @Override
-        public long skipTo(long encodedSkipPosition)
-        {
-            return source.skipTo(encodedSkipPosition);
+            return new OnDiskCursor.Range<>(deletionDeserializer, rebuffererFactory, byteComparableVersion, direction, root);
         }
 
         @Override
         public DeletionAwareCursor<T, D> tailCursor(Direction direction)
         {
-            return new OnDiskDeletionAwareCursor<>(trie, direction, source.currentFullNodePostCodePos, source.currentFullNodeCode);
-        }
-
-        @Override
-        public void close()
-        {
-            source.close();
+            return new OnDiskDeletionAwareCursor<>(rdr.deserializer, deletionDeserializer, rebuffererFactory, byteComparableVersion,
+                                                   direction, currentFullNodePostCodePos, currentFullNodeCode);
         }
     }
 }
