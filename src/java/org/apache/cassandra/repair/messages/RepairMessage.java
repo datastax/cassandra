@@ -33,6 +33,7 @@ import org.apache.cassandra.nodes.NodeInfo;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.net.MessageFlag.CALL_BACK_ON_FAILURE;
 
@@ -90,6 +91,9 @@ public abstract class RepairMessage
 
     private static boolean supportsTimeouts(InetAddressAndPort from, UUID parentSessionId)
     {
+        // the local node has no peers row, but it always runs our own version
+        if (from.equals(FBUtilities.getBroadcastAddressAndPort()))
+            return true;
         CassandraVersion remoteVersion = Nodes.peers().map(from, NodeInfo::getReleaseVersion, () -> null);
         if (remoteVersion != null && remoteVersion.compareTo(SUPPORTS_TIMEOUTS, true) >= 0)
             return true;

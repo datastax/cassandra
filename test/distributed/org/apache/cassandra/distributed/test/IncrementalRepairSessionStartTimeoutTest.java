@@ -48,6 +48,7 @@ import static java.lang.String.format;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
+import static org.apache.cassandra.net.Verb.VALIDATION_REQ;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -93,8 +94,7 @@ public class IncrementalRepairSessionStartTimeoutTest extends TestBaseImpl
     /**
      * Incremental repair session startup, including the slow repair_history writes, must not run on AntiEntropyStage.
      * Otherwise the coordinator's own VALIDATION_REQs for the first sessions queue behind the remaining sessions'
-     * startup, expire and are dropped. The ack timeout to self is ignored (no peers row, version = null), so the
-     * repair hangs.
+     * startup, expire and are dropped.
      */
     @Test
     public void testIncrementalRepairSessionStartDoesNotBlockAntiEntropyStage() throws Exception
@@ -132,6 +132,31 @@ public class IncrementalRepairSessionStartTimeoutTest extends TestBaseImpl
         NodeToolResult slow = awaitRepair(busy, mark, slowRepair);
         other.asserts().success();
         slow.asserts().success();
+    }
+
+    /**
+     * A VALIDATION_REQ the coordinator sends to itself that is lost must fail the repair with a timeout, like one sent
+     * to a remote replica. The local node has no peers row, so its version used to be unknown (null) and the timeout
+     * was ignored, leaving the repair hanging.
+     */
+    @Test
+    public void testLostValidationRequestToSelfFailsRepair() throws Exception
+    {
+        String ks = createKeyspace("self_lost", 1);
+        IInvokableInstance coordinator = CLUSTER.get(1);
+        long mark = coordinator.logs().mark();
+
+        CLUSTER.filters().verbs(VALIDATION_REQ.id).from(1).to(1).drop();
+        try
+        {
+            CompletableFuture<NodeToolResult> repair = CompletableFuture.supplyAsync(() -> coordinator.nodetoolResult("repair", ks));
+            awaitRepair(coordinator, mark, repair).asserts().failure().notificationContains(VALIDATION_REQ + " failure from");
+        }
+        finally
+        {
+            CLUSTER.filters().reset();
+        }
+        assertNoMatch(coordinator, mark, SELF_TIMEOUT_IGNORED);
     }
 
     /**
