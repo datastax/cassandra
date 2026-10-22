@@ -22,6 +22,7 @@ import java.util.stream.StreamSupport;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
+import com.codahale.metrics.Meter;
 import org.apache.cassandra.db.Keyspace;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
@@ -45,6 +46,26 @@ public class StorageMetrics
     public static final Counter totalHintsInProgress  = Metrics.counter(factory.createMetricName("TotalHintsInProgress"));
     public static final Counter totalHints = Metrics.counter(factory.createMetricName("TotalHints"));
     public static final Counter repairExceptions = Metrics.counter(factory.createMetricName("RepairExceptions"));
+
+    /**
+     * Batches replayed from the batchlog for which no hint was written, normally because every replica acknowledged
+     * the replayed mutations or the local node was their only live replica. Each replay of a batch is counted in
+     * exactly one of this meter and {@link #hintedBatchlogReplays}, once its mutations complete, even if the batch
+     * then stays in the batchlog awaiting its interceptor callback; like {@code TotalBatchesReplayed}, both meters
+     * may count a batch again if the replay cycle aborts and the batch is later replayed from scratch. Batches that
+     * are expired, whose tables were all truncated, or that cannot be deserialized are not replayed and count in
+     * neither meter.
+     */
+    public static final Meter batchlogReplays = Metrics.meter(factory.createMetricName("BatchlogReplays"));
+
+    /**
+     * Batches replayed from the batchlog for which at least one hint was written, because a replica was down when
+     * the mutations were sent, failed them, or did not acknowledge them in time. Counted once per replay of the
+     * batch, as described on {@link #batchlogReplays}. The DSE meter of the same name was also marked for expired,
+     * truncated and locally-applied-only batches that wrote no hint; this one is not.
+     */
+    public static final Meter hintedBatchlogReplays = Metrics.meter(factory.createMetricName("HintedBatchlogReplays"));
+
     public static final Counter totalOpsForInvalidToken = Metrics.counter(factory.createMetricName("TotalOpsForInvalidToken"));
     public static final Counter startupOpsForInvalidToken = Metrics.counter(factory.createMetricName("StartupOpsForInvalidToken"));
 

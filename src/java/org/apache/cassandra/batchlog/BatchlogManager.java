@@ -69,6 +69,7 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaLayout;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.Replicas;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
@@ -102,7 +103,6 @@ public class BatchlogManager implements BatchlogManagerMBean
     public static final long BATCHLOG_REPLAY_TIMEOUT = BATCHLOG_REPLAY_TIMEOUT_IN_MS.getLong(DatabaseDescriptor.getWriteRpcTimeout(MILLISECONDS) * 2);
 
     private volatile long totalBatchesReplayed = 0; // no concurrency protection necessary as only written by replay thread.
-    private volatile long hintedBatchesReplayed = 0;
     private volatile TimeUUID lastReplayedUuid = TimeUUID.minAtUnixMillis(0);
 
     // Batches whose mutations have completed (applied locally, acknowledged by remote replicas, or
@@ -209,7 +209,7 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public long getHintedBatchesReplayed()
     {
-        return hintedBatchesReplayed;
+        return StorageMetrics.hintedBatchlogReplays.getCount();
     }
 
     @VisibleForTesting
@@ -470,8 +470,12 @@ public class BatchlogManager implements BatchlogManagerMBean
         {
             batch.finish();
             Set<UUID> batchHintedNodes = batch.hintedNodes();
-            if (!batchHintedNodes.isEmpty())
-                ++hintedBatchesReplayed;
+            // Metered now, even if the interceptor fails below: the retry path re-sends no mutations and writes
+            // no hints, so the batch would otherwise never be accounted for.
+            if (batchHintedNodes.isEmpty())
+                StorageMetrics.batchlogReplays.mark();
+            else
+                StorageMetrics.hintedBatchlogReplays.mark();
             hintedNodes.addAll(batchHintedNodes);
             if (tryNotifyInterceptor(batch))
             {
@@ -572,7 +576,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 {
                     handler.get();
                 }
-                catch (WriteTimeoutException | WriteFailureException e)
+                catch (WriteTimeoutException|WriteFailureException e)
                 {
                     logger.trace("Failed replaying a batched mutation to a node, will write a hint");
                     logger.trace("Failure was : {}", e.getMessage());

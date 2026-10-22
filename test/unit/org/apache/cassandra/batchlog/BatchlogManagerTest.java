@@ -137,6 +137,8 @@ public class BatchlogManagerTest
     {
         long initialAllBatches = BatchlogManager.instance.countAllBatches();
         long initialReplayedBatches = BatchlogManager.instance.getTotalBatchesReplayed();
+        long initialBatchlogReplays = StorageMetrics.batchlogReplays.getCount();
+        long initialHintedBatchlogReplays = StorageMetrics.hintedBatchlogReplays.getCount();
 
         TableMetadata cfm = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1).metadata();
 
@@ -172,6 +174,10 @@ public class BatchlogManagerTest
         // Ensure that the first half, and only the first half, got replayed.
         assertEquals(50, BatchlogManager.instance.countAllBatches() - initialAllBatches);
         assertEquals(50, BatchlogManager.instance.getTotalBatchesReplayed() - initialReplayedBatches);
+        // The local node is the only replica: the mutations are applied locally, nothing is sent and no hint is
+        // written, so every replayed batch is a plain, not a hinted, replay.
+        assertEquals(50, StorageMetrics.batchlogReplays.getCount() - initialBatchlogReplays);
+        assertEquals(0, StorageMetrics.hintedBatchlogReplays.getCount() - initialHintedBatchlogReplays);
 
         for (int i = 0; i < 100; i++)
         {
@@ -211,6 +217,8 @@ public class BatchlogManagerTest
     {
         TableMetadata cf2 = Schema.instance.getTableMetadata(KEYSPACE1, CF_STANDARD2);
         TableMetadata cf3 = Schema.instance.getTableMetadata(KEYSPACE1, CF_STANDARD3);
+        long initialBatchlogReplays = StorageMetrics.batchlogReplays.getCount();
+        long initialHintedBatchlogReplays = StorageMetrics.hintedBatchlogReplays.getCount();
 
         try
         {
@@ -253,6 +261,11 @@ public class BatchlogManagerTest
             // Force batchlog replay and wait for it to complete.
             BatchlogManager.instance.startBatchlogReplay().get();
 
+            // Every batch keeps its Standard3 mutation, so all 1000 are replayed (locally, without hints), the
+            // truncated Standard2 mutations notwithstanding.
+            assertEquals(1000, StorageMetrics.batchlogReplays.getCount() - initialBatchlogReplays);
+            assertEquals(0, StorageMetrics.hintedBatchlogReplays.getCount() - initialHintedBatchlogReplays);
+
             // We should see half of Standard2-targeted mutations written after the replay and all of Standard3 mutations applied.
             for (int i = 0; i < 1000; i++)
             {
@@ -281,6 +294,7 @@ public class BatchlogManagerTest
         }
         finally
         {
+            // don't leak the truncation record into later tests of this class
             SystemKeyspace.removeTruncationRecord(cf2.id);
         }
     }
@@ -434,6 +448,8 @@ public class BatchlogManagerTest
 
         long initialReplayedBatches = BatchlogManager.instance.getTotalBatchesReplayed();
         long initialHintedBatches = BatchlogManager.instance.getHintedBatchesReplayed();
+        long initialBatchlogReplays = StorageMetrics.batchlogReplays.getCount();
+        long initialHintedBatchlogReplays = StorageMetrics.hintedBatchlogReplays.getCount();
         long initialHints = StorageMetrics.totalHints.getCount();
 
         TableMetadata cfm = Keyspace.open(KEYSPACE1)
@@ -470,9 +486,13 @@ public class BatchlogManagerTest
             assertEquals(initialHints + 1,
                          StorageMetrics.totalHints.getCount());
 
-            // And verify that the replay is accounted as a hinted replay.
+            // And verify that the replay is accounted as a hinted replay, both on the MBean and on the meters.
             assertEquals(initialHintedBatches + 1,
                          BatchlogManager.instance.getHintedBatchesReplayed());
+            assertEquals(initialHintedBatchlogReplays + 1,
+                         StorageMetrics.hintedBatchlogReplays.getCount());
+            assertEquals(initialBatchlogReplays,
+                         StorageMetrics.batchlogReplays.getCount());
         }
         finally
         {
@@ -487,6 +507,8 @@ public class BatchlogManagerTest
         long initialAllBatches = BatchlogManager.instance.countAllBatches();
         long initialReplayedBatches = BatchlogManager.instance.getTotalBatchesReplayed();
         long initialHintedBatches = BatchlogManager.instance.getHintedBatchesReplayed();
+        long initialBatchlogReplays = StorageMetrics.batchlogReplays.getCount();
+        long initialHintedBatchlogReplays = StorageMetrics.hintedBatchlogReplays.getCount();
 
         TableMetadata cfm = Keyspace.open(KEYSPACE1)
                                     .getColumnFamilyStore(CF_STANDARD1)
@@ -520,8 +542,12 @@ public class BatchlogManagerTest
         assertEquals(initialReplayedBatches + 1,
                      BatchlogManager.instance.getTotalBatchesReplayed());
 
-        // ... but no replay was sent, therefore no hint was generated.
+        // ... but no replay was sent, therefore no hint was generated and neither replay meter moved.
         assertEquals(initialHintedBatches,
                      BatchlogManager.instance.getHintedBatchesReplayed());
+        assertEquals(initialHintedBatchlogReplays,
+                     StorageMetrics.hintedBatchlogReplays.getCount());
+        assertEquals(initialBatchlogReplays,
+                     StorageMetrics.batchlogReplays.getCount());
     }
 }

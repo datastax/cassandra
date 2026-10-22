@@ -32,7 +32,12 @@ public interface BatchlogManagerMBean
     public long getTotalBatchesReplayed();
 
     /**
-     * @return count of hinted batches replayed since node start
+     * @return number of batches replayed since node start for which at least one hint was written, because a
+     *         replica was down, failed, or did not acknowledge the replayed mutations in time. A batch is counted
+     *         once its mutations complete, even while it stays in the batchlog awaiting its interceptor callback,
+     *         so this can transiently exceed {@link #getTotalBatchesReplayed()}; like that counter, it may count a
+     *         batch again if a replay cycle aborts and the batch is later replayed from scratch. Same value as the
+     *         {@code org.apache.cassandra.metrics:type=Storage,name=HintedBatchlogReplays} meter.
      */
     public long getHintedBatchesReplayed();
 
