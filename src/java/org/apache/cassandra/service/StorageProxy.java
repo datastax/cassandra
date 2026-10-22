@@ -1699,7 +1699,7 @@ public class StorageProxy implements StorageProxyMBean
             logger.trace("Sending batchlog store request {} to {} for {} mutations", batch.id, replica, batch.size());
 
             if (replica.isSelf())
-                removeBatchLocally(Stage.MUTATION, replica, () -> BatchlogManager.store(batch), handler, requestTime);
+                storeBatchLocally(Stage.MUTATION, replica, () -> BatchlogManager.store(batch), handler, requestTime);
             else
                 MessagingService.instance().sendWithCallback(message, replica.endpoint(), handler);
         }
@@ -2057,7 +2057,7 @@ public class StorageProxy implements StorageProxyMBean
         });
     }
 
-    private static void removeBatchLocally(Stage stage, Replica localReplica, final Runnable runnable, final RequestCallback<?> handler, Dispatcher.RequestTime requestTime)
+    private static void storeBatchLocally(Stage stage, Replica localReplica, final Runnable runnable, final RequestCallback<?> handler, Dispatcher.RequestTime requestTime)
     {
         stage.maybeExecuteImmediately(new LocalMutationRunnable(localReplica, requestTime)
         {
