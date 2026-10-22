@@ -110,11 +110,9 @@ public final class HintMessage implements SerializableHintMessage
             {
                 Encoded message = (Encoded) obj;
 
-                // UUID serialization is version-independent, VInt encoding is version-independent,
-                // and hint bytes are written verbatim. The size is the same regardless of the version
-                // passed, so we don't need to check for version mismatch here. This allows encoded
-                // hints written at the storage compatibility version to be dispatched correctly
-                // even when the peer is at a different (newer) messaging version.
+                // the size does not depend on the version: the outbound connection sizes every message at the
+                // current version, whatever the version of the connection, and sizes one that failed to serialize at
+                // the version of the connection, which may be the version serialize has just rejected
                 long size = UUIDSerializer.serializer.serializedSize(message.hostId, version);
                 size += TypeSizes.sizeofUnsignedVInt(message.hint.remaining());
                 size += message.hint.remaining();
@@ -148,11 +146,11 @@ public final class HintMessage implements SerializableHintMessage
             {
                 Encoded message = (Encoded) obj;
 
-                // UUID serialization and VInt encoding are version-independent, and hint bytes are
-                // written verbatim (already encoded at message.version). This allows encoded hints
-                // written at the storage compatibility version to be dispatched correctly even when
-                // the peer is at a different (newer) messaging version. The receiver will deserialize
-                // the hint bytes using the appropriate version based on the hint file descriptor.
+                // the hint bytes are written verbatim and the receiver decodes them at the version of the connection
+                if (version != message.version)
+                    throw new IllegalStateException("serialize() called with version " + version +
+                                                    " for a hint encoded at version " + message.version);
+
                 UUIDSerializer.serializer.serialize(message.hostId, out, version);
                 out.writeUnsignedVInt32(message.hint.remaining());
                 out.write(message.hint);
