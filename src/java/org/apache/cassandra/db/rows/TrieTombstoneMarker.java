@@ -59,13 +59,44 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IMeasurableMemory
 {
     /// The kind of covering deletion specifies the origin of the range that is in effect with a given deletion time.
+    ///
+    /// Partition updates in the trie encoding, which commit logs and messages carry, write a kind as its [#code]. The
+    /// code of a kind must therefore never change, nor be given to another kind.
     enum Kind
     {
-        PARTITION,
-        RANGE,
-        ROW,
-        COLUMN
+        PARTITION(0),
+        RANGE(1),
+        ROW(2),
+        COLUMN(3);
         // we don't yet use cell-level tombstones
+
+        private static final Kind[] BY_CODE;
+        static
+        {
+            int maxCode = -1;
+            for (Kind kind : values())
+                maxCode = Math.max(maxCode, kind.code);
+            BY_CODE = new Kind[maxCode + 1];
+            for (Kind kind : values())
+            {
+                if (BY_CODE[kind.code] != null)
+                    throw new IllegalStateException("Duplicate deletion kind code " + kind.code);
+                BY_CODE[kind.code] = kind;
+            }
+        }
+
+        public final int code;
+
+        Kind(int code)
+        {
+            this.code = code;
+        }
+
+        /// The kind with the given code, or null if there is none.
+        public static Kind fromCode(int code)
+        {
+            return code >= 0 && code < BY_CODE.length ? BY_CODE[code] : null;
+        }
     }
 
     /// The deletion that is in effect to the left of the current position (i.e. preceding in the forward direction).

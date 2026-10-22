@@ -86,7 +86,6 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     final int dataSize;
     final int cellCount;
     int serializedSizeDS21 = -1;
-    int serializedSizeDS20 = -1;
 
     /// The trie as [TriePartitionUpdateSerializer#serializedSize] laid it out at
     /// [org.apache.cassandra.net.MessagingService#VERSION_DS_21], kept so that the write that follows does not have to
@@ -482,7 +481,6 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     void invalidateSerializationCaches()
     {
         serializedSizeDS21 = -1;
-        serializedSizeDS20 = -1;
         serializedTrieDS21 = null;
     }
 

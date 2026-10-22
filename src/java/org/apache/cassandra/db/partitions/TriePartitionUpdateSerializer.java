@@ -21,6 +21,7 @@ package org.apache.cassandra.db.partitions;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
+import java.util.Objects;
 
 import com.google.common.primitives.Ints;
 
@@ -234,12 +235,22 @@ public class TriePartitionUpdateSerializer
 
     private static OnDiskCursor.DataDeserializer<Object> contentDeserializer(ContentManagerPojo.PojoSerializer<Object> pojo)
     {
-        return (rdr, length) -> pojo.deserialize(rdr);
+        return (rdr, length) -> {
+            long start = OnDiskCursor.position(rdr);
+            Object content = pojo.deserialize(rdr);
+            checkReadToEnd(rdr, start, length);
+            return content;
+        };
     }
 
     private static OnDiskCursor.DataDeserializer<TrieTombstoneMarker> deletionDeserializer(ContentManagerPojo.PojoSerializer<Object> pojo)
     {
-        return (rdr, length) -> (TrieTombstoneMarker) pojo.deserialize(rdr);
+        return (rdr, length) -> {
+            long start = OnDiskCursor.position(rdr);
+            TrieTombstoneMarker marker = (TrieTombstoneMarker) pojo.deserialize(rdr);
+            checkReadToEnd(rdr, start, length);
+            return marker;
+        };
     }
 
     /**
@@ -342,8 +353,6 @@ public class TriePartitionUpdateSerializer
         TriePartitionUpdate trieUpdate = TriePartitionUpdate.asTrieUpdate(update);
         if (version == MessagingService.VERSION_DS_21 && trieUpdate.serializedSizeDS21 >= 0)
             return trieUpdate.serializedSizeDS21;
-        if (version == MessagingService.VERSION_DS_20 && trieUpdate.serializedSizeDS20 >= 0)
-            return trieUpdate.serializedSizeDS20;
 
         SerializationHeader header = new SerializationHeader(false, trieUpdate.metadata(), trieUpdate.columns(), trieUpdate.stats());
         SerializationHelper helper = new SerializationHelper(header);
@@ -359,8 +368,6 @@ public class TriePartitionUpdateSerializer
 
         if (version == MessagingService.VERSION_DS_21)
             trieUpdate.serializedSizeDS21 = Ints.saturatedCast(size);
-        else if (version == MessagingService.VERSION_DS_20)
-            trieUpdate.serializedSizeDS20 = Ints.saturatedCast(size);
 
         return size;
     }
@@ -390,6 +397,15 @@ public class TriePartitionUpdateSerializer
             // is a failure to encode a payload, which the write path reports as IOException.
             throw new UncheckedIOException(e);
         }
+    }
+
+    /// A payload is read to the end of its slot and no further, so a read that stops anywhere else has been given bytes
+    /// the writer did not write.
+    private static void checkReadToEnd(DataInputPlus in, long start, int length) throws IOException
+    {
+        long read = OnDiskCursor.position(in) - start;
+        if (read != length)
+            throw new IOException("Read " + read + " bytes of a payload of " + length);
     }
 
     private static final ColumnMetadata[] EMPTY_COLS = new ColumnMetadata[0];
@@ -590,7 +606,7 @@ public class TriePartitionUpdateSerializer
     }
 
     /**
-     * Serializes a {@link TrieTombstoneMarker.Covering} instance (boolean presence tag, {@link DeletionTime}, and {@link TrieTombstoneMarker.Kind} ordinal).
+     * Serializes a {@link TrieTombstoneMarker.Covering} instance (boolean presence tag, {@link DeletionTime}, and {@link TrieTombstoneMarker.Kind} code).
      */
     private static void serializeCovering(TrieTombstoneMarker.Covering covering, DataOutputPlus out, SerializationHeader header) throws IOException
     {
@@ -602,11 +618,9 @@ public class TriePartitionUpdateSerializer
         {
             out.writeBoolean(true);
             header.writeDeletionTime(covering, out);
-            out.writeByte(covering.deletionKind().ordinal());
+            out.writeByte(covering.deletionKind().code);
         }
     }
-
-    private static final TrieTombstoneMarker.Kind[] KINDS = TrieTombstoneMarker.Kind.values();
 
     /**
      * Deserializes a {@link TrieTombstoneMarker.Covering} instance from stream.
@@ -616,10 +630,12 @@ public class TriePartitionUpdateSerializer
         if (!in.readBoolean())
             return null;
         DeletionTime dt = header.readDeletionTime(in);
-        int ordinal = in.readByte() & 0xFF;
-        if (ordinal >= KINDS.length)
-            throw new IOException("Invalid TrieTombstoneMarker.Kind ordinal: " + ordinal);
-        TrieTombstoneMarker.Kind kind = KINDS[ordinal];
+        if (dt.isLive())
+            throw new IOException("Live deletion time in a deletion marker");
+        int code = in.readByte() & 0xFF;
+        TrieTombstoneMarker.Kind kind = TrieTombstoneMarker.Kind.fromCode(code);
+        if (kind == null)
+            throw new IOException("Invalid TrieTombstoneMarker.Kind code: " + code);
         return TrieTombstoneMarker.covering(dt, kind);
     }
 
@@ -641,7 +657,10 @@ public class TriePartitionUpdateSerializer
         serializeCovering(marker.leftDeletion(), out, header);
         serializeCovering(marker.rightDeletion(), out, header);
         serializeCovering(marker.pointDeletion(), out, header);
-        out.writeBoolean(marker.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW));
+        boolean hasRowLevelMarker = marker.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW);
+        // A point deletion is read back without a level marker; one that had it would lose it unnoticed.
+        assert marker.pointDeletion() == null || !hasRowLevelMarker : "Point deletion with a row level marker: " + marker;
+        out.writeBoolean(hasRowLevelMarker);
     }
 
     /**
@@ -656,7 +675,17 @@ public class TriePartitionUpdateSerializer
         TrieTombstoneMarker.LevelMarker levelMarker = hasRowLevelMarker ? TrieTombstoneMarker.LevelMarker.ROW : null;
 
         if (point != null)
+        {
+            // A point deletion with the same deletion on both sides is built with one instance for both.
+            if (left != null && left.equals(right))
+                return new TrieTombstoneMarker.Point(point, left);
             return new TrieTombstoneMarker.Point(point, left, right);
+        }
+
+        // Every marker the writer writes changes something; make would return a bare covering deletion, or nothing,
+        // for one that does not.
+        if (levelMarker == null && Objects.equals(left, right))
+            throw new IOException("Deletion marker with the same deletion on both sides and nothing else: " + left);
 
         return TrieTombstoneMarker.make(left, right, levelMarker);
     }
