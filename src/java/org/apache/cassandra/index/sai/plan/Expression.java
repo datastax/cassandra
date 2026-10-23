@@ -37,6 +37,7 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Redaction;
@@ -454,7 +455,7 @@ public class Expression
     /**
      * Returns whether this is an {@link Op#AUTOMATON} expression of a wildcard-free pattern (a {@code LIKE '<term>'}
      * without any {@code %}), which matches the single term equal to the pattern, like an {@link Op#EQ}
-     * expression: its automaton is a {@code SINGLE} one (see {@link AutomatonQueries#fromLikePattern}). Decided
+     * expression: its automaton is a {@code SINGLE} one (see {@link LikePatterns#fromLikePattern}). Decided
      * from the pattern, without compiling it.
      */
     public boolean isExactPatternMatch()
@@ -477,14 +478,14 @@ public class Expression
      * normalized, e.g. lowercased) pattern produced by the analysis in {@code Operation#analyzeGroup}, matching
      * how the stored terms are normalized.
      *
-     * @throws org.apache.cassandra.index.sai.utils.InvalidPatternException if the pattern is invalid or too complex
+     * @throws org.apache.cassandra.exceptions.InvalidPatternException if the pattern is invalid or too complex
      */
     public CompiledAutomaton getAutomaton()
     {
         assert operation == Op.AUTOMATON : "Automaton requested for operation " + operation;
         CompiledAutomaton compiled = automaton;
         if (compiled == null)
-            automaton = compiled = AutomatonQueries.forPatternOperator(patternOperator, lower.value.raw, context.getColumnName());
+            automaton = compiled = LikePatterns.forPatternOperator(patternOperator, lower.value.raw, context.getColumnName());
         return compiled;
     }
 
@@ -605,7 +606,7 @@ public class Expression
                     case AUTOMATON:
                         // pattern matching over the (possibly normalized) term, with the exact same automaton
                         // used by the index searchers
-                        isMatch = AutomatonQueries.accepts(getAutomaton(), term);
+                        isMatch = LikePatterns.accepts(getAutomaton(), term);
                         break;
                 }
 

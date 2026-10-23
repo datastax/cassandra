@@ -52,7 +52,7 @@ import org.apache.lucene.util.automaton.Transition;
  * {@link ByteRunAutomaton} runs over — i.e. SAI's non-composite literal trie dictionaries, which store the raw
  * unterminated term bytes at every index version (see {@code OnDiskFormat#encodeForTrie}).
  * <p>
- * Note on shared {@link CompiledAutomaton} instances (see the compile cache in {@link AutomatonQueries}): this
+ * Note on shared {@link CompiledAutomaton} instances (see the compile cache in {@link org.apache.cassandra.cql3.LikePatterns}): this
  * class only performs read-only operations on the compiled automaton ({@code runAutomaton.step/isAccept/run},
  * {@code automaton.initTransition/getNextTransition} into a private {@link Transition} scratch); it never calls
  * the non-thread-safe {@code CompiledAutomaton#floor()}. All mutable walk state is per-instance, and a seeker

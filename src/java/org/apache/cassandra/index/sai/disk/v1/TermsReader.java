@@ -31,6 +31,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -976,7 +977,7 @@ public class TermsReader implements Closeable
                         continue;
                     if (budget != null)
                         budget.consumeVisitedTerm();
-                    if (automaton != null && !AutomatonQueries.accepts(automaton, termBytes))
+                    if (automaton != null && !LikePatterns.accepts(automaton, termBytes))
                         continue;
                     pending = candidate;
                     return true;
