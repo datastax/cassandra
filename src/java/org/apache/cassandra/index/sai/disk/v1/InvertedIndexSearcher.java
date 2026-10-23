@@ -59,7 +59,6 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.AutomatonQueries;
-import org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException;
 import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.BM25Utils.EagerDocTF;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -185,18 +184,8 @@ public class InvertedIndexSearcher extends IndexSearcher
             // Automaton-served pattern matching (non-prefix LIKE variants): intersect the segment's terms
             // dictionary with the expression's compiled automaton and union the posting lists of the accepted
             // terms. Only supported on non-composite literal indexes (guarded by IndexContext#supports at the
-            // CQL layer). The visited-terms budget is the one of the query context, shared by all the segments and
-            // memtable shards the read visits: the expansions cap is not a per-segment allowance.
-            try
-            {
-                return searchAutomatonPostings(exp.getAutomaton(), exp.getAutomatonCommonPrefix(), context.automatonExpansionsBudget(), context);
-            }
-            catch (AutomatonTermsExceededException e)
-            {
-                // re-throw with full query context; clients see the SAI_AUTOMATON_EXPANSIONS_EXCEEDED failure
-                // reason, this detailed message lands in the logs
-                throw e.forRestriction(exp.getPatternOperator(), indexContext.getColumnName());
-            }
+            // CQL layer).
+            return searchAutomatonPostings(exp.getAutomaton(), exp.getAutomatonCommonPrefix(), context);
         }
         throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
     }
@@ -205,45 +194,22 @@ public class InvertedIndexSearcher extends IndexSearcher
      * Automaton-driven term matching entry point (see
      * {@link org.apache.cassandra.index.sai.utils.AutomatonQueries}): intersects the segment's terms dictionary
      * with the given byte-level automaton and returns the primary keys of the union of the posting lists of all
-     * matching terms, using a fresh per-call budget of {@link AutomatonQueries#DEFAULT_MAX_VISITED_TERMS} visited
-     * terms.
-     * <p>
-     * The CQL surface (the non-prefix LIKE variants) reaches this engine through the
-     * {@code Expression.Op.AUTOMATON} branch of {@code searchPosting}, which instead consumes the budget shared
-     * by the whole read ({@code QueryContext#automatonExpansionsBudget()}, initialized from the configurable
-     * {@link AutomatonQueries#maxAutomatonExpansions()} cap).
-     *
-     * @throws org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException if the dictionary scan visits
-     *         more terms than the cap
+     * matching terms. The CQL surface (the non-prefix LIKE variants) reaches this engine through the
+     * {@code Expression.Op.AUTOMATON} branch of {@code searchPosting}. The visited terms are counted in the query
+     * context (see {@link QueryContext#onAutomatonTermVisited()}).
      */
     @VisibleForTesting
     public KeyRangeIterator searchAutomaton(CompiledAutomaton automaton, QueryContext context) throws IOException
     {
-        return searchAutomaton(automaton, AutomatonQueries.DEFAULT_MAX_VISITED_TERMS, context);
-    }
-
-    /**
-     * Same as {@link #searchAutomaton(CompiledAutomaton, QueryContext)} with an explicit per-call cap on the
-     * number of dictionary terms the intersection may visit.
-     */
-    @VisibleForTesting
-    public KeyRangeIterator searchAutomaton(CompiledAutomaton automaton, int maxVisitedTerms, QueryContext context) throws IOException
-    {
-        return toPrimaryKeyIterator(searchAutomatonPostings(automaton,
-                                                            AutomatonQueries.commonPrefixBytes(automaton),
-                                                            new AutomatonQueries.ExpansionsBudget(maxVisitedTerms),
-                                                            context), context);
+        return toPrimaryKeyIterator(searchAutomatonPostings(automaton, AutomatonQueries.commonPrefixBytes(automaton), context), context);
     }
 
     /**
      * Posting-list-level variant of {@link #searchAutomaton(CompiledAutomaton, QueryContext)}, returning the union
      * of the posting lists of all terms in this segment matching the automaton (consistent with what
-     * {@code searchPosting} returns for {@code Expression.Op.RANGE}). The scan consumes the given visited-terms
-     * budget; the CQL query path passes the budget of its query context
-     * ({@code QueryContext#automatonExpansionsBudget()}), so the configured expansions cap bounds the whole read,
-     * not each segment.
+     * {@code searchPosting} returns for {@code Expression.Op.RANGE}).
      */
-    public PostingList searchAutomatonPostings(CompiledAutomaton automaton, byte[] commonPrefix, AutomatonQueries.ExpansionsBudget budget, QueryContext context)
+    public PostingList searchAutomatonPostings(CompiledAutomaton automaton, byte[] commonPrefix, QueryContext context)
     {
         // Automaton intersection runs directly over the stored term bytes, which only line up with the raw value
         // bytes for non-composite literal types (see OnDiskFormat#encodeForTrie).
@@ -251,7 +217,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             throw new IllegalStateException(indexContext.logMessage("Automaton matching is only supported on non-composite literal indexes"));
 
         QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
-        return reader.intersect(automaton, commonPrefix, budget, listener, context);
+        return reader.intersect(automaton, commonPrefix, listener, context);
     }
 
     private Cell<?> readColumn(SSTableReader sstable, PrimaryKey primaryKey)
@@ -279,13 +245,12 @@ public class InvertedIndexSearcher extends IndexSearcher
     {
         if (!orderer.isBM25())
         {
-            // A LIKE restriction on the ordering column only scans the terms it can match (and an automaton pattern
-            // consumes the expansions budget of the query, like its non-ordered scan); otherwise the whole terms
+            // A LIKE restriction on the ordering column only scans the terms it can match; otherwise the whole terms
             // dictionary is scanned, and the ordered rows are post-filtered by the query.
             boolean patternSlice = slice != null
                                    && (slice.getOp() == Expression.Op.PREFIX || slice.getOp() == Expression.Op.AUTOMATON);
             var terms = patternSlice
-                        ? reader.patternTerms(slice, orderer.isAscending(), slice.getOp() == Expression.Op.AUTOMATON ? queryContext.automatonExpansionsBudget() : null)
+                        ? reader.patternTerms(slice, orderer.isAscending(), queryContext)
                         : reader.allTerms(orderer.isAscending());
             var iter = new RowIdWithTermsIterator(terms);
             return toMetaSortedIterator(iter, queryContext);

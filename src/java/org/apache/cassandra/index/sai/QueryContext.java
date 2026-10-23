@@ -29,7 +29,6 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.utils.MonotonicClock;
 
 import static java.lang.Math.max;
@@ -125,8 +124,8 @@ public class QueryContext
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
 
-    // The per-query automaton expansions budget, created lazily on the first automaton intersection of the query.
-    private AutomatonQueries.ExpansionsBudget automatonExpansionsBudget;
+    /** Number of terms visited by the automaton (non-prefix LIKE) scans of the query, see {@link #onAutomatonTermVisited()}. */
+    private long automatonTermsVisited = 0;
 
     /** Metrics about the query plan. */
     private PlanInfo queryPlanInfo;
@@ -269,24 +268,34 @@ public class QueryContext
         postFilteringReadLatency += val;
     }
 
+    /** How many automaton-visited terms are counted between two timeout checks, see {@link #onAutomatonTermVisited()}. */
+    @VisibleForTesting
+    public static final int AUTOMATON_CHECKPOINT_INTERVAL = 64;
+
     /**
-     * The budget of dictionary/trie terms all automaton (non-prefix LIKE) intersections and ordering scans restricted
-     * by an automaton run with this query context may visit in total, across every sstable index segment and memtable
-     * index shard they touch, initialized lazily from {@link AutomatonQueries#maxAutomatonExpansions()} on first use.
-     * Multiple automaton predicates share the budget. Consuming it periodically checks this context for timeouts ({@link #checkpoint()}).
-     * <p>
-     * A query context belongs to the execution of one read command on one replica, so the cap applies separately to
-     * each replica read, each page of a paged query and each token-range subrequest of a range read. It doesn't grow
-     * with the number of segments, but a term present in several segments/shards is visited (and counted) once in
-     * each of them, so how close a query gets to the cap depends on how its data is currently spread over memtables
-     * and sstables (i.e. on flushes and compactions).
+     * Counts a term visited by an automaton (non-prefix LIKE) scan of this query: the sstable segment intersections
+     * ({@code TermsReader#intersect}), the memtable shard walks ({@code TrieMemoryIndex#automatonMatch}) and the
+     * ordering scans filtered by an automaton. With the automaton-guided seek-skipping scans this counts the terms
+     * actually visited <em>after</em> skipping, which tests use to pin that optimization. Every
+     * {@value #AUTOMATON_CHECKPOINT_INTERVAL} visited terms, the query is checked for a timeout
+     * ({@link #checkpoint()}), so that a scan over many terms is aborted when the query's deadline passes rather than
+     * running to completion: like the range scans of the terms dictionaries, these scans are bounded by the query
+     * timeout only.
+     *
+     * @throws AbortedOperationException if the query has timed out
      */
-    public AutomatonQueries.ExpansionsBudget automatonExpansionsBudget()
+    public void onAutomatonTermVisited()
     {
         checkThreadOwnership();
-        if (automatonExpansionsBudget == null)
-            automatonExpansionsBudget = new AutomatonQueries.ExpansionsBudget(AutomatonQueries.maxAutomatonExpansions(), this::checkpoint);
-        return automatonExpansionsBudget;
+        if (++automatonTermsVisited % AUTOMATON_CHECKPOINT_INTERVAL == 0)
+            checkpoint();
+    }
+
+    /** @return the number of terms visited so far by the automaton (non-prefix LIKE) scans of this query */
+    public long automatonTermsVisited()
+    {
+        checkThreadOwnership();
+        return automatonTermsVisited;
     }
 
     /**

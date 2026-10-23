@@ -54,8 +54,7 @@ import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
-import org.apache.cassandra.index.sai.utils.AutomatonQueries;
-import org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException;
+import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -80,7 +79,6 @@ import static org.mockito.Mockito.when;
  */
 public class AutomatonIntersectionTest extends SaiRandomizedTest
 {
-    private static final int NO_CAP = Integer.MAX_VALUE;
 
     private final Version version;
 
@@ -151,7 +149,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
             CompiledAutomaton automaton = LikePatterns.fromLikePattern("ab%");
             assertEngineMatchesBruteForce(fixture, dictionary, automaton, "prefix bounds ab%");
 
-            var results = intersect(fixture, automaton, NO_CAP);
+            var results = intersect(fixture, automaton);
             var expected = expectedRowIds(dictionary, automaton);
             // guard against a vacuous comparison: exactly the four "ab"-prefixed terms must have matched
             assertEquals(union(dictionary, "ab", "ab\0", "ab\uFFFF\uFFFF", "abz"), expected);
@@ -160,7 +158,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
     }
 
     @Test
-    public void testVisitedTermCapTriggering() throws IOException
+    public void testVisitedTermsAreCounted() throws IOException
     {
         Map<String, TreeSet<Integer>> dictionary = new TreeMap<>();
         int rowId = 0;
@@ -170,22 +168,44 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
 
         withIndex(dictionary, fixture ->
         {
+            // the scan of 'a%' is bounded to the 100 terms of [a, b)
             CompiledAutomaton broad = LikePatterns.fromLikePattern("a%");
-            // just enough budget: 100 terms visited in the bounded range
-            assertEquals(expectedRowIds(dictionary, broad), intersect(fixture, broad, 100));
-            // one short of the required budget
-            assertThrows(AutomatonTermsExceededException.class, () -> intersect(fixture, broad, 99));
+            QueryContext context = new QueryContext();
+            assertEquals(expectedRowIds(dictionary, broad), intersect(fixture, broad, context));
+            assertEquals(100, context.automatonTermsVisited());
 
-            // the cap applies to *visited* terms, so even an automaton matching nothing in a broad scan range trips it
+            // the count is of *visited* terms, so an automaton matching nothing in a broad scan range still visits some
             CompiledAutomaton selective = LikePatterns.fromLikePattern("a%zzz");
-            assertEquals(expectedRowIds(dictionary, selective), intersect(fixture, selective, NO_CAP));
-            assertThrows(AutomatonTermsExceededException.class, () -> intersect(fixture, selective, 10));
+            context = new QueryContext();
+            assertEquals(expectedRowIds(dictionary, selective), intersect(fixture, selective, context));
+            assertTrue(context.automatonTermsVisited() > 0);
+            assertTrue(context.automatonTermsVisited() <= 100);
 
             // a match-all automaton scans the whole dictionary
             CompiledAutomaton all = LikePatterns.fromLikePattern("%");
             assertEquals(CompiledAutomaton.AUTOMATON_TYPE.ALL, all.type);
-            assertEquals(expectedRowIds(dictionary, all), intersect(fixture, all, 101));
-            assertThrows(AutomatonTermsExceededException.class, () -> intersect(fixture, all, 100));
+            context = new QueryContext();
+            assertEquals(expectedRowIds(dictionary, all), intersect(fixture, all, context));
+            assertEquals(101, context.automatonTermsVisited());
+        });
+    }
+
+    /** A scan whose query has timed out is aborted at the periodic timeout check of the visited terms. */
+    @Test
+    public void testScanAbortedWhenQueryTimesOut() throws IOException
+    {
+        if (QueryContext.DISABLE_TIMEOUT)
+            return;
+        Map<String, TreeSet<Integer>> dictionary = new TreeMap<>();
+        int rowId = 0;
+        for (int i = 0; i < 100; i++)
+            dictionary.computeIfAbsent(String.format("a%03d", i), k -> new TreeSet<>()).add(rowId++);
+
+        withIndex(dictionary, fixture ->
+        {
+            // (the intersection checks for a timeout before scanning too, so the first check throws here)
+            QueryContext expired = new QueryContext(0);
+            assertThrows(AbortedOperationException.class, () -> intersect(fixture, LikePatterns.fromLikePattern("a%"), expired));
         });
     }
 
@@ -214,15 +234,15 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
                 Operations.concatenate(List.of(Automata.makeAnyChar(), Automata.makeString("0100"), Automata.makeAnyString())));
             assertEquals(CompiledAutomaton.AUTOMATON_TYPE.NORMAL, automaton.type);
 
-            AutomatonQueries.ExpansionsBudget budget = new AutomatonQueries.ExpansionsBudget(NO_CAP);
-            TreeSet<Integer> results = intersect(fixture, automaton, budget);
+            QueryContext context = new QueryContext();
+            TreeSet<Integer> results = intersect(fixture, automaton, context);
 
             // correctness first (and a guard against a vacuous comparison: exactly one match per letter block)
             assertEquals(expectedRowIds(dictionary, automaton), results);
             assertEquals(26, results.size());
 
             // the pin: the guided walk must visit far fewer terms than the scanned range size
-            int visited = budget.visitedTerms();
+            long visited = context.automatonTermsVisited();
             assertTrue("expected at least the 26 accepted terms to be visited, but visited only " + visited,
                        visited >= 26);
             assertTrue("seek-skipping regressed: visited " + visited + " of " + dictionary.size() +
@@ -232,7 +252,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
     }
 
     /**
-     * The seek-skipping walk must degrade to (budget-guarded) sequential scanning for automatons that cannot
+     * The seek-skipping walk must degrade to sequential scanning for automatons that cannot
      * skip, and its visited-term accounting must equal the bounded-scan behaviour there: a suffix pattern
      * ({@code LIKE '%zzz'}) puts every term of an {@code a}-block dictionary inside a linear (loop) stretch,
      * so every term is visited exactly once.
@@ -251,14 +271,14 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
             CompiledAutomaton suffix = LikePatterns.suffixAutomaton("zzz");
             assertEquals(CompiledAutomaton.AUTOMATON_TYPE.NORMAL, suffix.type);
 
-            AutomatonQueries.ExpansionsBudget budget = new AutomatonQueries.ExpansionsBudget(NO_CAP);
-            assertEquals(expectedRowIds(dictionary, suffix), intersect(fixture, suffix, budget));
-            assertEquals(dictionary.size(), budget.visitedTerms());
+            QueryContext context = new QueryContext();
+            assertEquals(expectedRowIds(dictionary, suffix), intersect(fixture, suffix, context));
+            assertEquals(dictionary.size(), context.automatonTermsVisited());
         });
     }
 
     @Test
-    public void testSharedBudgetSpansMultipleIntersections() throws IOException
+    public void testVisitedTermsAccumulateAcrossIntersections() throws IOException
     {
         Map<String, TreeSet<Integer>> dictionary = new TreeMap<>();
         int rowId = 0;
@@ -269,25 +289,13 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         {
             CompiledAutomaton broad = LikePatterns.fromLikePattern("a%");
 
-            // The query path shares one budget per query (QueryContext#automatonExpansionsBudget) across every
-            // segment intersection: a budget covering one 10-term scan but not two is exhausted by the second
-            // scan (as it would be by the second segment of the same query), and the failure carries the
-            // budget's total limit, not the per-scan count.
-            AutomatonQueries.ExpansionsBudget budget = new AutomatonQueries.ExpansionsBudget(15);
-            assertEquals(expectedRowIds(dictionary, broad), intersect(fixture, broad, budget));
-            try
-            {
-                intersect(fixture, broad, budget);
-                fail("the second intersection must exhaust the shared budget");
-            }
-            catch (AutomatonTermsExceededException e)
-            {
-                assertEquals(15, e.maxVisitedTerms());
-            }
-
-            // fresh per-call budgets (the engine-level int-cap overloads) are unaffected by earlier scans
-            assertEquals(expectedRowIds(dictionary, broad), intersect(fixture, broad, 10));
-            assertEquals(expectedRowIds(dictionary, broad), intersect(fixture, broad, 10));
+            // the query context counts the terms visited by every segment intersection of a query (and the
+            // memtable shard scans), so two intersections of the same context add up
+            QueryContext context = new QueryContext();
+            assertEquals(expectedRowIds(dictionary, broad), intersect(fixture, broad, context));
+            assertEquals(10, context.automatonTermsVisited());
+            assertEquals(expectedRowIds(dictionary, broad), intersect(fixture, broad, context));
+            assertEquals(20, context.automatonTermsVisited());
         });
     }
 
@@ -307,7 +315,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
             assertEquals(CompiledAutomaton.AUTOMATON_TYPE.NORMAL, automaton.type);
 
             // automaton intersection: scanFilterAndMergePostings
-            expectInjectedOpenFailure(() -> intersect(fixture, automaton, NO_CAP));
+            expectInjectedOpenFailure(() -> intersect(fixture, automaton));
 
             // exact match: the two opens in TermQuery's constructor
             ByteComparable term = version.onDiskFormat().encodeForTrie(UTF8Type.instance.decompose("alpha"), UTF8Type.instance);
@@ -399,7 +407,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         withIndex(dictionary, fixture ->
         {
             CompiledAutomaton automaton = LikePatterns.fromLikePattern("match%");
-            var results = intersect(fixture, automaton, NO_CAP);
+            var results = intersect(fixture, automaton);
             var expected = expectedRowIds(dictionary, automaton);
             assertEquals(512 + 7 + 512, expected.size());
             assertEquals(expected, results);
@@ -559,19 +567,18 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
     }
 
     /** Runs the engine and collects the resulting row ids. */
-    private TreeSet<Integer> intersect(Fixture fixture, CompiledAutomaton automaton, int maxVisitedTerms) throws IOException
+    private TreeSet<Integer> intersect(Fixture fixture, CompiledAutomaton automaton) throws IOException
     {
-        return intersect(fixture, automaton, new AutomatonQueries.ExpansionsBudget(maxVisitedTerms));
+        return intersect(fixture, automaton, new QueryContext());
     }
 
-    /** Same as {@link #intersect(Fixture, CompiledAutomaton, int)}, consuming the given (possibly shared) budget. */
-    private TreeSet<Integer> intersect(Fixture fixture, CompiledAutomaton automaton, AutomatonQueries.ExpansionsBudget budget) throws IOException
+    /** Same as {@link #intersect(Fixture, CompiledAutomaton)}, with the given query context (which counts the visited terms). */
+    private TreeSet<Integer> intersect(Fixture fixture, CompiledAutomaton automaton, QueryContext context) throws IOException
     {
         TreeSet<Integer> results = new TreeSet<>();
         try (PostingList postings = fixture.reader.intersect(automaton,
-                                                             budget,
                                                              (QueryEventListener.TrieIndexEventListener) NO_OP_TRIE_LISTENER,
-                                                             new QueryContext()))
+                                                             context))
         {
             assertNotNull(postings);
             for (long rowId = postings.nextPosting(); rowId != PostingList.END_OF_STREAM; rowId = postings.nextPosting())
@@ -597,7 +604,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
     {
         assertEquals("engine and brute-force results differ for " + description,
                      expectedRowIds(dictionary, automaton),
-                     intersect(fixture, automaton, NO_CAP));
+                     intersect(fixture, automaton));
     }
 
     /** Builds a dictionary mapping each distinct term to a singleton posting of its position. */

@@ -24,9 +24,7 @@ import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.lucene.util.automaton.Automata;
 
 import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -66,49 +64,6 @@ public class AutomatonQueriesTest
         assertTrue(Arrays.compareUnsigned(prefix, upper) < 0);
         assertTrue(Arrays.compareUnsigned(utf8("ab￿￿"), upper) < 0);
         assertTrue(Arrays.compareUnsigned(utf8("ac"), upper) >= 0);
-    }
-
-    @Test
-    public void expansionsBudgetIsASharedCountdown()
-    {
-        AutomatonQueries.ExpansionsBudget budget = new AutomatonQueries.ExpansionsBudget(3);
-        assertEquals(3, budget.limit());
-        // consumable from multiple scans (as the per-query budget is, across segments and memtable shards)
-        budget.consumeVisitedTerm();
-        budget.consumeVisitedTerm();
-        budget.consumeVisitedTerm();
-        AutomatonTermsExceededException e = assertThrows(AutomatonTermsExceededException.class, budget::consumeVisitedTerm);
-        // the exception carries the budget's total limit, not the count of any single scan
-        assertEquals(3, e.maxVisitedTerms());
-    }
-
-    @Test
-    public void maxAutomatonExpansionsValidation()
-    {
-        assertEquals(1, AutomatonQueries.parseMaxAutomatonExpansions("1"));
-        assertEquals(100, AutomatonQueries.parseMaxAutomatonExpansions(" 100 "));
-        // invalid values fall back to the default
-        for (String invalid : new String[]{ "0", "-1", "abc", "", "1.5", "99999999999", null })
-            assertEquals(invalid, AutomatonQueries.DEFAULT_MAX_VISITED_TERMS, AutomatonQueries.parseMaxAutomatonExpansions(invalid));
-    }
-
-    @Test
-    public void expansionsBudgetCheckpoints()
-    {
-        int[] checkpoints = { 0 };
-        AutomatonQueries.ExpansionsBudget budget = new AutomatonQueries.ExpansionsBudget(200, () -> checkpoints[0]++);
-        for (int i = 0; i < 200; i++)
-            budget.consumeVisitedTerm();
-        assertEquals(200, budget.visitedTerms());
-        // every 64 consumed terms
-        assertEquals(3, checkpoints[0]);
-        assertThrows(AutomatonTermsExceededException.class, budget::consumeVisitedTerm);
-
-        // a checkpoint failure (e.g. a query timeout) aborts the consuming scan
-        AutomatonQueries.ExpansionsBudget aborting = new AutomatonQueries.ExpansionsBudget(200, () -> { throw new AbortedOperationException(); });
-        for (int i = 0; i < 63; i++)
-            aborting.consumeVisitedTerm();
-        assertThrows(AbortedOperationException.class, aborting::consumeVisitedTerm);
     }
 
     private static byte[] utf8(String s)

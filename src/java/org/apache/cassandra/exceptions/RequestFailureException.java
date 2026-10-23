@@ -52,17 +52,8 @@ public class RequestFailureException extends RequestExecutionException
     private static String buildFailureString(Map<InetAddressAndPort, RequestFailureReason> failures)
     {
         return failures.entrySet().stream()
-                       .map(e -> failureString(e.getValue(), e.getKey()))
+                       .map(e -> String.format("%s from %s", e.getValue(), e.getKey()))
                        .collect(Collectors.joining(", "));
-    }
-
-    /** "REASON from endpoint", followed by the explanation of the reason when it has one (see {@link RequestFailureReason#hint()}). */
-    private static String failureString(RequestFailureReason reason, InetAddressAndPort endpoint)
-    {
-        String hint = reason.hint();
-        return hint == null
-               ? String.format("%s from %s", reason, endpoint)
-               : String.format("%s from %s (%s)", reason, endpoint, hint);
     }
 
     private static String buildErrorMessage(CharSequence msg, Map<InetAddressAndPort, RequestFailureReason> failures)

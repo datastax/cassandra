@@ -41,11 +41,11 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.TargetParser;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.AutomatonQueries;
-import org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException;
+import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -103,16 +103,16 @@ public class TrieMemoryIndexAutomatonTest
         Map<Integer, String> rows = indexRows(index, "aa", "aa￿", "ab", "ab ", "ab￿￿", "abz", "ac", "aca", "b");
 
         CompiledAutomaton automaton = LikePatterns.fromLikePattern("ab%");
-        TreeSet<Integer> results = search(index, automaton, Integer.MAX_VALUE);
+        QueryContext context = new QueryContext();
+        TreeSet<Integer> results = search(index, automaton, context);
         assertEquals(keysOf(rows, "ab", "ab ", "ab￿￿", "abz"), results);
 
-        // a prefix-bounded scan visits only the terms under the prefix, so a tight cap that would trip on a full
-        // scan passes here
-        assertEquals(results, search(index, automaton, 4));
+        // a prefix-bounded scan visits only the terms under the prefix
+        assertEquals(4, context.automatonTermsVisited());
     }
 
     @Test
-    public void shouldTriggerVisitedTermCap()
+    public void shouldCountVisitedTerms()
     {
         TrieMemoryIndex index = newIndex(UTF8Type.instance);
         String[] values = new String[100];
@@ -121,17 +121,38 @@ public class TrieMemoryIndexAutomatonTest
         Map<Integer, String> rows = indexRows(index, values);
 
         CompiledAutomaton broad = LikePatterns.fromLikePattern("a%");
-        assertEquals(rows.keySet(), search(index, broad, 100));
-        assertThrows(AutomatonTermsExceededException.class, () -> search(index, broad, 99));
+        QueryContext context = new QueryContext();
+        assertEquals(rows.keySet(), search(index, broad, context));
+        assertEquals(100, context.automatonTermsVisited());
 
-        // the cap counts visited terms, not matches
+        // the count is of visited terms, not matches
         CompiledAutomaton selective = LikePatterns.fromLikePattern("a%zzz");
-        assertEquals(new TreeSet<>(), search(index, selective, Integer.MAX_VALUE));
-        assertThrows(AutomatonTermsExceededException.class, () -> search(index, selective, 10));
+        context = new QueryContext();
+        assertEquals(new TreeSet<>(), search(index, selective, context));
+        assertTrue(context.automatonTermsVisited() > 0);
+        assertTrue(context.automatonTermsVisited() <= 100);
+    }
+
+    /** A walk whose query has timed out is aborted at the periodic timeout check of the visited terms. */
+    @Test
+    public void shouldAbortWalkWhenQueryTimesOut()
+    {
+        if (QueryContext.DISABLE_TIMEOUT)
+            return;
+        TrieMemoryIndex index = newIndex(UTF8Type.instance);
+        String[] values = new String[100];
+        for (int i = 0; i < values.length; i++)
+            values[i] = String.format("a%03d", i);
+        indexRows(index, values);
+
+        QueryContext expired = new QueryContext(0);
+        assertThrows(AbortedOperationException.class, () -> search(index, LikePatterns.fromLikePattern("a%"), expired));
+        // aborted at the first periodic check, not at the end of the walk
+        assertEquals(QueryContext.AUTOMATON_CHECKPOINT_INTERVAL, expired.automatonTermsVisited());
     }
 
     @Test
-    public void shouldConsumeSharedBudgetAcrossScans()
+    public void shouldAccumulateVisitedTermsAcrossScans()
     {
         TrieMemoryIndex index = newIndex(UTF8Type.instance);
         String[] values = new String[10];
@@ -140,20 +161,14 @@ public class TrieMemoryIndexAutomatonTest
         Map<Integer, String> rows = indexRows(index, values);
 
         CompiledAutomaton broad = LikePatterns.fromLikePattern("a%");
-        AbstractBounds<PartitionPosition> keyRange = AbstractBounds.unbounded(Murmur3Partitioner.instance);
 
-        // The query path shares one budget per query (QueryContext#automatonExpansionsBudget) across every
-        // memtable shard scan and sstable segment intersection: a budget covering one 10-term scan but not two
-        // is exhausted by the second scan, and the failure carries the budget's total limit.
-        AutomatonQueries.ExpansionsBudget budget = new AutomatonQueries.ExpansionsBudget(15);
-        index.automatonMatch(broad, budget, keyRange);
-        AutomatonTermsExceededException e =
-            assertThrows(AutomatonTermsExceededException.class, () -> index.automatonMatch(broad, budget, keyRange));
-        assertEquals(15, e.maxVisitedTerms());
-
-        // fresh per-call budgets (the engine-level int-cap overload) are unaffected by earlier scans
-        assertEquals(rows.keySet(), search(index, broad, 10));
-        assertEquals(rows.keySet(), search(index, broad, 10));
+        // the query context counts the terms visited by every memtable shard scan (and sstable segment
+        // intersection) of a query, so two scans of the same context add up
+        QueryContext context = new QueryContext();
+        assertEquals(rows.keySet(), search(index, broad, context));
+        assertEquals(10, context.automatonTermsVisited());
+        assertEquals(rows.keySet(), search(index, broad, context));
+        assertEquals(20, context.automatonTermsVisited());
     }
 
     @Test
@@ -165,18 +180,18 @@ public class TrieMemoryIndexAutomatonTest
         // a pattern without wildcards simplifies to a SINGLE automaton served by an exact lookup
         CompiledAutomaton single = LikePatterns.fromLikePattern("beta");
         assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, single.type);
-        assertEquals(keysOf(rows, "beta"), search(index, single, Integer.MAX_VALUE));
-        assertEquals(new TreeSet<>(), search(index, LikePatterns.fromLikePattern("delta"), Integer.MAX_VALUE));
+        assertEquals(keysOf(rows, "beta"), search(index, single));
+        assertEquals(new TreeSet<>(), search(index, LikePatterns.fromLikePattern("delta")));
 
         // the empty language matches nothing
         CompiledAutomaton none = LikePatterns.compile(org.apache.lucene.util.automaton.Automata.makeEmpty());
         assertEquals(CompiledAutomaton.AUTOMATON_TYPE.NONE, none.type);
-        assertEquals(new TreeSet<>(), search(index, none, Integer.MAX_VALUE));
+        assertEquals(new TreeSet<>(), search(index, none));
 
         // an all-wildcard pattern simplifies to a match-all (ALL) automaton accepting every term
         CompiledAutomaton all = LikePatterns.fromLikePattern("%");
         assertEquals(CompiledAutomaton.AUTOMATON_TYPE.ALL, all.type);
-        assertEquals(rows.keySet(), search(index, all, Integer.MAX_VALUE));
+        assertEquals(rows.keySet(), search(index, all));
     }
 
     @Test
@@ -185,7 +200,7 @@ public class TrieMemoryIndexAutomatonTest
         TrieMemoryIndex index = newIndex(Int32Type.instance);
         index.add(makeKey(table, "0"), Clustering.EMPTY, Int32Type.instance.decompose(42), b -> {}, b -> {});
         assertThrows(IllegalStateException.class,
-                     () -> search(index, LikePatterns.fromLikePattern("4%"), Integer.MAX_VALUE));
+                     () -> search(index, LikePatterns.fromLikePattern("4%")));
     }
 
     @Test
@@ -216,15 +231,21 @@ public class TrieMemoryIndexAutomatonTest
 
         assertEquals("engine and brute-force results differ for " + description,
                      expected,
-                     search(index, automaton, Integer.MAX_VALUE));
+                     search(index, automaton));
     }
 
     /** Runs the engine and collects the partition key values of the matching rows. */
-    private TreeSet<Integer> search(TrieMemoryIndex index, CompiledAutomaton automaton, int maxVisitedTerms)
+    private TreeSet<Integer> search(TrieMemoryIndex index, CompiledAutomaton automaton)
+    {
+        return search(index, automaton, new QueryContext());
+    }
+
+    /** Same as {@link #search(TrieMemoryIndex, CompiledAutomaton)}, with the given query context (which counts the visited terms). */
+    private TreeSet<Integer> search(TrieMemoryIndex index, CompiledAutomaton automaton, QueryContext context)
     {
         AbstractBounds<PartitionPosition> keyRange = AbstractBounds.unbounded(Murmur3Partitioner.instance);
         TreeSet<Integer> results = new TreeSet<>();
-        KeyRangeIterator iterator = index.automatonMatch(automaton, maxVisitedTerms, keyRange);
+        KeyRangeIterator iterator = index.automatonMatch(automaton, context, keyRange);
         while (iterator.hasNext())
             results.add(Int32Type.instance.compose(iterator.next().partitionKey().getKey()));
         return results;
