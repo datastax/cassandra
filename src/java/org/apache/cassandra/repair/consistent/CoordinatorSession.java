@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -296,35 +297,46 @@ public class CoordinatorSession extends ConsistentSession
     /**
      * Runs the asynchronous consistent repair session. Actual repair sessions are scheduled via a submitter to make unit testing easier
      */
-    public ListenableFuture execute(Supplier<ListenableFuture<List<RepairSessionResult>>> sessionSubmitter, AtomicBoolean hasFailure)
+    public ListenableFuture execute(Supplier<ListenableFuture<List<RepairSessionResult>>> sessionSubmitter, AtomicBoolean hasFailure, Executor repairExecutor)
     {
         logger.info("Beginning coordination of incremental repair session {}", sessionID);
 
         sessionStart = System.currentTimeMillis();
         ListenableFuture<Boolean> prepareResult = prepare();
 
-        // run repair sessions normally
+        // run repair sessions on the repair executor rather than on the thread completing the prepare phase
+        // (normally AntiEntropyStage), as session startup blocks on repair history writes
         ListenableFuture<List<RepairSessionResult>> repairSessionResults = Futures.transformAsync(prepareResult, new AsyncFunction<Boolean, List<RepairSessionResult>>()
         {
             public ListenableFuture<List<RepairSessionResult>> apply(Boolean success) throws Exception
             {
-                if (success)
+                if (!success)
+                    return Futures.immediateFuture(null);
+
+                // Since this task is offloaded to the repair executor, fail() (e.g. from a participant failure or
+                // a repair abort) may run after the prepare phase completed but before this task runs. Without this
+                // check, setRepairing() would throw on the invalid FAILED -> REPAIRING transition instead of failing
+                // with a meaningful error. Synchronizing on the session makes the state check and
+                // setRepairing() atomic with respect to fail(), which is also synchronized.
+                synchronized (CoordinatorSession.this)
                 {
+                    if (getState() == State.FAILED)
+                    {
+                        String msg = String.format("Incremental repair session %s has failed after the prepare phase " +
+                                                   "before running repair sessions", sessionID);
+                        return Futures.immediateFailedFuture(new RuntimeException(msg));
+                    }
+
                     repairStart = System.currentTimeMillis();
                     if (logger.isDebugEnabled())
                     {
                         logger.debug("Incremental repair {} prepare phase completed in {}", sessionID, formatDuration(sessionStart, repairStart));
                     }
                     setRepairing();
-                    return sessionSubmitter.get();
                 }
-                else
-                {
-                    return Futures.immediateFuture(null);
-                }
-
+                return sessionSubmitter.get();
             }
-        }, MoreExecutors.directExecutor());
+        }, repairExecutor);
 
         // mark propose finalization
         ListenableFuture<Boolean> proposeFuture = Futures.transformAsync(repairSessionResults, new AsyncFunction<List<RepairSessionResult>, Boolean>()

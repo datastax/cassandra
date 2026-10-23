@@ -556,7 +556,7 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
         ListeningExecutorService executor = createExecutor();
         AtomicBoolean hasFailure = new AtomicBoolean(false);
         ListenableFuture repairResult = coordinatorSession.execute(() -> submitRepairSessions(parentSession, true, executor, validationScheduler, allRanges, cfnames),
-                                                                   hasFailure);
+                                                                   hasFailure, executor);
         Collection<Range<Token>> ranges = new HashSet<>();
         for (Collection<Range<Token>> range : Iterables.transform(allRanges, cr -> cr.ranges))
         {
