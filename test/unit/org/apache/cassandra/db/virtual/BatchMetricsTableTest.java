@@ -97,6 +97,9 @@ public class BatchMetricsTableTest extends CQLTester
         if ("rows_per_unlogged_batch".equals(name))
             return metrics.rowsPerUnloggedBatch;
 
-        return metrics.rowsPerCounterBatch;
+        if ("rows_per_counter_batch".equals(name))
+            return metrics.rowsPerCounterBatch;
+
+        throw new IllegalArgumentException("Unknown metric name: " + name);
     }
 }
