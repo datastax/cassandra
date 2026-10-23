@@ -398,6 +398,37 @@ public enum CassandraRelevantProperties
     /** Controls the type of bufffer (heap/direct) used for shared scratch buffers */
     DATA_OUTPUT_BUFFER_ALLOCATE_TYPE("cassandra.dob.allocate_type"),
     DATA_OUTPUT_STREAM_PLUS_TEMP_BUFFER_SIZE("cassandra.data_output_stream_plus_temp_buffer_size", "8192"),
+    /**
+     * Records the {@code Ref} debug data (the allocating and releasing thread and stack) for one in this many
+     * copies of a reference ({@code Ref.ref()}, {@code Ref.tryRef()}, and so {@code SharedCloseable.sharedCopy()}),
+     * picked at random. {@code 0} turns this sampling off. A negative or unparseable value logs one warning and turns
+     * it off. Ignored when {@link #TEST_DEBUG_REF_COUNT} is on, as that records every reference. Read once, at
+     * startup.
+     * <p>
+     * A sampled copy costs one stack capture when it is created and one when it is released: on a 55-frame stack,
+     * about 3.5 microseconds together, and about 1.5 KB of heap kept while the copy is live. Both roughly double at
+     * 100 frames. An unsampled copy costs one {@code ThreadLocalRandom} draw. Copies can be created at hundreds of
+     * thousands per second, as a range read makes three per sstable it reads, per page. The default of 2048 keeps
+     * sampling at or under 0.1% of one core up to about 600 000 copies per second (at 300 000, about 0.05%, and the
+     * draws about 0.03% more).
+     */
+    DEBUG_REF_COUNT_COPY_SAMPLE_INTERVAL("cassandra.debugrefcount.copy_sample_interval", "2048"),
+    /**
+     * Records the {@code Ref} debug data (the allocating and releasing thread and stack) for one in this many of
+     * the references that {@code new Ref(referent, tidy)} makes, picked at random, so that a leak which repeats is
+     * eventually reported with its allocation stack. These are the references a resource (an sstable reader, a
+     * file handle, a block of native memory) is created with, not its copies, which
+     * {@link #DEBUG_REF_COUNT_COPY_SAMPLE_INTERVAL} covers. {@code 0} turns this sampling off. A negative or
+     * unparseable value logs one warning and turns it off. Ignored when {@link #TEST_DEBUG_REF_COUNT} is on, as that
+     * records every reference. Read once, at startup.
+     * <p>
+     * A node creates these at tens per second, so their sampling costs no measurable CPU. What it costs is heap: a
+     * node keeps about 12 of them live per sstable of a table without indexes, and about 14 more per SAI index (40
+     * with two), and a live sampled one keeps about 0.85 KB (on a stack of up to 32 frames) to 1.5 KB (up to 64
+     * frames). At the default of 64, 10 000 sstables keep about 1 900 records, 1.6 to 2.8 MB, without indexes, and
+     * about 6 300 records, 5.3 to 9.4 MB, with two SAI indexes.
+     */
+    DEBUG_REF_COUNT_PRIMARY_SAMPLE_INTERVAL("cassandra.debugrefcount.primary_sample_interval", "64"),
     DECAYING_ESTIMATED_HISTOGRAM_RESERVOIR_STRIPE_COUNT("cassandra.dehr_stripe_count", "2"),
     DEFAULT_COMPACTION_COSTS_READ_MULTIPLIER("default.compaction.costs_read_multiplier"),
     DEFAULT_COMPACTION_LOGS("default.compaction.logs"),
