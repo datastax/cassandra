@@ -143,6 +143,12 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         sstables = scanners.stream().map(ISSTableScanner::getBackingSSTables).flatMap(Collection::stream).collect(ImmutableSet.toImmutableSet());
         op = createOperation(progress);
 
+        // Give indexes their pre-iteration hook (row-source tagging) BEFORE any partition can be
+        // pulled through the merge: hasNext() may consume rows (the purger peeks to decide
+        // partition emptiness) long before the first output writer — and its observers — exist.
+        if ((type == OperationType.COMPACTION || type == OperationType.MAJOR_COMPACTION) && !scanners.isEmpty())
+            controller.realm.getIndexManager().prepareCompactionRowSourceTagging();
+
         UnfilteredPartitionIterator merged = scanners.isEmpty()
                                            ? EmptyIterators.unfilteredPartition(controller.realm.metadata())
                                            : UnfilteredPartitionIterators.merge(scanners, listener());
@@ -268,6 +274,28 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         this.targetDirectory = targetDirectory;
     }
 
+    /**
+     * Resolves a merge-stream version index to the backing source SSTableReader for the given partition key.
+     * Used by CompactionRowSourceTagging to tell the tag ring which sstable won each row's merge.
+     */
+    private final CompactionRowSourceTagging.SourceResolver sourceResolver = this::resolveSource;
+
+    @javax.annotation.Nullable
+    private SSTableReader resolveSource(int versionIdx, DecoratedKey key)
+    {
+        if (versionIdx < 0 || versionIdx >= scanners.size())
+            return null;
+        Collection<SSTableReader> backing = scanners.get(versionIdx).getBackingSSTables();
+        if (backing.size() == 1)
+            return backing.iterator().next();
+        for (SSTableReader reader : backing)
+        {
+            if (reader.first.compareTo(key) <= 0 && reader.last.compareTo(key) >= 0)
+                return reader;
+        }
+        return null;
+    }
+
     private UnfilteredPartitionIterators.MergeListener listener()
     {
         return new UnfilteredPartitionIterators.MergeListener()
@@ -281,7 +309,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
             @Override
             public boolean preserveOrder()
             {
-                return rowProcessingNeeded();
+                return rowProcessingNeeded() || CompactionRowSourceTagging.current() != null;
             }
 
             public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
@@ -324,6 +352,10 @@ public class CompactionIterator implements UnfilteredPartitionIterator
                             indexTransaction.commit();
                         }
 
+                        // Row-source provenance tap (no-op unless an index registered a sink for
+                        // this compaction thread — see CompactionRowSourceTagging). Fires pre-purge,
+                        // before the output writer's observers see the row.
+                        CompactionRowSourceTagging.emit(partitionKey, merged, versions, sourceResolver);
                     }
 
                     @Override
@@ -396,6 +428,10 @@ public class CompactionIterator implements UnfilteredPartitionIterator
     public void close()
     {
         updateBytesRead();
+
+        // Row-source tagging is scoped to this compaction's row stream; drop any sink an index
+        // registered so a pooled thread can't carry it forward to the next compaction.
+        CompactionRowSourceTagging.clear();
 
         Throwables.maybeFail(Throwables.close(null, compacted));
     }

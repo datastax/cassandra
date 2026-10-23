@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -49,6 +50,8 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 
@@ -70,7 +73,11 @@ abstract public class VectorCompactionTest extends VectorTester
     @Parameterized.Parameter(1)
     public boolean enableNVQ;
 
-    @Parameterized.Parameters(name = "version={0} enableNVQ={1}")
+    // When graph merge is enabled, vector indexes are compacted through a direct merge of JVector graphs
+    @Parameterized.Parameter(2)
+    public boolean enableGraphMerge;
+
+    @Parameterized.Parameters(name = "version={0} enableNVQ={1} enableGraphMerge={2}")
     public static Collection<Object[]> data()
     {
         return data(v -> true);
@@ -87,7 +94,10 @@ abstract public class VectorCompactionTest extends VectorTester
                               Boolean[] enableNVQ = JVectorVersionUtil.versionSupportsNVQ(vd)
                                                     ? new Boolean[]{ true, false }
                                                     : new Boolean[]{ false };
-                              return Arrays.stream(enableNVQ).map(b -> new Object[]{ vd, b });
+                              return Arrays.stream(enableNVQ).flatMap(nvq ->
+                                  Arrays.stream(new Boolean[]{ true, false })
+                                        .map(merge -> new Object[]{ vd, nvq, merge })
+                              );
                           })
                           .collect(Collectors.toList());
     }
@@ -102,6 +112,18 @@ abstract public class VectorCompactionTest extends VectorTester
     public void setEnableNVQ()
     {
         SAIUtil.setEnableNVQ(enableNVQ);
+    }
+
+    @Before
+    public void setMergeEnabledParam()
+    {
+        setMergeEnabled(enableGraphMerge);
+    }
+
+    @After
+    public void resetMergeEnabled()
+    {
+        CompactionGraphMerger.ENABLED = CassandraRelevantProperties.SAI_VECTOR_GRAPH_COMPACTION_MERGE_ENABLED.getBoolean();
     }
 
     @Test
@@ -205,11 +227,9 @@ abstract public class VectorCompactionTest extends VectorTester
         compact();
         validateQueries();
 
-        // ONE_TO_MANY is version dependent, so we need to branch based on which version we're writing
-        var expectedStructure = V5OnDiskFormat.writeV5VectorPostings(version)
-                                ? V5VectorPostingsWriter.Structure.ONE_TO_MANY
-                                : V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY;
-        validatePostingsStructureAndOrdinalToVectorMapping(index, expectedStructure, vectorsPerSstable * sstables);
+        // ONE_TO_MANY is no longer written; both V5 and older versions now produce ZERO_OR_ONE_TO_MANY
+        // for segments with duplicate vectors
+        validatePostingsStructureAndOrdinalToVectorMapping(index, V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, vectorsPerSstable * sstables);
     }
 
     @Test
@@ -432,21 +452,15 @@ abstract public class VectorCompactionTest extends VectorTester
                 // When we have a row with a null vector, it is valid for the missing row vector(s) to be at the
                 // start or end of the sstable, and in that case, we actually skip them within the segment.
                 var postingsStructure = searcher.getPostingsStructure();
+                // ONE_TO_MANY is no longer written; the write path only produces ONE_TO_ONE or ZERO_OR_ONE_TO_MANY.
                 if (!nullValueObserved
                     && isMissingRows
                     && expectedStructure != V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
                 {
                     var struct = hasUniqueVectors
                                  ? V5VectorPostingsWriter.Structure.ONE_TO_ONE
-                                 : V5VectorPostingsWriter.tooManyOrdinalMappingHoles(searcher.graph.size(), numRows)
-                                   ? V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY
-                                   : V5VectorPostingsWriter.Structure.ONE_TO_MANY;
+                                 : V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY;
                     assertEquals(struct, postingsStructure);
-                }
-                else if (!nullValueObserved && expectedStructure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
-                {
-                    assertTrue(postingsStructure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY
-                               || postingsStructure == V5VectorPostingsWriter.Structure.ONE_TO_MANY);
                 }
                 else
                 {
