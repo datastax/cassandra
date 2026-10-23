@@ -574,6 +574,17 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         }, jobs, OperationType.SCRUB, TableOperation.StopTrigger.SCRUB);
     }
 
+    public AllSSTableOpStatus performScrub(final ColumnFamilyStore cfs, final boolean skipCorrupted, final boolean checkData,
+                                           final IScrubber.OverwriteTTLMode overwriteTTLMode, int jobs)
+    {
+        IScrubber.Options options = IScrubber.options()
+                                             .skipCorrupted(skipCorrupted)
+                                             .checkData(checkData)
+                                             .overwriteTTLMode(overwriteTTLMode)
+                                             .build();
+        return performScrub(cfs, options, jobs);
+    }
+
     public AllSSTableOpStatus performVerify(ColumnFamilyStore cfs, IVerifier.Options options) throws InterruptedException, ExecutionException
     {
         assert !cfs.isIndex();
