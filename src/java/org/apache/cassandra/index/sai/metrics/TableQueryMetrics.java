@@ -128,29 +128,9 @@ public class TableQueryMetrics
             final long queryLatencyMicros = TimeUnit.NANOSECONDS.toMicros(snapshot.totalQueryTimeNs);
             final String metrics = snapshot.toLogString("  ");
 
-            if (snapshot.queryPlanInfo != null && snapshot.queryPlanInfo.searchExecutedBeforeOrder)
-            {
-                Tracing.trace("Index query accessed memtable indexes, {}, and {}, selected {} before ranking, " +
-                              "post-filtered {} in {}, and took {} microseconds.\nSAI query metrics:\n{}",
-                              pluralize(snapshot.sstablesHit, "SSTable index", "es"),
-                              pluralize(snapshot.segmentsHit, "segment", "s"),
-                              pluralize(snapshot.rowsFetched, "row", "s"),
-                              pluralize(snapshot.rowsReturned, "row", "s"),
-                              pluralize(snapshot.partitionsReturned, "partition", "s"),
-                              queryLatencyMicros,
-                              metrics);
-            }
-            else
-            {
-                Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, " +
-                              "and took {} microseconds.\nSAI query metrics:\n{}",
-                              pluralize(snapshot.sstablesHit, "SSTable index", "es"),
-                              pluralize(snapshot.segmentsHit, "segment", "s"),
-                              pluralize(snapshot.rowsReturned, "row", "s"),
-                              pluralize(snapshot.partitionsReturned, "partition", "s"),
-                              queryLatencyMicros,
-                              metrics);
-            }
+            Tracing.trace("Index query took {} microseconds.\nSAI query metrics:\n{}",
+                          queryLatencyMicros,
+                          metrics);
         }
     }
 
@@ -161,11 +141,6 @@ public class TableQueryMetrics
     {
         perTableMetrics.values().forEach(PerTable::release);
         perQueryMetrics.values().forEach(PerQuery::release);
-    }
-
-    private static String pluralize(long count, String root, String plural)
-    {
-        return count == 1 ? String.format("1 %s", root) : String.format("%d %s%s", count, root, plural);
     }
 
     /**

@@ -154,7 +154,7 @@ public class QueryTracingTest extends SAITester
 
     private void assertTraceHasMetrics(String query, String... expected)
     {
-        assertTraceHas(query, "Index query accessed", expected);
+        assertTraceHas(query, "Index query took", expected);
     }
 
     private void assertTraceHasPlan(String query, String... expected)
