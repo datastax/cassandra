@@ -466,6 +466,57 @@ public enum CassandraRelevantProperties
      * Whether {@link org.apache.cassandra.db.ConsistencyLevel#NODE_LOCAL} should be allowed.
      */
     ENABLE_NODELOCAL_QUERIES("cassandra.enable_nodelocal_queries"),
+    /**
+     * How often, in milliseconds, {@link org.apache.cassandra.concurrent.ExecutorLivenessWatchdog} checks the executors.
+     */
+    EXECUTOR_LIVENESS_WATCHDOG_CHECK_INTERVAL_MS("cassandra.executor_liveness_watchdog.check_interval_ms", "5000"),
+    /**
+     * Whether to start {@link org.apache.cassandra.concurrent.ExecutorLivenessWatchdog}, which logs a warning when an
+     * executor's longest-running or oldest queued task is older than its threshold, and a thread dump, on logger
+     * {@code org.apache.cassandra.concurrent.ThreadDump}, for a stall no dump has shown yet, including a
+     * clock-refresher stall. No dump is taken while that logger is off.
+     */
+    EXECUTOR_LIVENESS_WATCHDOG_ENABLED("cassandra.executor_liveness_watchdog.enabled", "true"),
+    /**
+     * Comma-separated names of the executors {@link org.apache.cassandra.concurrent.ExecutorLivenessWatchdog} does not
+     * watch; a trailing {@code *} matches a prefix. The default lists the pools whose tasks legitimately run or queue
+     * for minutes to hours:
+     * <ul>
+     * <li>{@code CompactionExecutor}: compactions, cleanup, scrub, anticompaction and other sstable rewrites.</li>
+     * <li>{@code ValidationExecutor}: repair validation compactions, which build a merkle tree over a whole range.</li>
+     * <li>{@code ViewBuildExecutor}: materialized view builds, which read the whole base table.</li>
+     * <li>{@code CacheCleanupExecutor}: walks a table's entire row and counter caches on cleanup.</li>
+     * <li>{@code SecondaryIndexExecutor}: secondary index builds and rebuilds, which read the whole table.</li>
+     * <li>{@code SecondaryIndexManagement}: runs a new index's initial build and waits for it.</li>
+     * <li>{@code HintsDispatcher}: one task drains every hints file for a node, throttled by
+     * {@code hinted_handoff_throttle}.</li>
+     * </ul>
+     * Repair pools ({@code Repair-Task}, {@code Repair#*}) are watched: their tasks only chain asynchronous steps and
+     * never wait for a whole repair. The flush and reclaim pools ({@code MemtableFlushWriter},
+     * {@code PerDiskMemtableFlushWriter_*}, {@code MemtablePostFlush}, {@code MemtableReclaimMemory*}) must stay watched,
+     * as a stall there blocks writes.
+     */
+    EXECUTOR_LIVENESS_WATCHDOG_EXCLUDED_POOLS("cassandra.executor_liveness_watchdog.excluded_pools",
+                                              "CompactionExecutor,ValidationExecutor,ViewBuildExecutor,CacheCleanupExecutor," +
+                                              "SecondaryIndexExecutor,SecondaryIndexManagement,HintsDispatcher"),
+    /**
+     * The oldest queued task age, in milliseconds, that {@link org.apache.cassandra.concurrent.ExecutorLivenessWatchdog}
+     * reports as a stall. At least 10000, and twice the check interval plus 1000: after a stall of the approximate
+     * clock refresher too short for any check to see, an age may read up to about one check interval too high.
+     */
+    EXECUTOR_LIVENESS_WATCHDOG_QUEUED_THRESHOLD_MS("cassandra.executor_liveness_watchdog.queued_threshold_ms", "300000"),
+    /**
+     * The minimum interval, in milliseconds, between two warnings for the same executor, and between two thread dumps,
+     * from {@link org.apache.cassandra.concurrent.ExecutorLivenessWatchdog}. At least 60000 and the check interval.
+     */
+    EXECUTOR_LIVENESS_WATCHDOG_REPORT_INTERVAL_MS("cassandra.executor_liveness_watchdog.report_interval_ms", "600000"),
+    /**
+     * The longest-running task age, in milliseconds, that
+     * {@link org.apache.cassandra.concurrent.ExecutorLivenessWatchdog} reports as a stall. At least 10000, and twice
+     * the check interval plus 1000: after a stall of the approximate clock refresher too short for any check to see, an
+     * age may read up to about one check interval too high.
+     */
+    EXECUTOR_LIVENESS_WATCHDOG_RUNNING_THRESHOLD_MS("cassandra.executor_liveness_watchdog.running_threshold_ms", "300000"),
     EXPIRATION_DATE_OVERFLOW_POLICY("cassandra.expiration_date_overflow_policy"),
     EXPIRATION_OVERFLOW_WARNING_INTERVAL_MINUTES("cassandra.expiration_overflow_warning_interval_minutes", "5"),
     FAILED_BOOTSTRAP_TIMEOUT("cassandra.failed_bootstrap_timeout_ms"),

@@ -18,10 +18,13 @@
 package org.apache.cassandra.metrics;
 
 import java.lang.management.ManagementFactory;
+import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import javax.management.JMX;
+import javax.management.MBeanOperationInfo;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
@@ -103,6 +106,15 @@ public class ThreadPoolMetricsTest
             assertTrue(running >= TimeUnit.MILLISECONDS.toNanos(40));
             long queued = (Long) server.invoke(mbean, "oldestTaskQueueTime", new Object[0], new String[0]);
             assertTrue(queued >= TimeUnit.MILLISECONDS.toNanos(40));
+
+            // the snapshot is read through the metrics only, and is not an operation of the executor's MBean
+            RunningTaskSnapshot snapshot = metrics.longestRunningTask.get();
+            assertEquals(BlockingTask.class.getName(), snapshot.getTaskClassName());
+            assertTrue(snapshot.getThreadName(), snapshot.getThreadName().startsWith("ThreadPoolMetricsTest-liveness:"));
+            assertNoLongestRunningTaskOperation(server, mbean);
+            ResizableThreadPoolMXBean proxy = JMX.newMXBeanProxy(server, mbean, ResizableThreadPoolMXBean.class);
+            assertEquals(BlockingTask.class.getName(), proxy.getLongestRunningTaskClass());
+            assertTrue(proxy.longestRunningTaskTime() >= TimeUnit.MILLISECONDS.toNanos(40));
             t1.allowToComplete();
             t2.allowToComplete();
         }
@@ -133,6 +145,15 @@ public class ThreadPoolMetricsTest
             assertEquals(BlockingTask.class.getName(), executor.metrics.longestRunningTaskClass.get());
             ObjectName mbean = new ObjectName("org.apache.cassandra.internal:type=ThreadPoolMetricsTest-5");
             assertEquals(BlockingTask.class.getName(), server.getAttribute(mbean, "LongestRunningTaskClass"));
+
+            // the snapshot is read through the metrics only, and is not an operation of the executor's MBean
+            RunningTaskSnapshot snapshot = executor.metrics.longestRunningTask.get();
+            assertEquals(BlockingTask.class.getName(), snapshot.getTaskClassName());
+            assertTrue(snapshot.getThreadName(), snapshot.getThreadName().startsWith("ThreadPoolMetricsTest-5"));
+            assertNoLongestRunningTaskOperation(server, mbean);
+            SEPExecutorMBean proxy = JMX.newMBeanProxy(server, mbean, SEPExecutorMBean.class);
+            assertEquals(BlockingTask.class.getName(), proxy.getLongestRunningTaskClass());
+            assertTrue(proxy.longestRunningTaskTime() >= TimeUnit.MILLISECONDS.toNanos(40));
             t1.allowToComplete();
         }
         finally
@@ -140,6 +161,14 @@ public class ThreadPoolMetricsTest
             pool.shutdownAndWait(1, TimeUnit.MINUTES);
             assertFalse(server.isRegistered(new ObjectName(prefix + ThreadPoolMetrics.LONGEST_RUNNING_TASK_TIME)));
         }
+    }
+
+    // longestRunningTask() is not an operation of the MBean; its sibling longestRunningTaskTime() is, so the check is not vacuous
+    private static void assertNoLongestRunningTaskOperation(MBeanServer server, ObjectName mbean) throws Exception
+    {
+        MBeanOperationInfo[] operations = server.getMBeanInfo(mbean).getOperations();
+        assertTrue(Arrays.toString(operations), Arrays.stream(operations).anyMatch(op -> op.getName().equals("longestRunningTaskTime")));
+        assertTrue(Arrays.toString(operations), Arrays.stream(operations).noneMatch(op -> op.getName().equals("longestRunningTask")));
     }
 
     private static void testMetricsWithBlockedThreads(ExecutorPlus threadPool, ThreadPoolMetrics metrics)
