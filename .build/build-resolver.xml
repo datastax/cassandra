@@ -21,9 +21,16 @@
          xmlns:unless="ant:unless">
 
     <!-- details of what version of Resolver ANT Tasks to fetch -->
-    <property name="resolver-ant-tasks.version" value="1.3.0" />
+    <property name="resolver-ant-tasks.version" value="1.6.1" />
     <property name="resolver-ant-tasks.local" value="${local.repository}/org/apache/maven/resolver/maven-resolver-ant-tasks/${resolver-ant-tasks.version}/maven-resolver-ant-tasks-${resolver-ant-tasks.version}.jar"/>
     <property name="resolver-ant-tasks.url" value="https://repo1.maven.org/maven2/org/apache/maven/resolver/maven-resolver-ant-tasks" />
+    <!-- CI may override resolver-ant-tasks.url to a local mirror and supply credentials via
+         -Dresolver-ant-tasks.url.username=... -Dresolver-ant-tasks.url.password=... -->
+    <property name="resolver-ant-tasks.url.username" value=""/>
+    <property name="resolver-ant-tasks.url.password" value=""/>
+    <condition property="resolver-ant-tasks.url.auth.enabled">
+        <not><equals arg1="${resolver-ant-tasks.url.username}" arg2=""/></not>
+    </condition>
     <condition property="resolver-ant-tasks.jar.exists">
         <available file="${resolver-ant-tasks.local}" />
     </condition>
@@ -47,8 +54,15 @@
         <mkdir dir="${local.repository}/org/apache/maven/resolver/maven-resolver-ant-tasks/${resolver-ant-tasks.version}" />
 
         <retry retrycount="3" retrydelay="10" >
-            <get src="${resolver-ant-tasks.url}/${resolver-ant-tasks.version}/maven-resolver-ant-tasks-${resolver-ant-tasks.version}-uber.jar"
-                 dest="${resolver-ant-tasks.local}" usetimestamp="true" quiet="true"/>
+            <sequential>
+                <get src="${resolver-ant-tasks.url}/${resolver-ant-tasks.version}/maven-resolver-ant-tasks-${resolver-ant-tasks.version}-uber.jar"
+                     dest="${resolver-ant-tasks.local}" usetimestamp="true" quiet="true"
+                     username="${resolver-ant-tasks.url.username}" password="${resolver-ant-tasks.url.password}"
+                     if:set="resolver-ant-tasks.url.auth.enabled"/>
+                <get src="${resolver-ant-tasks.url}/${resolver-ant-tasks.version}/maven-resolver-ant-tasks-${resolver-ant-tasks.version}-uber.jar"
+                     dest="${resolver-ant-tasks.local}" usetimestamp="true" quiet="true"
+                     unless:set="resolver-ant-tasks.url.auth.enabled"/>
+            </sequential>
         </retry>
     </target>
 
@@ -60,9 +74,9 @@
 
         <typedef uri="antlib:org.apache.maven.resolver.ant" resource="org/apache/maven/resolver/ant/antlib.xml" classpathref="resolver-ant-tasks.classpath" />
         <resolver:remoterepos id="all">
+            <remoterepo id="resolver-datastax" url="${artifact.remoteRepository.datastax}"/>
             <remoterepo id="resolver-central" url="${artifact.remoteRepository.central}"/>
             <remoterepo id="resolver-apache" url="${artifact.remoteRepository.apache}"/>
-            <remoterepo id="resolver-datastax" url="${artifact.remoteRepository.datastax}"/>
             <!-- Snapshot artifacts must not exist in nor be downloaded by any Cassandra release artifact.
                  Please validate that all artifacts included in parent-pom-template.xml are release
                  artifacts before committing.
