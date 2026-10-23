@@ -101,17 +101,6 @@ New features
       required. LIKE values whose characters other than '%' are larger than the maximum size of the terms of the
       index (cassandra.sai.max_string_term_size_kb, or cassandra.sai.max_analyzed_size_kb for case-insensitive,
       normalized or ASCII-folding indexes) are rejected.
-    - The number of indexed terms visited to match the patterns served by an automaton (every LIKE variant but
-      LIKE '<prefix>%' and the wildcard-free LIKE '<term>', an exact match, which are not capped) is capped by the
-      cassandra.sai.max_automaton_expansions system property (a positive integer, default 8192). The cap applies
-      to each read command executed on a replica (each page of a paged query and each token-range subrequest of a
-      range read has its own allowance), and a term counts once for each sstable index segment and memtable it is
-      visited in. Ordering scans restricted by such a pattern (see above) count every term they visit in the range
-      of the terms starting with the pattern's literal prefix (the whole dictionary without one), in order and
-      until the query has enough rows; when the query planner instead orders the whole index and filters the rows
-      afterwards, no terms are matched against the pattern and the cap doesn't apply. Reads exceeding the cap fail
-      with the SAI_AUTOMATON_EXPANSIONS_EXCEEDED failure reason (code 505), whose message suggests a more
-      selective pattern; the replica logs the details as a rate-limited warning.
 
 Upgrading
 ---------

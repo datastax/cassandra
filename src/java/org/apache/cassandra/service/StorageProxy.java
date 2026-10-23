@@ -103,7 +103,6 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
-import org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.locator.EndpointsForToken;
@@ -2703,13 +2702,6 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
                     logger.error(t.getMessage());
-                }
-                else if (t instanceof AutomatonTermsExceededException)
-                {
-                    // a guardrail rejecting the query, not a node failure: report the dedicated reason (whose
-                    // client message suggests a more selective pattern) and log the details without spamming
-                    handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.forException(t));
-                    NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS, t.getMessage());
                 }
                 else if (t instanceof InvalidPatternException)
                 {

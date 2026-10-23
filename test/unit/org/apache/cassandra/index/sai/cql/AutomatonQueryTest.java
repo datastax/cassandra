@@ -38,14 +38,11 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.utils.Pair;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_AUTOMATON_EXPANSIONS;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 
@@ -264,106 +261,6 @@ public class AutomatonQueryTest extends SAITester
         });
     }
 
-    @Test
-    public void testExpansionCapError()
-    {
-        createTableWithIndex();
-
-        for (int pk = 0; pk < 32; pk++)
-            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, "term" + pk + "a");
-
-        try (WithProperties properties = new WithProperties().set(SAI_MAX_AUTOMATON_EXPANSIONS, 4))
-        {
-            for (int i = 0; i < 2; i++)
-            {
-                // '%a' has no common prefix, so the scan visits every term and trips the cap; the failure is
-                // reported to the client with the SAI_AUTOMATON_EXPANSIONS_EXCEEDED failure reason, whose message
-                // suggests a more selective pattern (the detailed message goes to the replica logs)
-                assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE '%%a'"))
-                    .hasMessageContaining(RequestFailureReason.SAI_AUTOMATON_EXPANSIONS_EXCEEDED.name())
-                    .hasMessageContaining("use a more selective pattern");
-                // a selective pattern with a common prefix stays under the cap
-                assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'term31%%a'"), row(31));
-
-                if (i == 0)
-                    flush();
-            }
-        }
-    }
-
-    /**
-     * The memtable automaton walk bounds (and seek-skips) its scan exactly like the sstable one, so a
-     * common-prefix-anchored pattern over a term count far above the budget gives the SAME guardrail outcome
-     * before and after flush: were the memtable scan to visit every term of the index sequentially, the
-     * identical query would fail on unflushed data and succeed after a flush.
-     */
-    @Test
-    public void testSkippablePatternBudgetIsFlushIndependent()
-    {
-        createTableWithIndex();
-        // 64 terms sharing no prefix with the pattern's target ('zz...'): a prefix-bounded walk jumps
-        // straight past them, an unbounded sequential scan visits them all
-        for (int pk = 0; pk < 64; pk++)
-            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, String.format("term%03da", pk));
-        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 100, "zzz");
-
-        try (WithProperties properties = new WithProperties().set(SAI_MAX_AUTOMATON_EXPANSIONS, 8))
-        {
-            // memtable-only, then flushed: same outcome under the tiny budget
-            for (int i = 0; i < 2; i++)
-            {
-                assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'z%%zz'"), row(100));
-                assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'zz%%z'"), row(100));
-                if (i == 0)
-                    flush();
-            }
-        }
-    }
-
-    /**
-     * The expansions cap is a budget shared by all the sstable segments and memtable shards a read visits on a
-     * replica, not a per-segment allowance: a query whose every individual segment scan is under the cap must still
-     * fail when its aggregate visited-terms count exceeds it. Otherwise the worst case would scale with the segment
-     * count.
-     */
-    @Test
-    public void testExpansionCapIsPerQueryAcrossSegments()
-    {
-        createTableWithIndex();
-
-        // 3 flushed sstables with 4 terms each, plus 4 memtable-only terms; '*a' has no common prefix, so every
-        // scan visits every term of its segment/shard: 4 per segment, 16 for the whole query.
-        int pk = 0;
-        for (int sstable = 0; sstable < 3; sstable++)
-        {
-            for (int i = 0; i < 4; i++, pk++)
-                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, String.format("term%02da", pk));
-            flush();
-        }
-        for (int i = 0; i < 4; i++, pk++)
-            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, String.format("term%02da", pk));
-        int totalRows = pk;
-
-        try (WithProperties properties = new WithProperties().set(SAI_MAX_AUTOMATON_EXPANSIONS, 8))
-        {
-            // Every single segment visits only 4 terms - under the cap - but the aggregate exceeds it: with a
-            // per-segment interpretation of the cap this query would (wrongly) succeed.
-            assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE '%%a'"))
-                .hasMessageContaining(RequestFailureReason.SAI_AUTOMATON_EXPANSIONS_EXCEEDED.name());
-
-            // The mirror case: over the very same many-segment layout, an aggregate within the budget succeeds.
-            SAI_MAX_AUTOMATON_EXPANSIONS.setLong(16);
-            Object[][] allRows = new Object[totalRows][];
-            for (int k = 0; k < totalRows; k++)
-                allRows[k] = row(k);
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE '%%a'"), allRows);
-
-            // and a selective, prefix-bounded pattern stays well under the budget
-            SAI_MAX_AUTOMATON_EXPANSIONS.setLong(8);
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'term01%%a'"), row(1));
-        }
-    }
-
     /**
      * Every '%' of a LIKE pattern is a wildcard, wherever it appears: patterns with inner wildcards are generic
      * patterns even when they also start or end with '%', both through the index and through post-filtering.
@@ -469,13 +366,12 @@ public class AutomatonQueryTest extends SAITester
 
     /**
      * LIKE combined with ORDER BY on the same column: the ordering scans only visit the terms the pattern can match,
-     * and the terms visited by an automaton pattern consume the expansions budget like the non-ordered scans do,
-     * while prefix patterns are not capped, on memtables and sstables alike. The query optimizer is disabled so that
-     * the plan keeps the LIKE restriction on the ordering index scan: for an unselective pattern it would otherwise
-     * order the whole index and post-filter the rows, which doesn't match the pattern against the index.
+     * on memtables and sstables alike. The query optimizer is disabled so that the plan keeps the LIKE restriction
+     * on the ordering index scan: for an unselective pattern it would otherwise order the whole index and
+     * post-filter the rows, which doesn't match the pattern against the index.
      */
     @Test
-    public void testLikeWithOrderByExpansionsCap()
+    public void testLikeWithOrderByOnUnselectivePatterns()
     {
         disableQueryOptimization();
         createTableWithIndex();
@@ -486,30 +382,24 @@ public class AutomatonQueryTest extends SAITester
         // a prefix of 10 of the terms above
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 200, "aaa0");
 
-        try (WithProperties properties = new WithProperties().set(SAI_MAX_AUTOMATON_EXPANSIONS, 4))
+        // memtable only, then sstable only
+        for (int i = 0; i < 2; i++)
         {
-            // memtable only, then sstable only
-            for (int i = 0; i < 2; i++)
-            {
-                // an ordering scan over '%a' (no common prefix) visits the 32 non-matching terms first, ascending
-                assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE '%%a' ORDER BY v LIMIT 1"))
-                    .hasMessageContaining(RequestFailureReason.SAI_AUTOMATON_EXPANSIONS_EXCEEDED.name())
-                    .hasMessageContaining("use a more selective pattern");
-                assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE 'aaa%%a' ORDER BY v DESC LIMIT 1"))
-                    .hasMessageContaining(RequestFailureReason.SAI_AUTOMATON_EXPANSIONS_EXCEEDED.name());
-                // a pattern whose common prefix bounds the scan to few terms stays under the cap
-                assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'zz%%a' ORDER BY v LIMIT 10"), row(100));
-                assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'zz%%a' ORDER BY v DESC LIMIT 10"), row(100));
-                // prefix patterns and exact matches are not capped
-                assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'aaa%%' ORDER BY v LIMIT 2"), row(200), row(0));
-                assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'aaa%%' ORDER BY v DESC LIMIT 2"), row(31), row(30));
-                assertEquals(33, execute("SELECT pk FROM %s WHERE v LIKE 'aaa%%' ORDER BY v LIMIT 100").size());
-                assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'aaa0' ORDER BY v LIMIT 10"), row(200));
-                assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'aaa0' ORDER BY v DESC LIMIT 10"), row(200));
+            // an ordering scan over '%a' (no common prefix) visits the 32 non-matching terms first, ascending
+            assertRows(execute("SELECT pk FROM %s WHERE v LIKE '%%a' ORDER BY v LIMIT 1"), row(100));
+            assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'aaa%%a' ORDER BY v DESC LIMIT 1"));
+            // a pattern whose common prefix bounds the scan to few terms
+            assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'zz%%a' ORDER BY v LIMIT 10"), row(100));
+            assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'zz%%a' ORDER BY v DESC LIMIT 10"), row(100));
+            // prefix patterns and exact matches
+            assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'aaa%%' ORDER BY v LIMIT 2"), row(200), row(0));
+            assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'aaa%%' ORDER BY v DESC LIMIT 2"), row(31), row(30));
+            assertEquals(33, execute("SELECT pk FROM %s WHERE v LIKE 'aaa%%' ORDER BY v LIMIT 100").size());
+            assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'aaa0' ORDER BY v LIMIT 10"), row(200));
+            assertRows(execute("SELECT pk FROM %s WHERE v LIKE 'aaa0' ORDER BY v DESC LIMIT 10"), row(200));
 
-                if (i == 0)
-                    flush();
-            }
+            if (i == 0)
+                flush();
         }
     }
 

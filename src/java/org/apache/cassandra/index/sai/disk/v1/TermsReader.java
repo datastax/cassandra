@@ -50,7 +50,6 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.index.sai.utils.AutomatonSeeker;
-import org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -155,27 +154,22 @@ public class TermsReader implements Closeable
      * Iterates, in the given order, the terms of an ordering scan restricted by the given prefix or automaton pattern
      * expression ({@code LIKE} on the ordering column): the terms starting with the prefix, or the terms accepted by
      * the automaton, which all start with its common prefix. Only the range of terms starting with that prefix is
-     * read. For an automaton expression, every term of that range the scan visits consumes the given expansions
-     * budget, like the non-ordered automaton intersection ({@link #intersect}) does, but without seek-skipping (the
-     * scan visits the terms lazily, in order, until the query has enough rows); prefix scans and single-term
-     * automata (exact matches) are not capped, like their non-ordered scans. Only valid for non-composite literal
-     * indexes, whose terms are stored as their raw bytes.
+     * read. For an automaton expression, every term of that range the scan visits is counted in the query context
+     * ({@link QueryContext#onAutomatonTermVisited()}, which also checks the query for a timeout), like the
+     * non-ordered automaton intersection ({@link #intersect}) does, but without seek-skipping (the scan visits the
+     * terms lazily, in order, until the query has enough rows). Only valid for non-composite literal indexes, whose
+     * terms are stored as their raw bytes.
      */
-    public TermsIterator patternTerms(Expression slice, boolean ascending, @Nullable AutomatonQueries.ExpansionsBudget budget)
+    public TermsIterator patternTerms(Expression slice, boolean ascending, QueryContext context)
     {
         if (slice.getOp() == Expression.Op.PREFIX)
-            return new PatternTermsScanner(slice, ByteBufferUtil.getArray(slice.lower.value.encoded), null, null, ascending);
+            return new PatternTermsScanner(ByteBufferUtil.getArray(slice.lower.value.encoded), null, context, ascending);
 
         assert slice.getOp() == Expression.Op.AUTOMATON : "Not a pattern expression: " + slice;
         CompiledAutomaton automaton = slice.getAutomaton();
         if (automaton.type == CompiledAutomaton.AUTOMATON_TYPE.NONE)
             return new EmptyTermsIterator();
-        // a single-term automaton (a wildcard-free pattern) is an exact match, which the non-ordered path serves
-        // with a term lookup that doesn't consume the budget either (the query plan doesn't order the index scans
-        // of such patterns, like those of equalities, see Plan.IndexScan: this scan reads the range of the terms
-        // starting with the pattern only for other callers)
-        boolean charged = automaton.type != CompiledAutomaton.AUTOMATON_TYPE.SINGLE;
-        return new PatternTermsScanner(slice, slice.getAutomatonCommonPrefix(), automaton, charged ? budget : null, ascending);
+        return new PatternTermsScanner(slice.getAutomatonCommonPrefix(), automaton, context, ascending);
     }
 
     public PostingList exactMatch(ByteComparable term, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
@@ -223,52 +217,30 @@ public class TermsReader implements Closeable
      * and on a rejection the walk seeks the dictionary to the next byte string that could possibly match instead
      * of visiting every term in between. Match-all ({@code ALL}) automatons scan the range sequentially,
      * accepting every term.
+     * <p>
+     * Every visited term is counted in the query context ({@link QueryContext#onAutomatonTermVisited()}, which
+     * periodically checks the query for a timeout): the scan is bounded by the query timeout, like a range scan.
      *
      * @param automaton the compiled byte-level automaton to intersect with the dictionary
-     * @param maxVisitedTerms cap on the number of dictionary terms this scan may visit before failing with
-     *        {@link AutomatonTermsExceededException}; a fresh per-call budget — the query path shares the budget
-     *        of its query context instead, see {@link #intersect(CompiledAutomaton, AutomatonQueries.ExpansionsBudget,
-     *        QueryEventListener.TrieIndexEventListener, QueryContext)}
      * @param perQueryEventListener the event listener
      * @param context the query context
      * @return the union of the posting lists of all matching terms, possibly {@link PostingList#EMPTY}
-     * @throws AutomatonTermsExceededException if the scan visits more than {@code maxVisitedTerms} terms
      */
     @VisibleForTesting
     public PostingList intersect(CompiledAutomaton automaton,
-                                 int maxVisitedTerms,
                                  QueryEventListener.TrieIndexEventListener perQueryEventListener,
                                  QueryContext context)
     {
-        return intersect(automaton, new AutomatonQueries.ExpansionsBudget(maxVisitedTerms), perQueryEventListener, context);
+        return intersect(automaton, AutomatonQueries.commonPrefixBytes(automaton), perQueryEventListener, context);
     }
 
     /**
-     * Same as {@link #intersect(CompiledAutomaton, int, QueryEventListener.TrieIndexEventListener, QueryContext)},
-     * consuming the given visited-terms budget. The query path passes the budget of its query context
-     * ({@code QueryContext#automatonExpansionsBudget()}), shared by all the segments and memtable shards it visits,
-     * making the expansions cap a bound on the whole read command rather than on each segment.
-     *
-     * @throws AutomatonTermsExceededException if the budget is exhausted, carrying the budget's total limit
-     */
-    @VisibleForTesting
-    public PostingList intersect(CompiledAutomaton automaton,
-                                 AutomatonQueries.ExpansionsBudget budget,
-                                 QueryEventListener.TrieIndexEventListener perQueryEventListener,
-                                 QueryContext context)
-    {
-        return intersect(automaton, AutomatonQueries.commonPrefixBytes(automaton), budget, perQueryEventListener, context);
-    }
-
-    /**
-     * Same as {@link #intersect(CompiledAutomaton, AutomatonQueries.ExpansionsBudget,
-     * QueryEventListener.TrieIndexEventListener, QueryContext)}, with the automaton's common byte prefix
-     * ({@link AutomatonQueries#commonPrefixBytes}) computed by the caller, so that it isn't recomputed for every
-     * segment a query intersects (see {@code Expression#getAutomatonCommonPrefix()}).
+     * Same as {@link #intersect(CompiledAutomaton, QueryEventListener.TrieIndexEventListener, QueryContext)}, with
+     * the automaton's common byte prefix ({@link AutomatonQueries#commonPrefixBytes}) computed by the caller, so
+     * that it isn't recomputed for every segment a query intersects (see {@code Expression#getAutomatonCommonPrefix()}).
      */
     public PostingList intersect(CompiledAutomaton automaton,
                                  byte[] commonPrefix,
-                                 AutomatonQueries.ExpansionsBudget budget,
                                  QueryEventListener.TrieIndexEventListener perQueryEventListener,
                                  QueryContext context)
     {
@@ -287,7 +259,7 @@ public class TermsReader implements Closeable
             case ALL:
             case NORMAL:
                 perQueryEventListener.onSegmentHit();
-                return new AutomatonIntersection(automaton, commonPrefix, budget, perQueryEventListener, context).execute();
+                return new AutomatonIntersection(automaton, commonPrefix, perQueryEventListener, context).execute();
             default:
                 throw new AssertionError("Unknown automaton type: " + automaton.type);
         }
@@ -612,18 +584,15 @@ public class TermsReader implements Closeable
 
         private final CompiledAutomaton automaton;
         private final byte[] commonPrefix;
-        private final AutomatonQueries.ExpansionsBudget budget;
 
         AutomatonIntersection(CompiledAutomaton automaton,
                               byte[] commonPrefix,
-                              AutomatonQueries.ExpansionsBudget budget,
                               QueryEventListener.TrieIndexEventListener listener,
                               QueryContext context)
         {
             this.listener = listener;
             this.automaton = automaton;
             this.commonPrefix = commonPrefix;
-            this.budget = budget;
             this.lookupStartTime = Clock.Global.nanoTime();
             this.context = context;
         }
@@ -689,7 +658,7 @@ public class TermsReader implements Closeable
             }
             catch (Throwable e)
             {
-                if (!(e instanceof AbortedOperationException) && !(e instanceof AutomatonTermsExceededException))
+                if (!(e instanceof AbortedOperationException))
                     logger.error(indexContext.logMessage("Failed to execute automaton intersection"), e);
 
                 throw Throwables.cleaned(e);
@@ -701,7 +670,7 @@ public class TermsReader implements Closeable
          * lists into a single (sorted, deduplicated) posting list. With a seeker (NORMAL automatons) the walk is
          * seek-skipping: whenever the seeker classifies a visited term as {@code *_AND_SEEK}, the dictionary is
          * repositioned at the seeker's next possibly-matching string instead of advancing term by term. The
-         * visited-terms budget counts the terms actually visited (post-skip).
+         * query context counts the terms actually visited (post-skip).
          */
         private PostingList scanFilterAndMergePostings(TrieTermsDictionaryReader reader,
                                                        ByteRunAutomaton runAutomaton,
@@ -737,7 +706,7 @@ public class TermsReader implements Closeable
                     if (upperBytes != null && Arrays.equals(termBytes, upperBytes))
                         break;
 
-                    budget.consumeVisitedTerm();
+                    context.onAutomatonTermVisited();
 
                     boolean accepted;
                     boolean seek = false;
@@ -886,12 +855,10 @@ public class TermsReader implements Closeable
      */
     private class PatternTermsScanner implements TermsIterator
     {
-        private final Expression slice;
         private final byte[] prefix;
         @Nullable
         private final CompiledAutomaton automaton;
-        @Nullable
-        private final AutomatonQueries.ExpansionsBudget budget;
+        private final QueryContext context;
         private final Iterator<Pair<ByteComparable, Long>> reader;
         private final AutoCloseable readerCloser;
         private final ByteComparable.Version readerVersion;
@@ -900,16 +867,14 @@ public class TermsReader implements Closeable
         private Pair<ByteComparable, Long> entry;
         private Pair<ByteComparable, Long> pending;
 
-        private PatternTermsScanner(Expression slice,
-                                    byte[] prefix,
+        private PatternTermsScanner(byte[] prefix,
                                     @Nullable CompiledAutomaton automaton,
-                                    @Nullable AutomatonQueries.ExpansionsBudget budget,
+                                    QueryContext context,
                                     boolean ascending)
         {
-            this.slice = slice;
             this.prefix = prefix;
             this.automaton = automaton;
-            this.budget = budget;
+            this.context = context;
 
             // [prefix, nextOf(prefix)], the inclusive end bound being skipped by the prefix check in hasNext
             byte[] upperBytes = AutomatonQueries.prefixUpperBound(prefix);
@@ -966,28 +931,23 @@ public class TermsReader implements Closeable
             if (pending != null)
                 return true;
 
-            try
+            while (reader.hasNext())
             {
-                while (reader.hasNext())
+                Pair<ByteComparable, Long> candidate = reader.next();
+                byte[] termBytes = ByteSourceInverse.readBytes(candidate.left.asComparableBytes(readerVersion));
+                // the reader's bounds admit the end bound nextOf(prefix) itself
+                if (!startsWith(termBytes, prefix))
+                    continue;
+                if (automaton != null)
                 {
-                    Pair<ByteComparable, Long> candidate = reader.next();
-                    byte[] termBytes = ByteSourceInverse.readBytes(candidate.left.asComparableBytes(readerVersion));
-                    // the reader's bounds admit the end bound nextOf(prefix) itself
-                    if (!startsWith(termBytes, prefix))
+                    context.onAutomatonTermVisited();
+                    if (!LikePatterns.accepts(automaton, termBytes))
                         continue;
-                    if (budget != null)
-                        budget.consumeVisitedTerm();
-                    if (automaton != null && !LikePatterns.accepts(automaton, termBytes))
-                        continue;
-                    pending = candidate;
-                    return true;
                 }
-                return false;
+                pending = candidate;
+                return true;
             }
-            catch (AutomatonTermsExceededException e)
-            {
-                throw e.forRestriction(slice.getPatternOperator(), indexContext.getColumnName());
-            }
+            return false;
         }
 
         @Override

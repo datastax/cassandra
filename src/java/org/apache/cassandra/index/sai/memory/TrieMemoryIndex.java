@@ -70,7 +70,6 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.index.sai.utils.AutomatonSeeker;
-import org.apache.cassandra.index.sai.utils.AutomatonTermsExceededException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
@@ -340,20 +339,8 @@ public class TrieMemoryIndex extends MemoryIndex
             case PREFIX:
                 return prefixMatch(expression, keyRange);
             case AUTOMATON:
-                // Automaton-served pattern matching (the non-prefix LIKE variants). The visited-terms budget is
-                // the one of the query context, shared by all the memtable shards and sstable segments the read
-                // visits: the configured expansions cap is not a per-shard allowance.
-                try
-                {
-                    return automatonMatch(expression.getAutomaton(), expression.getAutomatonCommonPrefix(),
-                                          queryContext.automatonExpansionsBudget(), keyRange);
-                }
-                catch (AutomatonTermsExceededException e)
-                {
-                    // re-throw with full query context; clients see the SAI_AUTOMATON_EXPANSIONS_EXCEEDED failure
-                    // reason, this detailed message lands in the logs
-                    throw e.forRestriction(expression.getPatternOperator(), indexContext.getColumnName());
-                }
+                // Automaton-served pattern matching (the non-prefix LIKE variants)
+                return automatonMatch(expression.getAutomaton(), expression.getAutomatonCommonPrefix(), queryContext, keyRange);
             default:
                 throw new IllegalArgumentException("Unsupported expression: " + expression);
         }
@@ -399,51 +386,39 @@ public class TrieMemoryIndex extends MemoryIndex
         Trie<PrimaryKeys> subtrie = getSubtrie(slice);
         var iter = subtrie.entrySet(orderer.isAscending() ? Direction.FORWARD : Direction.REVERSE).iterator();
         if (slice != null && slice.getOp() == Expression.Op.AUTOMATON)
-            iter = automatonFilteredEntries(iter, slice, queryContext.automatonExpansionsBudget());
+            iter = automatonFilteredEntries(iter, slice, queryContext);
         return new AllTermsIterator(iter);
     }
 
     /**
      * Filters the entries of an ordering scan restricted by an automaton pattern (the subtrie of the terms starting
-     * with the automaton's common prefix, see {@link #getSubtrie}) by the automaton, consuming the expansions budget
-     * of the query for every visited term, like the non-ordered {@link #automatonMatch} does (but without
-     * seek-skipping, as the scan visits the terms lazily, in order, until the query has enough rows), except for
-     * single-term automata (exact matches), which are not capped.
+     * with the automaton's common prefix, see {@link #getSubtrie}) by the automaton, counting every visited term in
+     * the query context ({@link QueryContext#onAutomatonTermVisited()}, which also checks the query for a timeout),
+     * like the non-ordered {@link #automatonMatch} does (but without seek-skipping, as the scan visits the terms
+     * lazily, in order, until the query has enough rows).
      */
     private Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> automatonFilteredEntries(Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> entries,
                                                                                                  Expression slice,
-                                                                                                 AutomatonQueries.ExpansionsBudget budget)
+                                                                                                 QueryContext context)
     {
         CompiledAutomaton automaton = slice.getAutomaton();
         if (automaton.type == CompiledAutomaton.AUTOMATON_TYPE.NONE)
             return Collections.emptyIterator();
-        // a single-term automaton (a wildcard-free pattern) is an exact match, which the non-ordered path serves
-        // with a term lookup that doesn't consume the budget either (the query plan doesn't order the index scans
-        // of such patterns, like those of equalities, see Plan.IndexScan)
-        boolean charged = automaton.type != CompiledAutomaton.AUTOMATON_TYPE.SINGLE;
 
         return new AbstractGuavaIterator<>()
         {
             @Override
             protected Map.Entry<ByteComparable.Preencoded, PrimaryKeys> computeNext()
             {
-                try
+                while (entries.hasNext())
                 {
-                    while (entries.hasNext())
-                    {
-                        Map.Entry<ByteComparable.Preencoded, PrimaryKeys> entry = entries.next();
-                        if (charged)
-                            budget.consumeVisitedTerm();
-                        // for non-composite literal types the pre-encoded trie key bytes are the raw term bytes
-                        if (LikePatterns.accepts(automaton, ByteSourceInverse.readBytes(entry.getKey().getPreencodedBytes())))
-                            return entry;
-                    }
-                    return endOfData();
+                    Map.Entry<ByteComparable.Preencoded, PrimaryKeys> entry = entries.next();
+                    context.onAutomatonTermVisited();
+                    // for non-composite literal types the pre-encoded trie key bytes are the raw term bytes
+                    if (LikePatterns.accepts(automaton, ByteSourceInverse.readBytes(entry.getKey().getPreencodedBytes())))
+                        return entry;
                 }
-                catch (AutomatonTermsExceededException e)
-                {
-                    throw e.forRestriction(slice.getPatternOperator(), indexContext.getColumnName());
-                }
+                return endOfData();
             }
         };
     }
@@ -825,61 +800,36 @@ public class TrieMemoryIndex extends MemoryIndex
     /**
      * Automaton-driven term matching over the in-memory trie (the non-prefix LIKE matching engine, see
      * {@link org.apache.cassandra.index.sai.utils.AutomatonQueries}): returns the primary keys of all terms
-     * accepted by the given byte-level automaton, using the default
-     * {@link AutomatonQueries#DEFAULT_MAX_VISITED_TERMS} cap on visited terms.
+     * accepted by the given byte-level automaton. The visited terms are counted in the query context (see
+     * {@link QueryContext#onAutomatonTermVisited()}, which also checks the query for a timeout).
      * <p>
      * This is only correct for indexes over non-composite literal types, whose terms are stored in the trie as
      * their raw unterminated bytes (see {@code OnDiskFormat#encodeForTrie}), so a byte-level automaton can be run
      * directly over the stored bytes and the automaton's common prefix delimits a contiguous subtrie.
      * <p>
      * The CQL surface (the non-prefix LIKE variants) reaches this engine through the
-     * {@code Expression.Op.AUTOMATON} branch of {@link #search}, which instead consumes the budget shared
-     * by the whole read ({@code QueryContext#automatonExpansionsBudget()}, initialized from the configurable
-     * {@link AutomatonQueries#maxAutomatonExpansions()} cap).
+     * {@code Expression.Op.AUTOMATON} branch of {@link #search}.
      * <p>
      * Like the on-disk dictionaries (whose {@code TermsReader} intersection is automaton-guided and
      * seek-skipping), the walk is driven by an {@link AutomatonSeeker}: on a {@code *_AND_SEEK} acceptance the
      * scan re-derives the {@code subtrie} view from the next seek target — a root-down descent per <em>skip</em>
-     * (not per rejected term), which is cheap relative to the terms it elides. This keeps the expansions budget
-     * consumption of a memtable shard comparable to that of the sstable segment it is flushed to.
-     *
-     * @throws AutomatonTermsExceededException if the walk exhausts the visited-terms budget
+     * (not per rejected term), which is cheap relative to the terms it elides. This keeps the number of terms
+     * visited in a memtable shard comparable to that of the sstable segment it is flushed to.
      */
     @VisibleForTesting
-    public KeyRangeIterator automatonMatch(CompiledAutomaton automaton, AbstractBounds<PartitionPosition> keyRange)
+    public KeyRangeIterator automatonMatch(CompiledAutomaton automaton, QueryContext context, AbstractBounds<PartitionPosition> keyRange)
     {
-        return automatonMatch(automaton, AutomatonQueries.DEFAULT_MAX_VISITED_TERMS, keyRange);
+        return automatonMatch(automaton, AutomatonQueries.commonPrefixBytes(automaton), context, keyRange);
     }
 
     /**
-     * Same as {@link #automatonMatch(CompiledAutomaton, AbstractBounds)} with an explicit per-call cap on the
-     * number of trie terms the scan may visit.
-     */
-    @VisibleForTesting
-    public KeyRangeIterator automatonMatch(CompiledAutomaton automaton, int maxVisitedTerms, AbstractBounds<PartitionPosition> keyRange)
-    {
-        return automatonMatch(automaton, new AutomatonQueries.ExpansionsBudget(maxVisitedTerms), keyRange);
-    }
-
-    /**
-     * Same as {@link #automatonMatch(CompiledAutomaton, AbstractBounds)}, consuming the given visited-terms
-     * budget (the query path passes the budget of its query context, making the expansions cap a bound on the
-     * whole read).
-     */
-    @VisibleForTesting
-    public KeyRangeIterator automatonMatch(CompiledAutomaton automaton, AutomatonQueries.ExpansionsBudget budget, AbstractBounds<PartitionPosition> keyRange)
-    {
-        return automatonMatch(automaton, AutomatonQueries.commonPrefixBytes(automaton), budget, keyRange);
-    }
-
-    /**
-     * Same as {@link #automatonMatch(CompiledAutomaton, AutomatonQueries.ExpansionsBudget, AbstractBounds)}, with the
-     * automaton's common byte prefix ({@link AutomatonQueries#commonPrefixBytes}) computed by the caller, so that
-     * it isn't recomputed for every memtable shard a query visits (see {@code Expression#getAutomatonCommonPrefix()}).
+     * Same as {@link #automatonMatch(CompiledAutomaton, QueryContext, AbstractBounds)}, with the automaton's common
+     * byte prefix ({@link AutomatonQueries#commonPrefixBytes}) computed by the caller, so that it isn't recomputed
+     * for every memtable shard a query visits (see {@code Expression#getAutomatonCommonPrefix()}).
      */
     private KeyRangeIterator automatonMatch(CompiledAutomaton automaton,
                                             byte[] commonPrefix,
-                                            AutomatonQueries.ExpansionsBudget budget,
+                                            QueryContext context,
                                             AbstractBounds<PartitionPosition> keyRange)
     {
         if (!TypeUtil.isLiteral(indexContext.getValidator()) || TypeUtil.isComposite(indexContext.getValidator()))
@@ -937,7 +887,7 @@ public class TrieMemoryIndex extends MemoryIndex
         while (entries.hasNext())
         {
             Map.Entry<ByteComparable.Preencoded, PrimaryKeys> entry = entries.next();
-            budget.consumeVisitedTerm();
+            context.onAutomatonTermVisited();
 
             boolean accepted = true;
             boolean seek = false;
