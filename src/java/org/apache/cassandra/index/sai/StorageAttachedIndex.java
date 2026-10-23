@@ -825,6 +825,13 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public void validate(RowFilter.Expression expression) throws InvalidRequestException
+    {
+        if (expression.operator().isLike())
+            indexContext.validateLikeRestriction(expression.operator(), expression.getIndexValue());
+    }
+
+    @Override
     public long getEstimatedResultRows()
     {
         // This is temporary (until proper QueryPlan is integrated into Cassandra)

@@ -113,6 +113,32 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
      */
     protected void skipTo(ByteComparable skipTo, LeftBoundTreatment admitPrefix)
     {
+        // Note: this compares the collected (signed) bytes with the unsigned transition bytes of skipTo, so a byte
+        // >= 0x80 on the current path never compares equal to the corresponding byte of skipTo, and the walk
+        // restarts from that depth instead of from the deepest node shared with skipTo. For a key before the current
+        // position this makes the outcome depend on the byte values: the walk moves back to the least key >= skipTo
+        // when their shared path has a byte >= 0x80, and is a no-op otherwise. Existing callers (ceiling() on the
+        // sorted terms of the primary key maps) and tests depend on both outcomes, so this is kept as is;
+        // skipForwardTo compares in the unsigned byte space, which iterations interleaving forward skips with
+        // next() over terms with bytes >= 0x80 (e.g. multi-byte UTF-8) need to be positioned correctly.
+        skipTo(skipTo, admitPrefix, false);
+    }
+
+    /**
+     * Forward-only variant of {@link #skipTo(ByteComparable, LeftBoundTreatment)}: skips to the given key or the
+     * closest after it in iteration order, comparing the key with the current position in the unsigned byte space
+     * the trie is ordered by, so that the walk restarts from the deepest node shared by the key and the current
+     * position whatever the byte values. A key before the current position is a no-op. A key equal to the current
+     * position re-prepares it, so iterating callers must only pass keys strictly greater than the last consumed one.
+     * Requires that the iterator is collecting bytes.
+     */
+    protected void skipForwardTo(ByteComparable skipTo, LeftBoundTreatment admitPrefix)
+    {
+        skipTo(skipTo, admitPrefix, true);
+    }
+
+    private void skipTo(ByteComparable skipTo, LeftBoundTreatment admitPrefix, boolean unsignedCompare)
+    {
         assert skipTo != null;
         assert collector != null : "Cannot skip without collecting bytes";
         // TODO: Figure out what you need to know to say if an earlier prefix would still be acceptable
@@ -127,9 +153,10 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
         final byte[] collectedBytes = collector.bytes;
         for (pos = 0; pos < collectedLength; ++pos)
         {
-            if (nextByte != collectedBytes[pos])
+            int collectedByte = unsignedCompare ? collectedBytes[pos] & 0xFF : collectedBytes[pos];
+            if (nextByte != collectedByte)
             {
-                if (nextByte < collectedBytes[pos])
+                if (nextByte < collectedByte)
                     return;    // the position we are already advanced to is beyond skipTo
                 else
                     break;     // matched a prefix of skipTo, now we need to advance through the rest of it

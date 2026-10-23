@@ -26,6 +26,8 @@ import java.util.Map;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.cql3.MarkerOrTerms;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -972,7 +974,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
     public static final class LikeRestriction extends SingleColumnRestriction
     {
-        private static final ByteBuffer LIKE_WILDCARD = ByteBufferUtil.bytes("%");
+        private static final byte LIKE_WILDCARD = '%';
         private final Operator operator;
         private final Term value;
 
@@ -1016,11 +1018,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         {
             Pair<Operator, ByteBuffer> operation = makeSpecific(value.bindAndGet(options));
 
-            // there must be a suitable INDEX for LIKE_XXX expressions
+            // there must be a suitable INDEX for LIKE_XXX expressions, and it validates the bound pattern
             RowFilter.SimpleExpression expression = filter.add(columnDef, operation.left, operation.right);
-            indexRegistry.getBestIndexFor(expression, indexHints)
-                         .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
-                                                           expression));
+            Index index = indexRegistry.getBestIndexFor(expression, indexHints)
+                                       .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
+                                                                         expression));
+            index.validate(expression);
         }
 
         @Override
@@ -1053,47 +1056,102 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         /**
          * As the specific subtype of LIKE (LIKE_PREFIX, LIKE_SUFFIX, LIKE_CONTAINS, LIKE_MATCHES) can only be
          * determined by examining the value, which in turn can only be known after binding, all LIKE restrictions
-         * are initially created with the generic LIKE operator. This function takes the bound value, trims the
-         * wildcard '%' chars from it and returns a tuple of the inferred operator subtype and the final value
+         * are initially created with the generic LIKE operator. This function takes the bound value and returns a
+         * tuple of the inferred operator subtype and the value it applies to.
+         * <p>
+         * Every {@code '%'} of a LIKE pattern is a wildcard matching any (possibly empty) character sequence; there
+         * is no escape mechanism and {@code '_'} is a literal character. Runs of leading and trailing wildcards are
+         * trimmed, and the remaining value selects the operator:
+         * <ul>
+         *   <li>a value that still contains a {@code '%'} (an inner wildcard, e.g. {@code 'a%b'}, {@code 'a%b%'},
+         *   {@code '%a%b'} or {@code '%a%b%'}) is a generic pattern: {@link Operator#LIKE_MATCHES} with the whole,
+         *   untrimmed pattern, every {@code '%'} of which is a wildcard, and whose runs of {@code '%'} are collapsed
+         *   into one (a run matches what a single wildcard does);</li>
+         *   <li>otherwise the trimmed value is a literal and leading/trailing wildcards select
+         *   {@link Operator#LIKE_CONTAINS} ({@code '%a%'}), {@link Operator#LIKE_PREFIX} ({@code 'a%'}),
+         *   {@link Operator#LIKE_SUFFIX} ({@code '%a'}) or, without wildcards, the exact match
+         *   {@link Operator#LIKE_MATCHES} ({@code 'a'}).</li>
+         * </ul>
+         * A pattern made only of wildcards (or empty) is rejected.
+         *
          * @param value the bound value for the LIKE operation
-         * @return  Pair containing the inferred LIKE subtype and the value with wildcards removed
+         * @return Pair containing the inferred LIKE subtype and the value it applies to
          */
-        private static Pair<Operator, ByteBuffer> makeSpecific(ByteBuffer value)
+        @VisibleForTesting
+        public static Pair<Operator, ByteBuffer> makeSpecific(ByteBuffer value)
         {
+            int start = value.position();
+            int end = value.limit();
+            int beginIndex = start;
+            while (beginIndex < end && value.get(beginIndex) == LIKE_WILDCARD)
+                beginIndex++;
+            if (beginIndex == end)
+                throw invalidRequest("LIKE value can't be empty.");
+            int endIndex = end;
+            while (value.get(endIndex - 1) == LIKE_WILDCARD)
+                endIndex--;
+
+            boolean leadingWildcard = beginIndex > start;
+            boolean trailingWildcard = endIndex < end;
+            boolean innerWildcard = false;
+            for (int i = beginIndex; i < endIndex && !innerWildcard; i++)
+                innerWildcard |= value.get(i) == LIKE_WILDCARD;
+
             Operator operator;
-            int beginIndex = value.position();
-            int endIndex = value.limit() - 1;
-            if (ByteBufferUtil.endsWith(value, LIKE_WILDCARD))
+            ByteBuffer newValue = value.duplicate();
+            if (innerWildcard)
             {
-                if (ByteBufferUtil.startsWith(value, LIKE_WILDCARD))
-                {
-                    operator = Operator.LIKE_CONTAINS;
-                    beginIndex =+ 1;
-                }
-                else
-                {
-                    operator = Operator.LIKE_PREFIX;
-                }
+                // a generic pattern: the operator applies to the whole pattern, every '%' of which is a wildcard
+                return Pair.create(Operator.LIKE_MATCHES, collapseWildcardRuns(newValue));
             }
-            else if (ByteBufferUtil.startsWith(value, LIKE_WILDCARD))
+            else if (leadingWildcard && trailingWildcard)
+            {
+                operator = Operator.LIKE_CONTAINS;
+            }
+            else if (trailingWildcard)
+            {
+                operator = Operator.LIKE_PREFIX;
+            }
+            else if (leadingWildcard)
             {
                 operator = Operator.LIKE_SUFFIX;
-                beginIndex += 1;
-                endIndex += 1;
             }
             else
             {
                 operator = Operator.LIKE_MATCHES;
-                endIndex += 1;
             }
 
-            if (endIndex == 0 || beginIndex == endIndex)
-                throw invalidRequest("LIKE value can't be empty.");
-
-            ByteBuffer newValue = value.duplicate();
             newValue.position(beginIndex);
             newValue.limit(endIndex);
             return Pair.create(operator, newValue);
+        }
+
+        /**
+         * Returns the given pattern with every run of consecutive {@code '%'} replaced by a single one, or the
+         * pattern itself if it has no such run.
+         */
+        private static ByteBuffer collapseWildcardRuns(ByteBuffer pattern)
+        {
+            int start = pattern.position();
+            int end = pattern.limit();
+            int runs = 0;
+            for (int i = start + 1; i < end; i++)
+            {
+                if (pattern.get(i) == LIKE_WILDCARD && pattern.get(i - 1) == LIKE_WILDCARD)
+                    runs++;
+            }
+            if (runs == 0)
+                return pattern;
+
+            ByteBuffer collapsed = ByteBuffer.allocate(end - start - runs);
+            for (int i = start; i < end; i++)
+            {
+                byte b = pattern.get(i);
+                if (b != LIKE_WILDCARD || i == start || pattern.get(i - 1) != LIKE_WILDCARD)
+                    collapsed.put(b);
+            }
+            collapsed.flip();
+            return collapsed;
         }
     }
 

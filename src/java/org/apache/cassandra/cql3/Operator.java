@@ -233,7 +233,19 @@ public enum Operator
 
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            return ByteBufferUtil.contains(leftOperand, rightOperand);
+            // The value is either a literal (exact match) or a whole LIKE pattern with an inner '%' (possibly also
+            // leading/trailing ones, see LikeRestriction#makeSpecific); every '%' in it is an any-string wildcard,
+            // there are no escapes and '_' is a literal character. The pattern is evaluated with the exact same
+            // automaton the SAI index side uses (LikePatterns#fromLikePattern), keeping index results and
+            // post-filtering (e.g. replica filtering protection) in exact agreement.
+            // Note: this used to be a plain 'contains' check, which treated the '%' wildcards as literal
+            // characters and could therefore never match a value for a pattern that actually contains a wildcard,
+            // and matched any value containing a wildcard-free pattern instead of only the equal ones.
+            // NOT_LIKE_MATCHES negates this method and flips accordingly, and post-filtering of LIKE results
+            // served by custom (non-SAI) index implementations also evaluates these corrected semantics (see
+            // NEWS.txt). The column isn't known here: an InvalidPatternException for a pattern that can't be
+            // compiled is completed with it by the caller (RowFilter).
+            return LikePatterns.accepts(LikePatterns.forPatternOperator(this, rightOperand, null), leftOperand);
         }
     },
     LIKE(14)

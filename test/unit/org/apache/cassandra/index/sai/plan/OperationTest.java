@@ -227,12 +227,10 @@ public class OperationTest extends IndexingSchemaLoader
 
         List<Expression> expectedExpressions = new ArrayList<Expression>(2)
         {{
+                // LIKE_MATCHES is automaton-served; building through add() sets the operation (Op.AUTOMATON)
+                // and the pattern operator consistently
                 add(new Expression(SAITester.createIndexContext("comment", UTF8Type.instance))
-                {{
-                        operation = Op.MATCH;
-                        lower = new Bound(UTF8Type.instance.decompose("soft eng"), UTF8Type.instance, true);
-                        upper = lower;
-                }});
+                    .add(Operator.LIKE_MATCHES, UTF8Type.instance.decompose("soft eng")));
 
                 add(new Expression(SAITester.createIndexContext("comment", UTF8Type.instance))
                 {{

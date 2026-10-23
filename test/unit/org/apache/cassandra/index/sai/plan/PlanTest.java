@@ -749,6 +749,27 @@ public class PlanTest
     }
 
     @Test
+    public void exactPatternMatchIsNotOrdered()
+    {
+        // Like equalities, wildcard-free LIKE patterns match a single term: ordering their index scan by the same
+        // index is pointless, and would scan all the terms starting with the pattern instead of looking it up.
+        Orderer literalOrderer = Mockito.mock(Orderer.class);
+        Mockito.when(literalOrderer.getIndexName()).thenReturn("pred1_idx");
+        Mockito.when(literalOrderer.isLiteral()).thenReturn(true);
+
+        Expression exactPattern = saiPred("pred1", Expression.Op.AUTOMATON, true);
+        Mockito.when(exactPattern.isExactPatternMatch()).thenReturn(true);
+        Plan.KeysIteration exactSort = factory.sort(factory.indexScan(exactPattern, 10), literalOrderer);
+        assertTrue(exactSort instanceof Plan.IndexScan);
+        assertNull(((Plan.IndexScan) exactSort).ordering());
+
+        Expression pattern = saiPred("pred1", Expression.Op.AUTOMATON, true);
+        Plan.KeysIteration patternSort = factory.sort(factory.indexScan(pattern, 10), literalOrderer);
+        assertTrue(patternSort instanceof Plan.IndexScan);
+        assertSame(literalOrderer, ((Plan.IndexScan) patternSort).ordering());
+    }
+
+    @Test
     public void notReplaceAnnSortWithAnnScan()
     {
         // Test for CNDB-9898

@@ -124,6 +124,9 @@ public class QueryContext
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
 
+    /** Number of terms visited by the automaton (non-prefix LIKE) scans of the query, see {@link #onAutomatonTermVisited()}. */
+    private long automatonTermsVisited = 0;
+
     /** Metrics about the query plan. */
     private PlanInfo queryPlanInfo;
 
@@ -263,6 +266,36 @@ public class QueryContext
     {
         checkThreadOwnership();
         postFilteringReadLatency += val;
+    }
+
+    /** How many automaton-visited terms are counted between two timeout checks, see {@link #onAutomatonTermVisited()}. */
+    @VisibleForTesting
+    public static final int AUTOMATON_CHECKPOINT_INTERVAL = 64;
+
+    /**
+     * Counts a term visited by an automaton (non-prefix LIKE) scan of this query: the sstable segment intersections
+     * ({@code TermsReader#intersect}), the memtable shard walks ({@code TrieMemoryIndex#automatonMatch}) and the
+     * ordering scans filtered by an automaton. With the automaton-guided seek-skipping scans this counts the terms
+     * actually visited <em>after</em> skipping, which tests use to pin that optimization. Every
+     * {@value #AUTOMATON_CHECKPOINT_INTERVAL} visited terms, the query is checked for a timeout
+     * ({@link #checkpoint()}), so that a scan over many terms is aborted when the query's deadline passes rather than
+     * running to completion: like the range scans of the terms dictionaries, these scans are bounded by the query
+     * timeout only.
+     *
+     * @throws AbortedOperationException if the query has timed out
+     */
+    public void onAutomatonTermVisited()
+    {
+        checkThreadOwnership();
+        if (++automatonTermsVisited % AUTOMATON_CHECKPOINT_INTERVAL == 0)
+            checkpoint();
+    }
+
+    /** @return the number of terms visited so far by the automaton (non-prefix LIKE) scans of this query */
+    public long automatonTermsVisited()
+    {
+        checkThreadOwnership();
+        return automatonTermsVisited;
     }
 
     /**

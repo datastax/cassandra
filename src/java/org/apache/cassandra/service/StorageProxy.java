@@ -83,6 +83,7 @@ import org.apache.cassandra.db.view.ViewUtils;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.CasWriteTimeoutException;
 import org.apache.cassandra.exceptions.CasWriteUnknownResultException;
+import org.apache.cassandra.exceptions.InvalidPatternException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.IsBootstrappingException;
 import org.apache.cassandra.exceptions.OverloadedException;
@@ -2701,6 +2702,13 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
                     logger.error(t.getMessage());
+                }
+                else if (t instanceof InvalidPatternException)
+                {
+                    // an invalid LIKE pattern met by the replica (e.g. when post-filtering rows served by a custom
+                    // index): a request failure, not a node failure
+                    handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.forException(t));
+                    NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS, t.getMessage());
                 }
                 else
                 {

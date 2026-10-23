@@ -73,6 +73,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.exceptions.InvalidPatternException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
@@ -1081,12 +1082,41 @@ public class RowFilter
             if (foundValue == null)
                 return false;
 
+            try
+            {
+                return isSatisfiedByNonNull(type, foundValue);
+            }
+            catch (InvalidPatternException e)
+            {
+                // a LIKE pattern that can't be compiled; the operator evaluating it doesn't know the column
+                throw e.withColumn(column.name);
+            }
+        }
+
+        private boolean isSatisfiedByNonNull(AbstractType<?> type, ByteBuffer foundValue)
+        {
             Index.Analyzer analyzer = analyzer();
 
             // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
-            return analyzer == null
-                   ? operator.isSatisfiedBy(type, foundValue, value)
-                   : operator.isSatisfiedByAnalyzed(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
+            if (analyzer == null)
+                return operator.isSatisfiedBy(type, foundValue, value);
+
+            // No tokenizing index serves LIKE (see IndexContext#supportsLikeQueries). An analyzer here is one of
+            // the non-tokenizing normalizations an index can apply to its terms (case folding, Unicode
+            // normalization, ASCII folding), which turn a value and the pattern into exactly one normalized term
+            // each: the pattern is matched against the normalized value, as the index matches it against its
+            // normalized terms. (Operator#isSatisfiedByAnalyzed is the token-set semantics of the other operators
+            // on analyzed indexes, which doesn't apply to patterns.)
+            if (operator.isLike())
+            {
+                List<ByteBuffer> indexedTokens = analyzer.indexedTokens(foundValue);
+                List<ByteBuffer> queriedTokens = analyzer.queriedTokens();
+                return indexedTokens.size() == 1
+                       && queriedTokens.size() == 1
+                       && operator.isSatisfiedBy(type, indexedTokens.get(0), queriedTokens.get(0));
+            }
+
+            return operator.isSatisfiedByAnalyzed(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
         }
 
         @Nullable
