@@ -107,8 +107,6 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 
 import static java.lang.Math.max;
-import org.apache.cassandra.config.CassandraRelevantProperties;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_QUERY_OPT_LEVEL;
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 public class QueryController implements Plan.Executor, Plan.CostEstimator
@@ -118,18 +116,22 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     public static final String INDEX_VERSION_DOES_NOT_SUPPORT_BM25 = "%s does not support BM25 scoring until it is rebuilt";
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
-    /**
-     * Controls whether we optimize query plans.
-     * 0 disables the optimizer. As a side effect, hybrid ANN queries will default to FilterSortOrder.SCAN_THEN_FILTER.
-     * 1 enables the optimizer.
-     * Note: the config is not final to simplify testing.
-     */
-    @VisibleForTesting
-    public static int QUERY_OPT_LEVEL = SAI_QUERY_OPT_LEVEL.getInt();
-
-    public static volatile boolean QUERY_OPT_USE_TERM_STATS = CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS.getBoolean();
-
     private final ColumnFamilyStore cfs;
+
+    /// If set to true, the term statistics in index metadata are used for predicate selectivity estimation
+    /// @see org.apache.cassandra.config.CassandraRelevantProperties#SAI_QUERY_OPTIMIZATION_USE_TERM_STATISTICS
+    private final boolean useTermStatistics;
+
+    /// Zero disables optimization, positive number enables. The higher the value, the more optimization is supposed
+    /// to happen, but currently the highest level is 1.
+    /// @see org.apache.cassandra.config.CassandraRelevantProperties#SAI_QUERY_OPTIMIZATION_LEVEL
+    private final int queryOptimizationLevel;
+
+    /// How many index iterators can be intersected when multiple index filters are present in the query.
+    /// We limit them because we empirically found out that intersecting too many iterators doesn't improve performance.
+    /// @see org.apache.cassandra.config.CassandraRelevantProperties#SAI_INTERSECTION_CLAUSE_LIMIT
+    private final int intersectionClauseLimit;
+
     private final ReadCommand command;
     private final Orderer orderer;
     private final QueryContext queryContext;
@@ -162,13 +164,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private final Map<IndexContext, QueryView> queryViews = new HashMap<>();
 
-    static
-    {
-        logger.info(String.format("Query plan optimization is %s (level = %d)",
-                                  QUERY_OPT_LEVEL > 0 ? "enabled" : "disabled",
-                                  QUERY_OPT_LEVEL));
-    }
-
     @VisibleForTesting
     public QueryController(ColumnFamilyStore cfs,
                            ReadCommand command,
@@ -194,6 +189,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         this.indexFeatureSet = indexFeatureSet;
         this.ranges = dataRanges(command);
         this.mergeRange = merge(ranges);
+
+        // Optimizer options. Use table-level settings, which fall back to global properties if not set
+        this.queryOptimizationLevel = cfs.metadata().params.storageAttachedIndexingParams.queryOptimizationLevel();
+        this.intersectionClauseLimit = cfs.metadata().params.storageAttachedIndexingParams.intersectionClauseLimit();
+        this.useTermStatistics = cfs.metadata().params.storageAttachedIndexingParams.useTermStatistics();
 
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
@@ -408,11 +408,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // The limit here is higher than the final limit, so that the optimizer has a bit more freedom
         // in which predicates it leaves in the plan and the probability of accidentally removing a good branch
         // here is even lower.
-        int intersectionClauseLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
         Plan.RowsIteration origPlan = rowsIteration.limitIntersectedClauses(intersectionClauseLimit * 3);
         Plan.RowsIteration plan = origPlan;
 
-        if (QUERY_OPT_LEVEL > 0)
+        if (queryOptimizationLevel > 0)
             plan = origPlan.optimize();
 
         plan = plan.limitIntersectedClauses(intersectionClauseLimit);
@@ -420,7 +419,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         updateIndexMetricsQueriesCount(plan);
 
         if (logger.isTraceEnabled())
+        {
+            logger.trace("Query optimization level: {}", queryOptimizationLevel);
+            logger.trace("Query intersection clause limit: {}", intersectionClauseLimit);
+            logger.trace("Query optimizer using terms statistics: {}", useTermStatistics);
             logger.trace("Query execution plan:\n" + plan.toStringRecursive(Redaction.REDACT));
+        }
 
         if (Tracing.isTracing())
         {
@@ -1001,7 +1005,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             case NOT_CONTAINS_KEY:
             case NOT_CONTAINS_VALUE:
             case RANGE:
-                return (indexFeatureSet.hasTermsHistogram() && QUERY_OPT_USE_TERM_STATS)
+                return (indexFeatureSet.hasTermsHistogram() && useTermStatistics)
                        ? estimateMatchingRowCountUsingHistograms(predicate)
                        : estimateMatchingRowCountUsingIndex(predicate);
             default:
