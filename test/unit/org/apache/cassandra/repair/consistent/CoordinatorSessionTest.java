@@ -264,7 +264,7 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         }
         catch (ExecutionException e)
         {
-            Assert.assertEquals(String.format("Incremental repair session %s has failed", coordinator.sessionID),
+            Assert.assertEquals(String.format("Incremental repair session %s has failed after the prepare phase before running repair sessions", coordinator.sessionID),
                                 e.getCause().getMessage());
         }
     }

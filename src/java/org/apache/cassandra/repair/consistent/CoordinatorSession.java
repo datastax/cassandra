@@ -313,11 +313,19 @@ public class CoordinatorSession extends ConsistentSession
                 if (!success)
                     return Futures.immediateFuture(null);
 
-                // the session may have failed after the prepare phase completed but before this task ran
+                // Since this task is offloaded to the repair executor, fail() (e.g. from a participant failure or
+                // a repair abort) may run after the prepare phase completed but before this task runs. Without this
+                // check, setRepairing() would throw on the invalid FAILED -> REPAIRING transition instead of failing
+                // with a meaningful error. Synchronizing on the session makes the state check and
+                // setRepairing() atomic with respect to fail(), which is also synchronized.
                 synchronized (CoordinatorSession.this)
                 {
                     if (getState() == State.FAILED)
-                        return Futures.immediateFailedFuture(new RuntimeException(String.format("Incremental repair session %s has failed", sessionID)));
+                    {
+                        String msg = String.format("Incremental repair session %s has failed after the prepare phase " +
+                                                   "before running repair sessions", sessionID);
+                        return Futures.immediateFailedFuture(new RuntimeException(msg));
+                    }
 
                     repairStart = System.currentTimeMillis();
                     if (logger.isDebugEnabled())
