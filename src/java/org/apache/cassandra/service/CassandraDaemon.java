@@ -24,6 +24,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import javax.management.ObjectName;
@@ -244,6 +245,18 @@ public class CassandraDaemon
 
         maybeInitJmx();
 
+        // Fail fast on a misconfigured cassandra.custom_nodetool_server_extension_classes; the extensions are set up
+        // just before the node joins the ring, see below.
+        List<NodeToolServerExtension> nodeToolServerExtensions = Collections.emptyList();
+        try
+        {
+            nodeToolServerExtensions = NodeToolServerExtensions.load();
+        }
+        catch (ConfigurationException e)
+        {
+            exitOrFail(1, "Fatal configuration error", e);
+        }
+
         Mx4jTool.maybeLoad();
 
         ThreadAwareSecurityManager.install();
@@ -376,6 +389,11 @@ public class CassandraDaemon
 
         // Prepared statements
         QueryProcessor.instance.preloadPreparedStatements();
+
+        // Server-side half of the nodetool extensions (see NodeToolServerExtension): typically registers the MBeans
+        // that the commands contributed through NodeToolExtension talk to. Runs before the node joins the ring, so
+        // that those commands are available while it bootstraps, like the built-in ones.
+        NodeToolServerExtensions.setupAll(nodeToolServerExtensions);
 
         // start server internals
         StorageService.instance.registerDaemon(this);
