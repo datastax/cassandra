@@ -32,9 +32,7 @@ import java.util.function.ObjIntConsumer;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SortedLocalRanges;
-import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
@@ -166,7 +164,7 @@ public interface ShardManager
     /// The covered share is a fraction of the whole token ring (see [#rangeSpanned]), thus the density is the size the
     /// sstable would have if it covered the whole ring. This is the measure used to assign sstables to levels; to
     /// calculate the number of shards for a given density, it must first be normalized to the shard set by multiplying
-    /// it by [#shardSetCoverage] (see [UnifiedCompactionStrategy#shardCountForDensity]).
+    /// it by [#shardSetCoverage] (see [UnifiedCompactionStrategy#numShardsForDensity]).
     default double density(CompactionSSTable rdr)
     {
         return rdr.onDiskLength() / rangeSpanned(rdr);

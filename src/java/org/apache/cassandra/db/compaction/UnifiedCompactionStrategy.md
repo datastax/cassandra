@@ -523,7 +523,7 @@ size, the younger maximum density, and the older minimum density:
 $$\text{baseSSTableSize}_B = \max(\text{baseSSTableSize}, \text{youngerMaxDensity}, \text{olderMinDensity})$$
 
 All three quantities are compared in density units, i.e. the configured base sstable size is divided by the
-locally-owned share of the token ring before the maximum is taken.
+data directory's share of the token ring before the maximum is taken.
 
 This ensures that:
 - Any SSTable entering an older bucket that is smaller than or equal to the size of data produced

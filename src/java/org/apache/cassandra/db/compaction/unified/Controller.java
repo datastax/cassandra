@@ -20,7 +20,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -646,7 +645,7 @@ public abstract class Controller
      * Note that this is different from the density calculated by {@link ShardManager#density}, which is used to assign
      * sstables to levels and is normalized to the whole token ring. That density must be multiplied by
      * {@link ShardManager#shardSetCoverage()} before it is passed to this method, which
-     * {@link UnifiedCompactionStrategy#shardCountForDensity} does. For example, if a node owns a quarter of the token
+     * {@link UnifiedCompactionStrategy#numShardsForDensity} does. For example, if a node owns a quarter of the token
      * ring and has a single data directory, a flush of size {@code m}, which covers the whole locally-owned token
      * space, has a density of {@code 4m} for the purposes of assigning it to a level, but its shard set density, which
      * is to be passed to this method, is {@code m}.

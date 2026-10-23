@@ -485,7 +485,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// The density must be one calculated by [ShardManager#density], i.e. normalized to the whole token ring, which is
     /// the measure that defines the compaction levels. [Controller#getNumShards] needs the density normalized to the
     /// shard set instead, which this method obtains by multiplying by [ShardManager#shardSetCoverage].
-    public static int shardCountForDensity(double density, ShardManager shardManager, Controller controller)
+    public static int numShardsForDensity(double density, ShardManager shardManager, Controller controller)
     {
         return controller.getNumShards(density * shardManager.shardSetCoverage());
     }
@@ -500,7 +500,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         /// The density of the data, normalized to the whole token ring (as calculated by [ShardManager#density]).
         public final double density;
         /// The number of shards to split each shard set into for this density, see
-        /// [UnifiedCompactionStrategy#shardCountForDensity(double, ShardManager, Controller)].
+        /// [UnifiedCompactionStrategy#numShardsForDensity(double, ShardManager, Controller)].
         public final int shardCountForDensity;
         public final int coveredShardCount;
 
@@ -541,7 +541,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             this.min = min;
             this.max = max;
             this.density = shardManager.density(onDiskLength, min, max, estimatedPartitionCount);
-            this.shardCountForDensity = shardCountForDensity(this.density, shardManager, controller);
+            this.shardCountForDensity = numShardsForDensity(this.density, shardManager, controller);
             this.coveredShardCount = shardManager.coveredShardCount(min, max, shardCountForDensity);
         }
 
@@ -592,7 +592,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             this.overheadToDataRatio = overheadToDataRatio;
             this.uniqueKeyRatio = 1.0 * estimatedPartitionCount / partitionCountSum;
             this.density = shardManager.density(onDiskLengthInRange, min, max, (long) (partitionCountSumInRange * uniqueKeyRatio));
-            this.shardCountForDensity = shardCountForDensity(this.density, shardManager, controller);
+            this.shardCountForDensity = numShardsForDensity(this.density, shardManager, controller);
             this.coveredShardCount = shardManager.coveredShardCount(min, max, shardCountForDensity);
         }
 
@@ -632,7 +632,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             Preconditions.checkNotNull(shardManager, "shardManager must not be null");
             Preconditions.checkNotNull(controller, "controller must not be null");
 
-            int shardCountForDensity = shardCountForDensity(density, shardManager, controller);
+            int shardCountForDensity = numShardsForDensity(density, shardManager, controller);
             int coveredShardCount = shardManager.coveredShardCount(this.min, this.max, shardCountForDensity);
             return new ShardingStats(
                 this.min,
@@ -738,11 +738,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     ShardTracker getFlushShardBoundaries()
     {
         ShardManager shardManager = getShardManager();
-        // A flush covers the whole locally-owned token space, thus its density, as used to assign it to a level, is
-        // the flush size divided by the local space coverage (see the base density calculation in processFamily).
-        // The shard count must be calculated for that density normalized to the shard set, i.e. multiplied by the
-        // shard set coverage, which gives the size of the part of the flush that falls in one shard set.
-        double flushShardSetDensity = realm.metrics().flushSizeOnDisk().get() * shardManager.shardSetCoverage() / shardManager.localSpaceCoverage();
+        // A flush covers a disk (i.e. shard set)'s token space, thus its density is already normalized in the way that
+        // Controller.getNumShards() expects.
+        double flushShardSetDensity = realm.metrics().flushSizeOnDisk().get();
         return shardManager.boundaries(controller.getFlushShards(flushShardSetDensity));
     }
 
@@ -1438,10 +1436,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
             // All three quantities are compared in density units: the configured base sstable size is a size in
             // bytes and must be converted before it is compared against the densities collected above. It is derived
-            // from the flush size, and flushes cover the whole local token space, so we convert it to a density
-            // (normalized to the whole token ring like all levels' bounds) by dividing by the local space coverage.
+            // from the flush size, and flushes cover a disk (i.e. shard set)'s token space, so we convert it to a density
+            // (normalized to the whole token ring like all levels' bounds) by dividing by the shard set coverage.
             double adjustedDensity = Math.max(youngerMaxDensity, olderMinDensity);
-            double defaultBaseDensity = controller.getBaseSstableSize(controller.getFanout(0, bucket)) / currentShardManager.localSpaceCoverage();
+            double defaultBaseDensity = controller.getBaseSstableSize(controller.getFanout(0, bucket)) / currentShardManager.shardSetCoverage();
             double baseDensity = Math.max(defaultBaseDensity, adjustedDensity);
 
             // Guard needed to avoid prettyPrintMemory calls when debug is off or no adjustment occurs
@@ -1536,7 +1534,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         double maxDensity = 0;
         for (CompactionSSTable liveSSTable : sstables)
             maxDensity = Math.max(maxDensity, shardManager.density(liveSSTable));
-        int shardCount = shardCountForDensity(maxDensity, shardManager, controller);
+        int shardCount = numShardsForDensity(maxDensity, shardManager, controller);
 
         int[] overlapsMap = getMaxOverlapsPerShard(sstables, shardManager, shardCount);
         int max = 0;
@@ -1768,7 +1766,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (sstables.size() > shardThreshold)
             {
                 List<Set<CompactionSSTable>> groups = shardManager.splitSSTablesInShards(sstables,
-                                                                                         shardCountForDensity(max, shardManager, controller),
+                                                                                         numShardsForDensity(max, shardManager, controller),
                                                                                          (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
 
                 Set<CompactionSSTable> sstablesInOversizeGroup = new HashSet<>();

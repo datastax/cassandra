@@ -1022,7 +1022,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         arenasList.addAll(mockArenas(0, 2, true, null, boundaries, sstables, buckets)); // repaired
         arenasList.addAll(mockArenas(1, 2, true, null, boundaries, sstables, buckets)); // repaired, next disk
 
-        testGetBucketsMultipleArenas(arenasList, W, m, boundaries);
+        testGetBucketsMultipleArenas(arenasList, W, m, boundaries, 2);
     }
 
     @Test
@@ -1047,7 +1047,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         List<Token> boundaries = makeBoundaries(numShards, 1);
         List<ArenaSpecs> arenas = mockArenas(0, 1, true, null, boundaries, sstables, buckets);
-        testGetBucketsMultipleArenas(arenas, W, m, boundaries);
+        testGetBucketsMultipleArenas(arenas, W, m, boundaries, 1);
     }
 
     @Test
@@ -1076,7 +1076,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         arenas.addAll(mockArenas(0, 2, true, null, boundaries, sstables, buckets));
         arenas.addAll(mockArenas(1, 2, true, null, boundaries, sstables, buckets));
 
-        testGetBucketsMultipleArenas(arenas, W, m, boundaries);
+        testGetBucketsMultipleArenas(arenas, W, m, boundaries, 2);
     }
 
     @Test
@@ -1114,7 +1114,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         }
 
-        testGetBucketsMultipleArenas(arenasList, W, m, boundaries);
+        testGetBucketsMultipleArenas(arenasList, W, m, boundaries, 6);
     }
 
     @Test
@@ -1146,7 +1146,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         arenasList.addAll(mockArenas(0, 1, true, null, boundaries, sstables2, buckets2)); // repaired
         arenasList.addAll(mockArenas(0, 1, false, null, boundaries, sstables1, buckets1)); // unrepaired
 
-        testGetBucketsMultipleArenas(arenasList, W, m, boundaries);
+        testGetBucketsMultipleArenas(arenasList, W, m, boundaries, 1);
     }
 
     @Test
@@ -1181,10 +1181,10 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         arenasList.addAll(mockArenas(0, 2, false, null, boundaries, sstables1, buckets1));  // unrepaired, first disk
         arenasList.addAll(mockArenas(1, 2, false, null, boundaries, sstables2, buckets2));  // unrepaired, second disk
 
-        testGetBucketsMultipleArenas(arenasList, W, m, boundaries);
+        testGetBucketsMultipleArenas(arenasList, W, m, boundaries, 2);
     }
 
-    private void testGetBucketsMultipleArenas(List<ArenaSpecs> arenaSpecs, int W, int m, List<Token> shards)
+    private void testGetBucketsMultipleArenas(List<ArenaSpecs> arenaSpecs, int W, int m, List<Token> shards, int diskCount)
     {
         long minimalSizeBytes = m << 20;
 
@@ -1195,7 +1195,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
         when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
         when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
-        when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
+        when(controller.getBaseSstableSize(anyInt())).thenReturn(useDiskBoundaries ? (double) minimalSizeBytes / diskCount
+                                                                                   : (double) minimalSizeBytes);
         when(controller.getNumShards(anyDouble())).thenReturn(shards.size());
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
@@ -2468,7 +2469,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                                                 .filter(pick -> pick != null && !pick.isEmpty())
                                                 .map(pick -> pick.sstables().size())
                                                 .collect(Collectors.toList());
-        assertEquals(useDiskBoundaries ? List.of(16) : List.of(8, 8), compactedCounts);
+        assertEquals(List.of(8, 8), compactedCounts);
     }
 
     @Test
@@ -2480,13 +2481,11 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         MovingAverage flushSize = Mockito.mock(MovingAverage.class);
         when(realm.metrics()).thenReturn(metrics);
         when(metrics.flushSizeOnDisk()).thenReturn(flushSize);
-        when(flushSize.get()).thenReturn(600.0 * ONE_MB);
+        when(flushSize.get()).thenReturn(600.0 * ONE_MB / (useDiskBoundaries ? diskBoundaryPositions.size() : 1));
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
-        // A flush covers the whole local token space, thus without disks its density normalized to the shard set is
-        // equal to its size, 600 MiB, which should result in 4 shards. With two disks, the density is that of the
-        // half of the flush that falls in each disk, 300 MiB, which should result in 2 shards per disk, 4 in total.
-        // Either way the flush is split into sstables of 150 MiB.
+        // The flush size is prepared so that the total data content is 600MiB, which should result in 4 shards
+        // with or without disks.
         assertEquals(4, strategy.getFlushShardBoundaries().count());
     }
 
