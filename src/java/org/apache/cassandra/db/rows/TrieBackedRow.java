@@ -148,6 +148,44 @@ public class TrieBackedRow extends AbstractRow
         return builder.build();
     }
 
+    /// Rebuild a row whose data keys its columns by indices other than the ones `metadata` gives them -- the indices of
+    /// the node that serialized it, when the schemas of the two nodes disagree -- as a row keyed by `metadata`.
+    ///
+    /// `columns` are the columns the row may have, and `sourceColumnIds` (see [#columnIds]) gives the index each of
+    /// them is keyed by in `data`. Columns that `metadata` does not have, i.e. ones dropped on this node, are left out.
+    public static TrieBackedRow withColumnIndexes(TableMetadata metadata,
+                                                  Clustering<?> clustering,
+                                                  DeletionAwareTrie<Object, TrieTombstoneMarker> data,
+                                                  Columns columns,
+                                                  Object2IntHashMap<ColumnIdentifier> sourceColumnIds)
+    {
+        TrieBackedRow source = create(columns, sourceColumnIds, clustering, data);
+        Builder builder = builder(metadata, clustering);
+        builder.addPrimaryKeyLivenessInfo(source.primaryKeyLivenessInfo());
+        builder.addRowDeletion(source.deletion());
+        for (ColumnMetadata column : columns)
+        {
+            if (builder.columnIds.getValue(column.name) == COLUMN_NOT_PRESENT)
+                continue;
+            ColumnData columnData = source.getColumnData(column);
+            if (columnData != null)
+                builder.addColumn(columnData);
+        }
+        return builder.build();
+    }
+
+    /// The map from column name to the index the column is keyed by that [#withColumnIndexes] takes, for the given
+    /// columns and their indices, in the same order.
+    public static Object2IntHashMap<ColumnIdentifier> columnIds(Columns columns, int[] indexes)
+    {
+        assert columns.size() == indexes.length;
+        Object2IntHashMap<ColumnIdentifier> columnIds = new Object2IntHashMap<>(COLUMN_NOT_PRESENT);
+        int i = 0;
+        for (ColumnMetadata column : columns)
+            columnIds.put(column.name, indexes[i++]);
+        return columnIds;
+    }
+
     /// Returns false if the given object is a level marker with no meaning of its own. Used to drop unproductive
     /// markers that can remain after deletions.
     public static boolean shouldPreserveContentWithoutChildren(Object o)

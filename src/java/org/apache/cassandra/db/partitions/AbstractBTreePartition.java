@@ -323,7 +323,7 @@ public abstract class AbstractBTreePartition implements Partition
         if (reversed)
             builder.reverse();
 
-        return new BTreePartitionData(columns, builder.build(), deletionBuilder.build(), iterator.staticRow(), iterator.stats());
+        return new BTreePartitionData(columns, builder.build(), deletionBuilder.build(), BTreeRow.asBTreeRow(iterator.staticRow()), iterator.stats());
     }
 
     // Note that when building with a RowIterator, deletion will generally be LIVE, but we allow to pass it nonetheless because PartitionUpdate

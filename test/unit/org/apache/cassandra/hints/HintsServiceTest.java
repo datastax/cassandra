@@ -19,8 +19,13 @@ package org.apache.cassandra.hints;
 
 import java.net.UnknownHostException;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -41,8 +46,9 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.NoPayload;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -51,11 +57,15 @@ import org.apache.cassandra.metrics.HintsServiceMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.metrics.StorageMetrics;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.MockMessagingService;
 import org.apache.cassandra.net.MockMessagingSpy;
+import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.apache.cassandra.hints.HintsTestUtil.*;
 import static org.junit.Assert.assertEquals;
@@ -65,11 +75,12 @@ import org.awaitility.core.ConditionFactory;
 
 import static org.apache.cassandra.Util.dk;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SKIP_REWRITING_HINTS_ON_HOST_LEFT;
+import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.apache.cassandra.net.Verb.HINT_REQ;
 import static org.apache.cassandra.net.Verb.HINT_RSP;
-import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class HintsServiceTest
@@ -211,6 +222,76 @@ public class HintsServiceTest
         // wait until hints have been send
         spy.interceptMessageOut(100).get();
         spy.interceptNoMsg(500, TimeUnit.MILLISECONDS).get();
+    }
+
+    @Test
+    public void testDispatchedHintsDecodeAtConnectionVersion() throws Exception
+    {
+        // The hints file is written at the storage version, which a storage compatibility mode can keep below the
+        // version of the connection the hints are sent on. The receiver decodes every hint at the connection version.
+        assertDispatchedHintsDecodeAtConnectionVersion();
+    }
+
+    @Test
+    public void testDispatchedHintsDecodeAtConnectionVersionOfOlderPeer() throws Exception
+    {
+        // A peer at VERSION_40 receives the hints on a connection at that version, verbatim when the file was written
+        // at it, while the outbound connection still sizes every message at the current version.
+        InetAddressAndPort peer = HintsEndpointProvider.instance.endpointForHost(StorageService.instance.getLocalHostUUID());
+        int previousVersion = MessagingService.instance().versions.set(peer, MessagingService.VERSION_40);
+        try
+        {
+            assertDispatchedHintsDecodeAtConnectionVersion();
+        }
+        finally
+        {
+            MessagingService.instance().versions.set(peer, previousVersion);
+        }
+    }
+
+    private void assertDispatchedHintsDecodeAtConnectionVersion() throws Exception
+    {
+        UUID hostId = StorageService.instance.getLocalHostUUID();
+        int connectionVersion = MessagingService.instance().versions.get(HintsEndpointProvider.instance.endpointForHost(hostId));
+        int noOfHints = 10;
+
+        Set<Class<?>> payloadTypes = ConcurrentHashMap.newKeySet();
+        BlockingQueue<Object> received = new LinkedBlockingQueue<>();
+        MockMessagingService.when(verb(HINT_REQ)).respond((Message<SerializableHintMessage> request, InetAddressAndPort to) -> {
+            payloadTypes.add(request.payload.getClass());
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                // as OutboundConnections and OutboundConnection do, whatever the version of the connection
+                request.serializedSize(MessagingService.current_version);
+                HintMessage.serializer.serialize(request.payload, out, connectionVersion);
+                received.add(HintMessage.serializer.deserialize(new DataInputBuffer(out.buffer(), false), connectionVersion).hint());
+                return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+            }
+            catch (Throwable t)
+            {
+                received.add(t);
+                return null;
+            }
+        });
+
+        writeHints(hostId, noOfHints);
+
+        Set<String> keys = new HashSet<>();
+        for (int i = 0; i < noOfHints; i++)
+        {
+            Object hint = received.poll(60, TimeUnit.SECONDS);
+            assertThat(hint).isInstanceOf(Hint.class);
+            PartitionUpdate update = ((Hint) hint).mutation.getPartitionUpdate(metadata);
+            Row row = update.getRow(metadata.comparator.make("column0"));
+            assertNotNull(row);
+            assertEquals(ByteBufferUtil.bytes("value0"), row.getCell(metadata.getColumn(ByteBufferUtil.bytes("val"))).buffer());
+            keys.add(ByteBufferUtil.string(update.partitionKey().getKey()));
+        }
+        assertEquals(noOfHints, keys.size());
+
+        // the file's bytes are sent verbatim only when the file was written at the connection version
+        boolean sentVerbatim = StorageCompatibilityMode.current().storageMessagingVersion() == connectionVersion;
+        assertEquals(Collections.singleton(sentVerbatim ? HintMessage.Encoded.class : HintMessage.class), payloadTypes);
     }
 
     @Test

@@ -68,6 +68,12 @@ interface VerificationCursor
         Cursor.TransitionsReceiver chainedReceiver = null;
         boolean advanceMultipleCalledReceiver;
 
+        @Override
+        public void close()
+        {
+            source.close();
+        }
+
         Plain(C cursor)
         {
             this.direction = cursor.direction();
@@ -185,6 +191,13 @@ interface VerificationCursor
 
         private long verify(long newPosition)
         {
+            assert source.encodedPosition() == newPosition :
+                String.format("Cursor returned position %s (%016x) but reports %s (%016x)\n%s",
+                              Cursor.toString(newPosition),
+                              newPosition,
+                              Cursor.toString(source.encodedPosition()),
+                              source.encodedPosition(),
+                              this);
             int newDepth = Cursor.depth(newPosition);
             int oldDepth = Cursor.depth(returnedPosition);
             assert newDepth <= oldDepth + 1 :
@@ -219,7 +232,7 @@ interface VerificationCursor
                 {
                     assert ((getByte(newDepth) ^ direction.select(0x00, 0xFF)) << 1)
                            < undecodedTransition(newPosition) :
-                        String.format("Cursor went backwards to %s where it already visited byte %s\n%s",
+                        String.format("Cursor went backwards to %s where it already visited byte %02x\n%s",
                                       Cursor.toString(newPosition),
                                       getByte(newDepth),
                                       this);
@@ -305,6 +318,32 @@ interface VerificationCursor
                 builder.append(Hex.bytesToHex(path, 0, Cursor.depth(returnedPosition)));
             }
             return builder.toString();
+        }
+    }
+
+    /// A [Plain] verification cursor for sources that provide [DeletionAwareTrie.DeletionsStopControl]. The control
+    /// is reached by a cast of the cursor the trie hands out (see `TrieBackedPartitionStage3`), so a wrapper that
+    /// does not present it makes the partition read path unusable with verification enabled.
+    class PlainSwitchable<T> extends Plain<T, Cursor<T>> implements DeletionAwareTrie.DeletionsStopControl
+    {
+        PlainSwitchable(Cursor<T> cursor)
+        {
+            super(cursor);
+        }
+
+        @Override
+        public void stopIssuingDeletions(Cursor.ResettingTransitionsReceiver receiver)
+        {
+            ((DeletionAwareTrie.DeletionsStopControl) source).stopIssuingDeletions(receiver);
+        }
+
+        @Override
+        public Plain<T, Cursor<T>> tailCursor(Direction direction)
+        {
+            Cursor<T> tail = source.tailCursor(direction);
+            return tail instanceof DeletionAwareTrie.DeletionsStopControl
+                   ? new PlainSwitchable<>(tail)
+                   : new Plain<>(tail);
         }
     }
 
@@ -580,28 +619,32 @@ interface VerificationCursor
             var deletionBranch = source.deletionBranchCursor(direction);
             if (deletionBranch != null)
             {
-                assert (source.encodedPosition() & Cursor.MAY_HAVE_DELETION_BRANCH_BIT) != 0 :
-                    String.format("Deletion branch found but MAY_HAVE_DELETION_BRANCH_BIT was not set on position: %s\n%s",
-                                  Cursor.toString(source.encodedPosition()),
-                                  this);
-                assert deletionBranchDepth == -1 :
-                    String.format("Deletion branch at position %s covered by another deletion branch at parent depth %s\n%s",
-                                  Cursor.toString(position),
-                                  deletionBranchDepth,
-                                  this);
-                assert Cursor.compare(deletionBranch.encodedPosition(), Cursor.rootPosition(direction)) == 0 :
-                    String.format("Invalid deletion branch initial position %s\n%s",
-                                  Cursor.toString(deletionBranch.encodedPosition()),
-                                  this);
-                assert deletionBranch.precedingState() == null :
-                    String.format("Deletion branch starts with active deletion %s\n%s",
-                                  deletionBranch.precedingState(),
-                                  this);
-                deletionBranch.skipTo(Cursor.exhaustedPosition(direction));
-                assert deletionBranch.precedingState() == null :
-                    String.format("Deletion branch ends with active deletion %s\n%s",
-                                  deletionBranch.precedingState(),
-                                  this);
+                // The branch is ours to release; over a file it holds a buffer.
+                try (deletionBranch)
+                {
+                    assert (source.encodedPosition() & Cursor.MAY_HAVE_DELETION_BRANCH_BIT) != 0 :
+                        String.format("Deletion branch found but MAY_HAVE_DELETION_BRANCH_BIT was not set on position: %s\n%s",
+                                      Cursor.toString(source.encodedPosition()),
+                                      this);
+                    assert deletionBranchDepth == -1 :
+                        String.format("Deletion branch at position %s covered by another deletion branch at parent depth %s\n%s",
+                                      Cursor.toString(position),
+                                      deletionBranchDepth,
+                                      this);
+                    assert Cursor.compare(deletionBranch.encodedPosition(), Cursor.rootPosition(direction)) == 0 :
+                        String.format("Invalid deletion branch initial position %s\n%s",
+                                      Cursor.toString(deletionBranch.encodedPosition()),
+                                      this);
+                    assert deletionBranch.precedingState() == null :
+                        String.format("Deletion branch starts with active deletion %s\n%s",
+                                      deletionBranch.precedingState(),
+                                      this);
+                    deletionBranch.skipTo(Cursor.exhaustedPosition(direction));
+                    assert deletionBranch.precedingState() == null :
+                        String.format("Deletion branch ends with active deletion %s\n%s",
+                                      deletionBranch.precedingState(),
+                                      this);
+                }
                 deletionBranchDepth = Cursor.depth(position);
             }
             return position;

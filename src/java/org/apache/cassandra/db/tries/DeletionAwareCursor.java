@@ -104,10 +104,17 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
                 walker.content(content);
 
             RangeCursor<D> deletionBranch = deletionBranchCursor(this, currentPosition);
-            if (deletionBranch != null && walker.enterDeletionsBranch())
+            if (deletionBranch != null)
             {
-                processDeletionBranch(walker, deletionBranch);
-                walker.exitDeletionsBranch();
+                // The branch is ours to release; over a file it holds a buffer.
+                try (deletionBranch)
+                {
+                    if (walker.enterDeletionsBranch())
+                    {
+                        processDeletionBranch(walker, deletionBranch);
+                        walker.exitDeletionsBranch();
+                    }
+                }
             }
 
             long prevPosition = currentPosition;
@@ -277,6 +284,10 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
         // Create a trie cursor now to make sure changes to c or deletionBranch do not affect it.
         DeletionAwareCursor<T, D> cursor = combineTailCursors(c, deletionBranch);
 
+        // The returned trie keeps it as the position to make its cursors from, and has no close of its own for the
+        // caller to reach it with. Release it here; [Cursor#close] leaves `tailCursor` callable precisely for this.
+        cursor.close();
+
         return dir -> cursor.tailCursor(dir);
     }
 
@@ -297,11 +308,15 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
         {
             // fix the position of the deletion branch
             Direction direction = deletionBranch.direction();
-            deletionBranch = deletionBranch.tailCursor(direction);
+            RangeCursor<D> tail = deletionBranch.tailCursor(direction);
+            ByteComparable.Version version = tail.byteComparableVersion();
+            // The trie below keeps this tail as the position to make its cursors from and cannot close it; release it
+            // now, as [DeletionAwareCursor#combineTails] does with the cursor it retains.
+            tail.close();
             return new SingletonCursor.DeletionBranch<>(direction,
                                                         ByteSource.EMPTY,
-                                                        deletionBranch.byteComparableVersion(),
-                                                        deletionBranch::tailCursor);
+                                                        version,
+                                                        tail::tailCursor);
         }
         else
             return null;
@@ -320,10 +335,16 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
             this.stopIssuingDeletions = false;
         }
 
+        /// Constructs a tail of a cursor whose deletions may already have been switched off. The switch has to be
+        /// re-applied after the superclass constructor has run, because the latter calls the overridable
+        /// [#postAdvance] before this class's fields are assigned, i.e. with the flag still `false`, which opens the
+        /// deletion branch at the root of the tail.
         SwitchableLiveAndDeletionsMergeCursor(BiFunction<T, D, Z> resolver, DeletionAwareCursor<T, D> c1, boolean stopIssuingDeletions)
         {
             super(resolver, c1);
             this.stopIssuingDeletions = stopIssuingDeletions;
+            if (stopIssuingDeletions)
+                stopIssuingDeletions(null);
         }
 
         SwitchableLiveAndDeletionsMergeCursor(BiFunction<T, D, Z> resolver, DeletionAwareCursor<T, D> c1, RangeCursor<D> c2)
@@ -340,11 +361,12 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
             {
                 case AT_C2:
                     // we need to exit the deletion branch at the next advance
+                    closeC2();
                     c2 = RangeCursor.empty(direction(), byteComparableVersion());
                     break;
                 default:
                     state = State.C1_ONLY;
-                    c2 = null;
+                    closeC2();
                     break;
             }
         }
@@ -481,6 +503,12 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
         public Wrapping(Cursor<T> source)
         {
             this.source = source;
+        }
+
+        @Override
+        public void close()
+        {
+            source.close();
         }
 
         @Override

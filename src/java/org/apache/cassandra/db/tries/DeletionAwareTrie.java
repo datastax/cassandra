@@ -60,6 +60,12 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// It is also expected that a deletion-aware trie does not contain any live data that is deleted by its own deletion
 /// branches. If such data exists, whether it is preserved after transformations is undefined.
 ///
+/// Live data is presented on the descent path, i.e. before the node's children in both directions, which is where
+/// [InMemoryDeletionAwareTrie] always presents it. [#wrap] passes through whatever the wrapped trie does, so an
+/// ordered trie wrapped this way presents content after its branch when walked in reverse; such a trie can be walked,
+/// but cannot be serialized by [OnDiskDeletionAwareTrieWriter], whose format keeps a node's ascent-side slot for the
+/// deletion branch pointer.
+///
 /// See [DeletionAwareCursor] for details on cursor operations and [InMemoryDeletionAwareTrie] for the
 /// concrete in-memory implementation.
 ///
@@ -279,8 +285,13 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
                                                       boolean deletionsAtRoot)
     {
         // TODO: Optimize/simplify
+        ByteComparable.Version version;
+        try (RangeCursor<D> probe = deletionTrie.cursor(Direction.FORWARD))
+        {
+            version = probe.byteComparableVersion();
+        }
         return mergeWith(deletionBranch(ByteComparable.EMPTY,
-                                        deletionTrie.cursor(Direction.FORWARD).byteComparableVersion(),
+                                        version,
                                         deletionTrie),
                          throwingResolver(),
                          deletionResolver,
@@ -490,7 +501,10 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     /// Process the trie using the given [DeletionAwareCursor.DeletionAwareWalker].
     default <R> R process(Direction direction, DeletionAwareCursor.DeletionAwareWalker<? super T, ? super D, R> walker)
     {
-        return cursor(direction).process(walker);
+        try (DeletionAwareCursor<T, D> cursor = cursor(direction))
+        {
+            return cursor.process(walker);
+        }
     }
 
 
@@ -498,29 +512,34 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     /// the range that covers it (i.e. the `precedingState` of the next marker).
     default D applicableDeletion(ByteComparable key)
     {
-        DeletionAwareCursor<T, D> dac = cursor(Direction.FORWARD);
-        final ByteSource bytes = key.asComparableBytes(dac.byteComparableVersion());
-        long currentPosition = dac.encodedPosition();
-        RangeCursor<D> rc;
-        while (true)
+        try (DeletionAwareCursor<T, D> dac = cursor(Direction.FORWARD))
         {
-            rc = DeletionAwareCursor.deletionBranchCursor(dac, currentPosition);
-            if (rc != null)
-                break;
+            final ByteSource bytes = key.asComparableBytes(dac.byteComparableVersion());
+            long currentPosition = dac.encodedPosition();
+            RangeCursor<D> rc;
+            while (true)
+            {
+                rc = DeletionAwareCursor.deletionBranchCursor(dac, currentPosition);
+                if (rc != null)
+                    break;
 
-            int next = bytes.next();
-            if (next == ByteSource.END_OF_STREAM)
-                return null; // no deletion branch found
-            long nextPosition = Cursor.positionForDescentWithByte(currentPosition, next);
-            currentPosition = dac.skipTo(nextPosition);
-            if (Cursor.compare(currentPosition, nextPosition) != 0)
-                return null;
+                int next = bytes.next();
+                if (next == ByteSource.END_OF_STREAM)
+                    return null; // no deletion branch found
+                long nextPosition = Cursor.positionForDescentWithByte(currentPosition, next);
+                currentPosition = dac.skipTo(nextPosition);
+                if (Cursor.compare(currentPosition, nextPosition) != 0)
+                    return null;
+            }
+
+            try (RangeCursor<D> deletions = rc)
+            {
+                if (deletions.descendAlong(bytes))
+                    return deletions.state();
+                else
+                    return deletions.precedingState();
+            }
         }
-
-        if (rc.descendAlong(bytes))
-            return rc.state();
-        else
-            return rc.precedingState();
     }
 
 
@@ -550,9 +569,12 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     default RangeTrie<D> deletionBranchAtRoot()
     {
         return dir -> {
-            DeletionAwareCursor<T, D> cursor = cursor(dir);
-            RangeCursor<D> deletionBranch = cursor.deletionBranchCursor(dir);
-            return deletionBranch != null ? deletionBranch : RangeCursor.empty(dir, cursor.byteComparableVersion());
+            // The data cursor is only needed to reach the branch, which does not depend on it.
+            try (DeletionAwareCursor<T, D> cursor = cursor(dir))
+            {
+                RangeCursor<D> deletionBranch = cursor.deletionBranchCursor(dir);
+                return deletionBranch != null ? deletionBranch : RangeCursor.empty(dir, cursor.byteComparableVersion());
+            }
         };
     }
 
@@ -562,11 +584,15 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     /// position.
     default D deletionAtRoot()
     {
-        DeletionAwareCursor<T, D> cursor = cursor(Direction.FORWARD);
-        RangeCursor<D> deletionBranch = cursor.deletionBranchCursor(Direction.FORWARD);
-        if (deletionBranch == null)
-            return null;
-        return deletionBranch.content();
+        try (DeletionAwareCursor<T, D> cursor = cursor(Direction.FORWARD))
+        {
+            try (RangeCursor<D> deletionBranch = cursor.deletionBranchCursor(Direction.FORWARD))
+            {
+                if (deletionBranch == null)
+                    return null;
+                return deletionBranch.content();
+            }
+        }
     }
 
     /// Returns a view of the combination of the live data and deletions in this trie as a regular [Trie], using
@@ -644,38 +670,63 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     default DeletionAwareTrie<T, D> tailTrie(ByteComparable prefix, boolean includeCoveringDeletions)
     {
         DeletionAwareCursor<T, D> c = cursor(Direction.FORWARD);
-        ByteSource bytes = prefix.asComparableBytes(c.byteComparableVersion());
-        long currPosition = c.encodedPosition();
-        while (true)
+        try
         {
-            int next = bytes.next();
-            if (next == ByteSource.END_OF_STREAM)
-                return c::tailCursor;
+            ByteSource bytes = prefix.asComparableBytes(c.byteComparableVersion());
+            long currPosition = c.encodedPosition();
+            while (true)
+            {
+                int next = bytes.next();
+                if (next == ByteSource.END_OF_STREAM)
+                    return c::tailCursor;
 
-            RangeCursor<D> deletionBranch = DeletionAwareCursor.deletionBranchCursor(c, currPosition);
-            if (deletionBranch != null)
-                return tailTrieSeparately(next, ByteSource.duplicatable(bytes), c, deletionBranch, includeCoveringDeletions);
+                RangeCursor<D> deletionBranch = DeletionAwareCursor.deletionBranchCursor(c, currPosition);
+                if (deletionBranch != null)
+                    return tailTrieSeparately(next, ByteSource.duplicatable(bytes), c, deletionBranch, includeCoveringDeletions);
 
-            long nextPosition = Cursor.positionForDescentWithByte(currPosition, next);
-            currPosition = c.skipTo(nextPosition);
-            if (Cursor.compare(currPosition, nextPosition) != 0)
-                return null;
+                long nextPosition = Cursor.positionForDescentWithByte(currPosition, next);
+                currPosition = c.skipTo(nextPosition);
+                if (Cursor.compare(currPosition, nextPosition) != 0)
+                    return null;
+            }
+        }
+        finally
+        {
+            // The returned trie keeps the cursor as the position to make its cursors from, and has no close of its
+            // own for the caller to reach it with. Release it here; [Cursor#close] leaves `tailCursor` callable
+            // precisely for this. (The tries built by `tailTrieSeparately` retain a tail of it, not it.)
+            c.close();
         }
     }
 
     private static <T, D extends RangeState<D>> DeletionAwareTrie<T, D>
     tailTrieSeparately(int next, ByteSource.Duplicatable bytes, DeletionAwareCursor<T, D> c, RangeCursor<D> deletionBranch, boolean includeCoveringDeletions)
     {
-        ByteSource.Duplicatable bytesDeletion = bytes.duplicate();
-        if (!deletionBranch.descendAlong(next, bytesDeletion))
-            deletionBranch = includeCoveringDeletions ? deletionBranch.precedingStateCursor(Direction.FORWARD) : null;
-        else if (!includeCoveringDeletions)
-            deletionBranch = DeletionAwareCursor.dropCoveringDeletions(deletionBranch);
+        // The branch was made for us by deletionBranchCursor and is ours to release, as is whatever we derive from it
+        // below -- it is either the branch itself, a wrapper over it, or a fresh cursor. combineTails only keeps tails
+        // of the two cursors, so both can go as soon as it has returned. Closing twice is harmless.
+        RangeCursor<D> deletions = null;
+        try
+        {
+            ByteSource.Duplicatable bytesDeletion = bytes.duplicate();
+            if (!deletionBranch.descendAlong(next, bytesDeletion))
+                deletions = includeCoveringDeletions ? deletionBranch.precedingStateCursor(Direction.FORWARD) : null;
+            else if (!includeCoveringDeletions)
+                deletions = DeletionAwareCursor.dropCoveringDeletions(deletionBranch);
+            else
+                deletions = deletionBranch;
 
-        if (!c.descendAlong(next, bytes))
-            c = null;
+            if (!c.descendAlong(next, bytes))
+                c = null;
 
-        return DeletionAwareCursor.combineTails(c, deletionBranch);
+            return DeletionAwareCursor.combineTails(c, deletions);
+        }
+        finally
+        {
+            if (deletions != null)
+                deletions.close();
+            deletionBranch.close();
+        }
     }
 
     /// @inheritDoc
@@ -711,6 +762,11 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
 
     /// Returns a view of this trie where all live content and deletions are processed through the given mapping
     /// functions.
+    ///
+    /// `deletionMapper` is applied to the covering states a deletion branch reports as well as to the boundaries it
+    /// presents as content, and it is applied to each of them separately. It must therefore be a function of the
+    /// deletion state alone; the result of returning null for one side of a range while keeping the other, which
+    /// leaves a range that is opened and never closed, is undefined.
     default <V, E extends RangeState<E>> DeletionAwareTrie<V, E> mapValuesAndDeletions(Function<T, V> mapper, Function<D, E> deletionMapper)
     {
         return dir -> new ContentMappingCursor.DeletionAware<>(mapper, deletionMapper, cursor(dir));

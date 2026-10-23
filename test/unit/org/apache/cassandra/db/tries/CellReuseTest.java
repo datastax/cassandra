@@ -102,7 +102,7 @@ public class CellReuseTest
         verifyFreeCellsMatchUnreachable(trieLong);
     }
 
-    public static void verifyFreeCellsMatchUnreachable(InMemoryBaseTrie<?> trieLong)
+    public static void verifyFreeCellsMatchUnreachable(InMemoryBaseTrie<?, ?, ?> trieLong)
     {
         verifyFreeCells(trieLong, true);
     }
@@ -110,12 +110,12 @@ public class CellReuseTest
     /// Checks that no reachable cell or object is marked for reuse. Unlike [#verifyFreeCellsMatchUnreachable], this
     /// does not require all unreachable ones to be marked for reuse, which is no longer the case after
     /// [InMemoryBaseTrie#stopRecycling].
-    public static void verifyNoReachableCellsFree(InMemoryBaseTrie<?> trieLong)
+    public static void verifyNoReachableCellsFree(InMemoryBaseTrie<?, ?, ?> trieLong)
     {
         verifyFreeCells(trieLong, false);
     }
 
-    private static void verifyFreeCells(InMemoryBaseTrie<?> trieLong, boolean allUnreachableFree)
+    private static void verifyFreeCells(InMemoryBaseTrie<?, ?, ?> trieLong, boolean allUnreachableFree)
     {
         // dump some information first
         System.out.println(String.format(" LongLived %s sizes %10s %10s",
@@ -150,7 +150,7 @@ public class CellReuseTest
         }
     }
 
-    private static void verifyReachability(InMemoryBaseTrie<?> trieLong, BitSet reachable, IntArrayList availableList, int allocatedMax, int shift, String name, boolean allUnreachableFree)
+    private static void verifyReachability(InMemoryBaseTrie<?, ?, ?> trieLong, BitSet reachable, IntArrayList availableList, int allocatedMax, int shift, String name, boolean allUnreachableFree)
     {
         BitSet available = new BitSet(reachable.size());
         for (int v : availableList)
@@ -275,7 +275,7 @@ public class CellReuseTest
                         check.filteredEntrySet(ByteBuffer.class).iterator());
     }
 
-    public static void assertCellSetEmpty(BitSet set, InMemoryBaseTrie<?> trie, String message)
+    public static void assertCellSetEmpty(BitSet set, InMemoryBaseTrie<?, ?, ?> trie, String message)
     {
         if (set.isEmpty())
             return;
@@ -298,7 +298,7 @@ public class CellReuseTest
         Assert.fail(set.cardinality() + message);
     }
 
-    public static Pair<BitSet, BitSet> reachableCells(InMemoryBaseTrie<?> trie)
+    public static Pair<BitSet, BitSet> reachableCells(InMemoryBaseTrie<?, ?, ?> trie)
     {
         if (VERBOSE)
             System.out.println(trie.dump(Object::toString));
@@ -308,7 +308,7 @@ public class CellReuseTest
         return Pair.create(set, objs);
     }
 
-    private static void mark(InMemoryBaseTrie<?> trie, int node, BitSet set, BitSet objs)
+    private static void mark(InMemoryBaseTrie<?, ?, ?> trie, int node, BitSet set, BitSet objs)
     {
         set.set(node >> 5);
         if (VERBOSE)
@@ -355,13 +355,13 @@ public class CellReuseTest
         }
     }
 
-    private static void markPrefixContent(InMemoryBaseTrie<?> trie, int pointerAddress, BitSet set, BitSet objs)
+    private static void markPrefixContent(InMemoryBaseTrie<?, ?, ?> trie, int pointerAddress, BitSet set, BitSet objs)
     {
         int content = trie.getIntVolatile(pointerAddress);
         markChild(trie, content, set, objs);
     }
 
-    private static void markChild(InMemoryBaseTrie<?> trie, int child, BitSet set, BitSet objs)
+    private static void markChild(InMemoryBaseTrie<?, ?, ?> trie, int child, BitSet set, BitSet objs)
     {
         if (!InMemoryTrie.isNullOrLeaf(child))
             mark(trie, child, set, objs);

@@ -18,7 +18,9 @@
 
 package org.apache.cassandra.db.tries;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -33,6 +35,7 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.Function;
+import java.util.function.ObjLongConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -45,15 +48,24 @@ import com.google.common.collect.Sets;
 import com.google.common.collect.Streams;
 import org.junit.Assert;
 
+import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.RebuffererFactory;
+import org.apache.cassandra.io.util.WrappingRebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.EMPTY;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Preencoded;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class TrieUtil
@@ -595,6 +607,12 @@ public class TrieUtil
                     else
                         throw new UnsupportedOperationException("tailTrie on test cursor");
                 }
+
+                @Override
+                public void close()
+                {
+                    // nothing to release
+                }
             }
         };
     }
@@ -634,13 +652,42 @@ public class TrieUtil
             }
     }
 
+    /// Assert two tries are equal, performing exactly the same walks in both cursor directions.
+    public static <T> void assertTriesEqual(BaseTrie<T, ?, ?> expected, BaseTrie<T, ?, ?> actual)
+    {
+        if (expected == null || actual == null)
+        {
+            assertEquals(expected, actual);
+            return;
+        }
+
+        for (Direction dir : Direction.values())
+            try
+            {
+                assertCursorWalksEqual(expected.cursor(dir), actual.cursor(dir));
+            }
+            catch (Throwable t)
+            {
+                try
+                {
+                    System.err.println("Expected\n" + expected.cursor(dir).process(new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
+                    System.err.println("Actual\n" + actual.cursor(dir).process(new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
+                }
+                catch (Throwable t2)
+                {
+                    t.addSuppressed(t2);
+                }
+                throw t;
+            }
+    }
+
     public static<T, D extends RangeState<D>> void assertCursorWalksEqual(DeletionAwareCursor<T, D> expected, DeletionAwareCursor<T, D> actual)
     {
         long expectedPos = expected.encodedPosition();
         long actualPos = actual.encodedPosition();
         while (true)
         {
-            assertEquals("Actual pos " + Cursor.toString(actualPos) + " != " + Cursor.toString(expectedPos), expectedPos, actualPos);
+            assertEquals("Actual pos " + cursorPositionAsString(actual, actualPos) + " != " + cursorPositionAsString(expected, expectedPos), expectedPos, actualPos);
             if (Cursor.isExhausted(actualPos))
                 return;
             T expectedContent = expected.content();
@@ -662,7 +709,7 @@ public class TrieUtil
         long actualPos = actual.encodedPosition();
         while (true)
         {
-            assertEquals("Actual pos " + Cursor.toString(actualPos) + " != " + Cursor.toString(expectedPos), expectedPos, actualPos);
+            assertEquals("Actual pos " + cursorPositionAsString(actual, actualPos) + " != " + cursorPositionAsString(expected, expectedPos), expectedPos, actualPos);
             if (Cursor.isExhausted(actualPos))
                 return;
             T expectedContent = expected.content();
@@ -671,6 +718,14 @@ public class TrieUtil
             expectedPos = expected.advance();
             actualPos = actual.advance();
         }
+    }
+
+    public static String cursorPositionAsString(Cursor<?> cursor, long pos)
+    {
+        if (cursor instanceof VerificationCursor.Plain)
+            return cursor.toString();
+        else
+            return Cursor.toString(pos);
     }
 
 
@@ -801,6 +856,228 @@ public class TrieUtil
             assertEquals("Content", expectedContent, actualContent);
             expectedContent = expected.advanceToContent(expectedPath);
             actualContent = actual.advanceToContent(actualPath);
+        }
+    }
+
+    static void testSkipOverBranch(String[] testsAsStrings, Function<String, Preencoded> mapping, Trie<String> trie)
+    {
+        testsAsStrings = Arrays.copyOf(testsAsStrings, testsAsStrings.length);
+        Arrays.sort(testsAsStrings, (x, y) -> mapping.apply(x).compareTo(mapping.apply(y)));
+        Preencoded[] tests = Arrays.stream(testsAsStrings).map(mapping).toArray(Preencoded[]::new);
+        for (int testIndex = 0; testIndex < tests.length; ++testIndex)
+        {
+            Preencoded key = tests[testIndex];
+            for (Direction d : Direction.values())
+            {
+                Cursor<String> c = trie.cursor(d);
+                assertTrue(c.descendAlong(key.getPreencodedBytes()) || d.isForward() == testsAsStrings[testIndex].endsWith("^"));
+
+                long skipBranch = Cursor.positionForSkippingBranch(c.encodedPosition());
+                long pos = c.skipTo(skipBranch);
+                boolean exhausted = Cursor.isExhausted(pos);
+
+                String next = exhausted ? null : c.content();
+                if (next == null && !exhausted)
+                    next = c.advanceToContent(null);
+                int nextIndex = testIndex + d.increase;
+                while (d.inLoop(nextIndex, 0, tests.length - 1) && isPrefix(key, tests[nextIndex]))
+                    nextIndex += d.increase;
+                String expected = d.inLoop(nextIndex, 0, tests.length - 1) ? testsAsStrings[nextIndex] : null;
+                assertEquals("Value after skipping branch at " + testsAsStrings[testIndex] + " " + d, expected, next);
+            }
+        }
+    }
+
+    static boolean isPrefix(Preencoded prefix, Preencoded value)
+    {
+        ByteSource ps = prefix.getPreencodedBytes();
+        ByteSource vs = value.getPreencodedBytes();
+        while (true)
+        {
+            int nextp = ps.next();
+            int nextv = vs.next();
+            if (nextp == ByteSource.END_OF_STREAM)
+                return true;
+            if (nextp != nextv)
+                return false;
+        }
+    }
+
+    static class IntegerSerDe implements OnDiskTrieWriter.DataSerializer<Integer>, OnDiskCursor.DataDeserializer<Integer>
+    {
+        @Override
+        public void serialize(DataOutputPlus out, Integer value) throws IOException
+        {
+            out.writeInt(value);
+        }
+
+        @Override
+        public Integer deserialize(DataInputPlus rdr, int length) throws IOException
+        {
+            return rdr.readInt();
+        }
+    }
+    public static final IntegerSerDe INTEGER_SERDE = new IntegerSerDe();
+
+    static class StringSerDe implements OnDiskTrieWriter.DataSerializer<String>, OnDiskCursor.DataDeserializer<String>
+    {
+        @Override
+        public void serialize(DataOutputPlus out, String value) throws IOException
+        {
+            out.write(value.getBytes(StandardCharsets.UTF_8));
+        }
+
+        @Override
+        public String deserialize(DataInputPlus rdr, int length) throws IOException
+        {
+            byte[] bytes = new byte[length];
+            rdr.readFully(bytes);
+            return new String(bytes, 0, length, StandardCharsets.UTF_8);
+        }
+    }
+    public static final StringSerDe STRING_SERDE = new StringSerDe();
+
+    static class RangeSerDe implements OnDiskTrieWriter.DataSerializer<TestRangeState>, OnDiskCursor.DataDeserializer<TestRangeState>
+    {
+        @Override
+        public void serialize(DataOutputPlus out, TestRangeState value) throws IOException
+        {
+            out.writeVInt32(value.leftSide);
+            out.writeVInt32(value.rightSide);
+            out.writeBoolean(value.appliesAfter);
+            out.write(value.position.asByteComparableArray(VERSION));
+        }
+
+        @Override
+        public TestRangeState deserialize(DataInputPlus rdr, int length) throws IOException
+        {
+            int leftSide = rdr.readVInt32();
+            int rightSide = rdr.readVInt32();
+            boolean appliesAfter = rdr.readBoolean();
+            length -= VIntCoding.computeVIntSize(leftSide) + VIntCoding.computeVIntSize(rightSide) + 1;
+
+            byte[] bytes = new byte[length];
+            rdr.readFully(bytes);
+
+            return new TestRangeState(ByteComparable.preencoded(VERSION, bytes), appliesAfter, leftSide, rightSide);
+        }
+    }
+    public static final RangeSerDe RANGE_SERDE = new RangeSerDe();
+
+    public static OnDiskTrie<Integer> onDiskRoundtripIntegers(Trie<Integer> trie, boolean isOrdered)
+    {
+        return onDiskRoundtrip(trie, isOrdered, INTEGER_SERDE, INTEGER_SERDE);
+    }
+
+    public static OnDiskTrie<String> onDiskRoundtripStrings(Trie<String> trie, boolean isOrdered)
+    {
+        return onDiskRoundtrip(trie, isOrdered, STRING_SERDE, STRING_SERDE);
+    }
+
+    public static <T> OnDiskTrie<T> onDiskRoundtrip(Trie<T> trie, boolean isOrdered, OnDiskTrieWriter.DataSerializer<T> serializer, OnDiskCursor.DataDeserializer<T> deserializer)
+    {
+        try
+        {
+            File file = OnDiskTrieWriter.write(trie, isOrdered, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
+            return OnDiskTrie.open(file, deserializer, VERSION,  isOrdered, -1);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static OnDiskRangeTrie<TestRangeState> onDiskRoundtrip(RangeTrie<TestRangeState> trie)
+    {
+        return onDiskRoundtrip(trie, RANGE_SERDE, RANGE_SERDE);
+    }
+
+    public static <S extends RangeState<S>> OnDiskRangeTrie<S> onDiskRoundtrip(RangeTrie<S> trie, OnDiskTrieWriter.DataSerializer<S> serializer, OnDiskCursor.DataDeserializer<S> deserializer)
+    {
+        try
+        {
+            File file = OnDiskTrieWriter.write(trie, true, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
+            return OnDiskRangeTrie.open(file, deserializer, VERSION, -1);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /// Walks the cursor the ways a reader of a damaged commit-log record or message payload can: advancing, skipping to
+    /// random positions the cursor accepts, and closing it before it is exhausted, after which a tail taken from it is
+    /// walked the same way. Content is read at every position, `atPosition` is called there, and the cursor is closed
+    /// on every path.
+    ///
+    /// The steps taken, including those of the tails and of whatever `atPosition` walks, are counted in `steps`; a walk
+    /// that takes more than `maxSteps` fails, as a reader caught in a loop would never finish.
+    @SuppressWarnings("unchecked")  // a cursor's tail is a cursor of the same kind
+    static <C extends Cursor<?>> void walkRandomlyAndClose(Random rand, C cursor, int[] steps, int maxSteps,
+                                                           ObjLongConsumer<C> atPosition)
+    {
+        try
+        {
+            Direction direction = cursor.direction();
+            int[] path = new int[16];
+            long position = cursor.encodedPosition();
+            while (!Cursor.isExhausted(position))
+            {
+                if (++steps[0] > maxSteps)
+                    fail("Walk did not finish in " + maxSteps + " steps");
+                int depth = Cursor.depth(position);
+                if (depth > path.length)
+                    path = Arrays.copyOf(path, Math.max(depth, path.length * 2));
+                if (depth > 0)
+                    path[depth - 1] = Cursor.incomingTransition(position);
+                if ((position & Cursor.MAY_HAVE_CONTENT_BIT) != 0)
+                    cursor.content();
+                atPosition.accept(cursor, position);
+
+                boolean onReturnPath = Cursor.isOnReturnPath(position);
+                // Mostly advance, so that the walk covers most of the trie before it skips past it or stops.
+                int choice = rand.nextInt(256);
+                if (choice == 0)
+                {
+                    cursor.close();
+                    // A tail can be taken from a closed cursor, but not on the return path.
+                    if (!onReturnPath && rand.nextBoolean())
+                        walkRandomlyAndClose(rand, (C) cursor.tailCursor(rand.nextBoolean() ? Direction.FORWARD : Direction.REVERSE),
+                                             steps, maxSteps, atPosition);
+                    return;
+                }
+                else if (choice <= 4)
+                {
+                    position = cursor.skipTo(Cursor.positionForSkippingBranch(position));
+                }
+                else if (choice <= 8 && !onReturnPath)
+                {
+                    position = cursor.skipTo(Cursor.encode(depth + 1, rand.nextInt(256), direction));
+                }
+                else if (choice <= 12 && depth > 0)
+                {
+                    // Move to a depth the walk has reached, to a transition after the one it took there.
+                    int targetDepth = 1 + rand.nextInt(depth);
+                    int visited = path[targetDepth - 1];
+                    int remaining = direction.select(0xFF - visited, visited);
+                    long target = remaining == 0
+                                  ? Cursor.positionForSkippingBranch(Cursor.encode(targetDepth, visited, direction))
+                                  : Cursor.encode(targetDepth, visited + direction.select(1, -1) * (1 + rand.nextInt(remaining)), direction);
+                    position = cursor.skipTo(target);
+                }
+                else if (choice <= 14 && !onReturnPath)
+                {
+                    position = cursor.skipTo((position & ~Cursor.FLAGS_MASK) | Cursor.ON_RETURN_PATH_BIT);
+                }
+                else
+                {
+                    position = cursor.advance();
+                }
+            }
+        }
+        finally
+        {
+            cursor.close();
         }
     }
 
@@ -943,6 +1220,12 @@ public class TrieUtil
         }
 
         @Override
+        public void close()
+        {
+            // nothing to release
+        }
+
+        @Override
         public String toString()
         {
             StringBuilder stringBuilder = new StringBuilder();
@@ -958,4 +1241,87 @@ public class TrieUtil
             return stringBuilder.toString();
         }
     }
+
+    /// A [RebuffererFactory] that counts the rebufferers it has handed out and not been given back, so that a test
+    /// can tell whether the cursors made over it were closed.
+    public static class CountingRebuffererFactory implements RebuffererFactory
+    {
+        private final RebuffererFactory wrapped;
+        public int outstanding;
+
+        public CountingRebuffererFactory(RebuffererFactory wrapped)
+        {
+            this.wrapped = wrapped;
+        }
+
+        @Override
+        public Rebufferer instantiateRebufferer(boolean isScan)
+        {
+            ++outstanding;
+            return new WrappingRebufferer(wrapped.instantiateRebufferer(isScan))
+            {
+                @Override
+                public void closeReader()
+                {
+                    --outstanding;
+                    super.closeReader();
+                }
+            };
+        }
+
+        @Override
+        public int chunkSize()
+        {
+            return wrapped.chunkSize();
+        }
+
+        @Override
+        public void invalidateIfCached(long position)
+        {
+            wrapped.invalidateIfCached(position);
+        }
+
+        @Override
+        public ChannelProxy channel()
+        {
+            return wrapped.channel();
+        }
+
+        @Override
+        public long fileLength()
+        {
+            return wrapped.fileLength();
+        }
+
+        @Override
+        public double getCrcCheckChance()
+        {
+            return wrapped.getCrcCheckChance();
+        }
+
+        @Override
+        public long remainingBytes(long position)
+        {
+            return wrapped.remainingBytes(position);
+        }
+
+        @Override
+        public long positionForSkip(long currentPosition, int bytesToSkip)
+        {
+            return wrapped.positionForSkip(currentPosition, bytesToSkip);
+        }
+
+        @Override
+        public long adjustPosition(long position)
+        {
+            return wrapped.adjustPosition(position);
+        }
+
+        @Override
+        public void close()
+        {
+            wrapped.close();
+        }
+    }
+
 }

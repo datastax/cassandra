@@ -38,7 +38,6 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.io.util.DataInputBuffer;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -66,12 +65,12 @@ public class HintWriteTTLTest
         return hint.mutation().key();
     }
 
-    private static Hint deserialize(ByteBuffer bb) throws IOException
+    private static Hint deserialize(ByteBuffer bb, int version) throws IOException
     {
         DataInputBuffer input = new DataInputBuffer(bb, true);
         try
         {
-            return Hint.serializer.deserialize(input, MessagingService.current_version);
+            return Hint.serializer.deserialize(input, version);
         }
         finally
         {
@@ -160,7 +159,7 @@ public class HintWriteTTLTest
                 Iterator<ByteBuffer> iter = page.buffersIterator();
                 while (iter.hasNext())
                 {
-                    hints.add(deserialize(iter.next()));
+                    hints.add(deserialize(iter.next(), reader.descriptor().messagingVersion()));
                 }
             }
         }

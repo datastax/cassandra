@@ -311,10 +311,20 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
     default Trie<T> tailTrie(ByteComparable prefix)
     {
         Cursor<T> c = cursor(Direction.FORWARD);
-        if (c.descendAlong(prefix.asComparableBytes(c.byteComparableVersion())))
-            return c::tailCursor;
-        else
-            return null;
+        try
+        {
+            if (c.descendAlong(prefix.asComparableBytes(c.byteComparableVersion())))
+                return c::tailCursor;
+            else
+                return null;
+        }
+        finally
+        {
+            // The returned trie keeps the cursor as the position to make its cursors from, and has no close of its
+            // own for the caller to reach it with. Release it here; [Cursor#close] leaves `tailCursor` callable
+            // precisely for this.
+            c.close();
+        }
     }
 
     @Override
@@ -349,7 +359,12 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
     @Override
     default Cursor<T> cursor(Direction direction)
     {
-        return DEBUG ? new VerificationCursor.Plain<>(makeCursor(direction))
-                     : makeCursor(direction);
+        if (!DEBUG)
+            return makeCursor(direction);
+        Cursor<T> cursor = makeCursor(direction);
+        // Callers reach the deletions switch by a cast of the cursor they are given; the wrapper must keep it.
+        return cursor instanceof DeletionAwareTrie.DeletionsStopControl
+               ? new VerificationCursor.PlainSwitchable<>(cursor)
+               : new VerificationCursor.Plain<>(cursor);
     }
 }

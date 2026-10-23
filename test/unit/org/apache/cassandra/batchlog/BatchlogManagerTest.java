@@ -46,7 +46,10 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -200,6 +203,44 @@ public class BatchlogManagerTest
         UntypedResultSet result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", KEYSPACE1, CF_STANDARD1));
         assertNotNull(result);
         assertEquals(500, result.one().getLong("count"));
+    }
+
+    @Test
+    public void testReplayBatchReceivedAtCurrentVersion() throws Exception
+    {
+        // A batch arrives at the version of the connection, which a storage compatibility mode can keep above the
+        // version the batchlog stores mutations at. Replay decodes the mutations at the version they were stored with.
+        TableMetadata cfm = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD4).metadata();
+        long timestamp = currentTimeMillis() - BatchlogManager.getBatchlogTimeout();
+
+        List<Mutation> mutations = new ArrayList<>(10);
+        for (int i = 0; i < 10; i++)
+        {
+            mutations.add(new RowUpdateBuilder(cfm, FBUtilities.timestampMicros(), ByteBufferUtil.bytes(i))
+                          .clustering("name" + i)
+                          .add("val", "val" + i)
+                          .build());
+        }
+
+        Batch received;
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            Batch.serializer.serialize(Batch.createLocal(atUnixMillis(timestamp, 0), timestamp * 1000, mutations), out, MessagingService.current_version);
+            received = Batch.serializer.deserialize(new DataInputBuffer(out.buffer(), false), MessagingService.current_version);
+        }
+        // the mutations stay encoded only when the current and the storage versions agree, as in mode NONE
+        assertEquals(MessagingService.current_version == StorageCompatibilityMode.current().storageMessagingVersion(), !received.isLocal());
+        BatchlogManager.store(received);
+
+        BatchlogManager.instance.startBatchlogReplay().get();
+
+        assertEquals(0, BatchlogManager.instance.countAllBatches());
+        for (int i = 0; i < 10; i++)
+        {
+            UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = int_as_blob(%d)", KEYSPACE1, CF_STANDARD4, i));
+            assertEquals("name" + i, result.one().getString("name"));
+            assertEquals("val" + i, result.one().getString("val"));
+        }
     }
 
     @Test

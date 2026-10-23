@@ -36,6 +36,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -50,21 +51,31 @@ public class ReturnPathSeekTest
 {
     static final String[] tests = new String[] {"", "testing", "test", "tests", "tested", "tesa", "tesz"};
 
+    /// Keys forming a branch whose content is presented after it, with an immediately adjacent sibling branch:
+    /// walked in reverse, "ab" is reported on the return path and the next node at the same depth is "aa", one
+    /// byte away.
+    static final String[] adjacentBranchTests = new String[] {"aa", "aad", "ab", "abc"};
+
     @Parameterized.Parameter(0)
     public boolean inMemorySingleton = true;
     @Parameterized.Parameter(1)
     public boolean useUnion = false;
     @Parameterized.Parameter(2)
     public boolean intersectTrie = false;
+    /// Write the trie under test out and read it back as an [OnDiskTrie], whose cursor keeps its own backtracking
+    /// state for return-path content.
+    @Parameterized.Parameter(3)
+    public boolean onDisk = false;
 
-    @Parameterized.Parameters(name="inMemorySingleton={0}, useUnion={1}, intersectTrie={2}")
+    @Parameterized.Parameters(name="inMemorySingleton={0}, useUnion={1}, intersectTrie={2}, onDisk={3}")
     public static List<Object[]> generateData()
     {
         var list = new ArrayList<Object[]>();
         for (boolean inMemorySingleton : new boolean[] {true, false})
             for (boolean useUnion : new boolean[] {true, false})
                 for (boolean intersectTrie : new boolean[] {true, false})
-                    list.add(new Object[] {inMemorySingleton, useUnion, intersectTrie});
+                    for (boolean onDisk : new boolean[] {false, true})
+                        list.add(new Object[] {inMemorySingleton, useUnion, intersectTrie, onDisk});
         return list;
     }
 
@@ -72,6 +83,13 @@ public class ReturnPathSeekTest
     public static void enableVerification()
     {
         CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
+        // The on-disk tries are read from a file, which pulls in BufferPools, whose static initializer needs configuration.
+        DatabaseDescriptor.toolInitialization();
+    }
+
+    Trie<String> maybeOnDisk(Trie<String> trie)
+    {
+        return onDisk ? TrieUtil.onDiskRoundtripStrings(trie, true) : trie;
     }
 
     Trie<String> makeSingleton(ByteComparable.Preencoded e, String v) throws TrieSpaceExhaustedException
@@ -94,7 +112,7 @@ public class ReturnPathSeekTest
         {
             ByteComparable.Preencoded e = TrieUtil.directComparable(test);
             System.out.println("Testing singleton " + asString(e) + ": " + test);
-            Trie<String> tt = makeSingleton(e, test);
+            Trie<String> tt = maybeOnDisk(makeSingleton(e, test));
             if (intersectTrie)
                 tt = tt.slice(e, true, e, true); // ineffective but might mess it up
 
@@ -107,7 +125,7 @@ public class ReturnPathSeekTest
     @Test
     public void testMultiple() throws TrieSpaceExhaustedException
     {
-        Trie<String> trie = useUnion ? buildMergeTrie() : buildInMemoryTrie();
+        Trie<String> trie = maybeOnDisk(useUnion ? buildMergeTrie() : buildInMemoryTrie());
 
         System.out.println("Forward\n" + trie.dump());
         System.out.println("Reverse\n" + trie.process(Direction.REVERSE, new TrieDumper.Plain<>(Objects::toString)));
@@ -129,8 +147,13 @@ public class ReturnPathSeekTest
 
     private InMemoryTrie<String> buildInMemoryTrie() throws TrieSpaceExhaustedException
     {
+        return buildInMemoryTrie(tests);
+    }
+
+    private InMemoryTrie<String> buildInMemoryTrie(String[] keys) throws TrieSpaceExhaustedException
+    {
         InMemoryTrie<String> trie = InMemoryTrie.shortLivedOrdered(VERSION);
-        for (String test : tests)
+        for (String test : keys)
         {
             ByteComparable.Preencoded e = TrieUtil.directComparable(test);
             System.out.println("Adding " + asString(e) + ": " + test);
@@ -144,8 +167,13 @@ public class ReturnPathSeekTest
 
     private Trie<String> buildMergeTrie() throws TrieSpaceExhaustedException
     {
+        return buildMergeTrie(tests);
+    }
+
+    private Trie<String> buildMergeTrie(String[] keys) throws TrieSpaceExhaustedException
+    {
         List<Trie<String>> tries = new ArrayList<>();
-        for (String test : tests)
+        for (String test : keys)
         {
             ByteComparable.Preencoded e = TrieUtil.directComparable(test);
             System.out.println("Adding " + asString(e) + ": " + test);
@@ -205,10 +233,44 @@ public class ReturnPathSeekTest
         assertFalse(descendAlongToReturnPath(c, e.getPreencodedBytes()));
     }
 
+    /// A branch skip issued from a position on the return path must land on the next sibling's descent position.
+    /// Asking for the sibling's return path position instead would step over the sibling's whole branch, dropping
+    /// "aad" from the walk.
+    @Test
+    public void testSkipBranchFromReturnPath() throws TrieSpaceExhaustedException
+    {
+        Trie<String> trie = maybeOnDisk(useUnion ? buildMergeTrie(adjacentBranchTests) : buildInMemoryTrie(adjacentBranchTests));
+        if (intersectTrie)
+            trie = trie.slice(TrieUtil.directComparable("aa"), true, TrieUtil.directComparable("ac"), true);
+
+        Cursor<String> cursor = trie.cursor(Direction.REVERSE);
+        // In an ordered trie content is placed after the branch, thus in reverse it is presented on the return path.
+        assertTrue(descendAlongToReturnPath(cursor, TrieUtil.directComparable("ab").getPreencodedBytes()));
+        assertEquals("ab", cursor.content());
+
+        long skipped = cursor.skipTo(Cursor.positionForSkippingBranch(cursor.encodedPosition()));
+        assertEquals("Skipping the \"ab\" branch must descend into \"aa\"",
+                     0,
+                     Cursor.compare(Cursor.encode(2, 'a', Direction.REVERSE), skipped));
+        assertFalse("Skipping a branch must not land on the sibling's return path, its branch was not walked yet",
+                    Cursor.isOnReturnPath(skipped));
+
+        List<String> remaining = new ArrayList<>();
+        String value = Cursor.content(cursor, skipped);
+        if (value == null)
+            value = cursor.advanceToContent(null);
+        while (value != null)
+        {
+            remaining.add(value);
+            value = cursor.advanceToContent(null);
+        }
+        assertEquals(Arrays.asList("aad", "aa"), remaining);
+    }
+
     @Test
     public void testSeeksAfterDescent() throws TrieSpaceExhaustedException
     {
-        Trie<String> trie = useUnion ? buildMergeTrie() : buildInMemoryTrie();
+        Trie<String> trie = maybeOnDisk(useUnion ? buildMergeTrie() : buildInMemoryTrie());
 
         for (String first : tests)
         {
@@ -239,8 +301,8 @@ public class ReturnPathSeekTest
                 ByteComparable.Preencoded firstKey = TrieUtil.directComparable(first);
                 ByteComparable.Preencoded secondKey = TrieUtil.directComparable(second);
 
-                Trie<String> tt = makeSingleton(firstKey, first).mergeWith(makeSingleton(secondKey, second),
-                                                                           Trie.throwingResolver());
+                Trie<String> tt = maybeOnDisk(makeSingleton(firstKey, first).mergeWith(makeSingleton(secondKey, second),
+                                                                                       Trie.throwingResolver()));
                 if (intersectTrie)
                     tt = tt.subtrie(firstKey, secondKey); // ineffective but might mess it up
 

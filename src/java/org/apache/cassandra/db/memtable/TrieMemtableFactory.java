@@ -25,10 +25,13 @@ import com.google.common.collect.ImmutableMap;
 
 import org.apache.cassandra.config.InheritingClass;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdateStage2;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TrieMemtableMetricsView;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.apache.cassandra.db.partitions.PartitionUpdate.Factory;
 
@@ -58,12 +61,14 @@ public class TrieMemtableFactory implements Memtable.Factory
     public static final TrieMemtableFactory INSTANCE = new TrieMemtableFactory(null);
     public static InheritingClass CONFIGURATION = new InheritingClass(null, TrieMemtable.class.getName(), ImmutableMap.of());
 
+    /// Trie partition updates are written in the trie encoding, which exists from [MessagingService#VERSION_DS_21]
+    /// on. Below that storage version the commit log, hints and batchlog would convert every one of them back to
+    /// rows, so the legacy update, which writes the BTree encoding directly, is used instead.
     @Override
     public Factory partitionUpdateFactory()
     {
-        // For the time being, use a partition update that has legacy DeletionInfo and Row implementations to keep
-        // serialization and statistics collection efficient.
-        // To be changed when we implement trie serialization.
+        if (StorageCompatibilityMode.current().storageMessagingVersion() >= MessagingService.VERSION_DS_21)
+            return TriePartitionUpdate.FACTORY;
         return TriePartitionUpdateStage2.FACTORY;
     }
 

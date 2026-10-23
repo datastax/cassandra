@@ -85,6 +85,7 @@ public class GossipShutdownTest
             {
                 case VERSION_50:
                 case VERSION_DS_20:
+                case VERSION_DS_21:
                     expected = true;
                     break;
                 default:
