@@ -70,9 +70,9 @@ public enum RequestFailureReason
     }
 
     /**
-     * @return an explanation of this failure reason for the client, appended to the message of the request failures
-     * it causes because the failure protocol only carries the reason code, or {@code null} if the reason name is
-     * self-explanatory
+     * @return an explanation of this failure reason for the client, appended to each failure of this reason in the
+     * message of the request failure exceptions because the failure protocol only carries the reason code, or
+     * {@code null} if the reason name is self-explanatory
      */
     @Nullable
     public String hint()

@@ -1095,7 +1095,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             boolean trailingWildcard = endIndex < end;
             boolean innerWildcard = false;
             for (int i = beginIndex; i < endIndex && !innerWildcard; i++)
-                innerWildcard = value.get(i) == LIKE_WILDCARD;
+                innerWildcard |= value.get(i) == LIKE_WILDCARD;
 
             Operator operator;
             ByteBuffer newValue = value.duplicate();

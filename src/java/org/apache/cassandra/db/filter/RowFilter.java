@@ -1115,24 +1115,19 @@ public class RowFilter
             if (analyzer == null)
                 return operator.isSatisfiedBy(type, foundValue, value);
 
-            // LIKE operators are only supported by indexes with non-tokenizing analyzers (e.g. case or accent
-            // normalization), and their semantics apply to the normalized terms: each analyzed queried token
-            // must be satisfied by one of the analyzed value tokens. Operator#isSatisfiedByAnalyzed doesn't
-            // implement them, so they are handled here.
+            // No tokenizing index serves LIKE (see IndexContext#supportsLikeQueries). An analyzer here is one of
+            // the non-tokenizing normalizations an index can apply to its terms (case folding, Unicode
+            // normalization, ASCII folding), which turn a value and the pattern into exactly one normalized term
+            // each: the pattern is matched against the normalized value, as the index matches it against its
+            // normalized terms. (Operator#isSatisfiedByAnalyzed is the token-set semantics of the other operators
+            // on analyzed indexes, which doesn't apply to patterns.)
             if (operator.isLike())
             {
                 List<ByteBuffer> indexedTokens = analyzer.indexedTokens(foundValue);
-                for (ByteBuffer queriedToken : analyzer.queriedTokens())
-                {
-                    // plain indexed loop: this runs per candidate row (including replica filtering
-                    // protection), where a Stream + spliterator + capturing lambda per token is pure garbage
-                    boolean satisfied = false;
-                    for (int i = 0; i < indexedTokens.size() && !satisfied; i++)
-                        satisfied = operator.isSatisfiedBy(type, indexedTokens.get(i), queriedToken);
-                    if (!satisfied)
-                        return false;
-                }
-                return true;
+                List<ByteBuffer> queriedTokens = analyzer.queriedTokens();
+                return indexedTokens.size() == 1
+                       && queriedTokens.size() == 1
+                       && operator.isSatisfiedBy(type, indexedTokens.get(0), queriedTokens.get(0));
             }
 
             return operator.isSatisfiedByAnalyzed(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
