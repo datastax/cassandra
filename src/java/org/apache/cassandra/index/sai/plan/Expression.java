@@ -162,8 +162,8 @@ public class Expression
 
     /**
      * For {@link Op#AUTOMATON} expressions, the pattern operator ({@link Operator#LIKE_SUFFIX},
-     * {@link Operator#LIKE_CONTAINS} or {@link Operator#LIKE_MATCHES}) the pattern in {@link #lower} came from;
-     * it defines the pattern syntax. {@code null} for all other operations.
+     * {@link Operator#LIKE_CONTAINS} or {@link Operator#LIKE_MATCHES} with wildcards) the pattern in {@link #lower}
+     * came from; it defines the pattern syntax. {@code null} for all other operations.
      */
     private Operator patternOperator;
 
@@ -227,7 +227,11 @@ public class Expression
             case NOT_CONTAINS_KEY:
                 lower = new Bound(value, validator, true);
                 upper = lower;
-                operation = Op.valueOf(op);
+                // A wildcard-free LIKE '<term>' (LIKE_MATCHES without any '%') matches the single term equal to
+                // it, so the index serves it exactly like an equality (term lookup, no ordering scan): the
+                // automaton path is for the patterns with wildcards. The CQL operator stays LIKE_MATCHES, which
+                // is what index selection and post-filtering are about.
+                operation = op == Operator.LIKE_MATCHES && !containsWildcard(value) ? Op.EQ : Op.valueOf(op);
                 // Automaton-served pattern expressions remember which operator the pattern came from, because
                 // it defines the pattern syntax (see #getAutomaton()).
                 if (operation == Op.AUTOMATON)
@@ -452,24 +456,16 @@ public class Expression
         return patternOperator;
     }
 
-    /**
-     * Returns whether this is an {@link Op#AUTOMATON} expression of a wildcard-free pattern (a {@code LIKE '<term>'}
-     * without any {@code %}), which matches the single term equal to the pattern, like an {@link Op#EQ}
-     * expression: its automaton is a {@code SINGLE} one (see {@link LikePatterns#fromLikePattern}). Decided
-     * from the pattern, without compiling it.
-     */
-    public boolean isExactPatternMatch()
+    /** Whether the given LIKE pattern contains a {@code '%'} wildcard. */
+    private static boolean containsWildcard(ByteBuffer pattern)
     {
-        if (operation != Op.AUTOMATON || patternOperator != Operator.LIKE_MATCHES)
-            return false;
-        ByteBuffer pattern = lower.value.raw;
         for (int i = pattern.position(); i < pattern.limit(); i++)
         {
             // '%' is a single byte in UTF-8 (and ASCII), never part of a multibyte character
             if (pattern.get(i) == '%')
-                return false;
+                return true;
         }
-        return true;
+        return false;
     }
 
     /**

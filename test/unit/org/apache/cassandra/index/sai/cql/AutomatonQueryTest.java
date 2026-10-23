@@ -247,8 +247,8 @@ public class AutomatonQueryTest extends SAITester
             execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, "term" + pk);
 
         beforeAndAfterFlush(() -> {
-            // A single-term automaton (LIKE with no wildcard at all is an exact match served by LIKE_MATCHES)
-            // estimates like an exact match of that term, mirroring the search path's exact lookup.
+            // LIKE with no wildcard at all is an exact match (LIKE_MATCHES), served and estimated by the index
+            // exactly like an equality.
             assertThatPlanFor("SELECT pk FROM %s WHERE v LIKE 'term11'", 1)
                 .hasEstimatedRowsCountBetween(1.0, 2.0);
         });

@@ -927,11 +927,8 @@ abstract public class Plan
                                         || predicate.getIndexName().equals(ordering.getIndexName()),
                                         "Ordering must use the same index as the predicate");
             this.predicate = predicate;
-            // If we match by equality, ordering makes no sense because all term values would be the same. This
-            // includes wildcard-free LIKE patterns: an ordering scan would read the whole range of the terms
-            // starting with the pattern, while the non-ordered scan is a term lookup.
-            this.ordering = (predicate == null || (predicate.getOp() != Expression.Op.EQ && !predicate.isExactPatternMatch()))
-                            ? ordering : null;
+            // If we match by equality, ordering makes no sense because all term values would be the same.
+            this.ordering = (predicate == null || predicate.getOp() != Expression.Op.EQ) ? ordering : null;
             this.matchingKeysCount = matchingKeysCount;
         }
 

@@ -27,9 +27,7 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.SAITester;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertTrue;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class ExpressionTest
@@ -102,18 +100,18 @@ public class ExpressionTest
     }
 
     @Test
-    public void testIsExactPatternMatch()
+    public void testWildcardFreePatternsAreEqualities()
     {
-        // wildcard-free LIKE patterns (LIKE_MATCHES without '%') match a single term, like equalities
-        assertTrue(makeExpression(Operator.LIKE_MATCHES, "abc").isExactPatternMatch());
-        assertTrue(makeExpression(Operator.LIKE_MATCHES, "é日😀_").isExactPatternMatch());
-        assertFalse(makeExpression(Operator.LIKE_MATCHES, "a%c").isExactPatternMatch());
-        assertFalse(makeExpression(Operator.LIKE_MATCHES, "%abc%").isExactPatternMatch());
+        // wildcard-free LIKE patterns (LIKE_MATCHES without '%') match a single term: served as equalities
+        assertEquals(Expression.Op.EQ, makeExpression(Operator.LIKE_MATCHES, "abc").getOp());
+        assertEquals(Expression.Op.EQ, makeExpression(Operator.LIKE_MATCHES, "é日😀_").getOp());
+        assertEquals(makeExpression(Operator.EQ, "abc"), makeExpression(Operator.LIKE_MATCHES, "abc"));
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "a%c").getOp());
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "%abc%").getOp());
         // the other pattern operators carry the literal left once their leading/trailing wildcards were trimmed
-        assertFalse(makeExpression(Operator.LIKE_SUFFIX, "abc").isExactPatternMatch());
-        assertFalse(makeExpression(Operator.LIKE_CONTAINS, "abc").isExactPatternMatch());
-        assertFalse(makeExpression(Operator.LIKE_PREFIX, "abc").isExactPatternMatch());
-        assertFalse(makeExpression(Operator.EQ, "abc").isExactPatternMatch());
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_SUFFIX, "abc").getOp());
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_CONTAINS, "abc").getOp());
+        assertEquals(Expression.Op.PREFIX, makeExpression(Operator.LIKE_PREFIX, "abc").getOp());
     }
 
     private static Expression makeExpression(Operator op)
