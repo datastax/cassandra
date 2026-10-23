@@ -96,12 +96,12 @@ public class V1OnDiskFormat implements OnDiskFormat
      *
      * Note that to avoid flushing extremely small index segments, a segment is only flushed when
      * both the global size of all building segments has breached the limit and the size of the
-     * segment in question reaches (segment_write_buffer_space_mb / # currently building column indexes).
+     * segment in question reaches (segment_write_buffer_size / # currently building column indexes).
      *
-     * ex. If there is only one column index building, it can buffer up to segment_write_buffer_space_mb.
+     * ex. If there is only one column index building, it can buffer up to segment_write_buffer_size.
      *
      * ex. If there is one column index building per table across 8 compactors, each index will be
-     *     eligible to flush once it reaches (segment_write_buffer_space_mb / 8) MBs.
+     *     eligible to flush once it reaches (segment_write_buffer_size / 8) MBs.
      */
     public static final long SEGMENT_BUILD_MEMORY_LIMIT = 1024L * 1024L * DatabaseDescriptor.getSAISegmentWriteBufferSpace();
 
