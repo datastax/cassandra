@@ -575,7 +575,7 @@ public enum Operator
      */
     public boolean isLike()
     {
-        return this == LIKE_PREFIX || this == LIKE_CONTAINS || this == LIKE_SUFFIX || this == LIKE_MATCHES;
+        return this == LIKE || this == LIKE_PREFIX || this == LIKE_CONTAINS || this == LIKE_SUFFIX || this == LIKE_MATCHES;
     }
 
     /**

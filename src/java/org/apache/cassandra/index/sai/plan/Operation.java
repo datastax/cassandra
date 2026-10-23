@@ -113,13 +113,12 @@ public class Operation
                     case CONTAINS_KEY:
                     case NOT_CONTAINS:
                     case NOT_CONTAINS_KEY:
+                    // LIKE is only served by non-tokenizing indexes, so the analyzer below yields exactly one
+                    // token for the pattern: the (possibly normalized, e.g. lowercased) pattern itself.
                     case LIKE_PREFIX:
-                    case LIKE_MATCHES:
-                    // The automaton-served LIKE variants only apply to non-tokenizing indexes, so this
-                    // "analyzed" path produces exactly one expression carrying the (possibly normalized,
-                    // e.g. lowercased) pattern.
                     case LIKE_SUFFIX:
                     case LIKE_CONTAINS:
+                    case LIKE_MATCHES:
                     case ANALYZER_MATCHES:
                         isMultiExpression = true;
                         break;

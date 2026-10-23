@@ -746,17 +746,25 @@ public class IndexContext
      * Returns whether this index supports the CQL {@code LIKE} restrictions: prefix ({@code LIKE '<term>%'}),
      * suffix, contains and generic patterns.
      * <p>
-     * These are supported for plain string types when the index is not tokenized: the terms dictionary then
-     * contains whole (though possibly normalized, e.g. lowercased) terms in sorted order, so prefixes map to
-     * contiguous scans of it and the other patterns to automaton intersections with it. Tokenizing (Lucene)
-     * analyzers break the 1:1 mapping between column values and indexed terms, making pattern semantics over
-     * the indexed terms undefined.
+     * These are supported on non-tokenized indexes of plain {@code text}/{@code ascii} columns: the terms
+     * dictionary then contains whole (though possibly normalized, e.g. lowercased) terms in sorted order, so
+     * prefixes map to contiguous scans of it and the other patterns to automaton intersections with it.
+     * Tokenizing (Lucene) analyzers break the 1:1 mapping between column values and indexed terms, making
+     * pattern semantics over the indexed terms undefined.
+     * <p>
+     * Collections are not supported, frozen (the term is the whole serialized collection) or not: {@code LIKE}
+     * is a restriction on the value of a column, and CQL defines no element-wise semantics for it, as it does for
+     * {@code CONTAINS}/{@code CONTAINS KEY} (which {@code LIKE_KEY}/{@code LIKE_VALUE} operators and the
+     * corresponding post-filtering would have to introduce). The terms of the keys/values/entries indexes of
+     * non-frozen collections could serve such a feature (the entries index excepted: its terms are composites).
      */
     public boolean supportsLikeQueries()
     {
         // Reversed (DESC clustering) string columns are supported too: their terms are stored as the raw,
         // un-reversed value bytes like any other string term (see OnDiskFormat#encodeForTrie), and the LIKE bounds
         // and automata are built from the raw pattern bytes (Expression#add only swaps the bounds of LT/LTE/GT/GTE).
+        // The validator of a frozen collection index or of a map entries index is not a string type, so the
+        // collection checks are only needed for the keys/values of non-frozen collections.
         return TypeUtil.isUTF8OrAscii(validator)
                && !isNonFrozenCollection()
                && indexType != IndexTarget.Type.FULL
@@ -781,7 +789,7 @@ public class IndexContext
         // are examined. Non-tokenizing indexes over string types serve prefix queries (LIKE '<term>%') as a
         // bounded scan over the sorted terms dictionary, and the remaining variants (LIKE '%<term>',
         // LIKE '%<term>%', LIKE '<a>%<b>') by automaton intersection with the terms dictionary.
-        if (op == Operator.LIKE || op.isLike())
+        if (op.isLike())
             return supportsLikeQueries();
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
         // The only supported operators are ANALYZER_MATCHES and BM25.

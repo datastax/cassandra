@@ -1115,12 +1115,9 @@ public class RowFilter
             if (analyzer == null)
                 return operator.isSatisfiedBy(type, foundValue, value);
 
-            // No tokenizing index serves LIKE (see IndexContext#supportsLikeQueries). An analyzer here is one of
-            // the non-tokenizing normalizations an index can apply to its terms (case folding, Unicode
-            // normalization, ASCII folding), which turn a value and the pattern into exactly one normalized term
-            // each: the pattern is matched against the normalized value, as the index matches it against its
-            // normalized terms. (Operator#isSatisfiedByAnalyzed is the token-set semantics of the other operators
-            // on analyzed indexes, which doesn't apply to patterns.)
+            // Tokenizing indexes don't serve LIKE, so the value and the pattern each analyze to a single
+            // (normalized) token: match the normalized pattern against the normalized value, as the index does
+            // against its normalized terms. A custom index tokenizing them anyway can't be matched.
             if (operator.isLike())
             {
                 List<ByteBuffer> indexedTokens = analyzer.indexedTokens(foundValue);
