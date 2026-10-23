@@ -98,9 +98,7 @@ New features
       compiled pattern automaton with the terms dictionaries. This includes string clustering columns in
       descending order. A LIKE restriction on the column a query is ordered by (ORDER BY) restricts the ordering
       scans of the index to the terms the pattern can match. No index rebuild or on-disk format change is
-      required. LIKE values whose characters other than '%' are larger than the maximum size of the terms of the
-      index (cassandra.sai.max_string_term_size_kb, or cassandra.sai.max_analyzed_size_kb for case-insensitive,
-      normalized or ASCII-folding indexes) are rejected.
+      required.
 
 Upgrading
 ---------

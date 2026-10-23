@@ -216,33 +216,26 @@ public class AutomatonQueryTest extends SAITester
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE ? OR w = 7 ALLOW FILTERING", pattern))
             .isInstanceOf(InvalidRequestException.class)
             .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
-        String oversized = "a".repeat(IndexContext.MAX_STRING_TERM_SIZE + 1) + '%';
-        assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE ? OR w = 7 ALLOW FILTERING", oversized))
-            .isInstanceOf(InvalidRequestException.class)
-            .hasMessageContaining("LIKE value on column v is");
-
         assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'a%%c' OR w = 8 ALLOW FILTERING"), row(1));
     }
 
     /**
-     * LIKE values larger than the maximum size of the indexed terms are rejected at the coordinator.
+     * LIKE values larger than the maximum size of the indexed terms are not rejected: the maximum is a system
+     * property that may have been larger when some of the terms were indexed, so such a value may still match
+     * indexed terms. Here it doesn't, and the query simply returns no row. (Long literals behind a wildcard are a
+     * different matter: whether their automaton can be determinized within Lucene's work limit depends on the
+     * literal, not on the maximum term size, so this doesn't test them.)
      */
     @Test
-    public void testLikeValueSizeLimit()
+    public void testLikeValuesLargerThanMaxTermSize()
     {
         createTableWithIndex();
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "abc");
 
-        String maxSize = "a".repeat(IndexContext.MAX_STRING_TERM_SIZE);
-        for (String pattern : new String[]{ maxSize + "a%", '%' + maxSize + 'a', '%' + maxSize + "a%", maxSize + "%a", maxSize + 'a' })
-            assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE ?", pattern))
-                .isInstanceOf(InvalidRequestException.class)
-                .hasMessageContaining("LIKE value on column v is")
-                .hasMessageContaining("without its wildcards, which exceeds the maximum size of 8.000KiB for indexed terms");
-
-        // the size limit applies to the characters of a pattern other than its wildcards
-        for (String pattern : new String[]{ maxSize + '%', maxSize, maxSize + "%%%%" })
+        String oversized = "a".repeat(IndexContext.MAX_STRING_TERM_SIZE + 1);
+        for (String pattern : new String[]{ oversized + '%', oversized, oversized + "%%%%", oversized + "%a" })
             assertRows(execute("SELECT pk FROM %s WHERE v LIKE ?", pattern));
+        // wildcards don't count towards any size
         assertRows(execute("SELECT pk FROM %s WHERE v LIKE ?", 'a' + "%".repeat(2 * IndexContext.MAX_STRING_TERM_SIZE) + 'c'), row(1));
     }
 
