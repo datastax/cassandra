@@ -188,8 +188,8 @@ public class AutomatonQueryTest extends SAITester
 
         // A generic LIKE pattern ('a%a%a%...a', LIKE_MATCHES) whose NFA-to-DFA determinization exceeds the
         // Lucene work limit must fail at the coordinator with a clear invalid-request "Invalid pattern" error
-        // from the eager compile in LikeRestriction#addToRowFilter. Without that eager compile the first
-        // compile happens on the replicas, mid-read, and surfaces as a generic read failure with an UNKNOWN
+        // from the eager compile in StorageAttachedIndex#validate(ReadCommand). Without that eager compile the
+        // first compile happens on the replicas, mid-read, and surfaces as a generic read failure with an UNKNOWN
         // failure reason.
         StringBuilder pattern = new StringBuilder();
         for (int i = 0; i < 1000; i++)
@@ -201,6 +201,30 @@ public class AutomatonQueryTest extends SAITester
 
         // ... while reasonable generic patterns keep working
         assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'a%%c'"), row(1));
+    }
+
+    /**
+     * The selected index validates the pattern when the restriction is bound, even when the query ends up with no
+     * index query plan: a disjunction with an unindexed sibling can't be served by the index, so the LIKE is
+     * post-filtered on the replicas, where an invalid pattern would otherwise surface as a read failure.
+     */
+    @Test
+    public void testLikeValidationWithoutQueryPlan()
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text, w int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        execute("INSERT INTO %s (pk, v, w) VALUES (?, ?, ?)", 1, "abc", 7);
+
+        String pattern = "a%".repeat(1000) + 'a';
+        assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE ? OR w = 7 ALLOW FILTERING", pattern))
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
+        String oversized = "a".repeat(IndexContext.MAX_STRING_TERM_SIZE + 1) + '%';
+        assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE ? OR w = 7 ALLOW FILTERING", oversized))
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining("LIKE value on column v is");
+
+        assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'a%%c' OR w = 8 ALLOW FILTERING"), row(1));
     }
 
     /**

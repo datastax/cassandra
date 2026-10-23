@@ -39,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -122,6 +123,9 @@ public class IndexContext
 
     private static final String ANALYZED_TERM_OVERSIZE_LOG_MESSAGE =
     "Term's analyzed size for column {} exceeds the cumulative limit for index. Max allowed size {}.";
+    private static final String LIKE_VALUE_OVERSIZE_ERROR_MESSAGE =
+    "LIKE value on column %s is %s long without its wildcards, which exceeds the maximum size of %s for indexed terms";
+
     private static final String ANALYZED_TERM_OVERSIZE_ERROR_MESSAGE =
     "Term's analyzed size for column %s exceeds the cumulative limit for index. Max allowed size %s.";
 
@@ -916,6 +920,54 @@ public class IndexContext
             if (value != null)
                 VectorValidation.validateIndexable(value, vectorSimilarityFunction);
         }
+    }
+
+    /**
+     * Validates a {@code LIKE} restriction this index has been selected to serve (see {@link #supportsLikeQueries()})
+     * when the coordinator validates the query, once the pattern is bound (see
+     * {@code Index#validate(RowFilter.Expression)}):
+     * <ul>
+     *   <li>This index doesn't index terms larger than its maximum term size, so it bounds the patterns too, which
+     *   keeps oversized patterns away from the replicas and the automaton compile caches. A term matching a pattern
+     *   contains at least its non-wildcard characters, which are what the size is checked on ({@code
+     *   LikeRestriction#makeSpecific} collapsed the runs of {@code '%'}, so a pattern is at most about twice that
+     *   size).</li>
+     *   <li>The suffix/contains/matches variants are served through a compiled automaton ({@code LIKE_PREFIX}
+     *   keeps its dedicated bounded range scan): the automaton is compiled (and cached) eagerly, so that a pattern
+     *   that is too complex to determinize fails here, at the coordinator, with a clear
+     *   {@link InvalidRequestException} instead of first compiling on the replicas and surfacing as a request
+     *   failure.</li>
+     * </ul>
+     *
+     * @param operator the LIKE operator ({@code LIKE_PREFIX}, {@code LIKE_SUFFIX}, {@code LIKE_CONTAINS} or
+     *                 {@code LIKE_MATCHES})
+     * @param pattern the bound pattern
+     * @throws InvalidRequestException if the pattern is too large for this index or can't be compiled
+     */
+    public void validateLikeRestriction(Operator operator, ByteBuffer pattern)
+    {
+        int literalSize = sizeWithoutWildcards(pattern);
+        if (literalSize > maxTermSize)
+            throw new InvalidRequestException(String.format(LIKE_VALUE_OVERSIZE_ERROR_MESSAGE,
+                                                            getColumnName(),
+                                                            FBUtilities.prettyPrintMemory(literalSize),
+                                                            FBUtilities.prettyPrintMemory(maxTermSize)));
+
+        if (operator != Operator.LIKE_PREFIX)
+            LikePatterns.forPatternOperator(operator, pattern, getColumnName());
+    }
+
+    /** The number of bytes of the given pattern that are not {@code '%'} wildcards. */
+    private static int sizeWithoutWildcards(ByteBuffer pattern)
+    {
+        int size = 0;
+        for (int i = pattern.position(); i < pattern.limit(); i++)
+        {
+            // '%' is a single byte in UTF-8 (and ASCII), never part of a multibyte character
+            if (pattern.get(i) != '%')
+                size++;
+        }
+        return size;
     }
 
     public void validate(RowFilter rowFilter)

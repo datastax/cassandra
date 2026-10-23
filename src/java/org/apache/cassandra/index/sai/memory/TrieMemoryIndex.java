@@ -48,6 +48,7 @@ import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -434,7 +435,7 @@ public class TrieMemoryIndex extends MemoryIndex
                         if (charged)
                             budget.consumeVisitedTerm();
                         // for non-composite literal types the pre-encoded trie key bytes are the raw term bytes
-                        if (AutomatonQueries.accepts(automaton, ByteSourceInverse.readBytes(entry.getKey().getPreencodedBytes())))
+                        if (LikePatterns.accepts(automaton, ByteSourceInverse.readBytes(entry.getKey().getPreencodedBytes())))
                             return entry;
                     }
                     return endOfData();

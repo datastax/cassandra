@@ -41,13 +41,10 @@ import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
-import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -1021,55 +1018,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         {
             Pair<Operator, ByteBuffer> operation = makeSpecific(value.bindAndGet(options));
 
-            // there must be a suitable INDEX for LIKE_XXX expressions
+            // there must be a suitable INDEX for LIKE_XXX expressions, and it validates the bound pattern
             RowFilter.SimpleExpression expression = filter.add(columnDef, operation.left, operation.right);
             Index index = indexRegistry.getBestIndexFor(expression, indexHints)
                                        .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
                                                                          expression));
-
-            if (!(index instanceof StorageAttachedIndex))
-                return;
-
-            // SAI doesn't index terms larger than its maximum term size, so it bounds the patterns too: this keeps
-            // oversized patterns away from the replicas and the automaton compile caches. A term matching a pattern
-            // contains at least its non-wildcard characters, which are what the size is checked on (makeSpecific
-            // collapsed the runs of '%', so a pattern is at most about twice that size).
-            int maxTermSize = ((StorageAttachedIndex) index).getIndexContext().getMaxTermSize();
-            int literalSize = sizeWithoutWildcards(operation.right);
-            if (literalSize > maxTermSize)
-                throw invalidRequest("LIKE value on column %s is %s long without its wildcards, which exceeds the maximum size of %s for indexed terms",
-                                     columnDef.name,
-                                     FBUtilities.prettyPrintMemory(literalSize),
-                                     FBUtilities.prettyPrintMemory(maxTermSize));
-
-            // SAI serves the suffix/contains/matches LIKE variants through a compiled automaton (LIKE_PREFIX
-            // keeps its dedicated bounded range scan). Compile (and cache) the automaton eagerly, so a pattern
-            // that is too complex to determinize fails here, at the coordinator, with a clear
-            // InvalidRequestException instead of first compiling on the replicas and surfacing as a request
-            // failure. Gated on the selected index being SAI: a custom index implementation may serve LIKE with
-            // its own pattern semantics, and only meets the automaton engine if its results are post-filtered.
-            if (isAutomatonServedLike(operation.left))
-                AutomatonQueries.forPatternOperator(operation.left, operation.right, columnDef.name);
-        }
-
-        /** The number of bytes of the given pattern that are not {@code '%'} wildcards. */
-        private static int sizeWithoutWildcards(ByteBuffer pattern)
-        {
-            int size = 0;
-            for (int i = pattern.position(); i < pattern.limit(); i++)
-            {
-                if (pattern.get(i) != LIKE_WILDCARD)
-                    size++;
-            }
-            return size;
-        }
-
-        /** The LIKE variants the SAI automaton engine serves (see {@code Expression.Op#valueOf}). */
-        private static boolean isAutomatonServedLike(Operator operator)
-        {
-            return operator == Operator.LIKE_SUFFIX
-                   || operator == Operator.LIKE_CONTAINS
-                   || operator == Operator.LIKE_MATCHES;
+            index.validate(expression);
         }
 
         @Override
