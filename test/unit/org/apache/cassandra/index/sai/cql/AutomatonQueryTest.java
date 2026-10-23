@@ -435,6 +435,15 @@ public class AutomatonQueryTest extends SAITester
     }
 
     /**
+     * The plan caps its expected rows at the memtable's total row count estimate, which is the memtable's live data
+     * size divided by the size of a sample of its rows. The two are not measured the same way (e.g. the trie memtable
+     * doesn't account the row deletion and the clustering, the sampled rows do), so for tiny rows the total is
+     * underestimated and the cap would hide the index estimates these tests assert on. Padding the rows keeps the
+     * discrepancy a small fraction of the row size.
+     */
+    private static final String ROW_PADDING = "p".repeat(200);
+
+    /**
      * Prefix and pattern estimates don't collapse to zero when the prefix is longer than the bytes the term
      * interpolation resolves, nor for reversed (DESC clustering) columns, whose memtable min/max terms are tracked
      * in the reversed order.
@@ -458,14 +467,14 @@ public class AutomatonQueryTest extends SAITester
                 .hasEstimatedRowsCountBetween(10.0, 150.0);
         });
 
-        createTable("CREATE TABLE %s (pk int, c text, PRIMARY KEY (pk, c)) WITH CLUSTERING ORDER BY (c DESC)");
+        createTable("CREATE TABLE %s (pk int, c text, pad text, PRIMARY KEY (pk, c)) WITH CLUSTERING ORDER BY (c DESC)");
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
         // more terms per prefix than the memtable estimate counts, so that it interpolates, over a range of terms
         // mostly covered by the prefix
         for (int i = 0; i < 600; i++)
-            execute("INSERT INTO %s (pk, c) VALUES (?, ?)", i, String.format("m%03d", i));
+            execute("INSERT INTO %s (pk, c, pad) VALUES (?, ?, ?)", i, String.format("m%03d", i), ROW_PADDING);
         for (int i = 600; i < 610; i++)
-            execute("INSERT INTO %s (pk, c) VALUES (?, ?)", i, String.format("n%03d", i));
+            execute("INSERT INTO %s (pk, c, pad) VALUES (?, ?, ?)", i, String.format("n%03d", i), ROW_PADDING);
 
         beforeAndAfterFlush(() -> {
             assertThatPlanFor("SELECT pk FROM %s WHERE c LIKE 'm%%'", 600)
@@ -482,14 +491,15 @@ public class AutomatonQueryTest extends SAITester
     @Test
     public void testPrefixEstimateRowCountBudget()
     {
-        createTableWithIndex();
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text, pad text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         // 5000 rows over only 3 terms starting with 'k', far fewer than those matching the prefix in the other terms
         for (int pk = 0; pk < 5000; pk++)
-            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, "k" + (pk % 3));
+            execute("INSERT INTO %s (pk, v, pad) VALUES (?, ?, ?)", pk, "k" + (pk % 3), ROW_PADDING);
         for (int pk = 5000; pk < 5010; pk++)
-            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, String.format("a%03d", pk));
+            execute("INSERT INTO %s (pk, v, pad) VALUES (?, ?, ?)", pk, String.format("a%03d", pk), ROW_PADDING);
         for (int pk = 5010; pk < 5020; pk++)
-            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, String.format("z%03d", pk));
+            execute("INSERT INTO %s (pk, v, pad) VALUES (?, ?, ?)", pk, String.format("z%03d", pk), ROW_PADDING);
 
         assertThatPlanFor("SELECT pk FROM %s WHERE v LIKE 'k%%'", 5000)
             .hasEstimatedRowsCountBetween(4096.0, 5020.0);
