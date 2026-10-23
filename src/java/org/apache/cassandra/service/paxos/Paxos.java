@@ -38,8 +38,10 @@ import com.google.common.collect.Maps;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.CostCalculator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.slf4j.Logger;
@@ -750,21 +752,39 @@ public class Paxos
         finally
         {
             recordCasWriteLatency(metadata, partitionKey, consistencyForConsensus, metrics, start, failedAttemptsDueToContention);
+            // Populate cost sensors (WRITE_COST, READ_COST, TOTAL_COST) from the byte/time sensors accumulated
+            // during this CAS round, mirroring what StorageProxy.legacyCas does in its own finally block.
+            RequestSensors casSensors = RequestTracker.instance.get();
+            if (casSensors != null)
+                CostCalculator.populateCostSensors(casSensors);
         }
     }
 
     /**
-     * Registers sensors for CAS operations so the coordinator can aggregate replica sensor values.
+     * Initialises the coordinator-side {@link RequestSensors} for a v2 CAS operation, mirroring the
+     * full sensor setup performed by {@code StorageProxy.legacyCas} for v1 so that both paths produce
+     * identical sensor output in CQL responses.
+     * <p>
+     * A fresh {@link RequestSensors} is always created and set on {@link RequestTracker} so the sensors
+     * are scoped to this CAS operation and do not inherit stale state from a prior request on the same
+     * thread.  If a {@link RequestSensors} was already present on the tracker (e.g. set by an enclosing
+     * context before this call), it is replaced — matching the behaviour of {@code legacyCas}, which
+     * also unconditionally creates and sets a new instance.
      */
     private static void registerCasSensors(TableMetadata metadata)
     {
-        RequestSensors sensors = RequestTracker.instance.get();
-        if (sensors != null)
-        {
-            Context context = Context.from(metadata);
-            sensors.registerSensor(context, Type.READ_BYTES);
-            sensors.registerSensor(context, Type.WRITE_BYTES);
-        }
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(Set.of(metadata.keyspace));
+        RequestTracker.instance.set(sensors);
+        Context context = Context.from(metadata);
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.registerSensor(context, Type.INDEX_WRITE_BYTES);
+        sensors.registerSensor(context, Type.WRITE_EXECUTION_TIME);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        Context requestContext = Context.from(sensors);
+        sensors.registerSensor(requestContext, Type.READ_COST);
+        sensors.registerSensor(requestContext, Type.WRITE_COST);
+        sensors.registerSensor(requestContext, Type.TOTAL_COST);
     }
 
     /**
