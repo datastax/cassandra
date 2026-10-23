@@ -327,6 +327,8 @@ public class BatchlogManagerInterceptorTest
         storeReplayableBatch(cfm, 5678);
 
         long initialHints = StorageMetrics.totalHints.getCount();
+        long initialHintedReplays = StorageMetrics.hintedBatchlogReplays.getCount();
+        long initialPlainReplays = StorageMetrics.batchlogReplays.getCount();
 
         // First cycle: the mutations are applied locally and hinted to the down replica; the
         // interceptor throws, so the batch is retained.
@@ -336,6 +338,9 @@ public class BatchlogManagerInterceptorTest
         assertEquals(1, BatchlogManager.instance.countAllBatches());
         assertEquals(1, BatchlogManager.instance.countBatchesAwaitingInterceptor());
         assertEquals(0, BatchlogManager.instance.getTotalBatchesReplayed() - initialReplayedBatches);
+        // The batch is metered as a hinted replay right away, although it is retained for the interceptor retry.
+        assertEquals(1, StorageMetrics.hintedBatchlogReplays.getCount() - initialHintedReplays);
+        assertEquals(0, StorageMetrics.batchlogReplays.getCount() - initialPlainReplays);
         int observedAfterFirstCycle = TestInterceptor.observedBatches.size();
         assertTrue(observedAfterFirstCycle >= 1);
 
@@ -346,6 +351,9 @@ public class BatchlogManagerInterceptorTest
         assertEquals(1, BatchlogManager.instance.countAllBatches());
         assertEquals(0, BatchlogManager.instance.getTotalBatchesReplayed() - initialReplayedBatches);
         assertTrue(TestInterceptor.observedBatches.size() > observedAfterFirstCycle);
+        // The callback-only retry does not meter the batch again.
+        assertEquals(1, StorageMetrics.hintedBatchlogReplays.getCount() - initialHintedReplays);
+        assertEquals(0, StorageMetrics.batchlogReplays.getCount() - initialPlainReplays);
 
         // Third cycle, interceptor recovered: the callback completes with the batch's complete
         // mutation list, the batch is removed and counted as replayed, and still no new hints
@@ -359,6 +367,8 @@ public class BatchlogManagerInterceptorTest
         assertEquals(0, BatchlogManager.instance.countAllBatches());
         assertEquals(0, BatchlogManager.instance.countBatchesAwaitingInterceptor());
         assertEquals(1, BatchlogManager.instance.getTotalBatchesReplayed() - initialReplayedBatches);
+        assertEquals(1, StorageMetrics.hintedBatchlogReplays.getCount() - initialHintedReplays);
+        assertEquals(0, StorageMetrics.batchlogReplays.getCount() - initialPlainReplays);
 
         // The mutations were applied locally (once, in the first cycle) and are readable.
         UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = int_as_blob(%d)", KEYSPACE2, CF_STANDARD1, 5678));
@@ -379,10 +389,13 @@ public class BatchlogManagerInterceptorTest
         storeReplayableBatch(cfm, 9012);
 
         long initialHints = StorageMetrics.totalHints.getCount();
+        long initialHintedReplays = StorageMetrics.hintedBatchlogReplays.getCount();
+        long initialPlainReplays = StorageMetrics.batchlogReplays.getCount();
         TestInterceptor.failCallbacks = true;
         BatchlogManager.instance.startBatchlogReplay().get();
         assertEquals(3, StorageMetrics.totalHints.getCount() - initialHints);
         assertEquals(1, BatchlogManager.instance.countBatchesAwaitingInterceptor());
+        assertEquals(1, StorageMetrics.hintedBatchlogReplays.getCount() - initialHintedReplays);
 
         // Simulate a cycle that aborted before advancing the scan bound, so that the next scan
         // covers the retained batch's row again: the batch must not be replayed a second time.
@@ -391,6 +404,8 @@ public class BatchlogManagerInterceptorTest
         assertEquals(3, StorageMetrics.totalHints.getCount() - initialHints);
         assertEquals(1, BatchlogManager.instance.countAllBatches());
         assertEquals(1, BatchlogManager.instance.countBatchesAwaitingInterceptor());
+        // ... nor metered a second time.
+        assertEquals(1, StorageMetrics.hintedBatchlogReplays.getCount() - initialHintedReplays);
 
         // Once the interceptor recovers, the batch is removed, still without new hints.
         TestInterceptor.failCallbacks = false;
@@ -398,5 +413,7 @@ public class BatchlogManagerInterceptorTest
         assertEquals(3, StorageMetrics.totalHints.getCount() - initialHints);
         assertEquals(0, BatchlogManager.instance.countAllBatches());
         assertEquals(0, BatchlogManager.instance.countBatchesAwaitingInterceptor());
+        assertEquals(1, StorageMetrics.hintedBatchlogReplays.getCount() - initialHintedReplays);
+        assertEquals(0, StorageMetrics.batchlogReplays.getCount() - initialPlainReplays);
     }
 }
