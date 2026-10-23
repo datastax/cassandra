@@ -139,7 +139,8 @@ public final class LikePatterns
         }
         if (segmentStart < pattern.length() || parts.isEmpty())
             parts.add(Automata.makeString(pattern.substring(segmentStart)));
-        return compile(parts.size() == 1 ? parts.get(0) : Operations.concatenate(parts));
+        // a pattern without wildcards accepts a single string; with wildcards, infinitely many
+        return compile(parts.size() == 1 ? parts.get(0) : Operations.concatenate(parts), !lastWasWildcard && parts.size() == 1);
     }
 
     /**
@@ -153,6 +154,18 @@ public final class LikePatterns
     public static CompiledAutomaton compile(Automaton automaton)
     {
         return new CompiledAutomaton(automaton, null, true, Operations.DEFAULT_DETERMINIZE_WORK_LIMIT, false);
+    }
+
+    /**
+     * As {@link #compile(Automaton)}, for an automaton whose finiteness is known: Lucene would otherwise compute
+     * it by a recursive walk of the automaton that gives up (with an {@code IllegalArgumentException}) past 1000
+     * states, i.e. on a pattern whose first literal is longer than that.
+     *
+     * @param finite whether the automaton accepts a finite language
+     */
+    private static CompiledAutomaton compile(Automaton automaton, boolean finite)
+    {
+        return new CompiledAutomaton(automaton, finite, true, Operations.DEFAULT_DETERMINIZE_WORK_LIMIT, false);
     }
 
     /**
@@ -203,7 +216,7 @@ public final class LikePatterns
     @VisibleForTesting
     public static CompiledAutomaton suffixAutomaton(String suffix)
     {
-        return compile(Operations.concatenate(Automata.makeAnyString(), Automata.makeString(suffix)));
+        return compile(Operations.concatenate(Automata.makeAnyString(), Automata.makeString(suffix)), false);
     }
 
     /**
@@ -215,7 +228,7 @@ public final class LikePatterns
     {
         return compile(Operations.concatenate(List.of(Automata.makeAnyString(),
                                                       Automata.makeString(substring),
-                                                      Automata.makeAnyString())));
+                                                      Automata.makeAnyString())), false);
     }
 
     /**

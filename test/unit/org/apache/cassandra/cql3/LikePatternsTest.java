@@ -177,6 +177,21 @@ public class LikePatternsTest
     }
 
     @Test
+    public void compilesPatternsWithLongLeadingLiterals()
+    {
+        // Lucene's finiteness check recurses over the automaton and gives up past 1000 states; a LIKE pattern's
+        // finiteness is known without it (wildcards: infinite language, none: a single string), so a pattern
+        // whose first literal is longer than that compiles
+        String literal = "x".repeat(1500);
+        CompiledAutomaton pattern = LikePatterns.fromLikePattern(literal + "%y");
+        assertTrue(LikePatterns.accepts(pattern, utf8(literal + "abcy")));
+        assertFalse(LikePatterns.accepts(pattern, utf8(literal + "abc")));
+        assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, LikePatterns.fromLikePattern(literal).type);
+        assertTrue(LikePatterns.accepts(LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, ByteBuffer.wrap(utf8(literal + "%y")), "v"),
+                                        utf8(literal + "y")));
+    }
+
+    @Test
     public void likeMatchesOperatorPostFilterSemantics()
     {
         // The LIKE_MATCHES post-filter (used by filtering and replica filtering protection) evaluates the same
