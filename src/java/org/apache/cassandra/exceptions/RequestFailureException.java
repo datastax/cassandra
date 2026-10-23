@@ -18,7 +18,6 @@
 package org.apache.cassandra.exceptions;
 
 import java.util.Map;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -53,8 +52,17 @@ public class RequestFailureException extends RequestExecutionException
     private static String buildFailureString(Map<InetAddressAndPort, RequestFailureReason> failures)
     {
         return failures.entrySet().stream()
-                       .map(e -> String.format("%s from %s", e.getValue(), e.getKey()))
+                       .map(e -> failureString(e.getValue(), e.getKey()))
                        .collect(Collectors.joining(", "));
+    }
+
+    /** "REASON from endpoint", followed by the explanation of the reason when it has one (see {@link RequestFailureReason#hint()}). */
+    private static String failureString(RequestFailureReason reason, InetAddressAndPort endpoint)
+    {
+        String hint = reason.hint();
+        return hint == null
+               ? String.format("%s from %s", reason, endpoint)
+               : String.format("%s from %s (%s)", reason, endpoint, hint);
     }
 
     private static String buildErrorMessage(CharSequence msg, Map<InetAddressAndPort, RequestFailureReason> failures)
@@ -62,14 +70,7 @@ public class RequestFailureException extends RequestExecutionException
         StringBuilder sb = new StringBuilder("Operation failed - ");
         sb.append(msg);
         if (failures != null && !failures.isEmpty())
-        {
             sb.append(": ").append(buildFailureString(failures));
-            failures.values().stream()
-                    .distinct()
-                    .map(RequestFailureReason::hint)
-                    .filter(Objects::nonNull)
-                    .forEach(hint -> sb.append(" (").append(hint).append(')'));
-        }
         return sb.toString();
     }
 }

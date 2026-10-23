@@ -126,8 +126,9 @@ public class RequestFailureReasonTest
         InetAddressAndPort replica = InetAddressAndPort.getByName("127.0.0.1");
         ReadFailureException failure = new ReadFailureException(ConsistencyLevel.ONE, 0, 1, false,
                                                                 Map.of(replica, RequestFailureReason.SAI_AUTOMATON_EXPANSIONS_EXCEEDED));
-        assertTrue(failure.getMessage(), failure.getMessage().contains("SAI_AUTOMATON_EXPANSIONS_EXCEEDED from " + replica));
-        assertTrue(failure.getMessage(), failure.getMessage().contains("use a more selective pattern"));
+        // the hint follows the failure it explains
+        assertTrue(failure.getMessage(), failure.getMessage().contains("SAI_AUTOMATON_EXPANSIONS_EXCEEDED from " + replica + " (a LIKE pattern"));
+        assertTrue(failure.getMessage(), failure.getMessage().endsWith("use a more selective pattern)"));
         assertTrue(failure.getMessage(), failure.getMessage().contains(CassandraRelevantProperties.SAI_MAX_AUTOMATON_EXPANSIONS.getKey()));
 
         // reasons without a hint keep their message
