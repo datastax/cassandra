@@ -1454,7 +1454,8 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
             long sstableSize = numEntries * valueSize;
             IPartitioner partitioner = minToken.getPartitioner();
 
-            int shards = strategy.getController().getNumShards(valueSize * numEntries / minToken.size(maxToken));
+            double density = valueSize * numEntries / minToken.size(maxToken);
+            int shards = UnifiedCompactionStrategy.numShardsForDensity(density, strategy.getShardManager(), strategy.getController());
             ShardTracker boundaries = strategy.getShardManager().boundaries(shards);
 
             int numSStables = 0;
