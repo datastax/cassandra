@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright IBM Corp.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -40,8 +38,9 @@ import org.apache.lucene.util.automaton.Transition;
  * every term in between.
  * <p>
  * This is a port of the {@code nextSeekTerm}/{@code nextString} machinery of Lucene 9.8's
- * {@code org.apache.lucene.index.AutomatonTermsEnum} (which is welded to Lucene's {@code TermsEnum} protocol and
- * cannot be reused directly), decoupled from the terms enumeration: the caller owns the dictionary cursor and
+ * {@code org.apache.lucene.index.AutomatonTermsEnum} (Apache License 2.0, copyright the Apache Software
+ * Foundation; it is welded to Lucene's {@code TermsEnum} protocol and cannot be reused directly), decoupled from
+ * the terms enumeration: the caller owns the dictionary cursor and
  * feeds visited terms to {@link #accept}, seeking to {@link #nextSeekTerm} whenever a {@code *_AND_SEEK} result
  * is returned. As in Lucene, the walk does not attempt to skip to the next <em>fully accepted</em> string (not
  * possible for infinite languages); it skips runs of terms that would put the DFA into a reject state, and
