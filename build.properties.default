@@ -1,4 +1,9 @@
 # Maven2 Repository Locations (you can override these in "build.properties" to point to a local proxy, e.g. Nexus)
 artifact.remoteRepository.central:     https://repo1.maven.org/maven2
 artifact.remoteRepository.apache:      https://repo.maven.apache.org/maven2
-artifact.remoteRepository.datastax:    https://repo.datastax.com/dse
+artifact.remoteRepository.datastax:    https://na.artifactory.swg-devops.com/artifactory/datastax-team-nosql-dse-maven-virtual
+
+# Credentials for authenticated repositories (TaaS requires authentication).
+# Set these in your local build.properties file (never commit credentials).
+# artifact.remoteRepository.datastax.username: your-ibm-email@ibm.com
+# artifact.remoteRepository.datastax.password: your-taas-token
