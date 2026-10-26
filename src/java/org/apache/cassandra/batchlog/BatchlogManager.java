@@ -69,6 +69,7 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaLayout;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.Replicas;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
@@ -204,6 +205,11 @@ public class BatchlogManager implements BatchlogManagerMBean
     public long getTotalBatchesReplayed()
     {
         return totalBatchesReplayed;
+    }
+
+    public long getHintedBatchesReplayed()
+    {
+        return StorageMetrics.hintedBatchlogReplays.getCount();
     }
 
     @VisibleForTesting
@@ -463,7 +469,14 @@ public class BatchlogManager implements BatchlogManagerMBean
         for (ReplayingBatch batch : batches)
         {
             batch.finish();
-            hintedNodes.addAll(batch.hintedNodes());
+            Set<UUID> batchHintedNodes = batch.hintedNodes();
+            // Metered now, even if the interceptor fails below: the retry path re-sends no mutations and writes
+            // no hints, so the batch would otherwise never be accounted for.
+            if (batchHintedNodes.isEmpty())
+                StorageMetrics.batchlogReplays.mark();
+            else
+                StorageMetrics.hintedBatchlogReplays.mark();
+            hintedNodes.addAll(batchHintedNodes);
             if (tryNotifyInterceptor(batch))
             {
                 replayedBatches.add(batch.id);
@@ -475,7 +488,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 // completed though, so remember that (along with the hosts hinted for it) and let
                 // later cycles retry the callback alone instead of replaying the whole batch
                 // (and writing another round of hints).
-                batchesAwaitingInterceptor.put(batch.id, batch.hintedNodes());
+                batchesAwaitingInterceptor.put(batch.id, batchHintedNodes);
             }
         }
 
