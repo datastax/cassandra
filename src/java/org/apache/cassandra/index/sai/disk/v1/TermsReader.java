@@ -61,7 +61,6 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
-import org.apache.lucene.util.automaton.ByteRunAutomaton;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.validate;
@@ -166,10 +165,7 @@ public class TermsReader implements Closeable
             return new PatternTermsScanner(ByteBufferUtil.getArray(slice.lower.value.encoded), null, context, ascending);
 
         assert slice.getOp() == Expression.Op.AUTOMATON : "Not a pattern expression: " + slice;
-        CompiledAutomaton automaton = slice.getAutomaton();
-        if (automaton.type == CompiledAutomaton.AUTOMATON_TYPE.NONE)
-            return new EmptyTermsIterator();
-        return new PatternTermsScanner(slice.getAutomatonCommonPrefix(), automaton, context, ascending);
+        return new PatternTermsScanner(slice.getAutomatonCommonPrefix(), slice.getAutomaton(), context, ascending);
     }
 
     public PostingList exactMatch(ByteComparable term, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
@@ -211,12 +207,12 @@ public class TermsReader implements Closeable
      * over the stored bytes. Callers are responsible for that guard.
      * <p>
      * The intersection restricts the dictionary range to
-     * {@code [commonPrefix(automaton), nextOf(commonPrefix(automaton)))} and, for {@code NORMAL} automatons,
-     * walks it guided by the automaton (Lucene's {@code AutomatonTermsEnum} strategy, see
-     * {@link AutomatonSeeker}): each visited term is tested against the automaton's {@link ByteRunAutomaton},
-     * and on a rejection the walk seeks the dictionary to the next byte string that could possibly match instead
-     * of visiting every term in between. Match-all ({@code ALL}) automatons scan the range sequentially,
-     * accepting every term.
+     * {@code [commonPrefix(automaton), nextOf(commonPrefix(automaton)))} and walks it guided by the automaton
+     * (Lucene's {@code AutomatonTermsEnum} strategy, see {@link AutomatonSeeker}): each visited term is fed to the
+     * seeker, which accepts or rejects it and, on a rejection, computes the next byte string that could possibly
+     * match, to which the walk seeks the dictionary instead of visiting every term in between. The seeker serves
+     * every automaton type (a match-all automaton accepts every term of the range, an empty-language one ends the
+     * walk at once, a single-term one seeks straight to its term).
      * <p>
      * Every visited term is counted in the query context ({@link QueryContext#onAutomatonTermVisited()}, which
      * periodically checks the query for a timeout): the scan is bounded by the query timeout, like a range scan.
@@ -244,25 +240,8 @@ public class TermsReader implements Closeable
                                  QueryEventListener.TrieIndexEventListener perQueryEventListener,
                                  QueryContext context)
     {
-        switch (automaton.type)
-        {
-            case NONE:
-                return PostingList.EMPTY;
-            case SINGLE:
-            {
-                perQueryEventListener.onSegmentHit();
-                ByteComparable term = ByteComparable.preencoded(termDictionaryFileEncodingVersion,
-                                                                automaton.term.bytes, automaton.term.offset, automaton.term.length);
-                PostingList postings = new TermQuery(term, perQueryEventListener, context).execute();
-                return postings == null ? PostingList.EMPTY : postings;
-            }
-            case ALL:
-            case NORMAL:
-                perQueryEventListener.onSegmentHit();
-                return new AutomatonIntersection(automaton, commonPrefix, perQueryEventListener, context).execute();
-            default:
-                throw new AssertionError("Unknown automaton type: " + automaton.type);
-        }
+        perQueryEventListener.onSegmentHit();
+        return new AutomatonIntersection(automaton, commonPrefix, perQueryEventListener, context).execute();
     }
 
     @VisibleForTesting
@@ -569,8 +548,8 @@ public class TermsReader implements Closeable
      * Automaton intersection over the terms dictionary: restricts the dictionary to the range implied by the
      * automaton's common byte prefix and walks it guided by the automaton — accepted terms are collected, and on
      * a rejected term the walk seeks the dictionary ({@link TrieTermsDictionaryReader#skipTo}) to the next
-     * possibly-matching byte string computed by the {@link AutomatonSeeker} instead of visiting every term
-     * (match-all automatons keep the plain bounded scan, every term is accepted). The seek targets are computed
+     * possibly-matching byte string computed by the {@link AutomatonSeeker} instead of visiting every term. The
+     * seek targets are computed
      * in the same raw byte space the trie is sorted by: this intersection is only used for non-composite literal
      * indexes, whose tries store the raw unterminated term bytes (see {@link TermsReader#intersect}), so the
      * automaton's byte order and the trie order coincide. The posting lists of the accepted terms are merged
@@ -599,28 +578,15 @@ public class TermsReader implements Closeable
 
         public PostingList execute()
         {
-            // A match-all automaton has no run automaton; every term in the dictionary is accepted.
-            ByteRunAutomaton runAutomaton = automaton.type == CompiledAutomaton.AUTOMATON_TYPE.ALL
-                                            ? null
-                                            : automaton.runAutomaton;
-
-            // NORMAL automatons drive a seek-skipping walk; a match-all (ALL) automaton accepts every term of
-            // the scanned range, so there is nothing to skip and no seeker is needed.
-            AutomatonSeeker seeker = automaton.type == CompiledAutomaton.AUTOMATON_TYPE.NORMAL
-                                     ? new AutomatonSeeker(automaton)
-                                     : null;
+            AutomatonSeeker seeker = new AutomatonSeeker(automaton);
 
             // The initial seek target: the least byte string that does not put the automaton into a reject
-            // state. It always shares the automaton's common byte prefix with every acceptable string (or is a
-            // prefix of it), so the common-prefix range below already contains it; it only tightens the start
-            // of the walk (see the skipTo below).
-            byte[] initialTarget = null;
-            if (seeker != null)
-            {
-                initialTarget = seeker.nextSeekTerm(null);
-                if (initialTarget == null)
-                    return PostingList.EMPTY;
-            }
+            // state (none for an empty-language automaton). It always shares the automaton's common byte prefix
+            // with every acceptable string (or is a prefix of it), so the common-prefix range below already
+            // contains it; it only tightens the start of the walk (see the skipTo below).
+            byte[] initialTarget = seeker.nextSeekTerm(null);
+            if (initialTarget == null)
+                return PostingList.EMPTY;
 
             // The scan is restricted to [commonPrefix, nextOf(commonPrefix)). The end bound of the trie scan is
             // inclusive, so a term exactly equal to nextOf(commonPrefix) is explicitly skipped by the scan below
@@ -643,14 +609,14 @@ public class TermsReader implements Closeable
             {
                 // Tighten the start of the walk to the initial seek target when it is past the common prefix
                 // (a key after the current position, as skipTo requires).
-                if (initialTarget != null && Arrays.compareUnsigned(initialTarget, commonPrefix) > 0)
+                if (Arrays.compareUnsigned(initialTarget, commonPrefix) > 0)
                     reader.skipTo(ByteComparable.preencoded(termDictionaryFileEncodingVersion, initialTarget));
 
                 if (!reader.hasNext())
                     return PostingList.EMPTY;
 
                 context.checkpoint();
-                PostingList postings = scanFilterAndMergePostings(reader, runAutomaton, seeker, upperBytes);
+                PostingList postings = scanFilterAndMergePostings(reader, seeker, upperBytes);
 
                 listener.onTraversalComplete(Clock.Global.nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
 
@@ -667,14 +633,13 @@ public class TermsReader implements Closeable
 
         /**
          * Walks the bounded dictionary range, keeps the terms accepted by the automaton and merges their posting
-         * lists into a single (sorted, deduplicated) posting list. With a seeker (NORMAL automatons) the walk is
-         * seek-skipping: whenever the seeker classifies a visited term as {@code *_AND_SEEK}, the dictionary is
-         * repositioned at the seeker's next possibly-matching string instead of advancing term by term. The
-         * query context counts the terms actually visited (post-skip).
+         * lists into a single (sorted, deduplicated) posting list. The walk is seek-skipping: whenever the seeker
+         * classifies a visited term as {@code *_AND_SEEK}, the dictionary is repositioned at the seeker's next
+         * possibly-matching string instead of advancing term by term. The query context counts the terms
+         * actually visited (post-skip).
          */
         private PostingList scanFilterAndMergePostings(TrieTermsDictionaryReader reader,
-                                                       ByteRunAutomaton runAutomaton,
-                                                       @Nullable AutomatonSeeker seeker,
+                                                       AutomatonSeeker seeker,
                                                        byte[] upperBytes) throws IOException
         {
             assert reader.hasNext();
@@ -710,30 +675,23 @@ public class TermsReader implements Closeable
 
                     boolean accepted;
                     boolean seek = false;
-                    if (seeker != null)
+                    switch (seeker.accept(termBytes))
                     {
-                        switch (seeker.accept(termBytes))
-                        {
-                            case YES:
-                                accepted = true;
-                                break;
-                            case YES_AND_SEEK:
-                                accepted = true;
-                                seek = true;
-                                break;
-                            case NO_AND_SEEK:
-                                accepted = false;
-                                seek = true;
-                                break;
-                            case NO:
-                            default:
-                                accepted = false;
-                                break;
-                        }
-                    }
-                    else
-                    {
-                        accepted = runAutomaton == null || runAutomaton.run(termBytes, 0, termBytes.length);
+                        case YES:
+                            accepted = true;
+                            break;
+                        case YES_AND_SEEK:
+                            accepted = true;
+                            seek = true;
+                            break;
+                        case NO_AND_SEEK:
+                            accepted = false;
+                            seek = true;
+                            break;
+                        case NO:
+                        default:
+                            accepted = false;
+                            break;
                     }
 
                     if (accepted)
@@ -987,44 +945,6 @@ public class TermsReader implements Closeable
         public ByteBuffer getMaxTerm()
         {
             throw new UnsupportedOperationException();
-        }
-    }
-
-    private static class EmptyTermsIterator implements TermsIterator
-    {
-        @Override
-        public PostingList postings()
-        {
-            throw new IllegalStateException();
-        }
-
-        @Override
-        public void close()
-        {
-        }
-
-        @Override
-        public ByteBuffer getMinTerm()
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public ByteBuffer getMaxTerm()
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public boolean hasNext()
-        {
-            return false;
-        }
-
-        @Override
-        public ByteComparable next()
-        {
-            return null;
         }
     }
 

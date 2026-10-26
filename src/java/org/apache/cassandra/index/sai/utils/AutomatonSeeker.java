@@ -47,10 +47,12 @@ import org.apache.lucene.util.automaton.Transition;
  * possible for infinite languages); it skips runs of terms that would put the DFA into a reject state, and
  * detects loops ("linear" mode) to fall back to plain sequential scanning of stretches where seeking cannot help.
  * <p>
- * The seeker only supports {@link CompiledAutomaton.AUTOMATON_TYPE#NORMAL} automatons and, like the intersection
- * it serves, is only correct when the dictionary stores (and is ordered by) the same raw bytes the
- * {@link ByteRunAutomaton} runs over — i.e. SAI's non-composite literal trie dictionaries, which store the raw
- * unterminated term bytes at every index version (see {@code OnDiskFormat#encodeForTrie}).
+ * The seeker serves every {@link CompiledAutomaton.AUTOMATON_TYPE}: a match-all automaton accepts every term and
+ * never seeks, an empty-language one ends the walk at once, a single-term one seeks straight to its term, and the
+ * {@code NORMAL} ones drive the seek-skipping walk described above. Like the intersection it serves, the seeker is
+ * only correct when the dictionary stores (and is ordered by) the same raw bytes the {@link ByteRunAutomaton} runs
+ * over — i.e. SAI's non-composite literal trie dictionaries, which store the raw unterminated term bytes at every
+ * index version (see {@code OnDiskFormat#encodeForTrie}).
  * <p>
  * Note on shared {@link CompiledAutomaton} instances (see the compile cache in {@link org.apache.cassandra.cql3.LikePatterns}): this
  * class only performs read-only operations on the compiled automaton ({@code runAutomaton.step/isAccept/run},
@@ -74,7 +76,10 @@ public final class AutomatonSeeker
         NO_AND_SEEK
     }
 
-    // a tableized array-based form of the DFA
+    private final CompiledAutomaton.AUTOMATON_TYPE type;
+    // the only accepted term, for SINGLE automatons
+    private final byte[] singleTerm;
+    // a tableized array-based form of the DFA, for NORMAL automatons
     private final ByteRunAutomaton runAutomaton;
     // common suffix of the automaton, used as a cheap pre-filter
     private final BytesRef commonSuffixRef;
@@ -100,11 +105,13 @@ public final class AutomatonSeeker
 
     public AutomatonSeeker(CompiledAutomaton compiled)
     {
-        if (compiled.type != CompiledAutomaton.AUTOMATON_TYPE.NORMAL)
-            throw new IllegalArgumentException("AutomatonSeeker requires a NORMAL compiled automaton, got " + compiled.type);
-        this.finite = compiled.finite;
+        this.type = compiled.type;
+        this.singleTerm = type == CompiledAutomaton.AUTOMATON_TYPE.SINGLE
+                          ? ArrayUtil.copyOfSubArray(compiled.term.bytes, compiled.term.offset, compiled.term.offset + compiled.term.length)
+                          : null;
+        // Only NORMAL automatons have a DFA (and a known finiteness); the other types are decided without one.
+        this.finite = type != CompiledAutomaton.AUTOMATON_TYPE.NORMAL || compiled.finite;
         this.runAutomaton = compiled.runAutomaton;
-        assert this.runAutomaton != null;
         this.commonSuffixRef = compiled.commonSuffixRef;
         this.automaton = compiled.automaton;
         // No need to track visited states for a finite language without loops.
@@ -117,10 +124,20 @@ public final class AutomatonSeeker
      */
     public Acceptance accept(byte[] termBytes)
     {
-        termScratch.bytes = termBytes;
-        termScratch.offset = 0;
-        termScratch.length = termBytes.length;
-        return accept(termScratch);
+        switch (type)
+        {
+            case ALL:
+                return Acceptance.YES;
+            case NONE:
+                return Acceptance.NO_AND_SEEK; // and nextSeekTerm ends the walk
+            case SINGLE:
+                return Arrays.equals(termBytes, singleTerm) ? Acceptance.YES_AND_SEEK : Acceptance.NO_AND_SEEK;
+            default:
+                termScratch.bytes = termBytes;
+                termScratch.offset = 0;
+                termScratch.length = termBytes.length;
+                return accept(termScratch);
+        }
     }
 
     private Acceptance accept(BytesRef term)
@@ -149,6 +166,19 @@ public final class AutomatonSeeker
      */
     public @Nullable byte[] nextSeekTerm(@Nullable byte[] term)
     {
+        switch (type)
+        {
+            case ALL:
+                // every string is viable: the least one, or the least one after the term
+                return term == null ? new byte[0] : Arrays.copyOf(term, term.length + 1);
+            case NONE:
+                return null;
+            case SINGLE:
+                return term == null || Arrays.compareUnsigned(term, singleTerm) < 0 ? singleTerm.clone() : null;
+            default:
+                break;
+        }
+
         if (term == null)
         {
             seekBytesRef.clear();

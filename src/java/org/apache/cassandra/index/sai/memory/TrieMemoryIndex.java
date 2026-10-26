@@ -402,9 +402,6 @@ public class TrieMemoryIndex extends MemoryIndex
                                                                                                  QueryContext context)
     {
         CompiledAutomaton automaton = slice.getAutomaton();
-        if (automaton.type == CompiledAutomaton.AUTOMATON_TYPE.NONE)
-            return Collections.emptyIterator();
-
         return new AbstractGuavaIterator<>()
         {
             @Override
@@ -426,12 +423,6 @@ public class TrieMemoryIndex extends MemoryIndex
     private ByteComparable asByteComparable(ByteBuffer input)
     {
         return version.onDiskFormat().encodeForTrie(input, indexContext.getValidator());
-    }
-
-    /** The term of a {@code SINGLE} automaton, wrapped without copying (the automaton is shared and read-only). */
-    private static ByteBuffer singleTerm(CompiledAutomaton automaton)
-    {
-        return ByteBuffer.wrap(automaton.term.bytes, automaton.term.offset, automaton.term.length);
     }
 
     public KeyRangeIterator exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
@@ -835,27 +826,6 @@ public class TrieMemoryIndex extends MemoryIndex
         if (!TypeUtil.isLiteral(indexContext.getValidator()) || TypeUtil.isComposite(indexContext.getValidator()))
             throw new IllegalStateException("Automaton matching is only supported on non-composite literal indexes");
 
-        switch (automaton.type)
-        {
-            case NONE:
-                return KeyRangeIterator.empty();
-            case SINGLE:
-            {
-                PrimaryKeys primaryKeys = data.get(asByteComparable(singleTerm(automaton)));
-                if (primaryKeys == null || primaryKeys.keys().isEmpty())
-                    return KeyRangeIterator.empty();
-                return new FilteringKeyRangeIterator(new SortedSetKeyRangeIterator(primaryKeys.keys()), keyRange);
-            }
-            case ALL:
-            case NORMAL:
-                break;
-            default:
-                throw new AssertionError("Unknown automaton type: " + automaton.type);
-        }
-
-        // A match-all automaton has no run automaton; every term in the trie is accepted.
-        boolean matchAll = automaton.type == CompiledAutomaton.AUTOMATON_TYPE.ALL;
-
         // Bound the scan to the subtrie of terms starting with the automaton's common byte prefix,
         // [commonPrefix, nextOf(commonPrefix)), mirroring prefixMatch above.
         byte[] upperBytes = AutomatonQueries.prefixUpperBound(commonPrefix);
@@ -863,19 +833,16 @@ public class TrieMemoryIndex extends MemoryIndex
 
         // Automaton-guided seek-skipping, mirroring the sstable walk: the seeker computes the least acceptable
         // string after each rejected run, and the scan re-derives the subtrie view from it.
-        AutomatonSeeker seeker = matchAll ? null : new AutomatonSeeker(automaton);
-        byte[] start = commonPrefix;
-        if (seeker != null)
-        {
-            byte[] initialTarget = seeker.nextSeekTerm(null);
-            if (initialTarget == null)
-                return KeyRangeIterator.empty();
-            // The initial target shares the common prefix with every acceptable string (or is a prefix of it):
-            // start from whichever bound is tighter.
-            if (FastByteOperations.compareUnsigned(initialTarget, 0, initialTarget.length,
-                                                   commonPrefix, 0, commonPrefix.length) > 0)
-                start = initialTarget;
-        }
+        AutomatonSeeker seeker = new AutomatonSeeker(automaton);
+        byte[] initialTarget = seeker.nextSeekTerm(null);
+        if (initialTarget == null)
+            return KeyRangeIterator.empty(); // no string is acceptable
+        // The initial target shares the common prefix with every acceptable string (or is a prefix of it):
+        // start from whichever bound is tighter.
+        byte[] start = FastByteOperations.compareUnsigned(initialTarget, 0, initialTarget.length,
+                                                          commonPrefix, 0, commonPrefix.length) > 0
+                       ? initialTarget
+                       : commonPrefix;
         ByteComparable lowerBound = start.length == 0 ? null : asByteComparable(ByteBuffer.wrap(start));
 
         var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
@@ -891,39 +858,36 @@ public class TrieMemoryIndex extends MemoryIndex
 
             boolean accepted = true;
             boolean seek = false;
-            if (seeker != null)
+            // For non-composite literal types the pre-encoded trie key bytes are the raw term bytes.
+            byte[] termBytes = ByteSourceInverse.readBytes(entry.getKey().getPreencodedBytes());
+            switch (seeker.accept(termBytes))
             {
-                // For non-composite literal types the pre-encoded trie key bytes are the raw term bytes.
-                byte[] termBytes = ByteSourceInverse.readBytes(entry.getKey().getPreencodedBytes());
-                switch (seeker.accept(termBytes))
-                {
-                    case YES:
-                        break;
-                    case YES_AND_SEEK:
-                        seek = true;
-                        break;
-                    case NO_AND_SEEK:
-                        accepted = false;
-                        seek = true;
-                        break;
-                    case NO:
-                    default:
-                        accepted = false;
-                        break;
-                }
-                if (seek)
-                {
-                    byte[] target = seeker.nextSeekTerm(termBytes);
-                    if (target == null)
-                        entries = Collections.emptyIterator(); // no string after this term can possibly match
-                    else
-                        // strictly-increasing target: one root-down descent per skipped run of terms
-                        entries = data.slice(asByteComparable(ByteBuffer.wrap(target)), true, upperBound, false)
-                                      .entrySet().iterator();
-                }
+                case YES:
+                    break;
+                case YES_AND_SEEK:
+                    seek = true;
+                    break;
+                case NO_AND_SEEK:
+                    accepted = false;
+                    seek = true;
+                    break;
+                case NO:
+                default:
+                    accepted = false;
+                    break;
             }
             if (accepted)
                 mergingIteratorBuilder.add(entry.getValue());
+            if (seek)
+            {
+                byte[] target = seeker.nextSeekTerm(termBytes);
+                if (target == null)
+                    entries = Collections.emptyIterator(); // no string after this term can possibly match
+                else
+                    // strictly-increasing target: one root-down descent per skipped run of terms
+                    entries = data.slice(asByteComparable(ByteBuffer.wrap(target)), true, upperBound, false)
+                                  .entrySet().iterator();
+            }
         }
 
         return mergingIteratorBuilder.isEmpty()
@@ -1067,23 +1031,6 @@ public class TrieMemoryIndex extends MemoryIndex
      */
     private long estimateNumRowsMatchingAutomaton(Expression expression)
     {
-        CompiledAutomaton automaton = expression.getAutomaton();
-        switch (automaton.type)
-        {
-            case NONE:
-                // An empty-language automaton matches nothing and automatonMatch short-circuits to an empty
-                // iterator; without this it would fall through to the no-common-prefix maximum below.
-                return 0;
-            case SINGLE:
-            {
-                // A single-term automaton matches exactly one term; mirror automatonMatch's exact lookup.
-                PrimaryKeys primaryKeys = data.get(asByteComparable(singleTerm(automaton)));
-                return primaryKeys == null ? 0 : primaryKeys.size();
-            }
-            default:
-                break;
-        }
-
         byte[] commonPrefix = expression.getAutomatonCommonPrefix();
         if (commonPrefix.length == 0)
             return indexedRows;

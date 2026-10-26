@@ -49,7 +49,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 /**
  * Multiple {@link SegmentMetadata} are stored in {@link IndexComponentType#META} file, each corresponds to an on-disk
@@ -370,17 +369,6 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                 // share its common byte prefix, so when one exists interpolate over [prefix, nextOf(prefix))
                 // exactly like a PREFIX expression; without a common prefix the pattern may match anywhere in
                 // the dictionary, so return the segment size as the upper bound.
-                CompiledAutomaton automaton = predicate.getAutomaton();
-                // An empty-language automaton matches nothing and the search path short-circuits to an empty
-                // iterator; without this check it would fall through to the no-common-prefix maximum below.
-                if (automaton.type == CompiledAutomaton.AUTOMATON_TYPE.NONE)
-                    return 0;
-                // A single-term automaton matches exactly one term, like the search path's exact lookup.
-                if (automaton.type == CompiledAutomaton.AUTOMATON_TYPE.SINGLE)
-                {
-                    ByteBuffer term = ByteBuffer.wrap(automaton.term.bytes, automaton.term.offset, automaton.term.length);
-                    return termsDistribution.estimateNumRowsMatchingExact(asByteComparable(term, predicate.validator));
-                }
                 byte[] commonPrefix = predicate.getAutomatonCommonPrefix();
                 if (commonPrefix.length == 0)
                     return numRows;
