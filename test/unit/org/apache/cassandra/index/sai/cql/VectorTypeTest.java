@@ -33,6 +33,7 @@ import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -42,7 +43,6 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.vector.AutoResumingNodeScoreIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
-import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.inject.ActionBuilder;
 import org.apache.cassandra.inject.Expression;
 import org.apache.cassandra.inject.Injection;
@@ -949,7 +949,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         Injections.inject(barrier);
 
         // start a filter-then-sort query asynchronously that will get blocked in the injected barrier
-        QueryController.QUERY_OPT_LEVEL = 0;
+        disableQueryOptimization();
         ExecutorService executor = Executors.newFixedThreadPool(1);
         String select = "SELECT k FROM %s WHERE c=1 ORDER BY v ANN OF [1, 1] LIMIT 100";
         Future<UntypedResultSet> future = executor.submit(() -> execute(select));
@@ -970,7 +970,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testHybridQueryWithMissingVectorValuesForMaxSegmentRow() throws Throwable
     {
         // Want to test the search then order path
-        QueryController.QUERY_OPT_LEVEL = 0;
+        CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_LEVEL.setInt(0);
 
         // We use a clustered primary key to simplify the mental model for this test.
         // The bug this test exposed happens when the last row(s) in a segment, based on PK order, are present
