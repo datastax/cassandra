@@ -116,7 +116,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         withIndex(dictionary, fixture ->
         {
             for (String pattern : new String[]{ "abc%", "%abc", "%abc%", "a%c", "%", "abc", "a_c", "a%%c" })
-                assertEngineMatchesBruteForce(fixture, dictionary, LikePatterns.fromLikePattern(pattern), "LIKE " + pattern);
+                assertEngineMatchesBruteForce(fixture, dictionary, LikePatterns.patternAutomaton(pattern), "LIKE " + pattern);
         });
     }
 
@@ -127,7 +127,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         withIndex(dictionary, fixture ->
         {
             // an empty LIKE pattern accepts only the empty term, which is not in the dictionary
-            assertEngineMatchesBruteForce(fixture, dictionary, LikePatterns.fromLikePattern(""), "empty LIKE");
+            assertEngineMatchesBruteForce(fixture, dictionary, LikePatterns.patternAutomaton(""), "empty LIKE");
             // empty suffix/contains automatons accept every term
             assertEngineMatchesBruteForce(fixture, dictionary, LikePatterns.suffixAutomaton(""), "empty suffix");
             assertEngineMatchesBruteForce(fixture, dictionary, LikePatterns.containsAutomaton(""), "empty contains");
@@ -146,7 +146,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
                                                               "abz", "ac", "aca", "b", "");
         withIndex(dictionary, fixture ->
         {
-            CompiledAutomaton automaton = LikePatterns.fromLikePattern("ab%");
+            CompiledAutomaton automaton = LikePatterns.patternAutomaton("ab%");
             assertEngineMatchesBruteForce(fixture, dictionary, automaton, "prefix bounds ab%");
 
             var results = intersect(fixture, automaton);
@@ -169,20 +169,20 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         withIndex(dictionary, fixture ->
         {
             // the scan of 'a%' is bounded to the 100 terms of [a, b)
-            CompiledAutomaton broad = LikePatterns.fromLikePattern("a%");
+            CompiledAutomaton broad = LikePatterns.patternAutomaton("a%");
             QueryContext context = new QueryContext();
             assertEquals(expectedRowIds(dictionary, broad), intersect(fixture, broad, context));
             assertEquals(100, context.automatonTermsVisited());
 
             // the count is of *visited* terms, so an automaton matching nothing in a broad scan range still visits some
-            CompiledAutomaton selective = LikePatterns.fromLikePattern("a%zzz");
+            CompiledAutomaton selective = LikePatterns.patternAutomaton("a%zzz");
             context = new QueryContext();
             assertEquals(expectedRowIds(dictionary, selective), intersect(fixture, selective, context));
             assertTrue(context.automatonTermsVisited() > 0);
             assertTrue(context.automatonTermsVisited() <= 100);
 
             // a match-all automaton scans the whole dictionary
-            CompiledAutomaton all = LikePatterns.fromLikePattern("%");
+            CompiledAutomaton all = LikePatterns.patternAutomaton("%");
             assertEquals(CompiledAutomaton.AUTOMATON_TYPE.ALL, all.type);
             context = new QueryContext();
             assertEquals(expectedRowIds(dictionary, all), intersect(fixture, all, context));
@@ -205,7 +205,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         {
             // (the intersection checks for a timeout before scanning too, so the first check throws here)
             QueryContext expired = new QueryContext(0);
-            assertThrows(AbortedOperationException.class, () -> intersect(fixture, LikePatterns.fromLikePattern("a%"), expired));
+            assertThrows(AbortedOperationException.class, () -> intersect(fixture, LikePatterns.patternAutomaton("a%"), expired));
         });
     }
 
@@ -287,7 +287,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
 
         withIndex(dictionary, fixture ->
         {
-            CompiledAutomaton broad = LikePatterns.fromLikePattern("a%");
+            CompiledAutomaton broad = LikePatterns.patternAutomaton("a%");
 
             // the query context counts the terms visited by every segment intersection of a query (and the
             // memtable shard scans), so two intersections of the same context add up
@@ -311,7 +311,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         Map<String, TreeSet<Integer>> dictionary = dictionary("alpha", "alps", "beta", "gamma");
         withIndex(dictionary, fixture ->
         {
-            CompiledAutomaton automaton = LikePatterns.fromLikePattern("al%");
+            CompiledAutomaton automaton = LikePatterns.patternAutomaton("al%");
             assertEquals(CompiledAutomaton.AUTOMATON_TYPE.NORMAL, automaton.type);
 
             // automaton intersection: scanFilterAndMergePostings
@@ -406,7 +406,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
 
         withIndex(dictionary, fixture ->
         {
-            CompiledAutomaton automaton = LikePatterns.fromLikePattern("match%");
+            CompiledAutomaton automaton = LikePatterns.patternAutomaton("match%");
             var results = intersect(fixture, automaton);
             var expected = expectedRowIds(dictionary, automaton);
             assertEquals(512 + 7 + 512, expected.size());
@@ -472,7 +472,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
             try (IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata))
             {
                 assertTrue(searcher instanceof InvertedIndexSearcher);
-                CompiledAutomaton automaton = LikePatterns.fromLikePattern("al%");
+                CompiledAutomaton automaton = LikePatterns.patternAutomaton("al%");
                 TreeSet<Integer> expected = expectedRowIds(dictionary, automaton);
                 assertEquals(union(dictionary, "alpha", "alps", "alcove"), expected);
 
@@ -672,11 +672,11 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         switch (nextInt(5))
         {
             case 0: // prefix wildcard
-                return LikePatterns.fromLikePattern(seed.substring(0, seed.offsetByCodePoints(0, randomIntBetween(1, Math.max(1, seed.codePointCount(0, seed.length()) - 1)))) + '%');
+                return LikePatterns.patternAutomaton(seed.substring(0, seed.offsetByCodePoints(0, randomIntBetween(1, Math.max(1, seed.codePointCount(0, seed.length()) - 1)))) + '%');
             case 1: // contains
-                return LikePatterns.fromLikePattern('%' + randomSubstring(seed) + '%');
+                return LikePatterns.patternAutomaton('%' + randomSubstring(seed) + '%');
             case 2: // suffix
-                return LikePatterns.fromLikePattern('%' + randomSubstring(seed));
+                return LikePatterns.patternAutomaton('%' + randomSubstring(seed));
             case 3: // suffix (trimmed-value factory, embedded '%' would be literal)
                 return LikePatterns.suffixAutomaton(randomSubstring(seed));
             default: // generic two-segment pattern, replacing a random code point with an any-string wildcard
@@ -685,7 +685,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
                 int cpIndex = nextInt(cpCount);
                 int start = seed.offsetByCodePoints(0, cpIndex);
                 int end = seed.offsetByCodePoints(start, 1);
-                return LikePatterns.fromLikePattern(seed.substring(0, start) + '%' + seed.substring(end));
+                return LikePatterns.patternAutomaton(seed.substring(0, start) + '%' + seed.substring(end));
             }
         }
     }

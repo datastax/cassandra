@@ -39,7 +39,7 @@ public class AutomatonSeekerTest
     @Test
     public void matchAllAcceptsEveryTermWithoutSeeking()
     {
-        CompiledAutomaton all = LikePatterns.fromLikePattern("%");
+        CompiledAutomaton all = LikePatterns.patternAutomaton("%");
         assertEquals(CompiledAutomaton.AUTOMATON_TYPE.ALL, all.type);
         AutomatonSeeker seeker = new AutomatonSeeker(all);
         assertArrayEquals(new byte[0], seeker.nextSeekTerm(null));
@@ -61,7 +61,7 @@ public class AutomatonSeekerTest
     @Test
     public void singleTermSeeksStraightToItsTerm()
     {
-        CompiledAutomaton single = LikePatterns.fromLikePattern("beta");
+        CompiledAutomaton single = LikePatterns.patternAutomaton("beta");
         assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, single.type);
         AutomatonSeeker seeker = new AutomatonSeeker(single);
         assertArrayEquals(utf8("beta"), seeker.nextSeekTerm(null));
@@ -76,7 +76,7 @@ public class AutomatonSeekerTest
     @Test
     public void normalAutomatonSeeksToTheNextViableString()
     {
-        CompiledAutomaton pattern = LikePatterns.fromLikePattern("ab%z");
+        CompiledAutomaton pattern = LikePatterns.patternAutomaton("ab%z");
         assertEquals(CompiledAutomaton.AUTOMATON_TYPE.NORMAL, pattern.type);
         AutomatonSeeker seeker = new AutomatonSeeker(pattern);
         // the least viable string starts with the common prefix

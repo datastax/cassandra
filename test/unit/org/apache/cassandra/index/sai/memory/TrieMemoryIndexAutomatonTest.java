@@ -87,7 +87,7 @@ public class TrieMemoryIndexAutomatonTest
 
         for (String pattern : new String[]{ "abc%", "%abc", "%abc%", "a%c", "%", "abc", "a_c", "a%b",
                                             "ab%", "%ab", "%ab%", "a%b%c", "nomatch%" })
-            assertMatchesBruteForce(index, rows, LikePatterns.fromLikePattern(pattern), "LIKE " + pattern);
+            assertMatchesBruteForce(index, rows, LikePatterns.patternAutomaton(pattern), "LIKE " + pattern);
 
         for (String suffix : new String[]{ "ab", "b", "a%b", "nomatch" })
             assertMatchesBruteForce(index, rows, LikePatterns.suffixAutomaton(suffix), "suffix " + suffix);
@@ -102,7 +102,7 @@ public class TrieMemoryIndexAutomatonTest
         TrieMemoryIndex index = newIndex(UTF8Type.instance);
         Map<Integer, String> rows = indexRows(index, "aa", "aa￿", "ab", "ab ", "ab￿￿", "abz", "ac", "aca", "b");
 
-        CompiledAutomaton automaton = LikePatterns.fromLikePattern("ab%");
+        CompiledAutomaton automaton = LikePatterns.patternAutomaton("ab%");
         QueryContext context = new QueryContext();
         TreeSet<Integer> results = search(index, automaton, context);
         assertEquals(keysOf(rows, "ab", "ab ", "ab￿￿", "abz"), results);
@@ -120,13 +120,13 @@ public class TrieMemoryIndexAutomatonTest
             values[i] = String.format("a%03d", i);
         Map<Integer, String> rows = indexRows(index, values);
 
-        CompiledAutomaton broad = LikePatterns.fromLikePattern("a%");
+        CompiledAutomaton broad = LikePatterns.patternAutomaton("a%");
         QueryContext context = new QueryContext();
         assertEquals(rows.keySet(), search(index, broad, context));
         assertEquals(100, context.automatonTermsVisited());
 
         // the count is of visited terms, not matches
-        CompiledAutomaton selective = LikePatterns.fromLikePattern("a%zzz");
+        CompiledAutomaton selective = LikePatterns.patternAutomaton("a%zzz");
         context = new QueryContext();
         assertEquals(new TreeSet<>(), search(index, selective, context));
         assertTrue(context.automatonTermsVisited() > 0);
@@ -146,7 +146,7 @@ public class TrieMemoryIndexAutomatonTest
         indexRows(index, values);
 
         QueryContext expired = new QueryContext(0);
-        assertThrows(AbortedOperationException.class, () -> search(index, LikePatterns.fromLikePattern("a%"), expired));
+        assertThrows(AbortedOperationException.class, () -> search(index, LikePatterns.patternAutomaton("a%"), expired));
         // aborted at the first periodic check, not at the end of the walk
         assertEquals(QueryContext.AUTOMATON_CHECKPOINT_INTERVAL, expired.automatonTermsVisited());
     }
@@ -160,7 +160,7 @@ public class TrieMemoryIndexAutomatonTest
             values[i] = String.format("a%02d", i);
         Map<Integer, String> rows = indexRows(index, values);
 
-        CompiledAutomaton broad = LikePatterns.fromLikePattern("a%");
+        CompiledAutomaton broad = LikePatterns.patternAutomaton("a%");
 
         // the query context counts the terms visited by every memtable shard scan (and sstable segment
         // intersection) of a query, so two scans of the same context add up
@@ -178,10 +178,10 @@ public class TrieMemoryIndexAutomatonTest
         Map<Integer, String> rows = indexRows(index, "alpha", "beta", "gamma");
 
         // a pattern without wildcards simplifies to a SINGLE automaton served by an exact lookup
-        CompiledAutomaton single = LikePatterns.fromLikePattern("beta");
+        CompiledAutomaton single = LikePatterns.patternAutomaton("beta");
         assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, single.type);
         assertEquals(keysOf(rows, "beta"), search(index, single));
-        assertEquals(new TreeSet<>(), search(index, LikePatterns.fromLikePattern("delta")));
+        assertEquals(new TreeSet<>(), search(index, LikePatterns.patternAutomaton("delta")));
 
         // the empty language matches nothing
         CompiledAutomaton none = LikePatterns.compile(org.apache.lucene.util.automaton.Automata.makeEmpty());
@@ -189,7 +189,7 @@ public class TrieMemoryIndexAutomatonTest
         assertEquals(new TreeSet<>(), search(index, none));
 
         // an all-wildcard pattern simplifies to a match-all (ALL) automaton accepting every term
-        CompiledAutomaton all = LikePatterns.fromLikePattern("%");
+        CompiledAutomaton all = LikePatterns.patternAutomaton("%");
         assertEquals(CompiledAutomaton.AUTOMATON_TYPE.ALL, all.type);
         assertEquals(rows.keySet(), search(index, all));
     }
@@ -200,7 +200,7 @@ public class TrieMemoryIndexAutomatonTest
         TrieMemoryIndex index = newIndex(Int32Type.instance);
         index.add(makeKey(table, "0"), Clustering.EMPTY, Int32Type.instance.decompose(42), b -> {}, b -> {});
         assertThrows(IllegalStateException.class,
-                     () -> search(index, LikePatterns.fromLikePattern("4%")));
+                     () -> search(index, LikePatterns.patternAutomaton("4%")));
     }
 
     @Test
@@ -350,7 +350,7 @@ public class TrieMemoryIndexAutomatonTest
             {
                 int cpCount = seed.codePointCount(0, seed.length());
                 int prefixCp = 1 + random.nextInt(Math.max(1, cpCount - 1));
-                return LikePatterns.fromLikePattern(seed.substring(0, seed.offsetByCodePoints(0, prefixCp)) + '%');
+                return LikePatterns.patternAutomaton(seed.substring(0, seed.offsetByCodePoints(0, prefixCp)) + '%');
             }
             case 1:
             {
@@ -358,12 +358,12 @@ public class TrieMemoryIndexAutomatonTest
                 int fromCp = random.nextInt(cpCount);
                 int toCp = fromCp + 1 + random.nextInt(cpCount - fromCp);
                 String substring = seed.substring(seed.offsetByCodePoints(0, fromCp), seed.offsetByCodePoints(0, toCp));
-                return LikePatterns.fromLikePattern('%' + substring + '%');
+                return LikePatterns.patternAutomaton('%' + substring + '%');
             }
             case 2:
                 return LikePatterns.suffixAutomaton(seed.substring(seed.offsetByCodePoints(0, random.nextInt(seed.codePointCount(0, seed.length())))));
             default:
-                return LikePatterns.fromLikePattern('%' + seed.substring(seed.offsetByCodePoints(0, random.nextInt(seed.codePointCount(0, seed.length())))));
+                return LikePatterns.patternAutomaton('%' + seed.substring(seed.offsetByCodePoints(0, random.nextInt(seed.codePointCount(0, seed.length())))));
         }
     }
 

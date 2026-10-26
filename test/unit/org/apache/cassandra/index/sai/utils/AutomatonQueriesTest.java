@@ -36,14 +36,14 @@ public class AutomatonQueriesTest
     @Test
     public void commonPrefixBytes()
     {
-        assertArrayEquals(utf8("abc"), AutomatonQueries.commonPrefixBytes(LikePatterns.fromLikePattern("abc%")));
-        assertArrayEquals(utf8("abc"), AutomatonQueries.commonPrefixBytes(LikePatterns.fromLikePattern("abc%def")));
-        assertArrayEquals(utf8("abc"), AutomatonQueries.commonPrefixBytes(LikePatterns.fromLikePattern("abc"))); // SINGLE
-        assertArrayEquals(new byte[0], AutomatonQueries.commonPrefixBytes(LikePatterns.fromLikePattern("%abc")));
-        assertArrayEquals(new byte[0], AutomatonQueries.commonPrefixBytes(LikePatterns.fromLikePattern("%"))); // ALL
+        assertArrayEquals(utf8("abc"), AutomatonQueries.commonPrefixBytes(LikePatterns.patternAutomaton("abc%")));
+        assertArrayEquals(utf8("abc"), AutomatonQueries.commonPrefixBytes(LikePatterns.patternAutomaton("abc%def")));
+        assertArrayEquals(utf8("abc"), AutomatonQueries.commonPrefixBytes(LikePatterns.patternAutomaton("abc"))); // SINGLE
+        assertArrayEquals(new byte[0], AutomatonQueries.commonPrefixBytes(LikePatterns.patternAutomaton("%abc")));
+        assertArrayEquals(new byte[0], AutomatonQueries.commonPrefixBytes(LikePatterns.patternAutomaton("%"))); // ALL
         assertArrayEquals(new byte[0], AutomatonQueries.commonPrefixBytes(LikePatterns.compile(Automata.makeEmpty()))); // NONE
         // multi-byte characters contribute their full UTF-8 encoding to the prefix
-        assertArrayEquals(utf8("café"), AutomatonQueries.commonPrefixBytes(LikePatterns.fromLikePattern("café%")));
+        assertArrayEquals(utf8("café"), AutomatonQueries.commonPrefixBytes(LikePatterns.patternAutomaton("café%")));
     }
 
     @Test

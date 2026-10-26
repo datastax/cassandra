@@ -40,7 +40,7 @@ public class LikePatternsTest
     @Test
     public void likePrefixPattern()
     {
-        CompiledAutomaton a = LikePatterns.fromLikePattern("abc%");
+        CompiledAutomaton a = LikePatterns.patternAutomaton("abc%");
         assertAccepts(a, "abc", "abcd", "abc%", "abc def");
         assertRejects(a, "ab", "xabc", "ABC", "");
     }
@@ -48,7 +48,7 @@ public class LikePatternsTest
     @Test
     public void likeSuffixPattern()
     {
-        CompiledAutomaton a = LikePatterns.fromLikePattern("%abc");
+        CompiledAutomaton a = LikePatterns.patternAutomaton("%abc");
         assertAccepts(a, "abc", "xabc", "xxabc");
         assertRejects(a, "abcx", "ab", "");
     }
@@ -56,7 +56,7 @@ public class LikePatternsTest
     @Test
     public void likeContainsPattern()
     {
-        CompiledAutomaton a = LikePatterns.fromLikePattern("%abc%");
+        CompiledAutomaton a = LikePatterns.patternAutomaton("%abc%");
         assertAccepts(a, "abc", "xabc", "abcx", "xabcx", "ababc");
         assertRejects(a, "ab", "axbxc", "");
     }
@@ -64,7 +64,7 @@ public class LikePatternsTest
     @Test
     public void likeGenericPattern()
     {
-        CompiledAutomaton a = LikePatterns.fromLikePattern("a%b");
+        CompiledAutomaton a = LikePatterns.patternAutomaton("a%b");
         assertAccepts(a, "ab", "axb", "axxxb", "abb", "aab");
         assertRejects(a, "ba", "a", "b", "axbx", "xab", "");
     }
@@ -72,8 +72,8 @@ public class LikePatternsTest
     @Test
     public void likeConsecutiveWildcardsCollapse()
     {
-        CompiledAutomaton single = LikePatterns.fromLikePattern("a%b");
-        CompiledAutomaton doubled = LikePatterns.fromLikePattern("a%%b");
+        CompiledAutomaton single = LikePatterns.patternAutomaton("a%b");
+        CompiledAutomaton doubled = LikePatterns.patternAutomaton("a%%b");
         for (String candidate : new String[]{ "ab", "axb", "a", "b", "axxb", "" })
             assertEquals(candidate,
                          LikePatterns.accepts(single, utf8(candidate)),
@@ -83,12 +83,12 @@ public class LikePatternsTest
     @Test
     public void likeMatchAllAndEmptyPatterns()
     {
-        CompiledAutomaton all = LikePatterns.fromLikePattern("%");
+        CompiledAutomaton all = LikePatterns.patternAutomaton("%");
         assertEquals(CompiledAutomaton.AUTOMATON_TYPE.ALL, all.type);
         assertAccepts(all, "", "a", "anything at all", "日本語");
 
         // an empty pattern accepts only the empty term
-        CompiledAutomaton empty = LikePatterns.fromLikePattern("");
+        CompiledAutomaton empty = LikePatterns.patternAutomaton("");
         assertAccepts(empty, "");
         assertRejects(empty, "a", " ");
     }
@@ -96,7 +96,7 @@ public class LikePatternsTest
     @Test
     public void likeWithoutWildcardIsExactMatch()
     {
-        CompiledAutomaton a = LikePatterns.fromLikePattern("abc");
+        CompiledAutomaton a = LikePatterns.patternAutomaton("abc");
         assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, a.type);
         assertAccepts(a, "abc");
         assertRejects(a, "ab", "abcd", "xabc");
@@ -106,16 +106,16 @@ public class LikePatternsTest
     public void likeUnderscoreAndRegexpMetacharsAreLiterals()
     {
         // '_' is not a wildcard in CQL LIKE
-        CompiledAutomaton underscore = LikePatterns.fromLikePattern("a_c");
+        CompiledAutomaton underscore = LikePatterns.patternAutomaton("a_c");
         assertAccepts(underscore, "a_c");
         assertRejects(underscore, "abc", "axc");
 
         // regexp/wildcard metacharacters in the pattern are literal characters
-        CompiledAutomaton dot = LikePatterns.fromLikePattern("a.c%");
+        CompiledAutomaton dot = LikePatterns.patternAutomaton("a.c%");
         assertAccepts(dot, "a.c", "a.cd");
         assertRejects(dot, "abc", "abcd");
 
-        CompiledAutomaton star = LikePatterns.fromLikePattern("a*c");
+        CompiledAutomaton star = LikePatterns.patternAutomaton("a*c");
         assertAccepts(star, "a*c");
         assertRejects(star, "ac", "axxc");
     }
@@ -123,11 +123,11 @@ public class LikePatternsTest
     @Test
     public void likeUnicodePattern()
     {
-        CompiledAutomaton a = LikePatterns.fromLikePattern("caf%é");
+        CompiledAutomaton a = LikePatterns.patternAutomaton("caf%é");
         assertAccepts(a, "café", "cafffé", "cafés café é");
         assertRejects(a, "cafe", "café.");
 
-        CompiledAutomaton emoji = LikePatterns.fromLikePattern("😀%");
+        CompiledAutomaton emoji = LikePatterns.patternAutomaton("😀%");
         assertAccepts(emoji, "😀", "😀abc", "😀😁");
         assertRejects(emoji, "😁", "a😀");
     }
@@ -183,10 +183,10 @@ public class LikePatternsTest
         // finiteness is known without it (wildcards: infinite language, none: a single string), so a pattern
         // whose first literal is longer than that compiles
         String literal = "x".repeat(1500);
-        CompiledAutomaton pattern = LikePatterns.fromLikePattern(literal + "%y");
+        CompiledAutomaton pattern = LikePatterns.patternAutomaton(literal + "%y");
         assertTrue(LikePatterns.accepts(pattern, utf8(literal + "abcy")));
         assertFalse(LikePatterns.accepts(pattern, utf8(literal + "abc")));
-        assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, LikePatterns.fromLikePattern(literal).type);
+        assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, LikePatterns.patternAutomaton(literal).type);
         assertTrue(LikePatterns.accepts(LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, ByteBuffer.wrap(utf8(literal + "%y")), "v"),
                                         utf8(literal + "y")));
     }

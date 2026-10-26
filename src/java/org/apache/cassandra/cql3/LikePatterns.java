@@ -50,6 +50,8 @@ import org.apache.lucene.util.automaton.TooComplexToDeterminizeException;
  * post-filtering of the pattern operators ({@link Operator#isSatisfiedBy}, including replica filtering protection) and
  * the index implementations intersecting it with their term dictionaries (SAI, see
  * {@code org.apache.cassandra.index.sai.utils.AutomatonQueries}), keeping both in exact agreement.
+ * <p>
+ * {@link #forPatternOperator} is the entry point, and the only cached one; the builders it uses are public for tests.
  */
 public final class LikePatterns
 {
@@ -109,12 +111,13 @@ public final class LikePatterns
     /**
      * Builds a byte-level automaton for a CQL {@code LIKE} pattern. This method accepts the full pattern, so it
      * serves {@code x%} (prefix), {@code %x} (suffix), {@code %x%} (contains) and generic patterns such as
-     * {@code a%b}, {@code a%b%}, {@code %a%b} or {@code %a%b%} alike.
+     * {@code a%b}, {@code a%b%}, {@code %a%b} or {@code %a%b%} alike. Not cached.
      *
      * @param pattern the LIKE pattern, with {@code %} wildcards
      * @return the compiled automaton
      */
-    public static CompiledAutomaton fromLikePattern(String pattern)
+    @VisibleForTesting
+    public static CompiledAutomaton patternAutomaton(String pattern)
     {
         List<Automaton> parts = new ArrayList<>();
         int segmentStart = 0;
@@ -145,12 +148,13 @@ public final class LikePatterns
 
     /**
      * Compiles a Unicode code point automaton into its UTF-8 byte form, determinizing it within
-     * {@link Operations#DEFAULT_DETERMINIZE_WORK_LIMIT}.
+     * {@link Operations#DEFAULT_DETERMINIZE_WORK_LIMIT}. Not cached.
      *
      * @param automaton an automaton over Unicode code points
      * @return the compiled byte-level automaton
      * @throws org.apache.lucene.util.automaton.TooComplexToDeterminizeException if determinization is too costly
      */
+    @VisibleForTesting
     public static CompiledAutomaton compile(Automaton automaton)
     {
         return new CompiledAutomaton(automaton, null, true, Operations.DEFAULT_DETERMINIZE_WORK_LIMIT, false);
@@ -211,7 +215,7 @@ public final class LikePatterns
      * Builds a byte-level automaton accepting all values that end with the given literal suffix
      * ({@code LIKE '%<term>'}). The CQL layer never produces a suffix containing {@code %} (a pattern with an inner
      * wildcard is a {@link Operator#LIKE_MATCHES} pattern, see {@code LikeRestriction#makeSpecific}); any
-     * {@code %} in the value is matched literally, like by the {@link Operator#LIKE_SUFFIX} post-filter.
+     * {@code %} in the value is matched literally, like by the {@link Operator#LIKE_SUFFIX} post-filter. Not cached.
      */
     @VisibleForTesting
     public static CompiledAutomaton suffixAutomaton(String suffix)
@@ -222,6 +226,7 @@ public final class LikePatterns
     /**
      * Builds a byte-level automaton accepting all values that contain the given literal substring
      * ({@code LIKE '%<term>%'}). As for {@link #suffixAutomaton}, any {@code %} in the value is matched literally.
+     * Not cached.
      */
     @VisibleForTesting
     public static CompiledAutomaton containsAutomaton(String substring)
@@ -232,15 +237,16 @@ public final class LikePatterns
     }
 
     /**
-     * Builds (or fetches from a small LRU cache) the {@link CompiledAutomaton} for a pattern-matching operator and
-     * its restriction value, translating the CQL-level semantics of each operator:
+     * The entry point of the pattern operators: returns the {@link CompiledAutomaton} for a pattern-matching
+     * operator and its restriction value, from the compile cache when it holds it, translating the CQL-level
+     * semantics of each operator:
      * <ul>
      *   <li>{@link Operator#LIKE_SUFFIX} / {@link Operator#LIKE_CONTAINS}: the value is the literal left once
      *       {@code LikeRestriction#makeSpecific} trimmed the leading/trailing {@code %} wildcards of a pattern
      *       without inner wildcards; it is matched literally;</li>
      *   <li>{@link Operator#LIKE_MATCHES}: the value is either a literal (exact match) or the whole pattern of a
      *       LIKE with an inner wildcard (including any leading/trailing ones), and every {@code %} is an any-string
-     *       wildcard (see {@link #fromLikePattern}).</li>
+     *       wildcard (see {@link #patternAutomaton}).</li>
      * </ul>
      *
      * @param operator the pattern operator
@@ -290,7 +296,7 @@ public final class LikePatterns
             case LIKE_CONTAINS:
                 return containsAutomaton(utf8(value));
             case LIKE_MATCHES:
-                return fromLikePattern(utf8(value));
+                return patternAutomaton(utf8(value));
             default:
                 throw new AssertionError("Not a pattern operator: " + operator);
         }
