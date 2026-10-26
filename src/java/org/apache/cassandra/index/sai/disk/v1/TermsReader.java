@@ -568,7 +568,7 @@ public class TermsReader implements Closeable
     /**
      * Automaton intersection over the terms dictionary: restricts the dictionary to the range implied by the
      * automaton's common byte prefix and walks it guided by the automaton — accepted terms are collected, and on
-     * a rejected term the walk seeks the dictionary ({@link TrieTermsDictionaryReader#skipForwardTo}) to the next
+     * a rejected term the walk seeks the dictionary ({@link TrieTermsDictionaryReader#skipTo}) to the next
      * possibly-matching byte string computed by the {@link AutomatonSeeker} instead of visiting every term
      * (match-all automatons keep the plain bounded scan, every term is accepted). The seek targets are computed
      * in the same raw byte space the trie is sorted by: this intersection is only used for non-composite literal
@@ -613,7 +613,7 @@ public class TermsReader implements Closeable
             // The initial seek target: the least byte string that does not put the automaton into a reject
             // state. It always shares the automaton's common byte prefix with every acceptable string (or is a
             // prefix of it), so the common-prefix range below already contains it; it only tightens the start
-            // of the walk (see the skipForwardTo below).
+            // of the walk (see the skipTo below).
             byte[] initialTarget = null;
             if (seeker != null)
             {
@@ -642,9 +642,9 @@ public class TermsReader implements Closeable
                                                                                   termDictionaryFileEncodingVersion))
             {
                 // Tighten the start of the walk to the initial seek target when it is past the common prefix
-                // (a strictly increasing key, satisfying skipForwardTo's statefulness contract).
+                // (a key after the current position, as skipTo requires).
                 if (initialTarget != null && Arrays.compareUnsigned(initialTarget, commonPrefix) > 0)
-                    reader.skipForwardTo(ByteComparable.preencoded(termDictionaryFileEncodingVersion, initialTarget));
+                    reader.skipTo(ByteComparable.preencoded(termDictionaryFileEncodingVersion, initialTarget));
 
                 if (!reader.hasNext())
                     return PostingList.EMPTY;
@@ -750,12 +750,12 @@ public class TermsReader implements Closeable
                     if (seek)
                     {
                         // Seek targets are strictly increasing (the seeker computes the next string after the
-                        // visited term), satisfying skipForwardTo's statefulness contract; the reader's end bound keeps
-                        // applying, so a target beyond the range simply exhausts the walk.
+                        // visited term), as skipTo requires; the reader's end bound keeps applying, so a target
+                        // beyond the range simply exhausts the walk.
                         byte[] target = seeker.nextSeekTerm(termBytes);
                         if (target == null)
                             break; // no string after this term can possibly match
-                        reader.skipForwardTo(ByteComparable.preencoded(termDictionaryFileEncodingVersion, target));
+                        reader.skipTo(ByteComparable.preencoded(termDictionaryFileEncodingVersion, target));
                     }
                 } while (reader.hasNext());
             }

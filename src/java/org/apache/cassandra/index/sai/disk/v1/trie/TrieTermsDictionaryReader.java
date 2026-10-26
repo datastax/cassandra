@@ -108,7 +108,8 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
     /**
      * Returns the position associated with the least term greater than or equal to the given key, or
      * a negative value if there is no such term. In order to optimize the search, the trie is traversed
-     * statefully. Therefore, this method only returns correct results when called for increasing keys.
+     * statefully (see {@link ValueIterator#skipTo}). Therefore, this method only returns correct results when
+     * called for increasing keys.
      * Warning: ceiling is not idempotent. Calling ceiling() twice for the same key will return successive
      * values instead of the same value. This is acceptable for the current usage of the method.
      * @param key the prefix to traverse in the trie
@@ -121,21 +122,16 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
     }
 
     /**
-     * Repositions the iteration at the least term greater than or equal to the given key, without consuming it:
-     * the entry is returned by the following {@link #next()}/{@link #nextAsLong()} call (or {@link #hasNext()}
-     * returns false when no such term exists within the reader's bounds), using the
-     * forward-only {@link ValueIterator#skipForwardTo}: the trie walk restarts from the deepest node shared by the
-     * key and the current position (comparing bytes as unsigned, unlike {@link #ceiling}), skipping to a key strictly
-     * before the current position is a no-op, and a key exactly equal to the just-consumed term re-prepares that
-     * term, which the following {@code next()} yields a second time. Callers must therefore only pass keys
-     * strictly greater than the last consumed term (the automaton-guided intersection provably does:
-     * {@code AutomatonSeeker#nextSeekTerm} always returns a strictly greater string). Requires a collecting
-     * reader. Used by the automaton-guided intersection ({@code TermsReader}) to skip runs of non-matching
-     * terms.
+     * Positions the iteration at the least term greater than or equal to the given key without consuming it: the
+     * following {@link #next()}/{@link #nextAsLong()} returns that term, or {@link #hasNext()} returns false when
+     * there is no such term within the reader's end bound. Like {@link #ceiling}, this only moves forward (see
+     * {@link ValueIterator#skipTo}): a key before the last consumed term leaves the iteration where it is, and a
+     * key equal to it makes {@code next()} return it a second time, so callers must pass keys strictly greater
+     * than the last consumed term. Requires a collecting reader.
      */
-    public void skipForwardTo(ByteComparable key)
+    public void skipTo(ByteComparable key)
     {
-        skipForwardTo(key, LeftBoundTreatment.ADMIT_EXACT);
+        skipTo(key, LeftBoundTreatment.ADMIT_EXACT);
     }
 
     public long nextAsLong()

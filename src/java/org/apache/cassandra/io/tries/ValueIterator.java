@@ -106,38 +106,16 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
     }
 
     /**
-     * Skip to the given key or the closest after it in iteration order. Inclusive when admitPrefix = ADMIT_EXACT,
-     * exclusive when GREATER (ADMIT_PREFIXES is not supported).
+     * Skips forward to the given key: the next {@link #nextPayloadedNode()} returns the least entry greater than or
+     * equal to the key (strictly greater when admitPrefix = GREATER; ADMIT_PREFIXES is not supported) within the
+     * iterator's end bound. The walk restarts from the deepest node shared by the current position and the key.
+     * <p>
+     * The iterator never moves backwards: a key before the current position leaves it where it is, so that the
+     * entries are returned in order and at most once; a key equal to the entry last returned prepares that entry
+     * again, so it is returned a second time.
      * Requires that the iterator is collecting bytes.
-     * To get the next entry, use getNextPayloadedNode as normal.
      */
     protected void skipTo(ByteComparable skipTo, LeftBoundTreatment admitPrefix)
-    {
-        // Note: this compares the collected (signed) bytes with the unsigned transition bytes of skipTo, so a byte
-        // >= 0x80 on the current path never compares equal to the corresponding byte of skipTo, and the walk
-        // restarts from that depth instead of from the deepest node shared with skipTo. For a key before the current
-        // position this makes the outcome depend on the byte values: the walk moves back to the least key >= skipTo
-        // when their shared path has a byte >= 0x80, and is a no-op otherwise. Existing callers (ceiling() on the
-        // sorted terms of the primary key maps) and tests depend on both outcomes, so this is kept as is;
-        // skipForwardTo compares in the unsigned byte space, which iterations interleaving forward skips with
-        // next() over terms with bytes >= 0x80 (e.g. multi-byte UTF-8) need to be positioned correctly.
-        skipTo(skipTo, admitPrefix, false);
-    }
-
-    /**
-     * Forward-only variant of {@link #skipTo(ByteComparable, LeftBoundTreatment)}: skips to the given key or the
-     * closest after it in iteration order, comparing the key with the current position in the unsigned byte space
-     * the trie is ordered by, so that the walk restarts from the deepest node shared by the key and the current
-     * position whatever the byte values. A key before the current position is a no-op. A key equal to the current
-     * position re-prepares it, so iterating callers must only pass keys strictly greater than the last consumed one.
-     * Requires that the iterator is collecting bytes.
-     */
-    protected void skipForwardTo(ByteComparable skipTo, LeftBoundTreatment admitPrefix)
-    {
-        skipTo(skipTo, admitPrefix, true);
-    }
-
-    private void skipTo(ByteComparable skipTo, LeftBoundTreatment admitPrefix, boolean unsignedCompare)
     {
         assert skipTo != null;
         assert collector != null : "Cannot skip without collecting bytes";
@@ -153,7 +131,8 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
         final byte[] collectedBytes = collector.bytes;
         for (pos = 0; pos < collectedLength; ++pos)
         {
-            int collectedByte = unsignedCompare ? collectedBytes[pos] & 0xFF : collectedBytes[pos];
+            // the trie is ordered by unsigned bytes, the values ByteSource produces
+            int collectedByte = collectedBytes[pos] & 0xFF;
             if (nextByte != collectedByte)
             {
                 if (nextByte < collectedByte)

@@ -16,8 +16,11 @@
 
 package org.apache.cassandra.index.sai.disk;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Set;
+import java.util.function.ToLongFunction;
 
 import org.junit.After;
 import org.junit.Before;
@@ -93,11 +96,8 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RowAware
         this.partitioner = sstable.metadata().partitioner;
         this.factory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
 
-        try (PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
-        {
-            idPk1Ck1 = map.ceiling(buildPk(1, 1));
-            idPk1Ck10 = map.ceiling(buildPk(1, 10));
-        }
+        idPk1Ck1 = ceiling(buildPk(1, 1));
+        idPk1Ck10 = ceiling(buildPk(1, 10));
 
         map = factory.newPerSSTablePrimaryKeyMap();
     }
@@ -114,122 +114,151 @@ public class RowAwareWidePrimaryKeyMapTest extends SAITester.Versioned.RowAware
     @Test
     public void testExactRowIdOrInvertedCeiling()
     {
-        assertThat(map.exactRowIdOrInvertedCeiling(beforeFirst(map))).as("before first expects the inverted first")
+        assertThat(exactRowIdOrInvertedCeiling(beforeFirst(map))).as("before first expects the inverted first")
                                                                      .isEqualTo(~0);
 
-        assertThat(map.exactRowIdOrInvertedCeiling(exactFirstRow(map))).as("exact first row")
+        assertThat(exactRowIdOrInvertedCeiling(exactFirstRow(map))).as("exact first row")
                                                                        .isEqualTo(0);
 
-        assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 1))).as("exact pk=1, ck=1")
+        assertThat(exactRowIdOrInvertedCeiling(buildPk(1, 1))).as("exact pk=1, ck=1")
                                                                   .isEqualTo(idPk1Ck1);
 
-        assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 2))).as("exact pk=1, ck=2 expects next after pk=1, ck=1")
+        assertThat(exactRowIdOrInvertedCeiling(buildPk(1, 2))).as("exact pk=1, ck=2 expects next after pk=1, ck=1")
                                                                   .isEqualTo(idPk1Ck1 + 1);
 
-        assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 3))).as("exact pk=1, ck=3 expects next after pk=1, ck=2")
+        assertThat(exactRowIdOrInvertedCeiling(buildPk(1, 3))).as("exact pk=1, ck=3 expects next after pk=1, ck=2")
                                                                   .isEqualTo(idPk1Ck1 + 2);
 
-        assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 4))).as("between pk=1 ck=3 and ck=10 expects inverted ck=10")
+        assertThat(exactRowIdOrInvertedCeiling(buildPk(1, 4))).as("between pk=1 ck=3 and ck=10 expects inverted ck=10")
                                                                   .isEqualTo(~idPk1Ck10);
 
-        assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, 10))).as("exact pk=1, ck=10 expects next after pk=1, ck=3")
+        assertThat(exactRowIdOrInvertedCeiling(buildPk(1, 10))).as("exact pk=1, ck=10 expects next after pk=1, ck=3")
                                                                    .isEqualTo(idPk1Ck1 + 3);
 
-        assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1, Integer.MAX_VALUE))).as("after last ck in pk=1 expects inverted next partition first row or out of range if the last partition")
+        assertThat(exactRowIdOrInvertedCeiling(buildPk(1, Integer.MAX_VALUE))).as("after last ck in pk=1 expects inverted next partition first row or out of range if the last partition")
                                                                                   .isEqualTo(idPk1Ck10 < map.count()
                                                                                              ? ~(idPk1Ck10 + 1)
                                                                                              : Integer.MAX_VALUE);
 
-        assertThat(map.exactRowIdOrInvertedCeiling(exactLastRow(map))).as("exact last row")
+        assertThat(exactRowIdOrInvertedCeiling(exactLastRow(map))).as("exact last row")
                                                                       .isEqualTo(map.count() - 1);
 
         if (Version.current(KEYSPACE).onOrAfter(Version.GA)) // See CNDB-18024
-            assertThat(map.exactRowIdOrInvertedCeiling(buildPk(1000, 11))).as("after last row in last partition expects out of range")
+            assertThat(exactRowIdOrInvertedCeiling(buildPk(1000, 11))).as("after last row in last partition expects out of range")
                                                                           .isEqualTo(Long.MIN_VALUE);
 
-        assertThat(map.exactRowIdOrInvertedCeiling(afterLastToken(map))).as("after last expects out of range")
+        assertThat(exactRowIdOrInvertedCeiling(afterLastToken(map))).as("after last expects out of range")
                                                                         .isEqualTo(Long.MIN_VALUE);
     }
 
     @Test
     public void testCeiling()
     {
-        assertThat(map.ceiling(beforeFirst(map))).as("before first expects the first")
+        assertThat(ceiling(beforeFirst(map))).as("before first expects the first")
                                                  .isEqualTo(0);
 
-        assertThat(map.ceiling(exactFirstRow(map))).as("exact first row")
+        assertThat(ceiling(exactFirstRow(map))).as("exact first row")
                                                    .isEqualTo(0);
 
-        assertThat(map.ceiling(buildPk(1, 1))).as("exact pk=1, ck=1")
+        assertThat(ceiling(buildPk(1, 1))).as("exact pk=1, ck=1")
                                               .isEqualTo(idPk1Ck1);
 
-        assertThat(map.ceiling(buildPk(1, 2))).as("pk=1, ck=2 expects next after pk=1, ck=1")
+        assertThat(ceiling(buildPk(1, 2))).as("pk=1, ck=2 expects next after pk=1, ck=1")
                                               .isEqualTo(idPk1Ck1 + 1);
 
-        assertThat(map.ceiling(buildPk(1, 3))).as("exact pk=1, ck=3 expects next after pk=1, ck=2")
+        assertThat(ceiling(buildPk(1, 3))).as("exact pk=1, ck=3 expects next after pk=1, ck=2")
                                               .isEqualTo(idPk1Ck1 + 2);
 
-        assertThat(map.ceiling(buildPk(1, 4))).as("between pk=1 ck=3 and ck=10 expects ck=10")
+        assertThat(ceiling(buildPk(1, 4))).as("between pk=1 ck=3 and ck=10 expects ck=10")
                                               .isEqualTo(idPk1Ck1 + 3);
 
-        assertThat(map.ceiling(buildPk(1, 10))).as("exact pk=1, ck=10 expects next after pk=1, ck=3")
+        assertThat(ceiling(buildPk(1, 10))).as("exact pk=1, ck=10 expects next after pk=1, ck=3")
                                                .isEqualTo(idPk1Ck1 + 3);
 
-        assertThat(map.ceiling(buildPk(1, Integer.MAX_VALUE))).as("after last ck in pk=1 expects inverted next partition first row or out of range if the last partition")
+        assertThat(ceiling(buildPk(1, Integer.MAX_VALUE))).as("after last ck in pk=1 expects inverted next partition first row or out of range if the last partition")
                                                               .isEqualTo(idPk1Ck10 < map.count()
                                                                          ? idPk1Ck10 + 1
                                                                          : -1);
 
-        assertThat(map.ceiling(exactLastRow(map))).as("exact last row")
+        assertThat(ceiling(exactLastRow(map))).as("exact last row")
                                                   .isEqualTo(map.count() - 1);
 
         if (Version.current(KEYSPACE).onOrAfter(Version.GA)) // See CNDB-18024
-            assertThat(map.ceiling(buildPk(1000, 11))).as("after last row in last partition expects out of range")
+            assertThat(ceiling(buildPk(1000, 11))).as("after last row in last partition expects out of range")
                                                       .isEqualTo(-1);
 
-        assertThat(map.ceiling(afterLastToken(map))).as("after last expects out of range")
+        assertThat(ceiling(afterLastToken(map))).as("after last expects out of range")
                                                     .isEqualTo(-1);
     }
 
     @Test
     public void testFloor()
     {
-        assertThat(map.floor(beforeFirst(map))).as("before first expects out of range")
+        assertThat(floor(beforeFirst(map))).as("before first expects out of range")
                                                .isEqualTo(-1);
 
-        assertThat(map.floor(exactFirstRow(map))).as("exact first row")
+        assertThat(floor(exactFirstRow(map))).as("exact first row")
                                                  .isEqualTo(0);
 
-        assertThat(map.floor(buildPk(1, 1))).as("exact pk=1, ck=1")
+        assertThat(floor(buildPk(1, 1))).as("exact pk=1, ck=1")
                                             .isEqualTo(idPk1Ck1);
 
-        assertThat(map.floor(buildPk(1, 2))).as("pk=1, ck=2 expects next after pk=1, ck=1")
+        assertThat(floor(buildPk(1, 2))).as("pk=1, ck=2 expects next after pk=1, ck=1")
                                             .isEqualTo(idPk1Ck1 + 1);
 
-        assertThat(map.floor(buildPk(1, 3))).as("exact pk=1, ck=3 expects next after pk=1, ck=2")
+        assertThat(floor(buildPk(1, 3))).as("exact pk=1, ck=3 expects next after pk=1, ck=2")
                                             .isEqualTo(idPk1Ck1 + 2);
 
-        assertThat(map.floor(buildPk(1, 10))).as("exact pk=1, ck=10 expects next after pk=1, ck=3")
+        assertThat(floor(buildPk(1, 10))).as("exact pk=1, ck=10 expects next after pk=1, ck=3")
                                              .isEqualTo(idPk1Ck1 + 3);
 
-        assertThat(map.floor(buildPk(1, 4))).as("between pk=1 ck=3 and ck=10 expects ck=3")
+        assertThat(floor(buildPk(1, 4))).as("between pk=1 ck=3 and ck=10 expects ck=3")
                                             .isEqualTo(idPk1Ck1 + 2);
 
-        assertThat(map.floor(buildPk(1, Integer.MAX_VALUE))).as("after last ck in pk=1 expects last ck in pk=1")
+        assertThat(floor(buildPk(1, Integer.MAX_VALUE))).as("after last ck in pk=1 expects last ck in pk=1")
                                                             .isEqualTo(idPk1Ck10);
 
-        assertThat(map.floor(exactLastRow(map))).as("exact last row")
+        assertThat(floor(exactLastRow(map))).as("exact last row")
                                                 .isEqualTo(map.count() - 1);
 
-        assertThat(map.floor(buildPk(1000, 11))).as("after last row in last partition expects the last")
+        assertThat(floor(buildPk(1000, 11))).as("after last row in last partition expects the last")
                                                 .isEqualTo(map.count() - 1);
 
         if (Version.current(KEYSPACE).onOrAfter(Version.GA)) // See CNDB-18024
-            assertThat(map.floor(buildPk(1000, 11))).as("after last row in last partition expects the last row")
+            assertThat(floor(buildPk(1000, 11))).as("after last row in last partition expects the last row")
                                                     .isEqualTo(map.count() - 1);
 
-        assertThat(map.floor(afterLastToken(map))).as("after last token expects the last")
+        assertThat(floor(afterLastToken(map))).as("after last token expects the last")
                                                   .isEqualTo(map.count() - 1);
+    }
+
+    // ceiling() and exactRowIdOrInvertedCeiling() walk the primary key trie statefully and only support increasing
+    // keys on the same map (see TrieTermsDictionaryReader#ceiling), so each lookup below uses its own map.
+    private long ceiling(PrimaryKey key)
+    {
+        return lookup(m -> m.ceiling(key));
+    }
+
+    private long exactRowIdOrInvertedCeiling(PrimaryKey key)
+    {
+        return lookup(m -> m.exactRowIdOrInvertedCeiling(key));
+    }
+
+    private long floor(PrimaryKey key)
+    {
+        return lookup(m -> m.floor(key));
+    }
+
+    private long lookup(ToLongFunction<PrimaryKeyMap> lookup)
+    {
+        try (PrimaryKeyMap map = factory.newPerSSTablePrimaryKeyMap())
+        {
+            return lookup.applyAsLong(map);
+        }
+        catch (IOException e)
+        {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private PrimaryKey buildPk(int partitionKey, int clusteringKey)

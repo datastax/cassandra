@@ -36,7 +36,7 @@ import org.apache.lucene.util.automaton.Transition;
  * Drives an automaton-guided (seek-skipping) walk of an ordered terms dictionary: given the byte string of a
  * visited dictionary term, decides whether it is accepted and, on a rejection outside of a "linear" (sequential)
  * stretch, computes the next string in unsigned byte order that does not put the DFA into a reject state, so the
- * caller can <em>seek</em> the dictionary there ({@code TrieTermsDictionaryReader#skipForwardTo}) instead of visiting
+ * caller can <em>seek</em> the dictionary there ({@code TrieTermsDictionaryReader#skipTo}) instead of visiting
  * every term in between.
  * <p>
  * This is a port of the {@code nextSeekTerm}/{@code nextString} machinery of Lucene 9.8's
