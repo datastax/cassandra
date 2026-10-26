@@ -1117,11 +1117,13 @@ public class RowFilter
 
             // Tokenizing indexes don't serve LIKE, so the value and the pattern each analyze to a single
             // (normalized) token: match the normalized pattern against the normalized value, as the index does
-            // against its normalized terms. A custom index tokenizing them anyway can't be matched.
+            // against its normalized terms.
             if (operator.isLike())
             {
                 List<ByteBuffer> indexedTokens = analyzer.indexedTokens(foundValue);
                 List<ByteBuffer> queriedTokens = analyzer.queriedTokens();
+                assert indexedTokens.size() <= 1 && queriedTokens.size() <= 1
+                    : "LIKE on " + column.name + " is served by a tokenizing index: " + indexedTokens.size() + " value tokens, " + queriedTokens.size() + " pattern tokens";
                 return indexedTokens.size() == 1
                        && queriedTokens.size() == 1
                        && operator.isSatisfiedBy(type, indexedTokens.get(0), queriedTokens.get(0));
