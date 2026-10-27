@@ -411,6 +411,55 @@ public class QueryContext
             filterSortOrder = context.filterSortOrder;
             queryPlanInfo = context.queryPlanInfo;
         }
+
+        /**
+         * Appends the metrics of this snapshot to the given string builder, with each line indented by the specified prefix.
+         *
+         * @param sb the string builder
+         * @param indent the indentation prefix for each line
+         */
+        public void appendMetrics(StringBuilder sb, String indent)
+        {
+            appendMetric(sb, indent, "sstablesHit", sstablesHit);
+            appendMetric(sb, indent, "segmentsHit", segmentsHit);
+            appendMetric(sb, indent, "keysFetched", keysFetched);
+            appendMetric(sb, indent, "partitionsFetched", partitionsFetched);
+            appendMetric(sb, indent, "partitionsReturned", partitionsReturned);
+            appendMetric(sb, indent, "partitionTombstonesFetched", partitionTombstonesFetched);
+            appendMetric(sb, indent, "rowsFetched", rowsFetched);
+            appendMetric(sb, indent, "rowsReturned", rowsReturned);
+            appendMetric(sb, indent, "rowTombstonesFetched", rowTombstonesFetched);
+            appendMetric(sb, indent, "cellsFetched", cellsFetched);
+            appendMetric(sb, indent, "cellsReturned", cellsReturned);
+            appendMetric(sb, indent, "trieSegmentsHit", trieSegmentsHit);
+            appendMetric(sb, indent, "triePostingsSkips", triePostingsSkips);
+            appendMetric(sb, indent, "triePostingsDecodes", triePostingsDecodes);
+            appendMetric(sb, indent, "bkdSegmentsHit", bkdSegmentsHit);
+            appendMetric(sb, indent, "bkdPostingListsHit", bkdPostingListsHit);
+            appendMetric(sb, indent, "bkdPostingsSkips", bkdPostingsSkips);
+            appendMetric(sb, indent, "bkdPostingsDecodes", bkdPostingsDecodes);
+            appendMetric(sb, indent, "annGraphSearchLatencyNanos", annGraphSearchLatency);
+        }
+
+        private static void appendMetric(StringBuilder sb, String indent, String name, Object value)
+        {
+            sb.append(indent).append(name).append(": ").append(value).append('\n');
+        }
+
+        /**
+         * Returns a multi-line string containing all metrics with the given indentation.
+         *
+         * @param indent the indentation prefix for each line
+         * @return the formatted metrics string
+         */
+        public String toLogString(String indent)
+        {
+            StringBuilder sb = new StringBuilder();
+            appendMetrics(sb, indent);
+            if (sb.length() > 0 && sb.charAt(sb.length() - 1) == '\n')
+                sb.setLength(sb.length() - 1);
+            return sb.toString();
+        }
     }
 
     /**

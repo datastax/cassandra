@@ -68,25 +68,7 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
 
         // append the index context metrics
         sb.append(sectionNamePrefix).append("metrics:\n");
-        appendMetric(sb, "sstablesHit", metrics.sstablesHit);
-        appendMetric(sb, "segmentsHit", metrics.segmentsHit);
-        appendMetric(sb, "keysFetched", metrics.keysFetched);
-        appendMetric(sb, "partitionsFetched", metrics.partitionsFetched);
-        appendMetric(sb, "partitionsReturned", metrics.partitionsReturned);
-        appendMetric(sb, "partitionTombstonesFetched", metrics.partitionTombstonesFetched);
-        appendMetric(sb, "rowsFetched", metrics.rowsFetched);
-        appendMetric(sb, "rowsReturned", metrics.rowsReturned);
-        appendMetric(sb, "rowTombstonesFetched", metrics.rowTombstonesFetched);
-        appendMetric(sb, "cellsFetched", metrics.cellsFetched);
-        appendMetric(sb, "cellsReturned", metrics.cellsReturned);
-        appendMetric(sb, "trieSegmentsHit", metrics.trieSegmentsHit);
-        appendMetric(sb, "triePostingsSkips", metrics.triePostingsSkips);
-        appendMetric(sb, "triePostingsDecodes", metrics.triePostingsDecodes);
-        appendMetric(sb, "bkdSegmentsHit", metrics.bkdSegmentsHit);
-        appendMetric(sb, "bkdPostingListsHit", metrics.bkdPostingListsHit);
-        appendMetric(sb, "bkdPostingsSkips", metrics.bkdPostingsSkips);
-        appendMetric(sb, "bkdPostingsDecodes", metrics.bkdPostingsDecodes);
-        appendMetric(sb, "annGraphSearchLatencyNanos", metrics.annGraphSearchLatency);
+        metrics.appendMetrics(sb, DOUBLE_INDENT);
 
         // append the plan
         sb.append(sectionNamePrefix).append("plan:\n").append(plan);
@@ -98,10 +80,5 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
     {
         String s = plan.toStringRecursive(Redaction.REDACT, DOUBLE_INDENT);
         return s.endsWith("\n") ? s.substring(0, s.length() - 1) : s;
-    }
-
-    private static void appendMetric(StringBuilder sb, String name, Object value)
-    {
-        sb.append(DOUBLE_INDENT).append(name).append(": ").append(value).append('\n');
     }
 }
