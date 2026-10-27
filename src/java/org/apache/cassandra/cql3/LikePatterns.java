@@ -88,22 +88,6 @@ public final class LikePatterns
                 })
                 .build();
 
-    /** The weight bound of {@link #FAILED_COMPILE_CACHE}, in approximate retained bytes. */
-    private static final long FAILED_COMPILE_CACHE_MAX_WEIGHT_BYTES = 1 << 20;
-
-    /**
-     * Failed compiles (syntactically invalid or too complex to determinize) are cached too, keyed like
-     * {@link #COMPILE_CACHE}: without this, a bad pattern that reaches the per-row post-filter path (e.g. LIKE
-     * served by a custom index implementation, which bypasses the eager coordinator compile of SAI) would re-run
-     * determinization up to the work limit for every candidate row. Entries are weighed by the size of the pattern
-     * they retain (plus their error message), so that large patterns can't pin an unbounded amount of heap.
-     */
-    private static final Cache<CacheKey, String> FAILED_COMPILE_CACHE =
-        Caffeine.newBuilder()
-                .maximumWeight(FAILED_COMPILE_CACHE_MAX_WEIGHT_BYTES)
-                .<CacheKey, String>weigher((key, reason) -> 64 + key.value.remaining() + 2 * reason.length())
-                .build();
-
     private LikePatterns()
     {
     }
@@ -264,9 +248,6 @@ public final class LikePatterns
         CompiledAutomaton cached = COMPILE_CACHE.getIfPresent(probe);
         if (cached != null)
             return cached;
-        String cachedFailure = FAILED_COMPILE_CACHE.getIfPresent(probe);
-        if (cachedFailure != null)
-            throw new InvalidPatternException(operator, column, cachedFailure);
 
         CompiledAutomaton automaton;
         try
@@ -275,9 +256,8 @@ public final class LikePatterns
         }
         catch (TooComplexToDeterminizeException | IllegalArgumentException e)
         {
-            String reason = String.valueOf(e.getMessage());
-            FAILED_COMPILE_CACHE.put(new CacheKey(operator, ByteBufferUtil.clone(value)), reason);
-            throw new InvalidPatternException(operator, column, reason);
+            // not cached: the query fails on the first evaluation
+            throw new InvalidPatternException(operator, column, String.valueOf(e.getMessage()));
         }
 
         // Store under a defensive copy of the pattern bytes: the static cache must not retain (and potentially

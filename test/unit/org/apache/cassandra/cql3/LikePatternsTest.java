@@ -161,15 +161,11 @@ public class LikePatternsTest
     @Test
     public void forPatternOperatorRejectsPatternsTooComplexToDeterminize()
     {
-        // enough alternating wildcards and literals to exceed Lucene's determinization work limit; the failure
-        // is cached too, so the second call fails the same way without re-running the determinization
+        // enough alternating wildcards and literals to exceed Lucene's determinization work limit
         ByteBuffer pattern = ByteBuffer.wrap(utf8("a%".repeat(1000) + 'a'));
-        for (int i = 0; i < 2; i++)
-        {
-            assertThatThrownBy(() -> LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, pattern, "v"))
-                .isInstanceOf(InvalidPatternException.class)
-                .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
-        }
+        assertThatThrownBy(() -> LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, pattern, "v"))
+            .isInstanceOf(InvalidPatternException.class)
+            .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
         // the column is optional (the Operator post-filter doesn't know it)
         assertThatThrownBy(() -> LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, pattern, null))
             .isInstanceOf(InvalidPatternException.class)
