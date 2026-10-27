@@ -91,7 +91,7 @@ public class VectorCompactionGraphPqRefineRecallTest extends VectorTester.Versio
         var groundTruth = VectorSiftSmallTest.readIvecs(String.format("test/data/%s/%s_groundtruth.ivecs", DATASET, DATASET));
 
         createTable("CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
-        String index = createIndexAsync("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        String index = createIndexAsync(vectorIndexDDL("%s", "val", Map.of("similarity_function", "euclidean")));
         waitForIndexQueryable(KEYSPACE, index, 5, TimeUnit.MINUTES);
         disableCompaction();
 
