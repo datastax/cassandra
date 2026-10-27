@@ -819,7 +819,6 @@ public class TermsReader implements Closeable
         private final QueryContext context;
         private final Iterator<Pair<ByteComparable, Long>> reader;
         private final AutoCloseable readerCloser;
-        private final ByteComparable.Version readerVersion;
         private final IndexInput postingsInput;
         private final IndexInput postingsSummaryInput;
         private Pair<ByteComparable, Long> entry;
@@ -838,25 +837,23 @@ public class TermsReader implements Closeable
             byte[] upperBytes = AutomatonQueries.prefixUpperBound(prefix);
             if (ascending)
             {
-                readerVersion = termDictionaryFileEncodingVersion;
                 TrieTermsDictionaryReader forward = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
                                                                                   termDictionaryRoot,
                                                                                   bound(prefix),
                                                                                   bound(upperBytes),
                                                                                   true,
                                                                                   true,
-                                                                                  readerVersion);
+                                                                                  termDictionaryFileEncodingVersion);
                 reader = forward;
                 readerCloser = forward;
             }
             else
             {
-                // like ReverseTermsScanner
-                readerVersion = TypeUtil.BYTE_COMPARABLE_VERSION;
                 ReverseTrieTermsDictionaryReader reverse = new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
                                                                                                 termDictionaryRoot,
                                                                                                 bound(prefix),
-                                                                                                bound(upperBytes));
+                                                                                                bound(upperBytes),
+                                                                                                termDictionaryFileEncodingVersion);
                 reader = reverse;
                 readerCloser = reverse;
             }
@@ -880,7 +877,7 @@ public class TermsReader implements Closeable
         @Nullable
         private ByteComparable bound(@Nullable byte[] bytes)
         {
-            return bytes == null || bytes.length == 0 ? null : ByteComparable.preencoded(readerVersion, bytes);
+            return bytes == null || bytes.length == 0 ? null : ByteComparable.preencoded(termDictionaryFileEncodingVersion, bytes);
         }
 
         @Override
@@ -892,7 +889,7 @@ public class TermsReader implements Closeable
             while (reader.hasNext())
             {
                 Pair<ByteComparable, Long> candidate = reader.next();
-                byte[] termBytes = ByteSourceInverse.readBytes(candidate.left.asComparableBytes(readerVersion));
+                byte[] termBytes = ByteSourceInverse.readBytes(candidate.left.asComparableBytes(termDictionaryFileEncodingVersion));
                 // the reader's bounds admit the end bound nextOf(prefix) itself
                 if (!startsWith(termBytes, prefix))
                     continue;
