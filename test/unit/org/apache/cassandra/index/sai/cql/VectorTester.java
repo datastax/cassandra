@@ -29,6 +29,7 @@ import java.util.stream.Collectors;
 import org.apache.cassandra.cql3.CqlBuilder;
 
 import org.apache.commons.lang.reflect.FieldUtils;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.runner.RunWith;
@@ -68,6 +69,14 @@ public class VectorTester extends SAITester
         setMaxBruteForceRows(n);
         // override the global holes allowed so that the one-to-many path gets exercised
         V5VectorPostingsWriter.GLOBAL_HOLES_ALLOWED = 1.0;
+    }
+
+    @After
+    public void resetParallelGraphWriting()
+    {
+        // Some tests enable parallel graph writing together with FusedPQ. Restore the default (disabled) so the
+        // static flag does not leak into other test classes running in the same JVM.
+        SAIUtil.setParallelGraphWriting(false);
     }
 
     public static void setMaxBruteForceRows(int n)
