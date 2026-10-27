@@ -78,7 +78,7 @@ public class VectorMetricsTest extends VectorTester
         super.setup();
         SAIUtil.setCurrentVersion(version);
         SAIUtil.setEnableFused(enableFused);
-        SAIUtil.setParallelGraphWriting(enableFused);
+        SAIUtil.setParallelEncodingWriting(enableFused);
     }
 
     @Test

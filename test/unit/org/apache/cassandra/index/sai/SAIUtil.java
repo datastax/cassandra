@@ -101,11 +101,6 @@ public class SAIUtil
         }
     }
 
-    public static void setParallelGraphWriting(boolean enabled)
-    {
-        CompactionGraph.PARALLEL_ENCODING_WRITING = enabled;
-    }
-
     public static void setEnableFused(boolean enableFused)
     {
         try

@@ -139,10 +139,10 @@ abstract public class VectorCompactionTest extends VectorTester
     }
 
     @Before
-    public void setParallelGraphWriting()
+    public void setParallelEncodingWriting()
     {
         // Enable parallel graph writing when running with FusedPQ (FB+ with enableFused=true)
-        SAIUtil.setParallelGraphWriting(enableFused);
+        SAIUtil.setParallelEncodingWriting(enableFused);
     }
 
     @Test

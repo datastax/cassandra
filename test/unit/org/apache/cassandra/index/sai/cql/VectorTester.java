@@ -72,11 +72,11 @@ public class VectorTester extends SAITester
     }
 
     @After
-    public void resetParallelGraphWriting()
+    public void resetParallelEncodingWriting()
     {
         // Some tests enable parallel graph writing together with FusedPQ. Restore the default (disabled) so the
         // static flag does not leak into other test classes running in the same JVM.
-        SAIUtil.setParallelGraphWriting(false);
+        SAIUtil.setParallelEncodingWriting(false);
     }
 
     public static void setMaxBruteForceRows(int n)
@@ -284,10 +284,10 @@ public class VectorTester extends SAITester
         }
 
         @Before
-        public void setParallelGraphWriting()
+        public void setParallelEncodingWriting()
         {
             // Enable parallel graph writing when running with FusedPQ (FB+ with ENABLE_FUSED=true)
-            SAIUtil.setParallelGraphWriting(ENABLE_FUSED);
+            SAIUtil.setParallelEncodingWriting(ENABLE_FUSED);
         }
 
         /**
