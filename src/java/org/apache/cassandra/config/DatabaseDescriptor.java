@@ -541,6 +541,8 @@ public class DatabaseDescriptor
 
         applyEncryptionContext();
 
+        initializeCommitLogDiskAccessMode();
+
         applySslContext();
 
         applyStartupChecks();
@@ -706,10 +708,6 @@ public class DatabaseDescriptor
         {
             conf.commitlog_directory = storagedirFor("commitlog");
         }
-
-        initializeCommitLogDiskAccessMode();
-        if (commitLogWriteDiskAccessMode != conf.commitlog_disk_access_mode)
-            logger.info("commitlog_disk_access_mode resolved to: {}", commitLogWriteDiskAccessMode);
 
         if (conf.hints_directory == null)
         {
@@ -1113,8 +1111,8 @@ public class DatabaseDescriptor
         if (conf.audit_logging_options != null)
             setAuditLoggingOptions(conf.audit_logging_options);
 
-        if (conf.aggregation_subpage_size_in_kb < 1)
-            throw new ConfigurationException("aggregation_subpage_size_in_kb must be greater than 0");
+        if (conf.aggregation_subpage_size == null || conf.aggregation_subpage_size.toKibibytes() < 1)
+            throw new ConfigurationException("aggregation_subpage_size must be at least 1KiB");
 
         setAggregationSubPageSize(getAggregationSubPageSize());
     }
@@ -2398,12 +2396,12 @@ public class DatabaseDescriptor
 
     public static long getRepairPrepareMessageTimeout(TimeUnit unit)
     {
-        return conf.repair_prepare_message_timeout_in_ms.to(unit);
+        return conf.repair_prepare_message_timeout.to(unit);
     }
 
     public static void setRepairPrepareMessageTimeout(Long timeOutInMillis)
     {
-        conf.repair_prepare_message_timeout_in_ms = new DurationSpec.LongMillisecondsBound(timeOutInMillis);
+        conf.repair_prepare_message_timeout = new DurationSpec.LongMillisecondsBound(timeOutInMillis);
     }
 
     public static boolean hasCrossNodeTimeout()
@@ -3119,6 +3117,8 @@ public class DatabaseDescriptor
         Pair<DiskAccessMode, Boolean> accessModeDirectIoPair = resolveCommitLogWriteDiskAccessMode(conf.commitlog_disk_access_mode);
         validateCommitLogWriteDiskAccessMode(accessModeDirectIoPair);
         commitLogWriteDiskAccessMode = accessModeDirectIoPair.left;
+        if (commitLogWriteDiskAccessMode != conf.commitlog_disk_access_mode)
+            logger.info("commitlog_disk_access_mode resolved to: {}", commitLogWriteDiskAccessMode);
     }
 
     public static File getSavedCachesLocation()
@@ -5581,12 +5581,12 @@ public class DatabaseDescriptor
 
     public static int getSAISegmentWriteBufferSpace()
     {
-        return conf == null ? StorageAttachedIndexOptions.DEFAULT_SEGMENT_BUFFER_MB : conf.sai_options.segment_write_buffer_space_mb;
+        return conf == null ? StorageAttachedIndexOptions.DEFAULT_SEGMENT_BUFFER_MB : conf.sai_options.segment_write_buffer_size.toMebibytes();
     }
 
     public static void setSAISegmentWriteBufferSpace(int bufferSpace)
     {
-        conf.sai_options.segment_write_buffer_space_mb = bufferSpace;
+        conf.sai_options.segment_write_buffer_size = new DataStorageSpec.IntMebibytesBound(bufferSpace);
     }
 
     public static double getSAIZeroCopyUsedThreshold()
@@ -5623,14 +5623,14 @@ public class DatabaseDescriptor
 
     public static PageSize getAggregationSubPageSize()
     {
-        return PageSize.inBytes(conf.aggregation_subpage_size_in_kb * 1024);
+        return PageSize.inBytes(conf.aggregation_subpage_size.toBytes());
     }
 
     public static void setAggregationSubPageSize(PageSize pageSize)
     {
         Preconditions.checkArgument(!pageSize.isDefined() || pageSize.getUnit() == PageSize.PageUnit.BYTES);
         Preconditions.checkArgument(pageSize.bytes() >= 1024);
-        conf.aggregation_subpage_size_in_kb = pageSize.bytes() / 1024;
+        conf.aggregation_subpage_size = new DataStorageSpec.IntKibibytesBound(pageSize.bytes() / 1024);
     }
 
     public static double getAnnBruteForceExpenseFactor()

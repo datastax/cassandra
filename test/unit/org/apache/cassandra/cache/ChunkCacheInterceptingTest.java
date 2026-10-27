@@ -123,6 +123,12 @@ public class ChunkCacheInterceptingTest
         }
 
         @Override
+        public long remainingBytes(long position)
+        {
+            return wrapped.remainingBytes(position);
+        }
+
+        @Override
         public Rebufferer instantiateRebufferer(boolean isScan)
         {
             numInstantiations += 1;

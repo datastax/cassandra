@@ -156,7 +156,9 @@ public class Config
 
     @Replaces(oldName = "write_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
     public volatile DurationSpec.LongMillisecondsBound write_request_timeout = new DurationSpec.LongMillisecondsBound("2000ms");
-    
+
+    // HCD-632: HCD 1.2 name
+    @Replaces(oldName = "hints_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
     public volatile DurationSpec.LongMillisecondsBound hints_request_timeout = new DurationSpec.LongMillisecondsBound("2000ms");
 
     @Replaces(oldName = "counter_write_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
@@ -171,7 +173,9 @@ public class Config
     @Replaces(oldName = "repair_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
     public volatile DurationSpec.LongMillisecondsBound repair_request_timeout = new DurationSpec.LongMillisecondsBound("120000ms");
 
-    public volatile DurationSpec.LongMillisecondsBound repair_prepare_message_timeout_in_ms = new DurationSpec.LongMillisecondsBound("10000ms");
+    // HCD-632: HCD 1.2 sets the old name as a number of milliseconds, HCD 2.0 before the rename as a duration
+    @Replaces(oldName = "repair_prepare_message_timeout_in_ms", converter = Converters.MILLIS_STRING_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound repair_prepare_message_timeout = new DurationSpec.LongMillisecondsBound("10000ms");
 
     public Integer streaming_connections_per_host = 1;
     @Replaces(oldName = "streaming_keep_alive_period_in_secs", converter = Converters.SECONDS_DURATION, deprecated = true)
@@ -820,7 +824,9 @@ public class Config
 
     public StorageAttachedIndexOptions sai_options = new StorageAttachedIndexOptions();
 
-    public volatile int aggregation_subpage_size_in_kb = 2048;
+    // HCD-632: renamed following the 4.1 convention, HCD 1.2 sets the old name
+    @Replaces(oldName = "aggregation_subpage_size_in_kb", converter = Converters.KIBIBYTES_DATASTORAGE, deprecated = true)
+    public volatile DataStorageSpec.IntKibibytesBound aggregation_subpage_size = new DataStorageSpec.IntKibibytesBound("2048KiB");
 
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()} See CASSANDRA-12550
@@ -857,6 +863,8 @@ public class Config
     public volatile boolean auto_optimise_preview_repair_streams = false;
 
     // see CASSANDRA-17048 and the comment in cassandra.yaml
+    // HCD-632: HCD 1.2 still uses the 4.1-alpha1 name
+    @Replaces(oldName = "enable_uuid_sstable_identifiers", converter = Converters.IDENTITY, deprecated = true)
     public boolean uuid_sstable_identifiers_enabled = true;
 
     /**

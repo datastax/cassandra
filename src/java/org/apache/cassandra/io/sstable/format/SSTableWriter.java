@@ -46,6 +46,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.compress.CompressionMetadataReaderType;
 import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -59,6 +60,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.MmappedRegionsCache;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -267,6 +269,21 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
 
     protected abstract SSTableReader openFinal(SSTableReader.OpenReason openReason);
 
+    /**
+     * @return the compression parameters the data file is written with ({@link CompressionParams#noCompression()} if
+     * it is not compressed), which the sstable metadata takes its encryptor from. Writers that know them should
+     * override this; the default implementation reads them back from the compression info file written by the data
+     * writer, if any, unless the version does not encrypt metadata (e.g. BIG): then the parameters do not matter, and
+     * {@link CompressionParams#noCompression()} is returned without reading the file.
+     */
+    protected CompressionParams dataCompressionParams()
+    {
+        if (!descriptor.version.metadataIsEncrypted())
+            return CompressionParams.noCompression();
+        CompressionParams params = CompressionInfoComponent.readCompressionParamsIfExists(descriptor, CompressionMetadataReaderType.WRITE_TIME);
+        return params != null ? params : CompressionParams.noCompression();
+    }
+
     public SSTableReader finish(boolean openResult, @Nullable StorageHandler storageHandler)
     {
         prepareToCommit();
@@ -404,7 +421,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         protected void doPrepare()
         {
             transactionals.get().forEach(Transactional::prepareToCommit);
-            new StatsComponent(descriptor, finalizeMetadata()).save(descriptor);
+            new StatsComponent(descriptor, finalizeMetadata()).save(descriptor, dataCompressionParams());
 
             // save the table of components
             TOCComponent.updateTOC(descriptor, components());

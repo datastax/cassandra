@@ -166,7 +166,19 @@ public class CompressionMetadata extends WrappedSharedCloseable
     }
 
     /**
-     * Create a CompressionMetadata for encryption-only (no compression) files.
+     * Create a CompressionMetadata for encryption-only (no compression) files, i.e. files written by
+     * {@link EncryptedSequentialWriter}, which carries nothing but the compression parameters (and thus the
+     * encryptor).
+     * <p>
+     * The returned instance has no chunk offsets ({@link #hasOffsets()} and {@link #isEncryptionOnly()} return
+     * respectively {@code false} and {@code true}), and its {@link #dataLength} and {@link #compressedFileLength}
+     * are {@code -1}: every accessor that needs the chunk offsets ({@link #chunkFor(long)},
+     * {@link #getTotalSizeForSections(Collection)}, {@link #getChunksForSections(Collection)}) throws
+     * {@link IllegalStateException}. The instance is only valid together with
+     * {@link org.apache.cassandra.io.util.FileHandle.Builder#encryptionOnly()}, which reads the file through an
+     * {@link org.apache.cassandra.io.util.EncryptedChunkReader} and takes the lengths from the file itself.
+     * It allocates no off-heap memory.
+     *
      * @param compressionParams The compression parameters containing the encryptor
      * @return A CompressionMetadata instance suitable for encryption-only files
      */
@@ -410,9 +422,29 @@ public class CompressionMetadata extends WrappedSharedCloseable
         return chunkOffsets != null ? chunkOffsets.offHeapMemoryUsed() : 0;
     }
 
+    /**
+     * @return {@code true} if this metadata has at least one chunk offset; {@code false} for an
+     * {@link #encryptedOnly(CompressionParams) encryption-only} instance, which has none, and for the metadata of an
+     * empty compressed file
+     */
     public boolean hasOffsets()
     {
         return chunkOffsets != null && chunkOffsets.size() > 0;
+    }
+
+    /**
+     * @return {@code true} if this is an {@link #encryptedOnly(CompressionParams) encryption-only} instance, which
+     * carries only the compression parameters: no chunk offsets and no lengths
+     */
+    public boolean isEncryptionOnly()
+    {
+        return chunkOffsets == null;
+    }
+
+    private void checkOffsets()
+    {
+        if (chunkOffsets == null)
+            throw new IllegalStateException("encryption-only compression metadata has no chunk offsets");
     }
 
     @Override
@@ -439,6 +471,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
      */
     public Chunk chunkFor(long uncompressedDataPosition)
     {
+        checkOffsets();
         int chunkIdx = chunkIndex(uncompressedDataPosition);
         return chunk(chunkIdx);
     }
@@ -515,7 +548,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
      */
     public long getTotalSizeForSections(Collection<SSTableReader.PartitionPositionBounds> sections)
     {
-        assert hasOffsets();
+        checkOffsets();
 
         long size = 0;
         int lastIncludedChunkIdx = -1;
@@ -543,7 +576,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
      */
     public Chunk[] getChunksForSections(Collection<SSTableReader.PartitionPositionBounds> sections)
     {
-        assert hasOffsets();
+        checkOffsets();
 
         // use SortedSet to eliminate duplicates and sort by chunk offset
         SortedSet<Chunk> offsets = new TreeSet<>((o1, o2) -> Longs.compare(o1.offset, o2.offset));

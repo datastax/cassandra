@@ -18,10 +18,12 @@
 
 package org.apache.cassandra.tools.nodetool.stats;
 
+import java.lang.reflect.UndeclaredThrowableException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
 
 import javax.management.InstanceNotFoundException;
@@ -398,11 +400,14 @@ public class TableStatsHolder implements StatsHolder
 
                 if (!SchemaConstants.isSystemKeyspace(keyspaceName))
                 {
-                    Object totalIndexCount = probe.getSaiMetric(keyspaceName, tableName, "TotalIndexCount");
-                    statsTable.saiTotalIndexCount = (totalIndexCount != null) ? (int) totalIndexCount : 0;
+                    statsTable.hasSaiIndexes = probe.hasSaiIndexes(keyspaceName, tableName);
 
-                    if (statsTable.saiTotalIndexCount > 0)
+                    if (statsTable.hasSaiIndexes)
                     {
+                        // the table state metrics, which count the indexes, can be disabled
+                        Object totalIndexCount = probe.getSaiMetric(keyspaceName, tableName, "TotalIndexCount");
+                        statsTable.saiTotalIndexCount = (totalIndexCount != null) ? (int) totalIndexCount : 0;
+
                         Object queryLatencyMetric = probe.getSaiMetric(keyspaceName, tableName, "QueryLatency");
                         double queryLatency = getMetricMean(queryLatencyMetric);
                         statsTable.saiQueryLatencyMs = queryLatency > 0 ? queryLatency : Double.NaN;
@@ -427,10 +432,13 @@ public class TableStatsHolder implements StatsHolder
                         Object totalQueryTimeouts = probe.getSaiMetric(keyspaceName, tableName, "TotalQueryTimeouts");
                         statsTable.saiTotalQueryTimeouts = (totalQueryTimeouts != null) ? (Long) totalQueryTimeouts : 0L;
 
-                        Object totalQueryableIndexCount = probe.getSaiMetric(keyspaceName, tableName, "TotalQueryableIndexCount");
-                        int saiTotalQueryableIndexCount = (totalQueryableIndexCount != null) ? (int) totalQueryableIndexCount : 0;
-
-                        statsTable.saiTotalQueryableIndexRatio = String.format("%d/%d", saiTotalQueryableIndexCount, statsTable.saiTotalIndexCount);
+                        Object totalQueryableIndexCount = (totalIndexCount != null)
+                                                          ? probe.getSaiMetric(keyspaceName, tableName, "TotalQueryableIndexCount")
+                                                          : null;
+                        if (totalQueryableIndexCount != null)
+                            statsTable.saiTotalQueryableIndexRatio = String.format("%d/%d", (int) totalQueryableIndexCount, statsTable.saiTotalIndexCount);
+                        else
+                            statsTable.saiTotalQueryableIndexRatio = "n/a";
                     }
                 }
 
@@ -440,12 +448,32 @@ public class TableStatsHolder implements StatsHolder
         }
     }
 
-    private double getMetricMean(Object metricObject) {
-        if (metricObject instanceof CassandraMetricsRegistry.JmxTimerMBean) {
-            return ((CassandraMetricsRegistry.JmxTimerMBean) metricObject).getMean() / 1000;
+    /**
+     * Returns the mean of an SAI timer in milliseconds, or of an SAI histogram rounded to two decimals. A metric that
+     * is not registered, or not anymore, has a NaN mean, while an empty histogram has a mean of 0: its mean is NaN,
+     * which {@link Math#round} turns into 0.
+     */
+    @VisibleForTesting
+    static double getMetricMean(Object metricObject) {
+        // the metric may not be registered, e.g. the SAI query latency timer when SAI histograms are disabled
+        if (metricObject == null)
+            return Double.NaN;
+        try
+        {
+            if (metricObject instanceof CassandraMetricsRegistry.JmxTimerMBean) {
+                // JMX timers report their mean in microseconds
+                return ((CassandraMetricsRegistry.JmxTimerMBean) metricObject).getMean() / 1000;
+            }
+            if (metricObject instanceof CassandraMetricsRegistry.JmxHistogramMBean) {
+                return Math.round(((CassandraMetricsRegistry.JmxHistogramMBean) metricObject).getMean() * 100.0) / 100.0;
+            }
         }
-        if (metricObject instanceof CassandraMetricsRegistry.JmxHistogramMBean) {
-            return Math.round(((CassandraMetricsRegistry.JmxHistogramMBean) metricObject).getMean() * 100.0) / 100.0;
+        catch (UndeclaredThrowableException e)
+        {
+            // the metric has been unregistered since it was looked up, e.g. because the index was dropped
+            if (e.getCause() instanceof InstanceNotFoundException)
+                return Double.NaN;
+            throw e;
         }
         throw new IllegalArgumentException("Unsupported metric object type: " + metricObject.getClass().getName());
     }

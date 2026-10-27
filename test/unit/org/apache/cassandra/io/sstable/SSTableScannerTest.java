@@ -118,7 +118,8 @@ public class SSTableScannerTest
                 {
                     if (end < start && e.compareTo(s) > 0)
                         continue;
-                    if (!isEmpty(new AbstractBounds.Boundary<>(s, inclusiveStart), new AbstractBounds.Boundary<>(e, inclusiveEnd)))
+                    // a non-wrapping request covers only the non-empty bounds; a wrapping one only the wrapping bounds
+                    if (end >= start && isEmpty(new AbstractBounds.Boundary<>(s, inclusiveStart), new AbstractBounds.Boundary<>(e, inclusiveEnd)))
                         continue;
                     ranges.add(dataRange(metadata, s, inclusiveStart, e, inclusiveEnd));
                 }
@@ -201,7 +202,9 @@ public class SSTableScannerTest
     private static void assertScanFromDataRangeMatches(SSTableReader sstable, int scanStart, int scanEnd, int ... boundaries)
     {
         assert boundaries.length % 2 == 0;
-        for (DataRange range : dataRanges(sstable.metadata(), scanStart, scanEnd))
+        Iterable<DataRange> ranges = dataRanges(sstable.metadata(), scanStart, scanEnd);
+        assertTrue("No data range for " + scanStart + ", " + scanEnd, ranges.iterator().hasNext());
+        for (DataRange range : ranges)
         {
             try(UnfilteredPartitionIterator scanner = sstable.partitionIterator(ColumnFilter.all(sstable.metadata()),
                                                                                 range,
@@ -235,10 +238,10 @@ public class SSTableScannerTest
             for (int b = 0; b < boundaries.length; b += 2)
                 for (int i = boundaries[b]; i <= boundaries[b + 1]; i++)
                     assertEquals(toKey(i), new String(scanner.next().partitionKey().getKey().array()));
-            boolean hadNext = scanner.hasNext();
+            List<String> extra = new ArrayList<>();
             while (scanner.hasNext())
-                System.out.println("Got extra " + new String(scanner.next().partitionKey().getKey().array()));
-            assertFalse(hadNext);
+                extra.add(new String(scanner.next().partitionKey().getKey().array()));
+            assertTrue("Got extra keys " + extra, extra.isEmpty());
         }
         catch (Exception e)
         {
@@ -315,13 +318,31 @@ public class SSTableScannerTest
 
         assertEquals(1, store.getLiveSSTables().size());
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
-        if (filterFirst)
-            sstable = sstable.cloneWithNewStart(dk(2));
-        if (filterLast)
-            sstable = cloneWithNewEndBound(sstable, dk(9));
-        testSingleDataRange(sstable);
+        SSTableReader startClone = null;
+        SSTableReader endBoundClone = null;
+        try
+        {
+            if (filterFirst)
+                sstable = startClone = sstable.cloneWithNewStart(dk(2));
+            if (filterLast)
+                sstable = endBoundClone = cloneWithNewEndBound(sstable, dk(9));
+            testSingleDataRange(sstable);
+        }
+        finally
+        {
+            // the clones are new readers with their own references; a spy copies the fields, so releasing the spy
+            // releases the reference of the reader it was made from
+            if (endBoundClone != null)
+                endBoundClone.selfRef().release();
+            if (startClone != null)
+                startClone.selfRef().release();
+        }
     }
 
+    /**
+     * Returns a new reader over the same files, with the given last key and filterLast() set. The caller must release
+     * the returned reader's {@link SSTableReader#selfRef()}.
+     */
     private SSTableReader cloneWithNewEndBound(SSTableReader sstable, DecoratedKey last)
     {
         long fileEnd = sstable.getPosition(last, SSTableReader.Operator.GT);
@@ -422,9 +443,20 @@ public class SSTableScannerTest
         Util.flush(store);
 
         assertEquals(1, store.getLiveSSTables().size());
-        SSTableReader sstable = store.getLiveSSTables().iterator().next();
-        sstable = sstable.cloneWithNewStart(dk(4));
+        SSTableReader startClone = store.getLiveSSTables().iterator().next().cloneWithNewStart(dk(4));
+        try
+        {
+            testSingleDataRangeWithMovedStart(startClone);
+        }
+        finally
+        {
+            // the clone is a new reader with its own reference
+            startClone.selfRef().release();
+        }
+    }
 
+    private void testSingleDataRangeWithMovedStart(SSTableReader sstable)
+    {
         // full range scan
         ISSTableScanner scanner = sstable.getScanner();
         for (int i = 4; i < 10; i++)

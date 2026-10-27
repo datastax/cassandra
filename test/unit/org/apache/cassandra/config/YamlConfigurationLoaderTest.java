@@ -34,6 +34,7 @@ import com.google.common.collect.ImmutableMap;
 import org.junit.Test;
 
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.File;
 import org.yaml.snakeyaml.error.YAMLException;
 
@@ -303,6 +304,46 @@ public class YamlConfigurationLoaderTest
         assertThat(old.key_cache_save_period).isEqualTo(latest.key_cache_save_period).isEqualTo(new DurationSpec.IntSecondsBound(42));
         assertThat(old.row_cache_save_period).isEqualTo(latest.row_cache_save_period).isEqualTo(new DurationSpec.IntSecondsBound(42));
         assertThat(old.counter_cache_save_period).isEqualTo(latest.counter_cache_save_period).isEqualTo(new DurationSpec.IntSecondsBound(42));
+    }
+
+    /**
+     * HCD-632: keys of an HCD 1.2 cassandra.yaml that changed name or type.
+     */
+    @Test
+    public void hcd12Keys()
+    {
+        assertThat(from("enable_uuid_sstable_identifiers", false).uuid_sstable_identifiers_enabled).isFalse();
+        assertThat(from("enable_uuid_sstable_identifiers", true).uuid_sstable_identifiers_enabled).isTrue();
+        assertThat(from("hints_request_timeout_in_ms", 3000).hints_request_timeout).isEqualTo(new DurationSpec.LongMillisecondsBound("3000ms"));
+        assertThat(from("aggregation_subpage_size_in_kb", 512).aggregation_subpage_size).isEqualTo(new DataStorageSpec.IntKibibytesBound("512KiB"));
+        assertThat(from("aggregation_subpage_size", "1MiB").aggregation_subpage_size).isEqualTo(new DataStorageSpec.IntKibibytesBound("1024KiB"));
+        assertThat(from("sai_options", ImmutableMap.of("segment_write_buffer_space_mb", 512)).sai_options.segment_write_buffer_size)
+        .isEqualTo(new DataStorageSpec.IntMebibytesBound("512MiB"));
+        assertThat(from("sai_options", ImmutableMap.of("segment_write_buffer_size", "1GiB")).sai_options.segment_write_buffer_size)
+        .isEqualTo(new DataStorageSpec.IntMebibytesBound("1024MiB"));
+
+        // MILLIS_STRING_DURATION_LONG: under the old name HCD 1.2 sets a number of milliseconds, HCD 2.0 a duration
+        assertThat(from("repair_prepare_message_timeout_in_ms", 5000).repair_prepare_message_timeout)
+        .isEqualTo(from("repair_prepare_message_timeout_in_ms", "5000ms").repair_prepare_message_timeout)
+        .isEqualTo(from("repair_prepare_message_timeout_in_ms", "5s").repair_prepare_message_timeout)
+        .isEqualTo(from("repair_prepare_message_timeout", "5s").repair_prepare_message_timeout)
+        .isEqualTo(new DurationSpec.LongMillisecondsBound(5000));
+        assertThatThrownBy(() -> from("repair_prepare_message_timeout_in_ms", -2))
+        .hasRootCauseInstanceOf(IllegalArgumentException.class)
+        .rootCause().hasMessageStartingWith("Invalid duration: -2 ");
+
+        assertThatThrownBy(() -> from("enable_uuid_sstable_identifiers", false, "uuid_sstable_identifiers_enabled", false))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessageContaining("[enable_uuid_sstable_identifiers -> uuid_sstable_identifiers_enabled]");
+        assertThatThrownBy(() -> from("hints_request_timeout_in_ms", 3000, "hints_request_timeout", "3s"))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessageContaining("[hints_request_timeout_in_ms -> hints_request_timeout]");
+        assertThatThrownBy(() -> from("repair_prepare_message_timeout_in_ms", 5000, "repair_prepare_message_timeout", "5s"))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessageContaining("[repair_prepare_message_timeout_in_ms -> repair_prepare_message_timeout]");
+        assertThatThrownBy(() -> from("aggregation_subpage_size_in_kb", 512, "aggregation_subpage_size", "512KiB"))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessageContaining("[aggregation_subpage_size_in_kb -> aggregation_subpage_size]");
     }
 
     @Test

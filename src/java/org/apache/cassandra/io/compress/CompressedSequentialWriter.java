@@ -62,6 +62,7 @@ public class CompressedSequentialWriter extends SequentialWriter
 
     // index file writer (random I/O)
     private final CompressionMetadata.Writer metadataWriter;
+    private final CompressionParams parameters;
     private final ICompressor compressor;
 
     // used to store compressed data
@@ -109,6 +110,7 @@ public class CompressedSequentialWriter extends SequentialWriter
                                           .bufferType(parameters.getSstableCompressor().preferredBufferType())
                                           .finishOnClose(option.finishOnClose())
                                           .build());
+        this.parameters = parameters;
         this.compressor = parameters.getSstableCompressor();
         this.digestFile = Optional.ofNullable(digestFile);
         this.checksumType = checksumType;
@@ -130,6 +132,14 @@ public class CompressedSequentialWriter extends SequentialWriter
 
         this.sstableMetadataCollector = sstableMetadataCollector;
         crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)), checksumType);
+    }
+
+    /**
+     * @return the compression parameters the file is written with, i.e. those stored in its compression info file
+     */
+    public CompressionParams parameters()
+    {
+        return parameters;
     }
 
     @Override

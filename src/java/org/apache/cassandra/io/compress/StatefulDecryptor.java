@@ -99,12 +99,12 @@ class StatefulDecryptor
         int headerSize = 0;
         if (keyProvider instanceof IMultiKeyProvider)
         {
-            ByteBuffer inputBuffer = ByteBuffer.wrap(input, inputOffset, inputLength - inputOffset);
+            ByteBuffer inputBuffer = ByteBuffer.wrap(input, inputOffset, inputLength);
             key = ((IMultiKeyProvider) keyProvider)
                     .readHeader(encryptionConfig.getCipherName(), encryptionConfig.getKeyStrength(), inputBuffer);
 
-            // only update the offset if the header decryption was successful,
-            // otherwise assume there is no header and default to the local key
+            // readHeader leaves the buffer positioned after the header; the IV (if any) and the ciphertext follow.
+            // There is no fallback for a chunk without a header: a multi-key provider always writes one.
             headerSize = inputBuffer.position() - inputOffset;
             inputLength -= headerSize;
             inputOffset = inputBuffer.position();

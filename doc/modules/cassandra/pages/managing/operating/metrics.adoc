@@ -747,8 +747,19 @@ Reported name format:
 [cols=",,",options="header",]
 |===
 |Name |Type |Description
+|BatchlogReplays |Meter |Number of batches replayed from the batchlog
+for which no hint was written, normally because every replica
+acknowledged the replayed mutations or the local node was their only
+live replica. Batches that are expired, whose tables were all truncated,
+or that cannot be deserialized are not replayed and count in neither
+this meter nor HintedBatchlogReplays.
+
 |Exceptions |Counter |Number of internal exceptions caught. Under normal
 exceptions this should be zero.
+
+|HintedBatchlogReplays |Meter |Number of batches replayed from the
+batchlog for which at least one hint was written, because a replica was
+down, failed, or did not acknowledge the replayed mutations in time.
 
 |Load |Counter |Size, in bytes, of the on disk data size this node
 manages.

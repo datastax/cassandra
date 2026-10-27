@@ -341,8 +341,13 @@ public class IndexFileUtils
         @Override
         public void writeMostSignificantBytes(long register, int bytes) throws IOException
         {
+            // When buffer.remaining() >= Long.BYTES the parent writes directly into the buffer,
+            // bypassing overridden primitives. Update the checksum here only in that case;
+            // the slow path already updates it through the overridden writeByte/writeInt/writeLong.
+            boolean directBufferPath = buffer.remaining() >= Long.BYTES;
             super.writeMostSignificantBytes(register, bytes);
-            addMsbToChecksum(register, bytes);
+            if (directBufferPath)
+                addMsbToChecksum(register, bytes);
         }
 
         /**
@@ -368,13 +373,13 @@ public class IndexFileUtils
                     msbValue = (int) (register >> 32);
                     break;
                 case 5:
-                    msbValue = (int) (register >> 24);
+                    msbValue = register >> 24;
                     break;
                 case 6:
-                    msbValue = (int) (register >> 16);
+                    msbValue = register >> 16;
                     break;
                 case 7:
-                    msbValue = (int) (register >> 8);
+                    msbValue = register >> 8;
                     break;
                 case 8:
                     msbValue = register;

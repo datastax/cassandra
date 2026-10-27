@@ -21,15 +21,18 @@ package org.apache.cassandra.io.sstable.format;
 import java.io.IOException;
 import java.nio.file.NoSuchFileException;
 import java.util.Set;
+import javax.annotation.Nullable;
 
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.io.compress.CompressionMetadataReaderType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SliceDescriptor;
+import org.apache.cassandra.schema.CompressionParams;
 
 public class CompressionInfoComponent
 {
@@ -47,6 +50,31 @@ public class CompressionInfoComponent
             return load(descriptor, sliceDescriptor);
 
         return null;
+    }
+
+    /**
+     * Reads only the header of the compression info file of the given sstable and returns its compression
+     * parameters, without loading any chunk offsets (see
+     * {@link CompressionMetadata#readCompressionParams(File, boolean, CompressionMetadataReaderType)}).
+     *
+     * @param descriptor the sstable
+     * @param readerType {@link CompressionMetadataReaderType#WRITE_TIME} when the file is read while the sstable is
+     *                   still being written (it may not have been uploaded to remote storage yet), which callers on
+     *                   the write path must pass; {@link CompressionMetadataReaderType#READ_TIME} otherwise
+     * @return the compression parameters, or {@code null} if the sstable has no compression info file
+     */
+    @Nullable
+    public static CompressionParams readCompressionParamsIfExists(Descriptor descriptor, CompressionMetadataReaderType readerType)
+    {
+        File compressionFile = descriptor.fileFor(Components.COMPRESSION_INFO);
+        if (!compressionFile.exists())
+            return null;
+
+        // hasMaxCompressedSize must match how the file was written - the version flag - otherwise everything the
+        // header stores after the parameters is read at the wrong offset.
+        return CompressionMetadata.readCompressionParams(compressionFile,
+                                                         descriptor.version.hasMaxCompressedLength(),
+                                                         readerType);
     }
 
     public static CompressionMetadata load(Descriptor descriptor)

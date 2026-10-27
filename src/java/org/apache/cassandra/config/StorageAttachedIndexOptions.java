@@ -30,7 +30,9 @@ public class StorageAttachedIndexOptions
     private static final int MAXIMUM_SEGMENT_BUFFER_MB = 32768;
     public static final double MAXIMUM_ANN_BRUTE_FORCE_FACTOR = 100.0;
 
-    public int segment_write_buffer_space_mb = DEFAULT_SEGMENT_BUFFER_MB;
+    // HCD-632: renamed to the upstream name, HCD 1.2 sets the old name
+    @Replaces(oldName = "segment_write_buffer_space_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
+    public DataStorageSpec.IntMebibytesBound segment_write_buffer_size = new DataStorageSpec.IntMebibytesBound(DEFAULT_SEGMENT_BUFFER_MB);
     public double zerocopy_used_threshold = DEFAULT_ZEROCOPY_USED_THRESHOLD;
     public double ann_brute_force_factor = DEFAULT_ANN_BRUTE_FORCE_FACTOR;
 
@@ -38,10 +40,10 @@ public class StorageAttachedIndexOptions
 
     public void validate()
     {
-        if ((segment_write_buffer_space_mb < 0) || (segment_write_buffer_space_mb > MAXIMUM_SEGMENT_BUFFER_MB))
+        if (segment_write_buffer_size == null || segment_write_buffer_size.toMebibytes() > MAXIMUM_SEGMENT_BUFFER_MB)
         {
-            throw new ConfigurationException("Invalid value for segment_write_buffer_space_mb. " +
-                                             "Value must be a positive integer less than " + MAXIMUM_SEGMENT_BUFFER_MB);
+            throw new ConfigurationException("Invalid value for segment_write_buffer_size. " +
+                                             "Value must be a positive integer less than " + MAXIMUM_SEGMENT_BUFFER_MB + "MiB");
         }
 
         if ((ann_brute_force_factor <= 0.0) || (ann_brute_force_factor > MAXIMUM_ANN_BRUTE_FORCE_FACTOR))
@@ -62,7 +64,7 @@ public class StorageAttachedIndexOptions
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         StorageAttachedIndexOptions that = (StorageAttachedIndexOptions) o;
-        return Objects.equal(segment_write_buffer_space_mb, that.segment_write_buffer_space_mb)
+        return Objects.equal(segment_write_buffer_size, that.segment_write_buffer_size)
                && Objects.equal(zerocopy_used_threshold, that.zerocopy_used_threshold)
                && Objects.equal(ann_brute_force_factor, that.ann_brute_force_factor);
     }
@@ -70,6 +72,6 @@ public class StorageAttachedIndexOptions
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(segment_write_buffer_space_mb, zerocopy_used_threshold);
+        return Objects.hashCode(segment_write_buffer_size, zerocopy_used_threshold);
     }
 }

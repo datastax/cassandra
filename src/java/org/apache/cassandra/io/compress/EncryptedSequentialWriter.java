@@ -221,14 +221,19 @@ public class EncryptedSequentialWriter extends SequentialWriter
             checksum.update(encrypted);
             encrypted.limit(CHUNK_SIZE);
 
-            if (encrypted.getInt(CHUNK_SIZE - 4) != (int) checksum.getValue())
+            int storedChecksum = encrypted.getInt(CHUNK_SIZE - 4);
+            int computedChecksum = (int) checksum.getValue();
+            if (storedChecksum != computedChecksum)
+                throw new CorruptBlockException(getFile(), truncateChunk, CHUNK_SIZE, storedChecksum, computedChecksum);
+
+            int length = encrypted.getInt(CHUNK_SIZE - FOOTER_LENGTH);
+            if (length < 0 || length > CHUNK_SIZE - FOOTER_LENGTH)
                 throw new CorruptBlockException(getFile(), truncateChunk, CHUNK_SIZE);
 
             try
             {
                 // Repopulate buffer from encrypted data
                 buffer.clear();
-                int length = encrypted.getInt(CHUNK_SIZE - FOOTER_LENGTH);
                 encrypted.position(0).limit(length);
                 encryptor.uncompress(encrypted, buffer);
             }

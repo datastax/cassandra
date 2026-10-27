@@ -33,6 +33,9 @@ public class BatchMetricsTable extends AbstractVirtualTable
     private static final String PARTITIONS_PER_LOGGED_BATCH = "partitions_per_logged_batch";
     private static final String PARTITIONS_PER_UNLOGGED_BATCH = "partitions_per_unlogged_batch";
     private static final String PARTITIONS_PER_COUNTER_BATCH = "partitions_per_counter_batch";
+    private static final String ROWS_PER_LOGGED_BATCH = "rows_per_logged_batch";
+    private static final String ROWS_PER_UNLOGGED_BATCH = "rows_per_unlogged_batch";
+    private static final String ROWS_PER_COUNTER_BATCH = "rows_per_counter_batch";
     private final static String P50 = "p50th";
     private final static String P99 = "p99th";
     private final static String P999 = "p999th";
@@ -60,6 +63,9 @@ public class BatchMetricsTable extends AbstractVirtualTable
         addRow(result, PARTITIONS_PER_LOGGED_BATCH, metrics.partitionsPerLoggedBatch.getSnapshot());
         addRow(result, PARTITIONS_PER_UNLOGGED_BATCH, metrics.partitionsPerUnloggedBatch.getSnapshot());
         addRow(result, PARTITIONS_PER_COUNTER_BATCH, metrics.partitionsPerCounterBatch.getSnapshot());
+        addRow(result, ROWS_PER_LOGGED_BATCH, metrics.rowsPerLoggedBatch.getSnapshot());
+        addRow(result, ROWS_PER_UNLOGGED_BATCH, metrics.rowsPerUnloggedBatch.getSnapshot());
+        addRow(result, ROWS_PER_COUNTER_BATCH, metrics.rowsPerCounterBatch.getSnapshot());
 
         return result;
     }

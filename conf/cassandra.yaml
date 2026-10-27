@@ -684,7 +684,7 @@ commitlog_disk_access_mode: legacy
 
 # Compression to apply to SSTables as they flush for compressed tables.
 # Note that tables without compression enabled, or whose compression includes
-# an encryption component do not respect this flag.
+# an encryption component, do not respect this flag.
 #
 # As high ratio compressors like LZ4HC, Zstd, and Deflate can potentially
 # block flushes for too long, the default is to flush with a known fast
@@ -1985,7 +1985,7 @@ report_unconfirmed_repaired_data_mismatches: false
 
 # This is the page size used internally by aggregation queries. It aims to limit the memory used by aggregation
 # queries when there is a lot of data to aggregate.
-# aggregation_subpage_size_in_kb: 2048
+# aggregation_subpage_size: 2048KiB
 
 #########################
 # EXPERIMENTAL FEATURES #

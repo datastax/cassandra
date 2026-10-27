@@ -19,19 +19,29 @@ package org.apache.cassandra.io.sstable;
 
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.primitives.Bytes;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Ignore;
@@ -44,10 +54,15 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.crypto.IKeyProvider;
+import org.apache.cassandra.crypto.IKeyProviderFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.SinglePartitionSliceCommandTest;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.repair.PendingAntiCompaction;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Unfiltered;
@@ -58,12 +73,19 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.StatsComponent;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.OutgoingStream;
@@ -72,6 +94,7 @@ import org.apache.cassandra.streaming.StreamPlan;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.OutputHandler;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.TimeUUID;
 import org.assertj.core.api.SoftAssertions;
 
@@ -156,6 +179,7 @@ public class LegacySSTableTest
         {
             truncateLegacyTables(legacyVersion);
         }
+        truncateLegacyEncryptedTables();
     }
 
     /**
@@ -334,6 +358,441 @@ public class LegacySSTableTest
                 }).describedAs(legacyVersion).doesNotThrowAnyException();
 
         assertions.assertAll();
+    }
+
+    /**
+     * Reads encrypted DSE 6.8 sstables ({@code bb}, trie-indexed, encrypted with the {@code Encryptor} compressor), or
+     * {@code bb} sstables never upgraded on an HCD 1.2 node, read by HCD 2.0 (HCD 1.2 itself writes {@code cc}).
+     * {@code bb} encrypts the data file, the partition and row indexes and the metadata (Statistics.db).
+     * <p>
+     * The fixtures were written with {@link KeyProviderFactoryStub}, whose class name is stored in their
+     * CompressionInfo.db, so that nested class must keep its name. {@code legacy_encrypted_table_pk} has 5 partitions
+     * {@code "0"}..{@code "4"}; {@code legacy_encrypted_table_pk_ck} has the same 5 partitions with 50 rows each,
+     * clustering {@code i + longString}; every {@code val} is {@code "foo bar baz"}.
+     * <p>
+     * Streaming of these sstables is not covered, like for all the other {@code a*}/{@code b*} versions
+     * (see {@link #testStreamLegacyCqlTables()}).
+     */
+    @Test
+    public void testEncryptedTables() throws Exception
+    {
+        createLegacyEncryptedTables();
+
+        // read the legacy sstables as they are
+        for (String table : LEGACY_ENCRYPTED_TABLES)
+            loadLegacyTableByName(LEGACY_ENCRYPTED_VERSION, table);
+        verifyLegacyEncryptedReads();
+        for (String table : LEGACY_ENCRYPTED_TABLES)
+        {
+            ColumnFamilyStore cfs = Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(table);
+            assertThat(cfs.getLiveSSTables()).isNotEmpty();
+            for (SSTableReader sstable : cfs.getLiveSSTables())
+                verifyLegacyEncryptedSSTable(sstable, table.endsWith("_ck"));
+        }
+
+        // Compaction and upgradesstables must turn the legacy sstables into sstables of another version: when bb is the
+        // current BTI version (-Dcassandra.trie_index_format_version=bb, e.g. the sai-legacy test targets), flushes
+        // write bb and upgradesstables, which compares with the latest BTI version, skips them.
+        Assume.assumeFalse("bb is the current BTI version, nothing to upgrade the legacy sstables to",
+                           LEGACY_ENCRYPTED_VERSION.equals(BtiFormat.getInstance().getLatestVersion().version));
+
+        // major compaction over two copies of the legacy sstables plus a new sstable, into the current version
+        truncateLegacyEncryptedTables();
+        for (String table : LEGACY_ENCRYPTED_TABLES)
+        {
+            loadLegacyTableByName(LEGACY_ENCRYPTED_VERSION, table);
+            loadLegacyTableByName(LEGACY_ENCRYPTED_VERSION, table);
+            insertEncryptedSensitivePartition(table);
+            ColumnFamilyStore cfs = Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(table);
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+            assertThat(cfs.getLiveSSTables().stream().filter(s -> s.descriptor.version.version.equals(LEGACY_ENCRYPTED_VERSION)).count()).isGreaterThanOrEqualTo(2);
+            assertThat(cfs.getLiveSSTables().stream().filter(s -> s.descriptor.version.isLatestVersion()).count()).isEqualTo(1);
+        }
+        // the reads merge two overlapping legacy sstables and one of the current version
+        verifyLegacyEncryptedReads();
+        verifyEncryptedSensitivePartitionReads();
+        for (String table : LEGACY_ENCRYPTED_TABLES)
+        {
+            ColumnFamilyStore cfs = Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(table);
+            cfs.forceMajorCompaction();
+            // a single output sstable with one data directory and one UCS shard, as configured by every test yaml
+            assertThat(cfs.getLiveSSTables()).hasSize(1);
+            verifyUpgradedEncryptedSSTable(Iterables.getOnlyElement(cfs.getLiveSSTables()), true);
+        }
+        verifyLegacyEncryptedReads();
+        verifyEncryptedSensitivePartitionReads();
+
+        // the equivalent of nodetool upgradesstables, which only rewrites sstables older than the current version
+        truncateLegacyEncryptedTables();
+        for (String table : LEGACY_ENCRYPTED_TABLES)
+        {
+            loadLegacyTableByName(LEGACY_ENCRYPTED_VERSION, table);
+            ColumnFamilyStore cfs = Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(table);
+            Set<Descriptor> before = cfs.getLiveSSTables().stream().map(s -> s.descriptor).collect(Collectors.toSet());
+            assertThat(cfs.sstablesRewrite(true, Long.MAX_VALUE, false, 1)).isEqualTo(CompactionManager.AllSSTableOpStatus.SUCCESSFUL);
+            // one output sstable per input with one data directory and one UCS shard, as configured by every test yaml
+            assertThat(cfs.getLiveSSTables()).hasSameSizeAs(before);
+            for (SSTableReader sstable : cfs.getLiveSSTables())
+            {
+                assertThat(before).describedAs("%s was not rewritten", sstable.descriptor).doesNotContain(sstable.descriptor);
+                verifyUpgradedEncryptedSSTable(sstable, false);
+            }
+        }
+        verifyLegacyEncryptedReads();
+    }
+
+    private static final String[] LEGACY_ENCRYPTED_TABLES = { "legacy_encrypted_table_pk", "legacy_encrypted_table_pk_ck" };
+    private static final String LEGACY_ENCRYPTED_VERSION = "bb";
+    private static final String LEGACY_ENCRYPTED_VALUE = "foo bar baz";
+    // sorts after the partition keys of the fixtures with the order preserving partitioner of the tests, so it is
+    // stored in full as the last key of the partition index; it gets a row index in the _ck table, as its partition
+    // (~60KiB) is larger than column_index_size
+    private static final String SENSITIVE_KEY = "zz-sensitive-partition-key-of-an-encrypted-table";
+    private static final String SENSITIVE_VALUE = "sensitive-value-of-an-encrypted-table";
+    // deterministic timestamps of the fixtures, as written by DSE
+    private static final long LEGACY_ENCRYPTED_PK_MIN_TIMESTAMP = 1744786768950000L;
+    private static final long LEGACY_ENCRYPTED_PK_MAX_TIMESTAMP = 1744786769128001L;
+    private static final long LEGACY_ENCRYPTED_PK_CK_MIN_TIMESTAMP = 1744786768953000L;
+    private static final long LEGACY_ENCRYPTED_PK_CK_MAX_TIMESTAMP = 1744786769162000L;
+
+    private static void createLegacyEncryptedTables()
+    {
+        QueryProcessor.executeInternal(String.format("CREATE TABLE IF NOT EXISTS %s.legacy_encrypted_table_pk (pk text PRIMARY KEY, val text) %s",
+                                                     LEGACY_TABLES_KEYSPACE, localSystemKeyEncryptionCompressionSuffix("Encryptor")));
+        QueryProcessor.executeInternal(String.format("CREATE TABLE IF NOT EXISTS %s.legacy_encrypted_table_pk_ck (pk text, ck text, val text, PRIMARY KEY (pk, ck)) %s",
+                                                     LEGACY_TABLES_KEYSPACE, localSystemKeyEncryptionCompressionSuffix("Encryptor")));
+    }
+
+    // the same options as stored in the CompressionInfo.db of the fixtures
+    private static String localSystemKeyEncryptionCompressionSuffix(String className)
+    {
+        return String.format(" WITH compression = " +
+                             "{'class' : '%s', " +
+                             "'cipher_algorithm' : 'AES/ECB/PKCS5Padding', " +
+                             "'secret_key_strength' : 128, " +
+                             "'key_provider' : '%s'}", className, KeyProviderFactoryStub.class.getName());
+    }
+
+    public static class KeyProviderFactoryStub implements IKeyProviderFactory
+    {
+        @Override
+        public IKeyProvider getKeyProvider(Map<String, String> options)
+        {
+            return new KeyProviderStub();
+        }
+
+        @Override
+        public Set<String> supportedOptions()
+        {
+            return Collections.emptySet();
+        }
+    }
+
+    public static class KeyProviderStub implements IKeyProvider
+    {
+        @Override
+        public SecretKey getSecretKey(String cipherName, int keyStrength)
+        {
+            byte[] bytes = new byte[keyStrength / 8];
+            Arrays.fill(bytes, (byte) 6);
+            return new SecretKeySpec(bytes, cipherName.replaceAll("/.*", ""));
+        }
+    }
+
+    // does nothing if testEncryptedTables did not run (the tables do not exist)
+    private static void truncateLegacyEncryptedTables()
+    {
+        for (String table : LEGACY_ENCRYPTED_TABLES)
+        {
+            if (Schema.instance.getTableMetadata(LEGACY_TABLES_KEYSPACE, table) != null)
+                Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(table).truncateBlocking();
+        }
+        CacheService.instance.invalidateKeyCache();
+    }
+
+    private static List<String> legacyEncryptedClusterings()
+    {
+        List<String> clusterings = new ArrayList<>();
+        for (int ck = 0; ck < 50; ck++)
+            clusterings.add(ck + longString);
+        Collections.sort(clusterings); // UTF8Type sorts ASCII strings like String does
+        return clusterings;
+    }
+
+    private static void verifyLegacyEncryptedReads()
+    {
+        CacheService.instance.invalidateKeyCache();
+        List<String> clusterings = legacyEncryptedClusterings();
+
+        // full scans, in the order of the order preserving partitioner of the tests
+        UntypedResultSet rs = QueryProcessor.executeInternal("SELECT * FROM legacy_tables.legacy_encrypted_table_pk");
+        List<String> keys = new ArrayList<>();
+        for (UntypedResultSet.Row row : rs)
+        {
+            if (SENSITIVE_KEY.equals(row.getString("pk")))
+                continue;
+            keys.add(row.getString("pk"));
+            assertEquals(LEGACY_ENCRYPTED_VALUE, row.getString("val"));
+        }
+        assertThat(keys).containsExactly("0", "1", "2", "3", "4");
+
+        rs = QueryProcessor.executeInternal("SELECT * FROM legacy_tables.legacy_encrypted_table_pk_ck");
+        List<String> rows = new ArrayList<>();
+        for (UntypedResultSet.Row row : rs)
+        {
+            if (SENSITIVE_KEY.equals(row.getString("pk")))
+                continue;
+            rows.add(row.getString("pk") + ':' + row.getString("ck"));
+            assertEquals(LEGACY_ENCRYPTED_VALUE, row.getString("val"));
+        }
+        List<String> expectedRows = new ArrayList<>();
+        for (int pk = 0; pk < 5; pk++)
+            for (String ck : clusterings)
+                expectedRows.add(pk + ":" + ck);
+        assertThat(rows).containsExactlyElementsOf(expectedRows);
+
+        for (int pk = 0; pk < 5; pk++)
+        {
+            String pkValue = Integer.toString(pk);
+
+            // point reads by partition key
+            rs = QueryProcessor.executeInternal("SELECT val FROM legacy_tables.legacy_encrypted_table_pk WHERE pk = ?", pkValue);
+            assertEquals(1, rs.size());
+            assertEquals(LEGACY_ENCRYPTED_VALUE, rs.one().getString("val"));
+
+            rs = QueryProcessor.executeInternal("SELECT ck FROM legacy_tables.legacy_encrypted_table_pk_ck WHERE pk = ?", pkValue);
+            List<String> partition = new ArrayList<>();
+            rs.forEach(row -> partition.add(row.getString("ck")));
+            assertThat(partition).isEqualTo(clusterings);
+
+            // point read of a row and slices, which go through the row index (each partition, ~60KiB, is larger
+            // than column_index_size)
+            for (int ck : new int[]{ 0, 4, 25, 49 })
+            {
+                String ckValue = ck + longString;
+                rs = QueryProcessor.executeInternal("SELECT val FROM legacy_tables.legacy_encrypted_table_pk_ck WHERE pk = ? AND ck = ?", pkValue, ckValue);
+                assertEquals(1, rs.size());
+                assertEquals(LEGACY_ENCRYPTED_VALUE, rs.one().getString("val"));
+
+                rs = QueryProcessor.executeInternal("SELECT ck, val FROM legacy_tables.legacy_encrypted_table_pk_ck WHERE pk = ? AND ck >= ?", pkValue, ckValue);
+                List<String> slice = new ArrayList<>();
+                rs.forEach(row -> {
+                    slice.add(row.getString("ck"));
+                    assertEquals(LEGACY_ENCRYPTED_VALUE, row.getString("val"));
+                });
+                assertThat(slice).isEqualTo(clusterings.stream().filter(c -> c.compareTo(ckValue) >= 0).collect(Collectors.toList()))
+                                 .isNotEmpty();
+
+                rs = QueryProcessor.executeInternal("SELECT ck, val FROM legacy_tables.legacy_encrypted_table_pk_ck WHERE pk = ? AND ck < ? ORDER BY ck DESC", pkValue, ckValue);
+                List<String> reversedSlice = new ArrayList<>();
+                rs.forEach(row -> {
+                    reversedSlice.add(row.getString("ck"));
+                    assertEquals(LEGACY_ENCRYPTED_VALUE, row.getString("val"));
+                });
+                List<String> expectedReversedSlice = clusterings.stream().filter(c -> c.compareTo(ckValue) < 0).collect(Collectors.toList());
+                Collections.reverse(expectedReversedSlice);
+                assertThat(reversedSlice).isEqualTo(expectedReversedSlice);
+            }
+        }
+
+        // no sstable may have been marked suspect by any of the reads
+        for (String table : LEGACY_ENCRYPTED_TABLES)
+        {
+            for (SSTableReader sstable : Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(table).getLiveSSTables())
+                assertThat(sstable.isMarkedSuspect()).describedAs(sstable.toString()).isFalse();
+        }
+    }
+
+    private static void insertEncryptedSensitivePartition(String table)
+    {
+        if (table.endsWith("_ck"))
+        {
+            for (int ck = 0; ck < 50; ck++)
+                QueryProcessor.executeInternal("INSERT INTO legacy_tables.legacy_encrypted_table_pk_ck (pk, ck, val) VALUES (?, ?, ?)",
+                                               SENSITIVE_KEY, ck + longString, SENSITIVE_VALUE);
+        }
+        else
+        {
+            QueryProcessor.executeInternal("INSERT INTO legacy_tables.legacy_encrypted_table_pk (pk, val) VALUES (?, ?)",
+                                           SENSITIVE_KEY, SENSITIVE_VALUE);
+        }
+    }
+
+    private static void verifyEncryptedSensitivePartitionReads()
+    {
+        UntypedResultSet rs = QueryProcessor.executeInternal("SELECT val FROM legacy_tables.legacy_encrypted_table_pk WHERE pk = ?", SENSITIVE_KEY);
+        assertEquals(1, rs.size());
+        assertEquals(SENSITIVE_VALUE, rs.one().getString("val"));
+
+        rs = QueryProcessor.executeInternal("SELECT ck, val FROM legacy_tables.legacy_encrypted_table_pk_ck WHERE pk = ? AND ck >= ?", SENSITIVE_KEY, "4" + longString);
+        List<String> slice = new ArrayList<>();
+        rs.forEach(row -> {
+            slice.add(row.getString("ck"));
+            assertEquals(SENSITIVE_VALUE, row.getString("val"));
+        });
+        assertThat(slice).isEqualTo(legacyEncryptedClusterings().stream().filter(c -> c.compareTo("4" + longString) >= 0).collect(Collectors.toList()));
+    }
+
+    /**
+     * Byte sequences always present in the plaintext form of the metadata (Statistics.db) of any sstable of the
+     * encrypted tables: the partitioner class name (validation metadata) and the key type (serialization header).
+     */
+    private static List<byte[]> plaintextMetadataMarkers(SSTableReader sstable)
+    {
+        return Arrays.asList(utf8(sstable.getPartitioner().getClass().getCanonicalName()),
+                             utf8(UTF8Type.class.getName()));
+    }
+
+    /**
+     * {@code key} as written by {@link ByteBufferUtil#writeWithShortLength}, the form of the keys in the partition
+     * index footer (first and last key, see {@code PartitionIndexBuilder.complete}) and in the row index (the key
+     * precedes the entry of each indexed partition, see {@code BtiTableWriter.IndexWriter.append}).
+     */
+    private static byte[] withShortLength(String... keys)
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            for (String key : keys)
+                ByteBufferUtil.writeWithShortLength(ByteBufferUtil.bytes(key), out);
+            return out.toByteArray();
+        }
+        catch (IOException e)
+        {
+            throw new AssertionError(e);
+        }
+    }
+
+    private static byte[] utf8(String s)
+    {
+        return s.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Checks a {@code bb} sstable as loaded from the fixtures.
+     * <p>
+     * The sstablemetadata tool ({@link org.apache.cassandra.tools.SSTableMetadataViewer}) is not invoked here, because
+     * its static initialisation runs {@code DatabaseDescriptor.toolInitialization()}, which asserts when the daemon
+     * is already initialised in this JVM. The code path it uses on these sstables is exercised instead: the
+     * deserialization of the (encrypted) Statistics.db through the metadata serializer, and
+     * {@code readKeyRange} for the first and last keys, which {@code bb} does not store in its metadata.
+     * The jvm-dtest {@code SSTableEncryptionTest} runs the real tool on encrypted sstables of the current version.
+     */
+    private static void verifyLegacyEncryptedSSTable(SSTableReader sstable, boolean hasClustering) throws IOException
+    {
+        Descriptor descriptor = sstable.descriptor;
+        assertEquals(LEGACY_ENCRYPTED_VERSION, descriptor.version.version);
+        assertEquals(BtiFormat.NAME, descriptor.getFormat().name());
+        assertThat(descriptor.version.indicesAreEncrypted()).isTrue();
+        assertThat(descriptor.version.metadataIsEncrypted()).isTrue();
+        assertThat(descriptor.version.hasKeyRange()).isFalse();
+        assertThat(sstable.getCompressionMetadata().compressor().encryptionOnly()).isNotNull();
+        assertThat(sstable.isMarkedSuspect()).isFalse();
+
+        IPartitioner partitioner = sstable.getPartitioner();
+        Pair<DecoratedKey, DecoratedKey> keyRange = descriptor.getFormat().getReaderFactory().readKeyRange(descriptor, partitioner);
+        assertThat(keyRange).isNotNull();
+        assertEquals(sstable.getFirst(), keyRange.left);
+        assertEquals(sstable.getLast(), keyRange.right);
+        // the order preserving partitioner of the tests
+        assertEquals("0", UTF8Type.instance.compose(keyRange.left.getKey()));
+        assertEquals("4", UTF8Type.instance.compose(keyRange.right.getKey()));
+
+        // a fresh deserialization, independent from the one done when the reader was opened
+        StatsComponent statsComponent = StatsComponent.load(descriptor, MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER);
+        ValidationMetadata validation = statsComponent.validationMetadata();
+        assertEquals(partitioner.getClass().getCanonicalName(), validation.partitioner);
+        assertEquals(0.01, validation.bloomFilterFPChance, 0.0);
+
+        StatsMetadata stats = statsComponent.statsMetadata();
+        assertEquals(5, stats.estimatedPartitionSize.count());
+        assertEquals(hasClustering ? 250 : 5, stats.totalRows);
+        assertEquals(hasClustering ? LEGACY_ENCRYPTED_PK_CK_MIN_TIMESTAMP : LEGACY_ENCRYPTED_PK_MIN_TIMESTAMP, stats.minTimestamp);
+        assertEquals(hasClustering ? LEGACY_ENCRYPTED_PK_CK_MAX_TIMESTAMP : LEGACY_ENCRYPTED_PK_MAX_TIMESTAMP, stats.maxTimestamp);
+        assertEquals(stats.minTimestamp, sstable.getSSTableMetadata().minTimestamp);
+        assertEquals(stats.maxTimestamp, sstable.getSSTableMetadata().maxTimestamp);
+        assertThat(stats.firstKey).isNull();
+        assertThat(stats.lastKey).isNull();
+
+        SerializationHeader.Component header = statsComponent.serializationHeader();
+        assertEquals(UTF8Type.instance, header.getKeyType());
+        assertEquals(hasClustering ? Collections.singletonList(UTF8Type.instance) : Collections.emptyList(), header.getClusteringTypes());
+        assertThat(header.getRegularColumns()).containsOnlyKeys(ByteBufferUtil.bytes("val"));
+        assertThat(header.getStaticColumns()).isEmpty();
+
+        // The rows returned by the queries contain these values, the files do not.
+        assertAbsent(descriptor.fileFor(SSTableFormat.Components.DATA), Arrays.asList(utf8(LEGACY_ENCRYPTED_VALUE), utf8(longString.substring(0, 100))));
+        // The plaintext partition index ends with the first and last keys, "0" and "4", written with their length.
+        assertAbsent(descriptor.fileFor(BtiFormat.Components.PARTITION_INDEX), Collections.singletonList(withShortLength("0", "4")));
+        // The plaintext row index holds the key of each indexed partition, written with its length, before the entry of
+        // the partition (see PartitionIterator.readNext); all partitions of the _ck table are indexed, the ones of the
+        // _pk table are not (its row index is empty).
+        File rowIndex = descriptor.fileFor(BtiFormat.Components.ROW_INDEX);
+        if (hasClustering)
+        {
+            assertThat(rowIndex.length()).isGreaterThan(0);
+            assertAbsent(rowIndex, Arrays.asList(withShortLength("0"), withShortLength("1"), withShortLength("2"), withShortLength("3"), withShortLength("4")));
+        }
+        else
+        {
+            assertEquals(0, rowIndex.length());
+        }
+        assertAbsent(descriptor.fileFor(SSTableFormat.Components.STATS), plaintextMetadataMarkers(sstable));
+    }
+
+    private static void verifyUpgradedEncryptedSSTable(SSTableReader sstable, boolean hasSensitivePartition)
+    {
+        Descriptor descriptor = sstable.descriptor;
+        assertThat(descriptor.version.isLatestVersion()).describedAs(descriptor.toString()).isTrue();
+        assertEquals(DatabaseDescriptor.getSelectedSSTableFormat().name(), descriptor.getFormat().name());
+        assertThat(sstable.getCompressionMetadata().compressor().encryptionOnly()).isNotNull();
+        assertThat(sstable.getCompressionMetadata().parameters.asMap()).containsEntry("key_provider", KeyProviderFactoryStub.class.getName());
+
+        List<byte[]> plaintext = new ArrayList<>(Arrays.asList(utf8(LEGACY_ENCRYPTED_VALUE), utf8(longString.substring(0, 100))));
+        if (hasSensitivePartition)
+        {
+            plaintext.add(utf8(SENSITIVE_KEY));
+            plaintext.add(utf8(SENSITIVE_VALUE));
+            // the sensitive key is the last key, stored in full in the plaintext partition index; the sensitive
+            // partition of the _ck table is indexed, so its key is in the plaintext row index too
+            assertEquals(SENSITIVE_KEY, UTF8Type.instance.compose(sstable.getLast().getKey()));
+        }
+        else
+        {
+            // the first and last keys, "0" and "4", are in the footer of the plaintext partition index
+            assertEquals("0", UTF8Type.instance.compose(sstable.getFirst().getKey()));
+            assertEquals("4", UTF8Type.instance.compose(sstable.getLast().getKey()));
+        }
+        assertAbsent(descriptor.fileFor(SSTableFormat.Components.DATA), plaintext);
+        // The guards below are for the current version of the big format, which encrypts neither its indexes nor its
+        // metadata; note that no CI configuration selects the big format with these tests.
+        if (descriptor.version.indicesAreEncrypted())
+        {
+            for (Component component : sstable.components())
+            {
+                if (component.equals(BtiFormat.Components.PARTITION_INDEX) || component.equals(BtiFormat.Components.ROW_INDEX))
+                    assertAbsent(descriptor.fileFor(component), plaintext);
+                if (component.equals(BtiFormat.Components.PARTITION_INDEX) && !hasSensitivePartition)
+                    assertAbsent(descriptor.fileFor(component), Collections.singletonList(withShortLength("0", "4")));
+            }
+        }
+        if (descriptor.version.metadataIsEncrypted())
+            assertAbsent(descriptor.fileFor(SSTableFormat.Components.STATS), plaintextMetadataMarkers(sstable));
+    }
+
+    private static void assertAbsent(File file, List<byte[]> plaintext)
+    {
+        assertThat(file.exists()).describedAs(file.toString()).isTrue();
+        byte[] bytes;
+        try
+        {
+            bytes = Files.readAllBytes(file.toPath());
+        }
+        catch (IOException e)
+        {
+            throw new AssertionError(e);
+        }
+        for (byte[] value : plaintext)
+            assertThat(Bytes.indexOf(bytes, value)).describedAs("0x%s in %s", ByteBufferUtil.bytesToHex(ByteBuffer.wrap(value)), file).isEqualTo(-1);
     }
 
     @Test
@@ -714,8 +1173,11 @@ public class LegacySSTableTest
 
     private static void loadLegacyTable(String legacyVersion, String tableSuffix)
     {
-        String table = String.format("legacy_%s_%s", legacyVersion, tableSuffix);
+        loadLegacyTableByName(legacyVersion, String.format("legacy_%s_%s", legacyVersion, tableSuffix));
+    }
 
+    private static void loadLegacyTableByName(String legacyVersion, String table)
+    {
         // ignore if no sstables are in this legacyVersion directory
         getTestDataTableDir(legacyVersion, table).forEach(f -> logger.info(f.toString()));
         if (0 == getTestDataTableDir(legacyVersion, table).tryList(f -> f.name().endsWith(".db")).length)

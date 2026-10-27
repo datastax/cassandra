@@ -335,6 +335,12 @@ public class PrefetchingRebufferer implements Rebufferer
     }
 
     @Override
+    public long remainingBytes(long position)
+    {
+        return source.remainingBytes(position);
+    }
+
+    @Override
     public void close()
     {
         assert unusedRebufferers.isEmpty() : "buffers should have been released";

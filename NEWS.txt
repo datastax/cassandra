@@ -65,6 +65,28 @@ restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
 
+UPGRADING FROM HCD 1.2 (HCD-632)
+================================
+
+An HCD 1.2 cassandra.yaml is accepted with these differences:
+    - `enable_uuid_sstable_identifiers` is a deprecated alias of `uuid_sstable_identifiers_enabled`.
+    - `hints_request_timeout_in_ms` is a deprecated alias of `hints_request_timeout`.
+    - `repair_prepare_message_timeout_in_ms` is a deprecated alias of `repair_prepare_message_timeout`. The alias
+      accepts a number of milliseconds (HCD 1.2) as well as a duration such as `10000ms` (earlier HCD 2.0 builds).
+    - `aggregation_subpage_size_in_kb` is a deprecated alias of `aggregation_subpage_size` (e.g. `2048KiB`).
+    - `sai_options.segment_write_buffer_space_mb` is a deprecated alias of `sai_options.segment_write_buffer_size`
+      (e.g. `1024MiB`), the name used by Apache Cassandra 5.0 and by the cassandra.yaml comments.
+The following HCD 1.2 properties are not accepted and must be removed or translated before the upgrade,
+otherwise the node does not start ("Invalid yaml. Please remove properties [...]"):
+    - the `guardrails:` block (commented out in the HCD 1.2 cassandra.yaml): guardrails are top-level
+      properties with different names, see the `*_warn_threshold`, `*_fail_threshold` and `*_enabled`
+      guardrail properties in cassandra.yaml.
+    - `max_total_hints_size_in_mb`: there is no node-wide limit any more, see `max_hints_size_per_host`.
+    - the HCD 1.2 `memtable:` default options map (e.g. `memtable: {class: TrieMemtable}`): use
+      `memtable.configurations` and its `default` entry instead.
+    - `commitlog_sync_batch_window_in_ms`, `commitlog_periodic_queue_size`, `concurrent_replicates` and
+      `native_transport_max_negotiable_protocol_version`, removed in 5.0.
+
 5.0.9
 =====
 
@@ -457,6 +479,7 @@ Upgrading
       being null again. In the JMX MBean `org.apache.cassandra.db:type=StorageService`, the setter method
       `setSSTablePreemptiveOpenIntervalInMB`still takes `intervalInMB` negative numbers for disabled.
     - `enable_uuid_sstable_identifiers` parameter from 4.1 alpha1 was renamed to `uuid_sstable_identifiers_enabled`.
+      The old name is still accepted as a deprecated alias, see "UPGRADING FROM HCD 1.2" (HCD-632).
     - `index_summary_resize_interval_in_minutes = -1` is equivalent to index_summary_resize_interval being set to `null` or
       disabled. In the JMX MBean `org.apache.cassandra.db:type=IndexSummaryManager`, the setter method `setResizeIntervalInMinutes` still takes
       `resizeIntervalInMinutes = -1` for disabled.

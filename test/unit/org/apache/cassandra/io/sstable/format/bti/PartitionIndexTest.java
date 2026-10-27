@@ -55,6 +55,7 @@ import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.io.compress.CorruptBlockException;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -94,7 +95,17 @@ public class PartitionIndexTest
 
     static final IPartitioner partitioner = Util.testPartitioner();
     //Lower the size of the indexes when running without the chunk cache, otherwise the test times out on Jenkins
-    static int COUNT = ChunkCache.instance != null ? 245256 : 24525;
+    static final int COUNT = ChunkCache.instance != null ? 245256 : 24525;
+
+    /**
+     * The number of keys of the large indexes built by the tests. Subclasses may lower it to fit their run time in the
+     * fork timeout; it is a method rather than a writable static so that doing so cannot change the size used by this
+     * class when both run in the same JVM.
+     */
+    protected int count()
+    {
+        return COUNT;
+    }
 
     @Parameterized.Parameters()
     public static Collection<Object[]> generateData()
@@ -125,7 +136,7 @@ public class PartitionIndexTest
     @Test
     public void testSizingBug() throws IOException
     {
-        for (int i = 1; i < COUNT; i *= 10)
+        for (int i = 1; i < count(); i *= 10)
         {
             testGetEq(generateRandomIndex(i));
             testGetEq(generateSequentialIndex(i));
@@ -135,15 +146,15 @@ public class PartitionIndexTest
     @Test
     public void testGetEq() throws IOException
     {
-        testGetEq(generateRandomIndex(COUNT));
-        testGetEq(generateSequentialIndex(COUNT));
+        testGetEq(generateRandomIndex(count()));
+        testGetEq(generateSequentialIndex(count()));
     }
 
     @Test
     public void testBrokenFile() throws IOException
     {
         // put some garbage in the file
-        final Pair<List<DecoratedKey>, PartitionIndex> data = generateRandomIndex(COUNT);
+        final Pair<List<DecoratedKey>, PartitionIndex> data = generateRandomIndex(count());
         File f = new File(data.right.getFileHandle().path());
         try (FileChannel ch = FileChannel.open(f.toPath(), StandardOpenOption.WRITE))
         {
@@ -156,7 +167,7 @@ public class PartitionIndexTest
     @Test
     public void testLongKeys() throws IOException
     {
-        testGetEq(generateLongKeysIndex(COUNT / 10));
+        testGetEq(generateLongKeysIndex(count() / 10));
     }
 
     void testGetEq(Pair<List<DecoratedKey>, PartitionIndex> data)
@@ -177,8 +188,8 @@ public class PartitionIndexTest
     @Test
     public void testGetGt() throws IOException
     {
-        testGetGt(generateRandomIndex(COUNT));
-        testGetGt(generateSequentialIndex(COUNT));
+        testGetGt(generateRandomIndex(count()));
+        testGetGt(generateSequentialIndex(count()));
     }
 
     private void testGetGt(Pair<List<DecoratedKey>, PartitionIndex> data) throws IOException
@@ -199,8 +210,8 @@ public class PartitionIndexTest
     @Test
     public void testGetGe() throws IOException
     {
-        testGetGe(generateRandomIndex(COUNT));
-        testGetGe(generateSequentialIndex(COUNT));
+        testGetGe(generateRandomIndex(count()));
+        testGetGe(generateSequentialIndex(count()));
     }
 
     public void testGetGe(Pair<List<DecoratedKey>, PartitionIndex> data) throws IOException
@@ -222,8 +233,8 @@ public class PartitionIndexTest
     @Test
     public void testGetLt() throws IOException
     {
-        testGetLt(generateRandomIndex(COUNT));
-        testGetLt(generateSequentialIndex(COUNT));
+        testGetLt(generateRandomIndex(count()));
+        testGetLt(generateSequentialIndex(count()));
     }
 
     public void testGetLt(Pair<List<DecoratedKey>, PartitionIndex> data) throws IOException
@@ -326,9 +337,60 @@ public class PartitionIndexTest
     @Test
     public void testIteration() throws IOException
     {
-        Pair<List<DecoratedKey>, PartitionIndex> random = generateRandomIndex(COUNT);
+        Pair<List<DecoratedKey>, PartitionIndex> random = generateRandomIndex(count());
         checkIteration(random.left.size(), random.right);
         random.right.close();
+    }
+
+    /**
+     * The partition index of a zero-copy sliced sstable covers every key of the original sstable; the slice's
+     * {@link ZeroCopyMetadata} restricts the key range and the key count of the loaded index.
+     */
+    @Test
+    public void testZeroCopyOffsets() throws IOException
+    {
+        // a slice and a bounded iteration need no more keys than this
+        int count = count() / 10;
+        int firstKeyOffset = 1;
+        int lastKeyOffset = count - 2;
+        File file = FileUtils.createTempFile("ColumnTrieReaderTest", "");
+        List<DecoratedKey> keys = Lists.newArrayList();
+        FileHandle.Builder fhBuilder = makeHandle(file);
+        try (SequentialWriter writer = makeWriter(file);
+             PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version)
+        )
+        {
+            for (int i = 0; i < count; i++)
+                keys.add(generateRandomKey());
+            Collections.sort(keys);
+
+            for (int i = 0; i < count; i++)
+                builder.addEntry(keys.get(i), i);
+            builder.complete();
+
+            // the data offsets only matter to the data file; any non-zero values make the metadata exist
+            ZeroCopyMetadata zeroCopyMetadata = new ZeroCopyMetadata(4096, 8192, 4096,
+                                                                     lastKeyOffset - firstKeyOffset + 1,
+                                                                     keys.get(firstKeyOffset).getKey(),
+                                                                     keys.get(lastKeyOffset).getKey());
+            try (PartitionIndex index = loadPartitionIndex(fhBuilder, writer, zeroCopyMetadata);
+                 PartitionIndex.IndexPosIterator iter = index.allKeysIterator())
+            {
+                assertEquals(lastKeyOffset - firstKeyOffset + 1, index.size());
+                assertEquals(keys.get(firstKeyOffset), index.firstKey());
+                assertEquals(keys.get(lastKeyOffset), index.lastKey());
+
+                // iteration is limited to the keys of the slice
+                long expected = firstKeyOffset;
+                for (long pos = iter.nextIndexPos(); pos != PartitionIndex.NOT_FOUND; pos = iter.nextIndexPos())
+                    assertEquals(expected++, pos);
+                assertEquals(lastKeyOffset + 1, expected);
+            }
+        }
+        finally
+        {
+            file.tryDelete();
+        }
     }
 
     public void checkIteration(int keysSize, PartitionIndex index)
@@ -352,7 +414,7 @@ public class PartitionIndexTest
     @Test
     public void testConstrainedIteration() throws IOException
     {
-        Pair<List<DecoratedKey>, PartitionIndex> random = generateRandomIndex(COUNT);
+        Pair<List<DecoratedKey>, PartitionIndex> random = generateRandomIndex(count());
         try (PartitionIndex summary = random.right)
         {
             List<DecoratedKey> keys = random.left;
@@ -430,52 +492,68 @@ public class PartitionIndexTest
     @Test
     public void testPartialIndex() throws IOException
     {
+        int count = count();
+        int parts = 15;
         for (int reps = 0; reps < 10; ++reps)
         {
             File file = FileUtils.createTempFile("ColumnTrieReaderTest", "");
             List<DecoratedKey> list = Lists.newArrayList();
-            int parts = 15;
             FileHandle.Builder fhBuilder = makeHandle(file);
             try (SequentialWriter writer = makeWriter(file);
                  PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version)
             )
             {
                 writer.setPostFlushListener(builder::markPartitionIndexSynced);
-                for (int i = 0; i < COUNT; i++)
+                for (int i = 0; i < count; i++)
                 {
                     DecoratedKey key = generateRandomLengthKey();
                     list.add(key);
                 }
                 Collections.sort(list);
                 AtomicInteger callCount = new AtomicInteger();
+                int acceptedCount = 0;
 
                 int i = 0;
                 for (int part = 1; part <= parts; ++part)
                 {
-                    for (; i < COUNT * part / parts; i++)
+                    for (; i < count * part / parts; i++)
                         builder.addEntry(list.get(i), i);
 
                     final long addedSize = i;
-                    builder.buildPartial(index ->
-                                         {
-                                             int indexSize = Collections.binarySearch(list, index.lastKey()) + 1;
-                                             assert indexSize >= addedSize - 1;
-                                             checkIteration(indexSize, index);
-                                             callCount.incrementAndGet();
-                                         }, 0, i * 1024L);
+                    // A request is refused while the previous partial index still waits for the index file to be
+                    // flushed past its end, and when no key was written since the previous request; the callback
+                    // is called from the writer's post-flush listener.
+                    if (builder.buildPartial(index ->
+                                             {
+                                                 int indexSize = Collections.binarySearch(list, index.lastKey()) + 1;
+                                                 assert indexSize >= addedSize - 1;
+                                                 checkIteration(indexSize, index);
+                                                 callCount.incrementAndGet();
+                                             }, 0, i * 1024L))
+                        ++acceptedCount;
                     builder.markDataSynced(i * 1024L);
                     // verifier will be called when the sequentialWriter finishes a chunk
                 }
 
-                for (; i < COUNT; ++i)
+                for (; i < count; ++i)
                     builder.addEntry(list.get(i), i);
                 builder.complete();
                 try (PartitionIndex index = loadPartitionIndex(fhBuilder, writer))
                 {
                     checkIteration(list.size(), index);
                 }
-                if (COUNT / parts > 16000)
+
+                logger.debug("testPartialIndex: {} keys, {} partial indexes requested, {} accepted, {} ready",
+                             count, parts, acceptedCount, callCount.get());
+                // Every accepted request but possibly the last one (complete() drops a pending one) must become
+                // ready, which it can only do through the post-flush listener of the writer. With the key counts
+                // used here the index file is flushed well before the end, so at least one partial index is ready.
+                assertTrue(String.format("Expected %d or %d calls, got %d", acceptedCount, acceptedCount - 1, callCount.get()),
+                           callCount.get() == acceptedCount || callCount.get() == acceptedCount - 1);
+                assertTrue("No partial index became ready", callCount.get() > 0);
+                if (count / parts > 16000)
                 {
+                    // Parts this large are always flushed before the next request, so none is refused.
                     assertTrue(String.format("Expected %d or %d calls, got %d", parts, parts - 1, callCount.get()),
                                callCount.get() == parts - 1 || callCount.get() == parts);
                 }
@@ -620,6 +698,16 @@ public class PartitionIndexTest
             return jumped(wrapped.fileLength(), cutoffs, offsets);
         }
 
+        /**
+         * Overridden as {@link #fileLength()} is: the source's count is against its own length. This ignores the
+         * source's holes, as trie readers only seek through this rebufferer and never skip.
+         */
+        @Override
+        public long remainingBytes(long position)
+        {
+            return Math.max(0, fileLength() - position);
+        }
+
         @Override
         public String toString()
         {
@@ -658,6 +746,7 @@ public class PartitionIndexTest
     @Test
     public void testPointerGrowth() throws IOException
     {
+        int count = count();
         for (int reps = 0; reps < 10; ++reps)
         {
             File file = FileUtils.createTempFile("ColumnTrieReaderTest", "");
@@ -679,19 +768,19 @@ public class PartitionIndexTest
             )
             {
                 writer.setPostFlushListener(builder::markPartitionIndexSynced);
-                for (int i = 0; i < COUNT; i++)
+                for (int i = 0; i < count; i++)
                 {
                     DecoratedKey key = generateRandomKey();
                     list.add(key);
                 }
                 Collections.sort(list);
 
-                for (int i = 0; i < COUNT; ++i)
+                for (int i = 0; i < count; ++i)
                     builder.addEntry(list.get(i), i);
                 long root = builder.complete();
 
                 try (FileHandle fh = fhBuilder.complete();
-                     PartitionIndex index = new PartitionIndexJumping(fh, root, COUNT, null, null, cutoffsAndOffsets);
+                     PartitionIndex index = new PartitionIndexJumping(fh, root, count, null, null, cutoffsAndOffsets);
                      Analyzer analyzer = new Analyzer(index))
                 {
                     checkIteration(list.size(), index);
@@ -892,6 +981,11 @@ public class PartitionIndexTest
 
     protected PartitionIndex loadPartitionIndex(FileHandle.Builder fhBuilder, SequentialWriter writer) throws IOException
     {
-        return PartitionIndex.load(fhBuilder, partitioner, false, version);
+        return loadPartitionIndex(fhBuilder, writer, ZeroCopyMetadata.EMPTY);
+    }
+
+    protected PartitionIndex loadPartitionIndex(FileHandle.Builder fhBuilder, SequentialWriter writer, ZeroCopyMetadata zeroCopyMetadata) throws IOException
+    {
+        return PartitionIndex.load(fhBuilder, partitioner, false, zeroCopyMetadata, version);
     }
 }

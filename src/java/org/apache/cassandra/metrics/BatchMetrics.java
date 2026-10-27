@@ -35,6 +35,10 @@ public class BatchMetrics
     public final Histogram partitionsPerUnloggedBatch;
     public final Histogram partitionsPerCounterBatch;
 
+    public final Histogram rowsPerLoggedBatch;
+    public final Histogram rowsPerUnloggedBatch;
+    public final Histogram rowsPerCounterBatch;
+
     public final Histogram columnsPerLoggedBatch;
     public final Histogram columnsPerUnloggedBatch;
     public final Histogram columnsPerCounterBatch;
@@ -49,28 +53,35 @@ public class BatchMetrics
         partitionsPerUnloggedBatch = Metrics.histogram(factory.createMetricName("PartitionsPerUnloggedBatch"), false);
         partitionsPerCounterBatch = Metrics.histogram(factory.createMetricName("PartitionsPerCounterBatch"), false);
 
+        rowsPerLoggedBatch = Metrics.histogram(factory.createMetricName("RowsPerLoggedBatch"), false);
+        rowsPerUnloggedBatch = Metrics.histogram(factory.createMetricName("RowsPerUnloggedBatch"), false);
+        rowsPerCounterBatch = Metrics.histogram(factory.createMetricName("RowsPerCounterBatch"), false);
+
         columnsPerLoggedBatch = Metrics.histogram(factory.createMetricName("ColumnsPerLoggedBatch"), false);
         columnsPerUnloggedBatch = Metrics.histogram(factory.createMetricName("ColumnsPerUnloggedBatch"), false);
         columnsPerCounterBatch = Metrics.histogram(factory.createMetricName("ColumnsPerCounterBatch"), false);
     }
 
-    public void update(BatchStatement.Type batchType, int updatedPartitions, int updatedColumns)
+    public void update(BatchStatement.Type batchType, int updatedPartitions, int updatedRows, int updatedColumns)
     {
         switch (batchType)
         {
             case LOGGED:
                 numLoggedBatches.inc();
                 partitionsPerLoggedBatch.update(updatedPartitions);
+                rowsPerLoggedBatch.update(updatedRows);
                 columnsPerLoggedBatch.update(updatedColumns);
                 break;
             case COUNTER:
                 numCounterBatches.inc();
                 partitionsPerCounterBatch.update(updatedPartitions);
+                rowsPerCounterBatch.update(updatedRows);
                 columnsPerCounterBatch.update(updatedColumns);
                 break;
             case UNLOGGED:
                 numUnloggedBatches.inc();
                 partitionsPerUnloggedBatch.update(updatedPartitions);
+                rowsPerUnloggedBatch.update(updatedRows);
                 columnsPerUnloggedBatch.update(updatedColumns);
                 break;
             default:

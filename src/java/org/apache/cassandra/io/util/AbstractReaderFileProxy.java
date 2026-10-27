@@ -70,4 +70,10 @@ public abstract class AbstractReaderFileProxy implements ReaderFileProxy
     {
         return currentPosition + bytesToSkip;
     }
+
+    @Override
+    public long remainingBytes(long position)
+    {
+        return Math.max(0, fileLength() - position);
+    }
 }

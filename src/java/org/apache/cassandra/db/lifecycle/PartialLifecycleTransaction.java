@@ -54,9 +54,14 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
         // don't do anything, composite will checkpoint at end
     }
 
+    /**
+     * A no-op, like {@link #checkpoint()}. The only user of {@code abortCheckpoint} is the early open of
+     * {@code SSTableRewriter}, and its {@code update} calls throw here before anything is staged (for readers opened
+     * early and for the originals with moved starts), so there is never anything of that attempt to roll back. The
+     * staged state of the shared main transaction also holds the other parts' readers, which must not be touched.
+     */
     public Throwable abortCheckpoint(Throwable accumulate)
     {
-        // treat like checkpoint above
         return accumulate;
     }
 
@@ -68,7 +73,7 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
     public void update(SSTableReader reader, boolean original)
     {
         throwIfCompositeAborted();
-        if (original)
+        if (original || reader.openReason == SSTableReader.OpenReason.EARLY)
             throw earlyOpenUnsupported();
 
         synchronized (mainTransaction)
@@ -80,7 +85,7 @@ public class PartialLifecycleTransaction implements ILifecycleTransaction
     public void update(Collection<SSTableReader> readers, boolean original)
     {
         throwIfCompositeAborted();
-        if (original)
+        if (original || readers.stream().anyMatch(reader -> reader.openReason == SSTableReader.OpenReason.EARLY))
             throw earlyOpenUnsupported();
 
         synchronized (mainTransaction)

@@ -173,18 +173,67 @@ public class CompressionMetadataTest
     }
 
     @Test
-    public void testEncryptedOnlyAccountsNativeMemory()
+    public void testEncryptedOnlyAllocatesNoNativeMemory()
     {
         long before = CompressionMetadata.nativeMemoryAllocated();
 
+        // encryption-only metadata has no chunk offsets, thus no off-heap memory
         CompressionMetadata metadata = CompressionMetadata.encryptedOnly(params);
-        long allocated = metadata.offHeapSize();
-        assertThat(allocated).isGreaterThan(0);
-        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before + allocated);
+        assertThat(metadata.offHeapSize()).isZero();
+        assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before);
 
         metadata.close();
         assertThat(metadata.isCleanedUp()).isTrue();
         assertThat(CompressionMetadata.nativeMemoryAllocated()).isEqualTo(before);
+    }
+
+    @Test
+    public void testEncryptedOnlyHasNoOffsets()
+    {
+        List<PartitionPositionBounds> sections = asList(new PartitionPositionBounds(0, 10));
+        try (CompressionMetadata metadata = CompressionMetadata.encryptedOnly(params))
+        {
+            assertThat(metadata.hasOffsets()).isFalse();
+            assertThat(metadata.isEncryptionOnly()).isTrue();
+            assertThat(metadata.dataLength).isEqualTo(-1);
+            assertThat(metadata.compressedFileLength).isEqualTo(-1);
+            assertThat(metadata.parameters).isSameAs(params);
+
+            String message = "encryption-only compression metadata has no chunk offsets";
+            assertThatThrownBy(() -> metadata.chunkFor(0)).isInstanceOf(IllegalStateException.class).hasMessage(message);
+            assertThatThrownBy(() -> metadata.chunkFor(1L << 20)).isInstanceOf(IllegalStateException.class).hasMessage(message);
+            assertThatThrownBy(() -> metadata.getTotalSizeForSections(sections)).isInstanceOf(IllegalStateException.class).hasMessage(message);
+            assertThatThrownBy(() -> metadata.getChunksForSections(sections)).isInstanceOf(IllegalStateException.class).hasMessage(message);
+        }
+
+        // metadata with offsets is not encryption-only
+        try (WithProperties properties = new WithProperties().set(TEST_DEBUG_REF_COUNT, false))
+        {
+            CompressionMetadata.ChunkOffsetMemory memory = new CompressionMetadata.ChunkOffsetMemory(1);
+            memory.set(0, 0);
+            try (CompressionMetadata metadata = newCompressionMetadata(memory))
+            {
+                assertThat(metadata.hasOffsets()).isTrue();
+                assertThat(metadata.isEncryptionOnly()).isFalse();
+            }
+        }
+    }
+
+    /**
+     * The metadata of an empty compressed file has no chunk offsets either, but it is not encryption-only: asking it
+     * for the chunks of no sections is fine (this used to fail the {@code hasOffsets()} assertion).
+     */
+    @Test
+    public void testEmptyCompressedFileHasNoChunksForNoSections() throws IOException
+    {
+        File f = generateMetaDataFile(0);
+        try (CompressionMetadata metadata = CompressionMetadata.open(f, 0, true))
+        {
+            assertThat(metadata.hasOffsets()).isFalse();
+            assertThat(metadata.isEncryptionOnly()).isFalse();
+            assertThat(metadata.getTotalSizeForSections(List.of())).isZero();
+            assertThat(metadata.getChunksForSections(List.of())).isEmpty();
+        }
     }
 
     private File generateMetaDataFile(long dataLength, long... offsets) throws IOException

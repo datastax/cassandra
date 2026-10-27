@@ -22,6 +22,7 @@ package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture; // checkstyle: permit this import
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -601,7 +602,7 @@ public class ChunkCache
 
     /**
      * A chunk with a single memory region. This is used for reading chunks smaller than PageAware.PAGE_SIZE, but it
-     * always allocated chunks of size PageAware.PAGE_SIZE to avoid fragmenting cache memory.
+     * is always allocated with a size of PageAware.PAGE_SIZE to avoid fragmenting cache memory.
      * See {@link this#newChunk}.
      * <p/>
      * This class is a chunk but also behaves as a {@link Rebufferer.BufferHolder} to save an allocation when
@@ -609,10 +610,10 @@ public class ChunkCache
      * <p/>
      * Only one {@link ByteBuffer} is owned: the object returned by the buffer pool, a full page.
      * Logical chunk size is encoded in {@code buffer.limit()} (with {@code position == 0}); capacity stays at the
-     * allocated size so the pool sees what it handed out on release. {@link #buffer()}  and {@link #read} build a
-     * transient {@code slice()} view whose capacity equals that logical size for {@code readChunk}, and the actual
-     * read size 's {@code clear()}
-     * semantics stay correct — the slice is never returned to the pool.
+     * allocated size so the pool sees what it handed out on release. {@link #buffer()} and {@link #read} build a
+     * transient {@code slice()} view whose capacity equals that logical size, so that {@code readChunk} cannot read
+     * more than that and the view's {@code clear()} semantics stay correct; {@link #read} then applies the actual
+     * read size to the limit. The slice is never returned to the pool.
      */
     private class SingleRegionSubChunk extends SingleRegionChunk
     {
@@ -754,6 +755,12 @@ public class ChunkCache
         }
 
         @Override
+        public long remainingBytes(long position)
+        {
+            return source.remainingBytes(position);
+        }
+
+        @Override
         public void close()
         {
             source.close();
@@ -833,5 +840,33 @@ public class ChunkCache
         long fileId = fileIdMaybeNull << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS);
         long mask = - (1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
         return (int) cacheAsMap.keySet().stream().filter(x -> (x.readerId & mask) == fileId).count();
+    }
+
+    /**
+     * Returns the number of chunks of the given file, as seen by the handles opened since the last
+     * {@link #invalidateFile}, that are currently cached and referenced by a reader, i.e. whose buffers a reader has
+     * not released. Only intended for tests checking that readers release what they hold.
+     */
+    @VisibleForTesting
+    public int chunksInUse(File file)
+    {
+        Long fileIdMaybeNull = fileIdMap.get(file);
+        if (fileIdMaybeNull == null)
+            return 0;
+        long fileId = fileIdMaybeNull << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS);
+        long mask = - (1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
+        int inUse = 0;
+        for (Map.Entry<Key, CompletableFuture<Chunk>> entry : cacheAsMap.entrySet())
+        {
+            if ((entry.getKey().readerId & mask) != fileId)
+                continue;
+            CompletableFuture<Chunk> future = entry.getValue();
+            if (!future.isDone() || future.isCompletedExceptionally())
+                continue;
+            // the cache holds one reference of its own
+            if (future.join().references > 1)
+                inUse++;
+        }
+        return inUse;
     }
 }

@@ -75,12 +75,16 @@ public class RowIndexEncryptedTest extends RowIndexTest
     {
         complete();
 
-        FileHandle.Builder builder = new FileHandle.Builder(file)
-                .withCompressionMetadata(CompressionMetadata.encryptedOnly(compressionParams))
-                .encryptionOnly()
-                .mmapped(accessMode == Config.DiskAccessMode.mmap);
-        
-        fh = builder.complete();
+        // the handle takes its own shared copy of the metadata
+        try (CompressionMetadata compressionMetadata = CompressionMetadata.encryptedOnly(compressionParams))
+        {
+            FileHandle.Builder builder = new FileHandle.Builder(file)
+                    .withCompressionMetadata(compressionMetadata)
+                    .encryptionOnly()
+                    .mmapped(accessMode == Config.DiskAccessMode.mmap);
+
+            fh = builder.complete();
+        }
         try (RandomAccessReader rdr = fh.createReader())
         {
             assertEquals("JUNK", rdr.readUTF());

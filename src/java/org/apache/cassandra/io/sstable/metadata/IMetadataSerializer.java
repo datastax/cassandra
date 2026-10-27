@@ -25,25 +25,60 @@ import java.util.function.UnaryOperator;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * Interface for SSTable metadata serializer
+ * <p>
+ * SSTable writers save the metadata through {@link #rewriteSSTableMetadata(Descriptor, Map, CompressionParams)}
+ * (see {@link org.apache.cassandra.io.sstable.format.StatsComponent#save(Descriptor, CompressionParams)}), not
+ * through {@link #rewriteSSTableMetadata(Descriptor, Map)} or {@link #serialize(Map, DataOutputPlus, Descriptor)}:
+ * implementations overriding or wrapping a serializer must override or forward the overloads taking the compression
+ * parameters too, otherwise the metadata of sstables being written falls back to reading the encryptor from the
+ * compression info file.
  */
 public interface IMetadataSerializer
 {
     /**
      * Serialize given metadata components. This should be called after all other components have been written.
-     * In particular, the method uses the COMPRESSION_INFO component to retrieve the encryptor that must be used for
-     * the metadata to avoid leaking sensitive data in e.g. min/max clusterings.
-     *
+     * In particular, if the sstable version encrypts its metadata, the method reads the COMPRESSION_INFO component
+     * (through the {@link org.apache.cassandra.io.compress.CompressionMetadataReaderType#WRITE_TIME write-time}
+     * channel) to retrieve the encryptor that must be used for the metadata to avoid leaking sensitive data in e.g.
+     * min/max clusterings. Callers that know the compression parameters of the sstable's data file should use
+     * {@link #serialize(Map, DataOutputPlus, Descriptor, CompressionParams)} instead.
      *
      * @param components Metadata components to serialize
      * @param out
      * @param descriptor
      * @throws IOException
+     * @throws org.apache.cassandra.io.sstable.CorruptSSTableException if the metadata may have to be encrypted, the
+     *                                                                 TOC lists a compression info file and it does
+     *                                                                 not exist
      */
     void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Descriptor descriptor) throws IOException;
+
+    /**
+     * Serialize given metadata components, encrypting them - if the sstable version encrypts its metadata - with the
+     * encryptor of the given compression parameters, which must be those the sstable's data file is (being) written
+     * with (i.e. those stored in its COMPRESSION_INFO component). Unlike
+     * {@link #serialize(Map, DataOutputPlus, Descriptor)}, the COMPRESSION_INFO component is not read, so it does
+     * not need to have been written yet.
+     * <p>
+     * The default implementation ignores the parameters and delegates to
+     * {@link #serialize(Map, DataOutputPlus, Descriptor)}, for the benefit of implementations predating this method.
+     *
+     * @param components        Metadata components to serialize
+     * @param out
+     * @param descriptor
+     * @param compressionParams the compression parameters of the data file, not null:
+     *                          {@link CompressionParams#noCompression()} if it is not compressed
+     * @throws IOException
+     */
+    default void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Descriptor descriptor, CompressionParams compressionParams) throws IOException
+    {
+        serialize(components, out, descriptor);
+    }
 
     /**
      * Deserialize specified metadata components from given descriptor.
@@ -99,8 +134,26 @@ public interface IMetadataSerializer
 
     /**
      * Replace the sstable metadata file ({@code -Statistics.db}) with the given components.
+     * If the sstable version encrypts its metadata, the encryptor is read from the sstable's COMPRESSION_INFO
+     * component (see {@link #serialize(Map, DataOutputPlus, Descriptor)}), through the
+     * {@link org.apache.cassandra.io.compress.CompressionMetadataReaderType#READ_TIME read-time} channel if the
+     * sstable is complete (it has a TOC), through the write-time one otherwise. Writers should use
+     * {@link #rewriteSSTableMetadata(Descriptor, Map, CompressionParams)}.
      */
     void rewriteSSTableMetadata(Descriptor descriptor, Map<MetadataType, MetadataComponent> currentComponents) throws IOException;
+
+    /**
+     * Replace the sstable metadata file ({@code -Statistics.db}) with the given components, encrypting them with the
+     * given compression parameters, not null (see {@link #serialize(Map, DataOutputPlus, Descriptor, CompressionParams)}).
+     * This is what sstable writers use, as they know the parameters their data file is written with.
+     * <p>
+     * The default implementation ignores the parameters and delegates to
+     * {@link #rewriteSSTableMetadata(Descriptor, Map)}, for the benefit of implementations predating this method.
+     */
+    default void rewriteSSTableMetadata(Descriptor descriptor, Map<MetadataType, MetadataComponent> currentComponents, CompressionParams compressionParams) throws IOException
+    {
+        rewriteSSTableMetadata(descriptor, currentComponents);
+    }
 
     /**
      * Updates the sstable metadata components (works similarly to {@link #rewriteSSTableMetadata(Descriptor, Map)} but
