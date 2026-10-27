@@ -43,6 +43,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.dht.BootStrapper;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -52,6 +53,9 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 import static org.junit.Assert.*;
@@ -103,6 +107,17 @@ abstract public class VectorCompactionTest extends VectorTester
                               );
                           })
                           .collect(Collectors.toList());
+    }
+
+    @Before
+    @Override
+    public void setup() throws Throwable
+    {
+        super.setup();
+        // CQLTester.tearDownClass() clears the token metadata, so when several test classes share a JVM the local
+        // node owns no tokens and coordinator queries at CL ONE fail with "Cannot achieve consistency level ONE".
+        TokenMetadata metadata = StorageService.instance.getTokenMetadata();
+        metadata.updateNormalTokens(BootStrapper.getRandomTokens(metadata, 10), FBUtilities.getBroadcastAddressAndPort());
     }
 
     @Before
