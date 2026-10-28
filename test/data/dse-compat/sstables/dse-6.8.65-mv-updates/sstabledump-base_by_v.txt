@@ -1,0 +1,873 @@
+=== bb-1-bti
+[
+  {
+    "partition" : {
+      "key" : [ "v3" ],
+      "position" : 0
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 72,
+        "clustering" : [ 1, 3 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -13 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 13 },
+          { "name" : "b", "value" : "b13" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k3" ], "value" : 1 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "1" ], "value" : "" },
+          { "name" : "s", "path" : [ "3" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 72,
+        "clustering" : [ 2, 3 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -23 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 23 },
+          { "name" : "b", "value" : "b23" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k3" ], "value" : 2 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "2" ], "value" : "" },
+          { "name" : "s", "path" : [ "3" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 128,
+        "clustering" : [ 3, 3 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -33 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 33 },
+          { "name" : "b", "value" : "b33" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k3" ], "value" : 3 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "3" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 178,
+        "clustering" : [ 4, 3 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -43 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 43 },
+          { "name" : "b", "value" : "b43" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k3" ], "value" : 4 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "3" ], "value" : "" },
+          { "name" : "s", "path" : [ "4" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 234,
+        "clustering" : [ 5, 3 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -53 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 53 },
+          { "name" : "b", "value" : "b53" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k3" ], "value" : 5 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "3" ], "value" : "" },
+          { "name" : "s", "path" : [ "5" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 290,
+        "clustering" : [ 6, 3 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -63 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 63 },
+          { "name" : "b", "value" : "b63" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k3" ], "value" : 6 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "3" ], "value" : "" },
+          { "name" : "s", "path" : [ "6" ], "value" : "" }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v2" ],
+      "position" : 347
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 419,
+        "clustering" : [ 1, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -12 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 12 },
+          { "name" : "b", "value" : "b12" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k2" ], "value" : 1 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "1" ], "value" : "" },
+          { "name" : "s", "path" : [ "2" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 419,
+        "clustering" : [ 2, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -22 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 22 },
+          { "name" : "b", "value" : "b22" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k2" ], "value" : 2 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "2" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 469,
+        "clustering" : [ 3, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -32 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 32 },
+          { "name" : "b", "value" : "b32" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k2" ], "value" : 3 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "2" ], "value" : "" },
+          { "name" : "s", "path" : [ "3" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 525,
+        "clustering" : [ 4, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -42 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 42 },
+          { "name" : "b", "value" : "b42" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k2" ], "value" : 4 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "2" ], "value" : "" },
+          { "name" : "s", "path" : [ "4" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 581,
+        "clustering" : [ 5, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -52 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 52 },
+          { "name" : "b", "value" : "b52" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k2" ], "value" : 5 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "2" ], "value" : "" },
+          { "name" : "s", "path" : [ "5" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 637,
+        "clustering" : [ 6, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -62 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 62 },
+          { "name" : "b", "value" : "b62" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k2" ], "value" : 6 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "2" ], "value" : "" },
+          { "name" : "s", "path" : [ "6" ], "value" : "" }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "u" ],
+      "position" : 694
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 730,
+        "clustering" : [ 5, 4 ],
+        "cells" : [
+          { "name" : "\".v\"", "value" : "", "tstamp" : "2026-10-28T19:05:43Z" },
+          { "name" : "a", "value" : 54, "tstamp" : "2026-10-28T19:05:43Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v1" ],
+      "position" : 731
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 797,
+        "clustering" : [ 1, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -11 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 11 },
+          { "name" : "b", "value" : "b11" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k1" ], "value" : 1 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "1" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 797,
+        "clustering" : [ 2, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -21 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 21 },
+          { "name" : "b", "value" : "b21" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k1" ], "value" : 2 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "1" ], "value" : "" },
+          { "name" : "s", "path" : [ "2" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 853,
+        "clustering" : [ 3, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -31 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 31 },
+          { "name" : "b", "value" : "b31" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k1" ], "value" : 3 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "1" ], "value" : "" },
+          { "name" : "s", "path" : [ "3" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 909,
+        "clustering" : [ 4, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -41 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 41 },
+          { "name" : "b", "value" : "b41" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k1" ], "value" : 4 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "1" ], "value" : "" },
+          { "name" : "s", "path" : [ "4" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 965,
+        "clustering" : [ 5, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -51 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 51 },
+          { "name" : "b", "value" : "b51" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k1" ], "value" : 5 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "1" ], "value" : "" },
+          { "name" : "s", "path" : [ "5" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 1021,
+        "clustering" : [ 6, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -61 },
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 61 },
+          { "name" : "b", "value" : "b61" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k1" ], "value" : 6 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "1" ], "value" : "" },
+          { "name" : "s", "path" : [ "6" ], "value" : "" }
+        ]
+      }
+    ]
+  }
+]
+=== bb-2-bti
+[
+  {
+    "partition" : {
+      "key" : [ "v3" ],
+      "position" : 0
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 43,
+        "clustering" : [ 1, 3 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "m", "path" : [ "z" ], "value" : 26, "tstamp" : "2026-10-28T19:05:44Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v2" ],
+      "position" : 44
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 85,
+        "clustering" : [ 1, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "s", "path" : [ "9" ], "value" : "", "tstamp" : "2026-10-28T19:05:44Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "w" ],
+      "position" : 86
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 124,
+        "clustering" : [ 5, 5 ],
+        "cells" : [
+          { "name" : "\".v\"", "value" : "", "tstamp" : "2026-10-28T19:05:44Z" },
+          { "name" : "a", "value" : 55, "tstamp" : "2026-10-28T19:05:43Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "u" ],
+      "position" : 125
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 170,
+        "clustering" : [ 5, 4 ],
+        "cells" : [
+          { "name" : "\"-x\"", "value" : 0, "tstamp" : "2026-10-28T19:05:44Z" },
+          { "name" : "\".v\"", "value" : "", "tstamp" : "2026-10-28T19:05:43Z" },
+          { "name" : "b", "value" : "bb", "tstamp" : "2026-10-28T19:05:44Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v1" ],
+      "position" : 171
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 210,
+        "clustering" : [ 1, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 100, "tstamp" : "2026-10-28T19:05:44Z" }
+        ]
+      }
+    ]
+  }
+]
+=== bb-3-bti
+[
+  {
+    "partition" : {
+      "key" : [ "v3" ],
+      "position" : 0
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 40,
+        "clustering" : [ 2, 3 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "m", "path" : [ "k3" ], "deletion_info" : { "local_delete_time" : "2026-10-28T19:05:52Z" },
+            "tstamp" : "2026-10-28T19:05:45Z"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v2" ],
+      "position" : 41
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 77,
+        "clustering" : [ 2, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:45Z", "local_delete_time" : "2026-10-28T19:05:52Z" } }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v1" ],
+      "position" : 78
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 114,
+        "clustering" : [ 2, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "deletion_info" : { "local_delete_time" : "2026-10-28T19:05:52Z" },
+            "tstamp" : "2026-10-28T19:05:45Z"
+          }
+        ]
+      }
+    ]
+  }
+]
+=== bb-4-bti
+[
+  {
+    "partition" : {
+      "key" : [ "v3" ],
+      "position" : 0
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 32,
+        "clustering" : [ 3, 3 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "deletion_info" : { "local_delete_time" : "2026-10-28T19:05:54Z" }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v2" ],
+      "position" : 33
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 74,
+        "clustering" : [ 3, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "deletion_info" : { "local_delete_time" : "2026-10-28T19:05:54Z" }
+          },
+          { "name" : "a", "value" : 0, "tstamp" : "2026-10-28T19:05:46Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v1" ],
+      "position" : 75
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 110,
+        "clustering" : [ 2, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "", "tstamp" : "2026-10-28T19:05:46Z" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 110,
+        "clustering" : [ 3, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "deletion_info" : { "local_delete_time" : "2026-10-28T19:05:54Z" }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "changed" ],
+      "position" : 127
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 208,
+        "clustering" : [ 3, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -31 },
+          { "name" : "\".v\"", "value" : "", "tstamp" : "2026-10-28T19:05:46Z" },
+          { "name" : "a", "value" : 31 },
+          { "name" : "b", "value" : "b31" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k1" ], "value" : 3 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "1" ], "value" : "" },
+          { "name" : "s", "path" : [ "3" ], "value" : "" }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 208,
+        "clustering" : [ 3, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -32 },
+          { "name" : "\".v\"", "value" : "", "tstamp" : "2026-10-28T19:05:46Z" },
+          { "name" : "a", "value" : 0, "tstamp" : "2026-10-28T19:05:46Z" },
+          { "name" : "b", "value" : "b32" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k2" ], "value" : 3 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "2" ], "value" : "" },
+          { "name" : "s", "path" : [ "3" ], "value" : "" }
+        ]
+      }
+    ]
+  }
+]
+=== bb-5-bti
+[
+  {
+    "partition" : {
+      "key" : [ "v3" ],
+      "position" : 0
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 31,
+        "clustering" : [ 4, 3 ],
+        "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:47Z", "local_delete_time" : "2026-10-28T19:05:56Z" },
+        "cells" : [ ]
+      },
+      {
+        "type" : "row",
+        "position" : 31,
+        "clustering" : [ 6, 3 ],
+        "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:47Z", "local_delete_time" : "2026-10-28T19:05:56Z" },
+        "cells" : [ ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v2" ],
+      "position" : 47
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 78,
+        "clustering" : [ 4, 2 ],
+        "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:47Z", "local_delete_time" : "2026-10-28T19:05:56Z" },
+        "cells" : [ ]
+      },
+      {
+        "type" : "row",
+        "position" : 78,
+        "clustering" : [ 6, 2 ],
+        "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:47Z", "local_delete_time" : "2026-10-28T19:05:56Z" },
+        "cells" : [ ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v1" ],
+      "position" : 94
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 125,
+        "clustering" : [ 4, 1 ],
+        "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:47Z", "local_delete_time" : "2026-10-28T19:05:56Z" },
+        "cells" : [ ]
+      },
+      {
+        "type" : "row",
+        "position" : 125,
+        "clustering" : [ 6, 1 ],
+        "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:47Z", "local_delete_time" : "2026-10-28T19:05:56Z" },
+        "cells" : [ ]
+      }
+    ]
+  }
+]
+=== bb-6-bti
+[
+  {
+    "partition" : {
+      "key" : [ "v2" ],
+      "position" : 0
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 40,
+        "clustering" : [ 1, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:48Z" },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "", "tstamp" : "2026-10-28T19:05:43Z" },
+          { "name" : "a", "value" : 7 }
+        ]
+      }
+    ]
+  }
+]
+=== bb-7-bti
+[
+  {
+    "partition" : {
+      "key" : [ "v3" ],
+      "position" : 0
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 50,
+        "clustering" : [ 1, 3 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 13, "tstamp" : "2026-10-28T19:05:49Z", "ttl" : 300000000, "expires_at" : "2036-05-01T00:26:00Z", "expired" : false }
+        ]
+      },
+      {
+        "type" : "row",
+        "position" : 50,
+        "clustering" : [ 2, 3 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 23, "tstamp" : "2026-10-28T19:05:49Z", "ttl" : 2, "expires_at" : "2026-10-28T19:06:02Z", "expired" : true }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v2" ],
+      "position" : 77
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 109,
+        "clustering" : [ 5, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "deletion_info" : { "local_delete_time" : "2026-10-28T19:06:00Z" }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "ttl" ],
+      "position" : 110
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 160,
+        "clustering" : [ 7, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:49Z", "ttl" : 300000000, "expires_at" : "2036-05-01T00:26:00Z", "expired" : false },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 71 }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "ttlv" ],
+      "position" : 161
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 249,
+        "clustering" : [ 5, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -51 },
+          { "name" : "\".v\"", "value" : "", "tstamp" : "2026-10-28T19:05:49Z", "ttl" : 300000000, "expires_at" : "2036-05-01T00:26:00Z", "expired" : false },
+          { "name" : "a", "value" : 51 },
+          { "name" : "b", "value" : "b51" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k1" ], "value" : 5 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "1" ], "value" : "" },
+          { "name" : "s", "path" : [ "5" ], "value" : "" }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "shortv" ],
+      "position" : 250
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 332,
+        "clustering" : [ 5, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\"-x\"", "value" : -52 },
+          { "name" : "\".v\"", "value" : "", "tstamp" : "2026-10-28T19:05:49Z", "ttl" : 2, "expires_at" : "2026-10-28T19:06:02Z", "expired" : true },
+          { "name" : "a", "value" : 52 },
+          { "name" : "b", "value" : "b52" },
+          { "name" : "m", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "m", "path" : [ "k2" ], "value" : 5 },
+          { "name" : "s", "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:42.999999Z", "local_delete_time" : "2026-10-28T19:05:48Z" } },
+          { "name" : "s", "path" : [ "2" ], "value" : "" },
+          { "name" : "s", "path" : [ "5" ], "value" : "" }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v1" ],
+      "position" : 333
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 365,
+        "clustering" : [ 5, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:43Z" },
+        "cells" : [
+          { "name" : "\".v\"", "deletion_info" : { "local_delete_time" : "2026-10-28T19:06:00Z" }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "short" ],
+      "position" : 366
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 410,
+        "clustering" : [ 7, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:49Z", "ttl" : 2, "expires_at" : "2026-10-28T19:06:02Z", "expired" : true },
+        "cells" : [
+          { "name" : "\".v\"", "value" : "" },
+          { "name" : "a", "value" : 72 }
+        ]
+      }
+    ]
+  }
+]
+=== bb-8-bti
+[
+  {
+    "partition" : {
+      "key" : [ "v1" ],
+      "position" : 0
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 37,
+        "clustering" : [ 1, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:05:50.000001Z" },
+        "deletion_info" : { "marked_deleted" : "2026-10-28T19:05:50Z", "local_delete_time" : "2026-10-28T19:06:07Z" },
+        "cells" : [
+          { "name" : "a", "value" : 111 }
+        ]
+      }
+    ]
+  }
+]
