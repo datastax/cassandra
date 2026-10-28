@@ -44,7 +44,7 @@ public class CassandraAuthorizerDseNamesTest
     {
         assertThat(CassandraAuthorizer.dseLoneWriteGrantName("data/ks/t", Set.of("UPDATE"))).isEqualTo("UPDATE");
         assertThat(CassandraAuthorizer.dseLoneWriteGrantName("data", Set.of("TRUNCATE", "SELECT"))).isEqualTo("TRUNCATE");
-        assertThat(CassandraAuthorizer.dseLoneWriteGrantName("data/ks", Set.of("UPDATE", "TRUNCATE"))).as("DSE's GRANT MODIFY").isNull();
+        assertThat(CassandraAuthorizer.dseLoneWriteGrantName("data/ks", Set.of("UPDATE", "TRUNCATE"))).as("DSE's GRANT ALL").isNull();
         assertThat(CassandraAuthorizer.dseLoneWriteGrantName("data/ks/t", Set.of("UPDATE", "MODIFY"))).as("MODIFY covers it").isNull();
         assertThat(CassandraAuthorizer.dseLoneWriteGrantName("data/ks/t", Set.of("SELECT"))).isNull();
         assertThat(CassandraAuthorizer.dseLoneWriteGrantName("roles/r", Set.of("UPDATE"))).as("not a data resource").isNull();

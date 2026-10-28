@@ -421,7 +421,7 @@ public class CompatStatusTest extends CQLTester
     {
         String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         String resource = "data/" + KEYSPACE + '/' + table;
-        // what DSE leaves for a role granted UPDATE alone, and for one granted MODIFY (the pair, read as MODIFY: not listed)
+        // what DSE leaves for a role granted UPDATE alone, and the pair its GRANT ALL writes (read as MODIFY: not listed)
         execute(String.format("INSERT INTO system_auth.role_permissions (role, resource, permissions) VALUES ('compat_lone', '%s', {'SELECT', 'UPDATE'})", resource));
         execute(String.format("INSERT INTO system_auth.role_permissions (role, resource, permissions) VALUES ('compat_pair', '%s', {'UPDATE', 'TRUNCATE'})", resource));
         String source = "(the rows read since startup)";
