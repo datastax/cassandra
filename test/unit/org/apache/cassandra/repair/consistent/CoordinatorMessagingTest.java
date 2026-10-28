@@ -116,7 +116,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         Assert.assertFalse(repairSubmitted.get());
 
         // execute repair and start prepare phase
-        ListenableFuture<Boolean> sessionResult = coordinator.execute(sessionSupplier, hasFailures);
+        ListenableFuture<Boolean> sessionResult = coordinator.execute(sessionSupplier, hasFailures, Runnable::run);
         Assert.assertFalse(sessionResult.isDone());
         Assert.assertFalse(hasFailures.get());
         // prepare completed
@@ -207,7 +207,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         Assert.assertFalse(repairSubmitted.get());
 
         // execute repair and start prepare phase
-        ListenableFuture<Boolean> sessionResult = coordinator.execute(sessionSupplier, proposeFailed);
+        ListenableFuture<Boolean> sessionResult = coordinator.execute(sessionSupplier, proposeFailed, Runnable::run);
         prepareLatch.countDown();
         // prepare completed
         try
@@ -246,7 +246,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         Assert.assertFalse(repairSubmitted.get());
 
         // execute repair and start prepare phase
-        ListenableFuture<Boolean> sessionResult = coordinator.execute(sessionSupplier, hasFailures);
+        ListenableFuture<Boolean> sessionResult = coordinator.execute(sessionSupplier, hasFailures, Runnable::run);
         try
         {
             sessionResult.get(1, TimeUnit.SECONDS);

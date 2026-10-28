@@ -19,6 +19,7 @@ package org.apache.cassandra.net;
 
 import java.net.UnknownHostException;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
@@ -26,6 +27,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 /**
  * Map of hosts to their known current messaging versions.
@@ -64,7 +66,8 @@ public class EndpointMessagingVersions
         if (v == null)
         {
             // we don't know the version. assume current. we'll know soon enough if that was incorrect.
-            logger.debug("Assuming current protocol version for {}", endpoint);
+            if (logger.isDebugEnabled())
+                NoSpamLogger.log(logger, NoSpamLogger.Level.DEBUG, 2, TimeUnit.SECONDS, "Assuming current protocol version for {}", endpoint);
             return MessagingService.current_version;
         }
         else
