@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
@@ -109,6 +110,8 @@ public class RangeTermTreePatternTest
         when(index.maxTerm()).thenReturn(UTF8Type.instance.decompose(maxTerm));
         when(index.getVersion()).thenReturn(Version.LATEST);
         when(index.getIndexContext()).thenReturn(context);
+        // read by the trace logging of RangeTermTree.Builder#addIndex (CI runs the tests with TRACE on)
+        when(index.getSSTable()).thenReturn(mock(SSTableReader.class));
         return index;
     }
 
