@@ -73,7 +73,7 @@ public class VectorCompactionBench extends SAITester
 
     /**
      * When true, vector indexes are compacted by merging existing JVector graphs directly.
-     * When false, the index is rebuilt from scratch during compaction (legacy behaviour).
+     * When false, the index is rebuilt from scratch during compaction (legacy behavior).
      */
     @Param({"true", "false" })
     public boolean graphMergeEnabled;

@@ -65,6 +65,7 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.metrics.VectorCompactionMetrics;
+import org.apache.cassandra.io.util.FileUtils;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 
@@ -161,38 +162,36 @@ public class CompactionGraphMerger
      */
     public SegmentMetadata.ComponentMetadataMap merge() throws IOException
     {
-        // --- Step 1: ordinal remapping from the surviving bitsets — pure CPU, no vector I/O.
-        // The postings own the ordering (ascending node id across all sources, which mirrors the
-        // natural row order of the output SSTable). No source vector is read, so the ProgressLimiter
-        // is live from the compactor's first phase.
-        List<OrdinalMapper> remappers;
-        int totalGlobalOrdinals;
-
-        try (var _ = progressLimiter.startPhase(VectorCompactionMetrics.Phase.ORDINAL_REMAP))
+        List<MappedOrdinalMapper> remappers = List.of();
+        FileChannel termsChannel = null;
+        FileChannel pqChannel = null;
+        try
         {
-            remappers = postings.ordinalMapping();
-            totalGlobalOrdinals = postings.size();
-            if (totalGlobalOrdinals == 0)
-                throw new IllegalStateException("CompactionGraphMerger: no surviving nodes found across all source segments; all rows may have been deleted");
-        }
+            // --- Step 1: ordinal remapping from the surviving bitsets — pure CPU, no vector I/O.
+            // The postings own the ordering (ascending node id across all sources, which mirrors the
+            // natural row order of the output SSTable). No source vector is read, so the ProgressLimiter
+            // is live from the compactor's first phase.
+            // All resources are declared up front and released in a single finally; closeQuietly is null-safe.
+            remappers = createRemappers();
+            int totalGlobalOrdinals = postings.size();
 
-        // --- Step 2: jvector writes the compacted graph body directly into the SAI TERMS_DATA
-        // component, after a reserved SAI header; the footer CRC is then computed over the in-place
-        // header+body. No temp file, one write of the (potentially large) graph.
-        Path termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file().toJavaIOFile().toPath();
-        Path pqFile = perIndexComponents.addOrGet(IndexComponentType.PQ).file().toJavaIOFile().toPath();
+            // --- Step 2: jvector writes the compacted graph body directly into the SAI TERMS_DATA
+            // component, after a reserved SAI header; the footer CRC is then computed over the in-place
+            // header+body. No temp file, one write of the (potentially large) graph.
+            Path termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file().toJavaIOFile().toPath();
+            Path pqFile = perIndexComponents.addOrGet(IndexComponentType.PQ).file().toJavaIOFile().toPath();
 
-        // Open both channels up front so they live for the full compaction + epilogue window.
-        // Headers are written directly through the channel — no separate SequentialWriter open.
-        try (FileChannel termsChannel = FileChannel.open(termsFile,
-                     StandardOpenOption.READ,
-                     StandardOpenOption.WRITE,
-                     StandardOpenOption.CREATE);
-             FileChannel pqChannel = FileChannel.open(pqFile,
-                     StandardOpenOption.READ,
-                     StandardOpenOption.WRITE,
-                     StandardOpenOption.CREATE))
-        {
+            // Open both channels up front so they live for the full compaction + epilogue window.
+            // Headers are written directly through the channel — no separate SequentialWriter open.
+            termsChannel = FileChannel.open(termsFile,
+                                            StandardOpenOption.READ,
+                                            StandardOpenOption.WRITE,
+                                            StandardOpenOption.CREATE);
+            pqChannel = FileChannel.open(pqFile,
+                                         StandardOpenOption.READ,
+                                         StandardOpenOption.WRITE,
+                                         StandardOpenOption.CREATE);
+
             // Write the SAI header for TERMS_DATA directly through the channel. The channel is left
             // positioned immediately after the header; that position becomes the compaction startOffset.
             Version version = context.version();
@@ -227,7 +226,7 @@ public class CompactionGraphMerger
             long compactMs = compactionResult.compactMs();
             long termsLength = compactionResult.termsLength();
             long termsOffset = compactionResult.termsOffset();
-            List<OrdinalMapper> effective = compactionResult.ordinalMapping();
+            List<? extends OrdinalMapper> effective = compactionResult.ordinalMapping();
             logger.info("CompactionGraphMerger: TERMS_DATA graph body written in place ({} source segments, {} surviving ordinals, {} bytes body at offset {}) in {} ms",
                         sources.size(), totalGlobalOrdinals, termsLength, termsOffset, compactMs);
 
@@ -281,10 +280,34 @@ public class CompactionGraphMerger
             return CassandraOnHeapGraph.createMetadataMap(termsOffset, termsLength,
                                                           postingsResult.postingsOffset(), postingsResult.postingsLength(),
                                                           pqOffset, pqLength);
-        } // end try-with-resources: termsChannel + pqChannel
+        }
+        finally
+        {
+            FileUtils.closeQuietly(pqChannel);
+            FileUtils.closeQuietly(termsChannel);
+            FileUtils.closeQuietly(remappers);
+        }
     }
 
-    private record CompactionResult(long termsOffset, long termsLength, List<OrdinalMapper> ordinalMapping, long compactMs) {}
+    /**
+     * Builds ordinal remappers from the surviving bitsets, tracking progress under the
+     * {@link VectorCompactionMetrics.Phase#ORDINAL_REMAP} phase.
+     */
+    private List<MappedOrdinalMapper> createRemappers()
+    {
+        try (var _ = progressLimiter.startPhase(VectorCompactionMetrics.Phase.ORDINAL_REMAP))
+        {
+            List<MappedOrdinalMapper> remappers = postings.ordinalMapping();
+            if (postings.isEmpty())
+            {
+                FileUtils.closeQuietly(remappers);
+                throw new IllegalStateException("CompactionGraphMerger: no surviving nodes found across all source segments; all rows may have been deleted");
+            }
+            return remappers;
+        }
+    }
+
+    private record CompactionResult(long termsOffset, long termsLength, List<? extends OrdinalMapper> ordinalMapping, long compactMs) {}
 
     /**
      * Builds and runs the jvector compactor, writing the graph body into a {@link CompactionDestination}
@@ -295,7 +318,7 @@ public class CompactionGraphMerger
      * @param pqChannel null when the PQ sidecar is not in use
      */
     private CompactionResult compactTermsAndPq(List<CompressedVectors> sourceCompressed,
-                                               List<OrdinalMapper> remappers,
+                                               List<MappedOrdinalMapper> remappers,
                                                FileChannel termsChannel,
                                                FileChannel pqChannel) throws IOException
     {
@@ -337,7 +360,7 @@ public class CompactionGraphMerger
         // are resolved through these effective mappers, so rows bind to the right vectors either way.
         // Binding to the wrong vector is silent -- the "could not be joined to a source graph
         // ordinal" guard in SegmentBuilder only catches rows with NO source ordinal.
-        List<OrdinalMapper> effective = compactor.effectiveRemappers();
+        List<? extends OrdinalMapper> effective = compactor.effectiveRemappers();
         if (effective.size() != sources.size())
             throw new IllegalStateException("CompactionGraphMerger: effectiveRemappers() returned " +
                                             effective.size() + " mappers for " + sources.size() + " sources");
@@ -403,7 +426,7 @@ public class CompactionGraphMerger
      * Opens and writes the {@link IndexComponentType#POSTING_LISTS} component, including SAI header,
      * postings body, and footer.
      */
-    private PostingsResult writePostings(List<OrdinalMapper> effective,
+    private PostingsResult writePostings(List<? extends OrdinalMapper> effective,
                                          int totalGlobalOrdinals) throws IOException
     {
         Version version = context.version();

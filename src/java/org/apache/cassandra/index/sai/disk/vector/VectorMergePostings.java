@@ -18,13 +18,10 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntFunction;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -75,8 +72,8 @@ public final class VectorMergePostings implements AutoCloseable
     private final org.apache.cassandra.io.util.File mergedRowIdsBySourceVectorFile;
 
     /** Maps each merged rowId to the packed source vector handle that supplies its vector (-1L if none). */
-    private final MappedLongArray sourceVectorByMergedRowId;
-    /** Retained solely to delete the temp file on {@link #close()}; {@link MappedLongArray} does not delete its own backing file. */
+    private final MappedArray.OfLong sourceVectorByMergedRowId;
+    /** Retained solely to delete the temp file on {@link #close()}; {@link MappedArray.OfLong} does not delete its own backing file. */
     private final org.apache.cassandra.io.util.File sourceVectorByMergedRowIdFile;
 
     /** Per-source exclusive upper bound on node ids; fixes source count and validates handles. */
@@ -108,7 +105,7 @@ public final class VectorMergePostings implements AutoCloseable
                                           .toArray(AtomicFixedBitSet[]::new);
 
         int entries = (int) Math.clamp((long) (1.1 * estimatedRows), 1000L, (long) Integer.MAX_VALUE - 100_000);
-        this.sourceVectorByMergedRowId = new MappedLongArray(sourceVectorByMergedRowIdFile.toJavaIOFile(), entries);
+        this.sourceVectorByMergedRowId = new MappedArray.OfLong(sourceVectorByMergedRowIdFile.toJavaIOFile(), entries, -1L);
         this.mergedRowIdsBySourceVector = ChronicleMapBuilder.of(VectorHandle.class, CompactionVectorPostings.class)
                                       .averageKeySize(VectorHandle.BYTES)
                                       .keySizeMarshaller(SizeMarshaller.constant(VectorHandle.BYTES))
@@ -227,41 +224,50 @@ public final class VectorMergePostings implements AutoCloseable
     }
 
     /**
-     * Builds the per-source {@link OrdinalMapper}s jvector's compactor needs, assigning the surviving nodes
+     * Builds and returns the per-source {@link OrdinalMapper}s jvector's compactor needs, assigning the surviving nodes
      * output ordinals {@code [0, size())}. Call after ingest is drained.
+     *
+     * <p>The returned mappers are backed by memory-mapped files rather than the heap; ownership is transferred
+     * to the caller, which is responsible for closing them when done.
      *
      * <p>Ordinals are assigned in ascending output-rowId order and currently no holes in numbering are produced.
      * Therefore, only ONE_TO_ONE and ZERO_OR_ONE_TO_MANY structures are supported.</p>
      *
-     * <p>One ChronicleMap lookup per surviving node populates two parallel {@code rowId}-indexed arrays
-     * ({@code sourceByRowId}, {@code nodeIdByRowId}); those are then walked once in rowId order to assign
-     * ordinals.
+     * <p>A single pass over the rowId-indexed {@code sourceVectorByMergedRowId} array assigns ordinals in order
+     * of first appearance; nothing is retained on the heap.
      *
      * @return one mapper per source, indexed by source
      */
-    public List<OrdinalMapper> ordinalMapping()
+    public List<MappedOrdinalMapper> ordinalMapping()
     {
         int maxRow = maxRowId();
+        int ordinalCount = size();
 
-        List<Map<Integer, Integer>> oldToNew = new ArrayList<>(liveNodesBySource.length);
-        for (AtomicFixedBitSet liveNodes : liveNodesBySource)
-            oldToNew.add(new HashMap<>(Math.max(16, (int) (liveNodes.cardinality() / 0.75f) + 1)));
-
-        int nextOrdinal = 0;
-        for (int rowId = 0; rowId <= maxRow; rowId++)
+        List<MappedOrdinalMapper> mappers = new ArrayList<>(idUpperBounds.length);
+        try
         {
-            long packed = sourceVectorByMergedRowId.get(rowId);
-            if (packed == -1L)
-                continue; // no vector for this rowId
-            VectorHandle handle = VectorHandle.unpack(packed);
-            Map<Integer, Integer> map = oldToNew.get(handle.source());
-            if (!map.containsKey(handle.nodeId()))
-                map.put(handle.nodeId(), nextOrdinal++);
-        }
+            for (int idUpperBound : idUpperBounds)
+                mappers.add(new MappedOrdinalMapper(idUpperBound, ordinalCount));
 
-        return oldToNew.stream()
-                       .map(OrdinalMapper.MapMapper::new)
-                       .collect(Collectors.toList());
+            int nextOrdinal = 0;
+            for (int rowId = 0; rowId <= maxRow; rowId++)
+            {
+                long packed = sourceVectorByMergedRowId.get(rowId);
+                if (packed == -1L)
+                    continue; // no vector for this rowId
+                VectorHandle handle = VectorHandle.unpack(packed);
+                MappedOrdinalMapper mapper = mappers.get(handle.source());
+                if (!mapper.isMapped(handle.nodeId()))
+                    mapper.assign(handle.nodeId(), nextOrdinal++);
+            }
+
+            return List.copyOf(mappers);
+        }
+        catch (IOException | RuntimeException e)
+        {
+            FileUtils.closeQuietly(mappers);
+            throw e instanceof RuntimeException ? (RuntimeException) e : new java.io.UncheckedIOException((IOException) e);
+        }
     }
 
     /** The number of source graphs, i.e. the valid range of {@code source} is {@code [0, sourceCount())}. */
@@ -274,7 +280,10 @@ public final class VectorMergePostings implements AutoCloseable
     @VisibleForTesting
     java.io.File[] backingFiles()
     {
-        return new java.io.File[]{ mergedRowIdsBySourceVectorFile.toJavaIOFile(), sourceVectorByMergedRowIdFile.toJavaIOFile() };
+        return new java.io.File[]{
+            mergedRowIdsBySourceVectorFile.toJavaIOFile(),
+            sourceVectorByMergedRowIdFile.toJavaIOFile()
+        };
     }
 
     /**
@@ -284,7 +293,7 @@ public final class VectorMergePostings implements AutoCloseable
      * @return a function from merged ordinal to rowId list; returns {@code null} for an empty (hole) ordinal
      * @throws IllegalStateException if mapper count does not match {@link #sourceCount()}
      */
-    public IntFunction<IntArrayList> rowIdsByMergedOrdinal(List<OrdinalMapper> effective)
+    public IntFunction<IntArrayList> rowIdsByMergedOrdinal(List<? extends OrdinalMapper> effective)
     {
         if (effective.size() != sourceCount())
             throw new IllegalStateException("rowIdsByMergedOrdinal: expected " + sourceCount() + " mappers but got " + effective.size());
@@ -318,7 +327,7 @@ public final class VectorMergePostings implements AutoCloseable
      *
      * @param effective per-source ordinal mappers as returned by the compactor's {@code effectiveRemappers()}
      */
-    public Structure discoverStructure(List<OrdinalMapper> effective)
+    public Structure discoverStructure(List<? extends OrdinalMapper> effective)
     {
         // Quick exits: duplicates or gaps mean ONE_TO_ONE is impossible regardless of the mapping.
         if (hasDuplicateVectors.get())
