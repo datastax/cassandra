@@ -122,7 +122,6 @@ public class IndexContext
 
     private static final String ANALYZED_TERM_OVERSIZE_LOG_MESSAGE =
     "Term's analyzed size for column {} exceeds the cumulative limit for index. Max allowed size {}.";
-
     private static final String ANALYZED_TERM_OVERSIZE_ERROR_MESSAGE =
     "Term's analyzed size for column %s exceeds the cumulative limit for index. Max allowed size %s.";
 
@@ -319,14 +318,6 @@ public class IndexContext
         }
         indexMetrics.flatMap(metrics -> metrics.memtableIndexWriteLatency).ifPresent(timer ->
                 timer.update(nanoTime() - start, TimeUnit.NANOSECONDS));
-    }
-
-    /**
-     * @return the maximum size in bytes of the terms this index indexes; larger values are not indexed
-     */
-    public int getMaxTermSize()
-    {
-        return maxTermSize;
     }
 
     /**
@@ -756,17 +747,16 @@ public class IndexContext
      * {@code CONTAINS}/{@code CONTAINS KEY} (which {@code LIKE_KEY}/{@code LIKE_VALUE} operators and the
      * corresponding post-filtering would have to introduce). The terms of the keys/values/entries indexes of
      * non-frozen collections could serve such a feature (the entries index excepted: its terms are composites).
+     * <p>
+     * Reversed (DESC clustering) string columns are supported: their terms are the raw, un-reversed value bytes.
      */
     public boolean supportsLikeQueries()
     {
-        // Reversed (DESC clustering) string columns are supported too: their terms are stored as the raw,
-        // un-reversed value bytes like any other string term (see OnDiskFormat#encodeForTrie), and the LIKE bounds
-        // and automata are built from the raw pattern bytes (Expression#add only swaps the bounds of LT/LTE/GT/GTE).
-        // The validator of a frozen collection index or of a map entries index is not a string type, so the
-        // collection checks are only needed for the keys/values of non-frozen collections.
+        // a string type: the validators of frozen collections and of map entries are not
         return TypeUtil.isUTF8OrAscii(validator)
+               // not the keys or values of a non-frozen collection, whose validator is the element type
                && !isNonFrozenCollection()
-               && indexType != IndexTarget.Type.FULL
+               // no tokenizing analyzer, so that the terms are whole (possibly normalized) values
                && !hasCustomAnalyzer();
     }
 
@@ -783,11 +773,6 @@ public class IndexContext
 
     public boolean supports(Operator op)
     {
-        // LIKE restrictions are parsed as the generic LIKE operator and are only refined to
-        // LIKE_PREFIX/LIKE_SUFFIX/LIKE_CONTAINS/LIKE_MATCHES once the queried value is bound and its wildcards
-        // are examined. Non-tokenizing indexes over string types serve prefix queries (LIKE '<term>%') as a
-        // bounded scan over the sorted terms dictionary, and the remaining variants (LIKE '%<term>',
-        // LIKE '%<term>%', LIKE '<a>%<b>') by automaton intersection with the terms dictionary.
         if (op.isLike())
             return supportsLikeQueries();
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
