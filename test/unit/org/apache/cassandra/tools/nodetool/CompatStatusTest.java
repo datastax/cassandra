@@ -31,6 +31,9 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.mockito.Mockito;
 
+import org.apache.cassandra.auth.AllowAllAuthorizer;
+import org.apache.cassandra.auth.CassandraAuthorizer;
+import org.apache.cassandra.auth.IAuthorizer;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.config.StartupChecksOptions;
@@ -66,6 +69,7 @@ public class CompatStatusTest extends CQLTester
     @BeforeClass
     public static void setup() throws Exception
     {
+        requireAuthentication();
         requireNetwork();
         startJMXServer();
     }
@@ -132,13 +136,15 @@ public class CompatStatusTest extends CQLTester
             tool.assertOnCleanExit();
             List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
             assertThat(lines).contains("Requests refused (upgrade)   : 3");
-            // the peer versions, the DSE peers, the record of DSE peers, the SAI pin, then the refusals
+            // the peer versions, the DSE peers, the record of DSE peers, the SAI pin, the lone DSE write
+            // grants, then the refusals
             String out = tool.getStdout();
             assertThat(out.indexOf("Peers with a known version")).isNotNegative()
                                                                   .isLessThan(out.indexOf("DSE peers                    :"));
             assertThat(out.indexOf("DSE peers                    :")).isLessThan(out.indexOf("DSE 6 peers on record        :"));
             assertThat(out.indexOf("DSE 6 peers on record        :")).isLessThan(out.indexOf("SAI version pinned           :"));
-            assertThat(out.indexOf("SAI version pinned           :")).isLessThan(out.indexOf("Requests refused (upgrade)"));
+            assertThat(out.indexOf("SAI version pinned           :")).isLessThan(out.indexOf("DSE UPDATE/TRUNCATE alone    :"));
+            assertThat(out.indexOf("DSE UPDATE/TRUNCATE alone    :")).isLessThan(out.indexOf("Requests refused (upgrade)"));
             assertThat(lines).contains(String.format("  %-45s %d", "read with an index hint", 1));
             assertThat(lines).contains(String.format("  %-45s %d", "verb PING_REQ to a DSE 6 peer", 2));
         }
@@ -299,6 +305,7 @@ public class CompatStatusTest extends CQLTester
         Mockito.when(probe.getDsePeers()).thenReturn(Map.of("127.0.0.45:7000", "release 4.0.0.6865, NET_VERSION 1024"));
         Mockito.when(probe.getDsePeersOnRecord()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DsePeersOnRecord")));
         Mockito.when(probe.getDseSaiVersionPin()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseSaiVersionPin")));
+        Mockito.when(probe.getDseLoneWriteGrantsSource()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseLoneWriteGrantsSource")));
         Mockito.when(probe.getDseCompatRefusals()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseCompatRefusals")));
 
         new CompatStatus().execute(probe);
@@ -313,6 +320,7 @@ public class CompatStatusTest extends CQLTester
                          String.format("  %-45s %s", "127.0.0.45:7000", "release 4.0.0.6865, NET_VERSION 1024"),
                          "DSE 6 peers on record        : unknown (this node does not report them)",
                          "SAI version pinned           : unknown (this node does not report it)",
+                         "DSE UPDATE/TRUNCATE alone    : unknown (this node does not report them)",
                          "Requests refused (upgrade)   : unknown (this node does not report them)");
 
         // any other failure is not hidden
@@ -342,6 +350,25 @@ public class CompatStatusTest extends CQLTester
         UndeclaredThrowableException other = new UndeclaredThrowableException(new IOException("connection lost"));
         Mockito.doThrow(other).when(probe).getInternodeCompatibilityMode();
         assertThatThrownBy(() -> new CompatStatus().execute(probe)).isSameAs(other);
+    }
+
+    @Test
+    public void dseLoneWriteGrantsOfAServerWithoutTheAttributeAreUnknown()
+    {
+        NodeProbe probe = Mockito.mock(NodeProbe.class);
+        Mockito.when(probe.getDseLoneWriteGrantsSource()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseLoneWriteGrantsSource")));
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (PrintStream out = new PrintStream(bytes, true, StandardCharsets.UTF_8))
+        {
+            CompatStatus.printDseLoneWriteGrants(probe, out);
+        }
+        assertThat(bytes.toString(StandardCharsets.UTF_8)).isEqualTo(String.format("DSE UPDATE/TRUNCATE alone    : unknown (this node does not report them)%n"));
+
+        // any other failure is not hidden
+        UndeclaredThrowableException other = new UndeclaredThrowableException(new IOException("connection lost"));
+        Mockito.doThrow(other).when(probe).getDseLoneWriteGrantsSource();
+        assertThatThrownBy(() -> CompatStatus.printDseLoneWriteGrants(probe, new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8)))
+        .isSameAs(other);
     }
 
     @Test
@@ -386,6 +413,55 @@ public class CompatStatusTest extends CQLTester
             DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
             Gossiper.instance.endpointStateMap.remove(dsePeer);
             StorageService.instance.getTokenMetadata().removeEndpoint(dsePeer);
+        }
+    }
+
+    @Test
+    public void printsDseLoneWriteGrants() throws Throwable
+    {
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        String resource = "data/" + KEYSPACE + '/' + table;
+        // what DSE leaves for a role granted UPDATE alone, and for one granted MODIFY (the pair, read as MODIFY: not listed)
+        execute(String.format("INSERT INTO system_auth.role_permissions (role, resource, permissions) VALUES ('compat_lone', '%s', {'SELECT', 'UPDATE'})", resource));
+        execute(String.format("INSERT INTO system_auth.role_permissions (role, resource, permissions) VALUES ('compat_pair', '%s', {'UPDATE', 'TRUNCATE'})", resource));
+        String source = "(the rows read since startup)";
+        try
+        {
+            CassandraAuthorizer.resetLoneDseWriteGrants();
+            ToolRunner.ToolResult tool = ToolRunner.invokeNodetool("compatstatus");
+            tool.assertOnCleanExit();
+            assertThat(tool.getStdout().split("\\R")).contains("DSE UPDATE/TRUNCATE alone    : 0 dropped, as last read on this node " + source);
+
+            // the cache warm-up reads every row
+            ((CassandraAuthorizer) DatabaseDescriptor.getAuthorizer()).bulkLoader().get();
+            tool = ToolRunner.invokeNodetool("compatstatus");
+            tool.assertOnCleanExit();
+            List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
+            assertThat(lines).containsSequence("DSE UPDATE/TRUNCATE alone    : 1 dropped, as last read on this node " + source,
+                                               "  role 'compat_lone' on " + resource + ": UPDATE");
+            // before the refusals
+            String out = tool.getStdout();
+            assertThat(out.indexOf("DSE UPDATE/TRUNCATE alone    :")).isLessThan(out.indexOf("Requests refused (upgrade)"));
+            CassandraAuthorizer.resetLoneDseWriteGrants();
+
+            IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+            DatabaseDescriptor.setAuthorizer(new AllowAllAuthorizer());
+            try
+            {
+                tool = ToolRunner.invokeNodetool("compatstatus");
+                tool.assertOnCleanExit();
+                assertThat(tool.getStdout()).contains("DSE UPDATE/TRUNCATE alone    : not tracked (the authorizer is not CassandraAuthorizer)");
+            }
+            finally
+            {
+                DatabaseDescriptor.setAuthorizer(authorizer);
+            }
+        }
+        finally
+        {
+            execute("DELETE FROM system_auth.role_permissions WHERE role = 'compat_lone'");
+            execute("DELETE FROM system_auth.role_permissions WHERE role = 'compat_pair'");
+            CassandraAuthorizer.resetLoneDseWriteGrants();
         }
     }
 
