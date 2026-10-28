@@ -182,8 +182,9 @@ public enum CassandraRelevantProperties
     /**
      * MiB withheld from Caffeine {@code maximumWeight} but still part of the chunk-cache buffer pool.
      * Headroom for in-flight cache loads under eviction pressure (not a separate allocator).
+     * The default value -1 means that it will be calculated during initialization.
      */
-    CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB("cassandra.chunk_cache_reserved_pool_space_in_mb", "64"),
+    CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB("cassandra.chunk_cache_reserved_pool_space_in_mb", "-1"),
     CLOCK_GLOBAL("cassandra.clock"),
     CLOCK_MONOTONIC_APPROX("cassandra.monotonic_clock.approx"),
     CLOCK_MONOTONIC_PRECISE("cassandra.monotonic_clock.precise"),

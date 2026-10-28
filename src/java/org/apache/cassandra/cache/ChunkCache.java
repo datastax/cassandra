@@ -86,9 +86,13 @@ public class ChunkCache
      * separate allocator; it is headroom in the <em>same</em> pool for in-flight cache loads while eviction frees
      * pages (callers may briefly WaitQueue-park after reclaim if the pool is still empty).
      * <p>
-     * Override with {@link CassandraRelevantProperties#CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB}.
+     * Override with {@link CassandraRelevantProperties#CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB}. When that property is
+     * negative (the default, {@code -1}) the value is derived from the number of threads that read through the cache,
+     * see {@link #calculateReservedPoolSpace(int, int, int)}. It is computed once, when this class is initialized.
      */
-    public static final int RESERVED_POOL_SPACE_IN_MiB = CassandraRelevantProperties.CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB.getInt();;
+    public static final int RESERVED_POOL_SPACE_IN_MiB = reservedPoolSpaceInMiB();
+    /** Lower bound of the automatically calculated reserved pool space. Does not apply to an explicit override. */
+    static final int MIN_RESERVED_POOL_SPACE_IN_MiB = 32;
     private static final int INITIAL_CAPACITY = CHUNKCACHE_INITIAL_CAPACITY.getInt();;
     private static final boolean ASYNC_CLEANUP =CHUNKCACHE_ASYNC_CLEANUP.getBoolean();
     private static final int CLEANER_THREADS = CHUNKCACHE_CLEANER_THREADS.getInt();
@@ -195,6 +199,46 @@ public class ChunkCache
             cleanupExecutor.execute(r);
         else
             r.run();
+    }
+
+    private static int reservedPoolSpaceInMiB()
+    {
+        int configured = CassandraRelevantProperties.CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB.getInt();
+        if (configured >= 0)
+            return configured;
+
+        return calculateReservedPoolSpace(DatabaseDescriptor.getConcurrentReaders(),
+                                          DatabaseDescriptor.getConcurrentCompactors(),
+                                          DatabaseDescriptor.getConcurrentIndexBuilders());
+    }
+
+    /**
+     * Calculates the MiB of the chunk cache pool that are withheld from the cache as headroom for in-flight loads:
+     * <pre>
+     *   reserved = max(MIN_RESERVED_POOL_SPACE_IN_MiB, ceil(16 * log2(threads / 4)))
+     *   threads  = concurrent_reads + concurrent_compactors + concurrent_index_builders
+     * </pre>
+     * <ul>
+     *   <li>{@code threads} are the threads that can hold chunks of the pool at the same time: read stage threads,
+     *       compactions and SAI index builds all read through the chunk cache.</li>
+     *   <li>{@code threads / 4} is a baseline: with 4 threads the logarithm is 0 and no extra headroom is added.</li>
+     *   <li>{@code log2} makes every doubling of {@code threads} add the same amount, and the factor 16 is that amount
+     *       in MiB. The headroom grows slower than the thread count.</li>
+     *   <li>The coefficients were fitted on single node stress runs (random reads over a data set much larger than the
+     *       cache, with a major compaction and an SAI build running), varying only {@code concurrent_reads}.
+     *       Compactors and index builders were not varied and are counted as read threads, which is an assumption.</li>
+     *   <li>The minimum keeps the result positive and bounded from below for small thread counts, where the logarithm
+     *       is zero or negative.</li>
+     * </ul>
+     *
+     * @return the reserved pool space in MiB, never less than {@link #MIN_RESERVED_POOL_SPACE_IN_MiB}
+     */
+    @VisibleForTesting
+    static int calculateReservedPoolSpace(int concurrentReads, int concurrentCompactors, int concurrentIndexBuilders)
+    {
+        double threads = (double) concurrentReads + concurrentCompactors + concurrentIndexBuilders;
+        double mib = 16 * (Math.log(threads / 4.0) / Math.log(2));
+        return Math.max(MIN_RESERVED_POOL_SPACE_IN_MiB, (int) Math.ceil(mib));
     }
 
     /**

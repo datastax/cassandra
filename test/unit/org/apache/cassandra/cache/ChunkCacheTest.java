@@ -1158,4 +1158,30 @@ public class ChunkCacheTest
         assertEquals(usedBefore, pool.usedSizeInBytes());
         assertEquals(overflowBefore, pool.overflowMemoryInBytes());
     }
+
+    @Test
+    public void testCalculateReservedPoolSpaceFollowsLog2OfThreads()
+    {
+        // threads = reads + compactors + index builders; 16 MiB are added for every doubling of (threads / 4)
+        assertEquals(48, ChunkCache.calculateReservedPoolSpace(32, 0, 0));
+        assertEquals(64, ChunkCache.calculateReservedPoolSpace(64, 0, 0));
+        assertEquals(80, ChunkCache.calculateReservedPoolSpace(128, 0, 0));
+        assertEquals(96, ChunkCache.calculateReservedPoolSpace(256, 0, 0));
+        assertEquals(112, ChunkCache.calculateReservedPoolSpace(512, 0, 0));
+    }
+
+    @Test
+    public void testCalculateReservedPoolSpaceHasMinimum()
+    {
+        int min = ChunkCache.MIN_RESERVED_POOL_SPACE_IN_MiB;
+        assertEquals(32, min);
+        // 16 * log2(threads / 4) is 0 or negative up to 4 threads, and below the minimum up to 16 threads
+        assertEquals(min, ChunkCache.calculateReservedPoolSpace(2, 1, 1));
+        assertEquals(min, ChunkCache.calculateReservedPoolSpace(1, 0, 0));
+        assertEquals(min, ChunkCache.calculateReservedPoolSpace(15, 1, 0));
+        // exactly at the minimum: 16 * log2(16 / 4) = 32
+        assertEquals(min, ChunkCache.calculateReservedPoolSpace(16, 0, 0));
+        // just above the minimum: 16 * log2(17 / 4) = 33.4, rounded up
+        assertEquals(34, ChunkCache.calculateReservedPoolSpace(17, 0, 0));
+    }
 }
