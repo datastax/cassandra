@@ -624,48 +624,80 @@ public class RowFilter
             for (ExternalRestriction expression : restrictions.filterRestrictions().getExternalExpressions())
                 addAllAsConjunction(b -> expression.addToRowFilter(b, table, options));
 
-            // Optimize out any conjunctions / disjunctions with always-true restrictions and/or empty ranges.
-            // This is not needed for correctness, although secondary index implementations might rely on this behavior.
-            if (restrictions.isDisjunction())
+            // Add childern, optimizing out any conjunctions/disjunctions with always-true or always-false restrictions.
+            // Optimizing is not needed for correctness, although secondary index implementations might rely on it.
+            List<StatementRestrictions> children = restrictions.children();
+            return restrictions.isDisjunction()
+                   ? buildDisjunction(element, children, table, options, annOptions)
+                   : buildConjunction(element, children, table, options, annOptions);
+        }
+
+        /**
+         * Processes the children of a disjunction (OR) node, pruning always-false branches and short-circuiting
+         * on any always-true branch, then returns the resulting {@link FilterElement}.
+         */
+        private FilterElement buildDisjunction(FilterElement.Builder disjunction,
+                                               List<StatementRestrictions> children,
+                                               TableMetadata table,
+                                               QueryOptions options,
+                                               ANNOptions annOptions)
+        {
+            for (StatementRestrictions child : children)
             {
-                for (StatementRestrictions child : restrictions.children())
-                {
-                    FilterElement childElement = doBuild(child, table, options, annOptions);
+                FilterElement childElement = doBuild(child, table, options, annOptions);
 
-                    // `OR FALSE` elements can be skipped in disjunctions.
-                    if (childElement.isAlwaysFalse())
-                        continue;
+                // `OR FALSE` elements can be skipped in disjunctions.
+                if (childElement.isAlwaysFalse())
+                    continue;
 
-                    // `OR TRUE` swallows all other restrictions in disjunctions.
-                    if (childElement.isAlwaysTrue())
-                        return FilterElement.NONE;
+                // `OR TRUE` swallows all other restrictions in disjunctions.
+                if (childElement.isAlwaysTrue())
+                    return FilterElement.NONE;
 
-                    element.children.add(childElement);
-                }
-
-                // If every OR branch was dropped the whole disjunction can never be satisfied.
-                if (element.expressions.isEmpty() && element.children.isEmpty())
-                    return FilterElement.ALL;
-            }
-            else
-            {
-                if (CellBounds.isAlwaysFalse(element.expressions, table, indexHints))
-                    return FilterElement.ALL;
-
-                for (StatementRestrictions child : restrictions.children())
-                {
-                    FilterElement childElement = doBuild(child, table, options, annOptions);
-
-                    // `AND FALSE` swallows all other restrictions in conjunctions.
-                    if (childElement.isAlwaysFalse())
-                        return FilterElement.ALL;
-
-                    // `AND TRUE` does nothing in conjunctions, so don't add it.
-                    if (!childElement.isAlwaysTrue())
-                        element.children.add(childElement);
-                }
+                disjunction.children.add(childElement);
             }
 
+            // If every OR branch was dropped the whole disjunction can never be satisfied.
+            if (disjunction.expressions.isEmpty() && disjunction.children.isEmpty())
+                return FilterElement.ALL;
+
+            return flattenOrBuild(disjunction);
+        }
+
+        /**
+         * Processes the children of a conjunction (AND) node, short-circuiting on any always-false branch and
+         * dropping always-true branches, then returns the resulting {@link FilterElement}.
+         */
+        private FilterElement buildConjunction(FilterElement.Builder conjunction,
+                                               List<StatementRestrictions> children,
+                                               TableMetadata table,
+                                               QueryOptions options,
+                                               ANNOptions annOptions)
+        {
+            if (CellBounds.isAlwaysFalse(conjunction.expressions, table, indexHints))
+                return FilterElement.ALL;
+
+            for (StatementRestrictions child : children)
+            {
+                FilterElement childElement = doBuild(child, table, options, annOptions);
+
+                // `AND FALSE` swallows all other restrictions in conjunctions.
+                if (childElement.isAlwaysFalse())
+                    return FilterElement.ALL;
+
+                // `AND TRUE` does nothing in conjunctions, so don't add it.
+                if (!childElement.isAlwaysTrue())
+                    conjunction.children.add(childElement);
+            }
+
+            return flattenOrBuild(conjunction);
+        }
+
+        /**
+         * Flattens a single-child wrapper node (redundant disjunction/conjunction) or builds the element normally.
+         */
+        private static FilterElement flattenOrBuild(FilterElement.Builder element)
+        {
             // A disjunction/conjunction with no expressions and exactly one child is redundant, so flatten it.
             if (element.expressions.isEmpty() && element.children.size() == 1)
                 return element.children.get(0);
