@@ -979,8 +979,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
     public static final class LikeRestriction extends SingleColumnRestriction
     {
-        private static final int ANY_STRING = -1;
-        private static final int ANY_CHAR = -2;
+        /** The token of a {@code '%'} wildcard in {@link #tokenize}. */
+        @VisibleForTesting
+        static final int ANY_STRING = -1;
+        /** The token of a {@code '_'} wildcard in {@link #tokenize}. */
+        @VisibleForTesting
+        static final int ANY_CHAR = -2;
 
         private final Operator operator;
         private final Term value;
@@ -1170,7 +1174,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
          * (0 to 255), resolving the escapes. {@code '%'}, {@code '_'} and the escape character are whole UTF-8
          * characters, so comparing bytes never matches part of a multibyte character.
          */
-        private static int[] tokenize(ByteBuffer value, @Nullable ByteBuffer escape)
+        @VisibleForTesting
+        static int[] tokenize(ByteBuffer value, @Nullable ByteBuffer escape)
         {
             int[] tokens = new int[value.remaining()];
             int count = 0;

@@ -17,6 +17,9 @@
 package org.apache.cassandra.cql3.restrictions;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.junit.Test;
 
@@ -26,6 +29,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.utils.Pair;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 
 /**
@@ -133,6 +137,94 @@ public class LikeRestrictionTest
         specific = SingleColumnRestriction.LikeRestriction.makeSpecific(buffer);
         assertEquals(Operator.LIKE_MATCHES, specific.left);
         assertEquals("%a%b", UTF8Type.instance.compose(specific.right));
+    }
+
+    @Test
+    public void testTokenizeWithoutEscape()
+    {
+        assertTokens("", null);
+        assertTokens("abc", null, "abc");
+        assertTokens("%a_b%", null, S, "a", C, "b", S);
+        assertTokens("%%__", null, S, S, C, C);
+        // without an escape character, backslashes (or anything else) are literals
+        assertTokens("a\\_\\%", null, "a\\", C, "\\", S);
+        // multibyte characters are literal bytes, as unsigned values
+        assertTokens("é_😀", null, "é", C, "😀");
+        assertArrayEquals(new int[]{ 0xC3, 0xA9 }, tokenize("é", null));
+    }
+
+    @Test
+    public void testTokenizeWithEscape()
+    {
+        assertTokens("a!_b!%c!!", "!", "a_b%c!");
+        assertTokens("!%%!__", "!", "%", S, "_", C);
+        // the escape character is matched as a whole: multibyte escape characters
+        assertTokens("é%é_ééx", "é", "%_éx");
+        assertTokens("日_😀%日日_", "日", "_😀", S, "日", C);
+        // a multibyte escape character doesn't match the bytes of another character sharing its lead byte
+        assertTokens("è_", "é", "è", C);
+        // wildcards as escape characters: their doubled form is a literal, so they are no wildcards any more
+        assertTokens("a%%b%_", "%", "a%b_");
+        assertTokens("a__b_%", "_", "a_b%");
+        assertTokens("%_", "%", "_");
+    }
+
+    @Test
+    public void testTokenizeInvalidEscapes()
+    {
+        for (String pattern : new String[]{ "!", "a!", "a!!!" })
+            assertThatThrownBy(() -> tokenize(pattern, "!")).isInstanceOf(InvalidRequestException.class)
+                                                             .hasMessageContaining("can't end with its escape character");
+        for (String pattern : new String[]{ "!a", "a!b%", "!é", "!\\" })
+            assertThatThrownBy(() -> tokenize(pattern, "!")).isInstanceOf(InvalidRequestException.class)
+                                                             .hasMessageContaining("must be followed by '%', '_' or itself");
+        // a multibyte escape character followed by part of itself
+        assertThatThrownBy(() -> tokenize("éeé", "é")).isInstanceOf(InvalidRequestException.class);
+    }
+
+    @Test
+    public void testTokenizeBufferSlices()
+    {
+        // the pattern and the escape character may be slices of larger buffers, which are left untouched
+        ByteBuffer pattern = UTF8Type.instance.decompose("xxa!_%yy");
+        pattern.position(2).limit(6);
+        ByteBuffer escape = UTF8Type.instance.decompose("?!?");
+        escape.position(1).limit(2);
+        assertArrayEquals(expected("a_", S), SingleColumnRestriction.LikeRestriction.tokenize(pattern, escape));
+        assertEquals(2, pattern.position());
+        assertEquals(6, pattern.limit());
+        assertEquals(1, escape.position());
+    }
+
+    private static final Object S = SingleColumnRestriction.LikeRestriction.ANY_STRING;
+    private static final Object C = SingleColumnRestriction.LikeRestriction.ANY_CHAR;
+
+    private static int[] tokenize(String pattern, String escape)
+    {
+        return SingleColumnRestriction.LikeRestriction.tokenize(UTF8Type.instance.decompose(pattern),
+                                                                escape == null ? null : UTF8Type.instance.decompose(escape));
+    }
+
+    /**
+     * Asserts the tokens of a pattern, expected as wildcard tokens ({@link #S}, {@link #C}) and literal strings.
+     */
+    private static void assertTokens(String pattern, String escape, Object... expected)
+    {
+        assertArrayEquals(pattern + " ESCAPE " + escape, expected(expected), tokenize(pattern, escape));
+    }
+
+    private static int[] expected(Object... parts)
+    {
+        List<Integer> tokens = new ArrayList<>();
+        for (Object part : parts)
+        {
+            if (part instanceof Integer)
+                tokens.add((Integer) part);
+            else
+                for (byte b : ((String) part).getBytes(StandardCharsets.UTF_8))
+                    tokens.add(b & 0xFF);
+        }
+        return tokens.stream().mapToInt(Integer::intValue).toArray();
     }
 
     private static Pair<Operator, ByteBuffer> makeSpecific(String pattern)

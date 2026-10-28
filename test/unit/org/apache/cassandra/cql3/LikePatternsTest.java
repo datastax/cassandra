@@ -17,6 +17,8 @@ package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.UnaryOperator;
 
 import org.junit.Test;
@@ -130,12 +132,53 @@ public class LikePatternsTest
 
         assertThatThrownBy(() -> LikePatterns.patternAutomaton("a\\")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> LikePatterns.patternAutomaton("a\\b")).isInstanceOf(IllegalArgumentException.class);
+    }
 
-        assertTrue(LikePatterns.hasWildcard(UTF8Type.instance.decompose("a_")));
-        assertTrue(LikePatterns.hasWildcard(UTF8Type.instance.decompose("\\\\%")));
-        assertFalse(LikePatterns.hasWildcard(UTF8Type.instance.decompose("a\\_\\%\\\\")));
-        assertEquals("a_%\\", UTF8Type.instance.compose(LikePatterns.unescape(UTF8Type.instance.decompose("a\\_\\%\\\\"))));
+    @Test
+    public void hasWildcardIgnoresEscapedWildcards()
+    {
+        for (String pattern : new String[]{ "a%", "_", "%a", "a_b", "\\\\%", "\\\\_", "é_", "\\%%" })
+            assertTrue(pattern, LikePatterns.hasWildcard(utf8Buffer(pattern)));
+        for (String pattern : new String[]{ "", "abc", "\\%", "\\_", "\\\\", "a\\_\\%\\\\b", "é日😀" })
+            assertFalse(pattern, LikePatterns.hasWildcard(utf8Buffer(pattern)));
+
+        // only the remaining bytes of the buffer count
+        ByteBuffer slice = utf8Buffer("%_abc%");
+        slice.position(2).limit(5);
+        assertFalse(LikePatterns.hasWildcard(slice));
+        assertEquals(2, slice.position());
+    }
+
+    @Test
+    public void unescapeRemovesEscapes()
+    {
+        assertEquals("", unescape(""));
+        assertEquals("abc", unescape("abc"));
+        assertEquals("a_%\\", unescape("a\\_\\%\\\\"));
+        assertEquals("é_日%😀", unescape("é\\_日\\%😀"));
+        // a trailing lone escape (never produced by the coordinator) is kept
+        assertEquals("a\\", unescape("a\\"));
+
+        ByteBuffer slice = utf8Buffer("xx\\_ayy");
+        slice.position(2).limit(5);
+        assertEquals("_a", UTF8Type.instance.compose(LikePatterns.unescape(slice)));
+        assertEquals(2, slice.position());
+    }
+
+    @Test
+    public void escapeEscapesWildcardsAndEscapes()
+    {
+        assertEquals("", LikePatterns.escape(""));
+        assertEquals("abc", LikePatterns.escape("abc"));
         assertEquals("a\\_\\%\\\\é", LikePatterns.escape("a_%\\é"));
+        // escape and unescape are inverse, and an escaped literal has no wildcard
+        for (String literal : new String[]{ "", "abc", "%", "_", "\\", "\\%", "a%b_c\\d", "é_😀%日\\" })
+        {
+            ByteBuffer escaped = utf8Buffer(LikePatterns.escape(literal));
+            assertFalse(literal, LikePatterns.hasWildcard(escaped));
+            assertEquals(literal, UTF8Type.instance.compose(LikePatterns.unescape(escaped)));
+            assertAccepts(LikePatterns.patternAutomaton(LikePatterns.escape(literal)), literal);
+        }
     }
 
     @Test
@@ -153,6 +196,49 @@ public class LikePatternsTest
         assertEquals("%_", normalize("%_", fold));
         // a literal normalized to nothing
         assertEquals("%a", normalize("x%a", literal -> UTF8Type.instance.compose(literal).equals("x") ? null : literal));
+        assertEquals("%a", normalize("x%a", literal -> UTF8Type.instance.compose(literal).equals("x") ? ByteBuffer.allocate(0) : literal));
+    }
+
+    @Test
+    public void normalizeLiteralsNormalizesWholeUnescapedRuns()
+    {
+        // the normalization sees each run of literals between wildcards once, unescaped
+        List<String> runs = new ArrayList<>();
+        UnaryOperator<ByteBuffer> record = literal -> {
+            runs.add(UTF8Type.instance.compose(literal));
+            return literal;
+        };
+        assertEquals("ab%c_\\%d\\\\é", normalize("ab%c_\\%d\\\\é", record));
+        assertEquals(List.of("ab", "c", "%d\\é"), runs);
+
+        runs.clear();
+        assertEquals("%%_%", normalize("%%_%", record));
+        assertEquals(List.of(), runs);
+        assertEquals("", normalize("", record));
+        assertEquals(List.of(), runs);
+    }
+
+    @Test
+    public void normalizeLiteralsEscapesNormalizedWildcards()
+    {
+        // a normalization producing wildcards or escapes in a literal: they are escaped
+        UnaryOperator<ByteBuffer> toWildcards = literal -> utf8Buffer(UTF8Type.instance.compose(literal).replace('x', '_')
+                                                                                                   .replace('y', '%')
+                                                                                                   .replace('z', '\\'));
+        String normalized = normalize("axyz%x", toWildcards);
+        assertEquals("a\\_\\%\\\\%\\_", normalized);
+        assertAccepts(LikePatterns.patternAutomaton(normalized), "a_%\\b_", "a_%\\_");
+        assertRejects(LikePatterns.patternAutomaton(normalized), "abcd_", "a_%\\b");
+    }
+
+    @Test
+    public void normalizeLiteralsReadsBufferSlices()
+    {
+        ByteBuffer slice = utf8Buffer("%%AB%C");
+        slice.position(2);
+        ByteBuffer normalized = LikePatterns.normalizeLiterals(slice, literal -> utf8Buffer(UTF8Type.instance.compose(literal).toLowerCase()));
+        assertEquals("ab%c", UTF8Type.instance.compose(normalized));
+        assertEquals(2, slice.position());
     }
 
     private static String normalize(String pattern, UnaryOperator<ByteBuffer> normalize)
@@ -284,6 +370,58 @@ public class LikePatternsTest
     {
         for (String candidate : candidates)
             assertFalse("expected automaton to reject: " + candidate, LikePatterns.accepts(automaton, utf8(candidate)));
+    }
+
+    @Test
+    public void forPatternOperatorReadsSuffixAndContainsValuesAsLiterals()
+    {
+        // the values of LIKE_SUFFIX and LIKE_CONTAINS are unescaped literals: '_', '%' and '\\' are no wildcards
+        CompiledAutomaton suffix = LikePatterns.forPatternOperator(Operator.LIKE_SUFFIX, utf8Buffer("a_\\"), "v");
+        assertAccepts(suffix, "xa_\\", "a_\\");
+        assertRejects(suffix, "xab\\", "a_");
+        CompiledAutomaton contains = LikePatterns.forPatternOperator(Operator.LIKE_CONTAINS, utf8Buffer("%_"), "v");
+        assertAccepts(contains, "x%_y", "%_");
+        assertRejects(contains, "x%ay", "x_%y");
+        // while the same bytes are a pattern for LIKE_MATCHES
+        assertAccepts(LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, utf8Buffer("%_"), "v"), "x", "xyz");
+    }
+
+    @Test
+    public void forPatternOperatorRejectsInvalidEscapes()
+    {
+        for (String pattern : new String[]{ "a\\", "a\\b%" })
+            assertThatThrownBy(() -> LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, utf8Buffer(pattern), "v"))
+            .isInstanceOf(InvalidPatternException.class)
+            .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v");
+    }
+
+    @Test
+    public void acceptsBufferSlicesAndDirectBuffers()
+    {
+        for (CompiledAutomaton automaton : new CompiledAutomaton[]{ LikePatterns.patternAutomaton("a_c"), LikePatterns.patternAutomaton("abc") })
+        {
+            ByteBuffer slice = utf8Buffer("xxabcyy");
+            slice.position(2).limit(5);
+            assertTrue(LikePatterns.accepts(automaton, slice));
+            assertEquals(2, slice.position());
+
+            ByteBuffer direct = ByteBuffer.allocateDirect(3);
+            direct.put(utf8("abc")).flip();
+            assertTrue(LikePatterns.accepts(automaton, direct));
+            assertEquals(0, direct.position());
+
+            assertFalse(LikePatterns.accepts(automaton, utf8Buffer("abcd")));
+        }
+    }
+
+    private static String unescape(String pattern)
+    {
+        return UTF8Type.instance.compose(LikePatterns.unescape(utf8Buffer(pattern)));
+    }
+
+    private static ByteBuffer utf8Buffer(String s)
+    {
+        return ByteBuffer.wrap(utf8(s));
     }
 
     private static byte[] utf8(String s)
