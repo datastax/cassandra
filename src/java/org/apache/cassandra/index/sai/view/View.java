@@ -88,12 +88,7 @@ public class View implements Iterable<SSTableIndex>
     {
         if (expression.getOp() == Expression.Op.ORDER_BY)
             throw new IllegalArgumentException("ORDER BY expression is not supported");
-        // The bounds of prefix and pattern (automaton) expressions are the pattern itself, not a term range, so the
-        // term tree can't prune by them: every sstable index may hold matching terms.
-        if (expression.getOp() == Expression.Op.BOUNDED_ANN
-            || expression.getOp().isNonEquality()
-            || expression.getOp() == Expression.Op.PREFIX
-            || expression.getOp() == Expression.Op.AUTOMATON)
+        if (expression.getOp() == Expression.Op.BOUNDED_ANN || expression.getOp().isNonEquality())
             return new HashSet<>(getIndexes());
         return termTree.search(expression);
     }
