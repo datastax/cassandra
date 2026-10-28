@@ -51,6 +51,7 @@ or not.
 |`DOUBLE` |no
 |`DROP` |yes
 |`ENTRIES` |yes
+|`ESCAPE` |no
 |`EXECUTE` |yes
 |`EXISTS` |no
 |`FILTERING` |no

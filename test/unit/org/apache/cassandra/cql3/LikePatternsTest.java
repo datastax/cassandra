@@ -17,6 +17,7 @@ package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.function.UnaryOperator;
 
 import org.junit.Test;
 
@@ -32,8 +33,8 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 /**
- * CQL LIKE pattern translation. CQL LIKE semantics (SingleColumnRestriction.LikeRestriction): '%' is the only
- * wildcard, there is no escape mechanism, and '_' is a literal character.
+ * CQL LIKE pattern translation. CQL LIKE semantics (SingleColumnRestriction.LikeRestriction): '%' matches any
+ * string and '_' any single character; the patterns of LIKE_MATCHES escape their literal wildcards with '\'.
  */
 public class LikePatternsTest
 {
@@ -103,13 +104,65 @@ public class LikePatternsTest
     }
 
     @Test
-    public void likeUnderscoreAndRegexpMetacharsAreLiterals()
+    public void likeUnderscoreMatchesOneCharacter()
     {
-        // '_' is not a wildcard in CQL LIKE
         CompiledAutomaton underscore = LikePatterns.patternAutomaton("a_c");
-        assertAccepts(underscore, "a_c");
-        assertRejects(underscore, "abc", "axc");
+        assertAccepts(underscore, "a_c", "abc", "aéc", "a😀c", "a%c");
+        assertRejects(underscore, "ac", "abbc", "aééc", "abcd");
 
+        CompiledAutomaton mixed = LikePatterns.patternAutomaton("_a%b__");
+        assertAccepts(mixed, "xab12", "😀aéb😀😀", "xaxxxb12");
+        assertRejects(mixed, "ab12", "xab1", "xab123");
+    }
+
+    @Test
+    public void likeEscapesAreLiterals()
+    {
+        // the internal form escapes the literal wildcards and the escape itself with a backslash
+        CompiledAutomaton escaped = LikePatterns.patternAutomaton("a\\_\\%\\\\%");
+        assertAccepts(escaped, "a_%\\", "a_%\\xyz");
+        assertRejects(escaped, "ab%\\", "a_x\\", "a_%x");
+
+        CompiledAutomaton exact = LikePatterns.patternAutomaton("a\\%");
+        assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, exact.type);
+        assertAccepts(exact, "a%");
+        assertRejects(exact, "a", "ab");
+
+        assertThatThrownBy(() -> LikePatterns.patternAutomaton("a\\")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> LikePatterns.patternAutomaton("a\\b")).isInstanceOf(IllegalArgumentException.class);
+
+        assertTrue(LikePatterns.hasWildcard(UTF8Type.instance.decompose("a_")));
+        assertTrue(LikePatterns.hasWildcard(UTF8Type.instance.decompose("\\\\%")));
+        assertFalse(LikePatterns.hasWildcard(UTF8Type.instance.decompose("a\\_\\%\\\\")));
+        assertEquals("a_%\\", UTF8Type.instance.compose(LikePatterns.unescape(UTF8Type.instance.decompose("a\\_\\%\\\\"))));
+        assertEquals("a\\_\\%\\\\é", LikePatterns.escape("a_%\\é"));
+    }
+
+    @Test
+    public void normalizeLiteralsKeepsWildcardsAndEscapes()
+    {
+        // a normalization turning literals into wildcards or escapes (like ASCII folding of full-width characters)
+        // must not change the structure of the pattern
+        UnaryOperator<ByteBuffer> fold = literal -> UTF8Type.instance.decompose(UTF8Type.instance.compose(literal)
+                                                                                            .replace('＿', '_')
+                                                                                            .replace('％', '%')
+                                                                                            .replace('＼', '\\')
+                                                                                            .toLowerCase());
+        assertEquals("a\\_\\%\\\\_b%\\_", normalize("A＿％＼_B%\\_", fold));
+        assertEquals("abc", normalize("ABC", fold));
+        assertEquals("%_", normalize("%_", fold));
+        // a literal normalized to nothing
+        assertEquals("%a", normalize("x%a", literal -> UTF8Type.instance.compose(literal).equals("x") ? null : literal));
+    }
+
+    private static String normalize(String pattern, UnaryOperator<ByteBuffer> normalize)
+    {
+        return UTF8Type.instance.compose(LikePatterns.normalizeLiterals(UTF8Type.instance.decompose(pattern), normalize));
+    }
+
+    @Test
+    public void likeRegexpMetacharsAreLiterals()
+    {
         // regexp/wildcard metacharacters in the pattern are literal characters
         CompiledAutomaton dot = LikePatterns.patternAutomaton("a.c%");
         assertAccepts(dot, "a.c", "a.cd");

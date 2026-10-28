@@ -233,10 +233,9 @@ public enum Operator
 
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            // The value is a literal or a whole LIKE pattern (see LikeRestriction#makeSpecific): every '%' is an
-            // any-string wildcard, there are no escapes and '_' is a literal character. The column isn't known
-            // here: an InvalidPatternException for a pattern that can't be compiled is completed with it by the
-            // caller (RowFilter).
+            // The value is a literal or a whole LIKE pattern, in the internal form of LikePatterns#ESCAPE (see
+            // LikeRestriction#makeSpecific). The column isn't known here: an InvalidPatternException for a
+            // pattern that can't be compiled is completed with it by the caller (RowFilter).
             return LikePatterns.accepts(LikePatterns.forPatternOperator(this, rightOperand, null), leftOperand);
         }
     },

@@ -102,11 +102,14 @@ public class ExpressionTest
     @Test
     public void testWildcardFreePatternsAreEqualities()
     {
-        // wildcard-free LIKE patterns (LIKE_MATCHES without '%') match a single term: served as equalities
+        // wildcard-free LIKE patterns (LIKE_MATCHES without '%' or '_') match a single term: served as equalities
+        // on their unescaped literal
         assertEquals(Expression.Op.EQ, makeExpression(Operator.LIKE_MATCHES, "abc").getOp());
-        assertEquals(Expression.Op.EQ, makeExpression(Operator.LIKE_MATCHES, "é日😀_").getOp());
         assertEquals(makeExpression(Operator.EQ, "abc"), makeExpression(Operator.LIKE_MATCHES, "abc"));
+        assertEquals(makeExpression(Operator.EQ, "é日😀_%\\"), makeExpression(Operator.LIKE_MATCHES, "é日😀\\_\\%\\\\"));
         assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "a%c").getOp());
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "a_c").getOp());
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "a\\\\_").getOp());
         assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "%abc%").getOp());
         // the other pattern operators carry the literal left once their leading/trailing wildcards were trimmed
         assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_SUFFIX, "abc").getOp());

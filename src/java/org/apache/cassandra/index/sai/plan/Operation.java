@@ -30,6 +30,7 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 
+import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -130,7 +131,13 @@ public class Operation
                 }
                 columnIsMultiExpression.put(e.column(), isMultiExpression);
 
-                if (isMultiExpression)
+                if (isMultiExpression && e.operator() == Operator.LIKE_MATCHES)
+                {
+                    // the analyzer normalizes the literals of the pattern, not its wildcards and escapes
+                    ByteBuffer pattern = LikePatterns.normalizeLiterals(e.getIndexValue(), literal -> analyzeLiteral(analyzerFactory, literal));
+                    perColumn.add(new Expression(indexContext).add(e.operator(), pattern));
+                }
+                else if (isMultiExpression)
                 {
                     if (!analyzer.hasNext())
                     {
@@ -215,6 +222,23 @@ public class Operation
         }
 
         return analyzed;
+    }
+
+    /**
+     * Returns the single token a non-tokenizing analyzer makes of a literal, {@code null} if none.
+     */
+    private static ByteBuffer analyzeLiteral(AbstractAnalyzer.AnalyzerFactory analyzerFactory, ByteBuffer literal)
+    {
+        AbstractAnalyzer analyzer = analyzerFactory.create();
+        try
+        {
+            analyzer.reset(literal);
+            return analyzer.hasNext() ? analyzer.next() : null;
+        }
+        finally
+        {
+            analyzer.end();
+        }
     }
 
     private static int getPriority(org.apache.cassandra.cql3.Operator op)

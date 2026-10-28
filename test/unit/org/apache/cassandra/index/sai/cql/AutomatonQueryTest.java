@@ -89,7 +89,7 @@ public class AutomatonQueryTest extends SAITester
     // Client-side ground truth, computed independently of both the index and the Operator post-filters.
     // ---------------------------------------------------------------------------------------------------------
 
-    /** Reference implementation of full CQL LIKE semantics: '%' = any string, no escapes, '_' literal. */
+    /** Reference implementation of CQL LIKE semantics for patterns without '_' or escapes: '%' = any string. */
     private static boolean likeMatches(String value, String pattern)
     {
         String[] segments = pattern.split("%", -1);

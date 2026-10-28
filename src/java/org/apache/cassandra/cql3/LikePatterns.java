@@ -16,10 +16,12 @@
 
 package org.apache.cassandra.cql3;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.UnaryOperator;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -39,9 +41,11 @@ import org.apache.lucene.util.automaton.TooComplexToDeterminizeException;
  * The CQL {@code LIKE} pattern engine: compiles the patterns of the {@code LIKE} operators into Lucene
  * {@link CompiledAutomaton}s and runs them over values.
  * <p>
- * CQL LIKE semantics (see {@code SingleColumnRestriction.LikeRestriction#makeSpecific}): {@code %} is the only
- * wildcard and matches any (possibly empty) character sequence, wherever it appears in the pattern. There is no
- * escape mechanism and {@code _} is a literal character.
+ * CQL LIKE semantics (see {@code SingleColumnRestriction.LikeRestriction#makeSpecific}): {@code %} matches any
+ * (possibly empty) character sequence and {@code _} any single character, wherever they appear in the pattern. The
+ * patterns of {@link Operator#LIKE_MATCHES} are in an internal form, where {@link #ESCAPE} escapes the literal
+ * occurrences of the wildcards and its own: the coordinator translates the {@code ESCAPE} clause of the query, if
+ * any, into it.
  * <p>
  * All automata produced here are defined over Unicode code points and are then compiled into UTF-8 byte automata
  * (via {@code CompiledAutomaton(automaton, null, true, workLimit, false /* not binary *&#47;)}), matching how Lucene
@@ -86,46 +90,184 @@ public final class LikePatterns
                 })
                 .build();
 
+    /**
+     * The escape character of the internal form of {@link Operator#LIKE_MATCHES} patterns: followed by {@code %},
+     * {@code _} or itself, it stands for that character literally. It is never followed by anything else.
+     */
+    public static final char ESCAPE = '\\';
+
     private LikePatterns()
     {
     }
 
     /**
-     * Builds a byte-level automaton for a CQL {@code LIKE} pattern. This method accepts the full pattern, so it
-     * serves {@code x%} (prefix), {@code %x} (suffix), {@code %x%} (contains) and generic patterns such as
-     * {@code a%b}, {@code a%b%}, {@code %a%b} or {@code %a%b%} alike. Not cached.
+     * Returns whether a {@link Operator#LIKE_MATCHES} pattern, in internal form, contains a wildcard.
+     */
+    public static boolean hasWildcard(ByteBuffer pattern)
+    {
+        // '%', '_' and the escape are single bytes in UTF-8 (and ASCII), never part of a multibyte character
+        for (int i = pattern.position(); i < pattern.limit(); i++)
+        {
+            byte b = pattern.get(i);
+            if (b == ESCAPE)
+                i++;
+            else if (b == '%' || b == '_')
+                return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns the pattern, in internal form, that matches the given literal: its {@code %}, {@code _} and
+     * {@link #ESCAPE} characters escaped.
+     */
+    public static String escape(String literal)
+    {
+        StringBuilder pattern = new StringBuilder(literal.length());
+        for (int i = 0; i < literal.length(); i++)
+        {
+            char c = literal.charAt(i);
+            if (c == '%' || c == '_' || c == ESCAPE)
+                pattern.append(ESCAPE);
+            pattern.append(c);
+        }
+        return pattern.toString();
+    }
+
+    /**
+     * Applies a normalization (e.g. the lowercasing or folding of a non-tokenizing index analyzer) to the literal
+     * runs of a {@link Operator#LIKE_MATCHES} pattern in internal form, and returns the normalized pattern. The
+     * wildcards and escapes are kept out of the normalization, which could otherwise turn literal characters into
+     * them (ASCII folding turns {@code ＿} into {@code _}, for example).
      *
-     * @param pattern the LIKE pattern, with {@code %} wildcards
+     * @param pattern the pattern, in internal form
+     * @param normalize the normalization of a literal; it may return {@code null} for an empty result
+     * @return the normalized pattern, in internal form
+     */
+    public static ByteBuffer normalizeLiterals(ByteBuffer pattern, UnaryOperator<ByteBuffer> normalize)
+    {
+        ByteBuffer literal = ByteBuffer.allocate(pattern.remaining());
+        ByteArrayOutputStream normalized = new ByteArrayOutputStream(pattern.remaining());
+        for (int i = pattern.position(); i < pattern.limit(); i++)
+        {
+            byte b = pattern.get(i);
+            if (b == ESCAPE && i + 1 < pattern.limit())
+            {
+                literal.put(pattern.get(++i));
+            }
+            else if (b == '%' || b == '_')
+            {
+                appendNormalized(literal, normalize, normalized);
+                normalized.write(b);
+            }
+            else
+            {
+                literal.put(b);
+            }
+        }
+        appendNormalized(literal, normalize, normalized);
+        return ByteBuffer.wrap(normalized.toByteArray());
+    }
+
+    /**
+     * Appends the escaped normalization of the literal accumulated in the given buffer, and clears it.
+     */
+    private static void appendNormalized(ByteBuffer literal, UnaryOperator<ByteBuffer> normalize, ByteArrayOutputStream out)
+    {
+        if (literal.position() == 0)
+            return;
+        literal.flip();
+        ByteBuffer normalized = normalize.apply(literal.duplicate());
+        literal.clear();
+        if (normalized == null)
+            return;
+        for (int i = normalized.position(); i < normalized.limit(); i++)
+        {
+            byte b = normalized.get(i);
+            if (b == '%' || b == '_' || b == ESCAPE)
+                out.write(ESCAPE);
+            out.write(b);
+        }
+    }
+
+    /**
+     * Returns the literal of a wildcard-free {@link Operator#LIKE_MATCHES} pattern in internal form, i.e. the
+     * pattern without its escapes.
+     */
+    public static ByteBuffer unescape(ByteBuffer pattern)
+    {
+        ByteBuffer literal = ByteBuffer.allocate(pattern.remaining());
+        for (int i = pattern.position(); i < pattern.limit(); i++)
+        {
+            byte b = pattern.get(i);
+            if (b == ESCAPE && i + 1 < pattern.limit())
+                b = pattern.get(++i);
+            literal.put(b);
+        }
+        literal.flip();
+        return literal;
+    }
+
+    /**
+     * Builds a byte-level automaton for a CQL {@code LIKE} pattern in internal form (see {@link #ESCAPE}). This
+     * method accepts the full pattern, so it serves {@code x%} (prefix), {@code %x} (suffix), {@code %x%}
+     * (contains) and generic patterns such as {@code a%b}, {@code a%b%}, {@code %a%b} or {@code a_c%} alike.
+     * {@code _} matches a single Unicode character, whatever the length of its UTF-8 encoding. Not cached.
+     *
+     * @param pattern the LIKE pattern, with {@code %} and {@code _} wildcards and {@link #ESCAPE} escapes
      * @return the compiled automaton
+     * @throws IllegalArgumentException if the pattern ends with a lone escape, or escapes another character
      */
     @VisibleForTesting
     public static CompiledAutomaton patternAutomaton(String pattern)
     {
         List<Automaton> parts = new ArrayList<>();
-        int segmentStart = 0;
-        boolean lastWasWildcard = false;
+        StringBuilder literal = new StringBuilder();
+        boolean lastWasAnyString = false;
+        boolean finite = true;
         for (int i = 0; i < pattern.length(); i++)
         {
-            if (pattern.charAt(i) == '%')
+            char c = pattern.charAt(i);
+            if (c == ESCAPE)
             {
-                if (i > segmentStart)
-                {
-                    parts.add(Automata.makeString(pattern.substring(segmentStart, i)));
-                    lastWasWildcard = false;
-                }
-                // Collapse runs of consecutive wildcards into a single any-string.
-                if (!lastWasWildcard)
-                {
-                    parts.add(Automata.makeAnyString());
-                    lastWasWildcard = true;
-                }
-                segmentStart = i + 1;
+                if (++i == pattern.length())
+                    throw new IllegalArgumentException("LIKE pattern ends with an escape: " + pattern);
+                char escaped = pattern.charAt(i);
+                if (escaped != '%' && escaped != '_' && escaped != ESCAPE)
+                    throw new IllegalArgumentException("LIKE pattern escapes a character other than '%', '_' or '\\': " + pattern);
+                literal.append(escaped);
+                lastWasAnyString = false;
+                continue;
+            }
+            if (c != '%' && c != '_')
+            {
+                literal.append(c);
+                lastWasAnyString = false;
+                continue;
+            }
+
+            if (literal.length() > 0)
+            {
+                parts.add(Automata.makeString(literal.toString()));
+                literal.setLength(0);
+            }
+            if (c == '_')
+            {
+                parts.add(Automata.makeAnyChar());
+                lastWasAnyString = false;
+            }
+            // Collapse runs of consecutive wildcards into a single any-string.
+            else if (!lastWasAnyString)
+            {
+                parts.add(Automata.makeAnyString());
+                lastWasAnyString = true;
+                finite = false;
             }
         }
-        if (segmentStart < pattern.length() || parts.isEmpty())
-            parts.add(Automata.makeString(pattern.substring(segmentStart)));
-        // a pattern without wildcards accepts a single string; with wildcards, infinitely many
-        return compile(parts.size() == 1 ? parts.get(0) : Operations.concatenate(parts), !lastWasWildcard && parts.size() == 1);
+        if (literal.length() > 0 || parts.isEmpty())
+            parts.add(Automata.makeString(literal.toString()));
+        // a pattern without '%' accepts finitely many strings; with one, infinitely many
+        return compile(parts.size() == 1 ? parts.get(0) : Operations.concatenate(parts), finite);
     }
 
     /**
@@ -226,9 +368,9 @@ public final class LikePatterns
      *   <li>{@link Operator#LIKE_SUFFIX} / {@link Operator#LIKE_CONTAINS}: the value is the literal left once
      *       {@code LikeRestriction#makeSpecific} trimmed the leading/trailing {@code %} wildcards of a pattern
      *       without inner wildcards; it is matched literally;</li>
-     *   <li>{@link Operator#LIKE_MATCHES}: the value is either a literal (exact match) or the whole pattern of a
-     *       LIKE with an inner wildcard (including any leading/trailing ones), and every {@code %} is an any-string
-     *       wildcard (see {@link #patternAutomaton}).</li>
+     *   <li>{@link Operator#LIKE_MATCHES}: the value is a pattern in internal form (see {@link #ESCAPE}), either
+     *       wildcard-free (exact match) or the whole pattern of a LIKE with an inner wildcard (including any
+     *       leading/trailing ones), see {@link #patternAutomaton}.</li>
      * </ul>
      *
      * @param operator the pattern operator

@@ -204,8 +204,8 @@ public class TermsReader implements Closeable
      * <p>
      * The terms accepted by the automaton all start with its common prefix, so the intersection is a range query
      * over {@code [commonPrefix, nextOf(commonPrefix))} keeping the terms the automaton accepts. The scan visits
-     * every term of that range: the only wildcard of a CQL pattern, {@code %}, matches any suffix, so every term
-     * starting with the literal prefix of the pattern may match and no term of the range can be skipped.
+     * every term of that range: past a {@code %} wildcard, every term starting with the literal prefix of the
+     * pattern may match. Only patterns with a {@code _} wildcard could skip terms by seeking.
      *
      * @param automaton the compiled byte-level automaton to intersect with the dictionary
      * @param perQueryEventListener the event listener

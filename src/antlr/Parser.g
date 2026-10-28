@@ -1823,7 +1823,7 @@ relationType returns [Operator op]
 
 relation[WhereClause.Builder clauses]
     : name=cident type=relationType t=term { $clauses.add(new SingleColumnRelation(name, type, t)); }
-    | name=cident K_LIKE t=term { $clauses.add(new SingleColumnRelation(name, Operator.LIKE, t)); }
+    | name=cident K_LIKE t=term (K_ESCAPE e=likeEscape)? { $clauses.add(SingleColumnRelation.createLikeRelation(name, t, e)); }
     | name=cident K_IS K_NOT K_NULL { $clauses.add(new SingleColumnRelation(name, Operator.IS_NOT, Constants.NULL_LITERAL)); }
     | K_TOKEN l=tupleOfIdentifiers type=relationType t=term
         { $clauses.add(new TokenRelation(l, type, t)); }
@@ -1874,6 +1874,12 @@ relation[WhereClause.Builder clauses]
 containsOperator returns [Operator o]
     : K_CONTAINS { o = Operator.CONTAINS; } (K_KEY { o = Operator.CONTAINS_KEY; })?
     | K_NOT K_CONTAINS { o = Operator.NOT_CONTAINS; } (K_KEY { o = Operator.NOT_CONTAINS_KEY; })?
+    ;
+
+likeEscape returns [Term.Raw escape]
+    : t=STRING_LITERAL      { $escape = Constants.Literal.string($t.text); }
+    | ':' id=noncol_ident   { $escape = newBindVariables(id); }
+    | QMARK                 { $escape = newBindVariables(null); }
     ;
 
 inMarker returns [AbstractMarker.INRaw marker]
@@ -2081,6 +2087,7 @@ basic_unreserved_keyword returns [String str]
         | K_CALLED
         | K_INPUT
         | K_LIKE
+        | K_ESCAPE
         | K_PER
         | K_PARTITION
         | K_GROUP

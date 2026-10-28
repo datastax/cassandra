@@ -225,13 +225,21 @@ public class Expression
             case CONTAINS_KEY:
             case NOT_CONTAINS:
             case NOT_CONTAINS_KEY:
+                // A wildcard-free LIKE '<term>' (LIKE_MATCHES without any wildcard) matches the single term equal
+                // to its unescaped literal, so the index serves it exactly like an equality (term lookup, no
+                // ordering scan): the automaton path is for the patterns with wildcards. The CQL operator stays
+                // LIKE_MATCHES, which is what index selection and post-filtering are about.
+                if (op == Operator.LIKE_MATCHES && !LikePatterns.hasWildcard(value))
+                {
+                    operation = Op.EQ;
+                    value = LikePatterns.unescape(value);
+                }
+                else
+                {
+                    operation = Op.valueOf(op);
+                }
                 lower = new Bound(value, validator, true);
                 upper = lower;
-                // A wildcard-free LIKE '<term>' (LIKE_MATCHES without any '%') matches the single term equal to
-                // it, so the index serves it exactly like an equality (term lookup, no ordering scan): the
-                // automaton path is for the patterns with wildcards. The CQL operator stays LIKE_MATCHES, which
-                // is what index selection and post-filtering are about.
-                operation = op == Operator.LIKE_MATCHES && !containsWildcard(value) ? Op.EQ : Op.valueOf(op);
                 // Automaton-served pattern expressions remember which operator the pattern came from, because
                 // it defines the pattern syntax (see #getAutomaton()).
                 if (operation == Op.AUTOMATON)
@@ -454,18 +462,6 @@ public class Expression
     {
         assert operation == Op.AUTOMATON : "Pattern operator requested for operation " + operation;
         return patternOperator;
-    }
-
-    /** Whether the given LIKE pattern contains a {@code '%'} wildcard. */
-    private static boolean containsWildcard(ByteBuffer pattern)
-    {
-        for (int i = pattern.position(); i < pattern.limit(); i++)
-        {
-            // '%' is a single byte in UTF-8 (and ASCII), never part of a multibyte character
-            if (pattern.get(i) == '%')
-                return true;
-        }
-        return false;
     }
 
     /**

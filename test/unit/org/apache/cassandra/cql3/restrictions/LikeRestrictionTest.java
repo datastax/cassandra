@@ -30,7 +30,7 @@ import static org.junit.Assert.assertEquals;
 
 /**
  * Tests how {@code SingleColumnRestriction.LikeRestriction#makeSpecific} classifies a bound LIKE pattern: every
- * {@code '%'} is a wildcard, wherever it appears in the pattern.
+ * {@code '%'} and {@code '_'} is a wildcard, wherever it appears in the pattern, unless it is escaped.
  */
 public class LikeRestrictionTest
 {
@@ -47,9 +47,46 @@ public class LikeRestrictionTest
         assertSpecific("%%abc", Operator.LIKE_SUFFIX, "abc");
         assertSpecific("%%%abc%%", Operator.LIKE_CONTAINS, "abc");
 
-        // '_' is a literal character, and so are multi-byte characters
-        assertSpecific("a_c%", Operator.LIKE_PREFIX, "a_c");
+        // multi-byte characters, and backslashes without an ESCAPE clause, are literals
         assertSpecific("%日本語", Operator.LIKE_SUFFIX, "日本語");
+        assertSpecific("a\\c%", Operator.LIKE_PREFIX, "a\\c");
+        // a wildcard-free pattern is in internal form: the backslash is escaped
+        assertSpecific("a\\c", Operator.LIKE_MATCHES, "a\\\\c");
+    }
+
+    @Test
+    public void testUnderscoreMakesGenericPatterns()
+    {
+        assertSpecific("a_c%", Operator.LIKE_MATCHES, "a_c%");
+        assertSpecific("_", Operator.LIKE_MATCHES, "_");
+        assertSpecific("%%_%%", Operator.LIKE_MATCHES, "%_%");
+        assertSpecific("%a_", Operator.LIKE_MATCHES, "%a_");
+    }
+
+    @Test
+    public void testEscapes()
+    {
+        // escaped wildcards are literals, so the leading/trailing ones don't select an operator
+        assertSpecific("a!_c%", "!", Operator.LIKE_PREFIX, "a_c");
+        assertSpecific("%a!%", "!", Operator.LIKE_SUFFIX, "a%");
+        assertSpecific("%!%%", "!", Operator.LIKE_CONTAINS, "%");
+        assertSpecific("a!!b%", "!", Operator.LIKE_PREFIX, "a!b");
+        // in a generic or wildcard-free pattern, they are escaped with the internal escape character
+        assertSpecific("a!_c", "!", Operator.LIKE_MATCHES, "a\\_c");
+        assertSpecific("a!%_\\%", "!", Operator.LIKE_MATCHES, "a\\%_\\\\%");
+        assertSpecific("a\\_%", "\\", Operator.LIKE_PREFIX, "a_");
+        assertSpecific("a\\\\_", "\\", Operator.LIKE_MATCHES, "a\\\\_");
+        // multi-byte escape characters
+        assertSpecific("日%日日%", "日", Operator.LIKE_PREFIX, "%日");
+        assertSpecific("é_日_", "é", Operator.LIKE_MATCHES, "\\_日_");
+        // without an escape character, there is nothing to escape
+        assertSpecific("a!_c", Operator.LIKE_MATCHES, "a!_c");
+        // escaped wildcards don't make a pattern empty
+        assertSpecific("!%", "!", Operator.LIKE_MATCHES, "\\%");
+
+        for (String pattern : new String[]{ "a!", "a!b", "a!日", "!" })
+            assertThatThrownBy(() -> makeSpecific(pattern, "!")).isInstanceOf(InvalidRequestException.class)
+                                                                .hasMessageContaining("escape character");
     }
 
     @Test
@@ -103,10 +140,25 @@ public class LikeRestrictionTest
         return SingleColumnRestriction.LikeRestriction.makeSpecific(UTF8Type.instance.decompose(pattern));
     }
 
+    private static Pair<Operator, ByteBuffer> makeSpecific(String pattern, String escape)
+    {
+        return SingleColumnRestriction.LikeRestriction.makeSpecific(UTF8Type.instance.decompose(pattern),
+                                                                    UTF8Type.instance.decompose(escape));
+    }
+
     private static void assertSpecific(String pattern, Operator expectedOperator, String expectedValue)
     {
-        Pair<Operator, ByteBuffer> specific = makeSpecific(pattern);
-        assertEquals(pattern, expectedOperator, specific.left);
-        assertEquals(pattern, expectedValue, UTF8Type.instance.compose(specific.right));
+        assertSpecific(makeSpecific(pattern), pattern, expectedOperator, expectedValue);
+    }
+
+    private static void assertSpecific(String pattern, String escape, Operator expectedOperator, String expectedValue)
+    {
+        assertSpecific(makeSpecific(pattern, escape), pattern + " ESCAPE " + escape, expectedOperator, expectedValue);
+    }
+
+    private static void assertSpecific(Pair<Operator, ByteBuffer> specific, String message, Operator expectedOperator, String expectedValue)
+    {
+        assertEquals(message, expectedOperator, specific.left);
+        assertEquals(message, expectedValue, UTF8Type.instance.compose(specific.right));
     }
 }

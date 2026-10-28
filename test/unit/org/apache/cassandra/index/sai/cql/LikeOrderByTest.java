@@ -73,11 +73,11 @@ public class LikeOrderByTest extends SAITester
         }
     };
 
-    /** Value alphabet: ascii, 2-byte and 4-byte UTF-8 characters, and '%' and '_' as literal value characters. */
-    private static final String[] ALPHABET = { "a", "b", "c", "é", "😀", "%", "_" };
+    /** Value alphabet: ascii, 2-byte and 4-byte UTF-8 characters, and the wildcards and escapes as literals. */
+    private static final String[] ALPHABET = { "a", "b", "c", "é", "😀", "%", "_", "\\", "!" };
 
-    /** Pattern segment alphabet: no '%'. */
-    private static final String[] SEGMENT_ALPHABET = { "a", "b", "c", "é", "😀", "_" };
+    /** The escape characters of the patterns, {@code null} for no {@code ESCAPE} clause. */
+    private static final String[] ESCAPES = { null, "\\", "!", "é" };
 
     private static final Comparator<String> UNSIGNED_BYTES = (x, y) -> Arrays.compareUnsigned(x.getBytes(StandardCharsets.UTF_8),
                                                                                              y.getBytes(StandardCharsets.UTF_8));
@@ -139,28 +139,31 @@ public class LikeOrderByTest extends SAITester
 
             for (int q = 0; q < 40; q++)
             {
-                String pattern = randomPattern(random);
+                String escape = ESCAPES[random.nextInt(ESCAPES.length)];
+                LikePattern pattern = randomPattern(random, escape);
                 boolean descending = random.nextBoolean();
                 int limit = 1 + random.nextInt(30);
 
                 List<String> expected = new ArrayList<>();
                 for (String v : model.values())
-                    if (likeMatches(v, pattern))
+                    if (pattern.regex.matcher(v).matches())
                         expected.add(v);
                 expected.sort(descending ? UNSIGNED_BYTES.reversed() : UNSIGNED_BYTES);
                 if (expected.size() > limit)
                     expected = expected.subList(0, limit);
 
-                String query = "SELECT v FROM %s WHERE v LIKE ? ORDER BY v " + (descending ? "DESC" : "ASC") + " LIMIT " + limit;
-                String message = "round " + round + ": " + query.replace("?", '\'' + pattern + '\'');
+                String query = "SELECT v FROM %s WHERE v LIKE ?" + (escape == null ? "" : " ESCAPE ?")
+                               + " ORDER BY v " + (descending ? "DESC" : "ASC") + " LIMIT " + limit;
+                Object[] values = escape == null ? new Object[]{ pattern.text.toString() } : new Object[]{ pattern.text.toString(), escape };
+                String message = "round " + round + ": " + query + " with " + Arrays.toString(values);
 
                 List<String> unpaged = new ArrayList<>();
-                for (UntypedResultSet.Row row : execute(query, pattern))
+                for (UntypedResultSet.Row row : execute(query, values))
                     unpaged.add(row.getString("v"));
                 assertEquals(message, expected, unpaged);
 
                 List<String> paged = new ArrayList<>();
-                for (com.datastax.driver.core.Row row : executeNetWithPaging(query, 3, pattern))
+                for (com.datastax.driver.core.Row row : executeNetWithPaging(query, 3, values))
                     paged.add(row.getString("v"));
                 assertEquals(message + " (paged)", expected, paged);
             }
@@ -194,18 +197,59 @@ public class LikeOrderByTest extends SAITester
         });
     }
 
-    private static String randomPattern(Random random)
+    /** A LIKE pattern, as written in a query, and the regular expression matching the same values. */
+    private static final class LikePattern
     {
-        String a = randomString(random, SEGMENT_ALPHABET, 2);
-        String b = randomString(random, SEGMENT_ALPHABET, 2);
+        final StringBuilder text = new StringBuilder();
+        final StringBuilder regexText = new StringBuilder();
+        Pattern regex;
+
+        void anyString()
+        {
+            text.append('%');
+            regexText.append(".*");
+        }
+    }
+
+    /**
+     * Returns a random pattern of one of the LIKE variants, whose segments mix literals (wildcards and the escape
+     * character escaped when there is an escape character) and '_' wildcards.
+     */
+    private static LikePattern randomPattern(Random random, String escape)
+    {
+        LikePattern pattern = new LikePattern();
         switch (random.nextInt(6))
         {
-            case 0: return a + '%';
-            case 1: return '%' + a;
-            case 2: return '%' + a + '%';
-            case 3: return a + '%' + b;
-            case 4: return '%' + a + '%' + b;
-            default: return a;
+            case 0: segment(random, escape, pattern); pattern.anyString(); break;
+            case 1: pattern.anyString(); segment(random, escape, pattern); break;
+            case 2: pattern.anyString(); segment(random, escape, pattern); pattern.anyString(); break;
+            case 3: segment(random, escape, pattern); pattern.anyString(); segment(random, escape, pattern); break;
+            case 4: pattern.anyString(); segment(random, escape, pattern); pattern.anyString(); segment(random, escape, pattern); break;
+            default: segment(random, escape, pattern);
+        }
+        pattern.regex = Pattern.compile(pattern.regexText.toString(), Pattern.DOTALL);
+        return pattern;
+    }
+
+    private static void segment(Random random, String escape, LikePattern pattern)
+    {
+        int length = 1 + random.nextInt(2);
+        for (int i = 0; i < length; i++)
+        {
+            if (random.nextInt(4) == 0)
+            {
+                pattern.text.append('_');
+                pattern.regexText.append('.');
+                continue;
+            }
+            String literal = ALPHABET[random.nextInt(ALPHABET.length)];
+            boolean special = literal.equals("%") || literal.equals("_") || literal.equals(escape);
+            if (special && escape == null)
+                literal = "a";
+            else if (special)
+                pattern.text.append(escape);
+            pattern.text.append(literal);
+            pattern.regexText.append(Pattern.quote(literal));
         }
     }
 
@@ -216,19 +260,5 @@ public class LikeOrderByTest extends SAITester
         for (int i = 0; i < length; i++)
             sb.append(alphabet[random.nextInt(alphabet.length)]);
         return sb.toString();
-    }
-
-    /** Reference implementation of CQL LIKE semantics: every '%' is an any-string wildcard, no escapes, '_' literal. */
-    private static boolean likeMatches(String value, String pattern)
-    {
-        String[] segments = pattern.split("%", -1);
-        StringBuilder regex = new StringBuilder();
-        for (int i = 0; i < segments.length; i++)
-        {
-            if (i > 0)
-                regex.append(".*");
-            regex.append(Pattern.quote(segments[i]));
-        }
-        return Pattern.compile(regex.toString(), Pattern.DOTALL).matcher(value).matches();
     }
 }

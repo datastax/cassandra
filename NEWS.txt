@@ -99,6 +99,11 @@ New features
       descending order. A LIKE restriction on the column a query is ordered by (ORDER BY) restricts the ordering
       scans of the index to the terms the pattern can match. No index rebuild or on-disk format change is
       required.
+    - CQL LIKE patterns support the '_' wildcard, which matches any single character, and an optional ESCAPE
+      clause: in LIKE '<pattern>' ESCAPE '<c>', the escape character <c> followed by '%', '_' or itself matches
+      that character literally (e.g. LIKE 'a!_%' ESCAPE '!' matches the values starting with 'a_'). The escape
+      character is a single character, given as a string literal or a bind marker. Without an ESCAPE clause there
+      is no escape character.
 
 Upgrading
 ---------
@@ -109,17 +114,29 @@ Upgrading
       the LIKE restriction is the only indexed restriction of the query, such a replica scans all its data in the
       queried token ranges (possibly timing out the read), and in any case it evaluates the LIKE restriction with
       the previous filtering semantics: patterns with an inner '%' match only values containing that '%' literally
-      (see below), and a wildcard-free LIKE '<term>' matches every value containing the term. The results of such
-      reads may therefore miss matching rows or include non-matching ones until the whole cluster is upgraded.
+      (see below), '_' is a literal character, and a wildcard-free LIKE '<term>' matches every value containing
+      the term. The results of such reads may therefore miss matching rows or include non-matching ones until the
+      whole cluster is upgraded. Conversely, with custom (non-SAI) indexes serving LIKE, a coordinator running a
+      previous version ships the generic LIKE '<term>' patterns unescaped: replicas running this version read
+      their '\' as escapes and their '_' as wildcards.
     - Every '%' of a CQL LIKE pattern is now an any-string wildcard, wherever it appears. Previously only the
       leading and trailing '%' of a pattern were wildcards when the pattern started or ended with one, so that
       e.g. LIKE 'a%b%', LIKE '%a%b', LIKE '%a%b%' and LIKE '%%a' matched their inner '%' (and all but one of the
       leading/trailing ones) as a literal character. Any pattern with an inner '%' is now a generic pattern
       (the LIKE '<term>' operator, applied to the whole pattern, whose runs of '%' are collapsed into one), and
       runs of leading/trailing '%' of the other patterns are trimmed; a pattern made only of '%' is rejected as
-      empty, like '%' and '%%' already were. There is still no escape mechanism, and '_' is still a literal
-      character. Custom (non-SAI) index implementations serving LIKE receive such patterns with the generic
-      operator and the whole pattern accordingly.
+      empty, like '%' and '%%' already were. Custom (non-SAI) index implementations serving LIKE receive such
+      patterns with the generic operator and the whole pattern accordingly.
+    - Breaking change: '_' in a CQL LIKE pattern is now a wildcard matching any single character. It was a
+      literal character, so existing queries whose pattern contains '_' now match more values: LIKE 'user_1%'
+      also matches 'userX1'. To match '_' literally, escape it with an ESCAPE clause: LIKE 'user!_1%' ESCAPE '!'.
+      Patterns with a '_' wildcard are served like patterns with an inner '%' (the generic LIKE '<term>'
+      operator). The generic operator's patterns use '\' as escape character internally, whatever the ESCAPE
+      clause of the query: custom (non-SAI) index implementations serving LIKE receive '\%', '\_' and '\\'
+      for the literal '%', '_' and '\' of such patterns, and the literal of a LIKE '<term>%', LIKE '%<term>' or
+      LIKE '%<term>%' restriction unescaped. On SAI indexes normalizing their terms ('case_sensitive': false,
+      'normalize', 'ascii'), '_' matches a single character of the normalized value: with 'ascii', 'Straße' is
+      indexed as 'strasse', which LIKE 'stra_e' doesn't match.
     - Filtering (including replica filtering protection) now evaluates the generic LIKE '<term>' operator
       with proper pattern semantics: every '%' in the pattern is an any-string wildcard, and a pattern without
       wildcards (a wildcard-free LIKE '<term>') only matches values equal to it. It previously performed a plain
