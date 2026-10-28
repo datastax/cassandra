@@ -847,7 +847,12 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             return removeTTL(row);
         }
 
-        // Rewrites the row replacing expiring liveness/cells with permanent equivalents, preserving timestamp and value.
+        // Rewrites the row replacing expiring liveness/cells with permanent equivalents, preserving the value.
+        // The rewritten liveness/cells get the original timestamp incremented by one: at the original timestamp they
+        // would lose the equal-timestamp tie against any un-scrubbed expiring copy of the same cell (another sstable,
+        // the memtable, another replica) and against the tombstone compaction produces when such a copy expires
+        // (Cells.reconcile, CASSANDRA-14592), i.e. the permanent copy would be deleted once the TTL elapses anywhere.
+        // Same approach as the CASSANDRA-14092 --reinsert-overflowed-ttl path (see fixCellExpirationTime).
         protected Row removeTTL(Row row)
         {
             if (!hasAnyTTL(row))
@@ -861,7 +866,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             LivenessInfo livenessInfo = row.primaryKeyLivenessInfo();
             if (livenessInfo.isExpiring())
             {
-                builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(livenessInfo.timestamp(), LivenessInfo.NO_TTL, FBUtilities.nowInSeconds()));
+                builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(livenessInfo.timestamp() + 1, LivenessInfo.NO_TTL, FBUtilities.nowInSeconds()));
                 ttlWasOverwritten = true;
             }
             else
@@ -893,7 +898,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         {
             if (cell.isExpiring())
             {
-                builder.addCell(BufferCell.live(cell.column(), cell.timestamp(), cell.buffer(), cell.path()));
+                builder.addCell(BufferCell.live(cell.column(), cell.timestamp() + 1, cell.buffer(), cell.path()));
                 return true;
             }
             builder.addCell(cell);

@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.validation.operations;
 
 
 import java.io.IOException;
+import java.util.Collections;
 
 import org.junit.After;
 import org.junit.Assume;
@@ -36,12 +37,15 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ExpirationDateOverflowHandling;
 import org.apache.cassandra.db.ExpirationDateOverflowHandling.ExpirationDateOverflowPolicy;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.rows.AbstractCell;
 import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.sstable.IScrubber;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
@@ -49,6 +53,7 @@ import org.apache.cassandra.tools.StandaloneScrubber;
 import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.utils.OutputHandler;
 import org.assertj.core.data.Offset;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_UTIL_ALLOW_TOOL_REINIT_FOR_TEST;
@@ -686,4 +691,65 @@ public class TTLTest extends CQLTester
         assertRows(execute("SELECT k, v, ttl(v) FROM %s WHERE k = 1"), row(1, "permanent_val", null));
     }
 
+    /**
+     * NO_TTL rewrites cells with the original timestamp incremented by one. Without the bump, a permanent copy
+     * written by the scrub loses the equal-timestamp tie against any un-scrubbed expiring copy of the same cell
+     * (CASSANDRA-14592: expiring beats non-expiring) and is deleted once that copy expires. Two copies of the same
+     * cell in two sstables stand in for "the memtable", "another sstable" or "another replica"; only one is scrubbed.
+     */
+    @Test
+    public void testScrubNoTTLSupersedesUnscrubbedExpiringCopy() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int) WITH gc_grace_seconds = 0");
+        execute("INSERT INTO %s (k, v) VALUES (0, 0) USING TTL 2 AND TIMESTAMP 1000");
+        flush();
+        execute("INSERT INTO %s (k, v) VALUES (0, 0) USING TTL 2 AND TIMESTAMP 1000");
+        flush();
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        assertEquals(2, cfs.getLiveSSTables().size());
+        SSTableReader toScrub = cfs.getLiveSSTables().iterator().next();
+        IScrubber.Options options = IScrubber.options().checkData().overwriteTTLMode(IScrubber.OverwriteTTLMode.NO_TTL).build();
+        try (LifecycleTransaction txn = cfs.getTracker().tryModify(Collections.singletonList(toScrub), OperationType.SCRUB);
+             IScrubber scrubber = toScrub.descriptor.getFormat().getScrubber(cfs, txn, new OutputHandler.LogOutput(), options))
+        {
+            assertEquals(1, scrubber.scrubWithResult().noTTLOverwrittenRows);
+        }
+
+        // the scrubbed copy is permanent and supersedes the still-expiring copy in the other sstable
+        assertRows(execute("SELECT k, v, ttl(v), writetime(v) FROM %s"), row(0, 0, null, 1001L));
+
+        // wait for the un-scrubbed copy to expire: its expiration must not delete the permanent copy
+        Thread.sleep(3000);
+        assertRows(execute("SELECT k, v, ttl(v), writetime(v) FROM %s"), row(0, 0, null, 1001L));
+
+        // nor must the tombstone compaction produces from the expired copy
+        compact();
+        assertEquals(1, cfs.getLiveSSTables().size());
+        assertRows(execute("SELECT k, v, ttl(v), writetime(v) FROM %s"), row(0, 0, null, 1001L));
+    }
+
+    /**
+     * Rows without regular columns only carry the primary-key liveness info; its TTL is stripped and its
+     * timestamp bumped the same way as for cells, while rows and cells that never had a TTL are untouched.
+     */
+    @Test
+    public void testScrubNoTTLBumpsTimestampOnlyOfExpiringData() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 0, 0) USING TTL 3600 AND TIMESTAMP 1000");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 1) USING TIMESTAMP 2000");
+        execute("INSERT INTO %s (k, c) VALUES (0, 2) USING TTL 3600 AND TIMESTAMP 3000");
+        flush();
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
+
+        assertRows(execute("SELECT c, v, ttl(v), writetime(v) FROM %s"),
+                   row(0, 0, null, 1001L),
+                   row(1, 1, null, 2000L),
+                   row(2, null, null, null));
+        // the row with only primary-key liveness survives as a permanent row
+        assertRows(execute("SELECT c FROM %s WHERE k = 0 AND c = 2"), row(2));
+    }
 }

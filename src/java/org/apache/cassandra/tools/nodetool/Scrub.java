@@ -59,7 +59,9 @@ public class Scrub extends NodeToolCmd
             name = {"-o", "--overwrite-ttl"},
             description = "Overwrite TTL info. Possible argument values:\n" +
                           "- NONE: does nothing\n" +
-                          "- NO_TTL: removes TTL\n" +
+                          "- NO_TTL: removes TTL from all cells, including already expired ones (resurrected).\n" +
+                          "Cells are rewritten with the original timestamp incremented by one, so that they\n" +
+                          "supersede un-scrubbed expiring copies and expiration tombstones of the same cells\n" +
                           "- REINSERT_OVERFLOWED_TTL: same as --reinsert-overflowed-ttl option")
     private IScrubber.OverwriteTTLMode overwriteTTLMode = IScrubber.OverwriteTTLMode.NONE;
 

@@ -64,7 +64,9 @@ public class StandaloneScrubberTest extends OfflineToolUtils
                        " -n,--no-validate               do not validate columns using column validator\n" +
                        " -o,--overwrite-ttl <arg>       Overwrite TTL info. Possible argument values:\n" +
                        "                                - NONE: does nothing\n" +
-                       "                                - NO_TTL: removes TTL\n" +
+                       "                                - NO_TTL: removes TTL from all cells, including already expired ones (resurrected).\n" +
+                       "                                Cells are rewritten with the original timestamp incremented by one, so that they\n" +
+                       "                                supersede un-scrubbed expiring copies and expiration tombstones of the same cells\n" +
                        "                                - REINSERT_OVERFLOWED_TTL: same as --reinsert-overflowed-ttl option\n" +
                        " -r,--reinsert-overflowed-ttl   Rewrites rows with overflowed expiration date affected by CASSANDRA-14092 with the\n" +
                        "                                maximum supported expiration date of 2038-01-19T03:14:06+00:00. The rows are rewritten\n" +

@@ -50,9 +50,12 @@ public interface IScrubber extends Closeable
      *   <li>{@link #NONE} — default behaviour; TTL values are left as-is.</li>
      *   <li>{@link #REINSERT_OVERFLOWED_TTL} — fixes cells whose local deletion time overflowed a 32-bit
      *       integer (see CASSANDRA-14092).</li>
-     *   <li>{@link #NO_TTL} — strips all TTL information from every cell (including expired cells), turning them
-     *       into permanent non-expiring data with their original timestamps. Note: all replicas should be flushed
-     *       and scrubbed to prevent un-scrubbed expiring copies from overwriting the permanent cells.</li>
+     *   <li>{@link #NO_TTL} — strips all TTL information from every cell (including expired cells, which are
+     *       resurrected), turning them into permanent non-expiring data. The rewritten cells carry the original
+     *       timestamp incremented by one, so that they supersede any un-scrubbed expiring copy of the same cell
+     *       (other sstables, the memtable, other replicas) and the tombstones produced when such copies expire;
+     *       at the original timestamp the expiring copy would win the tie (CASSANDRA-14592) and delete the
+     *       permanent cell once the TTL elapses. Same approach as {@link #REINSERT_OVERFLOWED_TTL}.</li>
      * </ul>
      */
     enum OverwriteTTLMode
