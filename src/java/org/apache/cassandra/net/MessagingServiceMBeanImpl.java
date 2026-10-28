@@ -18,7 +18,9 @@
 package org.apache.cassandra.net;
 
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -29,6 +31,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.security.SSLFactory;
+import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.utils.MBeanWrapper;
 
 public class MessagingServiceMBeanImpl implements MessagingServiceMBean
@@ -324,5 +327,16 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     public Map<String, Long> getDseCompatRefusals()
     {
         return DseCompatRefusals.snapshot();
+    }
+
+    @Override
+    public List<String> getDsePeersOnRecord()
+    {
+        List<String> result = new ArrayList<>();
+        for (InetAddressAndPort peer : DsePeersRecord.peers())
+            result.add(peer.getHostAddressAndPort());
+        // the lines of the persisted record that are not addresses with port refuse a start with NONE too
+        result.addAll(DsePeersRecord.unparsedEntries());
+        return result;
     }
 }

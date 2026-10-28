@@ -30,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 /**
@@ -44,12 +45,26 @@ public class EndpointMessagingVersions
     // protocol versions of the other nodes in the cluster
     private final ConcurrentMap<InetAddressAndPort, Integer> versions = new NonBlockingHashMap<>();
 
+    /**
+     * True only for the node's own map ({@code MessagingService.versions}): in the DSE 6 compatibility mode it feeds the
+     * record of DSE peers. Copies handed to outbound connections do not, so that a connection working from a stale
+     * copy cannot put a peer back on record after the node's own map has seen it at 4.0 or later.
+     */
+    private final boolean recordsDsePeers;
+
     public EndpointMessagingVersions()
     {
+        this(false);
+    }
+
+    EndpointMessagingVersions(boolean recordsDsePeers)
+    {
+        this.recordsDsePeers = recordsDsePeers;
     }
 
     private EndpointMessagingVersions(EndpointMessagingVersions versions)
     {
+        this.recordsDsePeers = false;
         this.versions.putAll(versions.versions);
     }
 
@@ -60,6 +75,19 @@ public class EndpointMessagingVersions
     {
         logger.trace("Setting version {} for {}", version, endpoint);
 
+        // in the DSE 6 compatibility mode the record of DSE peers follows this map: the two updates are made under
+        // one lock so that concurrent updates of the same peer (a handshake on an event loop, gossip on its stage)
+        // cannot leave the record and the map disagreeing
+        if (recordsDsePeers && DseCompat.enabled())
+        {
+            synchronized (this)
+            {
+                Integer v = versions.put(endpoint, version);
+                minClusterVersion = Collections.min(versions.values());
+                DsePeersRecord.versionRecorded(endpoint, version);
+                return v == null ? version : v;
+            }
+        }
         Integer v = versions.put(endpoint, version);
         minClusterVersion = Collections.min(versions.values());
         return v == null ? version : v;
@@ -68,6 +96,17 @@ public class EndpointMessagingVersions
     public void reset(InetAddressAndPort endpoint)
     {
         logger.trace("Resetting version for {}", endpoint);
+        if (recordsDsePeers && DseCompat.enabled())
+        {
+            synchronized (this)
+            {
+                versions.remove(endpoint);
+                if (!versions.values().isEmpty())
+                    minClusterVersion = Collections.min(versions.values());
+                DsePeersRecord.versionForgotten(endpoint);
+            }
+            return;
+        }
         versions.remove(endpoint);
         if (!versions.values().isEmpty())
             minClusterVersion = Collections.min(versions.values());
