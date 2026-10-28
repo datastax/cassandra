@@ -171,6 +171,137 @@ or expiring `v`) are not in it. The tests cover those with sstables written thro
 regular column named `.v`; a DSE-written set needs writes on a DSE cluster that this fixture's
 collection did not make.
 
+## `sstables/<version>-mv-updates/`
+
+The sstables of a DSE materialized view whose base table has other regular columns, written by every
+kind of base update, one flush each, and of a view of DSE's old format, with what DSE answered; one set
+for each version. They are the DSE-written set of such updates the section above lacks. Unlike the other
+fixtures of their version (the table at the top), each was written by a single-node cluster on the
+loopback interface (127.0.0.31, DC `Cassandra`, cluster `Test Cluster`, the `DseSimpleSnitch` of the
+default configuration) of DSE 6.8.65 (it logs its version as `6.8.65-4a7b9eb`) and of DSE
+6.9.26-0c77b67, with JDK 11; the `cqlsh` of DSE 6.9.26 ran the statements and the queries of both.
+Schema, as run with `cqlsh`, then `nodetool disableautocompaction test_ks`:
+
+```
+CREATE KEYSPACE IF NOT EXISTS test_ks WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+CREATE TABLE IF NOT EXISTS test_ks.base (pk int, ck int, v text, a int, b text, "-x" int, s set<int>, m map<text, int>,
+    PRIMARY KEY (pk, ck));
+CREATE MATERIALIZED VIEW IF NOT EXISTS test_ks.base_by_v AS SELECT * FROM test_ks.base
+    WHERE v IS NOT NULL AND pk IS NOT NULL AND ck IS NOT NULL PRIMARY KEY (v, pk, ck);
+```
+
+The column `"-x"` sorts before the hidden column `.v`, the others after it. The writes, in eight steps,
+each followed by `nodetool flush test_ks`; every statement of step `<n>` has `USING TIMESTAMP <T + n *
+1000000>`, where `T` is `1793214342000000` (6.8.65) and `1793214768000000` (6.9.26), and the insert of
+the batch of step 8 that timestamp + 1:
+
+```
+-- step 1: for p in 1..6, for c in 1..3, with k = 10 * p + c:
+INSERT INTO test_ks.base (pk, ck, v, a, b, "-x", s, m) VALUES (<p>, <c>, 'v<c>', <k>, 'b<k>', -<k>, {<p>, <c>}, {'k<c>': <p>});
+UPDATE test_ks.base SET v = 'u', a = 54 WHERE pk = 5 AND ck = 4;
+UPDATE test_ks.base SET a = 55 WHERE pk = 5 AND ck = 5;
+-- step 2: partial updates
+UPDATE test_ks.base SET a = 100 WHERE pk = 1 AND ck = 1;
+UPDATE test_ks.base SET s = s + {9} WHERE pk = 1 AND ck = 2;
+UPDATE test_ks.base SET m['z'] = 26 WHERE pk = 1 AND ck = 3;
+UPDATE test_ks.base SET "-x" = 0, b = 'bb' WHERE pk = 5 AND ck = 4;
+UPDATE test_ks.base SET v = 'w' WHERE pk = 5 AND ck = 5;
+-- step 3: cell deletions
+DELETE a FROM test_ks.base WHERE pk = 2 AND ck = 1;
+DELETE s FROM test_ks.base WHERE pk = 2 AND ck = 2;
+DELETE m['k3'] FROM test_ks.base WHERE pk = 2 AND ck = 3;
+-- step 4: changes of the view key column, and the same value written again (pk 2, ck 1)
+UPDATE test_ks.base SET v = 'changed' WHERE pk = 3 AND ck = 1;
+UPDATE test_ks.base SET v = 'changed', a = 0 WHERE pk = 3 AND ck = 2;
+DELETE v FROM test_ks.base WHERE pk = 3 AND ck = 3;
+UPDATE test_ks.base SET v = 'v1' WHERE pk = 2 AND ck = 1;
+-- step 5: row, range and partition deletions
+DELETE FROM test_ks.base WHERE pk = 4 AND ck = 1;
+DELETE FROM test_ks.base WHERE pk = 4 AND ck >= 2 AND ck <= 3;
+DELETE FROM test_ks.base WHERE pk = 6;
+-- step 6: inserts without the view key column
+INSERT INTO test_ks.base (pk, ck, a) VALUES (1, 2, 7);
+INSERT INTO test_ks.base (pk, ck, a) VALUES (4, 1, 8);
+-- step 7: TTLs, the long one with AND TTL 300000000, the short one with AND TTL 2
+INSERT INTO test_ks.base (pk, ck, v, a) VALUES (7, 1, 'ttl', 71);            -- long
+UPDATE test_ks.base SET a = 13 WHERE pk = 1 AND ck = 3;                       -- long
+UPDATE test_ks.base SET v = 'ttlv' WHERE pk = 5 AND ck = 1;                   -- long
+INSERT INTO test_ks.base (pk, ck, v, a) VALUES (7, 2, 'short', 72);          -- short
+UPDATE test_ks.base SET a = 23 WHERE pk = 2 AND ck = 3;                       -- short
+UPDATE test_ks.base SET v = 'shortv' WHERE pk = 5 AND ck = 2;                 -- short
+-- at least 5 seconds later (7 in both runs), step 8: a base row deleted and inserted again without the view key
+-- column, in one update
+BEGIN UNLOGGED BATCH
+DELETE FROM test_ks.base WHERE pk = 1 AND ck = 1;
+INSERT INTO test_ks.base (pk, ck, a) VALUES (1, 1, 111);
+APPLY BATCH;
+```
+
+`sstables/` holds a part of the node's data directory, with the same layout:
+`sstables/test_ks/base-<id>/` and `sstables/test_ks/base_by_v-<id>/` are the eight sstables of each
+table (`bb-1-bti` to `bb-8-bti`, one for each step, trie format `bb`, LZ4 compression), copied unchanged
+from the node's data directory after step 8. `select-star-base_by_v.txt` and `select-star-base.txt` are
+what DSE answered then, unchanged cqlsh output (consistency `ALL`, paging off, `SELECT *`): 12 view rows
+and 16 base rows, the same for both versions. The rows written with the short TTL had expired when DSE
+answered; those with the long one expire in May 2036, and from then on the answers of the fixture are no
+longer what the sstables give. `system-schema-test_ks.txt` is cqlsh's output of `SELECT *` from
+`system_schema.views`, `system_schema.hidden_columns`, `system_schema.columns` and
+`system_schema.dropped_columns` for the keyspace: the view of the new format (`version` 1 in
+`system_schema.views`), with `.v` (regular, `text`, `required_for_liveness`) as its only hidden column.
+`sstabledump-base_by_v.txt` and `sstablemetadata-base_by_v.txt` are DSE's `sstabledump` and
+`sstablemetadata` of each view sstable, run on the node, each output after a line `=== bb-<n>-bti`; the
+two WARN lines each tool printed about the host were removed, and the path of the sstable that
+`sstablemetadata` prints was cut to the part below the data directory. `sstabledump` prints times in
+UTC, `sstablemetadata` in the node's local time, one hour ahead.
+
+What they show:
+
+* the header of every view sstable names all the regular columns of the view, `.v` included, even the
+  sstable of step 5, whose rows are row deletions without a cell (`totalColumnsSet: 0`); the base
+  sstables likewise name every regular column of the table (`sstablemetadata` prints the header's
+  columns in no particular order);
+* every view row of a live view entry has a `.v` cell, also when its update writes or deletes only other
+  columns (steps 2, 3, 6 and 7): with the timestamp, TTL and expiration of the base cell of `v`, a
+  tombstone when the base cell is deleted or changes value. The view rows without one are the six row
+  deletions of step 5 and the row of step 8, which has a row deletion, a primary key liveness one
+  microsecond newer and the cell of `a`;
+* the cells of a row are in the order of the columns of this software: simple columns before complex
+  ones, each by name, so `"-x"`, `.v`, `a`, `b`, then `m` and `s`.
+
+The view of DSE's old format was created after the node was restarted with
+`-Dcassandra.mv.create_legacy_schema=true` (DSE's own switch: with it DSE creates every new view in the
+old format; without it DSE creates views in the new format, and refuses to create one that needs a
+hidden column while a node of the cluster runs a release before DSE 6.7 or is not a DSE node, with the
+error "All nodes in the cluster must be on DSE 6.7.0 or newer in order to create Materialized Views
+using the new format." (in the code of DSE 6.8.65 and 6.9.26), so the other views of the old format are
+those created before DSE 6.7):
+
+```
+CREATE TABLE IF NOT EXISTS test_ks.legacy_base (pk int, ck int, v text, a int, PRIMARY KEY (pk, ck));
+CREATE MATERIALIZED VIEW IF NOT EXISTS test_ks.legacy_by_v AS SELECT * FROM test_ks.legacy_base
+    WHERE v IS NOT NULL AND pk IS NOT NULL AND ck IS NOT NULL PRIMARY KEY (v, pk, ck);
+-- with L = 1793214657000000 (6.8.65) and 1793214975000000 (6.9.26)
+INSERT INTO test_ks.legacy_base (pk, ck, v, a) VALUES (1, 1, 'v1', 11) USING TIMESTAMP <L>;
+INSERT INTO test_ks.legacy_base (pk, ck, v, a) VALUES (1, 2, 'v2', 12) USING TIMESTAMP <L>;
+UPDATE test_ks.legacy_base USING TIMESTAMP <L + 1000000> SET a = 13 WHERE pk = 1 AND ck = 1;
+UPDATE test_ks.legacy_base USING TIMESTAMP <L + 1000000> SET v = 'changed' WHERE pk = 1 AND ck = 2;
+```
+
+followed by `nodetool flush test_ks` and `nodetool flush system_schema`. Before the restart, the
+sstables of the view of the new format and of its base table had been copied: the restart re-enables
+automatic compaction. `sstables/test_ks/legacy_base-<id>/` and `sstables/test_ks/legacy_by_v-<id>/` hold
+one sstable each, and `sstables/system_schema/hidden_columns-2461e8b28f6a31a1ac7230b9cd9c6ca5/` the
+sstables of DSE's `system_schema.hidden_columns` after that flush, all copied unchanged.
+`select-star-legacy.txt` is what DSE answered for `SELECT *` from the view then from its base table (2
+rows each). `system-schema-legacy.txt` holds the rows of both views in `system_schema.views` (the old
+format has `version` 0), DSE's `system_schema.hidden_columns` for the keyspace (the row of `base_by_v`
+alone: the view of the old format has none) and the view's rows of `system_schema.columns`.
+`sstabledump-legacy_by_v.txt` and `sstablemetadata-legacy_by_v.txt` show a header naming `a` alone and
+the encoding of this software, an expired primary key liveness for the old entry of the changed key.
+`org.apache.cassandra.db.view.DseViewUpdatesFixtureTest` reads the sstables, the `select-star-*.txt`
+files, `sstabledump-base_by_v.txt` and `system-schema-legacy.txt`; the other files are there for the
+reader.
+
 ## `handshake/<version>.txt`
 
 The first bytes of storage-port connections between two DSE nodes of the same version (three-node
