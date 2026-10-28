@@ -39,7 +39,10 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public interface ReadQuery
 {
-    public static ReadQuery empty(final TableMetadata metadata)
+    /**
+     * @return a read query that returns no rows
+     */
+    static ReadQuery empty(final TableMetadata metadata)
     {
         return new ReadQuery()
         {
@@ -112,7 +115,7 @@ public interface ReadQuery
             @Override
             public RowFilter rowFilter()
             {
-                return RowFilter.none();
+                return RowFilter.ALL; // filters out all rows, so no rows are returned
             }
 
             @Override
