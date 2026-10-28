@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.distributed.test.sai;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -43,7 +42,7 @@ public class TraceTest extends TestBaseImpl
     private final static int ROWS = 100;
     private final static int MATCHED_ROWS = 30;
 
-    private final static Pattern NUMBER_PATTERN = Pattern.compile("\\d+");
+    private final static Pattern PARTITIONS_RETURNED_PATTERN = Pattern.compile("partitionsReturned:\\s*(\\d+)");
 
     @Test
     public void testMultiIndexTracing() throws Throwable
@@ -75,7 +74,7 @@ public class TraceTest extends TestBaseImpl
             await().atMost(5, TimeUnit.SECONDS).until(() -> {
                 List<TracingUtil.TraceEntry> traceEntries = TracingUtil.getTrace(cluster, sessionId, ConsistencyLevel.ONE);
                 return traceEntries.stream().map(traceEntry -> traceEntry.activity)
-                                   .filter(activity -> activity.contains("post-filtered"))
+                                   .filter(activity -> activity.contains("partitionsReturned:"))
                                    .mapToLong(this::fetchPartitionCount).sum() == MATCHED_ROWS;
             });
         }
@@ -87,10 +86,9 @@ public class TraceTest extends TestBaseImpl
 
     private long fetchPartitionCount(String activity)
     {
-        List<Long> values = new ArrayList<>();
-        Matcher matcher = NUMBER_PATTERN.matcher(activity);
-        while (matcher.find())
-            values.add(Long.parseLong(matcher.group()));
-        return values.get(3);
+        Matcher matcher = PARTITIONS_RETURNED_PATTERN.matcher(activity);
+        if (matcher.find())
+            return Long.parseLong(matcher.group(1));
+        return 0;
     }
 }
