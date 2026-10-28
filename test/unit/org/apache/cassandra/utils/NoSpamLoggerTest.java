@@ -38,9 +38,39 @@ import org.slf4j.helpers.SubstituteLogger;
 public class NoSpamLoggerTest
 {
     Map<Level, Queue<Pair<String, Object[]>>> logged = new HashMap<>();
+    boolean debugEnabled;
 
    Logger mock = new SubstituteLogger(null, null, true)
    {
+       @Override
+       public boolean isDebugEnabled()
+       {
+           return debugEnabled;
+       }
+
+       @Override
+       public boolean isInfoEnabled()
+       {
+           return true;
+       }
+
+       @Override
+       public boolean isWarnEnabled()
+       {
+           return true;
+       }
+
+       @Override
+       public boolean isErrorEnabled()
+       {
+           return true;
+       }
+
+       @Override
+       public void debug(String statement, Object... args)
+       {
+           logged.get(Level.DEBUG).offer(Pair.create(statement, args));
+       }
 
        @Override
        public void info(String statement, Object... args)
@@ -94,6 +124,8 @@ public class NoSpamLoggerTest
    @Before
    public void setUp() throws Exception
    {
+       debugEnabled = false;
+       logged.put(Level.DEBUG, new ArrayDeque<Pair<String, Object[]>>());
        logged.put(Level.INFO, new ArrayDeque<Pair<String, Object[]>>());
        logged.put(Level.WARN, new ArrayDeque<Pair<String, Object[]>>());
        logged.put(Level.ERROR, new ArrayDeque<Pair<String, Object[]>>());
@@ -134,6 +166,31 @@ public class NoSpamLoggerTest
        assertFalse(NoSpamLogger.log( mock, l, "key", 5,  TimeUnit.NANOSECONDS, statement, param));
 
        assertEquals(3, logged.get(l).size());
+   }
+
+   /*
+    * A statement whose level is disabled must not log, and must not consume the statement's interval either,
+    * so it logs as soon as the level is enabled
+    */
+   @Test
+   public void testDisabledLevel() throws Exception
+   {
+       now = 5;
+       NoSpamLogger logger = NoSpamLogger.getLogger(mock, 5, TimeUnit.NANOSECONDS);
+       NoSpamLogger.NoSpamLogStatement nospamStatement = logger.getStatement("statement{}");
+
+       assertFalse(NoSpamLogger.log(mock, Level.DEBUG, 5, TimeUnit.NANOSECONDS, statement, param));
+       assertFalse(NoSpamLogger.log(mock, Level.DEBUG, "key", 5, TimeUnit.NANOSECONDS, statement, param));
+       assertFalse(logger.debug(statement, param));
+       assertFalse(nospamStatement.debug(param));
+       assertEquals(0, logged.get(Level.DEBUG).size());
+
+       debugEnabled = true;
+
+       assertTrue(NoSpamLogger.log(mock, Level.DEBUG, 5, TimeUnit.NANOSECONDS, statement, param));
+       assertTrue(NoSpamLogger.log(mock, Level.DEBUG, "key", 5, TimeUnit.NANOSECONDS, statement, param));
+       assertTrue(nospamStatement.debug(param));
+       assertEquals(3, logged.get(Level.DEBUG).size());
    }
 
    private void assertLoggedSizes(int info, int warn, int error)

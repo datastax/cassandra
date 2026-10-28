@@ -84,7 +84,7 @@ public class NoSpamLogger
 
         public boolean log(Level l, long nowNanos, Object... objects)
         {
-            if (!shouldLog(nowNanos)) return false;
+            if (!isEnabled(wrapped, l) || !shouldLog(nowNanos)) return false;
 
             switch (l)
             {
@@ -147,6 +147,23 @@ public class NoSpamLogger
         }
     }
 
+    private static boolean isEnabled(Logger logger, Level level)
+    {
+        switch (level)
+        {
+            case DEBUG:
+                return logger.isDebugEnabled();
+            case INFO:
+                return logger.isInfoEnabled();
+            case WARN:
+                return logger.isWarnEnabled();
+            case ERROR:
+                return logger.isErrorEnabled();
+            default:
+                throw new AssertionError();
+        }
+    }
+
     private static final NonBlockingHashMap<Logger, NoSpamLogger> wrappedLoggers = new NonBlockingHashMap<>();
 
     @VisibleForTesting
@@ -180,6 +197,9 @@ public class NoSpamLogger
 
     public static boolean log(Logger logger, Level level, String key, long minInterval, TimeUnit unit, long nowNanos, String message, Object... objects)
     {
+        if (!isEnabled(logger, level))
+            return false;
+
         NoSpamLogger wrapped = getLogger(logger, minInterval, unit);
         NoSpamLogStatement statement = wrapped.getStatement(key, message);
         return statement.log(level, nowNanos, objects);
@@ -243,6 +263,9 @@ public class NoSpamLogger
 
     public boolean log(Level l, String s, long nowNanos, Object... objects)
     {
+        if (!isEnabled(wrapped, l))
+            return false;
+
         return NoSpamLogger.this.getStatement(s, minIntervalNanos).log(l, nowNanos, objects);
     }
 
