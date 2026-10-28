@@ -17,15 +17,11 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.math.BigDecimal;
-import java.util.Collection;
-import java.util.stream.Collectors;
 
 import org.junit.After;
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
@@ -36,18 +32,8 @@ import org.apache.cassandra.index.sai.disk.format.Version;
  * ranges with equal bounds and at least one exclusive side, return no rows regardless of whether the data is in the
  * memtable, on disk, or both.
  */
-@RunWith(Parameterized.class)
-public class EmptyRangeQueryTest extends SAITester
+public class EmptyRangeQueryTest extends SAITester.Versioned
 {
-    @Parameterized.Parameter
-    public Version version;
-
-    @Parameterized.Parameters(name = "{0}")
-    public static Collection<Object[]> data()
-    {
-        return Version.ALL.stream().map(v -> new Object[]{ v }).collect(Collectors.toList());
-    }
-
     @Before
     public void setup() throws Throwable
     {

@@ -21,8 +21,10 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -33,7 +35,9 @@ import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,6 +49,7 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.Keyspace;
@@ -57,6 +62,7 @@ import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.MapType;
@@ -76,6 +82,7 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.utils.GeoUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -87,6 +94,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.util.SloppyMath;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkBindValueSet;
@@ -106,7 +114,44 @@ public class RowFilter
     private static final Logger logger = LoggerFactory.getLogger(RowFilter.class);
 
     public static final Serializer serializer = new Serializer();
+
+    /**
+     * An empty row filter that filters no rows, so it is always satisfied.
+     */
     public static final RowFilter NONE = new RowFilter(FilterElement.NONE, false, IndexHints.NONE, OptimizerOptions.NONE);
+
+    /**
+     * A row filter that filters all rows, so it can never be satisfied.
+     * Used when the CQL restrictions are detected to be trivially unsatisfiable,
+     * for example for {@code x < 1 AND x > 2}.
+     */
+    public static final RowFilter ALL = new RowFilter(FilterElement.ALL, false, IndexHints.NONE, OptimizerOptions.NONE) {
+        @Override
+        public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator partitions, long nowInSec)
+        {
+            partitions.close();
+            return EmptyIterators.unfilteredPartition(partitions.metadata());
+        }
+
+        @Override
+        public PartitionIterator filter(PartitionIterator partitions, TableMetadata metadata, long nowInSec)
+        {
+            partitions.close();
+            return EmptyIterators.partition();
+        }
+
+        @Override
+        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            return false;
+        }
+
+        @Override
+        public boolean isUnsatisfiable()
+        {
+            return true;
+        }
+    };
 
     public final FilterElement root;
     public final IndexHints indexHints;
@@ -207,9 +252,9 @@ public class RowFilter
     /**
      * If this filter belongs to a read that requires reconciliation at the coordinator, and it contains an intersection
      * on two or more non-key (and therefore mutable) columns, we cannot strictly apply it to local, unrepaired rows.
-     * When this occurs, we must downgrade the intersection of expressions to a union and leave the coordinator to 
+     * When this occurs, we must downgrade the intersection of expressions to a union and leave the coordinator to
      * filter strictly before sending results to the client.
-     * 
+     *
      * @return true if strict filtering is safe
      *
      * @see <a href="https://issues.apache.org/jira/browse/CASSANDRA-19018">CASSANDRA-19018</a>
@@ -473,6 +518,14 @@ public class RowFilter
         return root.isEmpty();
     }
 
+    /**
+     * @return {@code true} if this filter rejects all rows.
+     */
+    public boolean isUnsatisfiable()
+    {
+        return root.isAlwaysFalse();
+    }
+
     @Override
     public String toString()
     {
@@ -548,6 +601,9 @@ public class RowFilter
         {
             FilterElement root = doBuild(restrictions, table, options, annOptions);
 
+            if (root.isAlwaysFalse())
+                return ALL;
+
             if (Guardrails.queryFilters.enabled(state))
                 Guardrails.queryFilters.guard(root.numFilteredValues(), "Select query", false, state);
 
@@ -568,23 +624,51 @@ public class RowFilter
             for (ExternalRestriction expression : restrictions.filterRestrictions().getExternalExpressions())
                 addAllAsConjunction(b -> expression.addToRowFilter(b, table, options));
 
-            for (StatementRestrictions child : restrictions.children())
-                element.children.add(doBuild(child, table, options, annOptions));
-
-            // Optimize out any conjunctions / disjunctions with TRUE.
-            // This is not needed for correctness.
+            // Optimize out any conjunctions / disjunctions with always-true restrictions and/or empty ranges.
+            // This is not needed for correctness, although secondary index implementations might rely on this behavior.
             if (restrictions.isDisjunction())
             {
-                // `OR TRUE` swallows all other restrictions in disjunctions.
-                // Therefore, replace this node with an always true element.
-                if (element.children.stream().anyMatch(FilterElement::isAlwaysTrue))
-                    element = new FilterElement.Builder(false);
+                for (StatementRestrictions child : restrictions.children())
+                {
+                    FilterElement childElement = doBuild(child, table, options, annOptions);
+
+                    // `OR FALSE` elements can be skipped in disjunctions.
+                    if (childElement.isAlwaysFalse())
+                        continue;
+
+                    // `OR TRUE` swallows all other restrictions in disjunctions.
+                    if (childElement.isAlwaysTrue())
+                        return FilterElement.NONE;
+
+                    element.children.add(childElement);
+                }
+
+                // If every OR branch was dropped the whole disjunction can never be satisfied.
+                if (element.expressions.isEmpty() && element.children.isEmpty())
+                    return FilterElement.ALL;
             }
             else
             {
-                // `AND TRUE` does nothing in conjunctions, so remove it.
-                element.children.removeIf(FilterElement::isAlwaysTrue);
+                if (CellBounds.isAlwaysFalse(element.expressions, table, indexHints))
+                    return FilterElement.ALL;
+
+                for (StatementRestrictions child : restrictions.children())
+                {
+                    FilterElement childElement = doBuild(child, table, options, annOptions);
+
+                    // `AND FALSE` swallows all other restrictions in conjunctions.
+                    if (childElement.isAlwaysFalse())
+                        return FilterElement.ALL;
+
+                    // `AND TRUE` does nothing in conjunctions, so don't add it.
+                    if (!childElement.isAlwaysTrue())
+                        element.children.add(childElement);
+                }
             }
+
+            // A disjunction/conjunction with no expressions and exactly one child is redundant, so flatten it.
+            if (element.expressions.isEmpty() && element.children.size() == 1)
+                return element.children.get(0);
 
             return element.build();
         }
@@ -738,7 +822,11 @@ public class RowFilter
     {
         public static final Serializer serializer = new Serializer();
 
+        /** A filter element that filters no rows, so it is always satisfied. */
         public static final FilterElement NONE = new FilterElement(false, Collections.emptyList(), Collections.emptyList());
+
+        /** A filter element that filters all rows, so it can never be satisfied. */
+        public static final FilterElement ALL = new FilterElement(true, Collections.emptyList(), Collections.emptyList());
 
         private final boolean isDisjunction;
 
@@ -832,6 +920,11 @@ public class RowFilter
         public boolean isAlwaysTrue()
         {
             return !isDisjunction && isEmpty();
+        }
+
+        public boolean isAlwaysFalse()
+        {
+            return isDisjunction && isEmpty();
         }
 
         public boolean contains(Expression expression)
@@ -967,6 +1060,12 @@ public class RowFilter
                 assert (!operation.isDisjunction && operation.children().isEmpty()) || version >= MessagingService.VERSION_DS_10 :
                 "Attempting to serialize a disjunct row filter to a node that doesn't support disjunction";
 
+                if (operation == FilterElement.ALL)
+                {
+                    throw new AssertionError("An unsatisfiable row filter should either have produced an immediate " +
+                                             "coordinator response or have been removed from the row filter.");
+                }
+
                 out.writeUnsignedVInt32(operation.expressions.size());
                 for (Expression expr : operation.expressions)
                     Expression.serializer.serialize(expr, out, version);
@@ -1013,6 +1112,190 @@ public class RowFilter
                     size += serializedSize(child, version);
                 return size;
             }
+        }
+    }
+
+    /**
+     * Accumulates lower and upper bounds for the expressions for a single cell to detect sets of expressions that are
+     * unsatisfiable when combined into a conjunction. For example, {@code x < 0 AND x > 1} is unsatisfiable.
+     * </p>
+     * CQL validation forbids more than one lower bound and more than one upper bound on the same column or
+     * map element in a conjunction (e.g. x > 1 AND x >= 2), so there is no need to keep the tightest bound.
+     */
+    @VisibleForTesting
+    static class CellBounds
+    {
+        static final String MULTIPLE_LOWER_BOUNDS_MESSAGE = "Unexpected multiple lower bounds on the same cell";
+        static final String MULTIPLE_UPPER_BOUNDS_MESSAGE = "Unexpected multiple upper bounds on the same cell";
+        static final String EQUALITY_WITH_BOUNDS_MESSAGE = "Unexpected equality combined with slice bounds on the same cell";
+        static final String UNEXPECTED_OPERATOR_MESSAGE = "Unexpected operator ";
+
+        private final AbstractType<?> type;
+        private ByteBuffer lowerBound = null;
+        private ByteBuffer upperBound = null;
+        private boolean includesLower = true;
+        private boolean includesUpper = true;
+        private ByteBuffer eqValue = null; // CQL forbids multiple equalities in a conjunction
+        private List<ByteBuffer> neqValues = null;
+
+        @VisibleForTesting
+        CellBounds(AbstractType<?> type)
+        {
+            this.type = type;
+        }
+
+        @VisibleForTesting
+        void add(Operator op, ByteBuffer value)
+        {
+            switch (op)
+            {
+                case GT:
+                    assert lowerBound == null : MULTIPLE_LOWER_BOUNDS_MESSAGE;
+                    lowerBound = value;
+                    includesLower = false;
+                    break;
+                case GTE:
+                    assert lowerBound == null : MULTIPLE_LOWER_BOUNDS_MESSAGE;
+                    lowerBound = value;
+                    includesLower = true;
+                    break;
+                case LT:
+                    assert upperBound == null : MULTIPLE_UPPER_BOUNDS_MESSAGE;
+                    upperBound = value;
+                    includesUpper = false;
+                    break;
+                case LTE:
+                    assert upperBound == null : MULTIPLE_UPPER_BOUNDS_MESSAGE;
+                    upperBound = value;
+                    includesUpper = true;
+                    break;
+                case EQ:
+                    eqValue = value;
+                    break;
+                case NEQ:
+                    if (neqValues == null)
+                        neqValues = new ArrayList<>();
+                    neqValues.add(value);
+                    break;
+                default:
+                    throw new AssertionError(UNEXPECTED_OPERATOR_MESSAGE + op);
+            }
+        }
+
+        /**
+         * Returns {@code true} if the accumulated bounds form an empty interval.
+         * Handles:
+         * <ul>
+         *   <li>lower > upper  (e.g. {@code x > 5 AND x < 3})</li>
+         *   <li>lower == upper but at least one side is strict (e.g. {@code x >= 0 AND x < 0})</li>
+         *   <li>NEQ eliminates a single-point interval (e.g. {@code x >= 0 AND x <= 0 AND x != 0})</li>
+         * </ul>
+         */
+        private boolean isAlwaysFalse()
+        {
+            // CQL validation forbids combining an equality with any other relation on the same column or map element
+            // (e.g. x = 2 AND x > 5), so there is no need to check an equality against the slice bounds.
+            assert eqValue == null || (lowerBound == null && upperBound == null) : EQUALITY_WITH_BOUNDS_MESSAGE;
+
+            if (lowerBound == null || upperBound == null)
+                return false;
+
+            int cmp = type.compareForCQL(lowerBound, upperBound);
+            if (cmp > 0)
+                return true;  // lower > upper
+
+            if (cmp < 0)
+                return false;
+
+            // lower == upper
+            if (!includesLower || !includesUpper)
+                return true;  // e.g. x > 0 AND x < 0  or  x >= 0 AND x < 0
+
+            // The range has been pinned to a single point (both bounds inclusive),
+            // so if one of the NEQ values equals that point the interval is empty.
+            if (neqValues != null)
+            {
+                for (ByteBuffer neq : neqValues)
+                {
+                    if (type.compareForCQL(neq, lowerBound) == 0)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        /**
+         * Checks whether the specified conjunction of expressions forms an empty interval.
+         * For example, {@code x < 1 AND x > 2} is an unsatisfiable interval.
+         */
+        @VisibleForTesting
+        static boolean isAlwaysFalse(List<Expression> expressions, TableMetadata table, IndexHints hints)
+        {
+            if (expressions.size() <= 1)
+                return false;
+
+            Map<Pair<ColumnMetadata, ByteBuffer>, CellBounds> perCellBounds = new HashMap<>();
+
+            for (Expression expression : expressions)
+            {
+                AbstractType<?> valueType = boundValueType(expression, table, hints);
+                if (valueType == null)
+                    continue;
+
+                ByteBuffer mapKey = expression instanceof MapComparisonExpression ? ((MapComparisonExpression) expression).key : null;
+                CellBounds bounds = perCellBounds.computeIfAbsent(Pair.create(expression.column, mapKey), c -> new CellBounds(valueType));
+                bounds.add(expression.operator, expression.value);
+
+                if (bounds.isAlwaysFalse())
+                    return true;
+            }
+
+            return false;
+        }
+
+        /**
+         * Returns the type used to compare the bounds set by the specified expression,
+         * or {@code null} if the expression should not be considered when looking for empty intervals.
+         */
+        @Nullable
+        private static AbstractType<?> boundValueType(Expression expression, TableMetadata table, IndexHints hints)
+        {
+            Operator op = expression.operator;
+            if (!op.isSlice() && op != Operator.EQ && op != Operator.NEQ)
+                return null;
+
+            ColumnMetadata column = expression.column;
+            AbstractType<?> valueType;
+
+            if (expression instanceof SimpleExpression)
+                valueType = column.type.unwrap();
+            else if (expression instanceof MapComparisonExpression) // e.g. map['key'] > 'value'
+                valueType = ((MapType<?, ?>) column.type.unwrap()).valueComparator();
+            else
+                return null;
+
+            // Skip types that don't support comparison (e.g. counter columns, whose values are
+            // stored in an internal representation that is not comparable as plain CQL values).
+            if (valueType.comparisonType == AbstractType.ComparisonType.NOT_COMPARABLE)
+                return null;
+
+            // Skip SAI-indexed inet columns, because SAI orders inet values differently from CQL (see CNDB-12978).
+            // Using the CQL order here could wrongly discard ranges that are not empty for SAI,
+            // so we preserve the original behavior and let SAI deal with the empty ranges.
+            if (valueType instanceof InetAddressType && isSaiIndexed(expression, table, hints))
+                return null;
+
+            return valueType;
+        }
+
+        private static boolean isSaiIndexed(Expression expression, TableMetadata table, IndexHints hints)
+        {
+            return !table.isVirtual() &&
+                   Keyspace.openAndGetStore(table)
+                           .getIndexManager()
+                           .getBestIndexFor(expression, hints, StorageAttachedIndex.class)
+                           .isPresent();
         }
     }
 
