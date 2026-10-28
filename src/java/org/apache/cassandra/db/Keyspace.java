@@ -838,7 +838,19 @@ public class Keyspace
         return Schema.instance.getKeyspaces().stream().map(Schema.instance::getKeyspaceInstance).filter(Objects::nonNull);
     }
 
+    /**
+     * @return the distributed keyspaces that own token ranges, see {@link Schema#getNonLocalStrategyKeyspaces()}
+     */
     public static Iterable<Keyspace> nonLocalStrategy()
+    {
+        return Iterables.transform(Schema.instance.getNonLocalStrategyKeyspaces().names(), Keyspace::open);
+    }
+
+    /**
+     * @return every distributed keyspace (all but the local system keyspaces), including those with
+     * {@code LocalStrategy} replication that a DataStax Enterprise 6 node leaves in the schema
+     */
+    public static Iterable<Keyspace> distributed()
     {
         return Iterables.transform(Schema.instance.distributedKeyspaces().names(), Keyspace::open);
     }

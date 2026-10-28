@@ -68,6 +68,9 @@ public class StorageServiceDrainTest
     static EmbeddedCassandraService service;
     private static ListAppender<ILoggingEvent> logAppender;
     private static ColumnFamilyStore cfs;
+    // a LocalStrategy keyspace a DSE 6 node leaves in the schema: drain flushes it although it owns no ranges (the
+    // commit log recycling at the end of drain would flush it as well, so the drain progress count is what tells)
+    private static ColumnFamilyStore dseLocalCfs;
 
     @BeforeClass
     public static void startup() throws IOException
@@ -80,6 +83,11 @@ public class StorageServiceDrainTest
                                     SchemaLoader.standardCFMD(KEYSPACE, TABLE, 0, AsciiType.instance, BytesType.instance));
 
         cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE);
+
+        SchemaLoader.createKeyspace("dse_system_local",
+                                    KeyspaceParams.local(),
+                                    SchemaLoader.standardCFMD("dse_system_local", TABLE, 0, AsciiType.instance, BytesType.instance));
+        dseLocalCfs = Keyspace.open("dse_system_local").getColumnFamilyStore(TABLE);
 
         // Set up log capturing for StorageService
         logAppender = new ListAppender<>();
@@ -130,10 +138,16 @@ public class StorageServiceDrainTest
                            .add("val", ByteBuffer.wrap("testvalue".getBytes()))
                            .build();
         mutation.apply();
+        new RowUpdateBuilder(dseLocalCfs.metadata.get(), 0, "testkey")
+        .clustering("testcol")
+        .add("val", ByteBuffer.wrap("testvalue".getBytes()))
+        .build()
+        .apply();
 
         // Verify there's data in the memtable before drain
         long memtableSizeBefore = cfs.metric.memtableLiveDataSize.getValue();
         assertTrue("Memtable should have data before drain", memtableSizeBefore > 0);
+        assertTrue("Memtable of the DSE local keyspace should have data before drain", dseLocalCfs.metric.memtableLiveDataSize.getValue() > 0);
 
         // Start drain in background thread
         Executors.newSingleThreadExecutor().execute(() -> {
@@ -172,6 +186,17 @@ public class StorageServiceDrainTest
         // Verify data was flushed - memtable should be empty
         long memtableSizeAfter = cfs.metric.memtableLiveDataSize.getValue();
         assertEquals("Memtable should be empty after drain", 0, memtableSizeAfter);
+        assertEquals("Memtable of the DSE local keyspace should be empty after drain", 0, (long) dseLocalCfs.metric.memtableLiveDataSize.getValue());
+        assertFalse("The DSE local keyspace should have been flushed", dseLocalCfs.getLiveSSTables().isEmpty());
+        // the drain loop itself counted (and flushed) the tables of every distributed keyspace, the DSE local one included
+        int distributedTables = 0;
+        for (Keyspace keyspace : Keyspace.distributed())
+            distributedTables += keyspace.getColumnFamilyStores().size();
+        int nonLocalStrategyTables = 0;
+        for (Keyspace keyspace : Keyspace.nonLocalStrategy())
+            nonLocalStrategyTables += keyspace.getColumnFamilyStores().size();
+        assertTrue("dse_system_local is not among the keyspaces that own ranges", nonLocalStrategyTables < distributedTables);
+        assertEquals("Drained 0/" + distributedTables + " ColumnFamilies", StorageService.instance.getDrainProgress());
 
         // Collect all INFO level log messages
         List<String> infoMessages = logAppender.list.stream()
