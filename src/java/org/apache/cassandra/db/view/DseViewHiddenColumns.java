@@ -50,9 +50,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  *     {@code PRIMARY KEY (v, pk, ck)} over a base table keyed by {@code (pk, ck)}). DSE marks it
  *     {@code required_for_liveness}: a view row is live if and only if its {@code .v} cell is present and
  *     live, whatever the row's primary key liveness. DSE copies the base row's liveness there (which may be
- *     empty), writes the {@code .v} cell in every update of the view entry (an assumption, see below), and
- *     turns it into a tombstone at the timestamp of the old base cell when the base cell is deleted or changes
- *     value;</li>
+ *     empty), writes the {@code .v} cell in every update of a live view entry (see below), and turns it into a
+ *     tombstone at the timestamp of the old base cell when the base cell is deleted or changes value;</li>
  *     <li>a base column the view does not select but filters on (also {@code required_for_liveness});</li>
  *     <li>a base column the view does not select, in a view without required columns: a "virtual cell"
  *     keeping the view row alive while only unselected base columns are live.</li>
@@ -66,16 +65,15 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * key liveness and its other cells, unless the merge with another source gives it a live hidden cell: DSE writes
  * such a row for an update that deletes the base row (a row deletion, possibly with the liveness of a base row
  * inserted again without the view key column), and its compaction may leave one with live cells once it purges the
- * hidden tombstone of an old view entry. If, as assumed (see below), DSE writes the hidden cell in every update of
- * a view entry, no such row holds the newer cells of a live entry whose hidden cell is in another sstable. Such a
- * row gets {@link #LIVENESS_WITHOUT_HIDDEN_CELL}, an expired primary key liveness older than any write: it
+ * hidden tombstone of an old view entry. As DSE writes the hidden cell in every update of a live view entry (see
+ * below), no such row holds the newer cells of a live entry whose hidden cell is in another sstable. Such a row
+ * gets {@link #LIVENESS_WITHOUT_HIDDEN_CELL}, an expired primary key liveness older than any write: it
  * supersedes no liveness of the row in another source, so the merged row is live exactly when one of its sources
  * has a live hidden cell, as for DSE, and otherwise the strict liveness of the view hides it. Its cells are kept
  * until a compaction purges that liveness (at once: its timestamp and local expiration time are older than any
  * purge point), then the strict liveness drops the row with its cells, as this software does with its own expired
- * view entries; cleanup and anticompaction, which compact one sstable at a time, purge it too. Were the assumption
- * above wrong, a compaction without the sstable of the live hidden cell would drop newer cells DSE shows. The cell
- * itself is dropped, and so is the column from the header of every sstable this software writes
+ * view entries; cleanup and anticompaction, which compact one sstable at a time, purge it too. The cell itself is
+ * dropped, and so is the column from the header of every sstable this software writes
  * ({@link SerializationHeader#withoutDseViewLivenessColumn()}, applied by {@link SerializationHeader#make} and by the
  * sstable writer builder): only sstables written by DSE name it, so the rule above never reaches a row this
  * software wrote. Entire-sstable streaming is the one exception, and a consistent one: it copies a DSE sstable byte
@@ -89,17 +87,22 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * validates it without the sstable of the row's live hidden cell sees a row the other replicas may have purged: it
  * purges less, and may stream a dead row again, which reads as dead.
  * <p>
- * Three facts about DSE are assumed, which the DSE view sstable of the test fixtures, with the hidden column
- * alone, does not show:
+ * Three facts about DSE the rule relies on, which the sstables DSE 6.8.65 and 6.9.26 wrote for a view over a base
+ * table with other regular columns show ({@code test/data/dse-compat/sstables/dse-6.8.65-mv-updates} and
+ * {@code test/data/dse-compat/sstables/dse-6.9.26-mv-updates}: inserts, partial updates, deletions of cells, rows,
+ * ranges and partitions, inserts without the view key column, TTLs, changes of the view key column, and a base row
+ * deleted and inserted again without the view key column in one update, one flush each):
  * <ul>
- *     <li>DSE writes the hidden cell in every update of a view entry; otherwise a compaction without the sstable
- *     of the entry's live hidden cell drops newer cells DSE shows;</li>
- *     <li>the columns of a header naming other regular columns besides the hidden one are in the order of this
- *     software (simple columns before complex ones, each kind by name, so the hidden column first among the
- *     simple ones); otherwise the cells of such an sstable are misread;</li>
- *     <li>the header of a DSE view sstable names only the columns its rows have cells of, as the header of this
- *     software does, so an sstable none of whose rows has a hidden cell does not name it and is read as any
- *     sstable (see the limits below).</li>
+ *     <li>DSE writes the hidden cell in every update of a live view entry, whichever base columns the update
+ *     writes or deletes; the only view rows without it carry a row deletion. Otherwise a compaction without the
+ *     sstable of the entry's live hidden cell would drop newer cells DSE shows;</li>
+ *     <li>DSE writes the cells of a row in the order of the columns of this software: simple columns before complex
+ *     ones, each kind by name, the hidden column among the simple ones by its name (after a column named
+ *     {@code "-x"}, before {@code a}). Otherwise the cells of an sstable naming other regular columns besides the
+ *     hidden one would be misread;</li>
+ *     <li>the header of a DSE view sstable names every regular column of the view, the hidden one included,
+ *     whatever its rows hold (even in an sstable holding only row deletions, without a cell). So every row DSE
+ *     wrote without the hidden cell is read by the rule above.</li>
  * </ul>
  * The rule relies on every reader of these sstables deserializing their rows: compaction by cursors, which reads
  * cells and liveness directly, is never used for a view whose primary key holds a regular base column, a table
@@ -119,9 +122,9 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * rewrites) carry no hidden cell, so DSE considers them dead: after a rollback to DSE, the views of the rolled-back
  * node must be rebuilt from their base tables. DSE's repair Merkle trees include the hidden cells, and
  * {@code sstableloader} builds its table metadata without the view kind, so it still refuses a DSE view sstable;
- * this class handles neither. A DSE view sstable none of whose rows has a hidden cell does not name the column in
- * its header, and is read as any sstable: a row DSE wrote there with a primary key liveness and no hidden cell
- * (the liveness of a base row inserted again without the view key column, newer than the row deletion) reads as
+ * this class handles neither. A DSE view sstable whose header did not name the column, which none of the fixtures
+ * has, would be read as any sstable: a row DSE wrote there with a primary key liveness and no hidden cell (the
+ * liveness of a base row inserted again without the view key column, newer than the row deletion) would read as
  * live, where DSE does not show it.
  */
 public final class DseViewHiddenColumns
@@ -200,8 +203,8 @@ public final class DseViewHiddenColumns
      * The DSE hidden column of the regular base column in the primary key of the view {@code view} (the first kind
      * above), as DSE names it when it creates the view: {@code .<column>}, regular, of the type of the view column without
      * its clustering order (DSE lists the base type, {@code text} in the DSE 6.8.65 fixture). It is derived from the view
-     * definition; whether DSE keeps it for the view (not for a view DSE's table lists nothing for, taken to be of DSE's
-     * old format, which no view of that format has confirmed yet) is for {@link DseViewHiddenColumnCatalog} to say.
+     * definition; whether DSE keeps it for the view (not for a view of DSE's old format, which DSE's table lists nothing
+     * for, as the test fixtures show) is for {@link DseViewHiddenColumnCatalog} to say.
      *
      * @return the column, or {@code null} when {@code view} is not a materialized view in the schema, its base table
      * is not in the schema, or its primary key holds no regular base column or more than one (DSE's hidden columns of

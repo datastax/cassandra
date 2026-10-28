@@ -70,23 +70,26 @@ import org.apache.cassandra.utils.Pair;
  * {@code system_schema.hidden_columns} table, read from the sstables DSE left in this node's data directories.
  * <p>
  * This software does not define that table, so it does not load it with the rest of the schema. Nor are the hidden
- * columns of a view derived from its definition alone: DSE creates a view in its "new" format, the one with hidden
- * columns, only while every node runs DSE 6.7 or later, and keeps the old format otherwise, so a view created before
- * DSE 6.7, or while a non-DSE node was in the cluster, may have none. The DSE 6.8.65 fixture shows what the table holds
- * for a view of the new format ({@code system-schema-wide_by_v.txt} in
- * {@code test/data/dse-compat/sstables/dse-6.8.65-mv}: the row of {@code .v}, regular, required for liveness); a view
- * the table lists nothing for is taken to have no hidden column, which no view of the old format has confirmed yet.
+ * columns of a view derived from its definition alone: a view DSE created in its "old" format has none. DSE 6.7 and
+ * later create views in the "new" format, the one with hidden columns (and refuse to create one that needs them while
+ * a node of the cluster runs an earlier release or is not a DSE node), unless the node runs with
+ * {@code -Dcassandra.mv.create_legacy_schema=true}; a view created before DSE 6.7, or with that property, has the old
+ * format. The DSE 6.8.65 fixture shows what the table holds for a view of the new format
+ * ({@code system-schema-wide_by_v.txt} in {@code test/data/dse-compat/sstables/dse-6.8.65-mv}: the row of {@code .v},
+ * regular, required for liveness). A view of the old format has no row there, and its sstables name no hidden column:
+ * the fixtures {@code test/data/dse-compat/sstables/dse-6.8.65-mv-updates} and
+ * {@code test/data/dse-compat/sstables/dse-6.9.26-mv-updates} hold one, created with that property, next to one of the
+ * new format. So a view the table lists nothing for is taken to have no hidden column.
  * Its sstables are complete: a DSE node is drained before it is upgraded, which flushes every table, and this software
  * does not replay DSE's commit log for a table it does not define. The table does not change while this software runs
  * in DSE 6 compatibility mode: no DDL is expected during the upgrade; a view created meanwhile by this software has no
  * entry.
  * <p>
  * In DSE 6 compatibility mode the catalog is read at startup, once the schema and the sstables are loaded
- * ({@link #checkViewsAtStartup}), which refuses to start when the node cannot exchange the data of one of its views with
- * DSE 6 nodes: a view with a hidden column other than the one of its regular base column in the primary key, a view
- * whose own DSE sstables name a hidden column the table does not list, or data directories without DSE's table. For
- * each view, {@link #translatedColumn} says which hidden column, if any, its data carries when it is exchanged with
- * DSE 6 nodes.
+ * ({@link #checkViewsAtStartup}), which refuses to start when the node cannot read the data DSE wrote for one of its
+ * views as DSE reads it: a view with a hidden column other than the one of its regular base column in the primary key,
+ * a view whose own DSE sstables name a hidden column the table does not list, or data directories without DSE's table.
+ * For each view, {@link #translatedColumn} says which hidden column, if any, DSE keeps in its data.
  */
 public final class DseViewHiddenColumnCatalog
 {
@@ -101,7 +104,7 @@ public final class DseViewHiddenColumnCatalog
     /** The id of DSE's table, the one of a system table of that name: the end of the name of its directory. */
     public static final TableId HIDDEN_COLUMNS_ID = TableId.forSystemTable(SchemaConstants.SCHEMA_KEYSPACE_NAME, HIDDEN_COLUMNS);
 
-    /** The {@code compatstatus} refusal reason of the view data this software does not exchange with DSE 6 nodes. */
+    /** The {@code compatstatus} refusal reason of the view data this software does not read as DSE does. */
     static final String REFUSED_VIEW = "materialized view data with a DSE hidden column this software does not reproduce";
 
     private static volatile DseViewHiddenColumnCatalog instance;
@@ -139,7 +142,7 @@ public final class DseViewHiddenColumnCatalog
         }
     }
 
-    /** The decision for one view: the column to translate (possibly none), or the error refusing the view. */
+    /** The decision for one view: the hidden column DSE keeps in its data (possibly none), or the error refusing the view. */
     private static final class Translation
     {
         private final ColumnMetadata column;
@@ -216,8 +219,9 @@ public final class DseViewHiddenColumnCatalog
     }
 
     /**
-     * DSE 6 compatibility mode: reads the catalog, and refuses to start when the data of a view of this node cannot be
-     * exchanged with DSE 6 nodes ({@link #startupProblems}). A no-op otherwise, and on a node without materialized views.
+     * DSE 6 compatibility mode: reads the catalog, and refuses to start when this software cannot read the data DSE wrote
+     * for a view of this node as DSE does ({@link #startupProblems}). A no-op otherwise, and on a node without materialized
+     * views.
      */
     public static void checkViewsAtStartup() throws StartupException
     {
@@ -252,7 +256,7 @@ public final class DseViewHiddenColumnCatalog
         throw new StartupException(diskState ? StartupException.ERR_WRONG_DISK_STATE : StartupException.ERR_WRONG_CONFIG, String.join("\n", messages));
     }
 
-    /** Why the data of a view cannot be exchanged with DSE 6 nodes. */
+    /** Why this software cannot read the data DSE wrote for a view as DSE does. */
     public static final class StartupProblem
     {
         public final String message;
@@ -273,8 +277,8 @@ public final class DseViewHiddenColumnCatalog
     }
 
     /**
-     * Why the data of each of {@code views} cannot be exchanged with DSE 6 nodes: {@link #translatedColumn} refuses it,
-     * or DSE lists no hidden column for a view whose own DSE sstables on this node name one (the column
+     * Why this software cannot read the data DSE wrote for each of {@code views} as DSE does: {@link #translatedColumn}
+     * refuses it, or DSE lists no hidden column for a view whose own DSE sstables on this node name one (the column
      * {@link DseViewHiddenColumns} reads), which means that this node's copy of DSE's table is not the one DSE wrote.
      */
     @VisibleForTesting
@@ -304,7 +308,7 @@ public final class DseViewHiddenColumnCatalog
                     problems.add(new StartupProblem(String.format("DSE 6 compatibility mode: the sstable %s of materialized view %s, written by DSE, holds the " +
                                                                   "hidden column %s, but DSE's system_schema.%s on this node lists no hidden column for the " +
                                                                   "view; the data directories of this node do not hold the table DSE wrote, and this software " +
-                                                                  "cannot exchange the view's data with DSE 6 nodes",
+                                                                  "cannot tell which hidden columns DSE keeps in the view's data",
                                                                   sstable.descriptor, view, hidden.name, HIDDEN_COLUMNS),
                                                     true));
                     break;
@@ -321,13 +325,13 @@ public final class DseViewHiddenColumnCatalog
     }
 
     /**
-     * The hidden column the data of the view {@code view} carries when it is exchanged with DSE 6 nodes:
+     * The hidden column DSE keeps in the data of the view {@code view}:
      * {@link DseViewHiddenColumns#requiredHiddenColumn}, when DSE lists exactly that column for the view, regular, required
      * for liveness and of the type of the view column; {@code null} when DSE lists no hidden column for the view, whose
      * data then carries none, or when the view is not (or no longer) in the schema.
      *
-     * @throws IllegalStateException when DSE lists any other hidden column for the view: its data cannot be exchanged
-     * with DSE 6 nodes without returning or storing wrong view rows
+     * @throws IllegalStateException when DSE lists any other hidden column for the view: this software cannot read its
+     * data as DSE does, and would return wrong view rows
      */
     public ColumnMetadata translatedColumn(TableMetadata view)
     {
@@ -363,8 +367,8 @@ public final class DseViewHiddenColumnCatalog
         if (reproduces(hidden, derived))
             return new Translation(derived, null);
         return new Translation(null, String.format("DSE 6 compatibility mode: DSE keeps the hidden columns %s for materialized view %s; this software only reproduces " +
-                                                   "the hidden column of a regular base column in the view primary key, and refuses to exchange the view's " +
-                                                   "data with DSE 6 nodes rather than return or store wrong view rows. %s",
+                                                   "the hidden column of a regular base column in the view primary key, and refuses the view's data " +
+                                                   "rather than return wrong view rows. %s",
                                                    hidden, view, DseViewHiddenColumns.REMEDY));
     }
 
