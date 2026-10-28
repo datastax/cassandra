@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -49,7 +50,6 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.AutomatonQueries;
-import org.apache.cassandra.index.sai.utils.AutomatonSeeker;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -153,19 +153,15 @@ public class TermsReader implements Closeable
      * Iterates, in the given order, the terms of an ordering scan restricted by the given prefix or automaton pattern
      * expression ({@code LIKE} on the ordering column): the terms starting with the prefix, or the terms accepted by
      * the automaton, which all start with its common prefix. Only the range of terms starting with that prefix is
-     * read. For an automaton expression, every term of that range the scan visits is counted in the query context
-     * ({@link QueryContext#onAutomatonTermVisited()}, which also checks the query for a timeout), like the
-     * non-ordered automaton intersection ({@link #intersect}) does, but without seek-skipping (the scan visits the
-     * terms lazily, in order, until the query has enough rows). Only valid for non-composite literal indexes, whose
-     * terms are stored as their raw bytes.
+     * read. Only valid for non-composite literal indexes, whose terms are stored as their raw bytes.
      */
-    public TermsIterator patternTerms(Expression slice, boolean ascending, QueryContext context)
+    public TermsIterator patternTerms(Expression filter, boolean ascending)
     {
-        if (slice.getOp() == Expression.Op.PREFIX)
-            return new PatternTermsScanner(ByteBufferUtil.getArray(slice.lower.value.encoded), null, context, ascending);
+        if (filter.getOp() == Expression.Op.PREFIX)
+            return new PatternTermsScanner(ByteBufferUtil.getArray(filter.lower.value.encoded), null, ascending);
 
-        assert slice.getOp() == Expression.Op.AUTOMATON : "Not a pattern expression: " + slice;
-        return new PatternTermsScanner(slice.getAutomatonCommonPrefix(), slice.getAutomaton(), context, ascending);
+        assert filter.getOp() == Expression.Op.AUTOMATON : "Not a pattern expression: " + filter;
+        return new PatternTermsScanner(filter.getAutomatonCommonPrefix(), filter.getAutomaton(), ascending);
     }
 
     public PostingList exactMatch(ByteComparable term, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
@@ -181,7 +177,8 @@ public class TermsReader implements Closeable
     public PostingList rangeMatch(Expression exp, ByteComparable lower, ByteComparable upper, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
     {
         perQueryEventListener.onSegmentHit();
-        return new RangeQuery(exp, lower, upper, false, perQueryEventListener, context).execute();
+        Predicate<byte[]> termFilter = exp == null ? null : term -> exp.isSatisfiedBy(ByteBuffer.wrap(term));
+        return new RangeQuery(termFilter, lower, upper, false, perQueryEventListener, context).execute();
     }
 
     /**
@@ -198,24 +195,17 @@ public class TermsReader implements Closeable
     }
 
     /**
-     * Intersects the terms dictionary with a Lucene byte-level automaton (the non-prefix LIKE matching engine,
-     * see {@link AutomatonQueries}) and returns the union of the posting lists of all accepted terms.
+     * Intersects the terms dictionary with a byte-level automaton (the non-prefix LIKE matching engine, see
+     * {@link AutomatonQueries}) and returns the union of the posting lists of all accepted terms.
      * <p>
      * This is only correct for indexes over non-composite literal types: those store the raw, unterminated term
-     * bytes in the trie at every index version (see {@code OnDiskFormat#encodeForTrie}), so the dictionary iterates
-     * terms in exactly the unsigned-byte order the automaton bounds assume, and the automaton can be run directly
-     * over the stored bytes. Callers are responsible for that guard.
+     * bytes in the trie at every index version (see {@code OnDiskFormat#encodeForTrie}), so the automaton can be run
+     * directly over the stored bytes. Callers are responsible for that guard.
      * <p>
-     * The intersection restricts the dictionary range to
-     * {@code [commonPrefix(automaton), nextOf(commonPrefix(automaton)))} and walks it guided by the automaton
-     * (Lucene's {@code AutomatonTermsEnum} strategy, see {@link AutomatonSeeker}): each visited term is fed to the
-     * seeker, which accepts or rejects it and, on a rejection, computes the next byte string that could possibly
-     * match, to which the walk seeks the dictionary instead of visiting every term in between. The seeker serves
-     * every automaton type (a match-all automaton accepts every term of the range, an empty-language one ends the
-     * walk at once, a single-term one seeks straight to its term).
-     * <p>
-     * Every visited term is counted in the query context ({@link QueryContext#onAutomatonTermVisited()}, which
-     * periodically checks the query for a timeout): the scan is bounded by the query timeout, like a range scan.
+     * The terms accepted by the automaton all start with its common prefix, so the intersection is a range query
+     * over {@code [commonPrefix, nextOf(commonPrefix))} keeping the terms the automaton accepts. The scan visits
+     * every term of that range: the only wildcard of a CQL pattern, {@code %}, matches any suffix, so every term
+     * starting with the literal prefix of the pattern may match and no term of the range can be skipped.
      *
      * @param automaton the compiled byte-level automaton to intersect with the dictionary
      * @param perQueryEventListener the event listener
@@ -241,7 +231,15 @@ public class TermsReader implements Closeable
                                  QueryContext context)
     {
         perQueryEventListener.onSegmentHit();
-        return new AutomatonIntersection(automaton, commonPrefix, perQueryEventListener, context).execute();
+        ByteComparable lower = commonPrefix.length == 0
+                               ? null
+                               : ByteComparable.preencoded(termDictionaryFileEncodingVersion, commonPrefix);
+        // the end bound of the scan is inclusive, but the automaton rejects nextOf(commonPrefix)
+        byte[] upperBytes = AutomatonQueries.prefixUpperBound(commonPrefix);
+        ByteComparable upper = upperBytes == null
+                               ? null
+                               : ByteComparable.preencoded(termDictionaryFileEncodingVersion, upperBytes);
+        return new RangeQuery(term -> LikePatterns.accepts(automaton, term), lower, upper, false, perQueryEventListener, context).execute();
     }
 
     @VisibleForTesting
@@ -338,17 +336,18 @@ public class TermsReader implements Closeable
         private final long lookupStartTime;
         private final QueryContext context;
 
-        private final Expression exp;
+        @Nullable
+        private final Predicate<byte[]> termFilter;
         private final ByteComparable lower;
         private final ByteComparable upper;
         private final boolean excludeExactUpperTerm;
 
-        // When the exp is not null, we need to post filter the results
-        RangeQuery(Expression exp, ByteComparable lower, ByteComparable upper, boolean excludeExactUpperTerm, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
+        // When the term filter is not null, only the terms it accepts are read
+        RangeQuery(@Nullable Predicate<byte[]> termFilter, ByteComparable lower, ByteComparable upper, boolean excludeExactUpperTerm, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
         {
-            assert exp == null || !excludeExactUpperTerm : "per-term post-filtering already excludes the upper bound term";
+            assert termFilter == null || !excludeExactUpperTerm : "per-term filtering already excludes the upper bound term";
             this.listener = listener;
-            this.exp = exp;
+            this.termFilter = termFilter;
             lookupStartTime = Clock.Global.nanoTime();
             this.context = context;
             this.lower = lower;
@@ -366,7 +365,7 @@ public class TermsReader implements Closeable
                                                                                   lower,
                                                                                   upper,
                                                                                   true,
-                                                                                  exp != null,
+                                                                                  termFilter != null,
                                                                                   termDictionaryFileEncodingVersion))
             {
                 if (!reader.hasNext())
@@ -382,9 +381,7 @@ public class TermsReader implements Closeable
                                               : TrieTermsDictionaryReader.NOT_FOUND;
 
                 context.checkpoint();
-                PostingList postings = exp == null
-                                       ? readAndMergePostings(reader, excludedPostingsOffset)
-                                       : readFilterAndMergePosting(reader);
+                PostingList postings = readAndMergePostings(reader, excludedPostingsOffset);
 
                 listener.onTraversalComplete(Clock.Global.nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
 
@@ -414,8 +411,8 @@ public class TermsReader implements Closeable
         }
 
         /**
-         * Reads the posting lists for the matching terms and merges them into a single posting list.
-         * It assumes that the posting list for each term is sorted.
+         * Reads the posting lists of the terms of the range accepted by the term filter, if any, and merges them
+         * into a single posting list. It assumes that the posting list for each term is sorted.
          *
          * @param excludedPostingsOffset postings offset of the single term to exclude from the merge (the term
          *        exactly matching an end-exclusive upper bound), or {@link TrieTermsDictionaryReader#NOT_FOUND}
@@ -444,9 +441,20 @@ public class TermsReader implements Closeable
             {
                 do
                 {
-                    long postingsOffset = reader.nextAsLong();
-                    if (excludedPostingsOffset != TrieTermsDictionaryReader.NOT_FOUND && excludedPostingsOffset == postingsOffset)
-                        continue;
+                    long postingsOffset;
+                    if (termFilter == null)
+                    {
+                        postingsOffset = reader.nextAsLong();
+                        if (excludedPostingsOffset != TrieTermsDictionaryReader.NOT_FOUND && excludedPostingsOffset == postingsOffset)
+                            continue;
+                    }
+                    else
+                    {
+                        Pair<ByteComparable, Long> entry = reader.next();
+                        if (!termFilter.test(ByteSourceInverse.readBytes(entry.left.asComparableBytes(termDictionaryFileEncodingVersion))))
+                            continue;
+                        postingsOffset = entry.right;
+                    }
 
                     var currentReader = currentReader(postingsInput, postingsSummaryInput, postingsOffset);
 
@@ -454,65 +462,6 @@ public class TermsReader implements Closeable
                         postingLists.add(currentReader);
                     else
                         FileUtils.close(currentReader);
-                } while (reader.hasNext());
-            }
-            catch (Throwable e)
-            {
-                // a mid-scan failure exits before the merged posting list (whose onClose owns the resources)
-                // could be built: release the collected postings and both inputs
-                FileUtils.closeQuietly(postingLists);
-                FileUtils.closeQuietly(postingsInput);
-                FileUtils.closeQuietly(postingsSummaryInput);
-                throw e;
-            }
-
-            return MergePostingList.merge(postingLists)
-                                   .onClose(() -> FileUtils.close(postingsInput, postingsSummaryInput));
-        }
-
-        /**
-         * Reads the posting lists for the matching terms, apply the expression to filter results, and merge them into
-         * a single posting list. It assumes that the posting list for each term is sorted.
-         *
-         * @return the posting lists for the terms matching the query.
-         */
-        private PostingList readFilterAndMergePosting(TrieTermsDictionaryReader reader) throws IOException
-        {
-            assert reader.hasNext();
-            ArrayList<PostingList> postingLists = new ArrayList<>();
-
-            // index inputs will be closed with the onClose method of the returned merged posting list;
-            // if the second open throws, the first must be closed here instead of leaking
-            IndexInput postingsInput = IndexFileUtils.instance().openInput(postingsFile);
-            IndexInput postingsSummaryInput;
-            try
-            {
-                postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
-            }
-            catch (Throwable t)
-            {
-                FileUtils.closeQuietly(postingsInput);
-                throw t;
-            }
-
-            try
-            {
-                do
-                {
-                    Pair<ByteComparable, Long> nextTriePair = reader.next();
-                    ByteSource mapEntry = nextTriePair.left.asComparableBytes(termDictionaryFileEncodingVersion);
-                    long postingsOffset = nextTriePair.right;
-                    byte[] nextBytes = ByteSourceInverse.readBytes(mapEntry);
-
-                    if (exp.isSatisfiedBy(ByteBuffer.wrap(nextBytes)))
-                    {
-                        var currentReader = currentReader(postingsInput, postingsSummaryInput, postingsOffset);
-
-                        if (!currentReader.isEmpty())
-                            postingLists.add(currentReader);
-                        else
-                            FileUtils.close(currentReader);
-                    }
                 } while (reader.hasNext());
             }
             catch (Throwable e)
@@ -541,192 +490,6 @@ public class TermsReader implements Closeable
                                       readFrequencies(),
                                       listener.postingListEventListener(),
                                       PostingsReader.InputCloser.NOOP);
-        }
-    }
-
-    /**
-     * Automaton intersection over the terms dictionary: restricts the dictionary to the range implied by the
-     * automaton's common byte prefix and walks it guided by the automaton — accepted terms are collected, and on
-     * a rejected term the walk seeks the dictionary ({@link TrieTermsDictionaryReader#skipTo}) to the next
-     * possibly-matching byte string computed by the {@link AutomatonSeeker} instead of visiting every term. The
-     * seek targets are computed
-     * in the same raw byte space the trie is sorted by: this intersection is only used for non-composite literal
-     * indexes, whose tries store the raw unterminated term bytes (see {@link TermsReader#intersect}), so the
-     * automaton's byte order and the trie order coincide. The posting lists of the accepted terms are merged
-     * into a single posting list.
-     */
-    private class AutomatonIntersection
-    {
-        private final QueryEventListener.TrieIndexEventListener listener;
-        private final long lookupStartTime;
-        private final QueryContext context;
-
-        private final CompiledAutomaton automaton;
-        private final byte[] commonPrefix;
-
-        AutomatonIntersection(CompiledAutomaton automaton,
-                              byte[] commonPrefix,
-                              QueryEventListener.TrieIndexEventListener listener,
-                              QueryContext context)
-        {
-            this.listener = listener;
-            this.automaton = automaton;
-            this.commonPrefix = commonPrefix;
-            this.lookupStartTime = Clock.Global.nanoTime();
-            this.context = context;
-        }
-
-        public PostingList execute()
-        {
-            AutomatonSeeker seeker = new AutomatonSeeker(automaton);
-
-            // The initial seek target: the least byte string that does not put the automaton into a reject
-            // state (none for an empty-language automaton). It always shares the automaton's common byte prefix
-            // with every acceptable string (or is a prefix of it), so the common-prefix range below already
-            // contains it; it only tightens the start of the walk (see the skipTo below).
-            byte[] initialTarget = seeker.nextSeekTerm(null);
-            if (initialTarget == null)
-                return PostingList.EMPTY;
-
-            // The scan is restricted to [commonPrefix, nextOf(commonPrefix)). The end bound of the trie scan is
-            // inclusive, so a term exactly equal to nextOf(commonPrefix) is explicitly skipped by the scan below
-            // (it does not start with the common prefix, so it can never be accepted by the automaton).
-            ByteComparable lower = commonPrefix.length == 0
-                                   ? null
-                                   : ByteComparable.preencoded(termDictionaryFileEncodingVersion, commonPrefix);
-            byte[] upperBytes = AutomatonQueries.prefixUpperBound(commonPrefix);
-            ByteComparable upper = upperBytes == null
-                                   ? null
-                                   : ByteComparable.preencoded(termDictionaryFileEncodingVersion, upperBytes);
-
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
-                                                                                  termDictionaryRoot,
-                                                                                  lower,
-                                                                                  upper,
-                                                                                  true,
-                                                                                  true,
-                                                                                  termDictionaryFileEncodingVersion))
-            {
-                // Tighten the start of the walk to the initial seek target when it is past the common prefix
-                // (a key after the current position, as skipTo requires).
-                if (Arrays.compareUnsigned(initialTarget, commonPrefix) > 0)
-                    reader.skipTo(ByteComparable.preencoded(termDictionaryFileEncodingVersion, initialTarget));
-
-                if (!reader.hasNext())
-                    return PostingList.EMPTY;
-
-                context.checkpoint();
-                PostingList postings = scanFilterAndMergePostings(reader, seeker, upperBytes);
-
-                listener.onTraversalComplete(Clock.Global.nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
-
-                return postings;
-            }
-            catch (Throwable e)
-            {
-                if (!(e instanceof AbortedOperationException))
-                    logger.error(indexContext.logMessage("Failed to execute automaton intersection"), e);
-
-                throw Throwables.cleaned(e);
-            }
-        }
-
-        /**
-         * Walks the bounded dictionary range, keeps the terms accepted by the automaton and merges their posting
-         * lists into a single (sorted, deduplicated) posting list. The walk is seek-skipping: whenever the seeker
-         * classifies a visited term as {@code *_AND_SEEK}, the dictionary is repositioned at the seeker's next
-         * possibly-matching string instead of advancing term by term. The query context counts the terms
-         * actually visited (post-skip).
-         */
-        private PostingList scanFilterAndMergePostings(TrieTermsDictionaryReader reader,
-                                                       AutomatonSeeker seeker,
-                                                       byte[] upperBytes) throws IOException
-        {
-            assert reader.hasNext();
-            ArrayList<PostingList> postingLists = new ArrayList<>();
-
-            // index inputs will be closed with the onClose method of the returned merged posting list;
-            // if the second open throws, the first must be closed here instead of leaking
-            IndexInput postingsInput = IndexFileUtils.instance().openInput(postingsFile);
-            IndexInput postingsSummaryInput;
-            try
-            {
-                postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
-            }
-            catch (Throwable t)
-            {
-                FileUtils.closeQuietly(postingsInput);
-                throw t;
-            }
-
-            try
-            {
-                do
-                {
-                    Pair<ByteComparable, Long> entry = reader.next();
-                    byte[] termBytes = ByteSourceInverse.readBytes(entry.left.asComparableBytes(termDictionaryFileEncodingVersion));
-
-                    // The end bound of the trie scan is inclusive; the term equal to the exclusive upper bound of
-                    // the prefix range must not be visited (it is necessarily the last term of the scan).
-                    if (upperBytes != null && Arrays.equals(termBytes, upperBytes))
-                        break;
-
-                    context.onAutomatonTermVisited();
-
-                    boolean accepted;
-                    boolean seek = false;
-                    switch (seeker.accept(termBytes))
-                    {
-                        case YES:
-                            accepted = true;
-                            break;
-                        case YES_AND_SEEK:
-                            accepted = true;
-                            seek = true;
-                            break;
-                        case NO_AND_SEEK:
-                            accepted = false;
-                            seek = true;
-                            break;
-                        case NO:
-                        default:
-                            accepted = false;
-                            break;
-                    }
-
-                    if (accepted)
-                    {
-                        var summary = new PostingsReader.BlocksSummary(postingsSummaryInput, entry.right, PostingsReader.InputCloser.NOOP);
-                        var currentReader = new PostingsReader(postingsInput, summary, readFrequencies(), listener.postingListEventListener(), PostingsReader.InputCloser.NOOP);
-
-                        if (!currentReader.isEmpty())
-                            postingLists.add(currentReader);
-                        else
-                            FileUtils.close(currentReader);
-                    }
-
-                    if (seek)
-                    {
-                        // Seek targets are strictly increasing (the seeker computes the next string after the
-                        // visited term), as skipTo requires; the reader's end bound keeps applying, so a target
-                        // beyond the range simply exhausts the walk.
-                        byte[] target = seeker.nextSeekTerm(termBytes);
-                        if (target == null)
-                            break; // no string after this term can possibly match
-                        reader.skipTo(ByteComparable.preencoded(termDictionaryFileEncodingVersion, target));
-                    }
-                } while (reader.hasNext());
-            }
-            catch (Throwable e)
-            {
-                FileUtils.closeQuietly(postingLists);
-                FileUtils.closeQuietly(postingsInput);
-                FileUtils.closeQuietly(postingsSummaryInput);
-                throw e;
-            }
-
-            return MergePostingList.merge(postingLists)
-                                   .onClose(() -> FileUtils.close(postingsInput, postingsSummaryInput));
         }
     }
 
@@ -816,7 +579,6 @@ public class TermsReader implements Closeable
         private final byte[] prefix;
         @Nullable
         private final CompiledAutomaton automaton;
-        private final QueryContext context;
         private final Iterator<Pair<ByteComparable, Long>> reader;
         private final AutoCloseable readerCloser;
         private final IndexInput postingsInput;
@@ -826,12 +588,10 @@ public class TermsReader implements Closeable
 
         private PatternTermsScanner(byte[] prefix,
                                     @Nullable CompiledAutomaton automaton,
-                                    QueryContext context,
                                     boolean ascending)
         {
             this.prefix = prefix;
             this.automaton = automaton;
-            this.context = context;
 
             // [prefix, nextOf(prefix)], the inclusive end bound being skipped by the prefix check in hasNext
             byte[] upperBytes = AutomatonQueries.prefixUpperBound(prefix);
@@ -893,12 +653,8 @@ public class TermsReader implements Closeable
                 // the reader's bounds admit the end bound nextOf(prefix) itself
                 if (!startsWith(termBytes, prefix))
                     continue;
-                if (automaton != null)
-                {
-                    context.onAutomatonTermVisited();
-                    if (!LikePatterns.accepts(automaton, termBytes))
-                        continue;
-                }
+                if (automaton != null && !LikePatterns.accepts(automaton, termBytes))
+                    continue;
                 pending = candidate;
                 return true;
             }

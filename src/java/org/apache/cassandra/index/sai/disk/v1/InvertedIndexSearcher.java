@@ -195,8 +195,7 @@ public class InvertedIndexSearcher extends IndexSearcher
      * {@link org.apache.cassandra.index.sai.utils.AutomatonQueries}): intersects the segment's terms dictionary
      * with the given byte-level automaton and returns the primary keys of the union of the posting lists of all
      * matching terms. The CQL surface (the non-prefix LIKE variants) reaches this engine through the
-     * {@code Expression.Op.AUTOMATON} branch of {@code searchPosting}. The visited terms are counted in the query
-     * context (see {@link QueryContext#onAutomatonTermVisited()}).
+     * {@code Expression.Op.AUTOMATON} branch of {@code searchPosting}.
      */
     @VisibleForTesting
     public KeyRangeIterator searchAutomaton(CompiledAutomaton automaton, QueryContext context) throws IOException
@@ -247,10 +246,10 @@ public class InvertedIndexSearcher extends IndexSearcher
         {
             // A LIKE restriction on the ordering column only scans the terms it can match; otherwise the whole terms
             // dictionary is scanned, and the ordered rows are post-filtered by the query.
-            boolean patternSlice = slice != null
-                                   && (slice.getOp() == Expression.Op.PREFIX || slice.getOp() == Expression.Op.AUTOMATON);
-            var terms = patternSlice
-                        ? reader.patternTerms(slice, orderer.isAscending(), queryContext)
+            boolean patternFilter = slice != null
+                                    && (slice.getOp() == Expression.Op.PREFIX || slice.getOp() == Expression.Op.AUTOMATON);
+            var terms = patternFilter
+                        ? reader.patternTerms(slice, orderer.isAscending())
                         : reader.allTerms(orderer.isAscending());
             var iter = new RowIdWithTermsIterator(terms);
             return toMetaSortedIterator(iter, queryContext);

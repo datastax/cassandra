@@ -64,7 +64,6 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.util.automaton.Automata;
-import org.apache.lucene.util.automaton.Operations;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_TRIE_LISTENER;
@@ -157,40 +156,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         });
     }
 
-    @Test
-    public void testVisitedTermsAreCounted() throws IOException
-    {
-        Map<String, TreeSet<Integer>> dictionary = new TreeMap<>();
-        int rowId = 0;
-        for (int i = 0; i < 100; i++)
-            dictionary.computeIfAbsent(String.format("a%03d", i), k -> new TreeSet<>()).add(rowId++);
-        dictionary.computeIfAbsent("b", k -> new TreeSet<>()).add(rowId++);
-
-        withIndex(dictionary, fixture ->
-        {
-            // the scan of 'a%' is bounded to the 100 terms of [a, b)
-            CompiledAutomaton broad = LikePatterns.patternAutomaton("a%");
-            QueryContext context = new QueryContext();
-            assertEquals(expectedRowIds(dictionary, broad), intersect(fixture, broad, context));
-            assertEquals(100, context.automatonTermsVisited());
-
-            // the count is of *visited* terms, so an automaton matching nothing in a broad scan range still visits some
-            CompiledAutomaton selective = LikePatterns.patternAutomaton("a%zzz");
-            context = new QueryContext();
-            assertEquals(expectedRowIds(dictionary, selective), intersect(fixture, selective, context));
-            assertTrue(context.automatonTermsVisited() > 0);
-            assertTrue(context.automatonTermsVisited() <= 100);
-
-            // a match-all automaton scans the whole dictionary
-            CompiledAutomaton all = LikePatterns.patternAutomaton("%");
-            assertEquals(CompiledAutomaton.AUTOMATON_TYPE.ALL, all.type);
-            context = new QueryContext();
-            assertEquals(expectedRowIds(dictionary, all), intersect(fixture, all, context));
-            assertEquals(101, context.automatonTermsVisited());
-        });
-    }
-
-    /** A scan whose query has timed out is aborted at the periodic timeout check of the visited terms. */
+    /** A scan whose query has timed out is aborted at the timeout check before the scan. */
     @Test
     public void testScanAbortedWhenQueryTimesOut() throws IOException
     {
@@ -203,107 +169,16 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
 
         withIndex(dictionary, fixture ->
         {
-            // (the intersection checks for a timeout before scanning too, so the first check throws here)
             QueryContext expired = new QueryContext(0);
             assertThrows(AbortedOperationException.class, () -> intersect(fixture, LikePatterns.patternAutomaton("a%"), expired));
         });
     }
 
     /**
-     * Pins the seek-skipping optimization, not just its correctness: over a dictionary whose scanned range is
-     * much larger than the set of viable candidates, the automaton-guided intersection must visit materially fewer
-     * terms than the range contains. The bounded scan this replaced visited every term of the range (26 * 400 here).
-     */
-    @Test
-    public void testSeekSkippingVisitsMateriallyFewerTerms() throws IOException
-    {
-        // 26 letter blocks x 400 numbered terms; the <any-char>0100<any-string> automaton accepts exactly one term
-        // per block, and the automaton
-        // has no common prefix, so the scanned range is the whole 10_400-term dictionary
-        Map<String, TreeSet<Integer>> dictionary = new TreeMap<>();
-        int rowId = 0;
-        for (char letter = 'a'; letter <= 'z'; letter++)
-            for (int i = 0; i < 400; i++)
-                dictionary.computeIfAbsent(letter + String.format("%04d", i), k -> new TreeSet<>()).add(rowId++);
-
-        withIndex(dictionary, fixture ->
-        {
-            // any single character, then "0100", then anything — the same shape as Lucene's "?0100*" wildcard,
-            // composed directly since the LIKE surface has no single-character wildcard
-            CompiledAutomaton automaton = LikePatterns.compile(
-                Operations.concatenate(List.of(Automata.makeAnyChar(), Automata.makeString("0100"), Automata.makeAnyString())));
-            assertEquals(CompiledAutomaton.AUTOMATON_TYPE.NORMAL, automaton.type);
-
-            QueryContext context = new QueryContext();
-            TreeSet<Integer> results = intersect(fixture, automaton, context);
-
-            // correctness first (and a guard against a vacuous comparison: exactly one match per letter block)
-            assertEquals(expectedRowIds(dictionary, automaton), results);
-            assertEquals(26, results.size());
-
-            // the pin: the guided walk must visit far fewer terms than the scanned range size
-            long visited = context.automatonTermsVisited();
-            assertTrue("expected at least the 26 accepted terms to be visited, but visited only " + visited,
-                       visited >= 26);
-            assertTrue("seek-skipping regressed: visited " + visited + " of " + dictionary.size() +
-                       " terms in the scanned range (expected at most " + dictionary.size() / 20 + ')',
-                       visited <= dictionary.size() / 20);
-        });
-    }
-
-    /**
-     * The seek-skipping walk must degrade to sequential scanning for automatons that cannot
-     * skip, and its visited-term accounting must equal the bounded-scan behaviour there: a suffix pattern
-     * ({@code LIKE '%zzz'}) puts every term of an {@code a}-block dictionary inside a linear (loop) stretch,
-     * so every term is visited exactly once.
-     */
-    @Test
-    public void testNonSkippablePatternStillVisitsEveryTerm() throws IOException
-    {
-        Map<String, TreeSet<Integer>> dictionary = new TreeMap<>();
-        int rowId = 0;
-        for (int i = 0; i < 200; i++)
-            dictionary.computeIfAbsent(String.format("a%03d", i), k -> new TreeSet<>()).add(rowId++);
-        dictionary.computeIfAbsent("a042zzz", k -> new TreeSet<>()).add(rowId++);
-
-        withIndex(dictionary, fixture ->
-        {
-            CompiledAutomaton suffix = LikePatterns.suffixAutomaton("zzz");
-            assertEquals(CompiledAutomaton.AUTOMATON_TYPE.NORMAL, suffix.type);
-
-            QueryContext context = new QueryContext();
-            assertEquals(expectedRowIds(dictionary, suffix), intersect(fixture, suffix, context));
-            assertEquals(dictionary.size(), context.automatonTermsVisited());
-        });
-    }
-
-    @Test
-    public void testVisitedTermsAccumulateAcrossIntersections() throws IOException
-    {
-        Map<String, TreeSet<Integer>> dictionary = new TreeMap<>();
-        int rowId = 0;
-        for (int i = 0; i < 10; i++)
-            dictionary.computeIfAbsent(String.format("a%02d", i), k -> new TreeSet<>()).add(rowId++);
-
-        withIndex(dictionary, fixture ->
-        {
-            CompiledAutomaton broad = LikePatterns.patternAutomaton("a%");
-
-            // the query context counts the terms visited by every segment intersection of a query (and the
-            // memtable shard scans), so two intersections of the same context add up
-            QueryContext context = new QueryContext();
-            assertEquals(expectedRowIds(dictionary, broad), intersect(fixture, broad, context));
-            assertEquals(10, context.automatonTermsVisited());
-            assertEquals(expectedRowIds(dictionary, broad), intersect(fixture, broad, context));
-            assertEquals(20, context.automatonTermsVisited());
-        });
-    }
-
-    /**
      * If the second postings input open fails, the first one must be closed on the way out instead of leaking
      * (TermsReader used to open both before the try block whose catch closes them). Exercised for all the
-     * two-open scan paths: the automaton intersection ({@code scanFilterAndMergePostings}), the exact term
-     * lookup ({@code TermQuery}'s constructor) and the range scan merge ({@code readAndMergePostings}).
+     * two-open scan paths: the filtered range scan of the automaton intersection, the exact term lookup
+     * ({@code TermQuery}'s constructor) and the unfiltered range scan ({@code readAndMergePostings}, both).
      */
     @Test
     public void testFirstPostingsInputClosedWhenSecondOpenFails() throws IOException
@@ -314,7 +189,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
             CompiledAutomaton automaton = LikePatterns.patternAutomaton("al%");
             assertEquals(CompiledAutomaton.AUTOMATON_TYPE.NORMAL, automaton.type);
 
-            // automaton intersection: scanFilterAndMergePostings
+            // automaton intersection: filtered range scan
             expectInjectedOpenFailure(() -> intersect(fixture, automaton));
 
             // exact match: the two opens in TermQuery's constructor

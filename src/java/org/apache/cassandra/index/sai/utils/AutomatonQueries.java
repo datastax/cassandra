@@ -36,9 +36,8 @@ import org.apache.lucene.util.automaton.Operations;
  * The CQL surface riding this engine consists of the non-prefix {@code LIKE} variants
  * ({@link org.apache.cassandra.cql3.Operator#LIKE_SUFFIX}, {@link org.apache.cassandra.cql3.Operator#LIKE_CONTAINS},
  * {@link org.apache.cassandra.cql3.Operator#LIKE_MATCHES}); see {@link LikePatterns#forPatternOperator}.
- * ({@code LIKE '<term>%'} keeps its dedicated bounded range scan.) The terms visited by the intersections are
- * counted in the query context ({@code QueryContext#onAutomatonTermVisited()}), which checks the query for a
- * timeout as it goes: like the range scans of the dictionaries, the intersections are bounded by the query timeout.
+ * ({@code LIKE '<term>%'} keeps its dedicated bounded range scan.) The intersections scan the terms starting with
+ * the common prefix of the automaton ({@link #commonPrefixBytes}), filtered by the automaton.
  */
 public final class AutomatonQueries
 {

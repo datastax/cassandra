@@ -41,11 +41,9 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.TargetParser;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -103,72 +101,8 @@ public class TrieMemoryIndexAutomatonTest
         Map<Integer, String> rows = indexRows(index, "aa", "aa￿", "ab", "ab ", "ab￿￿", "abz", "ac", "aca", "b");
 
         CompiledAutomaton automaton = LikePatterns.patternAutomaton("ab%");
-        QueryContext context = new QueryContext();
-        TreeSet<Integer> results = search(index, automaton, context);
+        TreeSet<Integer> results = search(index, automaton);
         assertEquals(keysOf(rows, "ab", "ab ", "ab￿￿", "abz"), results);
-
-        // a prefix-bounded scan visits only the terms under the prefix
-        assertEquals(4, context.automatonTermsVisited());
-    }
-
-    @Test
-    public void shouldCountVisitedTerms()
-    {
-        TrieMemoryIndex index = newIndex(UTF8Type.instance);
-        String[] values = new String[100];
-        for (int i = 0; i < values.length; i++)
-            values[i] = String.format("a%03d", i);
-        Map<Integer, String> rows = indexRows(index, values);
-
-        CompiledAutomaton broad = LikePatterns.patternAutomaton("a%");
-        QueryContext context = new QueryContext();
-        assertEquals(rows.keySet(), search(index, broad, context));
-        assertEquals(100, context.automatonTermsVisited());
-
-        // the count is of visited terms, not matches
-        CompiledAutomaton selective = LikePatterns.patternAutomaton("a%zzz");
-        context = new QueryContext();
-        assertEquals(new TreeSet<>(), search(index, selective, context));
-        assertTrue(context.automatonTermsVisited() > 0);
-        assertTrue(context.automatonTermsVisited() <= 100);
-    }
-
-    /** A walk whose query has timed out is aborted at the periodic timeout check of the visited terms. */
-    @Test
-    public void shouldAbortWalkWhenQueryTimesOut()
-    {
-        if (QueryContext.DISABLE_TIMEOUT)
-            return;
-        TrieMemoryIndex index = newIndex(UTF8Type.instance);
-        String[] values = new String[100];
-        for (int i = 0; i < values.length; i++)
-            values[i] = String.format("a%03d", i);
-        indexRows(index, values);
-
-        QueryContext expired = new QueryContext(0);
-        assertThrows(AbortedOperationException.class, () -> search(index, LikePatterns.patternAutomaton("a%"), expired));
-        // aborted at the first periodic check, not at the end of the walk
-        assertEquals(QueryContext.AUTOMATON_CHECKPOINT_INTERVAL, expired.automatonTermsVisited());
-    }
-
-    @Test
-    public void shouldAccumulateVisitedTermsAcrossScans()
-    {
-        TrieMemoryIndex index = newIndex(UTF8Type.instance);
-        String[] values = new String[10];
-        for (int i = 0; i < values.length; i++)
-            values[i] = String.format("a%02d", i);
-        Map<Integer, String> rows = indexRows(index, values);
-
-        CompiledAutomaton broad = LikePatterns.patternAutomaton("a%");
-
-        // the query context counts the terms visited by every memtable shard scan (and sstable segment
-        // intersection) of a query, so two scans of the same context add up
-        QueryContext context = new QueryContext();
-        assertEquals(rows.keySet(), search(index, broad, context));
-        assertEquals(10, context.automatonTermsVisited());
-        assertEquals(rows.keySet(), search(index, broad, context));
-        assertEquals(20, context.automatonTermsVisited());
     }
 
     @Test
@@ -237,21 +171,14 @@ public class TrieMemoryIndexAutomatonTest
     /** Runs the engine and collects the partition key values of the matching rows. */
     private TreeSet<Integer> search(TrieMemoryIndex index, CompiledAutomaton automaton)
     {
-        return search(index, automaton, new QueryContext());
-    }
-
-    /** Same as {@link #search(TrieMemoryIndex, CompiledAutomaton)}, with the given query context (which counts the visited terms). */
-    private TreeSet<Integer> search(TrieMemoryIndex index, CompiledAutomaton automaton, QueryContext context)
-    {
         AbstractBounds<PartitionPosition> keyRange = AbstractBounds.unbounded(Murmur3Partitioner.instance);
         TreeSet<Integer> results = new TreeSet<>();
-        KeyRangeIterator iterator = index.automatonMatch(automaton, context, keyRange);
+        KeyRangeIterator iterator = index.automatonMatch(automaton, keyRange);
         while (iterator.hasNext())
             results.add(Int32Type.instance.compose(iterator.next().partitionKey().getKey()));
         return results;
     }
 
-    /** Indexes each value under partition key equal to its position and returns the key-to-value mapping. */
     /**
      * Prefix and pattern estimates count the rows of the matching terms when there are few of them, and otherwise
      * fall back to an interpolation that doesn't collapse to zero for long prefixes nor for reversed columns.
@@ -297,6 +224,7 @@ public class TrieMemoryIndexAutomatonTest
         return new Expression(indexContext).add(operator, UTF8Type.instance.decompose(value));
     }
 
+    /** Indexes each value under partition key equal to its position and returns the key-to-value mapping. */
     private Map<Integer, String> indexRows(TrieMemoryIndex index, String... values)
     {
         Map<Integer, String> rows = new HashMap<>();

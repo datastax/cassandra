@@ -28,7 +28,6 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
@@ -75,9 +74,9 @@ public abstract class MemoryIndex
                                 LongConsumer onHeapAllocationsTracker,
                                 LongConsumer offHeapAllocationsTracker);
 
-    public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(QueryContext queryContext, Orderer orderer, Expression slice);
+    public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice);
 
-    public abstract KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange);
+    public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange);
 
     public abstract long estimateMatchingRowsCount(Expression expression);
 

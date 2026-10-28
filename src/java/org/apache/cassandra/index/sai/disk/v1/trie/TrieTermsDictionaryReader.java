@@ -108,8 +108,7 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
     /**
      * Returns the position associated with the least term greater than or equal to the given key, or
      * a negative value if there is no such term. In order to optimize the search, the trie is traversed
-     * statefully (see {@link ValueIterator#skipTo}). Therefore, this method only returns correct results when
-     * called for increasing keys.
+     * statefully. Therefore, this method only returns correct results when called for increasing keys.
      * Warning: ceiling is not idempotent. Calling ceiling() twice for the same key will return successive
      * values instead of the same value. This is acceptable for the current usage of the method.
      * @param key the prefix to traverse in the trie
@@ -119,19 +118,6 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
     {
         skipTo(key, LeftBoundTreatment.ADMIT_EXACT);
         return nextAsLong();
-    }
-
-    /**
-     * Positions the iteration at the least term greater than or equal to the given key without consuming it: the
-     * following {@link #next()}/{@link #nextAsLong()} returns that term, or {@link #hasNext()} returns false when
-     * there is no such term within the reader's end bound. Like {@link #ceiling}, this only moves forward (see
-     * {@link ValueIterator#skipTo}): a key before the last consumed term leaves the iteration where it is, and a
-     * key equal to it makes {@code next()} return it a second time, so callers must pass keys strictly greater
-     * than the last consumed term. Requires a collecting reader.
-     */
-    public void skipTo(ByteComparable key)
-    {
-        skipTo(key, LeftBoundTreatment.ADMIT_EXACT);
     }
 
     public long nextAsLong()

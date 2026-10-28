@@ -67,8 +67,6 @@ public final class LikePatterns
      * threads. All operations used on them here are read-only and safe to share ({@code runAutomaton.run},
      * {@code term} comparisons, common-prefix extraction), but {@code CompiledAutomaton#floor()} must NEVER be
      * called on a shared instance: it mutates a private {@code Transition} scratch field and is not thread-safe.
-     * The seek-driven dictionary intersection of SAI ({@code AutomatonSeeker}) honours this: it walks the automaton
-     * through its own per-query {@code Transition} scratch and never calls {@code floor()}.
      */
     // Weight-bounded rather than entry-bounded: a near-determinize-limit pattern
     // can retain several MB of RunAutomaton transition tables, so 128 arbitrary entries could otherwise pin
