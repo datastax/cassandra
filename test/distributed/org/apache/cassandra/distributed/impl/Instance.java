@@ -683,7 +683,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
 
                 Keyspace.setInitialized();
 
-                // DSE 6 compatibility mode: whether the data of each materialized view can be exchanged with DSE 6 nodes, see CassandraDaemon.setup
+                // DSE 6 compatibility mode: whether this software reads the data DSE wrote for each materialized view as DSE does, see CassandraDaemon.setup
                 try
                 {
                     DseViewHiddenColumnCatalog.checkViewsAtStartup();

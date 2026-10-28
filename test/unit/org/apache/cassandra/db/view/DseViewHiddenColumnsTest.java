@@ -453,8 +453,8 @@ public class DseViewHiddenColumnsTest extends CQLTester
     /**
      * A row without the hidden cell in one sstable and the live hidden cell of the same row in another: the merged row
      * is live, with the cells of both, as DSE reads it. A compaction of the sstable without the hidden cell of row x
-     * alone purges the row (which DSE is assumed never to write: it writes the hidden cell in every update of a view
-     * entry, see {@link DseViewHiddenColumns}): its cells are gone, and the row stays live through the other sstable.
+     * alone purges the row (which DSE does not write: it writes the hidden cell in every update of a live view entry, as
+     * {@link DseViewUpdatesFixtureTest} shows): its cells are gone, and the row stays live through the other sstable.
      */
     @Test
     public void aRowWithoutTheHiddenCellIsLiveThroughAnotherSource() throws Throwable
