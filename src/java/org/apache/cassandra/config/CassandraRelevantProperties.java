@@ -568,6 +568,12 @@ public enum CassandraRelevantProperties
      * refuses any other value.
      */
     INTERNODE_COMPATIBILITY_MODE_DSE_VERSION("cassandra.internode_compatibility_mode.dse_version", "6.8.1"),
+    /**
+     * Lets a node start with {@code internode_compatibility_mode: NONE} although the DSE 6 upgrade marker file
+     * or the record of DSE 6 peers is still present in its metadata directory (for example a marker left behind,
+     * or a DSE 6 peer that was removed while this node was down).
+     */
+    INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS("cassandra.internode_compatibility_mode.ignore_dse_peers", "false"),
     INTERNODE_EVENT_THREADS("cassandra.internode-event-threads"),
     IO_NETTY_EVENTLOOP_THREADS("io.netty.eventLoopThreads"),
     IO_NETTY_TRANSPORT_ESTIMATE_SIZE_ON_SUBMIT("io.netty.transport.estimateSizeOnSubmit"),
