@@ -220,6 +220,10 @@ public final class HintsService implements HintsServiceMBean
         if (isShutDown)
             throw new IllegalStateException("HintsService is shut down and cannot be restarted");
 
+        // internode_compatibility_mode: DSE_6 only, a no-op otherwise; converts DSE's hints files on this thread, before
+        // the dispatch starts, and stops the start only for an error the stability inspector deems fatal
+        DseHintsConverter.convertAtDispatchStart(catalog);
+
         isDispatchPaused.set(false);
 
         HintsServiceDiagnostics.dispatchingStarted(this);
