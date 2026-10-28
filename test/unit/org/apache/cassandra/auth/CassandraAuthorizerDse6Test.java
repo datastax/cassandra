@@ -124,7 +124,7 @@ public class CassandraAuthorizerDse6Test extends CQLTester
             executeNet(format("REVOKE SELECT ON %s.%s FROM %s", KEYSPACE, table, role));
             assertThat(permissions(role, resource)).isEmpty();
 
-            // GRANT MODIFY is written in DSE's form; REVOKE MODIFY removes DSE's names, alone too, with no index to update
+            // GRANT MODIFY is written as UPDATE + TRUNCATE; REVOKE MODIFY removes DSE's names, alone too, with no index to update
             executeNet(format("GRANT MODIFY ON %s.%s TO %s", KEYSPACE, table, role));
             assertThat(permissions(role, resource)).containsExactlyInAnyOrder("UPDATE", "TRUNCATE");
             executeNet(format("REVOKE MODIFY ON %s.%s FROM %s", KEYSPACE, table, role));
@@ -173,7 +173,7 @@ public class CassandraAuthorizerDse6Test extends CQLTester
             executeNet(format("REVOKE ALL ON %s.%s FROM %s", KEYSPACE, table, role));
 
             DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
-            // MODIFY in DSE's form, and neither UNMASK nor SELECT_MASKED, with a warning
+            // MODIFY as UPDATE + TRUNCATE, as DSE writes GRANT ALL, and neither UNMASK nor SELECT_MASKED, with a warning
             ResultSet all = executeNet(format("GRANT ALL ON %s.%s TO %s", KEYSPACE, table, role));
             assertThat(all.getExecutionInfo().getWarnings()).containsExactly(notGranted);
             assertThat(permissions(role, resource)).containsExactlyInAnyOrder("ALTER", "DROP", "SELECT", "UPDATE", "TRUNCATE", "AUTHORIZE");

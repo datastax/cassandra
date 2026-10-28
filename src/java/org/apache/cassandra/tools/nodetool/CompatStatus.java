@@ -162,8 +162,8 @@ public class CompatStatus extends NodeTool.NodeToolCmd
     }
 
     /**
-     * DSE stores MODIFY as UPDATE + TRUNCATE (DSE 6.8's GRANT MODIFY, the creator's permissions on DSE 6.8 and 6.9), read
-     * as MODIFY; one of them alone grants nothing here.
+     * DSE writes UPDATE + TRUNCATE for GRANT ALL and a creator's permissions (its GRANT MODIFY writes the name MODIFY),
+     * read as MODIFY; one of them alone grants nothing here.
      */
     @VisibleForTesting
     static void printDseLoneWriteGrants(NodeProbe probe, PrintStream out)

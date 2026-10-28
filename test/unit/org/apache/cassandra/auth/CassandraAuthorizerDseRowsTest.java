@@ -65,9 +65,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * The unknown names are logged once per JVM, so the tests that assert their logging use names of their own, and each
  * asserts the logging of its own names only.
  * <p>
- * DSE stores {@code MODIFY} as {@code UPDATE} + {@code TRUNCATE} (DSE 6.8's {@code GRANT MODIFY}, the creator's
- * permissions on DSE 6.8 and 6.9): the pair is read as {@code MODIFY}, one of them alone is dropped and listed, and
- * GRANT and REVOKE of {@code MODIFY} keep DSE's names consistent.
+ * DSE writes {@code UPDATE} + {@code TRUNCATE} for {@code GRANT ALL} and a creator's permissions (its
+ * {@code GRANT MODIFY} writes the name {@code MODIFY}): the pair is read as {@code MODIFY}, one of them alone is
+ * dropped and listed; this software's GRANT MODIFY writes DSE's two names in the DSE 6 compatibility mode, and its
+ * REVOKE MODIFY removes them (DSE's own REVOKE MODIFY leaves them, see {@link CassandraAuthorizer#grant}).
  */
 public class CassandraAuthorizerDseRowsTest extends CQLTester
 {
@@ -109,7 +110,8 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
 
         // What DSE writes: its own permission names mixed into a standard data row...
         String dataResource = "data/" + KEYSPACE + '/' + table;
-        // (UPDATE and TRUNCATE, DSE's split of MODIFY, have their own tests below: together they read as MODIFY)
+        // (UPDATE and TRUNCATE, which DSE writes together for GRANT ALL and a creator's permissions, have their own tests
+        // below: together they read as MODIFY)
         execute(format("UPDATE system_auth.role_permissions SET permissions = permissions + {'PROXY.EXECUTE', 'READ', 'WRITE', 'BACKUP'} " +
                        "WHERE role = '%s' AND resource = '%s'", role, dataResource));
         // ...its own resource types...
@@ -218,8 +220,8 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
     }
 
     /**
-     * DSE 6.8.65 stores {@code GRANT MODIFY} as {@code UPDATE} + {@code TRUNCATE}: the pair is read as
-     * {@code MODIFY}, and only that, whatever the mode (the rows outlive the flag).
+     * DSE writes {@code UPDATE} + {@code TRUNCATE} for {@code GRANT ALL} and a creator's permissions: the pair is read
+     * as {@code MODIFY}, and only that, whatever the mode (the rows outlive the flag).
      */
     @Test
     public void dseModifyPairReadsAsModifyInEveryMode() throws Throwable
@@ -249,7 +251,9 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
                 // LIST read this role's row first, so the one-off message names it
                 assertThat(appender.list.stream().filter(e -> e.getLevel() == Level.INFO && e.getFormattedMessage().equals(
                     "Reading the permissions UPDATE and TRUNCATE granted together to role '" + role + "' on resource '" + dataResource(table) +
-                    "' in system_auth.role_permissions as MODIFY: DataStax Enterprise stores MODIFY this way (logged once)")).count())
+                    "' in system_auth.role_permissions as MODIFY: DataStax Enterprise writes the two for GRANT ALL and a creator's " +
+                    "permissions, and this software for every grant of MODIFY (GRANT MODIFY, GRANT ALL, a creator's permissions) with " +
+                    "internode_compatibility_mode DSE_6 (logged once)")).count())
                 .isEqualTo(1);
                 assertThat(appender.list).noneMatch(e -> e.getLevel() == Level.WARN && e.getFormattedMessage().contains("role '" + role + "'"));
             }));
@@ -329,7 +333,7 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
     }
 
     /**
-     * What DSE stores for MODIFY is known on data resources only: elsewhere UPDATE and TRUNCATE are unknown names, never
+     * DSE's UPDATE and TRUNCATE are known on data resources only: elsewhere they are unknown names, never
      * read as MODIFY (on an MBean it would allow setting attributes) and never listed.
      */
     @Test
@@ -406,8 +410,8 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
         // the row is left empty, so its entry in the reverse index goes as well
         withLogAppender(CassandraAuthorizer.class, appender -> {
             ResultSet revokedLone = executeNet(format("REVOKE MODIFY ON %s.%s FROM %s", KEYSPACE, updateTable, role));
-            String message = "Revoked UPDATE, granted by DataStax Enterprise to role '" + role + "' on " + dataResource(updateTable) +
-                             ", which this software did not honour";
+            String message = "Revoked UPDATE (a DataStax Enterprise permission), granted alone to role '" + role + "' on " +
+                             dataResource(updateTable) + ", which this software did not honour";
             assertThat(revokedLone.getExecutionInfo().getWarnings())
             .containsExactlyInAnyOrder(message, "Role '" + role + "' was not granted MODIFY on <table " + KEYSPACE + '.' + updateTable + '>');
             assertThat(appender.list).anyMatch(e -> e.getLevel() == Level.INFO && e.getFormattedMessage().equals(message));
@@ -434,8 +438,11 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
     }
 
     /**
-     * In the mode, GRANT MODIFY on a data resource writes DSE's form, UPDATE + TRUNCATE, so that the DSE nodes of the
-     * cluster and a node rolled back to DSE grant it; REVOKE MODIFY always removes both.
+     * In the mode, GRANT MODIFY on a data resource writes UPDATE + TRUNCATE, what DSE writes for GRANT ALL and a
+     * creator's permissions, so that the DSE nodes of the cluster and a node rolled back to DSE grant it, and GRANT ALL
+     * writes them too; on an MBean only MODIFY is written. REVOKE MODIFY removes a lone TRUNCATE and REVOKE ALL the pair
+     * GRANT ALL wrote (that REVOKE MODIFY always removes both names is tested by
+     * {@link #grantAndRevokeModifyStatementsInTheMode}).
      */
     @Test
     public void grantAndRevokeModifyInTheModeWriteDseNames() throws Throwable
@@ -462,14 +469,14 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
             assertThat(storedNames(role, updateTable)).containsExactlyInAnyOrder("UPDATE", "TRUNCATE");
             assertThat(CassandraAuthorizer.loneDseWriteGrants()).noneMatch(entry -> entry.contains(dataResource(updateTable)));
 
-            // the pair is MODIFY already: the client is told so, and no literal MODIFY is written
+            // the pair is MODIFY already: the client is told so, and the name MODIFY is not written
             ResultSet granted = executeNet(format("GRANT MODIFY ON %s.%s TO %s", KEYSPACE, pairTable, role));
             assertThat(granted.getExecutionInfo().getWarnings()).containsExactly("Role '" + role + "' was already granted MODIFY on <table " + KEYSPACE + '.' + pairTable + '>');
             assertThat(storedNames(role, pairTable)).containsExactlyInAnyOrder("UPDATE", "TRUNCATE");
 
             executeNet(format("GRANT ALL ON %s.%s TO %s", KEYSPACE, allTable, role));
             assertThat(storedNames(role, allTable)).contains("UPDATE", "TRUNCATE", "SELECT", "ALTER").doesNotContain("MODIFY");
-            // DSE's form of MODIFY is known on data resources only: elsewhere this software's name alone is written
+            // UPDATE + TRUNCATE are written on data resources only: elsewhere this software's name alone is written
             String mbean = "org.apache.cassandra.db:type=Tables,*";
             executeNet(format("GRANT MODIFY ON MBEAN '%s' TO %s", mbean, role));
             assertThat(storedNamesOf(role, "mbean/" + mbean)).containsExactly("MODIFY");
@@ -486,7 +493,8 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
             // a lone TRUNCATE revoked in the mode: reported, and removed
             ResultSet revokedLone = executeNet(format("REVOKE MODIFY ON %s.%s FROM %s", KEYSPACE, truncateTable, role));
             assertThat(revokedLone.getExecutionInfo().getWarnings())
-            .contains("Revoked TRUNCATE, granted by DataStax Enterprise to role '" + role + "' on " + dataResource(truncateTable) + ", which this software did not honour");
+            .contains("Revoked TRUNCATE (a DataStax Enterprise permission), granted alone to role '" + role + "' on " +
+                      dataResource(truncateTable) + ", which this software did not honour");
             assertThat(storedNames(role, truncateTable)).isEmpty();
             executeNet(format("REVOKE ALL ON %s.%s FROM %s", KEYSPACE, allTable, role));
             assertThat(storedNames(role, allTable)).isEmpty();
@@ -501,9 +509,8 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
 
     /**
      * In the mode, what GRANT and REVOKE MODIFY write on a data resource does not depend on the LOCAL_ONE read of the
-     * row: REVOKE removes DSE's two names, and a literal MODIFY (DSE 6.9's form), even when the read saw none (a DSE node
-     * may just have granted them), and
-     * GRANT writes them even when the row read already holds MODIFY.
+     * row: REVOKE removes DSE's two names, and the name MODIFY (what DSE's GRANT MODIFY writes), even when the read saw
+     * none (a DSE node may just have granted them), and GRANT writes the two even when the row read already holds MODIFY.
      */
     @Test
     public void grantAndRevokeModifyStatementsInTheMode() throws Throwable
@@ -530,7 +537,7 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
         DataResource data = DataResource.table(KEYSPACE, table);
 
         withMode(InternodeCompatibilityMode.DSE_6, () -> withLogAppender(CassandraAuthorizer.class, appender -> {
-            // the row read holds the pair: MODIFY is held, and DSE's form is written again
+            // the row read holds the pair: MODIFY is held, and the two names are written again
             assertThat(recording.grant(AuthenticatedUser.SYSTEM_USER, EnumSet.of(Permission.MODIFY), data, RoleResource.role(role))).isEmpty();
             assertThat(queries).containsExactly(read,
                                                 format("UPDATE system_auth.role_permissions SET permissions = permissions + {'UPDATE','TRUNCATE'} WHERE role = '%s' AND resource = '%s'", role, resource),
@@ -546,7 +553,7 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
             assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().startsWith("Revoked "));
             assertThat(storedNamesOf(role, resource)).isEmpty();
 
-            // a literal MODIFY, as DSE 6.9 stores GRANT MODIFY, that the read misses does not outlive the revoke either
+            // the name MODIFY, as DSE's GRANT MODIFY writes it, that the read misses does not outlive the revoke either
             insertGrant(role, resource, "'MODIFY'");
             queries.clear();
             assertThat(recording.revoke(AuthenticatedUser.SYSTEM_USER, EnumSet.of(Permission.MODIFY), data, RoleResource.role(role))).isEmpty();
@@ -757,8 +764,8 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
 
     /**
      * The rows of {@code system_auth.role_permissions} DSE 6.8.65 wrote (the sstables of {@link DseFixtures#schemaDataDirectory()}):
-     * the permissions DSE grants the creator of a keyspace, a table and their functions, with MODIFY stored as
-     * {@code UPDATE} + {@code TRUNCATE}, read as MODIFY, and {@code PROXY.LOGIN} and {@code PROXY.EXECUTE} on a role,
+     * the permissions DSE grants the creator of a keyspace, a table and their functions, with the creator's
+     * {@code UPDATE} + {@code TRUNCATE} read as MODIFY, and {@code PROXY.LOGIN} and {@code PROXY.EXECUTE} on a role,
      * which this software does not have, dropped; nothing is granted alone.
      */
     @Test
@@ -781,7 +788,7 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
         assertThat(getCurrentColumnFamilyStore().importNewSSTables(Set.of(copy.toString()), false, false, false, false, false, false, false)).isEmpty();
         UntypedResultSet rows = execute("SELECT role, resource, permissions FROM %s");
         assertThat(rows.size()).isEqualTo(25);
-        // as DSE stored them: MODIFY as UPDATE + TRUNCATE, never alone and never literal; PROXY.* the only unknown names
+        // as DSE stored them: the creator's UPDATE + TRUNCATE, never alone and never the name MODIFY; PROXY.* the only unknown names
         assertThat(storedNamesIn(rows, "dseadmin", "data/test_ks_fixture")).contains("UPDATE", "TRUNCATE").doesNotContain("MODIFY");
         assertThat(storedNamesIn(rows, "dseadmin", "data/test_ks_fixture/t")).contains("UPDATE", "TRUNCATE").doesNotContain("MODIFY");
         Set<String> unknown = new HashSet<>();

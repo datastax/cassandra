@@ -92,11 +92,13 @@ public class CassandraAuthorizer implements IAuthorizer
     private static final Set<String> unknownResourcePrefixesLogged = ConcurrentHashMap.newKeySet();
     private static final Set<String> unparseableResourcesLogged = ConcurrentHashMap.newKeySet();
 
-    // DataStax Enterprise stores MODIFY on a data resource as these two names: DSE 6.8.65 for GRANT MODIFY and the
-    // creator's permissions (the 6.8.65 rows of the test fixtures), DSE 6.9.26 for the creator's permissions (seen in
-    // the log of this software reading the rows of a 6.9.26 cluster; an explicit GRANT MODIFY there is stored as a
-    // literal MODIFY). Together they are read as MODIFY, one alone is dropped (MODIFY would also grant the other) and
-    // listed, see permissions()
+    // DataStax Enterprise 6.8 and 6.9 have these two permissions besides MODIFY, and write them together on a data
+    // resource for GRANT ALL and for the permissions of a resource's creator (the creator's rows of the DSE 6.8.65 test
+    // fixtures; GRANT ALL, and DSE 6.9, observed on single nodes); DSE's GRANT MODIFY writes the name MODIFY, its
+    // REVOKE MODIFY removes that name only, and its REVOKE UPDATE and REVOKE TRUNCATE never remove MODIFY. On DSE,
+    // UPDATE alone allows inserts but not truncate, TRUNCATE alone truncate but not inserts. Here, together they are
+    // read as MODIFY, one alone is dropped (MODIFY would also grant the other) and listed, see permissions(); in the
+    // DSE 6 compatibility mode GRANT MODIFY writes the two, see grant()
     private static final String DSE_UPDATE = "UPDATE";
     private static final String DSE_TRUNCATE = "TRUNCATE";
     private static final List<String> DSE_MODIFY = ImmutableList.of(DSE_UPDATE, DSE_TRUNCATE);
@@ -171,15 +173,16 @@ public class CassandraAuthorizer implements IAuthorizer
     }
 
     /**
-     * Grants the permissions the role does not have yet. A {@code MODIFY} that DataStax Enterprise stored as
-     * {@code UPDATE} + {@code TRUNCATE} on a data resource counts as held. In the DSE 6 compatibility mode, a
-     * {@code MODIFY} granted on a data resource is written in DSE's form, {@code UPDATE} + {@code TRUNCATE}, which this
-     * software reads as {@code MODIFY} in every mode: the DSE nodes of the cluster, which read the same replicated
-     * table, and a node rolled back to DSE grant it too. What a {@code REVOKE MODIFY} issued on a DSE node removes from
-     * a row holding the two names has not been observed (DSE 6.8.65 stores {@code GRANT MODIFY} and the creator's
-     * permissions as them; DSE 6.9.26 the creator's permissions as them, an explicit {@code GRANT MODIFY} as a literal
-     * {@code MODIFY}): if it leaves them, the role keeps {@code MODIFY} here and on the DSE nodes, so {@code MODIFY}
-     * granted in the mode is to be revoked on a node of this software. The two names are written whenever
+     * Grants the permissions the role does not have yet. The permissions {@code UPDATE} + {@code TRUNCATE} on a data
+     * resource, which DataStax Enterprise writes together for {@code GRANT ALL} and a creator's permissions, are read
+     * as {@code MODIFY}, which then counts as held. In the DSE 6 compatibility mode, a {@code MODIFY} granted on a data
+     * resource is written as {@code UPDATE} + {@code TRUNCATE} (DSE's own {@code GRANT MODIFY} writes the name
+     * {@code MODIFY}), which this software reads as {@code MODIFY} in every mode: the DSE nodes of the cluster, which
+     * read the same replicated table, and a node rolled back to DSE grant it too. DSE's {@code REVOKE MODIFY} removes
+     * the name {@code MODIFY} only and leaves the two names, so the role keeps its writes and truncate there and here:
+     * a {@code MODIFY} granted by this node in the mode is revoked by {@code REVOKE MODIFY} on a node of this software
+     * (see {@link #revoke} for what it removes), or on a DSE node by {@code REVOKE UPDATE} and {@code REVOKE TRUNCATE}
+     * (and {@code REVOKE MODIFY}, when the row also holds the name {@code MODIFY}). The two names are written whenever
      * {@code MODIFY} is granted in the mode, even if it looks held, since the row is read at {@code LOCAL_ONE}.
      * <p>
      * In the mode, the permissions DSE 6 does not have ({@code UNMASK}, {@code SELECT_MASKED}) are not written on a data
@@ -253,14 +256,14 @@ public class CassandraAuthorizer implements IAuthorizer
      * Revokes the permissions the role has. Revoking {@code MODIFY} on a data resource also removes DSE's
      * {@code UPDATE} and {@code TRUNCATE} from the row, together or alone: otherwise the DSE nodes of the cluster (and
      * a node rolled back to DSE) would keep granting them, and a pair left behind would still read as {@code MODIFY}
-     * here. In the DSE 6 compatibility mode both names, and a literal {@code MODIFY} (the form of an explicit
-     * {@code GRANT MODIFY} on DSE 6.9), are always removed, because the row is read at {@code LOCAL_ONE} and may miss
-     * what a DSE node just granted: every {@code REVOKE MODIFY} on a data resource then writes the removal of the three
-     * names, a role without them included (a write and its cell tombstones for nothing). Without the mode only the
+     * here. In the DSE 6 compatibility mode both names, and the name {@code MODIFY} (what DSE's {@code GRANT MODIFY}
+     * writes), are always removed, because the row is read at {@code LOCAL_ONE} and may miss what a DSE node just
+     * granted: every {@code REVOKE MODIFY} on a data resource then writes the removal of the three names, a role
+     * without them included (a write and its cell tombstones for nothing). Without the mode only the
      * names read are removed, so a row without them is written as before. DSE names removed while the role did not
      * hold {@code MODIFY} here are not reported as revoked, but the client gets a warning naming them, which is also
      * logged at INFO; the row read leaves the list of lone grants as it is, as for {@link #grant}. On other
-     * resources, where what DSE stores for {@code MODIFY} is not known, the two names are left alone like any unknown
+     * resources, where whether DSE writes the two is not known, the two names are left alone like any unknown
      * name.
      */
     public Set<Permission> revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee)
@@ -296,9 +299,10 @@ public class CassandraAuthorizer implements IAuthorizer
                 forgetLoneDseWriteGrant(revokee.getRoleName(), resource.getName());
         }
 
+        // at most one name: UPDATE and TRUNCATE stored together are read as MODIFY, which the role then holds
         if (!unhonouredDseNames.isEmpty())
         {
-            String message = String.format("Revoked %s, granted by DataStax Enterprise to role '%s' on %s, which this software did not honour",
+            String message = String.format("Revoked %s (a DataStax Enterprise permission), granted alone to role '%s' on %s, which this software did not honour",
                                            String.join(" and ", unhonouredDseNames), revokee.getRoleName(), resource.getName());
             logger.info(message);
             ClientWarn.instance.warn(message);
@@ -313,8 +317,8 @@ public class CassandraAuthorizer implements IAuthorizer
         return permissions.stream().sorted().map(Permission::name).collect(Collectors.joining(" and "));
     }
 
-    // whether MODIFY is written in DSE's form, UPDATE + TRUNCATE, and only the permissions DSE has are written: in the
-    // DSE 6 compatibility mode, on data resources
+    // whether MODIFY is written as UPDATE + TRUNCATE (what DSE writes for GRANT ALL and a creator's permissions), and
+    // only the permissions DSE has are written: in the DSE 6 compatibility mode, on data resources
     private static boolean writesDseModify(IResource resource)
     {
         return DatabaseDescriptor.isDse6CompatibilityMode() && resource instanceof DataResource;
@@ -898,13 +902,12 @@ public class CassandraAuthorizer implements IAuthorizer
      * The permissions of a {@code role_permissions} row that this software knows. Rows written by DataStax Enterprise
      * before an in-place upgrade can name permissions it does not have ({@code BACKUP}, {@code PROXY.LOGIN},
      * {@code SEARCH.*}, …); they are skipped, and logged once per name, instead of failing every authorization of the
-     * role. On a data resource DSE stores {@code MODIFY} as {@code UPDATE} + {@code TRUNCATE} (DSE 6.8's
-     * {@code GRANT MODIFY}, the creator's permissions on DSE 6.8 and 6.9; see the comment of {@code DSE_UPDATE}): the
+     * role. On a data resource DSE writes {@code UPDATE} + {@code TRUNCATE} for {@code GRANT ALL} and a creator's
+     * permissions (its {@code GRANT MODIFY} writes the name {@code MODIFY}; see the comment of {@code DSE_UPDATE}): the
      * two together are read as {@code MODIFY}, which covers exactly what they grant (inserts, updates, deletes,
-     * truncate). One alone
-     * is never widened to {@code MODIFY}, which would also grant the other: it is dropped, logged once per role and
-     * resource, and listed by {@code nodetool compatstatus} ({@link #loneDseWriteGrants}), unless the row holds
-     * {@code MODIFY} as well. On other resources, where what DSE stores for {@code MODIFY} is not known, the two names
+     * truncate). One alone is never widened to {@code MODIFY}, which would also grant the other: it is dropped, logged
+     * once per role and resource, and listed by {@code nodetool compatstatus} ({@link #loneDseWriteGrants}), unless the
+     * row holds {@code MODIFY} as well. On other resources, where whether DSE writes the two is not known, the two names
      * are unknown names like the others. This applies in every {@code internode_compatibility_mode}: the rows stay in
      * {@code system_auth} after the upgrade is complete; a row without DSE's names is read as before.
      * <p>
@@ -1011,7 +1014,8 @@ public class CassandraAuthorizer implements IAuthorizer
             // logged only when the pair is what grants MODIFY, and not by the read of GRANT and REVOKE
             if (permissions.add(Permission.MODIFY) && !isStatementRead(read) && dseModifyPairLogged.compareAndSet(false, true))
                 logger.info("Reading the permissions UPDATE and TRUNCATE granted together to role '{}' on resource '{}' in {}.{} as MODIFY: " +
-                            "DataStax Enterprise stores MODIFY this way (logged once)",
+                            "DataStax Enterprise writes the two for GRANT ALL and a creator's permissions, and this software for every grant " +
+                            "of MODIFY (GRANT MODIFY, GRANT ALL, a creator's permissions) with internode_compatibility_mode DSE_6 (logged once)",
                             role, resource, SchemaConstants.AUTH_KEYSPACE_NAME, AuthKeyspace.ROLE_PERMISSIONS);
             if (!isStatementRead(read))
                 forgetLoneDseWriteGrant(role, resource);
