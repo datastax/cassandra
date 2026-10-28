@@ -41,6 +41,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
@@ -178,7 +179,7 @@ final class LogRecord
     public static LogRecord make(Type type, SSTable table)
     {
         String absoluteTablePath = table.descriptor.baseFileUri() + Component.SEPARATOR;
-        return make(type, getExistingFiles(absoluteTablePath), table.getComponentSize(), absoluteTablePath);
+        return makeForSSTable(type, getExistingFiles(absoluteTablePath), table.getComponentSize(), absoluteTablePath);
     }
 
     public static Map<SSTable, LogRecord> make(Type type, Iterable<SSTableReader> tables)
@@ -196,9 +197,29 @@ final class LogRecord
             List<File> filesOnDisk = entry.getValue();
             String baseFileName = entry.getKey();
             SSTable sstable = absolutePaths.get(baseFileName);
-            records.put(sstable, make(type, filesOnDisk, sstable.getComponentSize(), baseFileName));
+            records.put(sstable, makeForSSTable(type, filesOnDisk, sstable.getComponentSize(), baseFileName));
         }
         return records;
+    }
+
+    /**
+     * The record written for an sstable. Its update time leaves the stats file out (see
+     * {@link #make(Type, List, int, String)}), except for a remove record in DSE 6 compatibility mode, while the node or
+     * a tool writes the sstables DSE 6 reads: DSE 6 recomputes a remove record's update time over every file of the
+     * sstable, the stats file included, and refuses to start on a record whose time differs
+     * ({@link DseTransactionLogs}). This software reads such a record back through the stats file checks of
+     * {@link LogFile#verifyRecord}. Temporary files are left out either way, which departs from DSE's computation (it
+     * takes every file of the sstable, so a temporary stats file left by a crash makes it refuse the log): with them the
+     * record's number of files would differ from the add record's, which {@link LogFile} compares it with.
+     */
+    private static LogRecord makeForSSTable(Type type, List<File> files, int minFiles, String absolutePath)
+    {
+        if (type == Type.REMOVE && DatabaseDescriptor.isDse6SSTableOutput() && !INCLUDE_STATS_FOR_TESTS)
+        {
+            List<File> withoutTemporaryFiles = files.stream().filter(f -> !f.name().endsWith(TMP_EXT)).collect(Collectors.toList());
+            return make(type, withoutTemporaryFiles, minFiles, absolutePath, true);
+        }
+        return make(type, files, minFiles, absolutePath);
     }
 
     public LogRecord withExistingFiles(List<File> existingFiles)
@@ -213,7 +234,8 @@ final class LogRecord
      * We create a LogRecord based on the files on disk; there's some subtlety around how we handle stats files as the
      * timestamp can be mutated by the async completion of compaction if things race with node shutdown. To work around this,
      * we don't take the stats file timestamp into account when calculating nor using the timestamps for all the components
-     * as we build the LogRecord.
+     * as we build the LogRecord (except for the remove records written in DSE 6 compatibility mode, see
+     * {@link #makeForSSTable}).
      */
     public static LogRecord make(Type type, List<File> files, int minFiles, String absolutePath)
     {
@@ -224,7 +246,8 @@ final class LogRecord
      * In most cases we skip including the stats file timestamp entirely as it can be mutated during anticompaction
      * and thus "invalidate" the LogRecord. There is an edge case where we have a LogRecord that was written w/the wrong
      * timestamp (i.e. included a mutated stats file) and we need the node to come up, so we need to expose the selective
-     * ability to either include the stats file timestamp or not.
+     * ability to either include the stats file timestamp or not. In DSE 6 compatibility mode the remove records are
+     * written with it (see {@link #makeForSSTable}).
      *
      * See {@link LogFile#verifyRecord}
      */

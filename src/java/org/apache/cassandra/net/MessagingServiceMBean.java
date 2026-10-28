@@ -150,5 +150,20 @@ public interface MessagingServiceMBean
 
     public int getVersion(String address) throws UnknownHostException;
 
+    /** The configured {@code internode_compatibility_mode} ({@code NONE} or {@code DSE_6}). */
+    public String getInternodeCompatibilityMode();
+
+    /** The configured {@code storage_compatibility_mode}. */
+    public String getStorageCompatibilityMode();
+
+    /** The selected sstable format and the version it writes, e.g. {@code bti-bb}. */
+    public String getSSTableFormatVersion();
+
+    /** The raw messaging version recorded for every known peer, keyed by address with port. */
+    public Map<String, Integer> getEndpointMessagingVersions();
+
+    /** The requests refused because of the DSE 6 compatibility mode, by reason (see {@code DseCompatRefusals}). */
+    public Map<String, Long> getDseCompatRefusals();
+
     void reloadSslCertificates() throws IOException;
 }

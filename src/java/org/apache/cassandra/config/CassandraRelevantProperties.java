@@ -551,6 +551,23 @@ public enum CassandraRelevantProperties
      * and for existing entries in `system_schema.index` of unknown index classes to silently use the NoopIndex. */
     INDEX_UNKNOWN_IGNORE("cassandra.index.unknown_custom_class.ignore"),
     INITIAL_TOKEN("cassandra.initial_token"),
+    /**
+     * Overrides {@code internode_compatibility_mode} of cassandra.yaml (values {@code NONE}, {@code DSE_6});
+     * for tests and for entering the DSE 6 compatibility mode without editing the configuration.
+     */
+    INTERNODE_COMPATIBILITY_MODE("cassandra.internode_compatibility_mode"),
+    /**
+     * Reserved for schema changes in {@code internode_compatibility_mode: DSE_6}: nothing reads it yet; the tests of the
+     * mode set it.
+     */
+    INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL("cassandra.internode_compatibility_mode.allow_ddl", "false"),
+    /**
+     * The DSE version for a node in {@code internode_compatibility_mode: DSE_6} to give DSE nodes as its
+     * {@code dse_version}: 6.8.0 or 6.8.1, below 6.8.2, so that DSE nodes send the range reads of index queries with a
+     * verb this software understands, or {@code none} for none. {@code DseCompat#gossipedDseVersion} reads it and
+     * refuses any other value.
+     */
+    INTERNODE_COMPATIBILITY_MODE_DSE_VERSION("cassandra.internode_compatibility_mode.dse_version", "6.8.1"),
     INTERNODE_EVENT_THREADS("cassandra.internode-event-threads"),
     IO_NETTY_EVENTLOOP_THREADS("io.netty.eventLoopThreads"),
     IO_NETTY_TRANSPORT_ESTIMATE_SIZE_ON_SUBMIT("io.netty.transport.estimateSizeOnSubmit"),
