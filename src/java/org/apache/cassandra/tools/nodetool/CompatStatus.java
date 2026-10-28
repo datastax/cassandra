@@ -36,10 +36,11 @@ import org.apache.cassandra.tools.NodeTool;
 /**
  * Shows the compatibility modes the node runs with, the sstable format it writes, what it knows about its peers'
  * messaging versions, the DSE peers it sees in gossip or has identified by a handshake, the DSE 6 peers it has on
- * record, the SAI on-disk version it pins for a rollback to DSE and the requests it refused because of the upgrade:
- * the operator's view during an in-place upgrade from DataStax Enterprise 6.
+ * record, the SAI on-disk version it pins for a rollback to DSE, the DataStax Enterprise grants of UPDATE or TRUNCATE
+ * alone it drops and the requests it refused because of the upgrade: the operator's view during an in-place upgrade
+ * from DataStax Enterprise 6.
  */
-@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE peers seen in gossip or identified by a handshake, the DSE 6 peers on record, the SAI on-disk version pinned and the requests refused during the upgrade")
+@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE peers seen in gossip or identified by a handshake, the DSE 6 peers on record, the SAI on-disk version pinned, the DSE grants of UPDATE or TRUNCATE alone that are dropped and the requests refused during the upgrade")
 public class CompatStatus extends NodeTool.NodeToolCmd
 {
     private static final String DSE_6 = InternodeCompatibilityMode.DSE_6.name();
@@ -107,6 +108,8 @@ public class CompatStatus extends NodeTool.NodeToolCmd
         else
             out.printf("SAI version pinned           : not checked%s%n", notInTheMode);
 
+        // what every read of role_permissions finds dropped, in every mode
+        printDseLoneWriteGrants(probe, out);
         printDseCompatRefusals(probe, out);
     }
 
@@ -156,6 +159,37 @@ public class CompatStatus extends NodeTool.NodeToolCmd
         out.printf("DSE peers                    : %d%n", dsePeers.size());
         for (Map.Entry<String, String> e : dsePeers.entrySet())
             out.printf("  %-45s %s%n", e.getKey(), e.getValue());
+    }
+
+    /**
+     * DSE stores MODIFY as UPDATE + TRUNCATE (DSE 6.8's GRANT MODIFY, the creator's permissions on DSE 6.8 and 6.9), read
+     * as MODIFY; one of them alone grants nothing here.
+     */
+    @VisibleForTesting
+    static void printDseLoneWriteGrants(NodeProbe probe, PrintStream out)
+    {
+        String loneGrantsSource;
+        try
+        {
+            loneGrantsSource = probe.getDseLoneWriteGrantsSource();
+        }
+        catch (UndeclaredThrowableException e)
+        {
+            // not ifReported: the attribute itself is null when another authorizer is configured
+            if (!(e.getCause() instanceof AttributeNotFoundException))
+                throw e;
+            out.printf("DSE UPDATE/TRUNCATE alone    : %s%n", NOT_REPORTED);
+            return;
+        }
+        if (loneGrantsSource == null)
+        {
+            out.printf("DSE UPDATE/TRUNCATE alone    : not tracked (the authorizer is not CassandraAuthorizer)%n");
+            return;
+        }
+        List<String> loneGrants = probe.getDseLoneWriteGrants();
+        out.printf("DSE UPDATE/TRUNCATE alone    : %d dropped, as last read on this node (%s)%n", loneGrants.size(), loneGrantsSource);
+        for (String grant : loneGrants)
+            out.printf("  %s%n", grant);
     }
 
     /**
