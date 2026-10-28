@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
@@ -36,6 +37,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -47,6 +49,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.security.EncryptionContext;
 
 public class CommitLogSegmentManagerCDCTest extends CQLTester
 {
@@ -70,6 +73,72 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         CommitLog.instance.stopUnsafe(true);
         CommitLog.instance.start();
         ((CommitLogSegmentManagerCDC)CommitLog.instance.getSegmentManager()).updateCDCTotalSize();
+    }
+
+    /**
+     * A replayed DSE 6 segment moved aside in {@code DSE_6} mode instead of being handled: its untracked cdc_raw hard
+     * link (no index file) is deleted as for a handled segment, a tracked one is kept.
+     */
+    @Test
+    public void testMovedAsideReplayedSegmentCleansUpItsUntrackedCdcLink() throws Throwable
+    {
+        CommitLogSegmentManagerCDC manager = (CommitLogSegmentManagerCDC) CommitLog.instance.getSegmentManager();
+        File cdcDirectory = DatabaseDescriptor.getCDCLogLocation();
+        String untracked = "CommitLog-680-1790248906231.log";
+        String tracked = "CommitLog-680-1790248906232.log";
+        Path untrackedLink = Files.createFile(new File(cdcDirectory, untracked).toPath());
+        Path trackedLink = Files.createFile(new File(cdcDirectory, tracked).toPath());
+        Path trackedIndex = Files.createFile(new File(cdcDirectory, CommitLogDescriptor.fromFileName(tracked).cdcIndexFileName()).toPath());
+        try
+        {
+            manager.handleMovedAsideReplayedSegment(new File(DatabaseDescriptor.getCommitLogLocation(), untracked));
+            manager.handleMovedAsideReplayedSegment(new File(DatabaseDescriptor.getCommitLogLocation(), tracked));
+
+            Assert.assertFalse("untracked CDC link of the moved-aside segment deleted", Files.exists(untrackedLink));
+            Assert.assertTrue("tracked CDC link kept", Files.exists(trackedLink));
+        }
+        finally
+        {
+            Files.deleteIfExists(untrackedLink);
+            Files.deleteIfExists(trackedLink);
+            Files.deleteIfExists(trackedIndex);
+        }
+    }
+
+    /**
+     * The same through the replay at the start in {@code DSE_6} mode: a DSE 6 segment (here a header-only one, as a
+     * freshly allocated segment is at a crash) is renamed with the replayed suffix, and its untracked cdc_raw hard
+     * link is deleted.
+     */
+    @Test
+    public void testStartupReplayInDse6ModeMovesTheDseSegmentAsideAndCleansUpItsCdcLink() throws Throwable
+    {
+        InternodeCompatibilityMode previous = DatabaseDescriptor.getInternodeCompatibilityMode();
+        Path directory = Files.createTempDirectory("dse-segment");
+        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.VERSION_DSE_68, 1790248906233L, null, new EncryptionContext());
+        ByteBuffer header = ByteBuffer.allocate(4096);
+        CommitLogDescriptor.writeHeader(header, descriptor);
+        header.putInt(0).putInt(0); // no sync marker: the end of the log
+        Path segment = Files.write(directory.resolve(descriptor.fileName()), Arrays.copyOf(header.array(), header.position()));
+        Path moved = directory.resolve(descriptor.fileName() + CommitLog.REPLAYED_DSE_SEGMENT_SUFFIX);
+        Path link = Files.createFile(new File(DatabaseDescriptor.getCDCLogLocation(), descriptor.fileName()).toPath());
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+            CommitLog.instance.recoverSegmentsOnDiskNoArchive(ColumnFamilyStore.FlushReason.STARTUP, new File[]{ new File(segment) });
+
+            Assert.assertFalse("DSE segment no longer under its name", Files.exists(segment));
+            Assert.assertTrue("DSE segment moved aside", Files.exists(moved));
+            Assert.assertFalse("untracked CDC link of the moved-aside segment deleted", Files.exists(link));
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(previous);
+            Files.deleteIfExists(link);
+            Files.deleteIfExists(segment);
+            Files.deleteIfExists(moved);
+            Files.deleteIfExists(directory);
+        }
     }
 
     @Test
