@@ -25,12 +25,10 @@ import org.apache.cassandra.cql3.Operator;
  * {@link org.apache.cassandra.cql3.LikePatterns#forPatternOperator}): it is syntactically invalid or too complex to
  * determinize.
  * <p>
- * Coordinators compile the patterns of {@code LIKE} restrictions served by SAI eagerly (when the index validates
- * the read command), so the client gets this {@link InvalidRequestException} when the query is executed. Replicas
- * may still meet it, e.g. when post-filtering the rows of a {@code LIKE} restriction served by a custom index
- * implementation: they report it to the coordinator as a request failure and log it without treating it as a node
- * failure. The operator evaluating the pattern ({@link Operator#isSatisfiedBy}) doesn't know the restricted column,
- * which its caller adds with {@link #withColumn}.
+ * Coordinators compile the patterns of {@code LIKE} restrictions when the restriction is bound, so the client gets
+ * this {@link InvalidRequestException} before the query reaches the replicas. The operator evaluating the pattern
+ * ({@link Operator#isSatisfiedBy}) doesn't know the restricted column, which its caller adds with
+ * {@link #withColumn}.
  */
 public final class InvalidPatternException extends InvalidRequestException
 {

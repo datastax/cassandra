@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.MarkerOrTerms;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -1018,12 +1019,16 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         {
             Pair<Operator, ByteBuffer> operation = makeSpecific(value.bindAndGet(options));
 
-            // there must be a suitable INDEX for LIKE_XXX expressions, and it validates the bound pattern
+            // there must be a suitable INDEX for LIKE_XXX expressions
             RowFilter.SimpleExpression expression = filter.add(columnDef, operation.left, operation.right);
-            Index index = indexRegistry.getBestIndexFor(expression, indexHints)
-                                       .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
-                                                                         expression));
-            index.validate(expression);
+            indexRegistry.getBestIndexFor(expression, indexHints)
+                         .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
+                                                           expression));
+
+            // whatever index serves it, the rows are filtered with the pattern (Operator#isSatisfiedBy): reject a
+            // pattern that can't be compiled here rather than on the replicas
+            if (operation.left != Operator.LIKE_PREFIX)
+                LikePatterns.forPatternOperator(operation.left, operation.right, columnDef.name);
         }
 
         @Override

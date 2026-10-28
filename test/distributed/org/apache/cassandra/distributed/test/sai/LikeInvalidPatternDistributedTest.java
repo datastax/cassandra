@@ -36,14 +36,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * A LIKE pattern too complex to be compiled into an automaton, met by a remote replica while filtering the rows
- * served by a custom (non-SAI) index, fails the read as a request failure sent over the wire to the coordinator,
- * while the replica logs it as a warning naming the column rather than as a fatal error of its read stage.
- * Coordinators only compile eagerly (and reject) the patterns served by SAI.
+ * A LIKE pattern too complex to be compiled into an automaton is rejected by the coordinator with an invalid request
+ * naming the column, whatever index serves the restriction (here a custom, non-SAI one, whose rows the replicas
+ * filter with the pattern): it never reaches the replicas.
  */
 public class LikeInvalidPatternDistributedTest extends TestBaseImpl
 {
-    private static final String WARNING = "Invalid pattern for LIKE '<term>' restriction on column v";
+    private static final String ERROR = "Invalid pattern for LIKE '<term>' restriction on column v";
 
     @Test
     public void testRemoteInvalidPatternFailure() throws Exception
@@ -70,14 +69,10 @@ public class LikeInvalidPatternDistributedTest extends TestBaseImpl
             pattern.append('a');
 
             long mark = replica.logs().mark();
-            String address = replica.config().broadcastAddress().getAddress().getHostAddress();
             assertThatThrownBy(() -> cluster.coordinator(1).execute(withKeyspace("SELECT pk FROM %s.t WHERE v LIKE ?"), ConsistencyLevel.ALL, pattern.toString()))
-                .hasMessageContaining("Operation failed")
-                .hasMessageContaining("from /" + address);
+                .hasMessageStartingWith(ERROR);
 
-            assertThat(replica.logs().grep(mark, WARNING).getResult()).isNotEmpty();
-            assertThat(replica.logs().grep(mark, "Fatal exception").getResult()).isEmpty();
-            assertThat(replica.logs().grep(mark, "InvalidPatternException").getResult()).isEmpty();
+            assertThat(replica.logs().grep(mark, "Invalid pattern").getResult()).isEmpty();
         }
     }
 

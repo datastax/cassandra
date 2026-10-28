@@ -26,7 +26,6 @@ import org.slf4j.LoggerFactory;
 
 import net.openhft.chronicle.core.util.ThrowingConsumer;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
-import org.apache.cassandra.exceptions.InvalidPatternException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
@@ -113,11 +112,6 @@ public class InboundSink implements InboundMessageHandlers.MessageConsumer
                 t instanceof IndexBuildInProgressException)
             {
                 noSpamLogger.error(t.getMessage());
-            }
-            else if (t instanceof InvalidPatternException)
-            {
-                // an invalid LIKE pattern (reported to the coordinator by fail() above), not a node failure
-                noSpamLogger.warn(t.getMessage());
             }
             else if (t instanceof RuntimeException)
             {

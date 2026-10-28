@@ -878,21 +878,6 @@ public interface Index
     }
 
     /**
-     * Called when a query is validated at the coordinator, once its values are bound, for a filtering expression
-     * this index has been selected to serve (see {@link IndexRegistry#getBestIndexFor}). Unlike
-     * {@link #validate(ReadCommand)}, it is called whether or not the index ends up in the query plan (e.g. for
-     * an expression in a disjunction the plan can't serve), so an index can reject here the values it can't
-     * serve, with a meaningful {@link InvalidRequestException}, instead of failing on the replicas. Currently
-     * called for {@code LIKE} restrictions.
-     *
-     * @param expression a filtering expression on a column this index supports
-     * @throws InvalidRequestException if the expression fails to meet the index's validation rules
-     */
-    default void validate(RowFilter.Expression expression) throws InvalidRequestException
-    {
-    }
-
-    /**
      * Tells whether this index supports replica fitering protection or not.
      * </p>
      * Replica filtering protection might need to run the query row filter in the coordinator to detect stale results.

@@ -39,7 +39,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -926,23 +925,6 @@ public class IndexContext
             if (value != null)
                 VectorValidation.validateIndexable(value, vectorSimilarityFunction);
         }
-    }
-
-    /**
-     * Validates a {@code LIKE} restriction this index was selected to serve, at the coordinator, once its pattern
-     * is bound (see {@code StorageAttachedIndex#validate(RowFilter.Expression)}): the automaton-served patterns
-     * (every variant but {@link Operator#LIKE_PREFIX}) are compiled eagerly, so that a pattern too complex to
-     * compile is rejected with a meaningful error instead of failing on the replicas. The compiled automaton is
-     * cached by {@link LikePatterns}, so the replicas don't compile it again.
-     *
-     * @param operator the pattern operator of the restriction
-     * @param pattern the bound pattern
-     * @throws InvalidRequestException if the pattern can't be compiled
-     */
-    public void validateLikeRestriction(Operator operator, ByteBuffer pattern)
-    {
-        if (operator != Operator.LIKE_PREFIX)
-            LikePatterns.forPatternOperator(operator, pattern, getColumnName());
     }
 
     public void validate(RowFilter rowFilter)
