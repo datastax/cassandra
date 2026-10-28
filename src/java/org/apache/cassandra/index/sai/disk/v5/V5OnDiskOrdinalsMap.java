@@ -141,6 +141,16 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         return structure;
     }
 
+    @Override
+    public boolean requiresDiskReads()
+    {
+        // The views are created lazily, so we can't ask them. Only ZERO_OR_ONE_TO_MANY with a non-empty graph
+        // falls back to disk-based views, and only when the in-memory delta index could not be built.
+        return structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY
+               && maxOrdinal >= 0
+               && deltaOrdinalsView == null;
+    }
+
     private void cacheExtraRowIds(RandomAccessReader reader) throws IOException
     {
         extraRowsByOrdinal = new Int2ObjectHashMap<>();

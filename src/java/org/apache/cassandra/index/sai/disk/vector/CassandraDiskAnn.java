@@ -162,9 +162,9 @@ public class CassandraDiskAnn
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
         ordinalsMap = omFactory.create(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
-        if (ordinalsMap.getStructure() == Structure.ZERO_OR_ONE_TO_MANY)
-            logger.warn("Index {} has structure ZERO_OR_ONE_TO_MANY, which requires on reading the on disk row id" +
-                        " to ordinal mapping for each search. This will be slower.", source);
+        if (ordinalsMap.requiresDiskReads())
+            logger.warn("Index {} has structure ZERO_OR_ONE_TO_MANY but could not build an in-memory index," +
+                        " so it will read the row id to ordinal mapping from disk on each search. This will be slower.", source);
 
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
 
