@@ -91,8 +91,13 @@ public class ColumnFilterTest
     @Before
     public void before()
     {
-        Util.setUpgradeFromVersion("4.0");
-        assertThat(Gossiper.instance.getMinVersion()).isEqualTo(new CassandraVersion("4.0"));
+        setMinVersion("5.0");
+    }
+
+    private static void setMinVersion(String version)
+    {
+        Util.setUpgradeFromVersion(version);
+        assertThat(Gossiper.instance.getMinVersion()).isEqualTo(new CassandraVersion(version));
     }
 
     // Select all
@@ -491,6 +496,53 @@ public class ColumnFilterTest
             assertCellFetchedQueried(true, true, filter, s2, path1);
             assertCellFetchedQueried(false, false, filter, s2, path0, path2, path3, path4);
         }
+    }
+
+    /**
+     * While any node may still be on a version lower than 5.0, the coordinator must not use the narrow
+     * "all regulars + queried statics" fetch strategy, because a pre-5.0 replica deserializes it as a wildcard that
+     * fetches all statics, which then mismatches the serialization header. See CNDB-19930.
+     */
+    @Test
+    public void testSelectStaticColumnWithMetadataWhenUpgradingFromPre50()
+    {
+        setMinVersion("4.0");
+
+        Consumer<ColumnFilter> check = filter -> {
+            testRoundTrips(filter);
+            assertEquals("*/[s1]", filter.toString());
+            assertFetchedQueried(true, true, filter, s1);
+            assertFetchedQueried(true, false, filter, v1, v2, s2);
+        };
+
+        check.accept(ColumnFilter.selection(metadata, RegularAndStaticColumns.builder().add(s1).build(), false));
+        check.accept(ColumnFilter.allRegularColumnsBuilder(metadata, false).add(s1).build());
+    }
+
+    @Test
+    public void testSelectSimpleColumnWithMetadataWhenUpgradingFromPre50()
+    {
+        setMinVersion("4.0");
+
+        Consumer<ColumnFilter> check = filter -> {
+            testRoundTrips(filter);
+            assertEquals("*/[v1]", filter.toString());
+            assertFetchedQueried(true, true, filter, v1);
+            assertFetchedQueried(true, false, filter, s1, s2, v2);
+        };
+
+        check.accept(ColumnFilter.selection(metadata, RegularAndStaticColumns.builder().add(v1).build(), false));
+        check.accept(ColumnFilter.allRegularColumnsBuilder(metadata, false).add(v1).build());
+    }
+
+    @Test
+    public void testSelectUsesNarrowStrategyOnceUpgradeCompletes()
+    {
+        setMinVersion("4.0");
+        assertEquals("*/[s1]", ColumnFilter.selection(metadata, RegularAndStaticColumns.builder().add(s1).build(), false).toString());
+
+        setMinVersion("5.0");
+        assertEquals("<all regulars>+[s1]/[s1]", ColumnFilter.selection(metadata, RegularAndStaticColumns.builder().add(s1).build(), false).toString());
     }
 
     private void testRoundTrips(ColumnFilter cf)
