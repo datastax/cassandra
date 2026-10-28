@@ -66,7 +66,8 @@ public class EndpointMessagingVersions
         if (v == null)
         {
             // we don't know the version. assume current. we'll know soon enough if that was incorrect.
-            NoSpamLogger.log(logger, NoSpamLogger.Level.DEBUG, 2, TimeUnit.SECONDS, "Assuming current protocol version for {}", endpoint);
+            if (logger.isDebugEnabled())
+                NoSpamLogger.log(logger, NoSpamLogger.Level.DEBUG, 2, TimeUnit.SECONDS, "Assuming current protocol version for {}", endpoint);
             return MessagingService.current_version;
         }
         else
