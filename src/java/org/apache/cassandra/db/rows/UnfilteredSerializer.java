@@ -30,6 +30,7 @@ import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.ByteArrayAccessor;
+import org.apache.cassandra.db.view.DseViewHiddenColumns;
 import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.rows.Row.Deletion;
@@ -669,6 +670,12 @@ public class UnfilteredSerializer
                 rowLiveness = LivenessInfo.withExpirationTime(timestamp, ttl, localDeletionTime);
             }
 
+            // A view sstable written by DSE: the row's liveness comes from the cell of its hidden column (see
+            // DseViewHiddenColumns); everything else takes the path below, unchanged.
+            if (header.dseViewLivenessColumn() != null && !isStatic)
+                return deserializeDseViewRowBody(in, header, helper, hasDeletion, deletionIsShadowable, hasComplexDeletion,
+                                                 hasAllColumns, headerColumns, rowLiveness, builder);
+
             builder.addPrimaryKeyLivenessInfo(rowLiveness);
             builder.addRowDeletion(hasDeletion ? new Row.Deletion(header.readDeletionTime(in), deletionIsShadowable) : Row.Deletion.LIVE);
 
@@ -711,6 +718,67 @@ public class UnfilteredSerializer
             // exception, it just make we catch it properly and mark the sstable as corrupted.
             throw new IOException("Error building row with data deserialized from " + in, e);
         }
+    }
+
+    /**
+     * The rest of {@link #deserializeRowBody} for a row of a materialized view sstable written by DSE, whose header
+     * names DSE's hidden column of a regular base column in the view primary key: DSE ignores the primary key
+     * liveness of such a row, which is live exactly when that hidden cell is, so the row gets the liveness of the
+     * cell ({@link DseViewHiddenColumns#livenessOf}), or {@link DseViewHiddenColumns#LIVENESS_WITHOUT_HIDDEN_CELL}
+     * when it has no such cell; the cell itself is dropped.
+     * The liveness is added once the cells are read, since the cells may be encoded relative to the liveness
+     * written in the row.
+     */
+    private Row deserializeDseViewRowBody(DataInputPlus in,
+                                          SerializationHeader header,
+                                          DeserializationHelper helper,
+                                          boolean hasDeletion,
+                                          boolean deletionIsShadowable,
+                                          boolean hasComplexDeletion,
+                                          boolean hasAllColumns,
+                                          Columns headerColumns,
+                                          LivenessInfo rowLiveness,
+                                          Row.Builder builder)
+    throws IOException
+    {
+        ColumnMetadata livenessColumn = header.dseViewLivenessColumn();
+        builder.addRowDeletion(hasDeletion ? new Row.Deletion(header.readDeletionTime(in), deletionIsShadowable) : Row.Deletion.LIVE);
+
+        Columns columns = hasAllColumns ? headerColumns : Columns.serializer.deserializeSubset(headerColumns, in);
+        Cell<?>[] livenessCell = new Cell<?>[1];
+        try
+        {
+            columns.apply(column -> {
+                try
+                {
+                    if (column == livenessColumn)
+                        livenessCell[0] = Cell.serializer.deserialize(in, rowLiveness, column, header, helper, ByteArrayAccessor.instance);
+                    else if (column.isSimple())
+                        readSimpleColumn(column, in, header, helper, builder, rowLiveness);
+                    else
+                        readComplexColumn(column, in, header, helper, hasComplexDeletion, builder, rowLiveness);
+                }
+                catch (IOException e)
+                {
+                    throw new WrappedException(e);
+                }
+            });
+        }
+        catch (WrappedException e)
+        {
+            if (e.getCause() instanceof IOException)
+                throw (IOException) e.getCause();
+
+            throw e;
+        }
+
+        // the builder does not keep a liveness the row deletion shadows
+        if (livenessCell[0] != null)
+            builder.addPrimaryKeyLivenessInfo(DseViewHiddenColumns.livenessOf(livenessCell[0]));
+        // dead for DSE without the hidden cell, unless another source has it
+        else
+            builder.addPrimaryKeyLivenessInfo(DseViewHiddenColumns.LIVENESS_WITHOUT_HIDDEN_CELL);
+        return builder.build();
     }
 
     private void readSimpleColumn(ColumnMetadata column, DataInputPlus in, SerializationHeader header, DeserializationHelper helper, Row.Builder builder, LivenessInfo rowLiveness)

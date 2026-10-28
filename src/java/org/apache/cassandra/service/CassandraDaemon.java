@@ -49,6 +49,7 @@ import org.apache.cassandra.db.SizeEstimatesRecorder;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.SystemKeyspaceMigrator41;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
 import org.apache.cassandra.db.virtual.SystemViewsKeyspace;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
@@ -314,6 +315,16 @@ public class CassandraDaemon
                     store.disableAutoCompaction();
                 }
             }
+        }
+
+        // DSE 6 compatibility mode: whether the data of each materialized view can be exchanged with DSE 6 nodes
+        try
+        {
+            DseViewHiddenColumnCatalog.checkViewsAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
         }
 
         try
