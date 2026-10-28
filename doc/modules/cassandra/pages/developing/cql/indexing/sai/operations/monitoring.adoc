@@ -27,12 +27,32 @@ SAI provides tracing capability just like other database components.
 Information is captured by the `system_traces` keyspace.
 You can enable tracing in CQLSH with `TRACING ON`, or in the Cassandra driver with `statement.enableTracing()`.
 
-The number of rows filtered by a particular query will show up in the CQL query trace.
+The query execution metrics will show up in the CQL query trace.
 Example:
 
 [source,no-highlight]
 ----
-Index query accessed memtable indexes, 2 SSTable indexes, and 2 segments, post-filtered 14 rows in 14 partitions, and took 88582 microseconds.
+Index query took 88582 microseconds.
+SAI query metrics:
+  sstablesHit: 2
+  segmentsHit: 2
+  keysFetched: 14
+  partitionsFetched: 14
+  partitionsReturned: 14
+  partitionTombstonesFetched: 0
+  rowsFetched: 14
+  rowsReturned: 14
+  rowTombstonesFetched: 0
+  cellsFetched: 28
+  cellsReturned: 28
+  trieSegmentsHit: 0
+  triePostingsSkips: 0
+  triePostingsDecodes: 0
+  bkdSegmentsHit: 2
+  bkdPostingListsHit: 2
+  bkdPostingsSkips: 0
+  bkdPostingsDecodes: 0
+  annGraphSearchLatencyNanos: 0
 ----
 
 For details about tracing, refer to CQL xref:cassandra:managing/tools/cqlsh.adoc#tracing[TRACING].
