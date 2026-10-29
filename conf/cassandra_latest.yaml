@@ -1615,7 +1615,10 @@ server_encryption_options:
   # optional defaults to true if internode_encryption is none
   # optional: true
   # If enabled, will open up an encrypted listening socket on ssl_storage_port. Should only be used
-  # during upgrade to 4.0; otherwise, set to false.
+  # during upgrade to 4.0; otherwise, set to false. In internode_compatibility_mode DSE_6 the node also
+  # listens there for DSE 6 nodes whenever internode_encryption is not none (and ssl_storage_port
+  # differs from storage_port), and dials each DSE node on the port its release listens on: leave this
+  # false.
   legacy_ssl_storage_port_enabled: false
   # Set to a valid keystore if internode_encryption is dc, rack or all
   keystore: conf/.keystore
