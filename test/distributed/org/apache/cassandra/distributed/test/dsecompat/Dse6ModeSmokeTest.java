@@ -48,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * version with uuid identifiers.
  * <p>
  * As on a real upgrade, the node enters the mode on a restart, on data it wrote before (first started without the
- * mode on DSE-readable storage settings).
+ * mode on DSE-readable storage settings), and the schema freeze of the mode is lifted by its property for the table.
  * <p>
  * The mode sets {@code cassandra.trie_index_format_version} as a system property, which the in-JVM
  * instances share: every test restores it, so that the order of the tests does not matter. The tests run
