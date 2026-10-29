@@ -38,6 +38,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.Output;
 import org.apache.cassandra.tools.ToolRunner;
@@ -85,7 +86,8 @@ public class CompatStatusTest extends CQLTester
             assertThat(lines).contains(String.format("  %-45s %d", "127.0.0.42:7000", MessagingService.current_version));
             assertThat(lines).contains(String.format("  %-45s %d  (pre-4.0 dialect)", "127.0.0.43:7000", MessagingService.VERSION_3014));
             assertThat(out).contains("(1 speaking the pre-4.0 dialect)");
-            // NONE: nothing was refused
+            // NONE: the record of DSE peers is not kept, and nothing was refused
+            assertThat(out).contains("DSE 6 peers on record        : not maintained (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("Requests refused (upgrade)   : 0\n");
         }
         finally
@@ -114,10 +116,11 @@ public class CompatStatusTest extends CQLTester
             tool.assertOnCleanExit();
             List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
             assertThat(lines).contains("Requests refused (upgrade)   : 3");
-            // the peer versions, then the refusals
+            // the peer versions, the record of DSE peers, then the refusals
             String out = tool.getStdout();
             assertThat(out.indexOf("Peers with a known version")).isNotNegative()
-                                                                  .isLessThan(out.indexOf("Requests refused (upgrade)"));
+                                                                  .isLessThan(out.indexOf("DSE 6 peers on record        :"));
+            assertThat(out.indexOf("DSE 6 peers on record        :")).isLessThan(out.indexOf("Requests refused (upgrade)"));
             assertThat(lines).contains(String.format("  %-45s %d", "read with an index hint", 1));
             assertThat(lines).contains(String.format("  %-45s %d", "verb PING_REQ to a DSE 6 peer", 2));
         }
@@ -163,6 +166,33 @@ public class CompatStatusTest extends CQLTester
     }
 
     @Test
+    public void printsTheRecordInDse6Mode() throws Exception
+    {
+        InetAddressAndPort dsePeer = InetAddressAndPort.getByName("127.0.0.44:7000");
+        boolean localKnown = knowLocalEndpoint();
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        DsePeersRecord.clear();
+        try
+        {
+            // in DSE_6 mode a peer seen at the dialect enters the record of DSE 6 peers
+            MessagingService.instance().versions.set(dsePeer, MessagingService.VERSION_3014);
+            DsePeersRecord.awaitPersisted();
+            ToolRunner.ToolResult tool = ToolRunner.invokeNodetool("compatstatus");
+            tool.assertOnCleanExit();
+            assertThat(tool.getStdout()).contains("DSE 6 peers on record        : 1 [127.0.0.44:7000]\n");
+        }
+        finally
+        {
+            MessagingService.instance().versions.reset(dsePeer);
+            forgetLocalEndpoint(localKnown);
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+            DsePeersRecord.clear();
+        }
+        assertThat(MessagingService.instance().versions.minClusterVersion).isEqualTo(MessagingService.current_version);
+    }
+
+    @Test
     public void aDseNodeKnownFromGossipOnlyWithoutTheMode() throws Exception
     {
         InetAddressAndPort dseNode = InetAddressAndPort.getByName("127.0.0.46:7000");
@@ -177,7 +207,9 @@ public class CompatStatusTest extends CQLTester
             tool.assertOnCleanExit();
             List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
             assertThat(lines).anyMatch(line -> line.matches("Peers with a known version   : \\d+ \\(0 speaking the pre-4.0 dialect, 1 DSE 6 node\\(s\\) known from gossip only\\)"))
-                             .contains(String.format("  %-45s %d  (DSE 6 node known from gossip only)", "127.0.0.46:7000", 1536));
+                             .contains(String.format("  %-45s %d  (DSE 6 node known from gossip only)", "127.0.0.46:7000", 1536))
+                             .contains("DSE 6 peers on record        : not maintained (internode_compatibility_mode NONE)");
+            assertThat(DsePeersRecord.peers()).isEmpty();
         }
         finally
         {
@@ -199,6 +231,7 @@ public class CompatStatusTest extends CQLTester
         Mockito.when(probe.getStorageCompatibilityMode()).thenReturn("NONE");
         Mockito.when(probe.getSSTableFormatVersion()).thenReturn("bti-da");
         Mockito.when(probe.getEndpointMessagingVersions()).thenReturn(Map.of("127.0.0.45:7000", MessagingService.VERSION_3014));
+        Mockito.when(probe.getDsePeersOnRecord()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DsePeersOnRecord")));
         Mockito.when(probe.getDseCompatRefusals()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseCompatRefusals")));
 
         new CompatStatus().execute(probe);
@@ -209,11 +242,12 @@ public class CompatStatusTest extends CQLTester
                          "SSTable format written       : bti-da",
                          "Peers with a known version   : 1 (1 speaking the pre-4.0 dialect)",
                          String.format("  %-45s %d  (pre-4.0 dialect)", "127.0.0.45:7000", MessagingService.VERSION_3014),
+                         "DSE 6 peers on record        : unknown (this node does not report them)",
                          "Requests refused (upgrade)   : unknown (this node does not report them)");
 
         // any other failure is not hidden
         UndeclaredThrowableException other = new UndeclaredThrowableException(new IOException("connection lost"));
-        Mockito.doThrow(other).when(probe).getDseCompatRefusals();
+        Mockito.doThrow(other).when(probe).getDsePeersOnRecord();
         assertThatThrownBy(() -> new CompatStatus().execute(probe)).isSameAs(other);
     }
 

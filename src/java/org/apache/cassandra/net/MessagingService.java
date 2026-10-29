@@ -391,7 +391,7 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     @VisibleForTesting
     MessagingService(boolean testOnly)
     {
-        this(testOnly, new EndpointMessagingVersions(),
+        this(testOnly, new EndpointMessagingVersions(!testOnly),
              CUSTOM_MESSAGING_METRICS_PROVIDER_PROPERTY.isPresent() ?
                 FBUtilities.construct(CUSTOM_MESSAGING_METRICS_PROVIDER_PROPERTY.getString(), "Messaging Metrics Provider") :
                 new MessagingMetrics());
