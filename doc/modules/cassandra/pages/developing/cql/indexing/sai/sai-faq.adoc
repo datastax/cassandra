@@ -148,6 +148,26 @@ The feature minimizes on-disk footprint and supports simple token skipping.
 * Equality and range queries on *numeric and non-literal types*.
 ** Numeric values and the other non-literal CQL types (`timestamp`, `date`, `UUID`) are indexed on-disk using https://en.wikipedia.org/wiki/K-d_tree[k-dimensional tree], a balanced structure that provides fast lookups across one or more dimensions, and compression for both values and postings.
 
+== How do I run range queries on string columns?
+
+SAI indexes on `text` and `ascii` columns without a tokenizing analyzer (`index_analyzer` or `query_analyzer`) serve the range operators `<`, `>`, `<=` and `>=`.
+They are the CQL counterpart of the term range queries of Solr:
+
+[cols="1,2"]
+|===
+|Solr |CQL
+
+|`name:[a TO m]` |`name >= 'a' AND name <= 'm'`
+|`name:{a TO m}` |`name > 'a' AND name < 'm'`
+|`name:[a TO m}` |`name >= 'a' AND name < 'm'`
+|`name:[a TO *]` |`name >= 'a'`
+|`name:[* TO m]` |`name <= 'm'`
+|===
+
+The values are ordered by their bytes, that is by Unicode code point, without locale-specific collation: `'Z'` sorts before `'a'`.
+On indexes normalizing their terms (`case_sensitive: false`, `normalize`, `ascii`), the bounds are normalized like the values, so that on a case-insensitive index `name >= 'B' AND name < 'C'` matches both `'banana'` and `'Banana'`.
+`boolean` columns (`false` sorts before `true`) and `uuid` columns (in the order of the `uuid` type) support the range operators as well.
+
 == What is the disk footprint overhead for SAI indexes?
 
 SAI requires significantly lower disk usage compared to other native or bolt-on Cassandra index solutions.

@@ -18,8 +18,11 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import org.junit.Before;
@@ -47,6 +50,7 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -225,6 +229,115 @@ public class TermsReaderTest extends SaiRandomizedTest
                 }
             }
         }
+    }
+
+    /**
+     * Literal range queries over the raw term bytes, with every combination of inclusive, exclusive and missing
+     * bounds, the bounds being either indexed terms or not.
+     */
+    @Test
+    public void testRangeMatch() throws IOException
+    {
+        final IndexDescriptor indexDescriptor = newIndexDescriptor();
+        final String index = newIndex();
+        final IndexContext indexContext = SAITester.createIndexContext(index, UTF8Type.instance);
+        final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildTermsEnum(version, 50, 3);
+
+        SegmentMetadata.ComponentMetadataMap indexMetas;
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
+        {
+            var iter = termsEnum.stream()
+                    .map(InvertedIndexBuilder::toTermWithFrequency)
+                    .iterator();
+            Int2IntHashMap docLengths = createMockDocLengths(termsEnum);
+            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter), docLengths);
+        }
+
+        FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+        FileHandle postingLists = components.get(IndexComponentType.POSTING_LISTS).createFileHandle();
+
+        long termsFooterPointer = Long.parseLong(indexMetas.get(IndexComponentType.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
+
+        List<byte[]> terms = termsEnum.stream()
+                                      .map(t -> ByteSourceInverse.readBytes(t.byteComparableBytes.asComparableBytes(VERSION)))
+                                      .collect(Collectors.toList());
+        try (TermsReader reader = new TermsReader(indexContext,
+                                                  termsData,
+                                                  components.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
+                                                  postingLists,
+                                                  indexMetas.get(IndexComponentType.TERMS_DATA).root,
+                                                  termsFooterPointer,
+                                                  version))
+        {
+            for (int i = 0; i < 200; i++)
+            {
+                byte[] lower = randomBound(terms);
+                byte[] upper = randomBound(terms);
+                if (lower != null && upper != null && FastByteOperations.compareUnsigned(lower, 0, lower.length, upper, 0, upper.length) > 0)
+                {
+                    byte[] swap = lower;
+                    lower = upper;
+                    upper = swap;
+                }
+                boolean lowerInclusive = randomBoolean();
+                boolean upperInclusive = randomBoolean();
+
+                Set<Integer> expected = new TreeSet<>();
+                for (InvertedIndexBuilder.TermsEnum term : termsEnum)
+                {
+                    byte[] bytes = ByteSourceInverse.readBytes(term.byteComparableBytes.asComparableBytes(VERSION));
+                    if (isInRange(bytes, lower, lowerInclusive) && isInRange(upper, upperInclusive, bytes))
+                        for (var posting : term.postings)
+                            expected.add(posting.value);
+                }
+
+                Set<Integer> actual = new TreeSet<>();
+                try (PostingList postings = reader.rangeMatch(lower == null ? null : ByteComparable.preencoded(VERSION, lower),
+                                                              lowerInclusive,
+                                                              upper == null ? null : ByteComparable.preencoded(VERSION, upper),
+                                                              upperInclusive,
+                                                              (QueryEventListener.TrieIndexEventListener) NO_OP_TRIE_LISTENER,
+                                                              new QueryContext()))
+                {
+                    for (long rowId = postings.nextPosting(); rowId != PostingList.END_OF_STREAM; rowId = postings.nextPosting())
+                        actual.add((int) rowId);
+                }
+                assertEquals(String.format("range %s%s, %s%s", lowerInclusive ? '[' : '(', toString(lower), toString(upper), upperInclusive ? ']' : ')'),
+                             expected, actual);
+            }
+        }
+    }
+
+    private byte[] randomBound(List<byte[]> terms)
+    {
+        switch (nextInt(0, 3))
+        {
+            case 0: return null;
+            case 1: return terms.get(nextInt(0, terms.size()));
+            default: return UTF8Type.instance.decompose(randomSimpleString(1, 10)).array();
+        }
+    }
+
+    private static boolean isInRange(byte[] term, byte[] lower, boolean inclusive)
+    {
+        if (lower == null)
+            return true;
+        int cmp = FastByteOperations.compareUnsigned(term, 0, term.length, lower, 0, lower.length);
+        return cmp > 0 || cmp == 0 && inclusive;
+    }
+
+    private static boolean isInRange(byte[] upper, boolean inclusive, byte[] term)
+    {
+        if (upper == null)
+            return true;
+        int cmp = FastByteOperations.compareUnsigned(term, 0, term.length, upper, 0, upper.length);
+        return cmp < 0 || cmp == 0 && inclusive;
+    }
+
+    private static String toString(byte[] bound)
+    {
+        return bound == null ? "*" : new String(bound, StandardCharsets.UTF_8);
     }
 
     private Int2IntHashMap createMockDocLengths(List<InvertedIndexBuilder.TermsEnum> termsEnum)

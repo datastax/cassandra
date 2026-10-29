@@ -50,7 +50,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * The term tree prunes the sstable indexes of prefix and pattern expressions by the range of the terms starting
- * with the prefix (the common prefix of the automaton for a pattern).
+ * with the prefix (the common prefix of the automaton for a pattern), and the ones of literal range expressions by
+ * the range of their raw bounds.
  */
 public class RangeTermTreePatternTest
 {
@@ -93,6 +94,50 @@ public class RangeTermTreePatternTest
         assertEquals(Set.of(a), tree.search(expression(context, Operator.LIKE_PREFIX, "ab")));
         assertEquals(Set.of(b), tree.search(expression(context, Operator.LIKE_MATCHES, "b%5")));
         assertEquals(Set.of(), tree.search(expression(context, Operator.LIKE_PREFIX, "x")));
+    }
+
+    @Test
+    public void shouldPruneLiteralRanges()
+    {
+        IndexContext context = indexContext(UTF8Type.instance);
+        SSTableIndex a = index(context, "aaa", "abz");
+        SSTableIndex b = index(context, "b00", "b99");
+        SSTableIndex c = index(context, "c", "d");
+        TermTree tree = tree(context, a, b, c);
+
+        assertEquals(Set.of(a), tree.search(range(context, Operator.GTE, "aa", Operator.LT, "ac")));
+        assertEquals(Set.of(b, c), tree.search(range(context, Operator.GT, "b", null, null)));
+        assertEquals(Set.of(a, b), tree.search(range(context, null, null, Operator.LTE, "b00")));
+        assertEquals(Set.of(), tree.search(range(context, Operator.GT, "e", null, null)));
+        assertEquals(Set.of(b), tree.search(range(context, Operator.GTE, "b5", Operator.LTE, "b6")));
+    }
+
+    @Test
+    public void shouldPruneLiteralRangesOfReversedColumns()
+    {
+        // the min/max terms of a DESC clustering column are in the reversed order of the column type, but the
+        // bounds of a literal range are in the order of the raw values
+        IndexContext context = indexContext(ReversedType.getInstance(UTF8Type.instance));
+        SSTableIndex a = index(context, "abz", "aaa");
+        SSTableIndex b = index(context, "b99", "b00");
+        SSTableIndex c = index(context, "d", "c");
+        TermTree tree = tree(context, a, b, c);
+
+        assertEquals(Set.of(a), tree.search(range(context, Operator.GTE, "aa", Operator.LT, "ac")));
+        assertEquals(Set.of(b, c), tree.search(range(context, Operator.GT, "b", null, null)));
+        assertEquals(Set.of(a, b), tree.search(range(context, null, null, Operator.LTE, "b00")));
+        assertEquals(Set.of(), tree.search(range(context, Operator.GT, "e", null, null)));
+        assertEquals(Set.of(b), tree.search(range(context, Operator.GTE, "b5", Operator.LTE, "b6")));
+    }
+
+    private static Expression range(IndexContext context, Operator lowerOperator, String lower, Operator upperOperator, String upper)
+    {
+        Expression expression = new Expression(context);
+        if (lower != null)
+            expression.add(lowerOperator, UTF8Type.instance.decompose(lower));
+        if (upper != null)
+            expression.add(upperOperator, UTF8Type.instance.decompose(upper));
+        return expression;
     }
 
     private static TermTree tree(IndexContext context, SSTableIndex... indexes)

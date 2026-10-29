@@ -535,6 +535,14 @@ public class TypeUtil
     }
 
     /**
+     * Returns <code>true</code> if given {@link AbstractType} is Boolean
+     */
+    public static boolean isBoolean(AbstractType<?> type)
+    {
+        return baseType(type) instanceof BooleanType;
+    }
+
+    /**
      * Returns <code>true</code> if given {@link AbstractType} is UTF8 or Ascii
      */
     public static boolean isUTF8OrAscii(AbstractType<?> type)
