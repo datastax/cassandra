@@ -43,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
@@ -483,6 +484,59 @@ public class MigrationCoordinatorTest
         finally
         {
             DatabaseDescriptor.setStorageCompatibilityMode(original);
+        }
+    }
+
+    /**
+     * The rule of the schema exchange in the DSE 6 compatibility mode (the caller asks only in the mode): a peer speaking
+     * this node's messaging version qualifies, never a DSE 6 peer (the pre-4.0 dialect), a peer whose version is unknown
+     * or this node.
+     */
+    @Test
+    public void schemaExchangedOnlyWithPeersAtThisVersion() throws UnknownHostException
+    {
+        Wrapper wrapper = new Wrapper();
+        EndpointState state = mock(EndpointState.class);
+        InetAddressAndPort thisNode = wrapper.configureMocksForEndpoint(FBUtilities.getBroadcastAddressAndPort(), state, MessagingService.current_version, false);
+        InetAddressAndPort unknownNode = wrapper.configureMocksForEndpoint("10.0.0.1:8000", state, null, false);
+        InetAddressAndPort dseNode = wrapper.configureMocksForEndpoint("10.0.0.2:8000", state, MessagingService.VERSION_3014, false);
+        InetAddressAndPort upgradedNode = wrapper.configureMocksForEndpoint("10.0.0.3:8000", state, MessagingService.current_version, false);
+
+        assertThat(wrapper.coordinator.exchangesSchemaWith(upgradedNode)).isTrue();
+        for (InetAddressAndPort peer : Arrays.asList(thisNode, unknownNode, dseNode))
+            assertThat(wrapper.coordinator.exchangesSchemaWith(peer)).as(peer.toString()).isFalse();
+    }
+
+    /**
+     * Schema changes are pushed to peers speaking this node's messaging version only, never to a DSE 6 peer (the
+     * pre-4.0 dialect), in either mode: a regression test of the version rule the DSE 6 compatibility mode relies on.
+     */
+    @Test
+    public void noSchemaPushToDsePeersInEitherMode() throws UnknownHostException
+    {
+        InternodeCompatibilityMode original = DatabaseDescriptor.getInternodeCompatibilityMode();
+        try
+        {
+            for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+            {
+                DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+                Wrapper wrapper = new Wrapper();
+                EndpointState state = mock(EndpointState.class);
+                InetAddressAndPort dseNode = wrapper.configureMocksForEndpoint("10.0.0.2:8000", state, MessagingService.VERSION_3014, false);
+                InetAddressAndPort upgradedNode = wrapper.configureMocksForEndpoint("10.0.0.3:8000", state, MessagingService.current_version, false);
+                when(wrapper.gossiper.getLiveMembers()).thenReturn(Sets.newHashSet(dseNode, upgradedNode));
+                ArgumentCaptor<InetAddressAndPort> target = ArgumentCaptor.forClass(InetAddressAndPort.class);
+                doNothing().when(wrapper.messagingService).send(any(), target.capture());
+
+                Pair<Set<InetAddressAndPort>, Set<InetAddressAndPort>> result = wrapper.coordinator.pushSchemaMutations(Arrays.asList(mock(Mutation.class)));
+                assertThat(result.left()).as("%s", mode).containsExactly(upgradedNode);
+                assertThat(result.right()).as("%s", mode).containsExactly(dseNode);
+                assertThat(target.getAllValues()).as("%s", mode).containsExactly(upgradedNode);
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(original);
         }
     }
 }
