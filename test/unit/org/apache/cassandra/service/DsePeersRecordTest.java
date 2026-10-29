@@ -20,7 +20,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -39,8 +41,14 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.HeartBeatState;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.net.MessagingService;
 
@@ -122,10 +130,55 @@ public class DsePeersRecordTest
     }
 
     @Test
+    public void gossipedDseVersionsReachTheRecordAtTheDialect() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            // DSE's own NET_VERSION (6.8: 1024): the gossip code stores the dialect, which puts the peer on record
+            gossipNetVersion(dsePeer, "1024");
+            assertThat(MessagingService.instance().versions.getRaw(dsePeer)).isEqualTo(MessagingService.VERSION_3014);
+            assertThat(DsePeers.isDse(dsePeer)).isTrue();
+            assertThat(DsePeersRecord.peers()).containsExactly(dsePeer);
+            assertThat(DsePeersRecord.persistedPeers()).containsExactly("127.0.0.44:7000");
+
+            // a node of this software in DSE_6 mode gossips 12 for DSE's sake: the version negotiated with it stays, and it
+            // does not enter the record
+            set(upgradedPeer, MessagingService.current_version);
+            gossipNetVersion(upgradedPeer, String.valueOf(DseCompat.NET_VERSION_PUBLISHED));
+            assertThat(MessagingService.instance().versions.getRaw(upgradedPeer)).isEqualTo(MessagingService.current_version);
+            assertThat(DsePeersRecord.peers()).containsExactly(dsePeer);
+
+            // the DSE node is upgraded and gossips 12: it is no longer a DSE node and leaves the record
+            gossipNetVersion(dsePeer, String.valueOf(DseCompat.NET_VERSION_PUBLISHED));
+            assertThat(MessagingService.instance().versions.getRaw(dsePeer)).isEqualTo(DseCompat.NET_VERSION_PUBLISHED);
+            assertThat(DsePeers.isDse(dsePeer)).isFalse();
+            assertThat(DsePeersRecord.peers()).isEmpty();
+            assertThat(DsePeersRecord.persistedPeers()).isEmpty();
+        }
+        finally
+        {
+            DsePeers.reset();
+        }
+    }
+
+    /** A {@code NET_VERSION} as the gossip code applies it to the storage service (a node restarted, or a state change). */
+    private static void gossipNetVersion(InetAddressAndPort peer, String netVersion) throws Exception
+    {
+        Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+        states.put(ApplicationState.NET_VERSION, VersionedValue.unsafeMakeVersionedValue(netVersion, 1));
+        EndpointState state = new EndpointState(new HeartBeatState(1, 1), states);
+        state.markDead(); // onRestart would otherwise first treat the peer as one that went down
+        StorageService.instance.onRestart(peer, state);
+        DsePeersRecord.awaitPersisted();
+    }
+
+    @Test
     public void rawDseGossipValuesAreRecordedAsDsePeers() throws Exception
     {
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
-        // NET_VERSION as DSE 6.8 and 6.9.7+ gossip it (relative version << 8): the record reads a raw value as the dialect
+        // NET_VERSION as DSE 6.8 and 6.9.7+ gossip it (relative version << 8): the gossip code stores the dialect in
+        // DSE_6 mode (see above), the record still reads a raw value as the dialect
         set(dsePeer, 1024);
         set(otherDsePeer, 1536);
         assertThat(DsePeersRecord.peers()).containsExactly(dsePeer, otherDsePeer);

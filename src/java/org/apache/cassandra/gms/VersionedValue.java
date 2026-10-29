@@ -40,6 +40,7 @@ import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -328,9 +329,23 @@ public class VersionedValue implements Comparable<VersionedValue>
             return new VersionedValue(String.valueOf(version));
         }
 
+        /**
+         * The {@code NET_VERSION} this node gossips. In DSE 6 compatibility mode it is
+         * {@link DseCompat#NET_VERSION_PUBLISHED}: DSE cannot parse this software's messaging version, and the
+         * peers of this software negotiate the real version in the handshake anyway.
+         */
         public VersionedValue networkVersion()
         {
-            return new VersionedValue(String.valueOf(MessagingService.current_version));
+            return new VersionedValue(String.valueOf(DseCompat.enabled() ? DseCompat.NET_VERSION_PUBLISHED : MessagingService.current_version));
+        }
+
+        /**
+         * DSE 6 compatibility mode: the {@code DSE_GOSSIP_STATE} this node gossips, with the DSE version
+         * {@code dseVersion}, at the ordinal of {@code X_11_PADDING} ({@link DseGossipStates#publishedDseState}).
+         */
+        public VersionedValue dseState(String dseVersion)
+        {
+            return new VersionedValue(DseGossipStates.publishedDseState(dseVersion));
         }
 
         public VersionedValue internalIP(InetAddress private_ip)
