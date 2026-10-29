@@ -38,7 +38,7 @@ import org.apache.cassandra.utils.CassandraVersion;
  */
 public final class DseCompat
 {
-    /** The messaging version DSE uses with non-DSE peers: the dialect of DSE 6 peers. */
+    /** The messaging version DSE uses with non-DSE peers, and the only one this software speaks with DSE. */
     public static final int DSE_DIALECT = MessagingService.VERSION_3014;
 
     /** The value DSE puts in the "requested version" byte of its first handshake message. */
@@ -133,7 +133,7 @@ public final class DseCompat
         return configured;
     }
 
-    /** True in DSE 6 compatibility mode ({@link DatabaseDescriptor#isDse6CompatibilityMode()}): the gate of the pre-4.0 code. */
+    /** True while the node accepts DSE 6 peers: the guard of every pre-4.0 code path. */
     public static boolean enabled()
     {
         return DatabaseDescriptor.isDse6CompatibilityMode();

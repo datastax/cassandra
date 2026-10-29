@@ -349,7 +349,7 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
             {
                 if (!DseCompat.enabled())
                     throw new AssertionError("pre-4.0 serialization version " + version);
-                // the pre-4.0 layout, address only: DSE 6 compatibility mode (3.0.14-dialect messages)
+                // the pre-4.0 layout, address only: DSE 6 compatibility mode (handshake and 3.0.14-dialect messages)
                 out.writeByte(address.length);
                 out.write(address);
                 return;

@@ -2271,7 +2271,8 @@ storage_compatibility_mode: NONE
 # default compression selector (no -Dcassandra.sstable.compression.selector.class) and
 # flush_compression fast or table. It also requires the SAI on-disk version to be pinned to the one
 # the cluster's DSE release writes, with -Dcassandra.sai.latest.version=aa (DSE 6.8) or =ca (DSE
-# 6.9) in jvm-server.options. Offline tools that read this file (sstablescrub, sstableupgrade,
+# 6.9) in jvm-server.options. With DSE 6 peers the node speaks the pre-4.0 internode dialect DSE
+# uses with non-DSE peers. Offline tools that read this file (sstablescrub, sstableupgrade,
 # sstablesplit, ...) inherit the on-disk half of the mode: they write trie bb sstables with numeric
 # generations too, without the storage mode and paxos checks. Clients that do not read this file
 # (CQLSSTableWriter, sstableloader) inherit it only through the system property below. Remove the

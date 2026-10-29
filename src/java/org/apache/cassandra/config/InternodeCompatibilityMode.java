@@ -17,19 +17,20 @@
 package org.apache.cassandra.config;
 
 /**
- * The transitional mode of an in-place upgrade from another database.
+ * Which foreign internode dialect this node is willing to speak, on top of its own.
  * <p>
  * {@link #DSE_6} is a transitional mode for the in-place upgrade of a DataStax Enterprise 6.9 (or 6.8)
  * cluster. It keeps the node's on-disk output readable by DSE so that a node can be rolled back (trie
  * sstables of version {@link #DSE_6_TRIE_INDEX_FORMAT_VERSION} with numeric generations), and requires
  * {@code storage_compatibility_mode: HCD_1}, the {@code bti} sstable format and {@code paxos_variant: v1}.
- * Offline tools and clients inherit the on-disk half only.
+ * Offline tools and clients inherit the on-disk half only. A node in the mode also speaks, with DSE 6 peers, the
+ * pre-4.0 handshake and the Cassandra 3.0.14 messaging dialect DSE uses with non-DSE peers.
  * <p>
  * The mode is removed with a rolling restart once every node runs this software.
  */
 public enum InternodeCompatibilityMode
 {
-    /** No compatibility mode; the default. */
+    /** Only the native dialects of this software; the default. */
     NONE,
 
     /** The in-place upgrade from DataStax Enterprise 6.8/6.9; see the class comment. */
