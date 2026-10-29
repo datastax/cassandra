@@ -95,7 +95,7 @@ public class MetadataCollectorDse6Test extends CQLTester
     @Test
     public void aFlushInDse6ModeWritesDsesCellCountHistogramAndWithNoneItsOwn() throws Throwable
     {
-        // the tables are created with NONE: only the flushes are under test
+        // the tables are created with NONE: DSE_6 freezes schema changes, which this test does not exercise
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
         String dse6Table = createTable("CREATE TABLE %s (pk int, ck int, v text, PRIMARY KEY (pk, ck))");
         String noneTable = createTable("CREATE TABLE %s (pk int, ck int, v text, PRIMARY KEY (pk, ck))");

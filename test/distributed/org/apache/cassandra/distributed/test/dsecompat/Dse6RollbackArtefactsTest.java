@@ -75,11 +75,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <li>hints: only this software's {@code <host id>-<ts>-2.hints}, {@code .crc32} and {@code -2-Statistics.hints}
  *     (version 2 of {@code HCD_1}), which DSE does not read: delete. While this software runs it delivers them to
  *     a DSE peer that is up (at 11, each hint counted as delivered once DSE acknowledges it); the writes of the hints
- *     still pending at the rollback reach the peer only by a repair once every node runs the same product again.
- *     They include the hints converted from DSE's own hints files at the first start of this software
- *     ({@code DseHintsConverter}), whose DSE files are gone by then: drain the hints before a rollback. Here they
- *     stay pending: the peer stays down, and the in-JVM instances never start the hints dispatch (no gossip, see
- *     {@link #startHintsDispatch});</li>
+ *     still pending at the rollback reach the peer only by a repair once every node runs the same product again
+ *     (repair is refused while the cluster is mixed). They include the hints converted from DSE's own hints files at
+ *     the first start of this software ({@code DseHintsConverter}), whose DSE files are gone by then: drain the hints
+ *     before a rollback. Here they stay pending: the peer stays down, and the in-JVM instances never start the hints
+ *     dispatch (no gossip, see {@link #startHintsDispatch});</li>
  * <li>metadata: {@code nodes/local} and {@code nodes/peers} byte-for-byte as before the upgrade: keep; the import
  *     marker {@code nodes/.imported-by-hcd-<host id>}: delete. A later upgrade of the node already imports again
  *     when DSE rewrote {@code nodes/local} or {@code nodes/peers} after the rollback (the marker records their size
