@@ -315,7 +315,7 @@ _main() {
   local -r version=$(grep 'property\s*name=\"base.version\"' build.xml |sed -ne 's/.*value=\"\([^"]*\)\".*/\1/p')
   local -r java_version_default=`grep 'property\s*name="java.default"' build.xml |sed -ne 's/.*value="\([^"]*\)".*/\1/p'`
 
-  if [ "${java_version}" -eq 17 ] && [[ "${target}" == "jvm-dtest-upgrade" ]] ; then
+  if { [ "${java_version}" -eq 17 ] || [ "${java_version}" -eq 21 ]; } && [[ "${target}" == "jvm-dtest-upgrade" ]] ; then
     error 1 "Invalid JDK${java_version}. Only overlapping supported JDKs can be used when upgrading, as the same jdk must be used over the upgrade path."
   fi
 
