@@ -562,10 +562,10 @@ public enum CassandraRelevantProperties
      */
     INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL("cassandra.internode_compatibility_mode.allow_ddl", "false"),
     /**
-     * The DSE version for a node in {@code internode_compatibility_mode: DSE_6} to give DSE nodes as its
-     * {@code dse_version}: 6.8.0 or 6.8.1, below 6.8.2, so that DSE nodes send the range reads of index queries with a
-     * verb this software understands, or {@code none} for none. {@code DseCompat#gossipedDseVersion} reads it and
-     * refuses any other value.
+     * The DSE version a node in {@code internode_compatibility_mode: DSE_6} gossips to DSE nodes as its
+     * {@code dse_version}: 6.8.0 or 6.8.1, below 6.8.2, so that the DSE nodes send it the range reads of index queries
+     * with a verb this software understands, or {@code none} to gossip none. Read only in that mode; any other value
+     * refuses the start (see {@code DseCompat#gossipedDseVersion}).
      */
     INTERNODE_COMPATIBILITY_MODE_DSE_VERSION("cassandra.internode_compatibility_mode.dse_version", "6.8.1"),
     /**

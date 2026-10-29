@@ -323,8 +323,8 @@ public class InboundConnectionInitiator
 
         /**
          * True when the handshake is stuck on a socket a DSE 6.8.65 node gave up on purpose (DSE 6 compatibility mode
-         * only): its pre-4.0 first message requested either 12 (a plain first message at
-         * {@link DseCompat#NET_VERSION_PUBLISHED}) or {@link DseCompat#DSE_VERSION_BYTE} (DSE's own flagged first
+         * only): its pre-4.0 first message requested either 12 (a plain first message at the {@code NET_VERSION} we
+         * gossip, {@link DseCompat#NET_VERSION_PUBLISHED}) or {@link DseCompat#DSE_VERSION_BYTE} (DSE's own flagged first
          * message), we answered the dialect (11) and no byte reached this handler since (on a TLS connection, no
          * decrypted byte). In both cases DSE 6.8.65 gives this socket up without a third message and reconnects at 11 on a
          * new socket, which succeeds, as observed with DSE 6.8.65: for a plain first message at 12, DSE logs "Seed gossip
@@ -559,9 +559,10 @@ public class InboundConnectionInitiator
                 return;
             }
             // the first message may have been one only DSE sends, which identifies the peer the third message names as a
-            // DSE node (DsePeers): DSE 6.9.26 sends this third message after either such first message (every connection
-            // of a DSE 6.9.26 node to an upgraded node was seen to open with the flagged one); DSE 6.8.65 sends none after
-            // them (it reconnects at 11, see isAbandonedByDse), so with it this only sees plain requests at 10 or 11
+            // DSE node, for the ordinals of gossip (DsePeers): DSE 6.9.26 sends this third message after either such first
+            // message (every connection of a DSE 6.9.26 node to an upgraded node was seen to open with the flagged one);
+            // DSE 6.8.65 sends none after them (it reconnects at 11, see isAbandonedByDse), so with it this only sees plain
+            // requests at 10 or 11
             DsePeers.fromPre40Initiate(confirmOutboundPre40.from, initiate.requestMessagingVersion);
             setupMessagingPipeline(confirmOutboundPre40.from, DseCompat.DSE_DIALECT, DseCompat.DSE_DIALECT, ctx.pipeline());
         }

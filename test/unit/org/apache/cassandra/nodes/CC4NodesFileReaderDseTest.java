@@ -53,6 +53,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.DseDialectVersions;
+import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.nodes.CC4UpgradeNodesPersistence.ImportState;
 import org.apache.cassandra.utils.CassandraVersion;
@@ -103,6 +104,8 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         finally
         {
             CC4UpgradeNodesPersistence.resetPendingCompletion();
+            // DseDialectVersions.seed presumes the peers it seeds to be DSE nodes: forget them
+            DsePeers.reset();
             DatabaseDescriptor.setMetadataDirectory(originalMetadataDir);
             DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
             new File(tempDir).deleteRecursive();

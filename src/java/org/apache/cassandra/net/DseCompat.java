@@ -93,14 +93,14 @@ public final class DseCompat
     public static final int OLDEST_PRE40_VERSION = MessagingService.VERSION_30;
 
     /**
-     * The gossip {@code NET_VERSION} value for a node in DSE_6 mode to publish: DSE parses it as Cassandra 4.0. A DSE peer's
-     * own value is read with {@link #messagingVersionFromGossip(int)}.
+     * The gossip {@code NET_VERSION} value published in DSE_6 mode: DSE parses it as Cassandra 4.0. A DSE peer's own value
+     * is read with {@link #messagingVersionFromGossip(int)}.
      */
     public static final int NET_VERSION_PUBLISHED = MessagingService.VERSION_40;
 
     /**
-     * The value of {@link CassandraRelevantProperties#INTERNODE_COMPATIBILITY_MODE_DSE_VERSION} meaning no DSE version: no
-     * {@code DSE_GOSSIP_STATE} for DSE nodes.
+     * The value of {@link CassandraRelevantProperties#INTERNODE_COMPATIBILITY_MODE_DSE_VERSION} with which this node
+     * gossips no {@code DSE_GOSSIP_STATE}.
      */
     public static final String NO_DSE_VERSION = "none";
 
@@ -117,8 +117,8 @@ public final class DseCompat
     }
 
     /**
-     * The DSE version for a node in DSE 6 compatibility mode to give DSE nodes
-     * ({@link CassandraRelevantProperties#INTERNODE_COMPATIBILITY_MODE_DSE_VERSION}), or null for none
+     * The DSE version this node gossips to DSE nodes in DSE 6 compatibility mode
+     * ({@link CassandraRelevantProperties#INTERNODE_COMPATIBILITY_MODE_DSE_VERSION}), or null when it gossips none
      * ({@link #NO_DSE_VERSION}).
      *
      * @throws ConfigurationException if the property is neither {@link #NO_DSE_VERSION} nor such a version
@@ -130,9 +130,9 @@ public final class DseCompat
         if (NO_DSE_VERSION.equals(configured))
             return null;
         if (!GOSSIPED_DSE_VERSION.matcher(configured).matches())
-            throw new ConfigurationException(String.format("%s is '%s': it must be '%s' or the DSE version 6.8.0 or 6.8.1, so that " +
-                                                           "DSE nodes do not send this node the range reads of a storage-attached index " +
-                                                           "query with a verb only DSE nodes understand",
+            throw new ConfigurationException(String.format("%s is '%s': it must be '%s' (no DSE version) or the DSE version 6.8.0 or " +
+                                                           "6.8.1, which this node gossips to DSE nodes so that they do not send it the " +
+                                                           "range reads of a storage-attached index query with a verb only DSE nodes understand",
                                                            CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getKey(), configured,
                                                            NO_DSE_VERSION));
         return configured;
@@ -152,8 +152,8 @@ public final class DseCompat
 
     /**
      * True for a plain pre-4.0 first handshake message: a requested version up to 4.0 and no accepted range. DSE sends
-     * one at 12 once it has stored {@code OSS_40} for the peer (from a gossip {@code NET_VERSION} of
-     * {@link #NET_VERSION_PUBLISHED}); a 4.0-style message always carries a maximum of 12 or more, so there is no ambiguity.
+     * one at 12 once it has stored {@code OSS_40} for us (from our gossip {@code NET_VERSION}, {@link #NET_VERSION_PUBLISHED});
+     * a 4.0-style message always carries a maximum of 12 or more, so there is no ambiguity.
      */
     public static boolean isPre40Initiate(int requestedVersion, int minVersion, int maxVersion)
     {
