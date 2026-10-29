@@ -46,6 +46,16 @@
       <groupId>org.mockito</groupId>
       <artifactId>mockito-inline</artifactId>
     </dependency>
+    <!-- Declared directly so the version managed in the parent pom (bytebuddy.version) wins over the older
+         one pulled in transitively by mockito, which does not support recent JDKs (e.g. 21 / class file 65). -->
+    <dependency>
+      <groupId>net.bytebuddy</groupId>
+      <artifactId>byte-buddy</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>net.bytebuddy</groupId>
+      <artifactId>byte-buddy-agent</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.ow2.asm</groupId>
       <artifactId>asm</artifactId>
