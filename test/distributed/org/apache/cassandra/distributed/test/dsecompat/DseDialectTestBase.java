@@ -16,6 +16,8 @@
 
 package org.apache.cassandra.distributed.test.dsecompat;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,6 +38,7 @@ import org.junit.BeforeClass;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
 import org.apache.cassandra.distributed.Constants;
 import org.apache.cassandra.distributed.UpgradeableCluster;
 import org.apache.cassandra.distributed.api.ICluster;
@@ -50,6 +53,8 @@ import org.apache.cassandra.distributed.upgrade.UpgradeTestBase;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.TableId;
 
 /**
  * In-JVM harness for the DSE 6 compatibility mode without any DSE binary.
@@ -77,8 +82,11 @@ import org.apache.cassandra.net.MessagingService;
  * <p>
  * Where this software follows DSE rather than HCD 1.2 at version 11, HCD 1.2 is not an oracle and the tests must not
  * exercise the difference: GROUP BY reads (DSE writes its own DataLimits kind ordinals at 11, 2 and 3 for GROUP BY,
- * which HCD 1.2 writes only at 10) and the FETCH_ALL_STATICS bit of the column filter (sent by HCD 1.2 at 11, absent
- * from the 3.0.14 layout DSE reads).
+ * which HCD 1.2 writes only at 10), the FETCH_ALL_STATICS bit of the column filter (sent by HCD 1.2 at 11, absent
+ * from the 3.0.14 layout DSE reads) and the hidden column DSE keeps in its materialized views (which HCD 1.2 does not
+ * have: before a node is upgraded, the harness gives its data directories the empty directory of DSE's
+ * {@code system_schema.hidden_columns}, as a DSE node whose table lists no view has, so the views are exchanged as they
+ * are).
  */
 public abstract class DseDialectTestBase extends UpgradeTestBase
 {
@@ -206,6 +214,30 @@ public abstract class DseDialectTestBase extends UpgradeTestBase
     {
         ((InstanceConfig) cluster.get(node).config()).remove("enable_uuid_sstable_identifiers");
         configureDse6(cluster.get(node).config());
+        createDseHiddenColumnsDirectory(cluster.get(node).config());
+    }
+
+    /**
+     * The directory of DSE's {@code system_schema.hidden_columns} in the first data directory of an HCD 1.2 node, empty:
+     * what a DSE node holds when that table lists no view (a node whose views are all of DSE's old format, which has no
+     * row there, as the fixtures {@code test/data/dse-compat/sstables/dse-<version>-mv-updates} show), and what this
+     * software in {@code DSE_6} mode reads to know which views DSE keeps a hidden column for
+     * (without it, an upgraded node with materialized views refuses to start).
+     */
+    private static void createDseHiddenColumnsDirectory(IInstanceConfig config)
+    {
+        String[] dataDirectories = (String[]) config.get("data_file_directories");
+        Path directory = Paths.get(dataDirectories[0], SchemaConstants.SCHEMA_KEYSPACE_NAME,
+                                   DseViewHiddenColumnCatalog.HIDDEN_COLUMNS + '-' + TableId.forSystemTable(SchemaConstants.SCHEMA_KEYSPACE_NAME,
+                                                                                                            DseViewHiddenColumnCatalog.HIDDEN_COLUMNS).toHexString());
+        try
+        {
+            Files.createDirectories(directory);
+        }
+        catch (IOException e)
+        {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /**
