@@ -136,7 +136,14 @@ JDK 22 config (`conf/jvm22-*.options`, `_jvm22_*` in `build.xml`) drops producti
 
 **Relevant Context:** files above; `.build/docker/_set_java.sh:31-65`.
 
-**Status:** [ ] pending
+**Status:** [x] done (first pass; CI results may require follow-ups)
+- `.build/run-tests.sh` and `.build/run-python-dtests.sh`: upgrade-test guard now rejects JDK 17 and 21.
+- Docker: `ubuntu-test.docker` installs `openjdk-21-jdk`; `almalinux-build.docker` installs `java-21-openjdk-devel`; `bullseye-build.docker` (no JDK 21 package on bullseye) installs Temurin 21.0.13+9 from the official tarball with pinned sha256 (amd64/arm64) and registers it with update-alternatives; `_set_java.sh` selects `/usr/lib/jvm/temurin-<ver>` when present. NOT verified locally (docker image not built).
+- `.github/workflows/code-check.yaml`: added `ant-check-jdk21` job.
+- `debian/control` and `redhat/cassandra.spec`: JDK 21 accepted as build/runtime dependency alternative.
+- `CHANGES.txt`: entry added. `NEWS.txt`/`README.asc` unchanged (README points at build.xml).
+- NOT done: `.circleci/config_template.yml` (needs a new java21 executor + image + regenerated config.yml via `.circleci/generate.sh`; no JDK 21 CircleCI image is known to exist in the repo) and `.jenkins/Jenkinsfile` (matrix is derived from `java.supported`, so 21 is picked up automatically; simulator/cqlsh/upgrade steps stay restricted to the default JDK).
+
 
 ---
 
@@ -158,7 +165,14 @@ JDK 22 config (`conf/jvm22-*.options`, `_jvm22_*` in `build.xml`) drops producti
 
 ## Baseline results (to be filled in by sub-task 2)
 
-_Empty until a JDK 21 run is available._
+Local targeted runs on JDK 21.0.11-tem (sdkman), after sub-tasks 1 and 3:
+- `ant jar simulator-jars`: OK.
+- PASS: `UFSecurityTest` (2), `UFJavaTest` (20), `UFVerifierTest` (20), `ObjectSizesTest` (4), `TimestampTypeTest`, `SimpleDateTypeTest`, `TimeFctsTest` (15).
+- `UFSecurityTest` also passes on JDK 11 and 17.
+- `ControllerTest` is `@Ignore`d (not informative).
+- `org.apache.cassandra.index.sai.cql.VectorTypeTest`: hit the 8 minute class timeout locally (large parameterized SAI suite, first parameter set `testIndexingMultipleVectorColumns`); not compared with JDK 11/17, so unknown whether JDK-21-specific. Check in CI.
+- Note: tests must be run with the fully qualified class name (`-Dtest.name=org.apache...`). Switching JDK requires `ant realclean`.
+- Full-suite results: pending CI.
 i/junit_helpers.py` for JDK enumerations.
 
 **Relevant Context:** files above; `.build/docker/_set_java.sh:31-65`.
@@ -186,4 +200,11 @@ i/junit_helpers.py` for JDK enumerations.
 
 ## Baseline results (to be filled in by sub-task 2)
 
-_Empty until a JDK 21 run is available._
+Local targeted runs on JDK 21.0.11-tem (sdkman), after sub-tasks 1 and 3:
+- `ant jar simulator-jars`: OK.
+- PASS: `UFSecurityTest` (2), `UFJavaTest` (20), `UFVerifierTest` (20), `ObjectSizesTest` (4), `TimestampTypeTest`, `SimpleDateTypeTest`, `TimeFctsTest` (15).
+- `UFSecurityTest` also passes on JDK 11 and 17.
+- `ControllerTest` is `@Ignore`d (not informative).
+- `org.apache.cassandra.index.sai.cql.VectorTypeTest`: hit the 8 minute class timeout locally (large parameterized SAI suite, first parameter set `testIndexingMultipleVectorColumns`); not compared with JDK 11/17, so unknown whether JDK-21-specific. Check in CI.
+- Note: tests must be run with the fully qualified class name (`-Dtest.name=org.apache...`). Switching JDK requires `ant realclean`.
+- Full-suite results: pending CI.
