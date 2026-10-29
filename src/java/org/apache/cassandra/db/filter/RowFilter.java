@@ -1069,6 +1069,12 @@ public class RowFilter
             return kind() == Kind.USER;
         }
 
+        /** The code of this expression's kind on the wire: below 100 the kinds of Cassandra 3.0, from 100 DS-only ones. */
+        public int kindCode()
+        {
+            return kind().getVal();
+        }
+
         public ColumnMetadata column()
         {
             return column;

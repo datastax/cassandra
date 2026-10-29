@@ -354,6 +354,51 @@ public class Verb
         return handler.get() == ResponseVerbHandler.instance;
     }
 
+    /**
+     * The request verb ids a DSE 6 peer accepts in the pre-4.0 dialect (messaging version 11): the Cassandra 3.0
+     * ordinals that DSE maps to one of its own verbs. Every other id is either a 3.0 verb
+     * DSE dropped (it asserts on 7, 8, 10-13, 17, 21, 25, 26, 30, 32, 36-41) or unknown to it (42 and above closes
+     * the connection), so a message with such a verb must never be sent to such a peer.
+     */
+    private static final int[] PRE40_REQUEST_IDS = { 0, 1, 2, 3, 5, 6, 9, 14, 15, 16, 18, 19, 20, 22, 24, 27, 28, 29, 31, 33, 34, 35 };
+
+    /**
+     * True when a peer speaking the pre-4.0 dialect (DSE 6 compatibility mode) can receive this verb: every response,
+     * and the requests whose id is one of {@link #PRE40_REQUEST_IDS}. A request without a 3.0 id (Paxos v2, repair
+     * sessions, ping, multi-range and other DS-only reads, custom verbs) must never reach such a peer.
+     */
+    public boolean existsInPre40Dialect()
+    {
+        if (this == REQUEST_RSP || this == INTERNAL_RSP || this == FAILURE_RSP || isResponse())
+            return true;
+        return kind != CUSTOM && Arrays.binarySearch(PRE40_REQUEST_IDS, id) >= 0;
+    }
+
+    /**
+     * The verb a peer speaking the pre-4.0 dialect (DSE 6 compatibility mode) sees for this verb.
+     * <p>
+     * Requests keep their id, which for every verb that existed in Cassandra 3.0 is the 3.0 ordinal. Responses
+     * become the generic {@link #REQUEST_RSP} (or {@link #INTERNAL_RSP} for the urgent ones and for
+     * {@link #FAILURE_RSP}, as DSE does for its own failure responses): a pre-4.0 peer routes a
+     * response by message id, not by verb, and this is the mapping HCD 1.2 uses with DSE. A request that does not
+     * {@link #existsInPre40Dialect() exist in the dialect} must never reach such a peer: {@code MessagingService}
+     * refuses it before it is queued, and this throws, before anything is written, for one that gets this far.
+     *
+     * @throws UnsupportedOperationException for a request the pre-4.0 dialect cannot carry
+     */
+    Verb toPre40Verb()
+    {
+        if (this == REQUEST_RSP || this == INTERNAL_RSP)
+            return this;
+        if (this == FAILURE_RSP)
+            return INTERNAL_RSP;
+        if (isResponse())
+            return priority == P0 ? INTERNAL_RSP : REQUEST_RSP;
+        if (!existsInPre40Dialect())
+            throw new UnsupportedOperationException("Verb " + name + " (id " + id + ") does not exist in the pre-4.0 dialect and cannot be sent to a DSE 6 peer");
+        return this;
+    }
+
     @VisibleForTesting
     Supplier<? extends IVerbHandler<?>> unsafeSetHandler(Supplier<? extends IVerbHandler<?>> handler) throws NoSuchFieldException, IllegalAccessException
     {

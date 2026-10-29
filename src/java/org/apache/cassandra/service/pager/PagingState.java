@@ -403,6 +403,9 @@ public class PagingState
             {
                 // We froze the serialization version to 3.0 as we need to make sure this this doesn't change
                 //  It got bumped to 4.0 when 3.0 got dropped, knowing it didn't change
+                // (DSE 6 compatibility mode: the clustering layout is the same at 3.0 and 4.0, Clustering.serializer does not
+                // depend on the version, so this mark is byte for byte the one HCD 1.2 writes at 3.0 and the pre-4.0 dialect
+                // needs no change here)
                 mark = Clustering.serializer.serialize(row.clustering(), MessagingService.VERSION_40, makeClusteringTypes(metadata));
             }
             return new RowMark(mark, protocolVersion);

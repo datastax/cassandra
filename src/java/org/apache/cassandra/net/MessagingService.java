@@ -50,6 +50,7 @@ import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.FutureCombiner;
 
@@ -534,6 +535,12 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
 
     private void doSend(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
     {
+        if (DseCompat.enabled() && !message.verb().existsInPre40Dialect() && versions.get(to) < VERSION_40)
+        {
+            refuseForPre40Peer(message, to);
+            return;
+        }
+
         // expire the callback if the message failed to enqueue (failed to establish a connection or exceeded queue capacity)
         while (true)
         {
@@ -552,6 +559,22 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
                 channelManagers.remove(to, connections);
             }
         }
+    }
+
+    /**
+     * DSE 6 compatibility mode: a request whose verb does not exist in the pre-4.0 dialect (repair, Paxos v2, ping,
+     * multi-range reads, custom verbs...) is never queued for a peer speaking it, which would fail on the unknown verb
+     * id. The refusal is counted in {@code nodetool compatstatus} and the callback, if any, fails at once
+     * instead of timing out. A message queued before the peer's version was known is refused when it is serialized
+     * (see {@code OutboundConnection}).
+     */
+    private void refuseForPre40Peer(Message<?> message, InetAddressAndPort to)
+    {
+        DseCompatRefusals.refused(DseCompat.refusedVerb(message.verb()));
+        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, MINUTES,
+                         "DSE 6 compatibility mode: not sending {} to {}: the verb does not exist in the pre-4.0 dialect that peer speaks",
+                         message.verb(), to);
+        callbacks.onRefused(message, to);
     }
 
     void markExpiredCallback(InetAddressAndPort addr)

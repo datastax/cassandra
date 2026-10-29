@@ -29,6 +29,7 @@ import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
@@ -120,6 +121,18 @@ public enum RequestFailureReason
         return UNKNOWN;
     }
 
+    /**
+     * The only two codes the pre-4.0 dialect knows: Cassandra 3.0 defined {@link #UNKNOWN} and
+     * {@link #READ_TOO_MANY_TOMBSTONES}, and DSE 6 sends the failure reason to such a peer as a 2-byte code.
+     * Any other reason is sent as {@link #UNKNOWN} in that dialect.
+     */
+    private static final int MAX_PRE40_CODE = READ_TOO_MANY_TOMBSTONES.code;
+
+    private static int pre40Code(RequestFailureReason reason)
+    {
+        return reason.code <= MAX_PRE40_CODE ? reason.code : UNKNOWN.code;
+    }
+
     public static final class Serializer implements IVersionedSerializer<RequestFailureReason>
     {
         private Serializer()
@@ -128,20 +141,26 @@ public enum RequestFailureReason
 
         public void serialize(RequestFailureReason reason, DataOutputPlus out, int version) throws IOException
         {
-            assert version >= VERSION_40;
-            out.writeUnsignedVInt32(reason.code);
+            boolean pre40 = DseCompat.isPre40Layout(version);
+            assert pre40 || version >= VERSION_40;
+            if (pre40)
+                out.writeShort(pre40Code(reason));
+            else
+                out.writeUnsignedVInt32(reason.code);
         }
 
         public RequestFailureReason deserialize(DataInputPlus in, int version) throws IOException
         {
-            assert version >= VERSION_40;
-            return fromCode(in.readUnsignedVInt32());
+            boolean pre40 = DseCompat.isPre40Layout(version);
+            assert pre40 || version >= VERSION_40;
+            return fromCode(pre40 ? in.readUnsignedShort() : in.readUnsignedVInt32());
         }
 
         public long serializedSize(RequestFailureReason reason, int version)
         {
-            assert version >= VERSION_40;
-            return VIntCoding.computeVIntSize(reason.code);
+            boolean pre40 = DseCompat.isPre40Layout(version);
+            assert pre40 || version >= VERSION_40;
+            return pre40 ? 2 : VIntCoding.computeVIntSize(reason.code);
         }
     }
 }

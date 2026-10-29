@@ -29,7 +29,9 @@ import org.junit.Test;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.Redaction;
@@ -490,6 +492,124 @@ public class ColumnFilterTest
             assertCellFetchedQueried(false, false, filter, v2, path0, path1, path2, path3, path4);
             assertCellFetchedQueried(true, true, filter, s2, path1);
             assertCellFetchedQueried(false, false, filter, s2, path0, path2, path3, path4);
+        }
+    }
+
+    /**
+     * The pre-4.0 layouts of the DSE 6 compatibility mode. The header has no FETCH_ALL_STATICS bit (0x08), which 4.0
+     * added: in those dialects fetching all regular columns fetches all static columns too, so such a filter is read back
+     * as ALL_COLUMNS. At version 10 (Cassandra 3.0.0 to 3.0.13) the fetched columns are not sent either: the receiver
+     * fetches all of the table's.
+     */
+    @Test
+    public void pre40Layouts() throws IOException
+    {
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            checkPre40Layouts();
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+    }
+
+    /**
+     * With the mode off versions 10 (the DSE to CC migration path) and 11 keep the layout they had before the mode
+     * existed: the 4.0 one, FETCH_ALL_STATICS bit and fetched columns included.
+     */
+    @Test
+    public void pre40LayoutsAreUnchangedWithTheModeOff() throws IOException
+    {
+        assertThat(DatabaseDescriptor.isDse6CompatibilityMode()).isFalse();
+        ColumnFilter wildcard = ColumnFilter.all(metadata);
+        ColumnFilter allStatics = ColumnFilter.allRegularColumnsBuilder(metadata, true).add(v1).build();
+        ColumnFilter queriedStatics = ColumnFilter.allRegularColumnsBuilder(metadata, false).add(v1).build();
+        for (int version : new int[]{ MessagingService.VERSION_30, MessagingService.VERSION_3014 })
+        {
+            for (ColumnFilter filter : new ColumnFilter[]{ wildcard, allStatics, queriedStatics })
+            {
+                assertThat(serialize(filter, version)).isEqualTo(serialize(filter, MessagingService.VERSION_40));
+                assertThat(deserialize(serialize(filter, version), version)).isEqualTo(filter);
+            }
+        }
+        // the FETCH_ALL_STATICS bit (0x08) stays on the wire at 11
+        assertThat(serialize(wildcard, MessagingService.VERSION_3014)[0]).isEqualTo((byte) 0x09);
+    }
+
+    private void checkPre40Layouts() throws IOException
+    {
+        ColumnFilter wildcard = ColumnFilter.all(metadata);
+        ColumnFilter allStatics = ColumnFilter.allRegularColumnsBuilder(metadata, true).add(v1).build();
+        ColumnFilter queriedStatics = ColumnFilter.allRegularColumnsBuilder(metadata, false).add(v1).build();
+        RegularAndStaticColumns queried = RegularAndStaticColumns.of(v1);
+
+        // wildcard: header only at 10, header and fetched columns from 11, FETCH_ALL_STATICS from 4.0
+        assertThat(serialize(wildcard, MessagingService.VERSION_30)).isEqualTo(new byte[]{ 0x01 });
+        assertThat(serialize(wildcard, MessagingService.VERSION_3014)).isEqualTo(bytes(0x01, metadata.regularAndStaticColumns()));
+        assertThat(serialize(wildcard, MessagingService.VERSION_40)).isEqualTo(bytes(0x09, metadata.regularAndStaticColumns()));
+
+        // a selection that fetches every column: FETCH_ALL_REGULARS and HAS_QUERIED, never FETCH_ALL_STATICS below 4.0
+        assertThat(serialize(allStatics, MessagingService.VERSION_30)).isEqualTo(bytes(0x03, queried));
+        assertThat(serialize(allStatics, MessagingService.VERSION_3014)).isEqualTo(bytes(0x03, allStatics.fetchedColumns(), queried));
+        assertThat(serialize(allStatics, MessagingService.VERSION_40)).isEqualTo(bytes(0x0B, allStatics.fetchedColumns(), queried));
+        assertThat(serialize(queriedStatics, MessagingService.VERSION_3014)).isEqualTo(bytes(0x03, queriedStatics.fetchedColumns(), queried));
+
+        for (int version : new int[]{ MessagingService.VERSION_30, MessagingService.VERSION_3014 })
+        {
+            // whichever statics the sender fetched, a pre-4.0 filter that fetches all regulars fetches all statics too
+            for (ColumnFilter filter : new ColumnFilter[]{ allStatics, queriedStatics })
+            {
+                ColumnFilter received = deserialize(serialize(filter, version), version);
+                assertThat(received.fetchesAllColumns(true)).isTrue();
+                assertThat(received.fetchesAllColumns(false)).isTrue();
+                assertThat(received.queriedColumns()).isEqualTo(queried);
+                assertFetchedQueried(true, false, received, s1, s2, v2, escaped);
+                assertFetchedQueried(true, true, received, v1);
+                // at 10 the receiver fetches every column of the table, at 11 the sender lists the columns it fetches
+                assertThat(received.fetchedColumns()).isEqualTo(version == MessagingService.VERSION_30 ? metadata.regularAndStaticColumns()
+                                                                                                       : filter.fetchedColumns());
+            }
+            assertThat(deserialize(serialize(wildcard, version), version)).isEqualTo(wildcard);
+        }
+        // from 4.0 the sender's choice is kept
+        assertThat(deserialize(serialize(queriedStatics, MessagingService.VERSION_40), MessagingService.VERSION_40).fetchesAllColumns(true)).isFalse();
+    }
+
+    private static byte[] bytes(int header, RegularAndStaticColumns... columns) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            out.writeByte(header);
+            for (RegularAndStaticColumns c : columns)
+            {
+                Columns.serializer.serialize(c.statics, out);
+                Columns.serializer.serialize(c.regulars, out);
+            }
+            return out.toByteArray();
+        }
+    }
+
+    private static byte[] serialize(ColumnFilter filter, int version) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            serializer.serialize(filter, out, version);
+            byte[] bytes = out.toByteArray();
+            assertEquals(serializer.serializedSize(filter, version), bytes.length);
+            return bytes;
+        }
+    }
+
+    private ColumnFilter deserialize(byte[] bytes, int version) throws IOException
+    {
+        try (DataInputBuffer in = new DataInputBuffer(bytes))
+        {
+            ColumnFilter filter = serializer.deserialize(in, version, metadata);
+            assertEquals(0, in.available());
+            return filter;
         }
     }
 
