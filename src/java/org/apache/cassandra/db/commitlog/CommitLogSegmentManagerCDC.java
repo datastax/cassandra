@@ -257,7 +257,19 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     void handleReplayedSegment(final File file, boolean hasInvalidMutations, boolean hasFailedMutations)
     {
         super.handleReplayedSegment(file, hasInvalidMutations, hasFailedMutations);
+        deleteUntrackedCdcLink(file);
+    }
 
+    /** The replayed segment was moved aside rather than handled: its CDC hard link is cleaned up all the same. */
+    @Override
+    void handleMovedAsideReplayedSegment(final File file)
+    {
+        super.handleMovedAsideReplayedSegment(file);
+        deleteUntrackedCdcLink(file);
+    }
+
+    private static void deleteUntrackedCdcLink(File file)
+    {
         // delete untracked cdc segment hard link files if their index files do not exist
         File cdcFile = new File(DatabaseDescriptor.getCDCLogLocation(), file.name());
         File cdcIndexFile = new File(DatabaseDescriptor.getCDCLogLocation(), CommitLogDescriptor.fromFileName(file.name()).cdcIndexFileName());

@@ -502,6 +502,16 @@ public abstract class AbstractCommitLogSegmentManager
     }
 
     /**
+     * Called instead of {@link #handleReplayedSegment(File, boolean, boolean)} for a replayed DSE 6 segment that
+     * {@link CommitLog} moved aside ({@code internode_compatibility_mode: DSE_6} only); {@code file} names the segment
+     * before the rename. Nothing to do here; the segment handler ({@link #commitLogSegmentHandler}, the default one or
+     * one set by {@link CommitLog#setCommitLogSegmentHandler}) is not called for such a segment.
+     */
+    void handleMovedAsideReplayedSegment(final File file)
+    {
+    }
+
+    /**
      * Adjust the tracked on-disk size. Called by individual segments to reflect writes, allocations and discards.
      * @param addedSize
      */

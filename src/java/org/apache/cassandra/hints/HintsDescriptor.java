@@ -85,8 +85,11 @@ final class HintsDescriptor
     static final String COMPRESSION = "compression";
     static final String ENCRYPTION = "encryption";
 
+    /** The host id that starts the name of a hints file, of this software and of DataStax Enterprise 6 alike. */
+    static final String HOST_ID_REGEX = "[a-fA-F0-9]{8}\\-[a-fA-F0-9]{4}\\-[a-fA-F0-9]{4}\\-[a-fA-F0-9]{4}\\-[a-fA-F0-9]{12}";
+
     static final Pattern pattern =
-        Pattern.compile("^[a-fA-F0-9]{8}\\-[a-fA-F0-9]{4}\\-[a-fA-F0-9]{4}\\-[a-fA-F0-9]{4}\\-[a-fA-F0-9]{12}\\-(\\d+)\\-(\\d+)\\.hints$");
+        Pattern.compile("^" + HOST_ID_REGEX + "\\-(\\d+)\\-(\\d+)\\.hints$");
 
     final UUID hostId;
     final int version;
