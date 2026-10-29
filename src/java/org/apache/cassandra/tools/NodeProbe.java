@@ -1605,6 +1605,11 @@ public class NodeProbe implements AutoCloseable
         return msProxy.getEndpointMessagingVersions();
     }
 
+    public Map<String, String> getDsePeers()
+    {
+        return msProxy.getDsePeers();
+    }
+
     public Map<String, Long> getDseCompatRefusals()
     {
         return msProxy.getDseCompatRefusals();

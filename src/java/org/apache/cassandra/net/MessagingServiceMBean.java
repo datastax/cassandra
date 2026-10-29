@@ -163,6 +163,15 @@ public interface MessagingServiceMBean
     /** The raw messaging version recorded for every known peer, keyed by address with port. */
     public Map<String, Integer> getEndpointMessagingVersions();
 
+    /**
+     * In DSE 6 compatibility mode, the peers whose gossip {@code NET_VERSION} is a DSE messaging version (256 or more),
+     * that is the DSE 6 nodes of the cluster, and the peers identified as DSE nodes by a handshake, keyed by address
+     * with port; the value names their release version, the gossiped {@code NET_VERSION}, when they gossip one, their
+     * DSE version, and whether a handshake identified them as DSE nodes. This node and the nodes that left the ring
+     * (decommissioned or removed, {@code DsePeers.hasLeftTheRing}) are not listed. Empty with the mode off.
+     */
+    public Map<String, String> getDsePeers();
+
     /** The requests refused because of the DSE 6 compatibility mode, by reason (see {@code DseCompatRefusals}). */
     public Map<String, Long> getDseCompatRefusals();
 
