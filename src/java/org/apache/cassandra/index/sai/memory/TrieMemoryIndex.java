@@ -896,10 +896,7 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         Trie<PrimaryKeys> subtrie = queryLower == null && queryUpper == null
                                     ? data
-                                    : data.slice(queryLower == null ? ByteComparable.EMPTY : queryLower,
-                                                 queryLower != null && !lowerExclusive,
-                                                 queryUpper,
-                                                 queryUpper != null && !upperExclusive);
+                                    : slice(queryLower, !lowerExclusive, queryUpper, !upperExclusive);
         long countedRows = 0;
         int countedTerms = 0;
         boolean complete = true;
@@ -1016,31 +1013,37 @@ public class TrieMemoryIndex extends MemoryIndex
         if (expression.getOp() == Expression.Op.AUTOMATON)
             return prefixSubtrie(expression.getAutomatonCommonPrefix());
 
-        ByteComparable lowerBound, upperBound;
-        boolean lowerInclusive, upperInclusive;
-        if (expression.lower != null)
+        return slice(expression.lower == null ? null : expression.getEncodedLowerBoundByteComparable(version),
+                     expression.lower != null && expression.lower.inclusive,
+                     expression.upper == null ? null : expression.getEncodedUpperBoundByteComparable(version),
+                     expression.upper != null && expression.upper.inclusive);
+    }
+
+    /**
+     * The terms of the given range, a {@code null} bound being unbounded.
+     * <p>
+     * The trie slices require ordered bounds, not both exclusive if equal. Any other range (e.g. x > 5 AND x < 3, or
+     * x > 5 AND x < 5) is empty: the bounds of a query are not checked when it is prepared, as they may be bind
+     * markers.
+     */
+    private Trie<PrimaryKeys> slice(@Nullable ByteComparable lower, boolean lowerInclusive,
+                                    @Nullable ByteComparable upper, boolean upperInclusive)
+    {
+        if (lower == null)
         {
-            lowerBound = expression.getEncodedLowerBoundByteComparable(version);
-            lowerInclusive = expression.lower.inclusive;
-        }
-        else
-        {
-            lowerBound = ByteComparable.EMPTY;
+            lower = ByteComparable.EMPTY;
             lowerInclusive = false;
         }
 
-        if (expression.upper != null)
+        if (upper != null)
         {
-            upperBound = expression.getEncodedUpperBoundByteComparable(version);
-            upperInclusive = expression.upper.inclusive;
-        }
-        else
-        {
-            upperBound = null;
-            upperInclusive = false;
+            ByteComparable.Version byteComparableVersion = TypeUtil.byteComparableVersionForTermsData(indexContext.version());
+            int cmp = ByteComparable.compare(lower, upper, byteComparableVersion);
+            if (cmp > 0 || cmp == 0 && !(lowerInclusive && upperInclusive))
+                return Trie.empty(byteComparableVersion);
         }
 
-        return data.slice(lowerBound, lowerInclusive, upperBound, upperInclusive);
+        return data.slice(lower, lowerInclusive, upper, upperInclusive);
     }
 
     @Override
