@@ -31,6 +31,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.security.SSLFactory;
+import org.apache.cassandra.service.Dse6SaiVersionPin;
 import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.utils.MBeanWrapper;
 
@@ -327,6 +328,12 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     public Map<String, Long> getDseCompatRefusals()
     {
         return DseCompatRefusals.snapshot();
+    }
+
+    @Override
+    public String getDseSaiVersionPin()
+    {
+        return DatabaseDescriptor.isDse6CompatibilityMode() ? Dse6SaiVersionPin.status() : null;
     }
 
     @Override

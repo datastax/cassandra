@@ -20,6 +20,7 @@ import java.io.PrintStream;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.function.Supplier;
 import javax.management.AttributeNotFoundException;
@@ -34,10 +35,11 @@ import org.apache.cassandra.tools.NodeTool;
 
 /**
  * Shows the compatibility modes the node runs with, the sstable format it writes, what it knows about its peers'
- * messaging versions, the DSE 6 peers it has on record and the requests it refused because of the upgrade: the
- * operator's view during an in-place upgrade from DataStax Enterprise 6.
+ * messaging versions, the DSE 6 peers it has on record, the SAI on-disk version it pins for a rollback to DSE and
+ * the requests it refused because of the upgrade: the operator's view during an in-place upgrade from DataStax
+ * Enterprise 6.
  */
-@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE 6 peers on record and the requests refused during the upgrade")
+@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE 6 peers on record, the SAI on-disk version pinned and the requests refused during the upgrade")
 public class CompatStatus extends NodeTool.NodeToolCmd
 {
     private static final String DSE_6 = InternodeCompatibilityMode.DSE_6.name();
@@ -92,6 +94,12 @@ public class CompatStatus extends NodeTool.NodeToolCmd
         else
             out.printf("DSE 6 peers on record        : %d%s%n", onRecord.size(), onRecord.isEmpty() ? "" : " " + onRecord);
 
+        // the SAI on-disk version a node rolled back to DSE reads, pinned by a startup check in DSE_6 mode
+        if (dse6)
+            printDseSaiVersionPin(probe, out);
+        else
+            out.printf("SAI version pinned           : not checked%s%n", notInTheMode);
+
         printDseCompatRefusals(probe, out);
     }
 
@@ -116,6 +124,16 @@ public class CompatStatus extends NodeTool.NodeToolCmd
     private static boolean isDseGossipValue(int rawVersion)
     {
         return DseCompat.messagingVersionFromGossip(rawVersion) != rawVersion;
+    }
+
+    private static void printDseSaiVersionPin(NodeProbe probe, PrintStream out)
+    {
+        // the server returns null before the check: an Optional tells it from a server without the attribute
+        Optional<String> pin = ifReported(() -> Optional.ofNullable(probe.getDseSaiVersionPin()));
+        if (pin == null)
+            out.printf("SAI version pinned           : unknown (this node does not report it)%n");
+        else
+            out.printf("SAI version pinned           : %s%n", pin.orElse("unknown (not checked yet)"));
     }
 
     /**

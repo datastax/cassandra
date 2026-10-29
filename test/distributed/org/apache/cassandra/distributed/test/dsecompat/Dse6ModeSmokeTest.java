@@ -34,8 +34,11 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.service.Dse6SaiVersionPin;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CURRENT_VERSION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -65,7 +68,9 @@ public class Dse6ModeSmokeTest extends TestBaseImpl
     @Test
     public void formerDseNodeWritesBbSstablesWithNumericGenerations() throws Throwable
     {
-        try (WithProperties properties = new WithProperties().clear(TRIE_INDEX_FORMAT_VERSION);
+        // the SAI on-disk version must be pinned in DSE_6 mode; this node stores no DSE release, so the pin is taken as set,
+        // for the whole life of the cluster
+        try (WithProperties properties = new WithProperties().clear(TRIE_INDEX_FORMAT_VERSION).set(SAI_CURRENT_VERSION, "aa");
              Cluster cluster = Cluster.build(1)
                                       .withDynamicPortAllocation(true)
                                       .withConfig(c -> c.set("storage_compatibility_mode", "HCD_1")
@@ -101,6 +106,46 @@ public class Dse6ModeSmokeTest extends TestBaseImpl
             assertThat(cluster.get(1).logs().grep("Running in internode_compatibility_mode DSE_6: the node writes trie bb sstables " +
                                                   "with numeric generations and requires paxos_variant v1, until the flag is " +
                                                   "dropped").getResult()).hasSize(1);
+
+            assertSaiVersionPinned(cluster, out);
+        }
+    }
+
+    /** The SAI on-disk version pin of a node in DSE_6 mode: shown by compatstatus, logged, and enforced by the startup check. */
+    private static void assertSaiVersionPinned(Cluster cluster, String compatStatus)
+    {
+        assertThat(compatStatus).contains("SAI version pinned           : aa, set explicitly; the DSE release the cluster ran cannot be determined: " +
+                                          "no DSE 6 release (4.0.0.<build>) is stored for this node or its saved peers\n");
+        assertThat(cluster.get(1).logs().grep("DSE 6 compatibility mode: SAI on-disk version pinned to aa \\(cassandra.sai.latest.version\\), " +
+                                              "set explicitly").getResult()).hasSize(1);
+        // without the pin the same check refuses the start; it is run inside the instance, since a refused start of an
+        // in-JVM instance exits the test JVM
+        try (WithProperties unpinned = new WithProperties().clear(SAI_CURRENT_VERSION))
+        {
+            assertThat(cluster.get(1).callOnInstance(Dse6ModeSmokeTest::saiVersionPinRefusal))
+            .isEqualTo("internode_compatibility_mode DSE_6 refused: the SAI on-disk version is not pinned (cassandra.sai.latest.version " +
+                       "is not set, so this node writes version " + SAI_CURRENT_VERSION.getDefaultValue() + ") and the DSE release " +
+                       "the cluster ran cannot be determined (no DSE 6 release (4.0.0.<build>) is stored for this node or its saved " +
+                       "peers). Add -Dcassandra.sai.latest.version=aa " +
+                       "for DSE 6.8 or -Dcassandra.sai.latest.version=ca for DSE 6.9 to conf/jvm-server.options (or JVM_EXTRA_OPTS), " +
+                       "matching the DSE release of the cluster, and restart; a node rolled back to DSE must read the SAI index files " +
+                       "this node writes, and DSE ignores the index files of a version it does not know and rebuilds those indexes " +
+                       "at startup; -Dcassandra.internode_compatibility_mode.ignore_sai_version_pin=true starts the node despite " +
+                       "this check (with a warning), for a node that will not be rolled back to DSE");
+        }
+    }
+
+    /** The startup check of the SAI on-disk version pin, run inside an instance: its refusal, or null when it accepts the start. */
+    private static String saiVersionPinRefusal()
+    {
+        try
+        {
+            Dse6SaiVersionPin.verifyAtStartup();
+            return null;
+        }
+        catch (StartupException e)
+        {
+            return e.getMessage();
         }
     }
 
