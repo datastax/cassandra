@@ -2132,7 +2132,8 @@ public class StorageProxy implements StorageProxyMBean
             @Override
             public String description()
             {
-                return "";
+                // Mutation.toString() is only evaluated when the description is explicitly checked
+                return mutation.toString();
             }
 
             @Override
