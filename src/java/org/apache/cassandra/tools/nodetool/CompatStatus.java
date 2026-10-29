@@ -30,17 +30,18 @@ import io.airlift.airline.Command;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.Dse6AccessControlCheck;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool;
 
 /**
  * Shows the compatibility modes the node runs with, the sstable format it writes, what it knows about its peers'
  * messaging versions, the DSE peers it sees in gossip or has identified by a handshake, the DSE 6 peers it has on
- * record, the SAI on-disk version it pins for a rollback to DSE, the DataStax Enterprise grants of UPDATE or TRUNCATE
- * alone it drops and the requests it refused because of the upgrade: the operator's view during an in-place upgrade
- * from DataStax Enterprise 6.
+ * record, the SAI on-disk version it pins for a rollback to DSE, the DSE access controls it does not enforce, the
+ * DataStax Enterprise grants of UPDATE or TRUNCATE alone it drops and the requests it refused because of the upgrade:
+ * the operator's view during an in-place upgrade from DataStax Enterprise 6.
  */
-@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE peers seen in gossip or identified by a handshake, the DSE 6 peers on record, the SAI on-disk version pinned, the DSE grants of UPDATE or TRUNCATE alone that are dropped and the requests refused during the upgrade")
+@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE peers seen in gossip or identified by a handshake, the DSE 6 peers on record, the SAI on-disk version pinned, the DSE access controls not enforced, the DSE grants of UPDATE or TRUNCATE alone that are dropped and the requests refused during the upgrade")
 public class CompatStatus extends NodeTool.NodeToolCmd
 {
     private static final String DSE_6 = InternodeCompatibilityMode.DSE_6.name();
@@ -85,8 +86,8 @@ public class CompatStatus extends NodeTool.NodeToolCmd
             out.printf("  %-45s %d%s%n", e.getKey(), version, note);
         }
 
-        // the DSE peers and their record exist in DSE_6 mode only; the record's entries that are not addresses with port
-        // are counted and listed too
+        // the DSE peers, their record and the access-control check exist in DSE_6 mode only; the record's entries that
+        // are not addresses with port are counted and listed too
         boolean dse6 = DSE_6.equals(mode);
         String notInTheMode = " (internode_compatibility_mode " + mode + ')';
         if (dse6)
@@ -108,7 +109,12 @@ public class CompatStatus extends NodeTool.NodeToolCmd
         else
             out.printf("SAI version pinned           : not checked%s%n", notInTheMode);
 
-        // what every read of role_permissions finds dropped, in every mode
+        // what a DSE node restricts but this node does not enforce (the last check in DSE_6 mode), and how it was found
+        if (dse6)
+            printDseAccessControlCheck(probe, out);
+        else
+            out.printf("DSE access controls ignored  : not checked%s%n", notInTheMode);
+        // what the access-control check (and every read of role_permissions) finds dropped, in every mode
         printDseLoneWriteGrants(probe, out);
         printDseCompatRefusals(probe, out);
     }
@@ -144,6 +150,29 @@ public class CompatStatus extends NodeTool.NodeToolCmd
             out.printf("SAI version pinned           : unknown (this node does not report it)%n");
         else
             out.printf("SAI version pinned           : %s%n", pin.orElse("unknown (not checked yet)"));
+    }
+
+    private static void printDseAccessControlCheck(NodeProbe probe, PrintStream out)
+    {
+        Map<String, List<String>> check = ifReported(probe::getDseAccessControlCheck);
+        if (check == null)
+        {
+            out.printf("DSE access controls ignored  : %s%n", NOT_REPORTED);
+            return;
+        }
+        List<String> unenforced = check.isEmpty() ? List.of() : check.values().iterator().next();
+        String source = check.isEmpty() ? null : check.keySet().iterator().next();
+        if (source == null)
+            out.printf("DSE access controls ignored  : unknown (not checked yet)%n");
+        else if (source.startsWith(Dse6AccessControlCheck.NOT_CHECKED))
+            out.printf("DSE access controls ignored  : unknown (%s)%n", source);
+        else if (source.startsWith(Dse6AccessControlCheck.LOCAL_SOURCE))
+            // this node's replica only: the other replicas may hold more
+            out.printf("DSE access controls ignored  : at least %d (found by %s)%n", unenforced.size(), source);
+        else
+            out.printf("DSE access controls ignored  : %d (found by %s)%n", unenforced.size(), source);
+        for (String finding : unenforced)
+            out.printf("  %s%n", finding);
     }
 
     @VisibleForTesting

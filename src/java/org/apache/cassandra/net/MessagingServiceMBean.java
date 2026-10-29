@@ -183,6 +183,13 @@ public interface MessagingServiceMBean
     public List<String> getDsePeersOnRecord();
 
     /**
+     * The last check of the DSE access controls (RESTRICT, row-level grants, tables restricted to rows) this node does
+     * not enforce, in {@code DSE_6} mode: one entry, from how the check was made ({@code a LOCAL_QUORUM read}, ..., or
+     * {@code not checked: <reason>}) to what it found; empty before the first check and outside {@code DSE_6}.
+     */
+    public Map<String, List<String>> getDseAccessControlCheck();
+
+    /**
      * In {@code DSE_6} mode, the SAI on-disk version the startup check found pinned and what it was derived from, or
      * why it was not enforced ({@code Dse6SaiVersionPin}); null outside {@code DSE_6} and before the check.
      */
@@ -197,8 +204,9 @@ public interface MessagingServiceMBean
     public List<String> getDseLoneWriteGrants();
 
     /**
-     * How the list of {@link #getDseLoneWriteGrants()} was made: the rows read since startup, or the last scan of
-     * {@code role_permissions} and the rows read since; null when another authorizer is configured.
+     * How the list of {@link #getDseLoneWriteGrants()} was made: in {@code DSE_6} mode the last scan of the access-control
+     * check (at startup, then periodically), otherwise only the rows read since startup; null when another authorizer
+     * is configured.
      */
     public String getDseLoneWriteGrantsSource();
 
