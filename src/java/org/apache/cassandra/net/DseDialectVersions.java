@@ -45,12 +45,15 @@ import static org.apache.cassandra.net.MessagingService.VERSION_40;
  * A peer whose version this node does not know gets the 4.0-style first handshake message. DSE answers it with its own
  * version and then reads the rest of that 19-byte message as a third handshake message, which fails with an error and a
  * stack trace in DSE's log before this node reconnects at 11 (observed with DSE 6.8.65). So the peers this node can
- * tell are DSE 6 nodes before any connection are assumed at 11 when the messaging service starts listening, and the
+ * identify as DSE 6 nodes before any connection are assumed at 11 when the messaging service starts listening, and the
  * first message they get is the 8-byte pre-4.0 one at 11, which DSE 6.9.26 echoes and DSE 6.8.65 answers with its own
- * version (1024), as observed with both.
+ * version (1024), as observed with both. They are also presumed to be DSE nodes ({@link DsePeers#presume}): DSE
+ * 6.9.26's echo does not identify a DSE node, and a DSE node fails on this software's states at its port ordinals, so
+ * the gossip acks sent to them at the dialect carry no endpoint state until their gossip, or DSE 6.8.65's answer,
+ * settles what they are.
  * <p>
- * Rule: the {@code release_version} this node stores for the peer ({@code system.peers}, from gossip or imported from
- * DSE's {@code nodes/peers}) is a DSE 6 one, {@code 4.0.0.<build>} ({@link DseCompat#isDse6ReleaseVersion}).
+ * Identification rule: the {@code release_version} this node stores for the peer ({@code system.peers}, from gossip or
+ * imported from DSE's {@code nodes/peers}) is a DSE 6 one, {@code 4.0.0.<build>} ({@link DseCompat#isDse6ReleaseVersion}).
  * Nothing else is used: at that time gossip has no state for any peer, and the record of pre-4.0 peers persisted for the
  * startup checks ({@code DsePeersRecord}) does not tell a DSE node from HCD 1.2 at the dialect. A peer this node knows a
  * version of already is left alone. The dialect is assumed, not seen ({@link EndpointMessagingVersions#assume}): it does
@@ -59,16 +62,15 @@ import static org.apache.cassandra.net.MessagingService.VERSION_40;
  * <p>
  * Failure mode: the stored release is stale, the peer was upgraded to this software while this node was down. It is then
  * connected to at 11 and, since this software answers any pre-4.0 first message with 11, the two nodes may speak the
- * dialect for a moment. That never lasts: the upgraded peer gossips its own {@code NET_VERSION}, which replaces the 11
- * ({@code StorageService.updateNetVersion}), and connects to this node with the 4.0-style handshake; when such a
- * handshake raises this node's version of the peer from the dialect to 4.0 or later, its connections to the peer are
- * closed ({@link #versionRaised}); a connection that still has the dialect for a peer the node knows at 4.0 or later
- * makes the 4.0-style handshake ({@link #connectionVersion}), and one that completes at the dialect for such a peer is
- * dropped and made again ({@link #supersededDialect}). A pre-4.0 handshake from a peer whose gossip state shows it is a
- * node of this software does not lower the version this node has for it ({@link #recordHandshakeVersion}). Conversely,
- * a peer that answers the 4.0-style first message in the dialect (a node rolled back to DSE, whose stale gossip state
- * still shows 12 or more) is recorded at the dialect ({@link #answeredInTheDialect}), so that this node does not probe
- * it again.
+ * dialect for a moment. That never lasts: the upgraded peer gossips {@code NET_VERSION} 12, which replaces the 11
+ * ({@code StorageService.updateNetVersion}) and clears the presumption; when this node's version of a peer rises from
+ * the dialect to 4.0 or later its connections to the peer are closed ({@link #versionRaised}); a connection that still
+ * has the dialect for a peer the node knows at 4.0 or later makes the 4.0-style handshake ({@link #connectionVersion}),
+ * and one that completes at the dialect for such a peer is dropped and made again ({@link #supersededDialect}). A pre-4.0
+ * handshake from a peer whose gossip state shows it is a node of this software does not lower the version this node
+ * has for it ({@link #recordHandshakeVersion}). Conversely, a peer that answers the 4.0-style first message in the dialect
+ * (a node rolled back to DSE, whose stale gossip state still shows 12 or more) is recorded at the dialect
+ * ({@link #answeredInTheDialect}), so that this node does not probe it again.
  */
 public final class DseDialectVersions
 {
@@ -81,7 +83,7 @@ public final class DseDialectVersions
 
     /**
      * Assumes the dialect for every saved peer whose stored release is a DSE 6 one, unless {@code versions} knows it
-     * already; called when the node is about to listen, before any connection to a
+     * already, and presumes it to be a DSE node; called when the node is about to listen, before any connection to a
      * peer. The saved peers are read first: a failure to read them is logged and every peer is left unknown (each then
      * gets the 4.0-style probe, as without this seeding).
      */
@@ -116,8 +118,10 @@ public final class DseDialectVersions
             if (address == null || !DseCompat.isDse6ReleaseVersion(peer.getReleaseVersion()) || versions.knows(address))
                 return;
             // assumed, not seen: the record of DSE peers the startup checks read is left alone
-            if (versions.assume(address, DseCompat.DSE_DIALECT))
-                seeded.add(address);
+            if (!versions.assume(address, DseCompat.DSE_DIALECT))
+                return;
+            DsePeers.presume(address, "stored release " + peer.getReleaseVersion());
+            seeded.add(address);
         });
         if (!seeded.isEmpty())
             logger.info("DSE 6 compatibility mode: {} stored with a DSE 6 release (4.0.0.<build>); connecting to them with the pre-4.0 handshake at version {}",
@@ -165,7 +169,7 @@ public final class DseDialectVersions
     }
 
     /** True when {@code versions} knows {@code peer} at the pre-4.0 dialect (or at a DSE version, which maps to it). */
-    static boolean isPre40(EndpointMessagingVersions versions, InetAddressAndPort peer)
+    public static boolean isPre40(EndpointMessagingVersions versions, InetAddressAndPort peer)
     {
         Integer raw = rawVersion(versions, peer);
         return raw != null && DseCompat.messagingVersionFromGossip(raw) < VERSION_40;
@@ -190,13 +194,14 @@ public final class DseDialectVersions
      * software: it only connected at the dialect because it had a stale version of this node, and recording the dialect
      * here would make this node's own connections to it fall back too. A first message only DSE sends (DSE-flagged, or
      * pre-4.0-shaped requesting 12) is recorded at the dialect whatever gossip says: the peer was rolled back to DSE.
-     * DSE 6.9.26 sends the third message on the same socket after such a first message, so a node rolled back to it
-     * can take this path (not checked in a rollback); DSE 6.8.65 sends none, it closes the socket and reconnects with a
+     * DSE 6.9.26 sends the third message on the same socket after such a first message, so a node rolled back to it can
+     * take this path (not checked in a rollback); DSE 6.8.65 sends none, it closes the socket and reconnects with a
      * plain first message at 11. For a node rolled back to DSE 6.8.65 whose stale gossip state still shows 12 or more,
      * the plain reconnect at 11 leaves this node's version of it unchanged, until the node's new gossip state, with its
-     * DSE version, replaces it ({@code StorageService.updateNetVersion}).
+     * DSE version, records the dialect ({@code StorageService.updateNetVersion}).
      * Then calls {@link #versionRaised} as needed. The check of the gossip state and the update are made under the lock
-     * of the node's versions.
+     * the gossip stage takes to record a gossiped version ({@code StorageService.updateNetVersion}): the state is stored
+     * before it is recorded, so either this check sees it or the gossip stage finds the dialect and raises it.
      *
      * @param requestedVersion the version the peer's first message requested
      */
@@ -243,7 +248,7 @@ public final class DseDialectVersions
      * per wrong identification. A connection being made at that time is handled when it completes
      * ({@link #supersededDialect}).
      */
-    static void versionRaised(InetAddressAndPort peer, boolean wasPre40, int version)
+    public static void versionRaised(InetAddressAndPort peer, boolean wasPre40, int version)
     {
         if (!wasPre40 || version < VERSION_40)
             return;

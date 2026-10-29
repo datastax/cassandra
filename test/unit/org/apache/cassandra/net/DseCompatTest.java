@@ -185,10 +185,10 @@ public class DseCompatTest
             {
                 assertThatThrownBy(DseCompat::gossipedDseVersion).as(refused)
                                                                  .isInstanceOf(ConfigurationException.class)
-                                                                 .hasMessage(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getKey() + " is '" + refused + "': it must be 'none' or the " +
-                                                                             "DSE version 6.8.0 or 6.8.1, so that DSE nodes do not send this node " +
-                                                                             "the range reads of a storage-attached index query with a verb only " +
-                                                                             "DSE nodes understand");
+                                                                 .hasMessage(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getKey() + " is '" + refused + "': it must be 'none' (no DSE " +
+                                                                             "version) or the DSE version 6.8.0 or 6.8.1, which this node gossips " +
+                                                                             "to DSE nodes so that they do not send it the range reads of a " +
+                                                                             "storage-attached index query with a verb only DSE nodes understand");
             }
         }
     }

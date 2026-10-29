@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,7 +53,7 @@ public class GossipDigestAckVerbHandler extends GossipVerbHandler<GossipDigestAc
 
         GossipDigestAck gDigestAckMessage = message.payload;
         List<GossipDigest> gDigestList = gDigestAckMessage.getGossipDigestList();
-        Map<InetAddressAndPort, EndpointState> epStateMap = gDigestAckMessage.getEndpointStateMap();
+        Map<InetAddressAndPort, EndpointState> epStateMap = gDigestAckMessage.getEndpointStateMap(from);
         logger.trace("Received ack with {} digests and {} states", gDigestList.size(), epStateMap.size());
 
         if (Gossiper.instance.isInShadowRound())
@@ -83,22 +84,38 @@ public class GossipDigestAckVerbHandler extends GossipVerbHandler<GossipDigestAc
         }
 
         /* Get the state required to send to this gossipee - construct GossipDigestAck2Message */
-        Map<InetAddressAndPort, EndpointState> deltaEpStateMap = new HashMap<>();
-        for (GossipDigest gDigest : gDigestList)
-        {
-            InetAddressAndPort addr = gDigest.getEndpoint();
-            // reply everything regardless of heartbeat if remote is asking about me, adding the flag check so we have the ability to rollback to OSS behavior
-            int maxVersion = FBUtilities.getBroadcastAddressAndPort().equals(addr) ? HeartBeatState.EMPTY_VERSION : gDigest.getMaxVersion();
-            EndpointState localEpStatePtr = Gossiper.instance.getStateForVersionBiggerThan(addr, maxVersion);
-            if (localEpStatePtr != null)
-                deltaEpStateMap.put(addr, localEpStatePtr);
-        }
+        Map<InetAddressAndPort, EndpointState> deltaEpStateMap = requestedStates(gDigestList, from);
 
-        Message<GossipDigestAck2> gDigestAck2Message = Message.out(GOSSIP_DIGEST_ACK2, new GossipDigestAck2(deltaEpStateMap));
+        Message<GossipDigestAck2> gDigestAck2Message = Message.out(GOSSIP_DIGEST_ACK2, new GossipDigestAck2(deltaEpStateMap, from));
         if (logger.isTraceEnabled())
             logger.trace("Sending a GossipDigestAck2Message to {}", from);
         MessagingService.instance().send(gDigestAck2Message, from);
 
         super.doVerb(message);
+    }
+
+    /**
+     * The states {@code from} asks for with the digests of its ack.
+     * <p>
+     * In DSE 6 compatibility mode a DSE node is sent only the states of this node it asks for
+     * ({@link DseGossipStates#sendsAllOwnStates}).
+     */
+    @VisibleForTesting
+    static Map<InetAddressAndPort, EndpointState> requestedStates(List<GossipDigest> gDigestList, InetAddressAndPort from)
+    {
+        // in DSE 6 compatibility mode this may identify the peer by the NET_VERSION stored for it, or end its presumption
+        boolean allOwnStates = DseGossipStates.sendsAllOwnStates(from);
+        Map<InetAddressAndPort, EndpointState> deltaEpStateMap = new HashMap<>();
+        for (GossipDigest gDigest : gDigestList)
+        {
+            InetAddressAndPort addr = gDigest.getEndpoint();
+            // reply everything regardless of heartbeat if remote is asking about me, adding the flag check so we have the ability to rollback to OSS behavior
+            // (DSE 6 compatibility mode: not to a DSE node, see DseGossipStates.sendsAllOwnStates)
+            int maxVersion = allOwnStates && FBUtilities.getBroadcastAddressAndPort().equals(addr) ? HeartBeatState.EMPTY_VERSION : gDigest.getMaxVersion();
+            EndpointState localEpStatePtr = Gossiper.instance.getStateForVersionBiggerThan(addr, maxVersion);
+            if (localEpStatePtr != null)
+                deltaEpStateMap.put(addr, localEpStatePtr);
+        }
+        return deltaEpStateMap;
     }
 }

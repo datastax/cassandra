@@ -178,6 +178,9 @@ import org.apache.cassandra.metrics.Sampler;
 import org.apache.cassandra.metrics.SamplingManager;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.AsyncOneResponse;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DseDialectVersions;
+import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.RepairCoordinator;
@@ -1263,6 +1266,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             appStates.put(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(FBUtilities.getJustBroadcastNativeAddress()));
             appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
             appStates.put(ApplicationState.SSTABLE_VERSIONS, valueFactory.sstableVersions(sstablesTracker.versionsInUse()));
+            addDseState(appStates, valueFactory);
 
             logger.debug("Starting up server gossip");
             Gossiper.instance.register(this);
@@ -1289,6 +1293,22 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             BatchlogManager.instance.start();
             startSnapshotManager();
         }
+    }
+
+    /**
+     * DSE 6 compatibility mode: adds to the states this node starts gossiping with DSE's {@code DSE_GOSSIP_STATE}, at the
+     * ordinal of {@code X_11_PADDING}, which this software never uses, unless the gossiped DSE version is
+     * {@link DseCompat#NO_DSE_VERSION} (see {@link DseCompat#gossipedDseVersion}). Outside the mode nothing is added and
+     * the property is not read.
+     */
+    @VisibleForTesting
+    static void addDseState(Map<ApplicationState, VersionedValue> appStates, VersionedValue.VersionedValueFactory valueFactory)
+    {
+        if (!DseCompat.enabled())
+            return;
+        String dseVersion = DseCompat.gossipedDseVersion();
+        if (dseVersion != null)
+            appStates.put(ApplicationState.X_11_PADDING, valueFactory.dseState(dseVersion));
     }
 
     @VisibleForTesting
@@ -2956,14 +2976,58 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private void updateNetVersion(InetAddressAndPort endpoint, VersionedValue value)
     {
+        int version;
         try
         {
-            MessagingService.instance().versions.set(endpoint, Integer.parseInt(value.value));
+            version = Integer.parseInt(value.value);
         }
         catch (NumberFormatException e)
         {
+            // DSE 6 compatibility mode: a value this software cannot parse must not break the gossip stage
+            if (DseCompat.enabled())
+            {
+                logger.warn("Ignoring the NET_VERSION {} gossiped by {}: not a number; the messaging version of the peer stays {}",
+                            value.value, endpoint, MessagingService.instance().versions.knows(endpoint) ? MessagingService.instance().versions.getRaw(endpoint) : "unknown");
+                return;
+            }
             throw new AssertionError("Got invalid value for NET_VERSION application state: " + value.value);
         }
+        if (DseCompat.enabled())
+        {
+            // whether the peer is a DSE 6 node, which decides the ordinals of the gossip states exchanged with it
+            DsePeers.fromGossipedNetVersion(endpoint, version);
+            // A DSE 6 peer gossips its own messaging version (256 or more); we speak the pre-4.0 dialect with it.
+            int dialect = DseCompat.messagingVersionFromGossip(version);
+            if (dialect != version)
+            {
+                // DsePeers logged the peer as a DSE node at INFO the first time
+                logger.debug("Peer {} gossips the DSE messaging version {}; recording the DSE 6 dialect {} for it", endpoint, version, dialect);
+                version = dialect;
+            }
+            boolean wasPre40;
+            // under the lock of the inbound handshakes' recording (DseDialectVersions.recordHandshakeVersion), which reads
+            // the gossip state this version was stored in
+            synchronized (MessagingService.instance().versions)
+            {
+                // A peer of this software in DSE_6 mode gossips 12 for DSE's sake: it must not lower the version a handshake
+                // with it negotiated, which schema pulls, read digests and hints rely on.
+                if (version == DseCompat.NET_VERSION_PUBLISHED && MessagingService.instance().versions.knows(endpoint))
+                {
+                    int negotiated = MessagingService.instance().versions.getRaw(endpoint);
+                    if (negotiated > version)
+                    {
+                        logger.debug("Peer {} gossips NET_VERSION {}; keeping the messaging version {} negotiated with it", endpoint, version, negotiated);
+                        return;
+                    }
+                }
+                wasPre40 = DseDialectVersions.isPre40(MessagingService.instance().versions, endpoint);
+                MessagingService.instance().versions.set(endpoint, version);
+            }
+            // a peer taken for a pre-4.0 node (a stale stored release, or it was upgraded meanwhile): reconnect to it
+            DseDialectVersions.versionRaised(endpoint, wasPre40, version);
+            return;
+        }
+        MessagingService.instance().versions.set(endpoint, version);
     }
 
     public void updateTopology(InetAddressAndPort endpoint)
@@ -3846,6 +3910,15 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // Then, the node may have been upgraded and changed its messaging protocol version. If so, we
         // want to update that before we mark the node live again to avoid problems like CASSANDRA-11128.
         VersionedValue netVersion = state.getApplicationState(ApplicationState.NET_VERSION);
+        // DSE 6 compatibility mode: the state given is the one from before the restart, and a DSE node upgraded to this
+        // software (or one of its nodes rolled back to DSE) changed its NET_VERSION with it; the gossiper has stored the
+        // new state already, so its NET_VERSION is the one to record
+        if (DseCompat.enabled())
+        {
+            EndpointState current = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+            if (current != null && current != state)
+                netVersion = current.getApplicationState(ApplicationState.NET_VERSION);
+        }
         if (netVersion != null)
             updateNetVersion(endpoint, netVersion);
     }
