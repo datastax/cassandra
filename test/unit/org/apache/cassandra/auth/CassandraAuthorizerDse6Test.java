@@ -46,12 +46,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * {@link CassandraAuthorizer} and the reverse index {@code system_auth.resource_role_permissons_index} in the DSE 6
- * compatibility mode: the index is maintained when {@code system_auth} has it (as without the mode); when it has none
- * (DSE 6.9.26's definition lacks it), GRANT and REVOKE update the permissions only and the roles holding permissions
- * on a dropped resource are found in the permissions themselves.
+ * compatibility mode, where {@code system_auth} keeps DSE 6's definition: the index is maintained when that definition
+ * has it (as without the mode); when it has none (the 6.9.26 capture), GRANT and REVOKE update the permissions only
+ * and the roles holding permissions on a dropped resource are found in the permissions themselves.
  * <p>
- * The test without the index removes the table from this JVM's schema, as DSE 6.9.26's definition lacks it, and adds it
- * back.
+ * The test without the index removes the table from this JVM's schema, as DSE's definition lacks it, and adds it back.
  * <p>
  * In the mode, the permissions DSE 6 does not have ({@code UNMASK}, {@code SELECT_MASKED}) are not written on data
  * resources: {@code GRANT ALL} and the grant to the creator of a table grant the others with a warning, a
