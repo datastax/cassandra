@@ -93,7 +93,9 @@ JDK 22 config (`conf/jvm22-*.options`, `_jvm22_*` in `build.xml`) drops producti
 
 **Relevant Context:** `build.xml:174-177,780-810,909-935`; `src/java/org/apache/cassandra/utils/FBUtilities.java:160`; `src/java/org/apache/cassandra/cql3/functions/UDFByteCodeVerifier.java`; `test/simulator/asm/**`.
 
-**Status:** [ ] pending
+**Status:** [x] done
+- `asm.version` bumped to 9.7.1 (`build.xml:177`). No other references except the generated/stale `ide/nbproject/project.xml` (left alone) and no `lib/licenses` directory in this repo.
+- Verified on JDK 21: `ant jar simulator-jars` OK; `UFVerifierTest` 20/20 pass.
 
 ---
 
