@@ -115,8 +115,9 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * {@code internode_compatibility_mode: NONE} such a header was refused before this class existed, so no
  * sstable this software could read before is read differently.
  * <p>
- * DSE lists the hidden columns of each view in its {@code system_schema.hidden_columns}, which
- * {@link DseViewHiddenColumnCatalog} reads.
+ * The view data exchanged with DSE nodes in a mixed cluster carries the same hidden column, and is translated by
+ * {@link DseViewWireFormat} with the same rule, for the views DSE lists that column for in its
+ * {@code system_schema.hidden_columns} ({@link DseViewHiddenColumnCatalog}).
  * <p>
  * Limits: view rows this software writes to disk (its own view updates, and every sstable compaction or scrub
  * rewrites) carry no hidden cell, so DSE considers them dead: after a rollback to DSE, the views of the rolled-back

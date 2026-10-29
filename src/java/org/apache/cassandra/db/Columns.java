@@ -37,6 +37,7 @@ import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -542,6 +543,16 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
 
         public Columns deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
         {
+            return deserialize(in, metadata, false);
+        }
+
+        /**
+         * @param dseViewHiddenColumns whether the columns come from a DSE 6 peer that may name the hidden columns of a
+         * materialized view ({@link DseViewWireFormat#translates}); a name that is not a column of {@code metadata} is
+         * then resolved by {@link DseViewWireFormat#resolveHiddenColumn}
+         */
+        public Columns deserialize(DataInputPlus in, TableMetadata metadata, boolean dseViewHiddenColumns) throws IOException
+        {
             try (BTree.FastBuilder<ColumnMetadata> builder = BTree.fastBuilder())
             {
                 long packedCount = in.readUnsignedVInt() ;
@@ -580,6 +591,8 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                     {
                         // If we don't find the definition, it could be we have data for a dropped column
                         column = metadata.getDroppedColumn(name);
+                        if (column == null && dseViewHiddenColumns)
+                            column = DseViewWireFormat.resolveHiddenColumn(metadata, name);
                         if (column == null)
                             throw new RuntimeException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization of " + metadata.keyspace + '.' + metadata.name);
                     }
