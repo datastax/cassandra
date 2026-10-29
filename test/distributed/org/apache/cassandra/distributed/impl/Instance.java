@@ -128,6 +128,7 @@ import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.DefaultFSErrorHandler;
+import org.apache.cassandra.service.Dse6AccessControlCheck;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
@@ -719,6 +720,18 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
 
                 Verb.HINT_REQ.unsafeSetSerializer(DTestSerializer::new);
 
+                // as CassandraDaemon.setup: the first pass of the DSE 6 access-control check, on this node's replica, before
+                // the node joins the ring; the cluster-wide pass follows once gossip has settled (with the GOSSIP feature; the
+                // instances of the HCD 1.2 harness run without it, and Dse6AccessControlMixedTest calls that pass explicitly)
+                try
+                {
+                    Dse6AccessControlCheck.verifyAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
+
                 if (config.has(NETWORK))
                     MessagingService.instance().listen();
                 else
@@ -746,6 +759,17 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                     JVMStabilityInspector.removeShutdownHooks();
 
                     Gossiper.waitToSettle();
+
+                    // as CassandraDaemon.setup: the cluster-wide pass of the DSE 6 access-control check, after the node joined (here
+                    // before the auth setup of postStartup, which the daemon runs first: the pass reads system_auth without it)
+                    try
+                    {
+                        Dse6AccessControlCheck.verifyAfterJoin();
+                    }
+                    catch (StartupException e)
+                    {
+                        throw new RuntimeException(e.getMessage(), e);
+                    }
                 }
                 else
                 {

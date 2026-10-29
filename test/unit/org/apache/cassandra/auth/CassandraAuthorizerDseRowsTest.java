@@ -285,9 +285,10 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
 
         String entry = "role '" + role + "' on " + dataResource(table) + ": UPDATE";
         assertThat(CassandraAuthorizer.loneDseWriteGrants()).containsExactly(entry);
-        // what nodetool compatstatus reads: only the rows read so far
+        // what nodetool compatstatus reads, without the mode: only the rows read so far
         assertThat(MessagingService.instance().getDseLoneWriteGrants()).containsExactly(entry);
-        assertThat(MessagingService.instance().getDseLoneWriteGrantsSource()).isEqualTo("the rows read since startup");
+        assertThat(MessagingService.instance().getDseLoneWriteGrantsSource())
+        .isEqualTo("the rows read since startup; no startup check with internode_compatibility_mode NONE");
         // nor does the warm-up of the permissions cache grant more than SELECT
         Map<Pair<AuthenticatedUser, IResource>, Set<Permission>> warm = ((CassandraAuthorizer) DatabaseDescriptor.getAuthorizer()).bulkLoader().get();
         assertThat(warm.get(Pair.create(new AuthenticatedUser(role), DataResource.table(KEYSPACE, table)))).containsExactly(Permission.SELECT);
@@ -370,7 +371,7 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
         assertThat(revoked.getExecutionInfo().getWarnings()).containsExactly("Role '" + role + "' was not granted MODIFY on <mbean " + mbean + '>');
         assertThat(storedNamesOf(role, "mbean/" + mbean)).containsExactlyInAnyOrder("SELECT", "UPDATE", "TRUNCATE");
 
-        // the read of a scan lists nothing on them either (the names are logged above)
+        // the read of the scans of the access-control check lists nothing on them either (the names are logged above)
         List<String> newlyListed = new ArrayList<>();
         assertThat(CassandraAuthorizer.readDseLoneWriteGrant(role, "mbean/" + mbean, Set.of("UPDATE"), newlyListed)).isNull();
         assertThat(CassandraAuthorizer.readDseLoneWriteGrant(role, "roles/" + other, Set.of("TRUNCATE"), newlyListed)).isNull();
@@ -625,8 +626,8 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
     }
 
     /**
-     * The read of a row for a scan of the table: the lone grant it lists first is reported as new, then not; a lone
-     * grant a scan forgets (it failed before logging) is new again for the next read.
+     * The read of a row for the scans of the access-control check: the lone grant it lists first is reported as new,
+     * then not; a lone grant a scan forgets (it failed before logging) is new again for the next read.
      */
     @Test
     public void scanReadsReportTheLoneGrantsTheyListFirst() throws Throwable
@@ -679,7 +680,7 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
         String kept = CassandraAuthorizer.readDseLoneWriteGrant("dse_scanned_role", "data/ks_scanned/kept", Set.of("UPDATE"), newlyListed);
         String gone = CassandraAuthorizer.readDseLoneWriteGrant("dse_scanned_role", "data/ks_scanned/gone", Set.of("TRUNCATE"), newlyListed);
         assertThat(CassandraAuthorizer.loneDseWriteGrants()).containsExactly(gone, kept);
-        assertThat(CassandraAuthorizer.loneDseWriteGrantsSource()).isEqualTo("the rows read since startup");
+        assertThat(CassandraAuthorizer.loneDseWriteGrantsSource()).isEqualTo("the rows read since startup; no startup check with internode_compatibility_mode NONE");
 
         CassandraAuthorizer.dseLoneWriteGrantsScanned("a partial scan", List.of(kept), false);
         assertThat(CassandraAuthorizer.loneDseWriteGrants()).containsExactly(gone, kept);
@@ -837,7 +838,8 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
     }
 
     /**
-     * setup() reads nothing, in the mode or not: the lone grants are listed as their rows are read.
+     * setup() reads nothing, in the mode or not: in the mode the lone grants are listed by the scans of the
+     * access-control check ({@code Dse6AccessControlCheckTest}).
      */
     @Test
     public void setupReadsNothing() throws Throwable
@@ -853,10 +855,10 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
             }
         };
         recording.setup();
-        assertThat(CassandraAuthorizer.loneDseWriteGrantsSource()).isEqualTo("the rows read since startup");
+        assertThat(CassandraAuthorizer.loneDseWriteGrantsSource()).isEqualTo("the rows read since startup; no startup check with internode_compatibility_mode NONE");
         withMode(InternodeCompatibilityMode.DSE_6, () -> {
             recording.setup();
-            assertThat(CassandraAuthorizer.loneDseWriteGrantsSource()).isEqualTo("the rows read since startup");
+            assertThat(CassandraAuthorizer.loneDseWriteGrantsSource()).isEqualTo("startup check not run yet; only the rows read so far");
         });
         assertThat(queries).isEmpty();
     }

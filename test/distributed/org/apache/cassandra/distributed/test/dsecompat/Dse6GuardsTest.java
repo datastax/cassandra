@@ -34,12 +34,15 @@ import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.service.Dse6AccessControlCheck;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.REPLACE_ADDRESS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CURRENT_VERSION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
@@ -52,8 +55,9 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 /**
  * The operational guards of the DSE 6 upgrade on a cluster of this software in {@code DSE_6} mode: every refused
  * operation answers with its error, the schema freeze applies to both statement paths and is lifted by the property,
- * no node can bootstrap or replace, and {@code compatstatus} counts the refusals (the removal of a node lost for good is
- * {@link Dse6LostDseNodeTest}'s and {@link Dse6LostNodeOfThisSoftwareTest}'s).
+ * no node can bootstrap or replace, the access-control check refuses a start, and {@code compatstatus} counts the
+ * refusals (the removal of a node lost for good is {@link Dse6LostDseNodeTest}'s and
+ * {@link Dse6LostNodeOfThisSoftwareTest}'s).
  * <p>
  * A node may only run in {@code DSE_6} mode once it has joined a ring (a former DSE node has), so the nodes
  * are started without the mode first, on the storage settings DSE reads (trie {@code bb}, numeric generations,
@@ -200,6 +204,8 @@ public class Dse6GuardsTest extends TestBaseImpl
             // the peer of this software is not a DSE peer
             assertThat(out).contains("(0 speaking the pre-4.0 dialect)");
             assertThat(out).contains("DSE 6 peers on record        : 0\n");
+            // the cluster-wide pass ran at the start in the mode (mirrored from CassandraDaemon)
+            assertThat(out).contains("DSE access controls ignored  : 0 (found by a LOCAL_QUORUM read)\n");
             assertThat(out).contains("Requests refused (upgrade)   : 18\n");
             assertThat(out).containsPattern("  changing paxos_variant to v2 +1\n");
             assertThat(out).containsPattern("  changing paxos_variant to v1_without_linearizable_reads_or_rejected_writes +1\n");
@@ -218,8 +224,8 @@ public class Dse6GuardsTest extends TestBaseImpl
             assertThat(out).containsPattern("  schema change +2\n");
             assertThat(out).containsPattern("  upgradesstables +1\n");
 
-            // the periodic status line was scheduled at the DSE_6 start
-            List<String> scheduled = node.logs().grep("The DSE 6 upgrade status will be logged every 10 minutes").getResult();
+            // the periodic status line and the access-control check were scheduled at the DSE_6 start
+            List<String> scheduled = node.logs().grep("The DSE 6 upgrade status will be logged, and the DSE access controls checked again, every 10 minutes").getResult();
             assertThat(scheduled).isNotEmpty();
         }
     }
@@ -317,11 +323,154 @@ public class Dse6GuardsTest extends TestBaseImpl
         }
     }
 
+    @Test
+    public void dseAccessControlsRefuseTheStart() throws Throwable
+    {
+        try (Cluster cluster = formerDseNodes(2, builder -> {}))
+        {
+            // a DSE row-level grant, as DSE leaves it in system_auth (replicated to one node: the default RF of system_auth)
+            cluster.coordinator(1).execute("INSERT INTO system_auth.role_permissions (role, resource, permissions) " +
+                                           "VALUES ('analyst', 'rows/top_secret/data/ks1/table1', {'SELECT'})", ConsistencyLevel.ALL);
+            int holder = 0;
+            for (int node = 1; node <= 2; node++)
+                if (cluster.get(node).executeInternal("SELECT role FROM system_auth.role_permissions WHERE role = 'analyst'").length > 0)
+                    holder = node;
+            assertThat(holder).isNotZero();
+            final int replica = holder;
+            final int other = 3 - replica;
+
+            // the cluster-wide pass finds the grant from either node, the local pass only on the replica
+            for (IInvokableInstance each : new IInvokableInstance[]{ cluster.get(1), cluster.get(2) })
+            {
+                Throwable quorum = catchThrowable(() -> each.runOnInstance(Dse6GuardsTest::quorumPass));
+                assertThat(quorum).as("cluster-wide pass on " + each).isNotNull();
+                assertThat(messages(quorum)).contains("(found by a LOCAL_QUORUM read): row-level grants [role 'analyst' on rows/top_secret/data/ks1/table1: [SELECT]]");
+            }
+            cluster.get(other).runOnInstance(Dse6GuardsTest::localPass);
+            Throwable local = catchThrowable(() -> cluster.get(replica).runOnInstance(Dse6GuardsTest::localPass));
+            assertThat(local).isNotNull();
+            assertThat(messages(local)).contains("(found by this node's replica): row-level grants [role 'analyst' on rows/top_secret/data/ks1/table1: [SELECT]]");
+
+            // the replica does not start again in DSE_6 mode while the grant exists
+            IInvokableInstance node = cluster.get(replica);
+            node.shutdown().get();
+            Throwable failure = catchThrowable(node::startup);
+            assertThat(failure).isNotNull();
+            assertThat(messages(failure)).contains("internode_compatibility_mode DSE_6 refused: DSE access controls that this software does not enforce would grant access if ignored");
+            shutdownIfRunning(node);
+
+            // nothing of the refusal stays behind: started with the override, the grant removed while the node is up, the node
+            // restarts without any property
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS, true))
+            {
+                node.startup();
+            }
+            cluster.coordinator(other).execute("DELETE FROM system_auth.role_permissions WHERE role = 'analyst'", ConsistencyLevel.ALL);
+            node.shutdown().get();
+            node.startup();
+            assertThat(node.nodetoolResult("compatstatus").getStdout()).contains("DSE access controls ignored  : 0 (found by a LOCAL_QUORUM read)\n");
+        }
+    }
+
+    @Test
+    public void tablesRestrictedToRowsRefuseTheStart() throws Throwable
+    {
+        try (Cluster cluster = formerDseNodes(1, builder -> {}))
+        {
+            // a table as DSE's RESTRICT ROWS ON <table> USING tenant leaves it (0x74656e616e74 is 'tenant' in UTF-8); the schema
+            // is frozen in DSE_6 mode, the property lets the test create it
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                cluster.schemaChange(withKeyspace("CREATE TABLE %s.restricted (tenant text PRIMARY KEY, v int) " +
+                                                  "WITH extensions = {'DSE_RLACA': 0x74656e616e74, 'other': 0x02}"));
+            }
+            IInvokableInstance node = cluster.get(1);
+            String table = KEYSPACE + ".restricted (tenant column tenant)";
+            Throwable local = catchThrowable(() -> node.runOnInstance(Dse6GuardsTest::localPass));
+            assertThat(local).isNotNull();
+            assertThat(messages(local)).contains("(found by this node's replica): row-level restricted tables in the schema [" + table + "]. " +
+                                                 "Roll this node back to DSE, remove them there " +
+                                                 "(UNRESTRICT ROWS ON " + KEYSPACE + ".restricted) and upgrade it again");
+            Throwable quorum = catchThrowable(() -> node.runOnInstance(Dse6GuardsTest::quorumPass));
+            assertThat(quorum).isNotNull();
+            assertThat(messages(quorum)).contains("(found by a LOCAL_QUORUM read): row-level restricted tables in the schema [" + table + "]");
+
+            // the periodic check logs it and compatstatus lists it; the other extension key is not reported
+            node.runOnInstance(() -> Dse6AccessControlCheck.recheck());
+            assertThat(node.logs().grep("The periodic check \\(a LOCAL_QUORUM read\\) found DSE access controls this node does not enforce: " +
+                                        "row-level restricted tables in the schema \\[" + KEYSPACE + "\\.restricted \\(tenant column tenant\\)\\]")
+                           .getResult()).hasSize(1);
+            String out = node.nodetoolResult("compatstatus").getStdout();
+            assertThat(out).contains("DSE access controls ignored  : 1 (found by a LOCAL_QUORUM read)\n" +
+                                     "  row-level restricted table in the schema " + table + '\n');
+            // the first pass lists it in one INFO line
+            assertThat(node.logs().grep("INFO .*Tables with schema extensions other than DSE_RLACA, kept and not interpreted by this " +
+                                        "software \\(not DSE access controls\\): \\[" + KEYSPACE + "\\.restricted: \\['other'\\]\\]").getResult())
+            .hasSize(1);
+            assertThat(node.logs().grep("schema extensions").getResult()).noneMatch(line -> line.contains("WARN"));
+
+            // the override drops it knowingly
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS, true))
+            {
+                node.runOnInstance(Dse6GuardsTest::localPass);
+            }
+            assertThat(node.logs().grep("access opens up accordingly \\(this node's replica\\): row-level restricted tables in the schema").getResult())
+            .hasSize(1);
+
+            // the node does not start again in DSE_6 mode while the table is restricted
+            node.shutdown().get();
+            Throwable failure = catchThrowable(node::startup);
+            assertThat(failure).isNotNull();
+            assertThat(messages(failure)).contains("row-level restricted tables in the schema [" + table + "]");
+            shutdownIfRunning(node);
+
+            // nothing of the refusal stays behind: started with the override, the extension removed while the node is up, the
+            // node restarts without any property
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS, true))
+            {
+                node.startup();
+            }
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                cluster.schemaChange(withKeyspace("ALTER TABLE %s.restricted WITH extensions = {'other': 0x02}"));
+            }
+            node.shutdown().get();
+            node.startup();
+            assertThat(node.nodetoolResult("compatstatus").getStdout()).contains("DSE access controls ignored  : 0 (found by a LOCAL_QUORUM read)\n");
+        }
+    }
+
     /** A node whose start was refused is usually not running any more; one whose start got further is stopped. */
     private static void shutdownIfRunning(IInvokableInstance node) throws Exception
     {
         if (!node.isShutdown())
             node.shutdown().get();
+    }
+
+    /** The first pass of the access-control check, run inside an instance; a refusal surfaces as a RuntimeException. */
+    private static void localPass()
+    {
+        try
+        {
+            Dse6AccessControlCheck.verifyAtStartup();
+        }
+        catch (StartupException e)
+        {
+            throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
+    /** The cluster-wide pass of the access-control check, run inside an instance. */
+    private static void quorumPass()
+    {
+        try
+        {
+            Dse6AccessControlCheck.verifyAfterJoin();
+        }
+        catch (StartupException e)
+        {
+            throw new RuntimeException(e.getMessage(), e);
+        }
     }
 
     static void assertRefused(NodeToolResult result, String message)

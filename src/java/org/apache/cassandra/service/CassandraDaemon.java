@@ -389,6 +389,18 @@ public class CassandraDaemon
         // Prepared statements
         QueryProcessor.instance.preloadPreparedStatements();
 
+        // DSE 6 compatibility: refuse to start while DSE access controls this software does not enforce would grant
+        // access if dropped. First pass on this node's replica, here because it reads system_auth: after the schema is
+        // loaded and the commit log replayed, before the node joins the ring.
+        try
+        {
+            Dse6AccessControlCheck.verifyAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
         // start server internals
         StorageService.instance.registerDaemon(this);
         try
@@ -444,6 +456,17 @@ public class CassandraDaemon
         }
 
         AuditLogManager.instance.initialize();
+
+        // DSE 6 compatibility, second pass: the same check on a cluster-wide read, now that the node has joined and can reach
+        // the other replicas of system_auth, before any client is served
+        try
+        {
+            Dse6AccessControlCheck.verifyAfterJoin();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
 
         // schedule periodic background compaction task submission. this is simply a backstop against compactions stalling
         // due to scheduling errors or race conditions

@@ -562,6 +562,24 @@ public enum CassandraRelevantProperties
      */
     INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL("cassandra.internode_compatibility_mode.allow_ddl", "false"),
     /**
+     * How long, in seconds, a node in {@code internode_compatibility_mode: DSE_6} retries the cluster-wide read of
+     * {@code system_auth.role_permissions} of its second startup check while it fails on the request (replicas not
+     * alive yet, a timeout, a read failure): the connections to the other replicas may still be coming up. When the read
+     * still fails after that time the start is refused. With {@code dse_restrictions_local_check_only} or
+     * {@code ignore_dse_restrictions} set, the read is made once and not retried, and those properties decide what
+     * happens when it fails. The value is a decimal number of seconds; any other value refuses the start, whatever the
+     * fallback properties say, and it is checked from the first startup pass on. 0 or less makes a single attempt.
+     */
+    INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_CHECK_WAIT_SECONDS("cassandra.internode_compatibility_mode.dse_restrictions_check_wait_seconds", "120"),
+    /**
+     * Lets a node in {@code internode_compatibility_mode: DSE_6} start when the cluster-wide read of
+     * {@code system_auth.role_permissions} of its second startup check fails, for any reason (replicas unreachable, a
+     * timeout, a read aborted by the guardrails, any other error): the check of the node's own replica is then the only
+     * one, and still refuses the DSE access controls it finds. With it set the cluster-wide read is made once, not
+     * retried. Logged at WARN on every start where it is set, and when the fallback is taken.
+     */
+    INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY("cassandra.internode_compatibility_mode.dse_restrictions_local_check_only", "false"),
+    /**
      * The DSE version a node in {@code internode_compatibility_mode: DSE_6} gossips to DSE nodes as its
      * {@code dse_version}: 6.8.0 or 6.8.1, below 6.8.2, so that the DSE nodes send it the range reads of index queries
      * with a verb this software understands, or {@code none} to gossip none. Read only in that mode; any other value
@@ -574,6 +592,17 @@ public enum CassandraRelevantProperties
      * or a DSE 6 peer that was removed while this node was down).
      */
     INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS("cassandra.internode_compatibility_mode.ignore_dse_peers", "false"),
+    /**
+     * Lets a node start in {@code internode_compatibility_mode: DSE_6} although {@code system_auth.role_permissions}
+     * or the schema still hold DSE access controls this software does not enforce (RESTRICT, row-level grants, tables
+     * restricted to rows), which are then dropped: the operator has reviewed the list the refusal printed and accepts
+     * that access opens up. It also accepts a second startup check whose cluster-wide read failed (only what the node's
+     * own replica and the schema hold is then listed), makes that read once, not retried, and turns the ERROR of the
+     * periodic check into a WARN on the controls a DSE node adds since; and it lets the node start when
+     * {@code system_auth.role_permissions} is not in the schema at all. Logged at WARN on every start where it is set;
+     * each start that drops controls lists them at WARN.
+     */
+    INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS("cassandra.internode_compatibility_mode.ignore_dse_restrictions", "false"),
     /**
      * Lets a node start in {@code internode_compatibility_mode: DSE_6} although the SAI on-disk version it writes
      * ({@link #SAI_CURRENT_VERSION}) is not pinned to the one the cluster's DSE release writes ({@code aa} for DSE 6.8,

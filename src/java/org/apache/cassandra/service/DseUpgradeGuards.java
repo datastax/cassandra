@@ -20,6 +20,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -60,7 +61,8 @@ import static org.apache.cassandra.utils.Clock.Global.nanoTime;
  * runs. The refusals of operations requested through JMX or nodetool, of schema changes and of repair messages (under
  * {@code repair}) are counted in {@link DseCompatRefusals} and shown by {@code nodetool compatstatus}; those of the
  * node's own start are not (the node exits). In {@code DSE_6} mode a status line with the DSE peers, the entries of
- * the record that are not addresses and the counters is logged every {@link #STATUS_LOG_INTERVAL_MINUTES} minutes.
+ * the record that are not addresses and the counters is logged every {@link #STATUS_LOG_INTERVAL_MINUTES} minutes,
+ * together with a new check of the DSE access controls ({@link Dse6AccessControlCheck#recheck()}).
  * <p>
  * The upgrade is in progress in {@code DSE_6} mode, or while any peer is recorded at a pre-4.0 messaging version: with
  * {@code NONE}, a node that gossips with upgraded nodes learns DSE's own {@code NET_VERSION} (256 or more) of the DSE
@@ -117,6 +119,10 @@ public final class DseUpgradeGuards
     private static final String LOST_NODE_OF_THIS_SOFTWARE = "node of this software";
 
     private static final AtomicBoolean STATUS_LOG_STARTED = new AtomicBoolean();
+
+    /** The periodic check of the DSE access controls; replaced by tests. */
+    @VisibleForTesting
+    static volatile Runnable accessControlRecheck = Dse6AccessControlCheck::recheck;
 
     private DseUpgradeGuards()
     {
@@ -586,14 +592,31 @@ public final class DseUpgradeGuards
         return line.toString();
     }
 
-    /** Starts the periodic status line, once at server start in {@code DSE_6} mode (a no-op otherwise). */
+    /**
+     * Starts the periodic tasks, once at server start in {@code DSE_6} mode (a no-op otherwise): the status line, and a
+     * new check of the DSE access controls, which a DSE node can still change after this node started. The check reads
+     * {@code system_auth} across the cluster and may block: it runs on the optional tasks executor, not on the shared
+     * scheduled tasks one. That executor also runs other background tasks of the node (the size estimates, the
+     * speculative retry thresholds, for instance), which a slow read delays for as long as it lasts, at most the read
+     * timeout and then a read of this node's replica, every {@value #STATUS_LOG_INTERVAL_MINUTES} minutes.
+     */
     public static void startStatusLog()
     {
         if (!DseCompat.enabled() || !STATUS_LOG_STARTED.compareAndSet(false, true))
             return;
-        ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(DseUpgradeGuards::logStatus,
-                                                                 STATUS_LOG_INTERVAL_MINUTES, STATUS_LOG_INTERVAL_MINUTES, TimeUnit.MINUTES);
-        logger.info("The DSE 6 upgrade status will be logged every {} minutes", STATUS_LOG_INTERVAL_MINUTES);
+        schedulePeriodicTasks(ScheduledExecutors.scheduledTasks, ScheduledExecutors.optionalTasks);
+        logger.info("The DSE 6 upgrade status will be logged, and the DSE access controls checked again, every {} minutes; the check does not " +
+                    "see RESTRICT ROWS or UNRESTRICT ROWS run on DSE nodes during the upgrade (DSE schema changes do not reach this node): do " +
+                    "not run them until every node is upgraded", STATUS_LOG_INTERVAL_MINUTES);
+    }
+
+    /** Schedules the status line on {@code statusExecutor} and the check of the DSE access controls on {@code recheckExecutor}. */
+    @VisibleForTesting
+    static void schedulePeriodicTasks(ScheduledExecutorService statusExecutor, ScheduledExecutorService recheckExecutor)
+    {
+        statusExecutor.scheduleWithFixedDelay(DseUpgradeGuards::logStatus, STATUS_LOG_INTERVAL_MINUTES, STATUS_LOG_INTERVAL_MINUTES, TimeUnit.MINUTES);
+        recheckExecutor.scheduleWithFixedDelay(DseUpgradeGuards::recheckAccessControls,
+                                               STATUS_LOG_INTERVAL_MINUTES, STATUS_LOG_INTERVAL_MINUTES, TimeUnit.MINUTES);
     }
 
     /** One status line; a failure is logged and never cancels the next runs. */
@@ -607,6 +630,20 @@ public final class DseUpgradeGuards
         catch (RuntimeException e)
         {
             logger.error("Unable to compute the DSE 6 upgrade status", e);
+        }
+    }
+
+    /** One periodic check of the DSE access controls; a failure is logged and never cancels the next runs. */
+    @VisibleForTesting
+    static void recheckAccessControls()
+    {
+        try
+        {
+            accessControlRecheck.run();
+        }
+        catch (RuntimeException e)
+        {
+            logger.error("Unable to check the DSE access controls again", e);
         }
     }
 
