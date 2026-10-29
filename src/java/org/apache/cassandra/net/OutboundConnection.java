@@ -1303,6 +1303,9 @@ public class OutboundConnection
                 if (messagingVersion > settings.acceptVersions.max)
                     messagingVersion = settings.acceptVersions.max;
 
+                // DSE 6 compatibility mode: a DSE 6 peer may need ssl_storage_port (DseTlsPorts; a no-op otherwise)
+                settings = settings.withLegacyPortIfNecessary(messagingVersion);
+
                 // In mixed mode operation, some nodes might be configured to use SSL for internode connections and
                 // others might be configured to not use SSL. When a node is configured in optional SSL mode, It should
                 // be able to handle SSL and Non-SSL internode connections. We take care of this when accepting NON-SSL
