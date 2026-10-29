@@ -31,7 +31,7 @@ set -o pipefail
 [ "x${DIST_DIR}" != "x" ] || DIST_DIR="${CASSANDRA_DIR}/build"
 
 # target types
-TARGET_TYPES="build_dtest_jars stress-test fqltool-test microbench microbench-test test-burn long-test cqlsh-test simulator-dtest test test-cdc test-compression test-oa test-system-keyspace-directory test-latest jvm-dtest jvm-dtest-upgrade jvm-dtest-novnode jvm-dtest-upgrade-novnode"
+TARGET_TYPES="build_dtest_jars stress-test fqltool-test microbench microbench-test test-burn long-test cqlsh-test simulator-dtest test test-cdc test-compression test-oa test-system-keyspace-directory test-latest jvm-dtest jvm-dtest-upgrade jvm-dtest-novnode jvm-dtest-upgrade-novnode jvm-dtest-dse"
 
 # pre-conditions
 command -v ant >/dev/null 2>&1 || { error 1 "ant needs to be installed"; }
@@ -150,6 +150,13 @@ javac -version  2>&1
 _list_tests() {
   local -r classlistprefix="$1"
   find "test/${classlistprefix}" -name '*Test.java' | sed "s;^test/${classlistprefix}/;;g" | sort
+}
+
+# the DSE 6 compatibility tests that start HCD 1.2 nodes (they need the HCD 1.2 dtest jar and their own JVM
+# arguments, see target type jvm-dtest-dse), in the form _list_tests "distributed" prints them: the classes declared
+# as "public class <name> extends DseDialectTestBase" (such tests extend it directly, see its javadoc)
+_list_dse_dialect_tests() {
+  grep -rlE --include='*Test.java' '^public class [A-Za-z0-9_]+ extends DseDialectTestBase' test/distributed | sed "s;^test/distributed/;;g" | sort
 }
 
 _split_tests() {
@@ -382,15 +389,31 @@ _main() {
     "jvm-dtest" | "jvm-dtest-novnode")
       [ "jvm-dtest-novnode" == "${target}" ] || ANT_TEST_OPTS="${ANT_TEST_OPTS} -Dcassandra.dtest.num_tokens=16"
       if [[ -z "${test_name_regexp}" ]] ; then
-        test_name_regexp=$( _list_tests "distributed" | grep -v "upgrade" | _split_tests "${split_chunk}")
+        # the DSE 6 compatibility tests on HCD 1.2 nodes run in target type jvm-dtest-dse
+        test_name_regexp=$( _list_tests "distributed" | grep -v "upgrade" | grep -v -x -F -f <(_list_dse_dialect_tests) | _split_tests "${split_chunk}")
         if [[ -z "${test_name_regexp}" ]]; then
           [[ "${split_chunk}" =~ ^[0-9]+/[0-9]+$ ]] || { error 1 "No tests match ${test_name_regexp}"; }
           # something has to run in the split to generate a junit xml result
           echo "Hacking jvm-dtest to run only first test found as no tests in split ${split_chunk} were found"
-          test_name_regexp="$( _list_tests "distributed"  | grep -v "upgrade" | sed -n 1p)"
+          test_name_regexp="$( _list_tests "distributed"  | grep -v "upgrade" | grep -v -x -F -f <(_list_dse_dialect_tests) | sed -n 1p)"
         fi
+      else
+        # here such a test would skip itself, without the HCD 1.2 dtest jar and its JVM arguments: refuse it
+        for i in ${test_name_regexp//,/ }; do
+          if _list_tests "distributed" | _split_tests "${i}" | grep -x -F -f <(_list_dse_dialect_tests) > /dev/null; then
+            error 1 "${i} matches a DSE 6 compatibility test on HCD 1.2 nodes: run it with target type jvm-dtest-dse"
+          fi
+        done
       fi
       _run_testlist "distributed" "testclasslist" "${test_name_regexp}" "" "$(_timeout_for 'test.distributed.timeout')" "${repeat_count}"
+      ;;
+    "jvm-dtest-dse")
+      # needs the HCD 1.2 dtest jar from test/bin/build-hcd12-dtest-jar.sh, the target fails without it;
+      # -t takes a simple class name (a file name pattern under dsecompat/, without .java), the target fails when
+      # nothing matches; the target rebuilds the dtest jar, and with it the tests, whatever -Dno-build-test says
+      [[ ${test_target} == *"-repeat" ]] && error 1 "Target ${target} does not support repeats."
+      [[ -z "${chunk}" || "1/1" == "${chunk}" ]] || error 1 "Target ${target} does not support splits."
+      ant test-jvm-dtest-dse ${ANT_TEST_OPTS} ${test_name_regexp:+"-Dtest.name=${test_name_regexp}"} || echo "failed ${target}"
       ;;
     "build_dtest_jars")
       _build_all_dtest_jars
