@@ -557,8 +557,8 @@ public enum CassandraRelevantProperties
      */
     INTERNODE_COMPATIBILITY_MODE("cassandra.internode_compatibility_mode"),
     /**
-     * Reserved for schema changes in {@code internode_compatibility_mode: DSE_6}: nothing reads it yet; the tests of the
-     * mode set it.
+     * Lifts the schema freeze of {@code internode_compatibility_mode: DSE_6}: schema changes are refused while
+     * the mode is on unless this is set (DSE 6 peers would not understand the schema this software writes).
      */
     INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL("cassandra.internode_compatibility_mode.allow_ddl", "false"),
     /**
