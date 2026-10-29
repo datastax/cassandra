@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
@@ -49,10 +50,12 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.nodes.LocalInfo;
 import org.apache.cassandra.nodes.NodeInfo;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.NullableSerializer;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
@@ -72,7 +75,7 @@ public class EndpointState
 
     static volatile boolean LOOSE_DEF_OF_EMPTY_ENABLED = CassandraRelevantProperties.LOOSE_DEF_OF_EMPTY_ENABLED.getBoolean();
 
-    public final static IVersionedSerializer<EndpointState> serializer = new EndpointStateSerializer();
+    public final static IVersionedSerializer<EndpointState> serializer = EndpointStateSerializer.instance;
     public final static IVersionedSerializer<EndpointState> nullableSerializer = NullableSerializer.wrap(serializer);
 
     private static class View
@@ -486,15 +489,31 @@ public class EndpointState
 class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
 {
     private static final Logger logger = LoggerFactory.getLogger(EndpointStateSerializer.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+
+    static final EndpointStateSerializer instance = new EndpointStateSerializer();
+
+    private EndpointStateSerializer()
+    {
+    }
 
     public void serialize(EndpointState epState, DataOutputPlus out, int version) throws IOException
+    {
+        serialize(epState, out, version, false);
+    }
+
+    /**
+     * @param dseOrdinals whether the recipient is a peer identified as a DSE 6 node, whose ordinals the states are
+     *                    written with at a pre-4.0 version (see {@link DseGossipStates})
+     */
+    void serialize(EndpointState epState, DataOutputPlus out, int version, boolean dseOrdinals) throws IOException
     {
         /* serialize the HeartBeatState */
         HeartBeatState hbState = epState.getHeartBeatState();
         HeartBeatState.serializer.serialize(hbState, out, version);
 
         /* serialize the map of ApplicationState objects */
-        Set<Map.Entry<ApplicationState, VersionedValue>> states = filterOutgoingStates(epState.states(), version);
+        Set<Map.Entry<ApplicationState, VersionedValue>> states = filterOutgoingStates(epState.states(), version, dseOrdinals);
         out.writeInt(states.size());
         for (Map.Entry<ApplicationState, VersionedValue> state : states)
         {
@@ -503,6 +522,11 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         }
     }
 
+    /**
+     * The states as the sender wrote them: a state received at a pre-4.0 version from a DSE 6 node still has DSE's
+     * ordinals, which the gossip message that carried it translates once it knows its sender
+     * ({@link DseGossipStates#receivedFrom}).
+     */
     public EndpointState deserialize(DataInputPlus in, int version) throws IOException
     {
         HeartBeatState hbState = HeartBeatState.serializer.deserialize(in, version);
@@ -513,16 +537,30 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         {
             int key = in.readInt();
             VersionedValue value = VersionedValue.serializer.deserialize(in, version);
+            if ((key < 0 || key >= Gossiper.STATES.length) && DseCompat.enabled())
+            {
+                // DSE 6 compatibility mode: DSE 6 has one more padding state than this software (ordinal 31); an ordinal
+                // this software does not know is dropped, the rest of the endpoint state is kept.
+                noSpamLogger.warn("Dropping the gossip application state with the unknown ordinal {} (value '{}') received at messaging version {}",
+                                  key, value.value, version);
+                continue;
+            }
             states.put(Gossiper.STATES[key], value);
         }
 
-        return new EndpointState(hbState, filterIncomingStates(states, version));
+        return new EndpointState(hbState, states);
     }
 
     public long serializedSize(EndpointState epState, int version)
     {
+        return serializedSize(epState, version, false);
+    }
+
+    /** The size of what {@link #serialize(EndpointState, DataOutputPlus, int, boolean)} writes. */
+    long serializedSize(EndpointState epState, int version, boolean dseOrdinals)
+    {
         long size = HeartBeatState.serializer.serializedSize(epState.getHeartBeatState(), version);
-        Set<Map.Entry<ApplicationState, VersionedValue>> states = filterOutgoingStates(epState.states(), version);
+        Set<Map.Entry<ApplicationState, VersionedValue>> states = filterOutgoingStates(epState.states(), version, dseOrdinals);
         size += TypeSizes.sizeof(states.size());
         for (Map.Entry<ApplicationState, VersionedValue> state : states)
         {
@@ -541,19 +579,24 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
                 : value;
     }
 
+    /**
+     * The states written to a peer at a pre-4.0 messaging version: at DSE's ordinals to a peer identified as a DSE 6
+     * node ({@link DseGossipStates#toDse}); with this software's ordinals to any other (HCD 1.2 at the dialect), only the
+     * release version cut as {@link #filterValue} does and the index status in the legacy format, as to HCD 1.2 at 4.0
+     * and later. At 4.0 and later, the states as they are, but the index status in the legacy format below
+     * {@link MessagingService#VERSION_DS_20} ({@link #withLegacyIndexStatus}).
+     */
     @VisibleForTesting
-    static Set<Map.Entry<ApplicationState, VersionedValue>> filterOutgoingStates(Set<Map.Entry<ApplicationState, VersionedValue>> states, int version)
+    static Set<Map.Entry<ApplicationState, VersionedValue>> filterOutgoingStates(Set<Map.Entry<ApplicationState, VersionedValue>> states, int version, boolean dseOrdinals)
     {
-        if (version < MessagingService.VERSION_40)
-        {
-            Set<Map.Entry<ApplicationState, VersionedValue>> filteredStates = new HashSet<>();
-            for (Map.Entry<ApplicationState, VersionedValue> state : states)
-                filteredStates.addAll(filterOutgoingState(state, version).entrySet());
-            return filteredStates;
-        }
-        if (version < MessagingService.VERSION_DS_20)
-            return withLegacyIndexStatus(states);
-        return states;
+        if (version >= MessagingService.VERSION_40)
+            return version < MessagingService.VERSION_DS_20 ? withLegacyIndexStatus(states) : states;
+        if (dseOrdinals)
+            return DseGossipStates.toDse(states).entrySet();
+        Map<ApplicationState, VersionedValue> filtered = new EnumMap<>(ApplicationState.class);
+        for (Map.Entry<ApplicationState, VersionedValue> state : states)
+            filtered.put(state.getKey(), filterValue(state.getKey(), state.getValue(), version));
+        return withLegacyIndexStatus(filtered.entrySet());
     }
 
     /**
@@ -566,6 +609,10 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
      * VERSION_41, which HCD 1.2 nodes use when their current messaging version is lowered with
      * {@code -Dds.current_messaging_version}. The legacy format is
      * understood by every version that knows INDEX_STATUS, so it is the safe choice when the peer is ambiguous.
+     * <p>
+     * Below 4.0 (DSE 6 compatibility mode only) it applies to a peer not identified as a DSE 6 node: HCD 1.2 at the
+     * dialect, started with {@code -Dds.current_messaging_version=11}, which then reads the states with its own
+     * ordinals, INDEX_STATUS at 20 on both sides.
      */
     private static Set<Map.Entry<ApplicationState, VersionedValue>> withLegacyIndexStatus(Set<Map.Entry<ApplicationState, VersionedValue>> states)
     {
@@ -584,94 +631,6 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
             filteredStates.remove(state);
             filteredStates.add(new AbstractMap.SimpleImmutableEntry<>(ApplicationState.INDEX_STATUS,
                                                                       VersionedValue.unsafeMakeVersionedValue(legacy, vv.version)));
-            return filteredStates;
-        }
-        return states;
-    }
-
-    private static Map<ApplicationState, VersionedValue> filterOutgoingState(Map.Entry<ApplicationState, VersionedValue> state, int version)
-    {
-        assert version < MessagingService.VERSION_40;
-        VersionedValue vv = state.getValue();
-        if (logger.isTraceEnabled())
-            logger.trace("Fetching the key from state {}({}) with value of {}", state.getKey(), state.getKey().ordinal(), vv);
-        String[] values;
-        switch (state.getKey())
-        {
-            case INTERNAL_ADDRESS_AND_PORT:
-                values = splitAddressAndPort(vv);
-                if (values.length > 1)
-                    return Map.of(ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(values[0], vv.version),
-                                  ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(values[1], vv.version));
-                else
-                    return Map.of(ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
-            case NATIVE_ADDRESS_AND_PORT:
-                values = splitAddressAndPort(vv);
-                if (values.length > 1)
-                    return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(values[1], vv.version));
-                else
-                    return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
-            case STATUS_WITH_PORT:
-                values = splitStatusAndPort(vv);
-                if (values.length > 1)
-                    return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(values[0], vv.version));
-                else
-                    return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(vv.value, vv.version));
-            case DISK_USAGE:
-                return Map.of(ApplicationState.values()[21], state.getValue());
-            case SSTABLE_VERSIONS:
-                return Map.of();
-            case INDEX_STATUS:
-                return Map.of();
-            case RELEASE_VERSION:
-                return Map.of(ApplicationState.RELEASE_VERSION, filterValue(state.getKey(), vv, version));
-            default:
-                return Map.of(state.getKey(), state.getValue());
-        }
-    }
-
-    private static String[] splitStatusAndPort(VersionedValue vv)
-    {
-        return vv.value.split("[:,]");
-    }
-
-    private static String[] splitAddressAndPort(VersionedValue vv)
-    {
-        return vv.value.split(":");
-    }
-
-    @VisibleForTesting
-    static Map<ApplicationState, VersionedValue> filterIncomingStates(Map<ApplicationState, VersionedValue> states, int version)
-    {
-        if (version < MessagingService.VERSION_40)
-        {
-            Map<ApplicationState, VersionedValue> filteredStates = new EnumMap<>(ApplicationState.class);
-            for (Map.Entry<ApplicationState, VersionedValue> state : states.entrySet())
-            {
-                VersionedValue vv = state.getValue();
-                if (logger.isTraceEnabled())
-                    logger.trace("Storing the key to state {}({}) with value of {}", state.getKey(), state.getKey().ordinal(), vv);
-                switch (state.getKey().ordinal())
-                {
-                    case 15:
-                        filteredStates.put(ApplicationState.NATIVE_ADDRESS_AND_PORT, vv);
-                        break;
-                    case 16:
-                        break;
-                    case 17:
-                        filteredStates.put(ApplicationState.INTERNAL_ADDRESS_AND_PORT, vv);
-                        break;
-                    case 18:
-                    case 19:
-                    case 20:
-                        break;
-                    case 21:
-                        filteredStates.put(ApplicationState.DISK_USAGE, vv);
-                        break;
-                    default:
-                        filteredStates.put(state.getKey(), vv);
-                }
-            }
             return filteredStates;
         }
         return states;
