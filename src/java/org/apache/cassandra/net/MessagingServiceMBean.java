@@ -173,5 +173,11 @@ public interface MessagingServiceMBean
      */
     public List<String> getDsePeersOnRecord();
 
+    /**
+     * In {@code DSE_6} mode, the SAI on-disk version the startup check found pinned and what it was derived from, or
+     * why it was not enforced ({@code Dse6SaiVersionPin}); null outside {@code DSE_6} and before the check.
+     */
+    public String getDseSaiVersionPin();
+
     void reloadSslCertificates() throws IOException;
 }
