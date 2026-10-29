@@ -40,26 +40,26 @@ public class LikeEscapeTest extends SAITester
 
         beforeAndAfterFlush(() -> {
             // '_' matches any single character, multibyte ones included
-            assertLike("v LIKE 'a_c'", "a_c", "abc", "a%c", "a\\c", "a😀c", "a!c");
-            assertLike("v LIKE '__'", "ab", "a_");
-            assertLike("v LIKE '日_本'", "日_本", "日x本");
-            assertLike("v LIKE 'a_%'", "a_c", "abc", "a%c", "a\\c", "ab", "a_", "a__c", "a😀c", "a!c");
-            assertLike("v LIKE '%_c'", "a_c", "abc", "a%c", "a\\c", "a__c", "a😀c", "a!c");
+            assertRowsMatchedByLike("v LIKE 'a_c'", "a_c", "abc", "a%c", "a\\c", "a😀c", "a!c");
+            assertRowsMatchedByLike("v LIKE '__'", "ab", "a_");
+            assertRowsMatchedByLike("v LIKE '日_本'", "日_本", "日x本");
+            assertRowsMatchedByLike("v LIKE 'a_%'", "a_c", "abc", "a%c", "a\\c", "ab", "a_", "a__c", "a😀c", "a!c");
+            assertRowsMatchedByLike("v LIKE '%_c'", "a_c", "abc", "a%c", "a\\c", "a__c", "a😀c", "a!c");
 
             // escaped wildcards are literals: exact, prefix, suffix, contains and generic patterns
-            assertLike("v LIKE 'a!_c' ESCAPE '!'", "a_c");
-            assertLike("v LIKE 'a!_%' ESCAPE '!'", "a_c", "a_", "a__c");
-            assertLike("v LIKE '%!%c' ESCAPE '!'", "a%c");
-            assertLike("v LIKE '%!%%' ESCAPE '!'", "a%c");
-            assertLike("v LIKE '%!_!_%' ESCAPE '!'", "a__c");
-            assertLike("v LIKE '_!_%' ESCAPE '!'", "a_c", "a_", "a__c", "日_本");
-            assertLike("v LIKE 'a!!c' ESCAPE '!'", "a!c");
-            assertLike("v LIKE 'a\\\\c' ESCAPE '\\'", "a\\c");
-            assertLike("v LIKE '日本_本本' ESCAPE '本'", "日_本");
+            assertRowsMatchedByLike("v LIKE 'a!_c' ESCAPE '!'", "a_c");
+            assertRowsMatchedByLike("v LIKE 'a!_%' ESCAPE '!'", "a_c", "a_", "a__c");
+            assertRowsMatchedByLike("v LIKE '%!%c' ESCAPE '!'", "a%c");
+            assertRowsMatchedByLike("v LIKE '%!%%' ESCAPE '!'", "a%c");
+            assertRowsMatchedByLike("v LIKE '%!_!_%' ESCAPE '!'", "a__c");
+            assertRowsMatchedByLike("v LIKE '_!_%' ESCAPE '!'", "a_c", "a_", "a__c", "日_本");
+            assertRowsMatchedByLike("v LIKE 'a!!c' ESCAPE '!'", "a!c");
+            assertRowsMatchedByLike("v LIKE 'a\\\\c' ESCAPE '\\'", "a\\c");
+            assertRowsMatchedByLike("v LIKE '日本_本本' ESCAPE '本'", "日_本");
 
             // without an ESCAPE clause, there is no escape character
-            assertLike("v LIKE 'a\\c'", "a\\c");
-            assertLike("v LIKE 'a!_c'");
+            assertRowsMatchedByLike("v LIKE 'a\\c'", "a\\c");
+            assertRowsMatchedByLike("v LIKE 'a!_c'");
 
             // bind markers
             assertRowsIgnoringOrder(execute("SELECT v FROM %s WHERE v LIKE ? ESCAPE ?", "a#_%", "#"),
@@ -84,9 +84,9 @@ public class LikeEscapeTest extends SAITester
         execute("INSERT INTO %s (pk, v) VALUES (2, 'ABC')");
 
         beforeAndAfterFlush(() -> {
-            assertLike("v LIKE 'a_c'", "A_C", "ABC");
-            assertLike("v LIKE 'a!_c' ESCAPE '!'", "A_C");
-            assertLike("v LIKE 'a!_%' ESCAPE '!'", "A_C");
+            assertRowsMatchedByLike("v LIKE 'a_c'", "A_C", "ABC");
+            assertRowsMatchedByLike("v LIKE 'a!_c' ESCAPE '!'", "A_C");
+            assertRowsMatchedByLike("v LIKE 'a!_%' ESCAPE '!'", "A_C");
         });
     }
 
@@ -102,11 +102,11 @@ public class LikeEscapeTest extends SAITester
             execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, values[pk]);
 
         beforeAndAfterFlush(() -> {
-            assertLike("v LIKE 'a＿c'", "a＿c", "a_c");
-            assertLike("v LIKE 'a％c'", "a％c");
-            assertLike("v LIKE 'a_c'", "a＿c", "a_c", "abc", "a％c");
-            assertLike("v LIKE 'x_＼'", "xy＼", "xy\\");
-            assertLike("v LIKE '%＼'", "xy＼", "xy\\");
+            assertRowsMatchedByLike("v LIKE 'a＿c'", "a＿c", "a_c");
+            assertRowsMatchedByLike("v LIKE 'a％c'", "a％c");
+            assertRowsMatchedByLike("v LIKE 'a_c'", "a＿c", "a_c", "abc", "a％c");
+            assertRowsMatchedByLike("v LIKE 'x_＼'", "xy＼", "xy\\");
+            assertRowsMatchedByLike("v LIKE '%＼'", "xy＼", "xy\\");
         });
     }
 
@@ -121,11 +121,11 @@ public class LikeEscapeTest extends SAITester
 
         beforeAndAfterFlush(() -> {
             // with '%' as escape character, '%%' is a literal '%' and '%' can't be a wildcard any more
-            assertLike("v LIKE 'a%%_' ESCAPE '%'", "a%c");
-            assertLike("v LIKE 'a%%' ESCAPE '%'", "a%");
+            assertRowsMatchedByLike("v LIKE 'a%%_' ESCAPE '%'", "a%c");
+            assertRowsMatchedByLike("v LIKE 'a%%' ESCAPE '%'", "a%");
             // with '_' as escape character, '__' is a literal '_'
-            assertLike("v LIKE 'a__c' ESCAPE '_'", "a_c");
-            assertLike("v LIKE 'a%' ESCAPE '_'", "a%c", "a_c", "abc", "a%");
+            assertRowsMatchedByLike("v LIKE 'a__c' ESCAPE '_'", "a_c");
+            assertRowsMatchedByLike("v LIKE 'a%' ESCAPE '_'", "a%c", "a_c", "abc", "a%");
         });
     }
 
@@ -157,7 +157,7 @@ public class LikeEscapeTest extends SAITester
         .hasMessageContaining("Invalid null or unset ESCAPE");
     }
 
-    private void assertLike(String restriction, String... expected) throws Throwable
+    private void assertRowsMatchedByLike(String restriction, String... expected) throws Throwable
     {
         Object[][] rows = new Object[expected.length][];
         for (int i = 0; i < expected.length; i++)

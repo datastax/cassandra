@@ -157,11 +157,20 @@ public class TermsReader implements Closeable
      */
     public TermsIterator patternTerms(Expression filter, boolean ascending)
     {
+        byte[] prefix;
+        CompiledAutomaton automaton;
         if (filter.getOp() == Expression.Op.PREFIX)
-            return new PatternTermsScanner(ByteBufferUtil.getArray(filter.lower.value.encoded), null, ascending);
-
-        assert filter.getOp() == Expression.Op.AUTOMATON : "Not a pattern expression: " + filter;
-        return new PatternTermsScanner(filter.getAutomatonCommonPrefix(), filter.getAutomaton(), ascending);
+        {
+            prefix = ByteBufferUtil.getArray(filter.lower.value.encoded);
+            automaton = null;
+        }
+        else
+        {
+            assert filter.getOp() == Expression.Op.AUTOMATON : "Not a pattern expression: " + filter;
+            prefix = filter.getAutomatonCommonPrefix();
+            automaton = filter.getAutomaton();
+        }
+        return ascending ? new TermsScanner(prefix, automaton) : new ReverseTermsScanner(prefix, automaton);
     }
 
     public PostingList exactMatch(ByteComparable term, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
@@ -498,30 +507,41 @@ public class TermsReader implements Closeable
         return indexContext.isAnalyzed() && version.onOrAfter(Version.BM25_EARLIEST);
     }
 
-    private class TermsScanner implements TermsIterator
+    /**
+     * Iterates the terms of the terms dictionary read by the given reader, in its order, with their postings, keeping
+     * only those accepted by the filter, if any.
+     */
+    private abstract class AbstractTermsScanner implements TermsIterator
     {
-        private final TrieTermsDictionaryReader termsDictionaryReader;
-        private final ByteBuffer minTerm, maxTerm;
-        private Pair<ByteComparable, Long> entry;
+        private final Iterator<Pair<ByteComparable, Long>> terms;
+        private final AutoCloseable termsCloser;
+        @Nullable
+        private final Predicate<byte[]> filter;
         private final IndexInput postingsInput;
         private final IndexInput postingsSummaryInput;
+        private Pair<ByteComparable, Long> entry;
+        private Pair<ByteComparable, Long> pending;
 
-        private TermsScanner(Version version, AbstractType<?> type)
+        <T extends Iterator<Pair<ByteComparable, Long>> & AutoCloseable> AbstractTermsScanner(T terms, @Nullable Predicate<byte[]> filter)
         {
-            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot, termDictionaryFileEncodingVersion);
-            this.postingsInput = IndexFileUtils.instance().openInput(postingsFile);
-            this.postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
-            // We decode based on the logic used to encode the min and max terms in the trie.
-            if (version.onOrAfter(Version.DB) && TypeUtil.isComposite(type))
+            this.terms = terms;
+            this.termsCloser = terms;
+            this.filter = filter;
+            // If an open throws, the constructor exits before the caller could clean up: close what was already
+            // opened on the way out instead of leaking it.
+            IndexInput postings = null;
+            try
             {
-                this.minTerm = indexContext.getValidator().fromComparableBytes(ByteSource.peekable(termsDictionaryReader.getMinTerm().asComparableBytes(termDictionaryFileEncodingVersion)), termDictionaryFileEncodingVersion);
-                this.maxTerm = indexContext.getValidator().fromComparableBytes(ByteSource.peekable(termsDictionaryReader.getMaxTerm().asComparableBytes(termDictionaryFileEncodingVersion)), termDictionaryFileEncodingVersion);
+                postings = IndexFileUtils.instance().openInput(postingsFile);
+                this.postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
             }
-            else
+            catch (Throwable t)
             {
-                this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(termDictionaryFileEncodingVersion)));
-                this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(termDictionaryFileEncodingVersion)));
+                FileUtils.closeQuietly(postings);
+                FileUtils.closeQuietly(terms);
+                throw t;
             }
+            this.postingsInput = postings;
         }
 
         @Override
@@ -536,7 +556,7 @@ public class TermsReader implements Closeable
         @Override
         public void close()
         {
-            termsDictionaryReader.close();
+            FileUtils.closeQuietly(termsCloser);
             FileUtils.closeQuietly(postingsInput);
             FileUtils.closeQuietly(postingsSummaryInput);
         }
@@ -544,121 +564,13 @@ public class TermsReader implements Closeable
         @Override
         public ByteBuffer getMinTerm()
         {
-            return minTerm;
+            throw new UnsupportedOperationException();
         }
 
         @Override
         public ByteBuffer getMaxTerm()
         {
-            return maxTerm;
-        }
-
-        @Override
-        public ByteComparable next()
-        {
-            if (termsDictionaryReader.hasNext())
-            {
-                entry = termsDictionaryReader.next();
-                return entry.left;
-            }
-            return null;
-        }
-
-        @Override
-        public boolean hasNext()
-        {
-            return termsDictionaryReader.hasNext();
-        }
-    }
-
-    /**
-     * See {@link #patternTerms}.
-     */
-    private class PatternTermsScanner implements TermsIterator
-    {
-        private final byte[] prefix;
-        @Nullable
-        private final CompiledAutomaton automaton;
-        private final Iterator<Pair<ByteComparable, Long>> reader;
-        private final AutoCloseable readerCloser;
-        private final IndexInput postingsInput;
-        private final IndexInput postingsSummaryInput;
-        private Pair<ByteComparable, Long> entry;
-        private Pair<ByteComparable, Long> pending;
-
-        private PatternTermsScanner(byte[] prefix,
-                                    @Nullable CompiledAutomaton automaton,
-                                    boolean ascending)
-        {
-            this.prefix = prefix;
-            this.automaton = automaton;
-
-            // [prefix, nextOf(prefix)], the inclusive end bound being skipped by the prefix check in hasNext
-            byte[] upperBytes = AutomatonQueries.prefixUpperBound(prefix);
-            if (ascending)
-            {
-                TrieTermsDictionaryReader forward = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
-                                                                                  termDictionaryRoot,
-                                                                                  bound(prefix),
-                                                                                  bound(upperBytes),
-                                                                                  true,
-                                                                                  true,
-                                                                                  termDictionaryFileEncodingVersion);
-                reader = forward;
-                readerCloser = forward;
-            }
-            else
-            {
-                ReverseTrieTermsDictionaryReader reverse = new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
-                                                                                                termDictionaryRoot,
-                                                                                                bound(prefix),
-                                                                                                bound(upperBytes),
-                                                                                                termDictionaryFileEncodingVersion);
-                reader = reverse;
-                readerCloser = reverse;
-            }
-            // If an open throws, the constructor exits before the caller could clean up: close what was already
-            // opened on the way out instead of leaking it.
-            IndexInput postings = null;
-            try
-            {
-                postings = IndexFileUtils.instance().openInput(postingsFile);
-                this.postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
-            }
-            catch (Throwable t)
-            {
-                FileUtils.closeQuietly(postings);
-                FileUtils.closeQuietly(readerCloser);
-                throw t;
-            }
-            this.postingsInput = postings;
-        }
-
-        @Nullable
-        private ByteComparable bound(@Nullable byte[] bytes)
-        {
-            return bytes == null || bytes.length == 0 ? null : ByteComparable.preencoded(termDictionaryFileEncodingVersion, bytes);
-        }
-
-        @Override
-        public boolean hasNext()
-        {
-            if (pending != null)
-                return true;
-
-            while (reader.hasNext())
-            {
-                Pair<ByteComparable, Long> candidate = reader.next();
-                byte[] termBytes = ByteSourceInverse.readBytes(candidate.left.asComparableBytes(termDictionaryFileEncodingVersion));
-                // the reader's bounds admit the end bound nextOf(prefix) itself
-                if (!startsWith(termBytes, prefix))
-                    continue;
-                if (automaton != null && !LikePatterns.accepts(automaton, termBytes))
-                    continue;
-                pending = candidate;
-                return true;
-            }
-            return false;
+            throw new UnsupportedOperationException();
         }
 
         @Override
@@ -672,98 +584,133 @@ public class TermsReader implements Closeable
         }
 
         @Override
-        @SuppressWarnings("resource")
-        public PostingList postings() throws IOException
+        public boolean hasNext()
         {
-            assert entry != null;
-            var blockSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, entry.right, PostingsReader.InputCloser.NOOP);
-            return new ScanningPostingsReader(postingsInput, blockSummary, readFrequencies());
+            if (pending != null)
+                return true;
+
+            while (terms.hasNext())
+            {
+                Pair<ByteComparable, Long> candidate = terms.next();
+                if (filter == null || filter.test(ByteSourceInverse.readBytes(candidate.left.asComparableBytes(termDictionaryFileEncodingVersion))))
+                {
+                    pending = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Iterates the terms in ascending order: all of them, or only those of an ordering scan restricted by a pattern
+     * (see {@link #patternTerms}).
+     */
+    private class TermsScanner extends AbstractTermsScanner
+    {
+        private final ByteBuffer minTerm, maxTerm;
+
+        private TermsScanner(Version version, AbstractType<?> type)
+        {
+            this(new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot, termDictionaryFileEncodingVersion), version, type);
         }
 
-        @Override
-        public void close()
+        private TermsScanner(TrieTermsDictionaryReader termsDictionaryReader, Version version, AbstractType<?> type)
         {
-            FileUtils.closeQuietly(readerCloser);
-            FileUtils.closeQuietly(postingsInput);
-            FileUtils.closeQuietly(postingsSummaryInput);
+            super(termsDictionaryReader, null);
+            // We decode based on the logic used to encode the min and max terms in the trie.
+            if (version.onOrAfter(Version.DB) && TypeUtil.isComposite(type))
+            {
+                this.minTerm = indexContext.getValidator().fromComparableBytes(ByteSource.peekable(termsDictionaryReader.getMinTerm().asComparableBytes(termDictionaryFileEncodingVersion)), termDictionaryFileEncodingVersion);
+                this.maxTerm = indexContext.getValidator().fromComparableBytes(ByteSource.peekable(termsDictionaryReader.getMaxTerm().asComparableBytes(termDictionaryFileEncodingVersion)), termDictionaryFileEncodingVersion);
+            }
+            else
+            {
+                this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(termDictionaryFileEncodingVersion)));
+                this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(termDictionaryFileEncodingVersion)));
+            }
+        }
+
+        private TermsScanner(byte[] prefix, @Nullable CompiledAutomaton automaton)
+        {
+            super(new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
+                                                termDictionaryRoot,
+                                                bound(prefix),
+                                                prefixUpperBound(prefix),
+                                                true,
+                                                true,
+                                                termDictionaryFileEncodingVersion),
+                  patternFilter(prefix, automaton));
+            // reading them would move the reader, and only the full scans of segment merging need them
+            this.minTerm = null;
+            this.maxTerm = null;
         }
 
         @Override
         public ByteBuffer getMinTerm()
         {
-            throw new UnsupportedOperationException();
+            if (minTerm == null)
+                throw new UnsupportedOperationException();
+            return minTerm;
         }
 
         @Override
         public ByteBuffer getMaxTerm()
         {
-            throw new UnsupportedOperationException();
+            if (maxTerm == null)
+                throw new UnsupportedOperationException();
+            return maxTerm;
         }
+    }
+
+    /**
+     * Iterates the terms in descending order: all of them, or only those of an ordering scan restricted by a pattern
+     * (see {@link #patternTerms}).
+     */
+    private class ReverseTermsScanner extends AbstractTermsScanner
+    {
+        private ReverseTermsScanner()
+        {
+            super(new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot), null);
+        }
+
+        private ReverseTermsScanner(byte[] prefix, @Nullable CompiledAutomaton automaton)
+        {
+            super(new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
+                                                       termDictionaryRoot,
+                                                       bound(prefix),
+                                                       prefixUpperBound(prefix),
+                                                       termDictionaryFileEncodingVersion),
+                  patternFilter(prefix, automaton));
+        }
+    }
+
+    /**
+     * The upper bound of the terms starting with the prefix, {@code nextOf(prefix)}: the readers include it, so
+     * {@link #patternFilter} skips it.
+     */
+    @Nullable
+    private ByteComparable prefixUpperBound(byte[] prefix)
+    {
+        return bound(AutomatonQueries.prefixUpperBound(prefix));
+    }
+
+    @Nullable
+    private ByteComparable bound(@Nullable byte[] bytes)
+    {
+        return bytes == null || bytes.length == 0 ? null : ByteComparable.preencoded(termDictionaryFileEncodingVersion, bytes);
+    }
+
+    /**
+     * Accepts the terms starting with the prefix, which the automaton, if any, accepts.
+     */
+    private static Predicate<byte[]> patternFilter(byte[] prefix, @Nullable CompiledAutomaton automaton)
+    {
+        return term -> startsWith(term, prefix) && (automaton == null || LikePatterns.accepts(automaton, term));
     }
 
     private static boolean startsWith(byte[] term, byte[] prefix)
     {
         return term.length >= prefix.length && Arrays.equals(term, 0, prefix.length, prefix, 0, prefix.length);
-    }
-
-    private class ReverseTermsScanner implements TermsIterator
-    {
-        private final ReverseTrieTermsDictionaryReader iterator;
-        private Pair<ByteComparable, Long> entry;
-        private final IndexInput postingsInput;
-        private final IndexInput postingsSummaryInput;
-
-        private ReverseTermsScanner()
-        {
-            this.iterator = new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot);
-            this.postingsInput = IndexFileUtils.instance().openInput(postingsFile);
-            this.postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
-        }
-
-        @Override
-        @SuppressWarnings("resource")
-        public PostingList postings() throws IOException
-        {
-            assert entry != null;
-            var blockSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, entry.right, PostingsReader.InputCloser.NOOP);
-            return new ScanningPostingsReader(postingsInput, blockSummary, readFrequencies());
-        }
-
-        @Override
-        public void close()
-        {
-            iterator.close();
-            FileUtils.closeQuietly(postingsInput);
-            FileUtils.closeQuietly(postingsSummaryInput);
-        }
-
-        @Override
-        public ByteBuffer getMinTerm()
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public ByteBuffer getMaxTerm()
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public ByteComparable next()
-        {
-            if (iterator.hasNext())
-            {
-                entry = iterator.next();
-                return entry.left;
-            }
-            return null;
-        }
-
-        @Override
-        public boolean hasNext()
-        {
-            return iterator.hasNext();
-        }
     }
 }

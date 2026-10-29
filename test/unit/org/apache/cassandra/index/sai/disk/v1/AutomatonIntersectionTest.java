@@ -35,6 +35,7 @@ import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.LikePatterns;
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -52,6 +53,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
@@ -72,7 +74,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Disk-level tests for the automaton term-matching engine serving the non-prefix LIKE variants ({@code TermsReader#intersect} and
- * {@code InvertedIndexSearcher#searchAutomaton}): builds real per-segment inverted indexes from synthetic
+ * {@code InvertedIndexSearcher#search} with a pattern expression): builds real per-segment inverted indexes from synthetic
  * term/rowid data and compares the engine results with a brute-force reference that runs the same automaton
  * over every term.
  */
@@ -347,12 +349,13 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
             try (IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata))
             {
                 assertTrue(searcher instanceof InvertedIndexSearcher);
-                CompiledAutomaton automaton = LikePatterns.patternAutomaton("al%");
-                TreeSet<Integer> expected = expectedRowIds(dictionary, automaton);
+                String pattern = "al_%";
+                TreeSet<Integer> expected = expectedRowIds(dictionary, LikePatterns.patternAutomaton(pattern));
                 assertEquals(union(dictionary, "alpha", "alps", "alcove"), expected);
 
+                Expression expression = new Expression(indexContext).add(Operator.LIKE_MATCHES, UTF8Type.instance.decompose(pattern));
                 TreeSet<Integer> actual = new TreeSet<>();
-                try (KeyRangeIterator results = ((InvertedIndexSearcher) searcher).searchAutomaton(automaton, new QueryContext()))
+                try (KeyRangeIterator results = searcher.search(expression, null, new QueryContext(), false))
                 {
                     // tokens are equal to their corresponding row ids with the test primary key map factory
                     while (results.hasNext())

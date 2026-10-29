@@ -28,7 +28,6 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import org.apache.cassandra.index.sai.plan.QueryController;
 import org.slf4j.Logger;
@@ -58,7 +57,6 @@ import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
-import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.BM25Utils.EagerDocTF;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -191,24 +189,10 @@ public class InvertedIndexSearcher extends IndexSearcher
     }
 
     /**
-     * Automaton-driven term matching entry point (see
-     * {@link org.apache.cassandra.index.sai.utils.AutomatonQueries}): intersects the segment's terms dictionary
-     * with the given byte-level automaton and returns the primary keys of the union of the posting lists of all
-     * matching terms. The CQL surface (the non-prefix LIKE variants) reaches this engine through the
-     * {@code Expression.Op.AUTOMATON} branch of {@code searchPosting}.
+     * Returns the union of the posting lists of all terms in this segment matching the automaton (consistent with
+     * what {@code searchPosting} returns for {@code Expression.Op.RANGE}).
      */
-    @VisibleForTesting
-    public KeyRangeIterator searchAutomaton(CompiledAutomaton automaton, QueryContext context) throws IOException
-    {
-        return toPrimaryKeyIterator(searchAutomatonPostings(automaton, AutomatonQueries.commonPrefixBytes(automaton), context), context);
-    }
-
-    /**
-     * Posting-list-level variant of {@link #searchAutomaton(CompiledAutomaton, QueryContext)}, returning the union
-     * of the posting lists of all terms in this segment matching the automaton (consistent with what
-     * {@code searchPosting} returns for {@code Expression.Op.RANGE}).
-     */
-    public PostingList searchAutomatonPostings(CompiledAutomaton automaton, byte[] commonPrefix, QueryContext context)
+    private PostingList searchAutomatonPostings(CompiledAutomaton automaton, byte[] commonPrefix, QueryContext context)
     {
         // Automaton intersection runs directly over the stored term bytes, which only line up with the raw value
         // bytes for non-composite literal types (see OnDiskFormat#encodeForTrie).

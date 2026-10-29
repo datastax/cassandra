@@ -101,13 +101,13 @@ public class TrieMemoryIndex extends MemoryIndex
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
 
-    /** The maximum number of terms whose rows are counted when estimating a prefix (see {@link #estimateNumRowsWithPrefix}). */
-    private static final int MAX_COUNTED_PREFIX_TERMS = 256;
+    /** The maximum number of terms whose rows are counted when estimating a range (see {@link #estimateNumRows}). */
+    private static final int MAX_COUNTED_TERMS = 256;
     /**
-     * The maximum number of rows counted when estimating a prefix (see {@link #estimateNumRowsWithPrefix}): the keys
-     * of a term are a skip list whose size is linear to compute, so counting stops after this many keys.
+     * The maximum number of rows counted when estimating a range (see {@link #estimateNumRows}): the keys of a term
+     * are a skip list whose size is linear to compute, so counting stops after this many keys.
      */
-    private static final int MAX_COUNTED_PREFIX_ROWS = 4096;
+    private static final int MAX_COUNTED_ROWS = 4096;
 
     private ByteBuffer minTerm;
     private ByteBuffer maxTerm;
@@ -843,12 +843,12 @@ public class TrieMemoryIndex extends MemoryIndex
         ByteComparable queryUpper = expression.upper != null ? expression.getEncodedUpperBoundByteComparable(version) : null;
         boolean lowerExclusive = expression.lower != null && !expression.lower.inclusive;
         boolean upperExclusive = expression.upper != null && !expression.upper.inclusive;
-        return estimateNumRowsInTermRange(queryLower, lowerExclusive, queryUpper, upperExclusive);
+        return estimateNumRows(getSubtrie(expression), queryLower, lowerExclusive, queryUpper, upperExclusive);
     }
 
     /**
-     * Conservatively estimates the number of rows matching a prefix expression by interpolating over the
-     * term range {@code [enc(prefix), nextOf(enc(prefix)))} covered by the prefix.
+     * Estimates the number of rows matching a prefix expression, the rows of the term range
+     * {@code [enc(prefix), nextOf(enc(prefix)))} covered by the prefix.
      */
     private long estimateNumRowsMatchingPrefix(Expression expression)
     {
@@ -856,33 +856,46 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     /**
-     * Estimates the number of rows whose term starts with the given raw term bytes.
-     * <p>
-     * The rows of the first {@link #MAX_COUNTED_PREFIX_TERMS} terms of the range {@code [prefix, nextOf(prefix))} are
-     * counted, up to {@link #MAX_COUNTED_PREFIX_ROWS} rows, which gives the exact count when the range doesn't have
-     * more terms or rows. Otherwise, the estimate is the
-     * greatest of that partial count and of the interpolation over the range: the linear interpolation in the byte
-     * space is very coarse for prefixes that are long (it resolves only the first
-     * {@link TermsDistribution#NON_NUMBER_RESOLUTION_BYTES} bytes of a term, so a longer prefix is truncated to them)
-     * or that share their first bytes with all the other terms, and alone would estimate such ranges as empty.
+     * Estimates the number of rows whose term starts with the given raw term bytes. The interpolation resolves only
+     * the first {@link TermsDistribution#NON_NUMBER_RESOLUTION_BYTES} bytes of a term, so it runs over the range of
+     * the prefix truncated to them: a longer prefix would be an empty range.
      */
     private long estimateNumRowsWithPrefix(byte[] prefix)
     {
-        byte[] upperBytes = AutomatonQueries.prefixUpperBound(prefix);
-        ByteComparable upperBound = upperBytes == null ? null : asByteComparable(ByteBuffer.wrap(upperBytes));
+        byte[] resolvablePrefix = TermsDistribution.resolvablePrefix(prefix);
+        byte[] resolvableUpperBytes = AutomatonQueries.prefixUpperBound(resolvablePrefix);
+        ByteComparable queryLower = asByteComparable(ByteBuffer.wrap(resolvablePrefix));
+        ByteComparable queryUpper = resolvableUpperBytes == null ? null : asByteComparable(ByteBuffer.wrap(resolvableUpperBytes));
+        return estimateNumRows(prefixSubtrie(prefix), queryLower, false, queryUpper, true);
+    }
+
+    /**
+     * Estimates the number of rows of the given subtrie, the terms of a range.
+     * <p>
+     * The rows of the first {@link #MAX_COUNTED_TERMS} terms of the subtrie are counted, up to
+     * {@link #MAX_COUNTED_ROWS} rows, which gives the exact count when the subtrie doesn't have more terms or rows.
+     * Otherwise, the estimate is the greatest of that partial count and of the interpolation over the given bounds
+     * (see {@link #estimateNumRowsInTermRange}): the linear interpolation in the byte space is very coarse for narrow
+     * ranges, such as those of long prefixes or of terms that share their first bytes with all the other terms, and
+     * alone would estimate them as empty.
+     */
+    private long estimateNumRows(Trie<PrimaryKeys> subtrie,
+                                 ByteComparable queryLower, boolean lowerExclusive,
+                                 ByteComparable queryUpper, boolean upperExclusive)
+    {
         long countedRows = 0;
         int countedTerms = 0;
         boolean complete = true;
-        for (PrimaryKeys primaryKeys : data.slice(asByteComparable(ByteBuffer.wrap(prefix)), true, upperBound, false).values())
+        for (PrimaryKeys primaryKeys : subtrie.values())
         {
-            if (++countedTerms > MAX_COUNTED_PREFIX_TERMS || countedRows >= MAX_COUNTED_PREFIX_ROWS)
+            if (++countedTerms > MAX_COUNTED_TERMS || countedRows >= MAX_COUNTED_ROWS)
             {
                 complete = false;
                 break;
             }
             // PrimaryKeys#size() walks the whole skip list: count at most the remaining row budget
             Iterator<PrimaryKey> keys = primaryKeys.keys().iterator();
-            while (keys.hasNext() && countedRows < MAX_COUNTED_PREFIX_ROWS)
+            while (keys.hasNext() && countedRows < MAX_COUNTED_ROWS)
             {
                 keys.next();
                 countedRows++;
@@ -896,11 +909,7 @@ public class TrieMemoryIndex extends MemoryIndex
         if (complete)
             return countedRows;
 
-        byte[] resolvablePrefix = TermsDistribution.resolvablePrefix(prefix);
-        byte[] resolvableUpperBytes = AutomatonQueries.prefixUpperBound(resolvablePrefix);
-        ByteComparable queryLower = asByteComparable(ByteBuffer.wrap(resolvablePrefix));
-        ByteComparable queryUpper = resolvableUpperBytes == null ? null : asByteComparable(ByteBuffer.wrap(resolvableUpperBytes));
-        return Math.max(countedRows, estimateNumRowsInTermRange(queryLower, false, queryUpper, true));
+        return Math.max(countedRows, estimateNumRowsInTermRange(queryLower, lowerExclusive, queryUpper, upperExclusive));
     }
 
     /**

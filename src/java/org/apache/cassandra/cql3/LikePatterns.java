@@ -264,10 +264,11 @@ public final class LikePatterns
                 finite = false;
             }
         }
+        // an empty pattern matches the empty string
         if (literal.length() > 0 || parts.isEmpty())
             parts.add(Automata.makeString(literal.toString()));
         // a pattern without '%' accepts finitely many strings; with one, infinitely many
-        return compile(parts.size() == 1 ? parts.get(0) : Operations.concatenate(parts), finite);
+        return compile(Operations.concatenate(parts), finite);
     }
 
     /**

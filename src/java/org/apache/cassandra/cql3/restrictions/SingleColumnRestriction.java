@@ -1185,7 +1185,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                 if (escape != null && startsWith(value, i, escape))
                 {
                     i += escape.remaining();
-                    if (i == value.limit())
+                    if (i >= value.limit())
                         throw invalidRequest("LIKE pattern can't end with its escape character");
                     if (value.get(i) == '%' || value.get(i) == '_')
                     {
@@ -1205,7 +1205,17 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                 }
 
                 byte b = value.get(i++);
-                tokens[count++] = b == '%' ? ANY_STRING : b == '_' ? ANY_CHAR : b & 0xFF;
+                switch (b)
+                {
+                    case '%':
+                        tokens[count++] = ANY_STRING;
+                        break;
+                    case '_':
+                        tokens[count++] = ANY_CHAR;
+                        break;
+                    default:
+                        tokens[count++] = b & 0xFF;
+                }
             }
             return Arrays.copyOf(tokens, count);
         }
