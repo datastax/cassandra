@@ -130,8 +130,11 @@ elif [ "$JVM_VERSION" \< "17" ] ; then
     exit 1;
 elif [ "$short" = "17" ]  ; then
      JAVA_VERSION=17
+elif [ "$short" = "21" ]  ; then
+     # Java 21 uses the Java 17 JVM options (jvm17-*.options)
+     JAVA_VERSION=17
 elif [ "$JVM_VERSION" \< "22" ] ; then
-    echo "DSE DB 5.0 requires Java 11 or higher."
+    echo "DSE DB 5.0 requires Java 11, 17, 21 or 22 (or newer)."
     exit 1;
 fi
 

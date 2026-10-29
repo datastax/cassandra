@@ -44,7 +44,7 @@
         When building, javac's source and target flags are set to the jdk used, so lower JDKs are not supported at runtime.
     -->
     <property name="java.default" value="11" />
-    <property name="java.supported" value="11,17,22" />
+    <property name="java.supported" value="11,17,21,22" />
 
     <!-- directory details -->
     <property name="basedir" value="."/>
@@ -319,8 +319,12 @@
         <string>--add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
     </resources>
     <pathconvert property="_jvm17_args_concat" refid="_jvm17_arg_items" pathsep=" "/>
+    <!-- JDK 21 uses the same JVM arguments as JDK 17 -->
     <condition property="java-jvmargs" value="${_jvm17_args_concat}">
-        <equals arg1="${ant.java.version}" arg2="17"/>
+        <or>
+            <equals arg1="${ant.java.version}" arg2="17"/>
+            <equals arg1="${ant.java.version}" arg2="21"/>
+        </or>
     </condition>
 
     <resources id="_jvm22_arg_items">
@@ -412,15 +416,23 @@
         <string>-Dio.netty.tryReflectionSetAccessible=true</string>
     </resources>
     <pathconvert property="_jvm11_test_arg_items_concat" refid="_jvm11_test_arg_items" pathsep=" "/>
+    <!-- Test arguments shared by JDK 17 and JDK 21 -->
     <resources id="_jvm17_test_arg_items">
         <string>-Dio.netty.tryReflectionSetAccessible=true</string>
+        <!-- required by ThreadAwareSecurityManager on JDK 18+ -->
+        <string>-Djava.security.manager=allow</string>
+        <!-- Enable vector incubator feature (simd support), as in jvm17-server.options -->
+        <string>--add-modules jdk.incubator.vector</string>
     </resources>
     <pathconvert property="_jvm17_test_arg_items_concat" refid="_jvm17_test_arg_items" pathsep=" "/>
     <condition property="_std-test-jvmargs" value="${_jvm11_test_arg_items_concat}">
             <equals arg1="${ant.java.version}" arg2="11"/>
     </condition>
     <condition property="_std-test-jvmargs" value="${_jvm17_test_arg_items_concat}">
-        <equals arg1="${ant.java.version}" arg2="17"/>
+        <or>
+            <equals arg1="${ant.java.version}" arg2="17"/>
+            <equals arg1="${ant.java.version}" arg2="21"/>
+        </or>
     </condition>
     <resources id="_jvm22_test_arg_items">
         <string>-Djava.security.manager=allow</string>
