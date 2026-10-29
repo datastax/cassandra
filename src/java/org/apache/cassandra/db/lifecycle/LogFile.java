@@ -279,6 +279,10 @@ final class LogFile implements AutoCloseable
         // we can have transaction files with mismatching updateTime resolutions due to switching between jdk8 and jdk11, truncate both to be consistent:
         if (truncateMillis(record.updateTime) != truncateMillis(record.status.onDiskRecord.updateTime) && record.status.onDiskRecord.updateTime > 0)
         {
+            // DSE 6 compatibility: the remove records written in this mode take the stats file's time (DseTransactionLogs)
+            if (DatabaseDescriptor.isDse6SSTableOutput() && DseTransactionLogs.isDse6RemoveRecord(record, existingFiles))
+                return;
+
             // handle the case where we have existing broken transaction file on disk, where the update time is
             // based on the stats file. This is just for the first upgrade, patched versions never base the update
             // time on the stats file.
@@ -512,7 +516,8 @@ final class LogFile implements AutoCloseable
     {
         StringBuilder str = new StringBuilder();
         str.append('[');
-        str.append(getFileName());
+        // DSE 6 compatibility: the name on disk, which differs from getFileName() for a log written in another mode
+        str.append(DatabaseDescriptor.isDse6SSTableOutput() ? nameOnDisk() : getFileName());
         str.append(" in ");
         str.append(replicas.getDirectories());
         str.append(']');
@@ -524,6 +529,13 @@ final class LogFile implements AutoCloseable
             replicas.printContentsWithAnyErrors(str);
         }
         return str.toString();
+    }
+
+    /** The name of this log's file on disk, or the name it gets when it has no file yet. */
+    private String nameOnDisk()
+    {
+        List<File> paths = replicas.getFilePaths();
+        return paths.isEmpty() ? getFileName() : paths.get(0).name();
     }
 
     @VisibleForTesting
@@ -540,6 +552,16 @@ final class LogFile implements AutoCloseable
 
     private String getFileName()
     {
+        return fileName(version, type, id);
+    }
+
+    @VisibleForTesting
+    static String fileName(Version version, OperationType type, TimeUUID id)
+    {
+        // DSE 6 compatibility: while the node, or a tool, writes the sstables DSE 6 reads, the name DSE 6 reads too
+        if (DatabaseDescriptor.isDse6SSTableOutput())
+            return DseTransactionLogs.fileName(version, type, id);
+
         // For pre-5.0 versions, only BigFormat is supported, and the file name includes only the version string.
         // To retain the ability to downgrade to 4.x, we keep the old file naming scheme for BigFormat sstables
         // and add format names for other formats as they are supported only in 5.0 and above.

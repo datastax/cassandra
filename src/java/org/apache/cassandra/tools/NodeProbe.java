@@ -1558,6 +1558,31 @@ public class NodeProbe implements AutoCloseable
         return msProxy.getDroppedMessages();
     }
 
+    public String getInternodeCompatibilityMode()
+    {
+        return msProxy.getInternodeCompatibilityMode();
+    }
+
+    public String getStorageCompatibilityMode()
+    {
+        return msProxy.getStorageCompatibilityMode();
+    }
+
+    public String getSSTableFormatVersion()
+    {
+        return msProxy.getSSTableFormatVersion();
+    }
+
+    public Map<String, Integer> getEndpointMessagingVersions()
+    {
+        return msProxy.getEndpointMessagingVersions();
+    }
+
+    public Map<String, Long> getDseCompatRefusals()
+    {
+        return msProxy.getDseCompatRefusals();
+    }
+
     /** @deprecated See CASSANDRA-6719 */
     @Deprecated(since = "4.0")
     public void loadNewSSTables(String ksName, String cfName)

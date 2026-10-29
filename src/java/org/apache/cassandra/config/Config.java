@@ -1457,6 +1457,14 @@ public class Config
     public StorageCompatibilityMode storage_compatibility_mode;
 
     /**
+     * Transitional: {@code DSE_6} is set on every node of a cluster being upgraded in place from DataStax
+     * Enterprise 6.9 (or 6.8) and removed with a rolling restart once every node runs this software. It keeps the
+     * on-disk output readable by DSE (trie version {@code bb}, numeric generations, compressors DSE reads) and
+     * requires {@code storage_compatibility_mode: HCD_1}. See {@link InternodeCompatibilityMode}.
+     */
+    public InternodeCompatibilityMode internode_compatibility_mode = InternodeCompatibilityMode.NONE;
+
+    /**
      * Which timestamp should be used to represent a base for replica-side timeouts.
      * Client-side timeout is always based on the QUEUE, and is controlled by native_transport_timeout.
      */

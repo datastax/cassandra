@@ -19,6 +19,8 @@ package org.apache.cassandra.net;
 
 import java.net.UnknownHostException;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
@@ -107,6 +109,12 @@ public class EndpointMessagingVersions
     public boolean knows(InetAddressAndPort endpoint)
     {
         return versions.containsKey(endpoint);
+    }
+
+    /** A copy of the raw (uncapped) version of every known endpoint, for reporting. */
+    public Map<InetAddressAndPort, Integer> snapshot()
+    {
+        return new HashMap<>(versions);
     }
 
     public EndpointMessagingVersions copy()

@@ -2350,5 +2350,26 @@ drop_compact_storage_enabled: false
 #
 storage_compatibility_mode: HCD_1
 
+# Transitional. Set to DSE_6 on every node of a cluster that is being upgraded in place from
+# DataStax Enterprise 6.9 (or 6.8). The flag keeps the node's on-disk output readable by DSE, so
+# that a node can be rolled back: it writes trie sstables of version bb (it sets
+# cassandra.trie_index_format_version=bb, and refuses to start if that property names another
+# version) and forces uuid_sstable_identifiers_enabled off, so sstables get numeric generations (set
+# uuid_sstable_identifiers_enabled: false as well to avoid a warning at every start of the node and
+# of the offline tools). It requires storage_compatibility_mode HCD_1, sstable format bti and
+# paxos_variant v1 (DSE has no Paxos v2, and v1_without_linearizable_reads_or_rejected_writes breaks
+# the linearizability of LWTs against DSE); a runtime change of the Paxos variant to another one is
+# refused. What the node flushes and compacts must use compressors DSE reads: it requires the
+# default compression selector (no -Dcassandra.sstable.compression.selector.class) and
+# flush_compression fast or table. Offline tools that read this file (sstablescrub, sstableupgrade,
+# sstablesplit, ...) inherit the on-disk half of the mode: they write trie bb sstables with numeric
+# generations too, without the storage mode and paxos checks. Clients that do not read this file
+# (CQLSSTableWriter, sstableloader) inherit it only through the system property below. Remove the
+# setting (or set NONE) with a rolling restart once every node runs this software.
+# The system property cassandra.internode_compatibility_mode overrides this setting.
+# Possible values: NONE (default), DSE_6.
+#
+#internode_compatibility_mode: NONE
+
 # Changes defaults considered production safest for HCD users
 # hcd_guardrail_defaults: false
