@@ -574,6 +574,13 @@ public enum CassandraRelevantProperties
      * or a DSE 6 peer that was removed while this node was down).
      */
     INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS("cassandra.internode_compatibility_mode.ignore_dse_peers", "false"),
+    /**
+     * Lets a node start in {@code internode_compatibility_mode: DSE_6} although the SAI on-disk version it writes
+     * ({@link #SAI_CURRENT_VERSION}) is not pinned to the one the cluster's DSE release writes ({@code aa} for DSE 6.8,
+     * {@code ca} for DSE 6.9): a node rolled back to DSE then rebuilds the SAI indexes of the sstables this node wrote.
+     * Logged at WARN on every start.
+     */
+    INTERNODE_COMPATIBILITY_MODE_IGNORE_SAI_VERSION_PIN("cassandra.internode_compatibility_mode.ignore_sai_version_pin", "false"),
     INTERNODE_EVENT_THREADS("cassandra.internode-event-threads"),
     IO_NETTY_EVENTLOOP_THREADS("io.netty.eventLoopThreads"),
     IO_NETTY_TRANSPORT_ESTIMATE_SIZE_ON_SUBMIT("io.netty.transport.estimateSizeOnSubmit"),

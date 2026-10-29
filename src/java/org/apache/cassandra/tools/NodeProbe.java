@@ -1588,6 +1588,11 @@ public class NodeProbe implements AutoCloseable
         return msProxy.getDsePeersOnRecord();
     }
 
+    public String getDseSaiVersionPin()
+    {
+        return msProxy.getDseSaiVersionPin();
+    }
+
     /** @deprecated See CASSANDRA-6719 */
     @Deprecated(since = "4.0")
     public void loadNewSSTables(String ksName, String cfName)

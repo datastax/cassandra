@@ -172,6 +172,7 @@ public class StartupChecks
                                                                       checkDse6Artefacts,
                                                                       checkSSTablesFormat,
                                                                       checkSystemKeyspaceState,
+                                                                      checkDse6SaiVersionPin,
                                                                       checkDse6Ec2NamingScheme,
                                                                       checkDatacenter,
                                                                       checkRack,
@@ -960,6 +961,23 @@ public class StartupChecks
                                                      "or start with -D%s=true",
                                                      found, remedy,
                                                      CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS.getKey()));
+        }
+    };
+
+    /**
+     * In {@code DSE_6} mode, refuses to start unless the SAI on-disk version is pinned to the one the cluster's DSE
+     * release writes ({@link Dse6SaiVersionPin}). It reads the node metadata, so it runs after
+     * {@link #checkSystemKeyspaceState}, which initialises it: on the first start in the mode the refusal therefore comes
+     * after the import of DSE's node metadata and the scrub of the system keyspace, both of which leave DSE's files as
+     * they are and are repeated harmlessly by the next start. Not configurable from the yaml, like the other checks of
+     * the mode; its own override property is logged at WARN on every start.
+     */
+    public static final StartupCheck checkDse6SaiVersionPin = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            Dse6SaiVersionPin.verifyAtStartup();
         }
     };
 
