@@ -25,8 +25,9 @@ import java.util.concurrent.atomic.LongAdder;
 import com.google.common.annotations.VisibleForTesting;
 
 /**
- * Counts the requests this node refused because of the DSE 6 compatibility mode, by reason. The counters are shown by
- * {@code nodetool compatstatus}, so that an operator sees what the upgrade window is holding back.
+ * Counts the requests this node refused because of the DSE 6 compatibility mode, by reason: the
+ * message features that cannot be sent to a DSE 6 peer (verbs and reads the pre-4.0 dialect lacks). The counters are
+ * shown by {@code nodetool compatstatus}, so that an operator sees what the upgrade window is holding back.
  * <p>
  * The reasons are free-form names chosen by the callers; a counter is created on first use.
  */
