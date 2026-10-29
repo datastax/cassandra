@@ -774,6 +774,24 @@ public class MigrationCoordinator
         return Pair.create(schemaDestinationEndpoints, schemaEndpointsIgnored);
     }
 
+    /**
+     * In the DSE 6 compatibility mode, whether this node exchanges its schema with the endpoint: answers its schema pulls
+     * with this node's schema and applies the schema it pushes. Only a peer this node would push its schema to
+     * ({@link #shouldPushSchemaTo}: another node, speaking this node's messaging version) qualifies; any other peer, a
+     * DSE 6 node in the first place, is answered with no schema and its pushes are ignored ({@code DefaultSchemaUpdateHandler}).
+     * <p>
+     * A DSE 6 node pulls the schema of a peer whose schema version differs from its own, as this node's does in practice
+     * (the two digest different {@code system_schema} tables), and merges what it receives (observed with DSE 6.8.65):
+     * this node's schema must not reach it, since a table DSE does not know stays in its schema after a rollback. DSE 6
+     * pushes a schema change to every live peer it considers schema-compatible, so a DDL run on a DSE node can be pushed
+     * here: it is ignored, so that no schema crosses between this node and a DSE 6 node in either direction. Without the
+     * mode the caller does not ask, and every peer is answered and applied as before.
+     */
+    boolean exchangesSchemaWith(InetAddressAndPort endpoint)
+    {
+        return shouldPushSchemaTo(endpoint);
+    }
+
     private boolean shouldPushSchemaTo(InetAddressAndPort endpoint)
     {
         // only push schema to nodes with known and equal versions
