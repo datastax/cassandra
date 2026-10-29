@@ -28,13 +28,17 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.slf4j.LoggerFactory;
 
 import ch.qos.logback.classic.Level;
@@ -986,6 +990,63 @@ public class Dse6UpgradeGuardsTest
         String expected = DseUpgradeGuards.statusLine();
         assertThat(logged(DseUpgradeGuards::logStatus, Level.WARN)).containsExactly(expected);
         assertThat(logged(DseUpgradeGuards::logStatus, Level.ERROR)).isEmpty();
+    }
+
+    @Test
+    public void thePeriodicAccessControlCheckSurvivesFailures()
+    {
+        dse6();
+        Runnable before = DseUpgradeGuards.accessControlRecheck;
+        AtomicInteger runs = new AtomicInteger();
+        DseUpgradeGuards.accessControlRecheck = () -> {
+            runs.incrementAndGet();
+            throw new IllegalStateException("simulated failure");
+        };
+        try
+        {
+            List<String> errors = logged(() -> {
+                DseUpgradeGuards.recheckAccessControls();
+                DseUpgradeGuards.recheckAccessControls();
+            }, Level.ERROR);
+            // both runs happened, each failure was logged with what failed and swallowed
+            assertThat(runs.get()).isEqualTo(2);
+            assertThat(errors).containsExactly("Unable to check the DSE access controls again", "Unable to check the DSE access controls again");
+        }
+        finally
+        {
+            DseUpgradeGuards.accessControlRecheck = before;
+        }
+    }
+
+    /**
+     * The status line goes to the shared scheduled tasks executor and the check of the DSE access controls, which may
+     * block on a cluster-wide read, to the other one, both every {@link DseUpgradeGuards#STATUS_LOG_INTERVAL_MINUTES}
+     * minutes; the task scheduled for the check runs it.
+     */
+    @Test
+    public void thePeriodicTasksAreScheduledOnTheirExecutors()
+    {
+        ScheduledExecutorService status = Mockito.mock(ScheduledExecutorService.class);
+        ScheduledExecutorService recheck = Mockito.mock(ScheduledExecutorService.class);
+        DseUpgradeGuards.schedulePeriodicTasks(status, recheck);
+        long interval = DseUpgradeGuards.STATUS_LOG_INTERVAL_MINUTES;
+        Mockito.verify(status).scheduleWithFixedDelay(Mockito.any(Runnable.class), Mockito.eq(interval), Mockito.eq(interval), Mockito.eq(TimeUnit.MINUTES));
+        ArgumentCaptor<Runnable> task = ArgumentCaptor.forClass(Runnable.class);
+        Mockito.verify(recheck).scheduleWithFixedDelay(task.capture(), Mockito.eq(interval), Mockito.eq(interval), Mockito.eq(TimeUnit.MINUTES));
+        Mockito.verifyNoMoreInteractions(status, recheck);
+
+        Runnable before = DseUpgradeGuards.accessControlRecheck;
+        AtomicInteger runs = new AtomicInteger();
+        DseUpgradeGuards.accessControlRecheck = runs::incrementAndGet;
+        try
+        {
+            task.getValue().run();
+            assertThat(runs.get()).isEqualTo(1);
+        }
+        finally
+        {
+            DseUpgradeGuards.accessControlRecheck = before;
+        }
     }
 
     /** Runs {@code action} and returns the one message {@link DseUpgradeGuards} logged at WARN meanwhile. */

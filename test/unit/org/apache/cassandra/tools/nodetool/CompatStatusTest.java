@@ -50,6 +50,7 @@ import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.Dse6AccessControlCheck;
 import org.apache.cassandra.service.Dse6SaiVersionPin;
 import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.service.StartupChecks;
@@ -59,6 +60,7 @@ import org.apache.cassandra.tools.Output;
 import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_SAI_VERSION_PIN;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CURRENT_VERSION;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -104,10 +106,11 @@ public class CompatStatusTest extends CQLTester
             assertThat(lines).contains(String.format("  %-45s %d", "127.0.0.42:7000", MessagingService.current_version));
             assertThat(lines).contains(String.format("  %-45s %d  (pre-4.0 dialect)", "127.0.0.43:7000", MessagingService.VERSION_3014));
             assertThat(out).contains("(1 speaking the pre-4.0 dialect)");
-            // NONE: the DSE peers and their record are not kept, and nothing was refused
+            // NONE: the DSE peers, their record and the access-control check are not kept, and nothing was refused
             assertThat(out).contains("DSE peers                    : not tracked (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("DSE 6 peers on record        : not maintained (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("SAI version pinned           : not checked (internode_compatibility_mode NONE)\n");
+            assertThat(out).contains("DSE access controls ignored  : not checked (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("Requests refused (upgrade)   : 0\n");
         }
         finally
@@ -136,14 +139,15 @@ public class CompatStatusTest extends CQLTester
             tool.assertOnCleanExit();
             List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
             assertThat(lines).contains("Requests refused (upgrade)   : 3");
-            // the peer versions, the DSE peers, the record of DSE peers, the SAI pin, the lone DSE write
-            // grants, then the refusals
+            // the peer versions, the DSE peers, the record of DSE peers, the SAI pin, the access controls, the lone DSE
+            // write grants, then the refusals
             String out = tool.getStdout();
             assertThat(out.indexOf("Peers with a known version")).isNotNegative()
                                                                   .isLessThan(out.indexOf("DSE peers                    :"));
             assertThat(out.indexOf("DSE peers                    :")).isLessThan(out.indexOf("DSE 6 peers on record        :"));
             assertThat(out.indexOf("DSE 6 peers on record        :")).isLessThan(out.indexOf("SAI version pinned           :"));
-            assertThat(out.indexOf("SAI version pinned           :")).isLessThan(out.indexOf("DSE UPDATE/TRUNCATE alone    :"));
+            assertThat(out.indexOf("SAI version pinned           :")).isLessThan(out.indexOf("DSE access controls ignored  :"));
+            assertThat(out.indexOf("DSE access controls ignored  :")).isLessThan(out.indexOf("DSE UPDATE/TRUNCATE alone    :"));
             assertThat(out.indexOf("DSE UPDATE/TRUNCATE alone    :")).isLessThan(out.indexOf("Requests refused (upgrade)"));
             assertThat(lines).contains(String.format("  %-45s %d", "read with an index hint", 1));
             assertThat(lines).contains(String.format("  %-45s %d", "verb PING_REQ to a DSE 6 peer", 2));
@@ -244,6 +248,63 @@ public class CompatStatusTest extends CQLTester
     }
 
     @Test
+    public void printsTheAccessControlCheckInDse6Mode() throws Throwable
+    {
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            // before any check of the DSE access controls: unknown, not 0
+            Dse6AccessControlCheck.resetLastCheck();
+            assertThat(ToolRunner.invokeNodetool("compatstatus").getStdout()).contains("DSE access controls ignored  : unknown (not checked yet)\n");
+
+            // a check that found a DSE control: the count, how it was found, one line per control
+            execute("INSERT INTO system_auth.role_permissions (role, resource, permissions) VALUES ('analyst', 'rows/top_secret/data/ks1/table1', {'SELECT'})");
+            // and a table DSE restricts to rows (RESTRICT ROWS ... USING tenant); the schema is frozen in DSE_6 mode
+            String table;
+            try (WithProperties ddl = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                table = createTable("CREATE TABLE %s (tenant text PRIMARY KEY, v int) WITH extensions = {'DSE_RLACA': 0x74656e616e74}");
+            }
+            try
+            {
+                Dse6AccessControlCheck.recheck();
+                String found = ToolRunner.invokeNodetool("compatstatus").getStdout();
+                assertThat(found).contains("DSE access controls ignored  : 2 (found by a LOCAL_QUORUM read)\n");
+                assertThat(found).contains("\n  row-level grant role 'analyst' on rows/top_secret/data/ks1/table1: [SELECT]\n" +
+                                           "  row-level restricted table in the schema " + KEYSPACE + '.' + table + " (tenant column tenant)\n");
+
+                // a check that could read this node's replica only: a lower bound
+                Dse6AccessControlCheck.recheck(consistency -> {
+                    if (consistency != null)
+                        throw new IllegalStateException("cluster-wide read failed");
+                    return Dse6AccessControlCheck.scan(null);
+                });
+                assertThat(ToolRunner.invokeNodetool("compatstatus").getStdout())
+                .contains("DSE access controls ignored  : at least 2 (found by this node's replica only: the cluster-wide read failed " +
+                          "(cluster-wide read failed))\n");
+
+                // a check that could read no permissions: unknown, with the tables of the schema listed all the same
+                RuntimeException broken = new IllegalStateException("broken read");
+                assertThatThrownBy(() -> Dse6AccessControlCheck.recheck(consistency -> { throw broken; })).isSameAs(broken);
+                assertThat(ToolRunner.invokeNodetool("compatstatus").getStdout())
+                .contains("DSE access controls ignored  : unknown (not checked: the cluster-wide read failed (broken read) and so did the read " +
+                          "of this node's replica (broken read))\n" +
+                          "  row-level restricted table in the schema " + KEYSPACE + '.' + table + " (tenant column tenant)\n");
+            }
+            finally
+            {
+                execute("DELETE FROM system_auth.role_permissions WHERE role = 'analyst'");
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+            Dse6AccessControlCheck.resetLastCheck();
+        }
+    }
+
+    @Test
     public void aDseNodeKnownFromGossipOnlyWithoutTheMode() throws Exception
     {
         InetAddressAndPort dseNode = InetAddressAndPort.getByName("127.0.0.46:7000");
@@ -260,7 +321,8 @@ public class CompatStatusTest extends CQLTester
             assertThat(lines).anyMatch(line -> line.matches("Peers with a known version   : \\d+ \\(0 speaking the pre-4.0 dialect, 1 DSE 6 node\\(s\\) known from gossip only\\)"))
                              .contains(String.format("  %-45s %d  (DSE 6 node known from gossip only; reachable in DSE_6 mode only)", "127.0.0.46:7000", 1536))
                              .contains("DSE peers                    : not tracked (internode_compatibility_mode NONE)")
-                             .contains("DSE 6 peers on record        : not maintained (internode_compatibility_mode NONE)");
+                             .contains("DSE 6 peers on record        : not maintained (internode_compatibility_mode NONE)")
+                             .contains("DSE access controls ignored  : not checked (internode_compatibility_mode NONE)");
             assertThat(DsePeersRecord.peers()).isEmpty();
         }
         finally
@@ -305,6 +367,7 @@ public class CompatStatusTest extends CQLTester
         Mockito.when(probe.getDsePeers()).thenReturn(Map.of("127.0.0.45:7000", "release 4.0.0.6865, NET_VERSION 1024"));
         Mockito.when(probe.getDsePeersOnRecord()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DsePeersOnRecord")));
         Mockito.when(probe.getDseSaiVersionPin()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseSaiVersionPin")));
+        Mockito.when(probe.getDseAccessControlCheck()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseAccessControlCheck")));
         Mockito.when(probe.getDseLoneWriteGrantsSource()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseLoneWriteGrantsSource")));
         Mockito.when(probe.getDseCompatRefusals()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseCompatRefusals")));
 
@@ -320,6 +383,7 @@ public class CompatStatusTest extends CQLTester
                          String.format("  %-45s %s", "127.0.0.45:7000", "release 4.0.0.6865, NET_VERSION 1024"),
                          "DSE 6 peers on record        : unknown (this node does not report them)",
                          "SAI version pinned           : unknown (this node does not report it)",
+                         "DSE access controls ignored  : unknown (this node does not report them)",
                          "DSE UPDATE/TRUNCATE alone    : unknown (this node does not report them)",
                          "Requests refused (upgrade)   : unknown (this node does not report them)");
 
@@ -424,7 +488,7 @@ public class CompatStatusTest extends CQLTester
         // what DSE leaves for a role granted UPDATE alone, and the pair its GRANT ALL writes (read as MODIFY: not listed)
         execute(String.format("INSERT INTO system_auth.role_permissions (role, resource, permissions) VALUES ('compat_lone', '%s', {'SELECT', 'UPDATE'})", resource));
         execute(String.format("INSERT INTO system_auth.role_permissions (role, resource, permissions) VALUES ('compat_pair', '%s', {'UPDATE', 'TRUNCATE'})", resource));
-        String source = "(the rows read since startup)";
+        String source = "(the rows read since startup; no startup check with internode_compatibility_mode NONE)";
         try
         {
             CassandraAuthorizer.resetLoneDseWriteGrants();
@@ -432,7 +496,7 @@ public class CompatStatusTest extends CQLTester
             tool.assertOnCleanExit();
             assertThat(tool.getStdout().split("\\R")).contains("DSE UPDATE/TRUNCATE alone    : 0 dropped, as last read on this node " + source);
 
-            // the cache warm-up reads every row
+            // the cache warm-up reads every row; without the mode there is no startup check
             ((CassandraAuthorizer) DatabaseDescriptor.getAuthorizer()).bulkLoader().get();
             tool = ToolRunner.invokeNodetool("compatstatus");
             tool.assertOnCleanExit();
