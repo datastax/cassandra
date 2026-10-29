@@ -190,11 +190,11 @@ public class CassandraAuthorizer implements IAuthorizer
      * <p>
      * In the mode, the permissions DSE 6 does not have ({@code UNMASK}, {@code SELECT_MASKED}) are not written on a data
      * resource either, since how a DSE node reads a name it does not have is not known: {@code GRANT ALL}, and the
-     * permissions granted to the creator of a keyspace or table, grant the others, and the client gets a warning naming
-     * those not granted, also logged at INFO (they are returned as granted, so that {@code GRANT} does not report them
-     * as already granted: the other callers ignore the result); a {@code GRANT} naming them is refused, unless it names
-     * every permission of the resource, which is {@code GRANT ALL}. Without the mode only this software's names are
-     * written, as before.
+     * permissions granted to the creator of a keyspace or table (with {@code allow_ddl}), grant the others, and the
+     * client gets a warning naming those not granted, also logged at INFO (they are returned as granted, so that
+     * {@code GRANT} does not report them as already granted: the other callers ignore the result); a {@code GRANT}
+     * naming them is refused, unless it names every permission of the resource, which is {@code GRANT ALL}. Without
+     * the mode only this software's names are written, as before.
      * <p>
      * The row read to find the permissions held leaves the list of lone grants as it is, and does not log the
      * {@code UPDATE} or {@code TRUNCATE} it holds alone nor the pair it reads as {@code MODIFY}: the authorizer's next

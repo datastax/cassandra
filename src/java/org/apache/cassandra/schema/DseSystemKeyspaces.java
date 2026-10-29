@@ -30,10 +30,10 @@ import java.util.List;
  * <p>
  * Why: DSE 6 pulls the schema of a peer whose schema version differs from its own, and merges what it receives
  * (observed with DSE 6.8.65: after a run in the mode, DSE's schema held {@code system_auth.network_permissions} and
- * {@code system_distributed.partition_denylist}, pulled from the upgraded node), and a table DSE does not know stays in
- * DSE's schema on a rollback. The schema exchange with DSE is closed as well
- * ({@code MigrationCoordinator.exchangesSchemaWith}): a DSE node's pull is answered with no schema and its pushes are
- * ignored.
+ * {@code system_distributed.partition_denylist}, pulled from the upgraded node). The schema is frozen during the
+ * upgrade, and a table DSE does not know stays in DSE's schema on a rollback. The schema exchange with DSE is closed as
+ * well ({@code MigrationCoordinator.exchangesSchemaWith}): a DSE node's pull is answered with no schema and its pushes
+ * are ignored.
  * <p>
  * What this software does in the mode where it would use a deferred table or column:
  * <ul>
@@ -50,9 +50,8 @@ import java.util.List;
  *     message built by {@link #deferredTable(String)} ({@code PartitionDenylist});</li>
  * <li>{@code system_traces.sessions.coordinator_port}, {@code system_traces.events.source_port}: trace rows leave them
  *     out ({@code TraceKeyspace});</li>
- * <li>{@code system_distributed.repair_history.coordinator_port} and {@code participants_v2}: written by repair only;
- *     the insert of a repair's history names them, fails against DSE's definition and is logged as an error, and the
- *     repair itself goes on.</li>
+ * <li>{@code system_distributed.repair_history.coordinator_port} and {@code participants_v2}: written by repair only,
+ *     which is refused during the upgrade ({@code DseUpgradeGuards}).</li>
  * </ul>
  */
 public final class DseSystemKeyspaces
