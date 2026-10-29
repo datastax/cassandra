@@ -71,8 +71,11 @@ import static org.apache.cassandra.net.InternodeConnectionUtils.SSL_HANDLER_NAME
 import static org.apache.cassandra.net.InternodeConnectionUtils.certificates;
 import static org.apache.cassandra.net.HandshakeProtocol.*;
 import static org.apache.cassandra.net.ConnectionType.STREAMING;
+import static org.apache.cassandra.net.MessagingService.VERSION_40;
+import static org.apache.cassandra.net.MessagingService.VERSION_50;
 import static org.apache.cassandra.net.OutboundConnectionInitiator.Result.incompatible;
 import static org.apache.cassandra.net.OutboundConnectionInitiator.Result.messagingSuccess;
+import static org.apache.cassandra.net.OutboundConnectionInitiator.Result.retry;
 import static org.apache.cassandra.net.OutboundConnectionInitiator.Result.streamingSuccess;
 import static org.apache.cassandra.net.SocketFactory.*;
 
@@ -95,16 +98,23 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
     private final ConnectionType type;
     private final SslFallbackConnectionType sslConnectionType;
     private final OutboundConnectionSettings settings;
+    /**
+     * The version we request. Only DSE 6 compatibility mode puts it on the wire: below 4.0 (a peer known to speak the
+     * 3.0.14 dialect) the first message is the pre-4.0 one and the handshake has three messages; otherwise it goes,
+     * raised to at least 13 ({@code VERSION_50}, since DSE echoes 12), in the legacy version byte of the 4.0-style
+     * first message. With {@code NONE} that byte keeps carrying {@code acceptVersions.min}.
+     */
+    private final int requestMessagingVersion;
     private final Promise<Result<SuccessType>> resultPromise;
     private boolean isClosed;
 
     private OutboundConnectionInitiator(ConnectionType type, SslFallbackConnectionType sslConnectionType, OutboundConnectionSettings settings,
-                                        Promise<Result<SuccessType>> resultPromise)
+                                        int requestMessagingVersion, Promise<Result<SuccessType>> resultPromise)
     {
         this.type = type;
         this.sslConnectionType = sslConnectionType;
-
         this.settings = settings;
+        this.requestMessagingVersion = requestMessagingVersion;
         this.resultPromise = resultPromise;
     }
 
@@ -118,7 +128,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
     public static Future<Result<StreamingSuccess>> initiateStreaming(EventLoop eventLoop, OutboundConnectionSettings settings,
                                                                      SslFallbackConnectionType sslConnectionType)
     {
-        return new OutboundConnectionInitiator<StreamingSuccess>(STREAMING, sslConnectionType, settings, AsyncPromise.withExecutor(eventLoop))
+        return new OutboundConnectionInitiator<StreamingSuccess>(STREAMING, sslConnectionType, settings, settings.acceptVersions.max, AsyncPromise.withExecutor(eventLoop))
                .initiate(eventLoop);
     }
 
@@ -132,7 +142,16 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
     static Future<Result<MessagingSuccess>> initiateMessaging(EventLoop eventLoop, ConnectionType type, SslFallbackConnectionType sslConnectionType,
                                                               OutboundConnectionSettings settings, Promise<Result<MessagingSuccess>> result)
     {
-        return new OutboundConnectionInitiator<>(type, sslConnectionType, settings, result)
+        return initiateMessaging(eventLoop, type, sslConnectionType, settings, settings.acceptVersions.max, result);
+    }
+
+    /**
+     * @param requestMessagingVersion the version to request; below 4.0 the pre-4.0 handshake is used (DSE 6 compatibility mode)
+     */
+    static Future<Result<MessagingSuccess>> initiateMessaging(EventLoop eventLoop, ConnectionType type, SslFallbackConnectionType sslConnectionType,
+                                                              OutboundConnectionSettings settings, int requestMessagingVersion, Promise<Result<MessagingSuccess>> result)
+    {
+        return new OutboundConnectionInitiator<>(type, sslConnectionType, settings, requestMessagingVersion, result)
                .initiate(eventLoop);
     }
 
@@ -306,7 +325,26 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         @Override
         public void channelActive(final ChannelHandlerContext ctx) throws Exception
         {
-            Initiate msg = new Initiate(settings.acceptVersions, type, settings.framing, settings.from);
+            Initiate msg;
+            if (DseCompat.enabled() && requestMessagingVersion < VERSION_40 && type.isMessaging())
+            {
+                // DSE 6 compatibility mode, a peer known to speak the 3.0.14 dialect: the 8-byte pre-4.0 first message
+                msg = new Initiate(requestMessagingVersion, null, type, settings.framing, settings.from);
+            }
+            else if (DseCompat.enabled() && requestMessagingVersion >= VERSION_40)
+            {
+                // DSE 6 compatibility mode: the 4.0-style first message with the requested version (the current version
+                // for an unknown peer) in the legacy version byte, which DSE answers with its own version (relative << 8)
+                // so that we reconnect in the dialect; 4.0+ peers only check that byte is 4.0 or later.
+                // Never 12 there: DSE would echo a 4-byte 12, which cannot be told from the start of a 12-byte Accept.
+                // Streaming too: a DSE peer then answers with its own version, refused at once as incompatible, instead
+                // of echoing acceptVersions.min (12) and leaving the handshake to time out
+                msg = new Initiate(Math.max(requestMessagingVersion, VERSION_50), settings.acceptVersions, type, settings.framing, settings.from);
+            }
+            else
+            {
+                msg = new Initiate(settings.acceptVersions, type, settings.framing, settings.from);
+            }
             logger.trace("starting handshake with peer {}, msg = {}", settings.connectToId(), msg);
 
             AsyncChannelPromise.writeAndFlush(ctx, msg.encode(),
@@ -337,7 +375,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         {
             try
             {
-                Accept msg = Accept.maybeDecode(in);
+                Accept msg = Accept.maybeDecode(in, requestMessagingVersion);
                 if (msg == null)
                     return;
 
@@ -348,14 +386,56 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 logger.debug("Summary of messaging versions while connecting to {} " +
                              "peer messaging version {} request messaging version {} " +
                              "max accept version {} min accept version {}",
-                             settings.connectTo, peerMessagingVersion, settings.acceptVersions.max,
+                             settings.connectTo, peerMessagingVersion, requestMessagingVersion,
                              settings.acceptVersions.max, settings.acceptVersions.min);
 
                 FrameEncoder frameEncoder = null;
                 Result<SuccessType> result;
-                assert useMessagingVersion > 0;
 
-                if (useMessagingVersion < settings.acceptVersions.min || useMessagingVersion > settings.acceptVersions.max)
+                assert useMessagingVersion > 0 || DseCompat.enabled();
+                if (useMessagingVersion == 0 && DseCompat.enabled())
+                {
+                    // a pre-4.0 reply (only decoded in DSE 6 compatibility mode): 4 bytes carrying the peer's version, or
+                    // the dialect a DSE version (relative << 8) maps to.
+                    if (!type.isMessaging())
+                    {
+                        // streaming with a pre-4.0 peer is not supported
+                        result = incompatible(-1, peerMessagingVersion);
+                    }
+                    else if (requestMessagingVersion < VERSION_40)
+                    {
+                        // we sent the pre-4.0 first message: the peer must echo the version we requested (compared as it
+                        // was sent, before a DSE version is mapped to the dialect), and we conclude with the third message;
+                        // any other answer is final (never retried, so no ping-pong)
+                        if (msg.pre40PeerVersion == requestMessagingVersion)
+                        {
+                            // pre-4.0 peers never CRC their frames: legacy encoders for CRC and UNPROTECTED alike
+                            frameEncoder = settings.framing == OutboundConnectionSettings.Framing.LZ4 ? FrameEncoderLegacyLZ4.instance : FrameEncoderLegacy.instance;
+                            result = (Result<SuccessType>) messagingSuccess(ctx.channel(), requestMessagingVersion, frameEncoder.allocator());
+                            ConfirmOutboundPre40 confirm = new ConfirmOutboundPre40(requestMessagingVersion, settings.from);
+                            logger.trace("sending third handshake message to peer {}, msg = {}", settings.connectTo, confirm);
+                            AsyncChannelPromise.writeAndFlush(ctx, confirm.encode(),
+                                                              future -> { if (!future.isSuccess()) exceptionCaught(ctx, future.cause()); });
+                        }
+                        else
+                        {
+                            result = incompatible(-1, msg.pre40PeerVersion);
+                        }
+                    }
+                    else if (peerMessagingVersion < DseCompat.OLDEST_PRE40_VERSION)
+                    {
+                        result = incompatible(-1, peerMessagingVersion);
+                    }
+                    else
+                    {
+                        // our 4.0-style first message was answered by a pre-4.0 peer: reconnect with the pre-4.0 first
+                        // message in the only dialect we speak with such peers; a DSE version in the answer tells a DSE
+                        // node from HCD 1.2 at the dialect (DsePeers)
+                        DsePeers.fromPre40Reply(settings.to, msg.pre40PeerVersion);
+                        result = retry(DseCompat.DSE_DIALECT);
+                    }
+                }
+                else if (useMessagingVersion < settings.acceptVersions.min || useMessagingVersion > settings.acceptVersions.max)
                 {
                     result = incompatible(useMessagingVersion, peerMessagingVersion);
                 }

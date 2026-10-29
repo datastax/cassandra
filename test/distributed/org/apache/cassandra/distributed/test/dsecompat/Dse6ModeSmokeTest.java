@@ -104,7 +104,8 @@ public class Dse6ModeSmokeTest extends TestBaseImpl
 
             // announced once the written version is verified, with that version: once, at the start in the mode
             assertThat(cluster.get(1).logs().grep("Running in internode_compatibility_mode DSE_6: the node writes trie bb sstables " +
-                                                  "with numeric generations and requires paxos_variant v1, until the flag is " +
+                                                  "with numeric generations and requires paxos_variant v1; it speaks with DSE 6 peers " +
+                                                  "the pre-4.0 internode dialect DSE uses with non-DSE peers, until the flag is " +
                                                   "dropped").getResult()).hasSize(1);
 
             assertSaiVersionPinned(cluster, out);
