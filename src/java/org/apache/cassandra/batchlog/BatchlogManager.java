@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -33,6 +34,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
@@ -57,6 +59,7 @@ import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.gms.IFailureDetector;
@@ -70,13 +73,17 @@ import org.apache.cassandra.locator.ReplicaLayout;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.Replicas;
 import org.apache.cassandra.metrics.StorageMetrics;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.WriteResponseHandler;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -91,6 +98,7 @@ import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternalWithPaging;
 import static org.apache.cassandra.net.Verb.MUTATION_REQ;
 import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 public class BatchlogManager implements BatchlogManagerMBean
 {
@@ -113,6 +121,31 @@ public class BatchlogManager implements BatchlogManagerMBean
     // on restart, in which case the batch (whose row sits behind lastReplayedUuid, itself reset by
     // the restart) is replayed from scratch, which the at-least-once contract already tolerates.
     private final Map<TimeUUID, Set<UUID>> batchesAwaitingInterceptor = new HashMap<>();
+
+    // Batches whose mutations cannot be decoded (a corrupt row, a messaging version this software does not know, a row DSE
+    // 6 left in the table with a layout this software cannot read), mapped to the version they were stored with (null when
+    // the row has none). They are kept in the batchlog, never deleted by the replay: the row may be the only complete copy
+    // of a batch whose mutations reached only some replicas, and a later build may decode it (the scan starts from the
+    // first batch again at every start of the node). They are not decoded again before that: the decoding is a function of
+    // the stored bytes and of the schema only, so it fails the same way while the schema does not change, and a schema
+    // change that would let it succeed (a column added, for example) is picked up at the next start of the node (a failure
+    // to read the row itself is not one of these: it fails the scan, which aborts the cycle, as before). Each is logged at
+    // ERROR once per start of the node, up to UNDECODABLE_ERROR_MAX_BATCHES of them while the set is not empty, the others
+    // at DEBUG; while any remains a WARN counts and lists them every UNDECODABLE_WARN_INTERVAL_NANOS, the first one an
+    // interval after the first batch was kept; the rows an operator deleted are forgotten then. Only accessed by the replay
+    // thread, but for the test accessor, called once a replay has completed.
+    private final Map<TimeUUID, Integer> undecodableBatches = new HashMap<>();
+    private static final long UNDECODABLE_WARN_INTERVAL_NANOS = TimeUnit.MINUTES.toNanos(10);
+    // the most ids the WARN lists
+    private static final int UNDECODABLE_WARN_MAX_IDS = 10;
+    // the most kept batches logged at ERROR, each, since the set of kept batches was last empty
+    private static final int UNDECODABLE_ERROR_MAX_BATCHES = 10;
+    private long nextUndecodableWarnNanos;
+    // the kept batches logged at ERROR since the set of kept batches was last empty
+    private int undecodableErrorsLogged;
+    // the exception classes whose stack trace an ERROR about a kept batch carried since the set of kept batches was last empty:
+    // the trace is logged for the first batch of each class only
+    private final Set<Class<?>> tracedUndecodableCauses = new HashSet<>();
 
     // Single-thread executor service for scheduling and serializing log replay.
     private final ScheduledExecutorPlus batchlogTasks;
@@ -218,6 +251,20 @@ public class BatchlogManager implements BatchlogManagerMBean
         return batchesAwaitingInterceptor.size();
     }
 
+    /** The ids of the batches kept in the batchlog because their mutations cannot be decoded, in no particular order. */
+    @VisibleForTesting
+    Set<TimeUUID> undecodableBatchIds()
+    {
+        return new HashSet<>(undecodableBatches.keySet());
+    }
+
+    /** Lets the next replay cycle log the WARN listing the undecodable batches without waiting for its interval. */
+    @VisibleForTesting
+    void expireUndecodableBatchesWarnInterval()
+    {
+        nextUndecodableWarnNanos = nanoTime();
+    }
+
     /**
      * Simulates the effect of a replay cycle that aborted before advancing the scan lower bound:
      * the next scan covers already-processed rows again, including those of batches awaiting their
@@ -265,7 +312,8 @@ public class BatchlogManager implements BatchlogManagerMBean
         int pageSize = calculatePageSize(store);
         // The only live content where token(id) <= token(lastReplayedUuid) are batches retained because
         // their interceptor callback failed, and those are retried through point reads, not through this
-        // scan; every other processed batch is deleted, but the tombstoned content may still be present
+        // scan, and batches kept because they cannot be decoded, which are not retried before the next
+        // start; every other processed batch is deleted, but the tombstoned content may still be present
         // in the tables. To avoid walking over it we specify token(id) > token(lastReplayedUuid) as part
         // of the query.
         String query = String.format("SELECT id, mutations, version FROM %s.%s WHERE token(id) > token(?) AND token(id) <= token(?)",
@@ -278,6 +326,7 @@ public class BatchlogManager implements BatchlogManagerMBean
             NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
                              "{} batches whose mutations were replayed are retained in the batchlog awaiting successful interceptor callbacks",
                              batchesAwaitingInterceptor.size());
+        warnAboutUndecodableBatches();
         logger.trace("Finished replayFailedBatches");
     }
 
@@ -331,7 +380,6 @@ public class BatchlogManager implements BatchlogManagerMBean
         for (UntypedResultSet.Row row : batches)
         {
             TimeUUID id = row.getTimeUUID("id");
-            int version = row.getInt("version");
 
             // If a cycle aborts before advancing lastReplayedUuid, the next scan still covers the
             // batches it left awaiting their interceptor; those are handled by
@@ -339,25 +387,53 @@ public class BatchlogManager implements BatchlogManagerMBean
             if (batchesAwaitingInterceptor.containsKey(id))
                 continue;
 
+            // A scan that covers an undecodable batch again (see above) neither decodes nor logs it again.
+            if (undecodableBatches.containsKey(id))
+                continue;
+
+            Integer version = storedVersion(row);
+            // a batch without mutations (an empty list reads as null) has nothing to replay and is removed below
+            List<ByteBuffer> serializedMutations = row.has("mutations") ? row.getList("mutations", BytesType.instance) : Collections.emptyList();
             try
             {
-                ReplayingBatch batch = new ReplayingBatch(id, version, row.getList("mutations", BytesType.instance));
-                if (batch.replay(rateLimiter) > 0)
+                if (serializedMutations.isEmpty())
                 {
-                    unfinishedBatches.add(batch);
+                    // nothing to replay, whatever the version: as for a batch of this software without mutations below
+                    remove(id);
+                    ++totalBatchesReplayed;
                 }
                 else
                 {
-                    remove(id); // no write mutations were sent (either expired or all CFs involved truncated).
-                    ++totalBatchesReplayed;
+                    if (version == null)
+                        throw new UndecodableBatchException("its mutations cannot be decoded without it", null);
+                    ReplayingBatch batch = new ReplayingBatch(id, version, serializedMutations);
+                    if (batch.replay(rateLimiter) > 0)
+                    {
+                        unfinishedBatches.add(batch);
+                    }
+                    else
+                    {
+                        remove(id); // no write mutations were sent (either expired or all CFs involved truncated).
+                        ++totalBatchesReplayed;
+                    }
                 }
             }
             catch (IOException e)
             {
-                logger.warn("Skipped batch replay of {} due to {}", id, e.getMessage());
+                // version is not null here; a batch DSE 6 stored gets here only for a table this software does not have
+                if (version >= DseCompat.DSE_60_VERSION)
+                    logger.warn("Skipped batch replay of {} (stored by DSE 6 with messaging version {}; its mutations, none of which " +
+                                "is replayed, write to {}, the first table of each mutation) due to {}",
+                                id, version, describeTables(serializedMutations), e.getMessage());
+                else
+                    logger.warn("Skipped batch replay of {} due to {}", id, e.getMessage());
                 caughtException = e;
                 remove(id);
                 ++skipped;
+            }
+            catch (UndecodableBatchException e)
+            {
+                keepUndecodableBatch(id, version, serializedMutations, e);
             }
 
             if (++positionInPage == pageSize)
@@ -398,6 +474,127 @@ public class BatchlogManager implements BatchlogManagerMBean
     }
 
     /**
+     * Keeps a batch whose mutations cannot be decoded in the batchlog, so that it blocks neither this replay cycle nor the
+     * replay of the batches after it, and logs it at ERROR: the caller skips the batches already kept, so this happens the
+     * first time a scan meets it after the node started. Past {@link #UNDECODABLE_ERROR_MAX_BATCHES} kept batches one
+     * more ERROR says that the others are logged at DEBUG only, so that many corrupt rows do not flood the log.
+     */
+    private void keepUndecodableBatch(TimeUUID id, Integer version, List<ByteBuffer> serializedMutations, UndecodableBatchException e)
+    {
+        if (undecodableBatches.isEmpty())
+        {
+            nextUndecodableWarnNanos = nanoTime() + UNDECODABLE_WARN_INTERVAL_NANOS;
+            tracedUndecodableCauses.clear();
+            undecodableErrorsLogged = 0;
+        }
+        undecodableBatches.put(id, version);
+
+        // the decoding failure, if any, with its stack trace the first time its class is met; an unknown or missing version
+        // has none
+        Throwable cause = e.getCause();
+        // in DSE_6 the upgrade is in progress: the tables are repaired once it is finished
+        String stored = version == null ? "stored without a messaging version" : "stored with messaging version " + version;
+        String repairWhen = DatabaseDescriptor.isDse6CompatibilityMode() ? " (once the DSE 6 upgrade is finished)" : "";
+        String message = "Batch {} of system.batches, {}, cannot be decoded: {}. It is kept in the batchlog and not replayed; " +
+                         "the other batches are replayed as usual. Its mutations may be missing on some of their replicas; they " +
+                         "write to {} (the first table of each mutation). The batch is tried again at the next start of this node; " +
+                         "if it is older than the gc_grace_seconds of its tables, it would not be replayed even if it could be " +
+                         "decoded. To drop it, save it (SELECT mutations, version FROM system.batches WHERE id = {}), delete it on " +
+                         "this node (DELETE FROM system.batches WHERE id = {}) and repair the tables it writes to{}";
+        if (undecodableErrorsLogged < UNDECODABLE_ERROR_MAX_BATCHES)
+        {
+            ++undecodableErrorsLogged;
+            logger.error(message, id, stored, e.getMessage(), describeTables(serializedMutations), id, id, repairWhen,
+                         cause != null && tracedUndecodableCauses.add(cause.getClass()) ? cause : null);
+            return;
+        }
+        if (undecodableErrorsLogged == UNDECODABLE_ERROR_MAX_BATCHES)
+        {
+            ++undecodableErrorsLogged;
+            logger.error("More batches of system.batches cannot be decoded than the {} logged above: they are kept in the batchlog " +
+                         "and not replayed as well, each logged at DEBUG only; the periodic warning counts and lists them",
+                         UNDECODABLE_ERROR_MAX_BATCHES);
+        }
+        if (logger.isDebugEnabled())
+            logger.debug(message, id, stored, e.getMessage(), describeTables(serializedMutations), id, id, repairWhen, cause);
+    }
+
+    /**
+     * The messaging version a row of {@code system.batches} was stored with, or null when it has none: a version cell that
+     * does not hold a 4-byte int (an empty value, which CQL accepts for an int) is read as no version.
+     */
+    private static Integer storedVersion(UntypedResultSet.Row row)
+    {
+        ByteBuffer versionBytes = row.getBytes("version");
+        return versionBytes != null && versionBytes.remaining() == Integer.BYTES ? ByteBufferUtil.toInt(versionBytes) : null;
+    }
+
+    /**
+     * The tables the first partition update of each serialized mutation writes to, best effort, for the operator: in every
+     * layout a mutation starts with the number of its partition updates (an unsigned vint) and the table id of the first.
+     */
+    @VisibleForTesting
+    static String describeTables(List<ByteBuffer> serializedMutations)
+    {
+        Set<String> tables = new LinkedHashSet<>();
+        for (ByteBuffer serializedMutation : serializedMutations)
+        {
+            try (DataInputBuffer in = new DataInputBuffer(serializedMutation, true))
+            {
+                in.readUnsignedVInt();
+                TableId tableId = TableId.deserialize(in);
+                TableMetadata table = Schema.instance.getTableMetadata(tableId);
+                tables.add(table == null ? "unknown table " + tableId : table.keyspace + '.' + table.name + " (" + tableId + ')');
+            }
+            catch (IOException | RuntimeException e)
+            {
+                tables.add("a mutation too short or corrupt to name its table");
+            }
+        }
+        return tables.isEmpty() ? "no mutation" : String.join(", ", tables);
+    }
+
+    /**
+     * Every {@link #UNDECODABLE_WARN_INTERVAL_NANOS} while batches are kept: forgets those whose rows are gone (deleted by
+     * an operator), with a point read each, and lists the others in a WARN, since the condition does not go away by
+     * itself. A failure of the point reads leaves the batches listed and the cycle unharmed.
+     */
+    private void warnAboutUndecodableBatches()
+    {
+        if (undecodableBatches.isEmpty() || nanoTime() - nextUndecodableWarnNanos < 0)
+            return;
+
+        nextUndecodableWarnNanos = nanoTime() + UNDECODABLE_WARN_INTERVAL_NANOS;
+        String query = String.format("SELECT id FROM %s.%s WHERE id = ?", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES);
+        try
+        {
+            undecodableBatches.keySet().removeIf(id -> {
+                UntypedResultSet result = executeInternal(query, id);
+                return result == null || result.isEmpty();
+            });
+        }
+        catch (RuntimeException e)
+        {
+            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 10, TimeUnit.MINUTES,
+                             "Failed to check whether the undecodable batches are still in system.batches", e);
+        }
+        if (undecodableBatches.isEmpty())
+        {
+            tracedUndecodableCauses.clear();
+            return;
+        }
+
+        String listed = undecodableBatches.entrySet().stream()
+                                          .limit(UNDECODABLE_WARN_MAX_IDS)
+                                          .map(entry -> entry.getKey() + (entry.getValue() == null ? " (no version)" : " (version " + entry.getValue() + ')'))
+                                          .collect(Collectors.joining(", "));
+        if (undecodableBatches.size() > UNDECODABLE_WARN_MAX_IDS)
+            listed += " and " + (undecodableBatches.size() - UNDECODABLE_WARN_MAX_IDS) + " more";
+        logger.warn("{} batches of system.batches cannot be decoded and are kept in the batchlog, not replayed: {}. See the errors " +
+                    "logged when they were first met", undecodableBatches.size(), listed);
+    }
+
+    /**
      * Retries the interceptor callbacks of batches whose mutations completed in an earlier cycle.
      * Batches are looked up individually — their rows sit behind {@code lastReplayedUuid}, outside
      * the ranges scanned by {@link #replayFailedBatches} — and their mutations are not re-delivered:
@@ -434,7 +631,10 @@ public class BatchlogManager implements BatchlogManagerMBean
                 }
 
                 UntypedResultSet.Row row = result.one();
-                ReplayingBatch batch = new ReplayingBatch(id, row.getInt("version"), row.getList("mutations", BytesType.instance));
+                Integer version = storedVersion(row);
+                if (version == null)
+                    throw new UndecodableBatchException("its mutations cannot be decoded without a messaging version", null);
+                ReplayingBatch batch = new ReplayingBatch(id, version, row.getList("mutations", BytesType.instance));
                 rateLimiter.acquire(batch.replayedBytes);
                 if (tryNotifyInterceptor(batch))
                 {
@@ -444,23 +644,42 @@ public class BatchlogManager implements BatchlogManagerMBean
             }
             catch (IOException e)
             {
-                logger.error("Batch {} was replayed but can no longer be deserialized; its remaining interceptor callbacks are dropped", id, e);
-                // let the deletion share the hint fsync barrier below, like any other replayed batch
-                hintedNodes.addAll(entry.getValue());
-                replayedBatches.add(id);
+                dropInterceptorCallbacks(entry, hintedNodes, replayedBatches, e);
+            }
+            catch (UndecodableBatchException e)
+            {
+                // the row decoded in an earlier cycle and changed since: classified as before batches could be kept, an
+                // IOException (in a batch DSE 6 stored) drops the callbacks, anything else is retried as below
+                if (e.getCause() instanceof IOException)
+                    dropInterceptorCallbacks(entry, hintedNodes, replayedBatches, e.getCause());
+                else
+                    retryInterceptorRead(id, e.getCause() == null ? e : e.getCause());
             }
             catch (Throwable t)
             {
-                // Failing to read one batch back (e.g. a transient local read error) must wedge
-                // neither the other retries nor the scan of new batchlog content: keep the entry
-                // and let a later cycle retry the read. Deliberately, an error we cannot classify
-                // is never grounds for deleting the batch (a corrupt row that keeps failing with
-                // a RuntimeException is retried, and warned about, indefinitely).
-                JVMStabilityInspector.inspectThrowable(t);
-                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
-                                 "Failed to read batch {} back for its interceptor retry; it will be retried", id, t);
+                retryInterceptorRead(id, t);
             }
         }
+    }
+
+    private void dropInterceptorCallbacks(Map.Entry<TimeUUID, Set<UUID>> entry, Set<UUID> hintedNodes, Set<TimeUUID> replayedBatches, Throwable e)
+    {
+        logger.error("Batch {} was replayed but can no longer be deserialized; its remaining interceptor callbacks are dropped", entry.getKey(), e);
+        // let the deletion share the hint fsync barrier below, like any other replayed batch
+        hintedNodes.addAll(entry.getValue());
+        replayedBatches.add(entry.getKey());
+    }
+
+    private static void retryInterceptorRead(TimeUUID id, Throwable t)
+    {
+        // Failing to read one batch back (e.g. a transient local read error) must wedge
+        // neither the other retries nor the scan of new batchlog content: keep the entry
+        // and let a later cycle retry the read. Deliberately, an error we cannot classify
+        // is never grounds for deleting the batch (a corrupt row that keeps failing with
+        // a RuntimeException is retried, and warned about, indefinitely).
+        JVMStabilityInspector.inspectThrowable(t);
+        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                         "Failed to read batch {} back for its interceptor retry; it will be retried", id, t);
     }
 
     private void finishAndClearBatches(ArrayList<ReplayingBatch> batches, Set<UUID> hintedNodes, Set<TimeUUID> replayedBatches)
@@ -522,6 +741,15 @@ public class BatchlogManager implements BatchlogManagerMBean
         return BATCHLOG_REPLAY_TIMEOUT; // enough time for the actual write + BM removal mutation
     }
 
+    /** The mutations of a batch cannot be decoded: the batch is kept in the batchlog, see {@link #undecodableBatches}. */
+    private static final class UndecodableBatchException extends Exception
+    {
+        UndecodableBatchException(String message, Throwable cause)
+        {
+            super(message, cause);
+        }
+    }
+
     private static class ReplayingBatch
     {
         private final TimeUUID id;
@@ -532,7 +760,16 @@ public class BatchlogManager implements BatchlogManagerMBean
 
         private List<ReplayWriteResponseHandler<Mutation>> replayHandlers;
 
-        ReplayingBatch(TimeUUID id, int version, List<ByteBuffer> serializedMutations) throws IOException
+        /**
+         * @throws IOException if a mutation writes to a table that does not exist ({@link UnknownTableException}: dropped, or
+         * one of DSE's own), or if a mutation of a batch of this software (stored at {@link MessagingService#VERSION_40} up
+         * to {@link DseCompat#DSE_60_VERSION}, excluded) fails to decode with an IOException: the replay drops the batch, as
+         * it always did
+         * @throws UndecodableBatchException if the stored version is unknown, or a mutation fails to decode with an
+         * IOException in a batch stored at another version, or with a RuntimeException or an AssertionError: the batch is
+         * kept
+         */
+        ReplayingBatch(TimeUUID id, int version, List<ByteBuffer> serializedMutations) throws IOException, UndecodableBatchException
         {
             this.id = id;
             this.writtenAt = id.unix(MILLISECONDS);
@@ -597,16 +834,42 @@ public class BatchlogManager implements BatchlogManagerMBean
             BatchlogManagerInterceptor.instance.onReplayedBatch(id, writtenAt, Collections.unmodifiableList(mutations));
         }
 
-        private int addMutations(int version, List<ByteBuffer> serializedMutations) throws IOException
+        private int addMutations(int version, List<ByteBuffer> serializedMutations) throws IOException, UndecodableBatchException
         {
+            // a batch DSE 6 left in the table carries DSE's messaging version, in every mode: the rows outlive the mode
+            if (DseCompat.isUnknownStoredDseVersion(version))
+                throw new UndecodableBatchException("it is in DSE's range of messaging versions but not a DSE 6 version (" +
+                                                    DseCompat.DSE_STORED_VERSIONS_TEXT + ')', null);
+            int decodingVersion = DseCompat.storedDecodingVersion(version);
+
             int ret = 0;
             for (ByteBuffer serializedMutation : serializedMutations)
             {
                 ret += serializedMutation.remaining();
+                Mutation mutation;
                 try (DataInputBuffer in = new DataInputBuffer(serializedMutation, true))
                 {
-                    addMutation(Mutation.serializer.deserialize(in, version));
+                    mutation = Mutation.serializer.deserialize(in, decodingVersion);
                 }
+                catch (UnknownTableException e)
+                {
+                    throw e;
+                }
+                catch (IOException e)
+                {
+                    // the batches of this software and of HCD (stored at VERSION_40 or later) keep the drop of the IOException
+                    // path; a batch a pre-4.0 node or DSE 6 stored that is cut short or corrupt is kept like the ones below
+                    if (version >= MessagingService.VERSION_40 && version < DseCompat.DSE_60_VERSION)
+                        throw e;
+                    throw new UndecodableBatchException(e.toString(), e);
+                }
+                catch (RuntimeException | AssertionError e)
+                {
+                    // a corrupt row (a length out of range), or bytes of a layout this software does not read: the batch
+                    // may be the only complete copy of its mutations, and it must not abort the replay cycle
+                    throw new UndecodableBatchException(e.toString(), e);
+                }
+                addMutation(mutation);
             }
 
             return ret;
