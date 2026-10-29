@@ -62,12 +62,14 @@ public class RangeTermTree implements TermTree
             return searchPrefix(ByteBufferUtil.getArray(e.lower.value.encoded));
         if (e.getOp() == Expression.Op.AUTOMATON)
             return searchPrefix(e.getAutomatonCommonPrefix());
-
         // Get the bounds given the version. Notice that we use the partially-encoded representation for bounds
         // because that is how we store them in the range tree. The comparator is used to compare the bounds to
         // each tree's min/max to see if the sstable index is in the query range.
-        return searchRange(version -> e.lower == null ? null : new Term(e.getPartiallyEncodedLowerBound(version), comparator, version),
-                           version -> e.upper == null ? null : new Term(e.getPartiallyEncodedUpperBound(version), comparator, version));
+        Function<Version, Term> lower = version -> e.lower == null ? null : new Term(e.getPartiallyEncodedLowerBound(version), comparator, version);
+        Function<Version, Term> upper = version -> e.upper == null ? null : new Term(e.getPartiallyEncodedUpperBound(version), comparator, version);
+        // the bounds of a literal range are raw terms, which the comparator of a reversed (DESC clustering) column
+        // orders in reverse
+        return e.isLiteralTermRange() && comparator.isReversed() ? searchRange(upper, lower) : searchRange(lower, upper);
     }
 
     /**

@@ -156,6 +156,15 @@ public class InvertedIndexSearcher extends IndexSearcher
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
             return reader.exactMatch(term, listener, context);
         }
+        else if (exp.isLiteralTermRange())
+        {
+            if (exp.isEmptyLiteralTermRange())
+                return PostingList.EMPTY;
+            QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
+            var lower = exp.getEncodedLowerBoundByteComparable(version);
+            var upper = exp.getEncodedUpperBoundByteComparable(version);
+            return reader.rangeMatch(lower, lower == null || exp.lower.inclusive, upper, upper == null || exp.upper.inclusive, listener, context);
+        }
         else if (exp.getOp() == Expression.Op.RANGE)
         {
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
@@ -175,7 +184,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             // possible over-match, and is excluded at the reader level instead of post-filtering every matched term.
             var lower = version.onDiskFormat().encodeForTrie(exp.lower.value.encoded, indexContext.getValidator());
             var upper = exp.getPrefixUpperBoundByteComparable(version);
-            return reader.rangeMatchExcludingUpperBoundTerm(lower, upper, listener, context);
+            return reader.rangeMatch(lower, true, upper, false, listener, context);
         }
         else if (exp.getOp() == Expression.Op.AUTOMATON)
         {
@@ -228,13 +237,19 @@ public class InvertedIndexSearcher extends IndexSearcher
     {
         if (!orderer.isBM25())
         {
-            // A LIKE restriction on the ordering column only scans the terms it can match; otherwise the whole terms
-            // dictionary is scanned, and the ordered rows are post-filtered by the query.
-            boolean patternFilter = slice != null
-                                    && (slice.getOp() == Expression.Op.PREFIX || slice.getOp() == Expression.Op.AUTOMATON);
-            var terms = patternFilter
-                        ? reader.patternTerms(slice, orderer.isAscending())
-                        : reader.allTerms(orderer.isAscending());
+            // A LIKE or literal range restriction on the ordering column only scans the terms it can match;
+            // otherwise the whole terms dictionary is scanned, and the ordered rows are post-filtered by the query.
+            TermsIterator terms;
+            if (slice != null && (slice.getOp() == Expression.Op.PREFIX || slice.getOp() == Expression.Op.AUTOMATON))
+                terms = reader.patternTerms(slice, orderer.isAscending());
+            else if (slice != null && slice.isLiteralTermRange())
+            {
+                if (slice.isEmptyLiteralTermRange())
+                    return CloseableIterator.emptyIterator();
+                terms = reader.rangeTerms(slice, orderer.isAscending());
+            }
+            else
+                terms = reader.allTerms(orderer.isAscending());
             var iter = new RowIdWithTermsIterator(terms);
             return toMetaSortedIterator(iter, queryContext);
         }

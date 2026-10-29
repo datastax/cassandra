@@ -1031,8 +1031,9 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         if (lower == null)
         {
+            // inclusive, so that the empty term of an indexed empty string value, if any, is part of the range
             lower = ByteComparable.EMPTY;
-            lowerInclusive = false;
+            lowerInclusive = true;
         }
 
         if (upper != null)

@@ -128,6 +128,7 @@ public class IndexContext
     public static final String MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE =
     "Index hints including a SAI index used for ORDER BY cannot include any other index";
 
+    // Besides EQ and IN, only RANGE is served on these types (see supports(Expression.Op))
     private static final Set<AbstractType<?>> EQ_ONLY_TYPES =
             ImmutableSet.of(UTF8Type.instance, AsciiType.instance, BooleanType.instance, UUIDType.instance);
 
@@ -821,9 +822,20 @@ public class IndexContext
         AbstractType<?> validator = getValidator();
         if (operator == Expression.Op.IN)
             return true;
+        if (operator == Expression.Op.RANGE)
+            return !TypeUtil.isLiteral(validator) || supportsLiteralRangeQueries();
         if (operator != Expression.Op.EQ && EQ_ONLY_TYPES.contains(validator)) return false;
-        // RANGE only applicable to non-literal indexes
-        return (operator != null) && !(TypeUtil.isLiteral(validator) && operator == Expression.Op.RANGE);
+        return operator != null;
+    }
+
+    /**
+     * Whether this index serves range restrictions on a literal column, in the unsigned byte order of its terms.
+     * That needs whole values as terms, as for {@code LIKE}: no tokenizing analyzer, and no frozen collection,
+     * whose serialized bytes are not in the order of the collections.
+     */
+    public boolean supportsLiteralRangeQueries()
+    {
+        return TypeUtil.isBoolean(validator) || supportsLikeQueries();
     }
 
     public ByteBuffer getValueOf(DecoratedKey key, Row row, long nowInSecs)
