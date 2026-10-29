@@ -317,7 +317,7 @@ public class CassandraDaemon
             }
         }
 
-        // DSE 6 compatibility mode: whether this software reads the data DSE wrote for each materialized view as DSE does
+        // DSE 6 compatibility mode: whether the data of each materialized view can be exchanged with DSE 6 nodes
         try
         {
             DseViewHiddenColumnCatalog.checkViewsAtStartup();
