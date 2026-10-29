@@ -30,10 +30,12 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.rows.CellPath;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.CassandraVersion;
 
 /**
  * Represents which (non-PK) columns (and optionally which sub-part of a column for complex columns) are selected
@@ -199,6 +201,22 @@ public abstract class ColumnFilter
     }
 
     /**
+     * Returns {@code true} if there are pre-5.0 nodes in the cluster (or the version of some nodes is not known yet),
+     * {@code false} otherwise.
+     *
+     * <p>Pre-5.0 nodes (e.g. CC4) that still consider the cluster as upgrading from a pre-4.0 version, which they can do
+     * for a while after any node changes its version, turn the filters they receive into wildcard filters that fetch all
+     * static columns, even when the sender only asked for the queried ones. The static row they read then contains
+     * columns that are not part of the fetched columns used to serialize the response header, which fails the read.
+     * To avoid it, the queried statics must not be narrowed while such nodes can be involved, so all the static columns
+     * are fetched instead (the {@link FetchingStrategy#ALL_COLUMNS} strategy).</p>
+     */
+    private static boolean isUpgradingFromVersionLowerThan50()
+    {
+        return Gossiper.instance.isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_5_0);
+    }
+
+    /**
      * A filter that fetches all columns for the provided table, but returns
      * only the queried ones.
      */
@@ -207,7 +225,7 @@ public abstract class ColumnFilter
                                          RegularAndStaticColumns queried,
                                          boolean returnStaticContentOnPartitionWithNoRows)
     {
-        if (!returnStaticContentOnPartitionWithNoRows)
+        if (!returnStaticContentOnPartitionWithNoRows && !isUpgradingFromVersionLowerThan50())
             return SelectionColumnFilter.newInstance(FetchingStrategy.ALL_REGULARS_AND_QUERIED_STATICS_COLUMNS, metadata, queried, null);
 
         return SelectionColumnFilter.newInstance(FetchingStrategy.ALL_COLUMNS, metadata, queried, null);
@@ -486,7 +504,7 @@ public abstract class ColumnFilter
                 if (queried == null)
                     return new WildCardColumnFilter(metadata.regularAndStaticColumns());
 
-                if (!returnStaticContentOnPartitionWithNoRows)
+                if (!returnStaticContentOnPartitionWithNoRows && !isUpgradingFromVersionLowerThan50())
                     return SelectionColumnFilter.newInstance(FetchingStrategy.ALL_REGULARS_AND_QUERIED_STATICS_COLUMNS, metadata, queried, s);
 
                 return SelectionColumnFilter.newInstance(FetchingStrategy.ALL_COLUMNS, metadata, queried, s);
