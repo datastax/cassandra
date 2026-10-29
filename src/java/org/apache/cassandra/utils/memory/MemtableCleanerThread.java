@@ -41,7 +41,8 @@ public class MemtableCleanerThread<P extends MemtablePool> implements Interrupti
 {
     private static final Logger logger = LoggerFactory.getLogger(MemtableCleanerThread.class);
 
-    private static class Clean<P extends MemtablePool> implements Interruptible.SimpleTask
+    @VisibleForTesting
+    static class Clean<P extends MemtablePool> implements Interruptible.SimpleTask
     {
         /** This is incremented when a cleaner is invoked and decremented when a cleaner has completed */
         final AtomicInteger numPendingTasks = new AtomicInteger(0);
@@ -55,7 +56,8 @@ public class MemtableCleanerThread<P extends MemtablePool> implements Interrupti
         /** signalled whenever needsCleaning() may return true */
         final WaitQueue wait = newWaitQueue();
 
-        private Clean(P pool, MemtableCleaner cleaner)
+        @VisibleForTesting
+        Clean(P pool, MemtableCleaner cleaner)
         {
             this.pool = pool;
             this.cleaner = cleaner;
@@ -89,7 +91,8 @@ public class MemtableCleanerThread<P extends MemtablePool> implements Interrupti
             }
         }
 
-        private Boolean apply(Boolean res, Throwable err)
+        @VisibleForTesting
+        Boolean apply(Boolean res, Throwable err)
         {
             final int tasks = numPendingTasks.decrementAndGet();
 

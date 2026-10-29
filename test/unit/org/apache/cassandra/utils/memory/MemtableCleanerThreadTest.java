@@ -34,6 +34,7 @@ import org.mockito.MockitoAnnotations;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -73,6 +74,25 @@ public class MemtableCleanerThreadTest
         FBUtilities.sleepQuietly(TIMEOUT_MILLIS);
 
         assertEquals(0, cleanerThread.numPendingTasks());
+    }
+
+    /**
+     * A future completed with a null result and no error (e.g. a cleaner that returns no value) must not
+     * cause a NullPointerException when auto-unboxing the result, and must not trigger a spurious retry.
+     */
+    @Test
+    public void testCleanApplyNoOpWhenNullResult() throws Exception
+    {
+        when(pool.needsCleaning()).thenReturn(false);
+        AsyncPromise<Boolean> fut = new AsyncPromise<>();
+        cleaner = () -> fut;
+
+        MemtableCleanerThread.Clean<MemtablePool> clean = new MemtableCleanerThread.Clean<>(pool, cleaner);
+
+        // null result with no error: should return null without NPE and without signalling the wait queue
+        Boolean res = clean.apply(null, null);
+
+        assertNull(res);
     }
 
     @Test
