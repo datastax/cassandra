@@ -93,6 +93,27 @@ public class EndpointMessagingVersions
         return v == null ? version : v;
     }
 
+    /**
+     * Sets the version this node assumes for {@code endpoint} before any evidence of it, unless a version is known for it
+     * already: used in DSE 6 compatibility mode only, for the dialect of a peer stored with a DSE 6 release
+     * ({@code DseDialectVersions}), before the node listens. Unlike {@link #set}, it does not enter the record of DSE
+     * peers, which holds only the versions peers were seen at (a handshake or their gossip): a stale stored release must
+     * not make a start with {@code NONE} refuse a peer that was upgraded meanwhile.
+     *
+     * @return true when the version was set, false when one was known already
+     */
+    public boolean assume(InetAddressAndPort endpoint, int version)
+    {
+        logger.trace("Assuming version {} for {}", version, endpoint);
+        synchronized (this)
+        {
+            if (versions.putIfAbsent(endpoint, version) != null)
+                return false;
+            minClusterVersion = Collections.min(versions.values());
+            return true;
+        }
+    }
+
     public void reset(InetAddressAndPort endpoint)
     {
         logger.trace("Resetting version for {}", endpoint);

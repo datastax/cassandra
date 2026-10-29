@@ -51,6 +51,9 @@ import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DseDialectVersions;
+import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.nodes.CC4UpgradeNodesPersistence.ImportState;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.msgpack.jackson.dataformat.MessagePackFactory;
@@ -152,6 +155,31 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         assertThat(info.getListenAddressAndPort()).isEqualTo(address("192.168.57.11", 7000));
         // as for 6.9.26, the fixture's native port is also the configured one
         assertThat(info.getNativeTransportAddressAndPort()).isEqualTo(address("192.168.57.11", 9042));
+    }
+
+    /**
+     * The peers imported from DSE's {@code nodes/peers} carry DSE's release ({@code 4.0.0.<build>}): all of them are
+     * first connected to in the pre-4.0 dialect ({@code DseDialectVersions}), so that no DSE node gets the 4.0-style
+     * probe from an upgraded node.
+     */
+    @Test
+    public void importedDsePeersAreSeededAtTheDialect() throws Exception
+    {
+        for (DseVersion version : DseVersion.values())
+        {
+            DseFixtures.installNodesDirectory(tempDir, version, false);
+            List<PeerInfo> peers = CC4NodesFileReader.tryReadPeers().collect(Collectors.toList());
+            assertThat(peers).as(version.name()).isNotEmpty();
+            EndpointMessagingVersions versions = new EndpointMessagingVersions();
+            assertThat(DseDialectVersions.seed(peers.stream(), versions))
+            .as(version.name())
+            .containsExactlyInAnyOrderElementsOf(peers.stream().map(PeerInfo::getPeerAddressAndPort).collect(Collectors.toList()));
+            for (PeerInfo peer : peers)
+            {
+                assertThat(peer.getReleaseVersion()).isEqualTo(new CassandraVersion(version.releaseVersion));
+                assertThat(versions.getRaw(peer.getPeerAddressAndPort())).isEqualTo(DseCompat.DSE_DIALECT);
+            }
+        }
     }
 
     @Test
@@ -1040,6 +1068,48 @@ public class CC4NodesFileReaderDseTest extends CQLTester
             assertThat(peers).as("peers of node %s", node).hasSize(DseFixtures.TWO_DC_NODES - 1);
             for (PeerInfo peer : peers)
                 TwoDcNode.assertPeer(node, peer, DseVersion.DSE_6_9_26.releaseVersion);
+        }
+    }
+
+    /**
+     * The import of the files DSE wrote in the mixed phase of the two-data-center cluster, once {@code dc2} ran this software:
+     * the data center and rack of the peers of both releases are imported; the seeding of the dialect from the imported
+     * peers (what {@code DseDialectVersions.seedFromSavedPeers} does at startup with the saved peers) assumes it only for
+     * the peers stored with a DSE 6 release (on node 1 the two other nodes of {@code dc1}, on node 4 the three nodes of
+     * {@code dc1}).
+     */
+    @Test
+    public void dse6ModeImportsTheMixedPhaseFilesOfTwoDataCenters() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        Map<Integer, List<Integer>> dsePeers = Map.of(1, List.of(2, 3), 4, List.of(1, 2, 3));
+        Map<Integer, List<Integer>> upgradedPeers = Map.of(1, List.of(4, 5, 6), 4, List.of(5, 6));
+        for (int node : new int[]{ 1, 4 })
+        {
+            TwoDcNode self = TwoDcNode.of(node);
+            importIntoEmptyTables(tempDir.resolve("mixed-node" + node), DseFixtures.nodesDirectoryTwoDataCentersMixed(node), self.hostId);
+
+            NodesPersistence tables = new NodesPersistence();
+            LocalInfo local = tables.loadLocal();
+            assertThat(local.getDataCenter()).as("node %s", node).isEqualTo(self.dataCenter);
+            assertThat(local.getRack()).as("node %s", node).isEqualTo(self.rack);
+            List<PeerInfo> peers = tables.loadPeers().collect(Collectors.toList());
+            assertThat(peers).as("peers of node %s", node).hasSize(DseFixtures.TWO_DC_NODES - 1);
+            for (PeerInfo peer : peers)
+            {
+                int peerNode = TwoDcNode.of(peer.getPeerAddressAndPort()).node;
+                boolean upgraded = upgradedPeers.get(node).contains(peerNode);
+                TwoDcNode.assertPeer(node, peer, upgraded ? "5.0.7.0-SNAPSHOT" : DseVersion.DSE_6_9_26.releaseVersion);
+            }
+
+            EndpointMessagingVersions versions = new EndpointMessagingVersions();
+            assertThat(DseDialectVersions.seed(peers.stream(), versions))
+            .as("peers of node %s assumed at the dialect", node)
+            .containsExactlyInAnyOrderElementsOf(dsePeers.get(node).stream().map(n -> TwoDcNode.of(n).address()).collect(Collectors.toList()));
+            for (int dse : dsePeers.get(node))
+                assertThat(versions.getRaw(TwoDcNode.of(dse).address())).as("node %s about DSE node %s", node, dse).isEqualTo(DseCompat.DSE_DIALECT);
+            for (int upgraded : upgradedPeers.get(node))
+                assertThat(versions.knows(TwoDcNode.of(upgraded).address())).as("node %s about upgraded node %s", node, upgraded).isFalse();
         }
     }
 

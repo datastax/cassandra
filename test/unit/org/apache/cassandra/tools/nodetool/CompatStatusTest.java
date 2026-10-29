@@ -22,6 +22,7 @@ import java.io.PrintStream;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import javax.management.AttributeNotFoundException;
@@ -35,14 +36,21 @@ import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.HeartBeatState;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.DseCompatRefusals;
+import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.Dse6SaiVersionPin;
 import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.service.StartupChecks;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.Output;
 import org.apache.cassandra.tools.ToolRunner;
@@ -92,7 +100,8 @@ public class CompatStatusTest extends CQLTester
             assertThat(lines).contains(String.format("  %-45s %d", "127.0.0.42:7000", MessagingService.current_version));
             assertThat(lines).contains(String.format("  %-45s %d  (pre-4.0 dialect)", "127.0.0.43:7000", MessagingService.VERSION_3014));
             assertThat(out).contains("(1 speaking the pre-4.0 dialect)");
-            // NONE: the record of DSE peers is not kept, and nothing was refused
+            // NONE: the DSE peers and their record are not kept, and nothing was refused
+            assertThat(out).contains("DSE peers                    : not tracked (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("DSE 6 peers on record        : not maintained (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("SAI version pinned           : not checked (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("Requests refused (upgrade)   : 0\n");
@@ -123,10 +132,11 @@ public class CompatStatusTest extends CQLTester
             tool.assertOnCleanExit();
             List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
             assertThat(lines).contains("Requests refused (upgrade)   : 3");
-            // the peer versions, the record of DSE peers, the SAI pin, then the refusals
+            // the peer versions, the DSE peers, the record of DSE peers, the SAI pin, then the refusals
             String out = tool.getStdout();
             assertThat(out.indexOf("Peers with a known version")).isNotNegative()
-                                                                  .isLessThan(out.indexOf("DSE 6 peers on record        :"));
+                                                                  .isLessThan(out.indexOf("DSE peers                    :"));
+            assertThat(out.indexOf("DSE peers                    :")).isLessThan(out.indexOf("DSE 6 peers on record        :"));
             assertThat(out.indexOf("DSE 6 peers on record        :")).isLessThan(out.indexOf("SAI version pinned           :"));
             assertThat(out.indexOf("SAI version pinned           :")).isLessThan(out.indexOf("Requests refused (upgrade)"));
             assertThat(lines).contains(String.format("  %-45s %d", "read with an index hint", 1));
@@ -243,6 +253,7 @@ public class CompatStatusTest extends CQLTester
             List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
             assertThat(lines).anyMatch(line -> line.matches("Peers with a known version   : \\d+ \\(0 speaking the pre-4.0 dialect, 1 DSE 6 node\\(s\\) known from gossip only\\)"))
                              .contains(String.format("  %-45s %d  (DSE 6 node known from gossip only)", "127.0.0.46:7000", 1536))
+                             .contains("DSE peers                    : not tracked (internode_compatibility_mode NONE)")
                              .contains("DSE 6 peers on record        : not maintained (internode_compatibility_mode NONE)");
             assertThat(DsePeersRecord.peers()).isEmpty();
         }
@@ -256,6 +267,25 @@ public class CompatStatusTest extends CQLTester
     }
 
     @Test
+    public void dsePeersOfAServerWithoutTheAttributeAreUnknown()
+    {
+        NodeProbe probe = Mockito.mock(NodeProbe.class);
+        Mockito.when(probe.getDsePeers()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DsePeers")));
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (PrintStream out = new PrintStream(bytes, true, StandardCharsets.UTF_8))
+        {
+            CompatStatus.printDsePeers(probe, out);
+        }
+        assertThat(bytes.toString(StandardCharsets.UTF_8)).isEqualTo(String.format("DSE peers                    : unknown (this node does not report them)%n"));
+
+        // any other failure is not hidden
+        UndeclaredThrowableException other = new UndeclaredThrowableException(new IOException("connection lost"));
+        Mockito.doThrow(other).when(probe).getDsePeers();
+        assertThatThrownBy(() -> CompatStatus.printDsePeers(probe, new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8)))
+        .isSameAs(other);
+    }
+
+    @Test
     public void attributesOfAnEarlierServerBuildAreUnknown()
     {
         NodeProbe probe = Mockito.mock(NodeProbe.class);
@@ -266,6 +296,7 @@ public class CompatStatusTest extends CQLTester
         Mockito.when(probe.getStorageCompatibilityMode()).thenReturn("NONE");
         Mockito.when(probe.getSSTableFormatVersion()).thenReturn("bti-da");
         Mockito.when(probe.getEndpointMessagingVersions()).thenReturn(Map.of("127.0.0.45:7000", MessagingService.VERSION_3014));
+        Mockito.when(probe.getDsePeers()).thenReturn(Map.of("127.0.0.45:7000", "release 4.0.0.6865, NET_VERSION 1024"));
         Mockito.when(probe.getDsePeersOnRecord()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DsePeersOnRecord")));
         Mockito.when(probe.getDseSaiVersionPin()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseSaiVersionPin")));
         Mockito.when(probe.getDseCompatRefusals()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseCompatRefusals")));
@@ -278,6 +309,8 @@ public class CompatStatusTest extends CQLTester
                          "SSTable format written       : bti-da",
                          "Peers with a known version   : 1 (1 speaking the pre-4.0 dialect)",
                          String.format("  %-45s %d  (pre-4.0 dialect)", "127.0.0.45:7000", MessagingService.VERSION_3014),
+                         "DSE peers                    : 1",
+                         String.format("  %-45s %s", "127.0.0.45:7000", "release 4.0.0.6865, NET_VERSION 1024"),
                          "DSE 6 peers on record        : unknown (this node does not report them)",
                          "SAI version pinned           : unknown (this node does not report it)",
                          "Requests refused (upgrade)   : unknown (this node does not report them)");
@@ -309,6 +342,102 @@ public class CompatStatusTest extends CQLTester
         UndeclaredThrowableException other = new UndeclaredThrowableException(new IOException("connection lost"));
         Mockito.doThrow(other).when(probe).getInternodeCompatibilityMode();
         assertThatThrownBy(() -> new CompatStatus().execute(probe)).isSameAs(other);
+    }
+
+    @Test
+    public void listsTheDsePeersSeenInGossip() throws Exception
+    {
+        InetAddressAndPort dsePeer = InetAddressAndPort.getByName("127.0.0.44:7000");
+        Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+        states.put(ApplicationState.NET_VERSION, VersionedValue.unsafeMakeVersionedValue("1024", 1));
+        states.put(ApplicationState.RELEASE_VERSION, VersionedValue.unsafeMakeVersionedValue("4.0.0.6865", 4));
+        states.put(ApplicationState.X_11_PADDING, VersionedValue.unsafeMakeVersionedValue("{\"dse_version\":\"6.8.65\",\"workload\":\"Cassandra\"}", 808));
+        // a ring member: gossip evicts an endpoint without tokens ("fat client") after a second of silence
+        StorageService.instance.getTokenMetadata().updateNormalToken(DatabaseDescriptor.getPartitioner().getRandomToken(), dsePeer);
+        Gossiper.instance.endpointStateMap.put(dsePeer, new EndpointState(new HeartBeatState(1, 1), states));
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        // the DSE peers are listed in DSE 6 compatibility mode only
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            ToolRunner.ToolResult tool = ToolRunner.invokeNodetool("compatstatus");
+            tool.assertOnCleanExit();
+            List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
+            assertThat(lines).contains("DSE peers                    : 1")
+                             .contains(String.format("  %-45s %s", "127.0.0.44:7000",
+                                                     "release 4.0.0.6865, NET_VERSION 1024, DSE 6.8.65, not identified as DSE by a handshake"));
+
+            // identified by a handshake: the evidence is shown, also for a peer without a gossip state
+            InetAddressAndPort handshakeOnly = InetAddressAndPort.getByName("127.0.0.47:7000");
+            DsePeers.identify(dsePeer, "DSE-flagged first handshake message");
+            DsePeers.identify(handshakeOnly, "handshake reply with the DSE messaging version 1536");
+            tool = ToolRunner.invokeNodetool("compatstatus");
+            tool.assertOnCleanExit();
+            assertThat(tool.getStdout().split("\\R"))
+            .containsSequence("DSE peers                    : 2",
+                              String.format("  %-45s %s", "127.0.0.44:7000",
+                                            "release 4.0.0.6865, NET_VERSION 1024, DSE 6.8.65, identified as DSE (DSE-flagged first handshake message)"),
+                              String.format("  %-45s %s", "127.0.0.47:7000",
+                                            "NET_VERSION unknown, identified as DSE (handshake reply with the DSE messaging version 1536)"));
+        }
+        finally
+        {
+            DsePeers.reset();
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+            Gossiper.instance.endpointStateMap.remove(dsePeer);
+            StorageService.instance.getTokenMetadata().removeEndpoint(dsePeer);
+        }
+    }
+
+    /**
+     * The attribute itself: empty without the mode; in DSE_6 mode a DSE node gossiping its DSE version is listed even
+     * without a release or a DSE version in its {@code DSE_GOSSIP_STATE}, while the DSE nodes that left the ring
+     * (decommissioned or removed) and the nodes gossiping a version below 256 are not, identified or not.
+     */
+    @Test
+    public void dsePeersAttributeLeavesOutNodesThatLeftTheRing() throws Exception
+    {
+        InetAddressAndPort bare = InetAddressAndPort.getByName("127.0.0.48:7000");
+        InetAddressAndPort left = InetAddressAndPort.getByName("127.0.0.49:7000");
+        InetAddressAndPort removed = InetAddressAndPort.getByName("127.0.0.50:7000");
+        InetAddressAndPort hcd = InetAddressAndPort.getByName("127.0.0.51:7000");
+        gossip(bare, Map.of(ApplicationState.NET_VERSION, "1536", ApplicationState.X_11_PADDING, "{\"workload\":\"Cassandra\"}"));
+        gossip(left, Map.of(ApplicationState.NET_VERSION, "1536", ApplicationState.STATUS_WITH_PORT, VersionedValue.STATUS_LEFT + ",0,0"));
+        gossip(removed, Map.of(ApplicationState.NET_VERSION, "1024", ApplicationState.STATUS_WITH_PORT, VersionedValue.REMOVED_TOKEN + ",0,0"));
+        gossip(hcd, Map.of(ApplicationState.NET_VERSION, String.valueOf(MessagingService.VERSION_3014)));
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+            DsePeers.identify(left, "DSE-flagged first handshake message");
+            DsePeers.identify(removed, "DSE-flagged first handshake message");
+            assertThat(MessagingService.instance().getDsePeers())
+            .containsExactlyInAnyOrderEntriesOf(Map.of("127.0.0.48:7000", "release unknown, NET_VERSION 1536, not identified as DSE by a handshake"));
+
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            assertThat(MessagingService.instance().getDsePeers()).isEmpty();
+        }
+        finally
+        {
+            DsePeers.reset();
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+            for (InetAddressAndPort peer : new InetAddressAndPort[]{ bare, left, removed, hcd })
+            {
+                Gossiper.instance.endpointStateMap.remove(peer);
+                StorageService.instance.getTokenMetadata().removeEndpoint(peer);
+            }
+        }
+    }
+
+    /** A gossip state of {@code peer} with the given values, for a ring member (gossip evicts an endpoint without tokens). */
+    private static void gossip(InetAddressAndPort peer, Map<ApplicationState, String> values)
+    {
+        Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+        int version = 1;
+        for (Map.Entry<ApplicationState, String> e : values.entrySet())
+            states.put(e.getKey(), VersionedValue.unsafeMakeVersionedValue(e.getValue(), version++));
+        StorageService.instance.getTokenMetadata().updateNormalToken(DatabaseDescriptor.getPartitioner().getRandomToken(), peer);
+        Gossiper.instance.endpointStateMap.put(peer, new EndpointState(new HeartBeatState(1, 1), states));
     }
 
     /** Registers the local endpoint unless it is known, so that removing the peers afterwards recomputes minClusterVersion from it. */
