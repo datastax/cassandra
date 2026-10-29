@@ -33,6 +33,7 @@ import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CURRENT_VERSION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -51,7 +52,8 @@ public class Dse6ViewStartupTest extends TestBaseImpl
     @Test
     public void aNodeWithViewsStartsInDse6ModeOnlyWithDsesTableOfHiddenColumns() throws Throwable
     {
-        try (WithProperties properties = new WithProperties().clear(TRIE_INDEX_FORMAT_VERSION);
+        // the SAI on-disk version is pinned to aa, the one DSE 6.8 writes, as on a node upgraded from DSE 6.8
+        try (WithProperties properties = new WithProperties().clear(TRIE_INDEX_FORMAT_VERSION).set(SAI_CURRENT_VERSION, "aa");
              Cluster cluster = Cluster.build(1)
                                       .withDynamicPortAllocation(true)
                                       .withConfig(c -> c.set("storage_compatibility_mode", "HCD_1")
