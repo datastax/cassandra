@@ -54,7 +54,8 @@ import org.apache.cassandra.utils.Pair;
 
 /**
  * Dummy index used when an unknown index is found in system_schema.index and INDEX_UNKNOWN_IGNORE=true, or while
- * the DSE 6 compatibility mode is on (an index type this software does not have, left by an in-place upgrade)
+ * the DSE 6 compatibility mode is on (an index type this software does not have, left by an in-place upgrade; the
+ * DataStax Enterprise Search indexes are refused in that mode instead, see Dse6NonCoreTraces)
  *
  * This is just a mock implementation to prevent problems with old schemas containing unknown indexes.
  * It ignores writes, declares that it supports no expressions, and throws an exception when asked to search.
@@ -68,7 +69,7 @@ public final class NoopIndex implements Index, INotificationConsumer
     private static final String DSE6_UNSUPPORTED_MESSAGE = "Custom index %s.%s of type '%s' %s is not supported by this software. "
                                                            + "The DSE 6 compatibility mode (internode_compatibility_mode: DSE_6) is enabled "
                                                            + "so using a noop index that will ignore writes and won't be queryable. "
-                                                           + "Please drop this index before switching internode_compatibility_mode back to NONE "
+                                                           + "Please drop this index on DSE before the upgrade (a node in internode_compatibility_mode NONE refuses to load it) "
                                                            + "and/or use a Storage Attached Index (SAI) instead.";
     @VisibleForTesting
     static final Callable<?> NO_OP_TASK = () -> null;
