@@ -34,13 +34,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The preflight inspection run as the operator runs it, through {@code main} in a JVM where nothing initialised the
- * configuration before: it initialises itself as a client, exits with its exit code, and loads neither the schema, nor
- * a keyspace, nor the commit log, nor the server.
+ * configuration before (so with this software's default trie version, not DSE 6's): it initialises itself as a client,
+ * exits with its exit code, and loads neither the schema, nor a keyspace, nor the commit log, nor the server.
  */
 public class DsePreflightToolTest extends OfflineToolUtils
 {
-    /** The threads the tool may leave behind. */
-    private static final String[] OPTIONAL_THREADS = { "Attach Listener" };
+    /** The threads the tool may leave behind, most of them started by the read of the sstables. */
+    private static final String[] OPTIONAL_THREADS = { "Reference-Reaper", "NonPeriodicTasks:[1-9]", "ScheduledTasks:[1-9]", "ScheduledFastTasks:[1-9]",
+                                                       "OptionalTasks:[1-9]", "ForkJoinPool.commonPool-worker-[0-9]+",
+                                                       "process reaper", "ObjectCleanerThread", "Strong-Reference-Leak-Detector:[1-9]",
+                                                       "LocalPool-Cleaner(-networking|-chunk-cache)", "JNA Cleaner", "Attach Listener" };
 
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
@@ -58,7 +61,8 @@ public class DsePreflightToolTest extends OfflineToolUtils
 
         NodeReport report = JsonUtils.JSON_OBJECT_MAPPER.readValue(Files.readAllBytes(json), NodeReport.class);
         assertThat(report.result).isEqualTo(NodeReport.READY);
-        assertThat(report.findings).noneMatch(f -> f.code.equals("SSTABLE_FORMAT"));
+        assertThat(report.findings).noneMatch(f -> f.code.equals("SSTABLE_FORMAT") || f.code.equals("UNREADABLE_SCHEMA"));
+        assertThat(report.findings).anyMatch(f -> f.code.equals("VIEWS_HANDLED") && f.message.contains("lab.wide_by_v"));
 
         assertSchemaNotLoaded();
         assertKeyspaceNotLoaded();
