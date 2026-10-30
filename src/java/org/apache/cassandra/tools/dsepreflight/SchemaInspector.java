@@ -62,6 +62,10 @@ import org.apache.cassandra.utils.Pair;
 import static org.apache.cassandra.tools.dsepreflight.Finding.blocking;
 import static org.apache.cassandra.tools.dsepreflight.Finding.info;
 import static org.apache.cassandra.tools.dsepreflight.Finding.warning;
+import static org.apache.cassandra.tools.dsepreflight.NodeInspector.SYSTEM_INFO_ENCRYPTED_TABLE_NAMES;
+import static org.apache.cassandra.tools.dsepreflight.NodeInspector.SYSTEM_INFO_KEEP_UNTIL;
+import static org.apache.cassandra.tools.dsepreflight.NodeInspector.SYSTEM_INFO_REWRITE;
+import static org.apache.cassandra.tools.dsepreflight.NodeInspector.SYSTEM_KEY_DIRECTORY;
 import static org.apache.cassandra.tools.dsepreflight.NodeInspector.list;
 
 /**
@@ -91,6 +95,12 @@ final class SchemaInspector
     private final String dsefsKeyspace;
     /** the partitioner of the cluster, which every table of the schema has */
     private final IPartitioner partitioner;
+    /**
+     * whether dse.yaml enables system_info_encryption, whose finding then names the tables it encrypts
+     * ({@link NodeInspector#SYSTEM_INFO_ENCRYPTED_TABLE_NAMES}); those are not to be decrypted by an ALTER TABLE, as DSE
+     * sets their compression back itself at its first start with the setting off
+     */
+    private final boolean systemInfoEncryption;
     private final List<Finding> findings;
 
     private final Map<String, UntypedResultSet.Row> keyspaces = new TreeMap<>();
@@ -127,11 +137,12 @@ final class SchemaInspector
     /** whether a directory of {@code system_auth.role_permissions} exists in the data directories */
     boolean rolePermissionsFound;
 
-    SchemaInspector(List<File> dataDirectories, @Nullable String dsefsKeyspace, IPartitioner partitioner, List<Finding> findings)
+    SchemaInspector(List<File> dataDirectories, @Nullable String dsefsKeyspace, IPartitioner partitioner, boolean systemInfoEncryption, List<Finding> findings)
     {
         this.dataDirectories = dataDirectories;
         this.dsefsKeyspace = dsefsKeyspace;
         this.partitioner = partitioner;
+        this.systemInfoEncryption = systemInfoEncryption;
         this.findings = findings;
     }
 
@@ -387,6 +398,7 @@ final class SchemaInspector
     {
         List<String> tiered = new ArrayList<>();
         List<String> encrypted = new ArrayList<>();
+        List<String> systemInfoEncrypted = new ArrayList<>();
         List<String> unloadableClasses = new ArrayList<>();
         List<String> unloadableTables = new ArrayList<>();
         List<String> compact = new ArrayList<>();
@@ -410,7 +422,8 @@ final class SchemaInspector
                 {
                     unloadableTables.add(name + ": flags " + message(e));
                 }
-                TableParams params = checkTableParams(keyspace.getKey(), entry.getKey(), row, tiered, encrypted, unloadableClasses, unloadableTables);
+                List<String> encryptedList = SYSTEM_INFO_ENCRYPTED_TABLE_NAMES.contains(name) ? systemInfoEncrypted : encrypted;
+                TableParams params = checkTableParams(keyspace.getKey(), entry.getKey(), row, tiered, encryptedList, unloadableClasses, unloadableTables);
                 TableMetadata metadata = build(keyspace.getKey(), entry.getKey(), row, flags, params, typesByKeyspace, false, unloadableTables);
                 if (metadata != null)
                     built.put(name, metadata);
@@ -427,6 +440,19 @@ final class SchemaInspector
                                   "encrypted (TDE) tables: " + list(encrypted) + "; the upgrade applies to clusters without encrypted tables or views",
                                   "decrypt them on DSE (ALTER TABLE ... WITH compression = {'class': 'LZ4Compressor'}, then nodetool upgradesstables -a " +
                                   "on every node) before the upgrade"));
+        // with the setting on, the finding of dse.yaml's system_info_encryption names these tables and their remedy
+        if (!systemInfoEncrypted.isEmpty() && !systemInfoEncryption)
+            findings.add(blocking("TDE_TABLE",
+                                  "tables that system_info_encryption of dse.yaml encrypted, whose schema still names an encrypting compression " +
+                                  "although dse.yaml does not enable it here, or could not be read: " + list(systemInfoEncrypted) + "; DSE sets " +
+                                  "their compression back to LZ4Compressor at its first start with the setting off (not done yet on this node, or, " +
+                                  "for system_backups, another node started with it on since then; or system_schema not flushed since), and " +
+                                  "their sstables stay encrypted until they are rewritten",
+                                  "do not ALTER these system tables: set enabled: false under system_info_encryption in dse.yaml and restart DSE " +
+                                  "on every node that has not run with it off yet, with " + SYSTEM_KEY_DIRECTORY + " still in place, so that " +
+                                  "DSE replays the commit log segments written before (if DSE already runs with it off on every node, run " +
+                                  "nodetool flush system_schema on this node and this tool again); then run " + SYSTEM_INFO_REWRITE + " (this " +
+                                  "tool does not check that the rewrite is done), and " + SYSTEM_INFO_KEEP_UNTIL));
         if (!unloadableClasses.isEmpty())
             findings.add(blocking("UNLOADABLE_CLASS",
                                   "tables with a compaction or compression class HCD 2.0 cannot load: " + list(unloadableClasses),
