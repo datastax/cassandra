@@ -262,6 +262,7 @@ public class NodeTool
                 SetSnapshotThrottle.class,
                 SetStreamThroughput.class,
                 SetTimeout.class,
+                SetTokens.class,
                 SetTraceProbability.class,
                 Sjk.class,
                 Snapshot.class,
