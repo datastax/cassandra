@@ -37,10 +37,16 @@ import java.util.function.Function;
 
 import org.junit.Assert;
 import org.junit.Test;
+import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
@@ -52,6 +58,8 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Ref.Visitor;
 import org.awaitility.Awaitility;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.DEBUG_REF_COUNT_COPY_SAMPLE_INTERVAL;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DEBUG_REF_COUNT_PRIMARY_SAMPLE_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SuppressWarnings({"unused", "unchecked", "rawtypes"})
@@ -548,5 +556,40 @@ public class RefCountedTest
         {
             Ref.ON_LEAK = prevOnLeak;
         }
+    }
+
+    @Test
+    public void fullModeRecordsEveryReferenceAndIgnoresSampleIntervals()
+    {
+        assertThat(Ref.DEBUG_ENABLED).isTrue();
+        assertThat(Ref.PRIMARY_SAMPLE_INTERVAL).isZero();
+        assertThat(Ref.COPY_SAMPLE_INTERVAL).isZero();
+        Tidier tidier = new Tidier();
+        for (int i = 0; i < 1000; i++)
+        {
+            Ref<?> ref = new Ref<>(null, tidier);
+            Ref<?> copy = ref.ref();
+            assertThat(ref.state.debug).isNotNull();
+            assertThat(copy.state.debug).isNotNull();
+            copy.release();
+            ref.release();
+        }
+
+        // an invalid interval does not warn either, as it is not read
+        Logger refLogger = (Logger) LoggerFactory.getLogger(Ref.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        refLogger.addAppender(appender);
+        try (WithProperties properties = new WithProperties().set(DEBUG_REF_COUNT_PRIMARY_SAMPLE_INTERVAL, "-1")
+                                                             .set(DEBUG_REF_COUNT_COPY_SAMPLE_INTERVAL, "abc"))
+        {
+            assertThat(Ref.sampleInterval(DEBUG_REF_COUNT_PRIMARY_SAMPLE_INTERVAL)).isZero();
+            assertThat(Ref.sampleInterval(DEBUG_REF_COUNT_COPY_SAMPLE_INTERVAL)).isZero();
+        }
+        finally
+        {
+            refLogger.detachAppender(appender);
+        }
+        assertThat(appender.list).noneMatch(e -> e.getLevel() == Level.WARN);
     }
 }
