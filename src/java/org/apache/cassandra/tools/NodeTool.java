@@ -22,6 +22,7 @@ import static com.google.common.collect.Iterables.toArray;
 import static com.google.common.collect.Lists.newArrayList;
 import static java.lang.Integer.parseInt;
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_NODETOOL_EXTENSION_CLASSES;
 import static org.apache.cassandra.io.util.File.WriteMode.APPEND;
 import static org.apache.commons.lang3.ArrayUtils.EMPTY_STRING_ARRAY;
 import static org.apache.commons.lang3.StringUtils.EMPTY;
@@ -39,17 +40,22 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Scanner;
+import java.util.Set;
 import java.util.SortedMap;
 
+import javax.annotation.Nullable;
 import javax.management.InstanceNotFoundException;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Throwables;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.EndpointSnitchInfoMBean;
 import org.apache.cassandra.tools.nodetool.*;
 import org.apache.cassandra.tools.nodetool.GuardrailsConfigCommand.GetGuardrailsConfig;
@@ -59,6 +65,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import com.google.common.collect.Maps;
 
 import io.airlift.airline.Cli;
+import io.airlift.airline.Command;
 import io.airlift.airline.Help;
 import io.airlift.airline.Option;
 import io.airlift.airline.OptionType;
@@ -69,6 +76,9 @@ import io.airlift.airline.ParseCommandUnrecognizedException;
 import io.airlift.airline.ParseOptionConversionException;
 import io.airlift.airline.ParseOptionMissingException;
 import io.airlift.airline.ParseOptionMissingValueException;
+import io.airlift.airline.model.CommandGroupMetadata;
+import io.airlift.airline.model.CommandMetadata;
+import io.airlift.airline.model.GlobalMetadata;
 
 public class NodeTool
 {
@@ -94,6 +104,40 @@ public class NodeTool
     }
 
     public int execute(String... args)
+    {
+        Cli<NodeToolCmdRunnable> parser = buildParser(loadExtensions());
+
+        int status = 0;
+        try
+        {
+            NodeToolCmdRunnable parse = parser.parse(args);
+            printHistory(args);
+            parse.run(nodeProbeFactory, output);
+        } catch (IllegalArgumentException |
+                IllegalStateException |
+                ParseArgumentsMissingException |
+                ParseArgumentsUnexpectedException |
+                ParseOptionConversionException |
+                ParseOptionMissingException |
+                ParseOptionMissingValueException |
+                ParseCommandMissingException |
+                ParseCommandUnrecognizedException e)
+        {
+            badUse(e);
+            status = 1;
+        } catch (Throwable throwable)
+        {
+            err(Throwables.getRootCause(throwable));
+            status = 2;
+        }
+
+        return status;
+    }
+
+    /**
+     * @return a builder holding the built-in commands and groups
+     */
+    private static Cli.CliBuilder<NodeToolCmdRunnable> builtinCommands()
     {
         List<Class<? extends NodeToolCmdRunnable>> commands = newArrayList(
                 Assassinate.class,
@@ -263,33 +307,181 @@ public class NodeTool
                .withCommand(RepairAdmin.SummarizePendingCmd.class)
                .withCommand(RepairAdmin.SummarizeRepairedCmd.class);
 
-        Cli<NodeToolCmdRunnable> parser = builder.build();
+        return builder;
+    }
 
-        int status = 0;
-        try
+    /**
+     * Instantiates the {@link NodeToolExtension}s listed in {@link CassandraRelevantProperties#CUSTOM_NODETOOL_EXTENSION_CLASSES},
+     * in the order they are listed. An extension that cannot be instantiated, or is listed twice, is skipped with a
+     * warning on the error output: a broken extension must never take the built-in commands down.
+     */
+    private List<NodeToolExtension> loadExtensions()
+    {
+        List<NodeToolExtension> extensions = new ArrayList<>();
+        Set<String> loaded = new HashSet<>();
+        for (String classname : FBUtilities.splitCommaSeparated(CUSTOM_NODETOOL_EXTENSION_CLASSES.getString()))
         {
-            NodeToolCmdRunnable parse = parser.parse(args);
-            printHistory(args);
-            parse.run(nodeProbeFactory, output);
-        } catch (IllegalArgumentException |
-                IllegalStateException |
-                ParseArgumentsMissingException |
-                ParseArgumentsUnexpectedException |
-                ParseOptionConversionException |
-                ParseOptionMissingException |
-                ParseOptionMissingValueException |
-                ParseCommandMissingException |
-                ParseCommandUnrecognizedException e)
+            if (!loaded.add(classname))
+            {
+                warnIgnoringExtension(classname, "listed twice in " + CUSTOM_NODETOOL_EXTENSION_CLASSES.getKey(), null);
+                continue;
+            }
+            try
+            {
+                extensions.add(FBUtilities.construct(classname, NodeToolExtension.class,
+                                                     "nodetool extension (set with " + CUSTOM_NODETOOL_EXTENSION_CLASSES.getKey() + ')'));
+            }
+            catch (RuntimeException | LinkageError e)
+            {
+                warnIgnoringExtension(classname, e);
+            }
+        }
+        return extensions;
+    }
+
+    /**
+     * Builds the command parser: the built-in commands and groups, plus the commands and groups of the given extensions.
+     * <p>
+     * The extensions are added one at a time, each on top of the ones accepted so far, and the parser is rebuilt
+     * every time: an extension that cannot be added (a name clashing with a built-in command or group, with another
+     * extension or within the extension, a class not annotated with {@link Command @Command}, an invalid name, or
+     * command definitions airline rejects, for instance a global option conflicting with the built-in ones or a
+     * field whose type is missing from the classpath) is skipped alone, with a warning on the error output.
+     */
+    private Cli<NodeToolCmdRunnable> buildParser(List<NodeToolExtension> extensions)
+    {
+        Cli<NodeToolCmdRunnable> parser = builtinCommands().build();
+        if (extensions.isEmpty())
+            return parser;
+
+        // commands and groups share the top-level namespace: the first argument of nodetool selects one or the other
+        Set<String> builtinNames = new HashSet<>();
+        GlobalMetadata metadata = parser.getMetadata();
+        for (CommandMetadata command : metadata.getDefaultGroupCommands())
+            builtinNames.add(command.getName());
+        for (CommandGroupMetadata group : metadata.getCommandGroups())
+            builtinNames.add(group.getName());
+
+        List<NodeToolExtension> accepted = new ArrayList<>();
+        for (NodeToolExtension extension : extensions)
         {
-            badUse(e);
-            status = 1;
-        } catch (Throwable throwable)
+            try
+            {
+                Cli.CliBuilder<NodeToolCmdRunnable> builder = builtinCommands();
+                Set<String> topLevelNames = new HashSet<>(builtinNames);
+                for (NodeToolExtension acceptedExtension : accepted)
+                    addExtension(builder, topLevelNames, acceptedExtension);
+                addExtension(builder, topLevelNames, extension);
+                parser = builder.build();
+                accepted.add(extension);
+            }
+            catch (RuntimeException | LinkageError e)
+            {
+                warnIgnoringExtension(extension.getClass().getName(), e);
+            }
+        }
+        return parser;
+    }
+
+    private void warnIgnoringExtension(String extension, Throwable cause)
+    {
+        warnIgnoringExtension(extension, cause.getMessage() != null ? cause.getMessage() : cause.toString(), cause);
+    }
+
+    private void warnIgnoringExtension(String extension, String message, @Nullable Throwable cause)
+    {
+        StringBuilder warning = new StringBuilder("warning: ignoring nodetool extension ").append(extension).append(": ").append(message);
+        Throwable rootCause = cause == null ? null : Throwables.getRootCause(cause);
+        if (rootCause != null && rootCause != cause)
+            warning.append(" (caused by ").append(rootCause).append(')');
+        output.err.println(warning);
+    }
+
+    /**
+     * Adds the commands and groups of an extension to the builder, after validating all of them against the names
+     * already taken.
+     *
+     * @param topLevelNames the names of the top-level commands and groups registered so far; the ones of the extension
+     *                      are added to it
+     * @throws ConfigurationException if the extension cannot be added, with the reason
+     */
+    private static void addExtension(Cli.CliBuilder<NodeToolCmdRunnable> builder, Set<String> topLevelNames, NodeToolExtension extension)
+    {
+        List<Class<? extends NodeToolCmdRunnable>> commands = extension.commands();
+        List<NodeToolExtension.CommandGroup> groups = extension.commandGroups();
+        if (commands == null || groups == null)
+            throw new ConfigurationException("it returned a null list of commands");
+
+        Set<String> names = new HashSet<>();
+        for (Class<? extends NodeToolCmdRunnable> command : commands)
         {
-            err(Throwables.getRootCause(throwable));
-            status = 2;
+            String name = commandName(command);
+            if (topLevelNames.contains(name) || !names.add(name))
+                throw new ConfigurationException(format("command '%s' (%s) has the name of an existing nodetool command or group", name, command.getName()));
+        }
+        for (NodeToolExtension.CommandGroup group : groups)
+        {
+            if (group == null)
+                throw new ConfigurationException("it lists a null command group");
+            checkName(group.name, "group");
+            if (topLevelNames.contains(group.name) || !names.add(group.name))
+                throw new ConfigurationException(format("group '%s' has the name of an existing nodetool command or group", group.name));
+
+            Set<String> groupNames = new HashSet<>();
+            for (Class<? extends NodeToolCmdRunnable> command : group.commands)
+            {
+                String name = commandName(command);
+                if (!groupNames.add(name))
+                    throw new ConfigurationException(format("group '%s' lists the command '%s' twice", group.name, name));
+            }
+            commandName(defaultCommand(group));
         }
 
-        return status;
+        topLevelNames.addAll(names);
+        builder.withCommands(commands);
+        for (NodeToolExtension.CommandGroup group : groups)
+        {
+            Cli.GroupBuilder<NodeToolCmdRunnable> groupBuilder = builder.withGroup(group.name)
+                                                                        .withDefaultCommand(defaultCommand(group))
+                                                                        .withCommands(group.commands);
+            if (group.description != null)
+                groupBuilder.withDescription(group.description);
+        }
+    }
+
+    private static Class<? extends NodeToolCmdRunnable> defaultCommand(NodeToolExtension.CommandGroup group)
+    {
+        return group.defaultCommand == null ? CassHelp.class : group.defaultCommand;
+    }
+
+    /**
+     * @return the name a command class is invoked with, that is the name of its {@link Command @Command} annotation,
+     * looked up through the superclasses as airline does
+     * @throws ConfigurationException if the class is null, not annotated, or its name is invalid
+     */
+    private static String commandName(@Nullable Class<?> command)
+    {
+        if (command == null)
+            throw new ConfigurationException("it lists a null command class");
+        for (Class<?> cls = command; cls != null && cls != Object.class; cls = cls.getSuperclass())
+        {
+            Command annotation = cls.getAnnotation(Command.class);
+            if (annotation != null)
+            {
+                checkName(annotation.name(), "command (" + command.getName() + ')');
+                return annotation.name();
+            }
+        }
+        throw new ConfigurationException(format("command class %s is not annotated with @%s", command.getName(), Command.class.getName()));
+    }
+
+    /**
+     * Rejects the names that could not be given on the command line: empty, with whitespace, or looking like an option.
+     */
+    private static void checkName(@Nullable String name, String what)
+    {
+        if (name == null || name.isEmpty() || name.startsWith("-") || name.chars().anyMatch(Character::isWhitespace))
+            throw new ConfigurationException(format("invalid %s name '%s': a name is not empty, has no whitespace and does not start with '-'", what, name));
     }
 
     private static void printHistory(String... args)
@@ -337,7 +529,7 @@ public class NodeTool
         }
     }
 
-    interface NodeToolCmdRunnable
+    public interface NodeToolCmdRunnable
     {
         void run(INodeProbeFactory nodeProbeFactory, Output output);
     }
