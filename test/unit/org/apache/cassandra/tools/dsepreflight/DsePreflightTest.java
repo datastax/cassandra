@@ -83,6 +83,22 @@ public class DsePreflightTest
                                                 "one data center only";
     /** What every INTERNODE_TLS remedy says of HCD 2.0, up to the keys of the fixture's server_encryption_options. */
     private static final String TLS_CARRY = "; on HCD 2.0, carry the keys DSE sets in server_encryption_options into the cassandra.yaml of HCD 2.0";
+    /** The message of TDE_TABLE for system_info_encryption enabled in dse.yaml. */
+    private static final String SYSTEM_INFO_ENCRYPTION_MESSAGE = "system_info_encryption.enabled is true in dse.yaml: DSE encrypts the tables " +
+                                                                 "system.batches, system.paxos, system_backups.backup_stores and " +
+                                                                 "system_backups.backup_configurations, its commit log, its saved caches and its " +
+                                                                 "hints files; encryption is out of scope of this upgrade";
+    /** The remedy of TDE_TABLE for system_info_encryption enabled in dse.yaml. */
+    private static final String SYSTEM_INFO_ENCRYPTION_REMEDY = "set enabled: false under system_info_encryption in dse.yaml; restart DSE on every " +
+                                                                "node, with the system key still in place, so that DSE replays the commit log " +
+                                                                "segments written before and writes its commit log, saved caches and hints files " +
+                                                                "unencrypted from then on (HCD 2.0 skips a saved cache it cannot read); then run " +
+                                                                "nodetool upgradesstables -a system batches paxos and nodetool upgradesstables -a " +
+                                                                "system_backups on every node, so that those tables are rewritten unencrypted (this " +
+                                                                "tool does not check that the rewrite is done); and keep the system key in place " +
+                                                                "until the rewrite is done and, with every node up, DSE has delivered the hints " +
+                                                                "files written before, which stay encrypted (this tool names those left, under " +
+                                                                "HINTS_COMPRESSION); all of it before the first node of the cluster is upgraded";
     /**
      * An id of the project's plan an operator cannot look up, which no text of the tool may hold: a decision ("decision
      * 3i", "decisions 3i and 3l"), a collection answer or question ("A58", "A06.01", "Q48"), a proposed runbook change
@@ -408,8 +424,8 @@ public class DsePreflightTest
         node.editYaml("dse.yaml", yaml -> section(yaml, "system_info_encryption").put("enabled", true));
         Run run = assertBlocked(run(node), "TDE_TABLE");
         assertThat(run.findings("TDE_TABLE")).hasSize(1);
-        assertThat(run.messages("TDE_TABLE")).isEqualTo("system_info_encryption.enabled is true in dse.yaml: DSE encrypts its system tables; encrypted " +
-                                                        "tables are out of scope of this upgrade");
+        assertThat(run.messages("TDE_TABLE")).isEqualTo(SYSTEM_INFO_ENCRYPTION_MESSAGE);
+        assertThat(run.findings("TDE_TABLE").get(0).remedy).isEqualTo(SYSTEM_INFO_ENCRYPTION_REMEDY);
     }
 
     // ---- access controls and authentication ----
@@ -653,9 +669,14 @@ public class DsePreflightTest
         DseNodeFixture node = node();
         node.editYaml("cassandra.yaml", yaml -> section(yaml, "transparent_data_encryption_options").put("enabled", true));
         Run run = assertBlocked(run(node), "TDE_COMMITLOG");
-        assertThat(run.messages("TDE_COMMITLOG")).contains("encryption is out of scope of this upgrade, and HCD 2.0's replay " +
-                                                           "of DSE's commit log and conversion of its hints were not validated with encrypted " +
-                                                           "files");
+        assertThat(run.findings("TDE_COMMITLOG")).hasSize(1);
+        assertThat(run.messages("TDE_COMMITLOG")).isEqualTo("transparent_data_encryption_options.enabled is true in DSE's cassandra.yaml: the commit " +
+                                                            "log DSE writes is encrypted; encryption is out of scope of this upgrade, and HCD 2.0's " +
+                                                            "replay of DSE's commit log was not validated with encrypted segments");
+        assertThat(run.findings("TDE_COMMITLOG").get(0).remedy)
+        .isEqualTo("set enabled: false under transparent_data_encryption_options and restart DSE on every node, with the keystore that section " +
+                   "names still in place, so that DSE replays the commit log segments written before and writes its segments unencrypted from " +
+                   "then on, before the upgrade");
     }
 
     /**
@@ -676,7 +697,7 @@ public class DsePreflightTest
         .isEqualTo("remove hints_compression from DSE's cassandra.yaml and restart DSE on this node, so that the hints files it writes from then " +
                    "on are not compressed; the files written before keep their compression: with every node up, wait until DSE has delivered " +
                    "them and they are gone from its hints directory, before the first node of the cluster is upgraded (this tool names the " +
-                   "compressed files left)");
+                   "compressed or encrypted files left)");
 
         DseNodeFixture other = node();
         other.editYaml("cassandra.yaml", yaml -> yaml.put("hints_compression", "SnappyCompressor"));
@@ -699,8 +720,8 @@ public class DsePreflightTest
     /**
      * HINTS_COMPRESSION from the hints files themselves: a DSE hints file whose header records a compression blocks, so
      * that the files written before hints_compression was removed are found, and so does a file DSE encrypted while
-     * system_info_encryption was enabled in dse.yaml, whose header records the encryption as a compression; the parameters
-     * are named, never their values. A header that cannot be read is a warning.
+     * system_info_encryption was enabled in dse.yaml, whose header records the encryption as a compression (TDE_TABLE blocks
+     * too while the setting is on); the parameters are named, never their values. A header that cannot be read is a warning.
      */
     @Test
     public void compressedDseHintsFilesBlock() throws IOException
@@ -720,8 +741,13 @@ public class DsePreflightTest
                    "encryption as a compression): remove hints_compression from DSE's cassandra.yaml and set enabled: false under " +
                    "system_info_encryption in dse.yaml, each one that is set, and restart DSE on this node, so that the hints files it " +
                    "writes from then on are neither compressed nor encrypted; the files written before keep their compression or " +
-                   "encryption: with every node up, and the key DSE encrypted them with still in place, wait until DSE has delivered " +
-                   "them and they are gone, before the first node of the cluster is upgraded, then run this tool again");
+                   "encryption: with every node up, and for encrypted files the system key still in place, wait until DSE has delivered " +
+                   "them and they are gone, before the first node of the cluster is upgraded, then run this tool again; if " +
+                   "system_info_encryption was enabled, it also encrypted the tables system.batches, system.paxos, " +
+                   "system_backups.backup_stores and system_backups.backup_configurations: once DSE runs with it off on every node, run " +
+                   "nodetool upgradesstables -a system batches paxos and nodetool upgradesstables -a system_backups on every node, with " +
+                   "the system key still in place, before the first node of the cluster is upgraded (this tool does not check that the " +
+                   "rewrite is done)");
         assertThat(run.out).doesNotContain("s3cr3t");
         assertThat(run.codes(Finding.Severity.WARNING)).doesNotContain("HINTS_UNREADABLE");
         assertThat(NodeInspector.hintsFileParameters(node.hints.resolve(plain))).isEmpty();
@@ -731,21 +757,37 @@ public class DsePreflightTest
         assertThat(NodeInspector.hintsFileParameters(written)).containsOnlyKeys("compression");
         assertThat(NodeInspector.hintsFileParameters(DseFixtures.hintsFile(DseVersion.DSE_6_8_65))).isEmpty();
 
-        // a file DSE encrypted while system_info_encryption was enabled: its header records DSE's encrypting compressor
+        // a file DSE encrypted while system_info_encryption was enabled, the setting off since: its header records DSE's
+        // encrypting compressor
         DseNodeFixture encryptedNode = node();
         String encrypted = UUID.randomUUID() + "-1790335633212-v1.hints";
         writeDseHintsHeader(encryptedNode.hints.resolve(encrypted),
                             "{\"compression\":{\"class_name\":\"org.apache.cassandra.io.compress.EncryptingLZ4Compressor\"," +
-                            "\"parameters\":{\"cipher_algorithm\":\"AES/ECB/PKCS5Padding\",\"secret_key_strength\":\"128\"," +
-                            "\"secret_key_file\":\"k3y-s3cr3t\"}}}");
+                            "\"parameters\":{\"cipher_algorithm\":\"AES\",\"secret_key_strength\":\"128\"," +
+                            "\"key_provider\":\"com.datastax.bdp.cassandra.crypto.LocalFileSystemKeyProviderFactory\"," +
+                            "\"secret_key_file\":\"/etc/dse/conf/system/k3y-s3cr3t\"}}}");
         Run encryptedRun = assertBlocked(run(encryptedNode), "HINTS_COMPRESSION");
         assertThat(encryptedRun.messages("HINTS_COMPRESSION"))
         .isEqualTo("DSE hints files written compressed or encrypted (the parameters their header records): " + encrypted + " (compression); HCD " +
                    "2.0 cannot convert such a file at its start: it keeps the file and does not deliver its hints");
         assertThat(encryptedRun.findings("HINTS_COMPRESSION").get(0).remedy).isEqualTo(run.findings("HINTS_COMPRESSION").get(0).remedy);
+        assertThat(encryptedRun.codes(Finding.Severity.BLOCKING)).containsExactly("HINTS_COMPRESSION");
         assertThat(encryptedRun.report.upgradePath.upgradeSteps).anyMatch(s -> s.startsWith("Hints: compressed or encrypted DSE hints files, or " +
                                                                                             "hints_compression set: see HINTS_COMPRESSION; "));
-        assertThat(encryptedRun.out).doesNotContain("EncryptingLZ4Compressor").doesNotContain("AES/ECB/PKCS5Padding").doesNotContain("k3y-s3cr3t");
+        assertThat(encryptedRun.out).doesNotContain("EncryptingLZ4Compressor").doesNotContain("LocalFileSystemKeyProviderFactory")
+                                     .doesNotContain("/etc/dse/conf/system").doesNotContain("k3y-s3cr3t");
+        // the same file with system_info_encryption still on: the setting blocks too, as TDE_TABLE
+        DseNodeFixture stillEncrypting = node();
+        stillEncrypting.editYaml("dse.yaml", yaml -> section(yaml, "system_info_encryption").put("enabled", true));
+        Files.copy(encryptedNode.hints.resolve(encrypted), stillEncrypting.hints.resolve(encrypted));
+        Run stillEncryptingRun = assertBlocked(run(stillEncrypting), "HINTS_COMPRESSION");
+        assertThat(stillEncryptingRun.messages("HINTS_COMPRESSION")).isEqualTo(encryptedRun.messages("HINTS_COMPRESSION"));
+        assertThat(stillEncryptingRun.findings("HINTS_COMPRESSION").get(0).remedy).isEqualTo(run.findings("HINTS_COMPRESSION").get(0).remedy);
+        assertThat(stillEncryptingRun.codes(Finding.Severity.BLOCKING)).containsExactlyInAnyOrder("TDE_TABLE", "HINTS_COMPRESSION");
+        assertThat(stillEncryptingRun.messages("TDE_TABLE")).isEqualTo(SYSTEM_INFO_ENCRYPTION_MESSAGE);
+        assertThat(stillEncryptingRun.findings("TDE_TABLE").get(0).remedy).isEqualTo(SYSTEM_INFO_ENCRYPTION_REMEDY);
+        assertThat(stillEncryptingRun.out).doesNotContain("EncryptingLZ4Compressor").doesNotContain("LocalFileSystemKeyProviderFactory")
+                                          .doesNotContain("/etc/dse/conf/system").doesNotContain("k3y-s3cr3t");
 
         // a header cut short, or damaged: not known, a warning
         DseNodeFixture cut = node();
