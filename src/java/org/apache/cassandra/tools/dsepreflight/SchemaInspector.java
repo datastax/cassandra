@@ -889,7 +889,7 @@ final class SchemaInspector
         if (!rows.rows.isEmpty())
             findings.add(info("AUTH_REPLICA",
                               "system_auth.role_permissions was read from this node's replica (" + rows.rows.size() + " rows): a node holds only the " +
-                              "partitions it replicates, so check the reports of every node"));
+                              "partitions it replicates, so check the reports of every node (the aggregate mode does)"));
     }
 
     private void checkRowLevelTables()

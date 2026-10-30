@@ -42,6 +42,7 @@ import java.util.zip.CRC32;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Throwables;
+import org.apache.commons.cli.Option;
 import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Rule;
@@ -68,7 +69,6 @@ import org.apache.cassandra.service.DseUpgradeMarker;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
@@ -181,7 +181,7 @@ public class DsePreflightTest
         }
     }
 
-    private static Run run(Path json, String... args) throws IOException
+    static Run run(Path json, String... args) throws IOException
     {
         List<String> all = new ArrayList<>(Arrays.asList(args));
         all.add("--json");
@@ -197,7 +197,7 @@ public class DsePreflightTest
         byte[] bytes = Files.exists(json) ? Files.readAllBytes(json) : null;
         if (bytes != null)
             assertNoPlanDecisionIds(new String(bytes, StandardCharsets.UTF_8));
-        NodeReport report = bytes == null ? null : JsonUtils.JSON_OBJECT_MAPPER.readValue(bytes, NodeReport.class);
+        NodeReport report = bytes == null ? null : ClusterAggregate.READER.readValue(bytes);
         Run run = new Run(exitCode, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8), report);
         assertNoPlanDecisionIds(run);
         return run;
@@ -251,7 +251,7 @@ public class DsePreflightTest
      * What a run of the tool printed or wrote (its output, its error output, its JSON) holds no id of the plan; the
      * paths and this machine's host name, which the texts quote and which are not the tool's words, are left out.
      */
-    private static void assertNoPlanDecisionIds(String... texts)
+    static void assertNoPlanDecisionIds(String... texts)
     {
         for (String text : texts)
         {
@@ -346,7 +346,7 @@ public class DsePreflightTest
         assertThat(report.accessControls.rolePermissionsRows).isEqualTo(25);
         assertThat(run.messages("PROXY_GRANT")).contains("role 'cassandra' on roles/dseadmin: [PROXY.EXECUTE, PROXY.LOGIN]");
         assertThat(run.messages("AUTH_REPLICA")).contains("read from this node's replica (25 rows)")
-                                                .endsWith("so check the reports of every node");
+                                                .endsWith("so check the reports of every node (the aggregate mode does)");
         assertThat(run.messages("VIEWS_HANDLED")).contains("lab.wide_by_v (hidden column .v)");
         assertThat(run.messages("DSE_RELEASE")).isEqualTo("DSE 6.8 (6.8.65) is accepted; the upgrade requires the latest DSE 6.8 or 6.9 patch " +
                                                           "release, which this tool does not check; DSE 6.9 is preferred");
@@ -2155,8 +2155,8 @@ public class DsePreflightTest
         .doesNotContain("change nothing on DSE");
         assertThat(withPort.report.upgradePath.upgradeSteps)
         .contains("Internode TLS on DSE 6.9: enable_legacy_ssl_storage_port: true is set in this node's cassandra.yaml; check that " +
-                  "DSE was restarted since (ss -tln lists ssl_storage_port); the report of every DSE node checks its own file, and every " +
-                  "one of them must pass");
+                  "DSE was restarted since (ss -tln lists ssl_storage_port); the report of every DSE node checks its own file, and the " +
+                  "aggregate is READY only if all of them pass");
 
         // DSE 6.9.26 with the setting false, DSE's shipped value: blocking
         Run falsePort = assertBlocked(run(nodeWithInternodeTls("6.9.26", "all", false)), "INTERNODE_TLS");
@@ -2361,7 +2361,7 @@ public class DsePreflightTest
      * {@code node} made to run DSE {@code dseVersion} ({@code 6.<minor>.<patch>}, with its peers and its installation),
      * with {@code internodeEncryption} and, unless null, {@code enable_legacy_ssl_storage_port} in DSE's cassandra.yaml.
      */
-    private static DseNodeFixture withInternodeTls(DseNodeFixture node, String dseVersion, String internodeEncryption, @Nullable Boolean legacySslStoragePort)
+    static DseNodeFixture withInternodeTls(DseNodeFixture node, String dseVersion, String internodeEncryption, @Nullable Boolean legacySslStoragePort)
     throws IOException
     {
         String release = "4.0.0." + dseVersion.replace(".", "");
@@ -2611,9 +2611,26 @@ public class DsePreflightTest
         Run arguments = run(json, "unexpected");
         assertThat(arguments.exitCode).isEqualTo(DsePreflight.EXIT_ERROR);
         assertThat(arguments.err).contains("unexpected arguments: [unexpected]");
+        Run notADirectory = run(json, "--aggregate", json.resolveSibling("missing").toString());
+        assertThat(notADirectory.exitCode).isEqualTo(DsePreflight.EXIT_ERROR);
+        assertThat(notADirectory.err).contains("--aggregate needs a directory of JSON reports: " + json.resolveSibling("missing"));
+        // every other option is refused with --aggregate, which would ignore it
+        List<String> refused = new ArrayList<>();
+        for (Option option : DsePreflight.options().getOptions())
+        {
+            String name = option.getLongOpt();
+            if (DsePreflight.AGGREGATE_OPTIONS.contains(name))
+                continue;
+            refused.add(name);
+            Run misuse = run(json, "--aggregate", temporaryFolder.getRoot().toString(), option.hasArg() ? "--" + name + "=x" : "--" + name);
+            assertThat(misuse.exitCode).as(name).isEqualTo(DsePreflight.EXIT_ERROR);
+            assertThat(misuse.err).as(name).startsWith("--" + name + " does not apply to --aggregate");
+        }
+        assertThat(refused).contains("dse-home", "data-dir", "nodetool", "nodetool-timeout");
         Run help = run(json, "--help");
         assertThat(help.exitCode).isEqualTo(DsePreflight.EXIT_READY);
-        assertThat(help.out).contains("--nodetool").contains("Exit codes");
+        assertThat(help.out).contains("--aggregate").contains("With --aggregate, checks the JSON reports of the")
+                            .contains("--nodetool").contains("Exit codes: 0 ready (warnings allowed), 1 blocking findings or cluster not ready");
         assertThat(json).doesNotExist();
     }
 
