@@ -170,10 +170,27 @@ public enum CassandraRelevantProperties
     CHUNKCACHE_CLEANER_THREADS("dse.chunk.cache.cleaner.threads","1"),
     CHUNKCACHE_INITIAL_CAPACITY("cassandra.chunkcache_initialcapacity", "16"),
     /**
+     * After tryGet + sync reclaim + tryGet still fails, how long a miss loader may wait for pool
+     * pages freed by other readers. On timeout the read fails with BufferPoolExhaustedException.
+     */
+    CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS("cassandra.chunk_cache_pool_wait_timeout_ms", "10"),
+    /**
      * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
      * CompletableFuture fetched from the cache to complete. This is part of a migitation for DBPE-13261.
      */
     CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000"),
+    /**
+     * MiB withheld from Caffeine {@code maximumWeight} but still part of the chunk-cache buffer pool.
+     * Headroom for in-flight cache loads under eviction pressure (not a separate allocator).
+     * The default value -1 means that it will be calculated during initialization.
+     */
+    CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB("cassandra.chunk_cache_reserved_pool_space_in_mb", "-1"),
+    /**
+     * MB added to the automatically calculated chunk-cache reserved pool space for every thread that reads through
+     * the cache (concurrent reads, compactors and index builders). Ignored when
+     * {@link #CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB} is set explicitly. Negative values are treated as 0.
+     */
+    CHUNK_CACHE_RESERVED_POOL_SPACE_THREAD_FACTOR("cassandra.chunk_cache_reserved_pool_space_thread_factor", "0.3"),
     CLOCK_GLOBAL("cassandra.clock"),
     CLOCK_MONOTONIC_APPROX("cassandra.monotonic_clock.approx"),
     CLOCK_MONOTONIC_PRECISE("cassandra.monotonic_clock.precise"),
@@ -1185,7 +1202,6 @@ public enum CassandraRelevantProperties
      * Allows to set custom current trie index format. This node will produce sstables in this format.
      */
     TRIE_INDEX_FORMAT_VERSION("cassandra.trie_index_format_version", "cc"),
-
     /**
      * Number of shards for TrieMemtable. If not specified, defaults to {@link TrieMemtable#autoShardCount}
      */

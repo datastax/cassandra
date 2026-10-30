@@ -50,15 +50,23 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReaderLoadingBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.io.sstable.format.bti.BtiTableReaderLoadingBuilder;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.memory.BufferPool;
+import org.apache.cassandra.utils.memory.BufferPoolExhaustedException;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
@@ -161,6 +169,64 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
     public void testSSTableSimpleScanner() throws Throwable
     {
         bruteForceCorruptionTest(ssTableReader, sstableSimpleScanner());
+    }
+
+    /**
+     * Verifies that a {@link BufferPoolExhaustedException} thrown by a totally-exhausted chunk-cache pool during
+     * row iteration is NOT misclassified as a {@link CorruptSSTableException} and does NOT
+     * cause the SSTable to be marked as suspect.
+     */
+    @Test
+    public void testPoolExhaustedDuringRowIterationIsNotCorruption() throws Throwable
+    {
+        SSTableReader reader = openWithExhaustedChunkCache();
+        try
+        {
+            DecoratedKey dk = Util.dk(String.format("pkvalue_%07d", 0));
+            assertThatThrownBy(() -> {
+                try (UnfilteredRowIterator rowIter = reader.rowIterator(dk,
+                                                                        Slices.ALL,
+                                                                        ColumnFilter.all(cfs.metadata()),
+                                                                        false,
+                                                                        SSTableReadsListener.NOOP_LISTENER))
+                {
+                    while (rowIter.hasNext())
+                        rowIter.next();
+                }
+            }).isInstanceOf(BufferPoolExhaustedException.class)
+              .isNotInstanceOf(CorruptSSTableException.class);
+
+            assertFalse("SSTable must not be marked suspect on pool exhaustion", reader.isMarkedSuspect());
+        }
+        finally
+        {
+            reader.selfRef().release();
+        }
+    }
+
+    /**
+     * Opens the shared {@link #ssTableReader}'s on-disk files through a fresh {@link ChunkCache} backed by a
+     * zero-capacity {@link BufferPool}. Every chunk-cache miss immediately exhausts the pool and throws
+     * {@link BufferPoolExhaustedException}.
+     */
+    private SSTableReader openWithExhaustedChunkCache() throws ReflectiveOperationException
+    {
+        // A pool with 0 bytes can never hand out a buffer: every allocateForCache call fails
+        BufferPool emptyPool = new BufferPool("test_exhausted_pool", 0, true);
+        ChunkCache exhaustedCache = new ChunkCache(emptyPool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 1, ChunkCacheMetrics::create);
+
+        SSTable.Builder tableBuilder = new SSTable.Builder<>(ssTableReader.descriptor)
+                .setTableMetadataRef(cfs.metadata)
+                .setComponents(ssTableReader.components())
+                .setChunkCache(exhaustedCache);
+
+        assert ssTableReader.descriptor.getFormat().name().equals(BtiFormat.NAME);
+        SSTableReaderLoadingBuilder<?, ?> loadingBuilder =
+                (SSTableReaderLoadingBuilder<?, ?>) Class.forName(BtiTableReaderLoadingBuilder.class.getName())
+                                                        .getConstructor(SSTable.Builder.class)
+                                                        .newInstance(tableBuilder);
+
+        return loadingBuilder.build(null, false, false);
     }
 
     private void bruteForceCorruptionTest(SSTableReader ssTableReader, Consumer<SSTableReader> walker) throws Throwable
