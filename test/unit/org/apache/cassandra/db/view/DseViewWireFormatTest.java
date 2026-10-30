@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 
+import ch.qos.logback.classic.Level;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -691,6 +692,164 @@ public class DseViewWireFormatTest extends CQLTester
         assertThat(rows.get(0).getCell(dseHidden)).isNull();
         mutation.apply();
         assertRows(execute("SELECT v, pk, ck, w FROM " + KEYSPACE + '.' + view.name + " WHERE v = 'e'"), row("e", 1, 1, 9));
+    }
+
+    /**
+     * A view update DSE 6.8 or 6.9 stored on its own disk before the upgrade (a batch of its batchlog, a hint, a mutation of
+     * its commit log), in DSE's own layout, decoded at {@link MessagingService#VERSION_DSE_68}: its rows are those of the
+     * same update sent at version 11, with the liveness of their hidden cells, and the stale entry (a hidden tombstone next
+     * to a primary key liveness) is not live. Replayed or delivered to a DSE 6 peer, the update carries the hidden cells
+     * DSE stored again.
+     */
+    @Test
+    public void viewUpdateStoredByDseIsTranslatedAsOnTheWire() throws Throwable
+    {
+        long nowInSec = FBUtilities.nowInSeconds();
+        PartitionUpdate.Builder builder = PartitionUpdate.builder(dseView, viewKey("s"), dseView.regularAndStaticColumns(), 4);
+        // a live hidden cell and no primary key liveness (the entry of a base row written by UPDATE): live
+        builder.add(dseRow(1, null, BufferCell.live(dseHidden, 10, ByteBufferUtil.EMPTY_BYTE_BUFFER), null));
+        // primary key liveness and a hidden tombstone (the old entry after the base cell changed): not live
+        builder.add(dseRow(2, LivenessInfo.create(10, nowInSec), BufferCell.tombstone(dseHidden, 10, nowInSec), null));
+        // primary key liveness, a live hidden cell and a regular cell (the entry of a base row written by INSERT): live
+        builder.add(dseRow(3, LivenessInfo.create(10, nowInSec), BufferCell.live(dseHidden, 10, ByteBufferUtil.EMPTY_BYTE_BUFFER),
+                           BufferCell.live(dseW, 10, Int32Type.instance.decompose(7))));
+        // primary key liveness and no hidden cell: not live, DSE ignores the primary key liveness
+        builder.add(dseRow(4, LivenessInfo.create(10, nowInSec), null, null));
+        Mutation dseMutation = new Mutation(builder.build());
+        ByteBuffer stored = DseFixtures.dse68Mutation(dseMutation);
+        assertThat(ByteBufferUtil.bytesToHex(stored)).contains(ByteBufferUtil.bytesToHex(ByteBufferUtil.bytes(".v")));
+
+        Mutation decoded = deserialize(Mutation.serializer, stored, MessagingService.VERSION_DSE_68);
+        PartitionUpdate update = decoded.getPartitionUpdate(view);
+        Mutation sentAt11 = deserialize(Mutation.serializer, asDse(() -> serialize(Mutation.serializer, dseMutation, VERSION_3014)), VERSION_3014);
+        assertThat(rowsOf(update)).isEqualTo(rowsOf(sentAt11.getPartitionUpdate(view)));
+        assertThat(update.columns().regulars).containsExactly(w);
+        List<Row> rows = rowsOf(update);
+        // the row without hidden cell has nothing left and is not decoded
+        assertThat(rows).hasSize(3);
+        assertThat(rows.get(0).primaryKeyLivenessInfo()).isEqualTo(LivenessInfo.create(10, nowInSec));
+        assertThat(rows.get(1).primaryKeyLivenessInfo()).isEqualTo(LivenessInfo.withExpirationTime(10, LivenessInfo.EXPIRED_LIVENESS_TTL, nowInSec));
+        assertThat(rows.get(2).primaryKeyLivenessInfo()).isEqualTo(LivenessInfo.create(10, nowInSec));
+        for (Row row : rows)
+            assertThat(row.getCell(dseHidden)).isNull();
+
+        // to a DSE 6 peer, at version 11: the hidden cells DSE stored, the live ones and the tombstone
+        ByteBuffer toDse = serialize(decoded.getPartitionUpdate(view), VERSION_3014);
+        PartitionUpdate.PartitionUpdateSerializer dseSerializer = new PartitionUpdate.PartitionUpdateSerializer(id -> dseView);
+        List<Row> dseRows = rowsOf(asDse(() -> {
+            try (DataInputBuffer in = new DataInputBuffer(toDse, true))
+            {
+                return dseSerializer.deserialize(in, VERSION_3014, DeserializationHelper.Flag.FROM_REMOTE);
+            }
+        }));
+        assertThat(dseRows).hasSize(3);
+        assertHiddenCell(dseRows.get(0), 10, Cell.NO_TTL, Cell.NO_DELETION_TIME, false);
+        assertHiddenCell(dseRows.get(1), 10, Cell.NO_TTL, nowInSec, true);
+        assertHiddenCell(dseRows.get(2), 10, Cell.NO_TTL, Cell.NO_DELETION_TIME, false);
+
+        decoded.apply();
+        assertRows(execute("SELECT v, pk, ck, w FROM " + KEYSPACE + '.' + view.name + " WHERE v = 's'"),
+                   row("s", 1, 1, null), row("s", 1, 3, 7));
+    }
+
+    /**
+     * A view update DSE stored is translated only when the translation is certain: when DSE's table lists no hidden column
+     * for the view, when the catalog refuses the view or cannot be read, the update fails to decode as one naming a column
+     * unknown here, as it did before, with a WARN once per view saying why. DSE 6.0's layout, decoded at
+     * {@link MessagingService#VERSION_40}, is not translated, and outside of the mode nothing is translated and the catalog
+     * is not read.
+     */
+    @Test
+    public void viewUpdateStoredByDseIsNotTranslatedWhenUncertain() throws Throwable
+    {
+        // a view DSE's table lists no hidden column for
+        TableMetadata unlisted = getColumnFamilyStore(KEYSPACE, createView(VIEW_QUERY)).metadata();
+        assertStoredUpdateNotTranslated(unlisted, ".v", "DSE's system_schema.hidden_columns on this node lists no hidden column for that view");
+
+        // a view DSE's table lists another hidden column for than the one the update names
+        TableMetadata other = getColumnFamilyStore(KEYSPACE, createView(VIEW_QUERY)).metadata();
+        dseHiddenColumns.put(Pair.create(KEYSPACE, other.name), List.of(DSE_V));
+        assertStoredUpdateNotTranslated(other, ".x", "DSE's system_schema.hidden_columns on this node lists the hidden column .v for that view");
+
+        // a view DSE's table lists another hidden column for too: the catalog refuses it
+        TableMetadata refused = getColumnFamilyStore(KEYSPACE, createView(VIEW_QUERY)).metadata();
+        dseHiddenColumns.put(Pair.create(KEYSPACE, refused.name), List.of(DSE_V, new HiddenColumn(".w", "regular", false, "int")));
+        assertStoredUpdateNotTranslated(refused, ".v", "DSE 6 compatibility mode: DSE keeps the hidden columns [.v text (regular, required for liveness), " +
+                                                 ".w int (regular)] for materialized view " + KEYSPACE + '.' + refused.name);
+
+        // a catalog that cannot be read (the data directories of this test do not hold DSE's table)
+        DseViewHiddenColumnCatalog.setInstance(null);
+        assertStoredUpdateNotTranslated(view, ".v", "DSE 6 compatibility mode: cannot read DSE's system_schema.hidden_columns from the data directories of this node");
+        DseViewHiddenColumnCatalog.setInstance(new DseViewHiddenColumnCatalog(dseHiddenColumns));
+
+        // DSE 6.0's layout, decoded at VERSION_40: the views of the new format came with DSE 6.7
+        ByteBuffer dse60 = serialize(Mutation.serializer, storedDseUpdate(view, ".v"), MessagingService.VERSION_40);
+        assertThatThrownBy(() -> deserialize(Mutation.serializer, dse60, MessagingService.VERSION_40))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessage("Unknown column .v during deserialization of " + KEYSPACE + '.' + view.name);
+
+        // outside of the mode: as before, and the catalog is not read
+        ByteBuffer stored = DseFixtures.dse68Mutation(storedDseUpdate(view, ".v"));
+        DseViewHiddenColumnCatalog.setInstance(null);
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        assertThat(DseViewWireFormat.translatesStored(view, MessagingService.VERSION_DSE_68)).isFalse();
+        assertThatThrownBy(() -> deserialize(Mutation.serializer, stored, MessagingService.VERSION_DSE_68))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessage("Unknown column .v during deserialization of " + KEYSPACE + '.' + view.name);
+        assertThat(DseViewHiddenColumnCatalog.setInstance(null)).isNull();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+
+        // in the mode, only at DSE's stored version and only for views
+        assertThat(DseViewWireFormat.translatesStored(view, MessagingService.VERSION_DSE_68)).isTrue();
+        assertThat(DseViewWireFormat.translatesStored(view, MessagingService.VERSION_40)).isFalse();
+        assertThat(DseViewWireFormat.translatesStored(view, VERSION_3014)).isFalse();
+        assertThat(DseViewWireFormat.translatesStored(view, MessagingService.current_version)).isFalse();
+        assertThat(DseViewWireFormat.translatesStored(currentTableMetadata(), MessagingService.VERSION_DSE_68)).isFalse();
+    }
+
+    /**
+     * The view update DSE stores for the entry {@code (pk 1, ck 1)} of the partition {@code 'u'} of {@code viewMetadata}: a
+     * live hidden cell and a regular cell, on the view as DSE knows it, with the hidden column {@code hiddenName}.
+     */
+    private static Mutation storedDseUpdate(TableMetadata viewMetadata, String hiddenName)
+    {
+        TableMetadata dse = viewMetadata.unbuild().addRegularColumn(hiddenName, UTF8Type.instance).build();
+        PartitionUpdate.Builder builder = PartitionUpdate.builder(dse, dse.partitioner.decorateKey(ByteBufferUtil.bytes("u")), dse.regularAndStaticColumns(), 1);
+        builder.add(dseRow(1, LivenessInfo.create(10, FBUtilities.nowInSeconds()),
+                           BufferCell.live(dse.getColumn(ByteBufferUtil.bytes(hiddenName)), 10, ByteBufferUtil.EMPTY_BYTE_BUFFER),
+                           BufferCell.live(dse.getColumn(ByteBufferUtil.bytes("w")), 10, Int32Type.instance.decompose(1))));
+        return new Mutation(builder.build());
+    }
+
+    /**
+     * The view update DSE stored for {@code viewMetadata}, naming the hidden column {@code hiddenName}, fails to decode as
+     * one naming a column unknown here, twice, with one WARN whose reason starts with {@code reason}, and no refusal of
+     * view data counted. The WARN is logged once per view for the life of the node: each call needs a view no earlier
+     * call or test met.
+     */
+    private void assertStoredUpdateNotTranslated(TableMetadata viewMetadata, String hiddenName, String reason) throws Throwable
+    {
+        ByteBuffer stored = DseFixtures.dse68Mutation(storedDseUpdate(viewMetadata, hiddenName));
+        long refusedBefore = DseCompatRefusals.count(DseViewHiddenColumnCatalog.REFUSED_VIEW);
+        withLogAppender(DseViewWireFormat.class, appender -> {
+            for (int i = 0; i < 2; i++)
+            {
+                assertThatThrownBy(() -> deserialize(Mutation.serializer, stored, MessagingService.VERSION_DSE_68))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Unknown column " + hiddenName + " during deserialization of " + viewMetadata);
+            }
+            assertThat(appender.list).singleElement().satisfies(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                assertThat(event.getFormattedMessage())
+                .startsWith("DSE 6 compatibility mode: a view update DSE 6 stored on the disk of this node before the upgrade (in a batch of " +
+                            "its batchlog, a hint of its hints files or a mutation of its commit log) names the column " + hiddenName + " of materialized view " +
+                            viewMetadata + ", which is not translated: " + reason)
+                .endsWith(". The update is read as one naming a column unknown here (a batch is kept in the batchlog, a hint is dropped, " +
+                          "a mutation of the commit log fails its replay), rather than written as view rows that may be wrong; this is logged " +
+                          "once per view");
+            });
+        });
+        assertThat(DseCompatRefusals.count(DseViewHiddenColumnCatalog.REFUSED_VIEW)).isEqualTo(refusedBefore);
     }
 
     /**

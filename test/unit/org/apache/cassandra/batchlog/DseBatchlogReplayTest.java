@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -45,6 +46,9 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog.HiddenColumn;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -60,7 +64,9 @@ import org.apache.cassandra.schema.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -86,6 +92,8 @@ public class DseBatchlogReplayTest extends CQLTester
     private static final String T69 = "t69";
     private static final String EXPECTED68 = "expected68";
     private static final String EXPECTED69 = "expected69";
+    /** DSE's hidden column of a view of the fixture table keyed by {@code v}, as system_schema.hidden_columns lists it. */
+    private static final HiddenColumn DSE_V = new HiddenColumn(".v", "regular", true, "text");
     private static final String COLUMNS = "(id int, ck text, fu frozen<addr>, l list<int>, m map<text, int>, n bigint, s int static, " +
                                           "tp frozen<tuple<int, text>>, u addr, v text, PRIMARY KEY (id, ck))";
 
@@ -704,6 +712,188 @@ public class DseBatchlogReplayTest extends CQLTester
                      ", a mutation too short or corrupt to name its table",
                      BatchlogManager.describeTables(Arrays.asList(dse, dse.duplicate(), nodesync.get(0), ByteBuffer.wrap(new byte[]{ 1, 2, 3 }))));
         assertEquals("no mutation", BatchlogManager.describeTables(Collections.emptyList()));
+    }
+
+    /**
+     * {@link DseFixtures#dse68Mutation}, which the tests of the view updates DSE stored build them with, writes the bytes DSE
+     * wrote: each mutation of the hints fixtures, decoded and written again, is the same bytes.
+     */
+    @Test
+    public void dse68MutationWritesTheBytesOfDse() throws Throwable
+    {
+        for (DseVersion version : new DseVersion[]{ DseVersion.DSE_6_8_65, DseVersion.DSE_6_9_26 })
+        {
+            for (ByteBuffer dse : DseFixtures.fixtureHintMutations(version))
+            {
+                Mutation decoded;
+                try (DataInputBuffer in = new DataInputBuffer(dse.duplicate(), true))
+                {
+                    decoded = Mutation.serializer.deserialize(in, MessagingService.VERSION_DSE_68);
+                }
+                assertEquals(ByteBufferUtil.bytesToHex(dse), ByteBufferUtil.bytesToHex(DseFixtures.dse68Mutation(decoded)));
+            }
+        }
+    }
+
+    /**
+     * In {@code DSE_6}, a DSE batch holding the update of a materialized view, which names DSE's hidden column of the view,
+     * is replayed when the catalog of DSE's hidden columns lists that column for the view: the rows get the liveness of
+     * their hidden cells, so the entry DSE wrote dead (a hidden tombstone) stays dead, and the batch is removed.
+     */
+    @Test
+    public void dseBatchOfAViewIsReplayedInDse6Mode() throws Throwable
+    {
+        String viewName = "t_by_v";
+        createFixtureView(viewName, T68);
+        useMode(InternodeCompatibilityMode.DSE_6);
+        TableMetadata view = Schema.instance.getTableMetadata(KS, viewName);
+        TimeUUID id = batchId(0);
+        storeBatch(id, storedVersion(DseVersion.DSE_6_8_65), Collections.singletonList(DseFixtures.dse68Mutation(DseFixtures.dseViewUpdate(view, "x"))));
+        long replayedBefore = BatchlogManager.instance.getTotalBatchesReplayed();
+
+        withCatalog(Collections.singletonMap(Pair.create(KS, viewName), Collections.singletonList(DSE_V)), () ->
+            withLogAppender(BatchlogManager.class, appender -> {
+                BatchlogManager.instance.forceBatchlogReplay();
+
+                assertEquals(Collections.emptySet(), storedBatchIds());
+                assertEquals(Collections.emptySet(), BatchlogManager.instance.undecodableBatchIds());
+                assertEquals(1, BatchlogManager.instance.getTotalBatchesReplayed() - replayedBefore);
+                assertEquals(Collections.emptyList(), messages(appender.list, Level.ERROR));
+                assertRows(execute("SELECT v, id, ck FROM " + KS + '.' + viewName + " WHERE v = 'x'"), row("x", 1, "a"));
+            }));
+    }
+
+    /**
+     * Without the mode, a DSE batch holding the update of a materialized view is kept, as before, with the advice for a
+     * view: the hidden column of the view is not translated, and the catalog of DSE's hidden columns is not read.
+     */
+    @Test
+    public void dseBatchOfAViewIsKeptInNoneMode() throws Throwable
+    {
+        String viewName = "t_by_v";
+        createFixtureView(viewName, T68);
+        useMode(InternodeCompatibilityMode.NONE);
+        TableMetadata view = Schema.instance.getTableMetadata(KS, viewName);
+        TimeUUID id = batchId(0);
+        storeBatch(id, storedVersion(DseVersion.DSE_6_8_65), Collections.singletonList(DseFixtures.dse68Mutation(DseFixtures.dseViewUpdate(view, "x"))));
+
+        withCatalog(null, () -> {
+            withLogAppender(BatchlogManager.class, appender -> {
+                BatchlogManager.instance.forceBatchlogReplay();
+
+                assertKeptViewBatch(appender.list, id, view);
+            });
+            assertNull("the catalog was not read", DseViewHiddenColumnCatalog.setInstance(null));
+        });
+    }
+
+    /**
+     * In {@code DSE_6}, a DSE batch holding the update of a materialized view is kept, as before, when the translation of
+     * the hidden column is not certain (the catalog of DSE's hidden columns lists no hidden column for the view, or cannot
+     * be read), or when the batch is DSE 6.0's (views with hidden columns came with DSE 6.7); a WARN says why the column is
+     * not translated.
+     */
+    @Test
+    public void dseBatchOfAViewIsKeptWhenItsTranslationIsUncertain() throws Throwable
+    {
+        createFixtureView("unlisted_by_v", T68);
+        createFixtureView("unreadable_by_v", T68);
+        createFixtureView("dse60_by_v", T68);
+        useMode(InternodeCompatibilityMode.DSE_6);
+        TableMetadata unlisted = Schema.instance.getTableMetadata(KS, "unlisted_by_v");
+        TableMetadata unreadable = Schema.instance.getTableMetadata(KS, "unreadable_by_v");
+        TableMetadata dse60 = Schema.instance.getTableMetadata(KS, "dse60_by_v");
+        int version = storedVersion(DseVersion.DSE_6_8_65);
+
+        TimeUUID unlistedId = batchId(0);
+        storeBatch(unlistedId, version, Collections.singletonList(DseFixtures.dse68Mutation(DseFixtures.dseViewUpdate(unlisted, "x"))));
+        withCatalog(Collections.emptyMap(), () -> withLogAppender(DseViewWireFormat.class, warnings -> {
+            withLogAppender(BatchlogManager.class, appender -> {
+                BatchlogManager.instance.forceBatchlogReplay();
+
+                assertKeptViewBatch(appender.list, unlistedId, unlisted);
+            });
+            assertTrue(warnings.list.toString(), messages(warnings.list, Level.WARN).stream().anyMatch(m -> m.contains(
+            "names the column .v of materialized view " + unlisted + ", which is not translated: DSE's system_schema.hidden_columns on this " +
+            "node lists no hidden column for that view.")));
+        }));
+
+        TimeUUID unreadableId = batchId(1);
+        // the scan of the next replay starts from the first batch again: the batches kept before are not decoded again
+        BatchlogManager.instance.resetLastReplayedUuid();
+        storeBatch(unreadableId, version, Collections.singletonList(DseFixtures.dse68Mutation(DseFixtures.dseViewUpdate(unreadable, "x"))));
+        withCatalog(null, () -> withLogAppender(DseViewWireFormat.class, warnings -> {
+            withLogAppender(BatchlogManager.class, appender -> {
+                BatchlogManager.instance.forceBatchlogReplay();
+
+                assertKeptViewBatch(appender.list, unreadableId, unreadable);
+            });
+            assertTrue(warnings.list.toString(), messages(warnings.list, Level.WARN).stream().anyMatch(m -> m.contains(
+            "names the column .v of materialized view " + unreadable + ", which is not translated: DSE 6 compatibility mode: cannot read " +
+            "DSE's system_schema.hidden_columns from the data directories of this node")));
+        }));
+
+        // DSE 6.0's layout: the update without the maximum timestamp DSE_68 writes after the table id
+        TimeUUID dse60Id = batchId(2);
+        // the scan of the next replay starts from the first batch again: the batches kept before are not decoded again
+        BatchlogManager.instance.resetLastReplayedUuid();
+        storeBatch(dse60Id, DseCompat.DSE_60_VERSION, Collections.singletonList(withoutMaxTimestamp(DseFixtures.dse68Mutation(DseFixtures.dseViewUpdate(dse60, "x")))));
+        withCatalog(Collections.singletonMap(Pair.create(KS, "dse60_by_v"), Collections.singletonList(DSE_V)), () ->
+            withLogAppender(BatchlogManager.class, appender -> {
+                BatchlogManager.instance.forceBatchlogReplay();
+
+                List<ILoggingEvent> errors = events(appender.list, Level.ERROR);
+                assertEquals(errors.toString(), 1, errors.size());
+                assertTrue(errors.get(0).getFormattedMessage(),
+                           errors.get(0).getFormattedMessage().startsWith("Batch " + dse60Id + " of system.batches, stored with messaging version " +
+                                                                          DseCompat.DSE_60_VERSION + ", cannot be decoded: java.lang.RuntimeException: " +
+                                                                          "Unknown column .v during deserialization of " + dse60 + ". "));
+            }));
+        assertEquals(new HashSet<>(Arrays.asList(unlistedId, unreadableId, dse60Id)), storedBatchIds());
+        assertEquals(new HashSet<>(Arrays.asList(unlistedId, unreadableId, dse60Id)), BatchlogManager.instance.undecodableBatchIds());
+        for (String viewName : new String[]{ "unlisted_by_v", "unreadable_by_v", "dse60_by_v" })
+            assertEmpty(execute("SELECT * FROM " + KS + '.' + viewName));
+    }
+
+    /**
+     * The batch {@code id}, holding the view update of {@link DseFixtures#dseViewUpdate} for {@code view}, is kept with one ERROR naming
+     * the hidden column as a column unknown here and advising to repair or rebuild the view; none of its rows is written.
+     */
+    private void assertKeptViewBatch(List<ILoggingEvent> events, TimeUUID id, TableMetadata view) throws Throwable
+    {
+        assertTrue(storedBatchIds().contains(id));
+        assertTrue(BatchlogManager.instance.undecodableBatchIds().contains(id));
+        List<String> errors = messages(events, Level.ERROR);
+        assertEquals(errors.toString(), 1, errors.size());
+        assertTrue(errors.get(0), errors.get(0).startsWith("Batch " + id + " of system.batches, stored with messaging version " +
+                                                           storedVersion(DseVersion.DSE_6_8_65) + ", cannot be decoded: java.lang.RuntimeException: " +
+                                                           "Unknown column .v during deserialization of " + view + ". "));
+        assertTrue(errors.get(0), errors.get(0).endsWith("(DELETE FROM system.batches WHERE id = " + id + ") and " +
+                                                         viewAdvice(T68, view.name) + repairWhen()));
+        assertEmpty(execute("SELECT * FROM " + view));
+    }
+
+    /**
+     * Runs {@code body} with the catalog of DSE's hidden columns listing {@code hiddenColumns}, or with none read yet when
+     * {@code hiddenColumns} is null (this test's data directories do not hold DSE's table, so reading it fails), then
+     * restores the catalog.
+     */
+    private static void withCatalog(Map<Pair<String, String>, List<HiddenColumn>> hiddenColumns, ThrowingRunnable body) throws Throwable
+    {
+        DseViewHiddenColumnCatalog before = DseViewHiddenColumnCatalog.setInstance(hiddenColumns == null ? null : new DseViewHiddenColumnCatalog(hiddenColumns));
+        try
+        {
+            body.run();
+        }
+        finally
+        {
+            DseViewHiddenColumnCatalog.setInstance(before);
+        }
+    }
+
+    private interface ThrowingRunnable
+    {
+        void run() throws Throwable;
     }
 
     @Test

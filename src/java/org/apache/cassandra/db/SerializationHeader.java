@@ -77,8 +77,8 @@ public class SerializationHeader
      * The DSE hidden column whose cells give the rows of a DSE view sstable their liveness (see
      * {@link DseViewHiddenColumns}), or {@code null}: always {@code null} unless the header was read from an
      * sstable, or the header of an sstable stream, that names such a column, or from the view data a DSE 6 peer sent
-     * in DSE 6 compatibility mode ({@link DseViewWireFormat}; such a header may not name the column, whose cells its
-     * rows then lack).
+     * or a view update DSE stored on the disk of this node, in DSE 6 compatibility mode ({@link DseViewWireFormat}; such
+     * a header may not name the column, whose cells its rows then lack).
      */
     private final ColumnMetadata dseViewLivenessColumn;
 
@@ -171,7 +171,7 @@ public class SerializationHeader
     /**
      * The DSE hidden column of a regular base column in the view primary key, when this header was read from
      * a view sstable written by DSE or from the header of a stream of one (see {@link DseViewHiddenColumns}), or from the
-     * view data of a DSE 6 peer (see {@link DseViewWireFormat}); {@code null} otherwise.
+     * view data of a DSE 6 peer or a view update DSE stored (see {@link DseViewWireFormat}); {@code null} otherwise.
      */
     public ColumnMetadata dseViewLivenessColumn()
     {
@@ -744,7 +744,8 @@ public class SerializationHeader
             if (selection == null)
             {
                 statics = hasStatic ? Columns.serializer.deserialize(in, metadata) : Columns.NONE;
-                regulars = Columns.serializer.deserialize(in, metadata, DseViewWireFormat.translates(metadata, version));
+                regulars = Columns.serializer.deserialize(in, metadata, DseViewWireFormat.translates(metadata, version),
+                                                           DseViewWireFormat.translatesStored(metadata, version));
             }
             else
             {
@@ -754,9 +755,10 @@ public class SerializationHeader
 
             // A DSE 6 peer decides the liveness of a view row by its hidden cell alone, whatever the row's primary key
             // liveness, and so does this header, like the one of a DSE view sstable: even when the peer's header does not
-            // name the column, its rows have no hidden cell and DSE does not consider them live.
+            // name the column, its rows have no hidden cell and DSE does not consider them live. The same for a view update
+            // DSE stored on the disk of this node, decoded at DSE's own version.
             ColumnMetadata dseViewLivenessColumn = null;
-            ColumnMetadata dseHidden = keepDseViewHiddenCells ? null : DseViewWireFormat.hiddenColumn(metadata, version);
+            ColumnMetadata dseHidden = keepDseViewHiddenCells ? null : DseViewWireFormat.inboundHiddenColumn(metadata, version);
             if (dseHidden != null)
                 dseViewLivenessColumn = regulars.contains(dseHidden) ? regulars.getSimple(regulars.simpleIdx(dseHidden)) : dseHidden;
 
