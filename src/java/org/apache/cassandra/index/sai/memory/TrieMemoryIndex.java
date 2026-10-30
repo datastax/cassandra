@@ -851,14 +851,14 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private long estimateNumRowsMatchingPrefix(Expression expression)
     {
-        return estimateNumRowsWithPrefix(ByteBufferUtil.getArray(expression.lower.value.encoded));
+        return estimateNumRowsMatchingPrefix(ByteBufferUtil.getArray(expression.lower.value.encoded));
     }
 
     /**
      * Estimates the number of rows whose term starts with the given raw term bytes, the rows of the term range
      * {@code [prefix, nextOf(prefix))}.
      */
-    private long estimateNumRowsWithPrefix(byte[] prefix)
+    private long estimateNumRowsMatchingPrefix(byte[] prefix)
     {
         byte[] upperBytes = AutomatonQueries.prefixUpperBound(prefix);
         ByteComparable lower = prefix.length == 0 ? null : asByteComparable(ByteBuffer.wrap(prefix));
@@ -878,7 +878,7 @@ public class TrieMemoryIndex extends MemoryIndex
         byte[] commonPrefix = expression.getAutomatonCommonPrefix();
         if (commonPrefix.length == 0)
             return indexedRows;
-        return estimateNumRowsWithPrefix(commonPrefix);
+        return estimateNumRowsMatchingPrefix(commonPrefix);
     }
 
     /**
