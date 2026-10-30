@@ -1,0 +1,16 @@
+SAI_GroupMeta.db
+SAI_t_v_sai_Meta.db
+Statistics.db
+Filter.db
+TOC.txt
+SAI_t_v_sai_ColumnComplete.db
+Partitions.db
+SAI_t_v_sai_PostingLists.db
+Data.db
+CompressionInfo.db
+Rows.db
+SAI_GroupComplete.db
+SAI_t_v_sai_TermsData.db
+SAI_TokenValues.db
+Digest.crc32
+SAI_OffsetsValues.db
