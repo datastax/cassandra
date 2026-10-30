@@ -83,8 +83,9 @@ import org.apache.cassandra.utils.CassandraVersion;
  * </ul>
  * So no setting of either side has to change for internode TLS: neither DSE's {@code enable_legacy_ssl_storage_port}
  * nor this node's {@code legacy_ssl_storage_port_enabled}; {@code ssl_storage_port} and {@code internode_encryption}
- * must be DSE's values. Observed with DSE 6.9.26 nodes under {@code internode_encryption: all}: they connect to an
- * upgraded node on {@code ssl_storage_port}, and it dials them on {@code storage_port}.
+ * must be DSE's values (the preflight tool lists them among the settings to carry). Observed with DSE 6.9.26 nodes
+ * under {@code internode_encryption: all}: they connect to an upgraded node on {@code ssl_storage_port}, and it dials
+ * them on {@code storage_port}.
  */
 public final class DseTlsPorts
 {
