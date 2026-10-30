@@ -213,7 +213,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
     {
         // A pool with 0 bytes can never hand out a buffer: every allocateForCache call fails
         BufferPool emptyPool = new BufferPool("test_exhausted_pool", 0, true);
-        ChunkCache exhaustedCache = new ChunkCache(emptyPool, ChunkCache.RESERVED_POOL_SPACE_IN_MiB + 1, ChunkCacheMetrics::create);
+        ChunkCache exhaustedCache = new ChunkCache(emptyPool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 1, ChunkCacheMetrics::create);
 
         SSTable.Builder tableBuilder = new SSTable.Builder<>(ssTableReader.descriptor)
                 .setTableMetadataRef(cfs.metadata)

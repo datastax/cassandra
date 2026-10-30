@@ -722,7 +722,7 @@ public class ChunkCacheTest
         when(pool.usedSizeInBytes()).thenReturn(0L);
         when(pool.overflowMemoryInBytes()).thenReturn(0L);
 
-        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MiB + 64, ChunkCacheMetrics::create);
+        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
         long retryBefore = chunkCache.metrics.reclaimRetrySuccesses();
         long reclaimBefore = chunkCache.metrics.syncReclaims();
         long blockedBefore = chunkCache.metrics.blockedOnPoolAllocation();
@@ -758,7 +758,7 @@ public class ChunkCacheTest
         final long poolBytes = 64L * BufferPool.NORMAL_CHUNK_SIZE;
         BufferPool pool = new BufferPool("chunk_cache_lifecycle", poolBytes, true);
         // 1MiB Caffeine weight after reserve — residents hit weight long before the 8MiB pool is gone.
-        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MiB + 1;
+        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MB + 1;
         ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
         assertTrue(chunkCache.capacity() > 0);
 
@@ -867,7 +867,7 @@ public class ChunkCacheTest
             return null;
         }).when(pool).put(any(ByteBuffer.class));
 
-        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MiB + 64, ChunkCacheMetrics::create);
+        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
         ChunkCache.Chunk chunk = chunkCache.allocateChunk(PAGE_SIZE, 0);
         assertNotNull(chunk);
         // newChunk succeeded on first tryGet — no reclaim, so no recycle yet
@@ -890,7 +890,7 @@ public class ChunkCacheTest
         final long poolBytes = 64L * BufferPool.NORMAL_CHUNK_SIZE;
         BufferPool pool = new BufferPool("chunk_cache_wait_after_release", poolBytes, true);
         // Small Caffeine weight so pool fills while pinning more pages than weight alone would hold.
-        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MiB + 1;
+        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MB + 1;
         ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
         // Extend wait so free+signal can run after the waiter parks.
         chunkCache.poolWaitTimeoutMsOverride = 10000;
@@ -994,7 +994,7 @@ public class ChunkCacheTest
     public void testPoolWaitTimeoutExhaustedThrowsWithoutOverflow() throws Exception
     {
         BufferPool pool = new BufferPool("pool_wait_exhausted", 0, true);
-        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MiB + 64, ChunkCacheMetrics::create);
+        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
         assertEquals(0, pool.overflowMemoryInBytes());
 
         long exhaustedBefore = chunkCache.metrics.poolExhausted();
@@ -1033,7 +1033,7 @@ public class ChunkCacheTest
     public void testSmallChunkCacheEvictionReleasesFullPage() throws IOException
     {
         // Cache large enough that RESERVED_POOL_SPACE_IN_MB still leaves room for a few pages of weight.
-        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MiB + 64;
+        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64;
         BufferPool pool = new BufferPool("small_chunk_eviction_test", 8 * 1024 * 1024, true);
         ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
 
@@ -1102,7 +1102,7 @@ public class ChunkCacheTest
     public void testLastChunkLimit(int chunkSize) throws IOException
     {
         // Cache large enough that RESERVED_POOL_SPACE_IN_MB still leaves room for a few pages of weight.
-        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MiB + 32;
+        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MB + 32;
         BufferPool pool = new BufferPool("last_chunk_limit_test", 8 * 1024 * 1024, true);
         ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
 
@@ -1160,28 +1160,48 @@ public class ChunkCacheTest
     }
 
     @Test
-    public void testCalculateReservedPoolSpaceFollowsLog2OfThreads()
+    public void testCalculateReservedPoolSpaceGrowsLinearlyWithThreads()
     {
-        // threads = reads + compactors + index builders; 16 MiB are added for every doubling of (threads / 4)
-        assertEquals(48, ChunkCache.calculateReservedPoolSpace(32, 0, 0));
-        assertEquals(64, ChunkCache.calculateReservedPoolSpace(64, 0, 0));
-        assertEquals(80, ChunkCache.calculateReservedPoolSpace(128, 0, 0));
-        assertEquals(96, ChunkCache.calculateReservedPoolSpace(256, 0, 0));
-        assertEquals(112, ChunkCache.calculateReservedPoolSpace(512, 0, 0));
+        // threads = reads + compactors + index builders; reserved = 32 + ceil(0.3 * threads)
+        assertEquals(37, ChunkCache.calculateReservedPoolSpace(16, 0, 0, 0.3));
+        assertEquals(42, ChunkCache.calculateReservedPoolSpace(32, 0, 0, 0.3));
+        assertEquals(52, ChunkCache.calculateReservedPoolSpace(64, 0, 0, 0.3));
+        assertEquals(71, ChunkCache.calculateReservedPoolSpace(128, 0, 0, 0.3));
+        assertEquals(109, ChunkCache.calculateReservedPoolSpace(256, 0, 0, 0.3));
+        assertEquals(186, ChunkCache.calculateReservedPoolSpace(512, 0, 0, 0.3));
     }
 
     @Test
-    public void testCalculateReservedPoolSpaceHasMinimum()
+    public void testCalculateReservedPoolSpaceDefaultThreadFactor()
     {
-        int min = ChunkCache.MIN_RESERVED_POOL_SPACE_IN_MiB;
-        assertEquals(32, min);
-        // 16 * log2(threads / 4) is 0 or negative up to 4 threads, and below the minimum up to 16 threads
-        assertEquals(min, ChunkCache.calculateReservedPoolSpace(2, 1, 1));
-        assertEquals(min, ChunkCache.calculateReservedPoolSpace(1, 0, 0));
-        assertEquals(min, ChunkCache.calculateReservedPoolSpace(15, 1, 0));
-        // exactly at the minimum: 16 * log2(16 / 4) = 32
-        assertEquals(min, ChunkCache.calculateReservedPoolSpace(16, 0, 0));
-        // just above the minimum: 16 * log2(17 / 4) = 33.4, rounded up
-        assertEquals(34, ChunkCache.calculateReservedPoolSpace(17, 0, 0));
+        assertEquals("0.3", CassandraRelevantProperties.CHUNK_CACHE_RESERVED_POOL_SPACE_THREAD_FACTOR.getDefaultValue());
+        // nodes with ~16 concurrent reads must not lose a large part of the cache to the reserve
+        assertTrue(ChunkCache.calculateReservedPoolSpace(16, 0, 0) < 40);
+        // 512 concurrent reads needed more than 160 MiB in stress runs, also with compactors and index builders
+        assertTrue(ChunkCache.calculateReservedPoolSpace(512, 0, 0) > 160);
+        assertTrue(ChunkCache.calculateReservedPoolSpace(512, 4, 4) > 160);
+    }
+
+    @Test
+    public void testCalculateReservedPoolSpaceThreadFactorIsConfigurable()
+    {
+        assertEquals(32 + 16, ChunkCache.calculateReservedPoolSpace(32, 0, 0, 0.5));
+        assertEquals(32 + 8, ChunkCache.calculateReservedPoolSpace(32, 0, 0, 0.25));
+        assertEquals(32 + 32, ChunkCache.calculateReservedPoolSpace(32, 0, 0, 1.0));
+        assertEquals(ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB, ChunkCache.calculateReservedPoolSpace(512, 0, 0, 0.0));
+        // negative factor is treated as 0
+        assertEquals(ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB, ChunkCache.calculateReservedPoolSpace(512, 0, 0, -1.0));
+    }
+
+    @Test
+    public void testCalculateReservedPoolSpaceHasFixedPart()
+    {
+        int fixed = ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB;
+        assertEquals(32, fixed);
+        assertEquals(fixed, ChunkCache.calculateReservedPoolSpace(0, 0, 0, 0.3));
+        // partial MiB are rounded up
+        assertEquals(fixed + 1, ChunkCache.calculateReservedPoolSpace(1, 0, 0, 0.3));
+        assertEquals(fixed + 2, ChunkCache.calculateReservedPoolSpace(2, 1, 1, 0.3));
+        assertEquals(fixed + 6, ChunkCache.calculateReservedPoolSpace(17, 0, 0, 0.3));
     }
 }
