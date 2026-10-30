@@ -707,23 +707,23 @@ public class DseBatchlogReplayTest extends CQLTester
     }
 
     @Test
-    public void keptBatchOfAViewAdvisesToRepairTheBaseTableInNoneMode() throws Throwable
+    public void keptBatchOfAViewAdvisesToRepairTheViewInNoneMode() throws Throwable
     {
-        keptBatchOfAViewAdvisesToRepairTheBaseTable(InternodeCompatibilityMode.NONE);
+        keptBatchOfAViewAdvisesToRepairTheView(InternodeCompatibilityMode.NONE);
     }
 
     @Test
-    public void keptBatchOfAViewAdvisesToRepairTheBaseTableInDse6Mode() throws Throwable
+    public void keptBatchOfAViewAdvisesToRepairTheViewInDse6Mode() throws Throwable
     {
-        keptBatchOfAViewAdvisesToRepairTheBaseTable(InternodeCompatibilityMode.DSE_6);
+        keptBatchOfAViewAdvisesToRepairTheView(InternodeCompatibilityMode.DSE_6);
     }
 
     /**
      * A kept batch whose mutations write to a materialized view (the batchlog holds the view updates of base writes): the
-     * ERROR advises to repair the base table of the view or to rebuild the view, and to repair the other tables the batch
-     * writes to, each with the timing of the mode.
+     * ERROR advises to repair the view, to repair its base table or to rebuild the view, and to repair the other tables
+     * the batch writes to, each with the timing of the mode.
      */
-    private void keptBatchOfAViewAdvisesToRepairTheBaseTable(InternodeCompatibilityMode mode) throws Throwable
+    private void keptBatchOfAViewAdvisesToRepairTheView(InternodeCompatibilityMode mode) throws Throwable
     {
         // the schema first, as for the fixture tables: the mode is entered once it is in place
         String viewName = "t_by_v";
@@ -753,7 +753,7 @@ public class DseBatchlogReplayTest extends CQLTester
     }
 
     /**
-     * {@link BatchlogManager#describeRepair} names the base table of each view among the first tables of the mutations,
+     * {@link BatchlogManager#describeRepair} names each view among the first tables of the mutations, with its base table,
      * once, and the other tables as a whole: a base table with a view, a view no longer in the schema and a mutation that
      * does not name its table are among the other tables. Each clause ends with the timing given.
      */
@@ -783,9 +783,10 @@ public class DseBatchlogReplayTest extends CQLTester
     /** The advice of the ERROR of a kept batch for the view {@code view} of the fixture table {@code base}, without its timing. */
     private static String viewAdvice(String base, String view)
     {
-        return "repair the base table " + KS + '.' + base + " of view " + KS + '.' + view + ", which restores the view rows only where the " +
-               "replicas of the base table differ, or rebuild the view (drop it and create it again, with materialized_views_enabled: true), " +
-               "which restores all of them";
+        return "repair the view " + KS + '.' + view + " on every node (the view replicas that miss its updates are usually other nodes), " +
+               "which restores the lost view rows that another replica of the view holds, or repair its base table " + KS + '.' + base +
+               ", which restores the lost view rows only where the replicas of the base table differ, or rebuild the view (drop it and " +
+               "create it again, with materialized_views_enabled: true), which restores all the view rows";
     }
 
     /**

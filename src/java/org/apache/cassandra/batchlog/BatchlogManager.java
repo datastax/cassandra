@@ -558,10 +558,14 @@ public class BatchlogManager implements BatchlogManagerMBean
     /**
      * What to repair once a kept batch is dropped, for the operator, from the same first table of each serialized mutation
      * as {@link #describeTables}, each clause followed by {@code repairWhen}: the tables it writes to, and for a
-     * materialized view among them (the batchlog holds the view updates of base writes) its base table or a rebuild of the
-     * view. A repair of the base table streams the base rows its replicas disagree on, which write their view updates
-     * again, so it restores only the view rows of those base rows; a rebuild of the view (drop and create it again)
-     * restores all of them.
+     * materialized view among them (the batchlog holds the view updates of base writes) a repair of the view or of its
+     * base table, or a rebuild of the view, in that order. The batchlog holds the view updates for a paired view replica
+     * that is usually another node (all of them while this node starts, joins or moves), so the view is repaired on every
+     * node, not only on this one. The base write usually reached every base replica, each of which sends its view
+     * updates to its paired view replica, so the lost view update is usually held by another view replica: a repair of
+     * the view restores it, in which case a repair of the base table finds no difference. A repair of the base table
+     * streams the base rows its replicas disagree on, which write their view updates again, so it restores only the view
+     * rows of those base rows; a rebuild of the view (drop and create it again) restores all the view rows.
      */
     @VisibleForTesting
     static String describeRepair(List<ByteBuffer> serializedMutations, String repairWhen)
@@ -584,9 +588,11 @@ public class BatchlogManager implements BatchlogManagerMBean
             if (view == null)
                 otherTables = true;
             else
-                views.add("repair the base table " + view.keyspace() + '.' + view.baseTableName + " of view " + view.keyspace() + '.' + view.name() +
-                          ", which restores the view rows only where the replicas of the base table differ, or rebuild the view (drop it " +
-                          "and create it again, with materialized_views_enabled: true), which restores all of them" + repairWhen);
+                views.add("repair the view " + view.keyspace() + '.' + view.name() + " on every node (the view replicas that miss its " +
+                          "updates are usually other nodes), which restores the lost view rows that another replica of the view holds, or " +
+                          "repair its base table " + view.keyspace() + '.' + view.baseTableName + ", which restores the lost view rows " +
+                          "only where the replicas of the base table differ, or rebuild the view (drop it and create it again, with " +
+                          "materialized_views_enabled: true), which restores all the view rows" + repairWhen);
         }
         List<String> advice = new ArrayList<>();
         if (otherTables || views.isEmpty())
