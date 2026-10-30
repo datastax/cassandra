@@ -44,9 +44,11 @@ public class JVectorVersionUtilTest extends SAITester
     @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data()
     {
-        // Test all versions that support vector indexes
+        // Test all versions that support vector indexes.
+        // FA is excluded: it always has FusedPQ on and is superseded by FB.
         return Version.ALL.stream()
                           .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .filter(v -> !v.equals(Version.FA))
                           .map(v -> new Object[]{ v })
                           .collect(Collectors.toList());
     }
@@ -54,7 +56,7 @@ public class JVectorVersionUtilTest extends SAITester
     @Test
     public void testFusedPQSupport()
     {
-        // versionSupportsFused: true for FA and FB (jvector format 6+), false for pre-FA
+        // versionSupportsFused: true for FB and later (jvector format 6+), false for pre-FA
         int jvectorFormat = version.onDiskFormat().jvectorFileFormatVersion();
         boolean expectedSupport = jvectorFormat >= JVECTOR_FORMAT_FUSED_PQ;
 
@@ -62,8 +64,8 @@ public class JVectorVersionUtilTest extends SAITester
                      expectedSupport,
                      JVectorVersionUtil.versionSupportsFused(version));
 
-        // shouldWriteFused: FA always on; FB+ requires ENABLE_FUSED flag (default false); pre-FA always false
-        boolean expectedWrite = version.equals(Version.FA);  // default flag is false, so only FA is unconditionally on
+        // shouldWriteFused: FB+ requires ENABLE_FUSED flag (default false); pre-FA always false
+        boolean expectedWrite = false;  // default flag is false, and FA (always on) is not tested
         assertEquals(String.format("Version %s (jvector format %d) shouldWriteFused mismatch (ENABLE_FUSED=false)", version, jvectorFormat),
                      expectedWrite,
                      JVectorVersionUtil.shouldWriteFused(version));

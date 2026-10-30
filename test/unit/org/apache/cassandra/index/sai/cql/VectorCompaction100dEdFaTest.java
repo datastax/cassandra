@@ -23,8 +23,9 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.index.sai.disk.format.Version;
 
 /**
- * Shard of {@link VectorCompaction100dTest} covering versions ED and FA: the full version matrix
- * takes longer than the test fork timeout on slow CI hosts.
+ * Shard of {@link VectorCompaction100dTest} covering the versions from ED up to (but excluding) FB: the full version
+ * matrix takes longer than the test fork timeout on slow CI hosts. Version FA falls in this range but is excluded by
+ * {@link VectorCompactionTest#data(java.util.function.Predicate)}, so in practice only ED is covered.
  */
 public class VectorCompaction100dEdFaTest extends VectorCompaction100dTest
 {

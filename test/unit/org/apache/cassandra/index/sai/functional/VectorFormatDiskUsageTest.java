@@ -157,7 +157,7 @@ public class VectorFormatDiskUsageTest extends VectorTester
     /// Regression guard: for every vector-capable version from [Version#JVECTOR_EARLIEST] (CA)
     /// up to but not including [Version#LATEST], asserts that [Version#LATEST] uses less than
     /// 5% more disk than that older version. Catches accidental large regressions introduced
-    /// by a new format version.
+    /// by a new format version. [Version#FA] is skipped: it always has FusedPQ on and is superseded by FB.
     @Test
     public void testDiskGrowthAcrossVersions()
     {
@@ -165,7 +165,7 @@ public class VectorFormatDiskUsageTest extends VectorTester
 
         for (Version version : Version.ALL)
         {
-            if (version == Version.LATEST || !version.onOrAfter(Version.JVECTOR_EARLIEST))
+            if (version == Version.LATEST || version == Version.FA || !version.onOrAfter(Version.JVECTOR_EARLIEST))
                 continue;
 
             DiskMeasurement[] older = measurePostFlushAndPostCompaction(version, version.toString(), null);

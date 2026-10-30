@@ -44,8 +44,10 @@ public class VectorDotProductWithLengthTest extends VectorTester
     public static Collection<Object[]> data()
     {
         // we are testing unit vector detection which was introduced in jvector format 4
+        // FA is excluded: it always has FusedPQ on and is superseded by FB.
         return Version.ALL.stream()
                           .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .filter(v -> !v.equals(Version.FA))
                           .filter(v -> v.onDiskFormat().jvectorFileFormatVersion() >= 4)
                           .map(v -> new Object[]{ v})
                           .collect(Collectors.toList());
