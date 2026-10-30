@@ -234,7 +234,8 @@ final class NodeInspector
 
         guarded("nodes/local and nodes/peers", this::inspectNodesFiles);
         guarded("cassandra.yaml and dse.yaml", this::inspectConfiguration);
-        schema = new SchemaInspector(layout.dataDirectories, dsefsKeyspace(), partitioner(), findings);
+        schema = new SchemaInspector(layout.dataDirectories, dsefsKeyspace(), partitioner(),
+                                     isTrue(get(layout.dseConf, "system_info_encryption", "enabled")), findings);
         guarded("the schema and the access controls", schema::inspect);
         report.accessControls.rolePermissionsRows = schema.rolePermissionsRead ? schema.rolePermissionsRows : null;
         report.accessControls.authorizationEnabled = authorizationEnabled();

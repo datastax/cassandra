@@ -597,6 +597,98 @@ public class DsePreflightTest
                                              .extracting(f -> f.remedy).isEqualTo(SYSTEM_INFO_ENCRYPTION_REMEDY);
     }
 
+    /**
+     * The tables system_info_encryption encrypts, encrypted in the schema: with the setting on, only the finding of the
+     * setting names them, next to the finding of a user table; with it off in dse.yaml and DSE not restarted since, or
+     * with dse.yaml unreadable, a finding of their own points to the restart and the rewrite, and the finding of the
+     * other encrypted tables, with its ALTER TABLE, leaves them out.
+     */
+    @Test
+    public void tablesEncryptedBySystemInfoEncryption() throws IOException
+    {
+        String encryptingClass = " (compression class org.apache.cassandra.io.compress.EncryptingLZ4Compressor)";
+        String userTableMessage = "encrypted (TDE) tables: lab.secret" + encryptingClass + "; the upgrade applies to clusters without " +
+                                  "encrypted tables or views";
+        String userTableRemedy = "decrypt them on DSE (ALTER TABLE ... WITH compression = {'class': 'LZ4Compressor'}, then nodetool " +
+                                 "upgradesstables -a on every node) before the upgrade";
+        String offMessage = "tables that system_info_encryption of dse.yaml encrypted, whose schema still names an encrypting compression " +
+                            "although dse.yaml does not enable it here, or could not be read: system.batches" + encryptingClass +
+                            ", system.paxos" + encryptingClass + ", system_backups.backup_configurations" + encryptingClass +
+                            ", system_backups.backup_stores" + encryptingClass + "; DSE sets their compression back to LZ4Compressor at " +
+                            "its first start with the setting off (not done yet on this node, or, for system_backups, another node " +
+                            "started with it on since then; or system_schema not flushed since), and their sstables stay encrypted " +
+                            "until they are rewritten";
+        String offRemedy = "do not ALTER these system tables: set enabled: false under system_info_encryption in dse.yaml and restart DSE on " +
+                           "every node that has not run with it off yet, with " + SYSTEM_KEY_DIRECTORY + " still in place, so that DSE " +
+                           "replays the commit log segments written before (if DSE already runs with it off on every node, run nodetool " +
+                           "flush system_schema on this node and this tool again); then run nodetool upgradesstables -a system batches " +
+                           "paxos and nodetool upgradesstables -a system_backups on every node (this tool does not check that the rewrite " +
+                           "is done), and keep that directory in place until the rewrite is done and, with every node up, DSE has " +
+                           "delivered the hints files written before, which stay encrypted (this tool names those left, under " +
+                           "HINTS_COMPRESSION); all of it before the first node of the cluster is upgraded; " + SYSTEM_KEY_LOSS;
+
+        // the setting on: its own finding only for the four tables, and the ALTER TABLE finding for a user table
+        DseNodeFixture on = systemInfoEncryptedNode();
+        on.editYaml("dse.yaml", yaml -> section(yaml, "system_info_encryption").put("enabled", true));
+        Run onRun = assertBlocked(run(on), "TDE_TABLE");
+        assertThat(onRun.codes(Finding.Severity.BLOCKING)).containsExactly("TDE_TABLE");
+        assertThat(onRun.findings("TDE_TABLE")).extracting(f -> f.message).containsExactlyInAnyOrder(SYSTEM_INFO_ENCRYPTION_MESSAGE, userTableMessage);
+        assertThat(onRun.findings("TDE_TABLE")).filteredOn(f -> f.message.equals(SYSTEM_INFO_ENCRYPTION_MESSAGE)).singleElement()
+                                               .extracting(f -> f.remedy).isEqualTo(SYSTEM_INFO_ENCRYPTION_REMEDY);
+        assertThat(onRun.findings("TDE_TABLE")).filteredOn(f -> f.message.equals(userTableMessage)).singleElement()
+                                               .extracting(f -> f.remedy).isEqualTo(userTableRemedy);
+
+        // the setting off: a finding of their own, and the ALTER TABLE finding for the user table only
+        DseNodeFixture off = systemInfoEncryptedNode();
+        Run offRun = assertBlocked(run(off), "TDE_TABLE");
+        assertThat(offRun.codes(Finding.Severity.BLOCKING)).containsExactly("TDE_TABLE");
+        assertThat(offRun.findings("TDE_TABLE")).extracting(f -> f.message).containsExactlyInAnyOrder(offMessage, userTableMessage);
+        assertThat(offRun.findings("TDE_TABLE")).filteredOn(f -> f.message.equals(offMessage)).singleElement()
+                                                .extracting(f -> f.remedy).isEqualTo(offRemedy);
+        assertThat(offRun.findings("TDE_TABLE")).filteredOn(f -> f.message.equals(userTableMessage)).singleElement()
+                                                .extracting(f -> f.remedy).isEqualTo(userTableRemedy);
+        // the parameters of the encrypting compression are not printed
+        assertThat(offRun.out).doesNotContain("/etc/dse/conf/system/system_table_keytab").doesNotContain("LocalFileSystemKeyProviderFactory");
+
+        // dse.yaml unreadable: the same finding, next to UNREADABLE_INPUT
+        DseNodeFixture unread = systemInfoEncryptedNode();
+        Files.write(unread.conf.resolve("dse.yaml"), "system_info_encryption: [\n".getBytes(StandardCharsets.UTF_8));
+        Run unreadRun = assertBlocked(run(unread), "UNREADABLE_INPUT");
+        assertThat(unreadRun.codes(Finding.Severity.BLOCKING)).containsExactlyInAnyOrder("TDE_TABLE", "UNREADABLE_INPUT");
+        assertThat(unreadRun.findings("UNREADABLE_INPUT")).singleElement().satisfies(f -> {
+            assertThat(f.message).startsWith("cannot read dse.yaml").endsWith(", so the checks that depend on it cannot be made");
+            assertThat(f.remedy).isEqualTo("run the tool as the user DSE runs as (or as root), or point it at the file (--cassandra-yaml, " +
+                                           "--dse-yaml, --conf-dir, --dse-home)");
+        });
+        assertThat(unreadRun.findings("TDE_TABLE")).extracting(f -> f.message).containsExactlyInAnyOrder(offMessage, userTableMessage);
+        assertThat(unreadRun.findings("TDE_TABLE")).filteredOn(f -> f.message.equals(offMessage)).singleElement()
+                                                   .extracting(f -> f.remedy).isEqualTo(offRemedy);
+    }
+
+    /**
+     * A node whose schema records the four tables system_info_encryption encrypts with DSE's encrypting compression and
+     * its parameters (their table rows written again, their columns as the fixture has them), and the user table
+     * lab.secret encrypted the same way.
+     */
+    private DseNodeFixture systemInfoEncryptedNode() throws IOException
+    {
+        Map<String, String> encrypting = Map.of("chunk_length_in_kb", "64",
+                                                "class", "org.apache.cassandra.io.compress.EncryptingLZ4Compressor",
+                                                "cipher_algorithm", "AES",
+                                                "key_provider", "com.datastax.bdp.cassandra.crypto.LocalFileSystemKeyProviderFactory",
+                                                "secret_key_file", "/etc/dse/conf/system/system_table_keytab",
+                                                "secret_key_strength", "128");
+        DseNodeFixture node = node();
+        for (String table : List.of("system.batches", "system.paxos", "system_backups.backup_configurations", "system_backups.backup_stores"))
+        {
+            int dot = table.indexOf('.');
+            node.writeRows("system_schema", "tables", KEYSPACES_KEY, TABLES_KEY,
+                           withTableOptions(row(table.substring(0, dot), table.substring(dot + 1)), stcs(), encrypting).with("flags", Set.of("compound")));
+        }
+        addTable(node, "lab", "secret", stcs(), encrypting, Set.of("compound"), Map.of());
+        return node;
+    }
+
     @Test
     public void compactStorageAndLegacyAuthTablesBlock() throws IOException
     {
