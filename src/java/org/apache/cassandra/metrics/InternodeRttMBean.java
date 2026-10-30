@@ -27,8 +27,7 @@ package org.apache.cassandra.metrics;
  * <p>MBean object name:
  * {@code org.apache.cassandra.metrics:type=Messaging,name=InternodeRtt}</p>
  *
- * <p>The metric can also be enabled at startup with the system property
- * {@code cassandra.internode_rtt_metrics_enabled=true}.</p>
+ * <p>The initial state is determined by the implementation of the metric.</p>
  */
 public interface InternodeRttMBean
 {

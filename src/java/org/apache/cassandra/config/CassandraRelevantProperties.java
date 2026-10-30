@@ -553,12 +553,6 @@ public enum CassandraRelevantProperties
     TABLE_METRICS_EXPORT_GLOBALS("cassandra.table_metrics_export_globals", "true"),
     // Enable/disable replica response size metrics collection
     REPLICA_RESPONSE_SIZE_METRICS_ENABLED("cassandra.replica_response_size_metrics_enabled", "true"),
-    /**
-     * Controls whether per-peer, per-verb internode request/response round-trip time (RTT) metrics are
-     * collected. Disabled by default because the metric has per-peer cardinality and may create a large
-     * number of time-series in clusters with many writers.
-     */
-    INTERNODE_RTT_METRICS_ENABLED("cassandra.internode_rtt_metrics_enabled", "false"),
     FILE_CACHE_SIZE_IN_MB("cassandra.file_cache_size_in_mb", "2048"),
     CUSTOM_HINTS_RATE_LIMITER_FACTORY("cassandra.custom_hints_rate_limiter_factory"),
 
