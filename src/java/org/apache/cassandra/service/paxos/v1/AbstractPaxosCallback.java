@@ -28,12 +28,15 @@ import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.concurrent.CountDownLatch;
+import org.apache.cassandra.sensors.Type;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.utils.concurrent.CountDownLatch.newCountDownLatch;
@@ -47,8 +50,8 @@ public abstract class AbstractPaxosCallback<T> implements RequestCallback<T>
     private final TableMetadata metadata;
     private final ConsistencyLevel consistency;
     private final Dispatcher.RequestTime requestTime;
-
-    private final RequestSensors requestSensors;
+    protected final RequestSensors requestSensors;
+    protected final ExecutionTimeSensorAccumulator execTimeAccumulator;
 
     public AbstractPaxosCallback(TableMetadata metadata, int targets, ConsistencyLevel consistency, Dispatcher.RequestTime requestTime)
     {
@@ -58,12 +61,19 @@ public abstract class AbstractPaxosCallback<T> implements RequestCallback<T>
         latch = newCountDownLatch(targets);
         this.requestTime = requestTime;
         this.requestSensors = RequestTracker.instance.get();
+        this.execTimeAccumulator = new ExecutionTimeSensorAccumulator(targets);
     }
 
     @Override
     public RequestSensors getRequestSensors()
     {
         return requestSensors;
+    }
+
+    @Override
+    public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
+        execTimeAccumulator.accumulate(context, type, value);
     }
 
     public int getResponseCount()

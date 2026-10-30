@@ -53,6 +53,9 @@ import org.apache.cassandra.utils.concurrent.Condition;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator;
+import org.apache.cassandra.sensors.Type;
 
 import static java.lang.Long.MAX_VALUE;
 import static java.lang.Math.min;
@@ -72,12 +75,13 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
 {
     protected static final Logger logger = LoggerFactory.getLogger(AbstractWriteResponseHandler.class);
 
-    //Count down until all responses and expirations have occured before deciding whether the ideal CL was reached.
+    // Count down until all responses and expirations have occured before deciding whether the ideal CL was reached.
     private AtomicInteger responsesAndExpirations;
     private final Condition condition = newOneTimeCondition();
     protected final ReplicaPlan.ForWrite replicaPlan;
+    protected final ExecutionTimeSensorAccumulator execTimeAccumulator;
 
-    protected final Runnable callback;
+    public final Runnable callback;
     protected final WriteType writeType;
     protected static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater =
         AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
@@ -87,7 +91,7 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     private final Dispatcher.RequestTime requestTime;
     private @Nullable final Supplier<Mutation> hintOnFailure;
 
-    private final RequestSensors requestSensors;
+    protected final RequestSensors requestSensors;
 
     /**
       * Delegate to another WriteResponseHandler or possibly this one to track if the ideal consistency level was reached.
@@ -117,6 +121,7 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         this.requestTime = requestTime;
         this.requestSensors = RequestTracker.instance.get();
+        this.execTimeAccumulator = new ExecutionTimeSensorAccumulator(replicaPlan.writeQuorum());
     }
 
     public int failures()
@@ -399,6 +404,12 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     public RequestSensors getRequestSensors()
     {
         return requestSensors;
+    }
+
+    @Override
+    public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+    {
+        execTimeAccumulator.accumulate(context, type, value);
     }
 
     /**
