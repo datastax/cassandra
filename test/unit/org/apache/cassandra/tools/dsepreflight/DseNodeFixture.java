@@ -52,6 +52,7 @@ import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableTxnWriter;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.TableMetadata;
@@ -64,9 +65,9 @@ import org.apache.cassandra.utils.FBUtilities;
  * temporary directory), the DSE installation's {@code ds_version.txt}, a data directory with the {@code system_schema}
  * and {@code system_auth.role_permissions} sstables of {@link DseFixtures#schemaDataDirectory()}, a metadata directory
  * with the {@code nodes} files given, and empty hints and commit log directories. The copy is modified by the tests to
- * build a node with one forbidden feature: configuration edits, and {@code nodes/local} and {@code nodes/peers} edits (the
- * msgpack maps DSE wrote, decoded and encoded again); a test can also start writing one more {@code bb} sstable of a
- * table, next to DSE's, as a flush in progress.
+ * build a node with one forbidden feature: configuration edits, {@code nodes/local} and {@code nodes/peers} edits (the
+ * msgpack maps DSE wrote, decoded and encoded again), and schema rows written as additional {@code bb} sstables next to
+ * DSE's, read and merged with them as the tool reads DSE's own (so a row written later wins, and a deletion shadows).
  */
 final class DseNodeFixture
 {
@@ -211,7 +212,7 @@ final class DseNodeFixture
         }
     }
 
-    // ---- an sstable being written ----
+    // ---- schema rows ----
 
     /** One row to write: the partition key values, the clustering values and the other columns by name. */
     static final class SchemaRow
@@ -239,6 +240,44 @@ final class DseNodeFixture
     }
 
     /**
+     * Writes {@code rows} to {@code keyspace.table} as one more sstable of its directory, with the columns the
+     * serialization headers of DSE's sstables of the table describe (the primary key columns named as given).
+     */
+    void writeRows(String keyspace, String table, List<String> partitionKey, List<String> clustering, SchemaRow... rows) throws IOException
+    {
+        writeRows(BtiFormat.getInstance(), keyspace, table, partitionKey, clustering, rows);
+    }
+
+    /** {@link #writeRows(String, String, List, List, SchemaRow...)} in the sstable format given. */
+    void writeRows(SSTableFormat<?, ?> format, String keyspace, String table, List<String> partitionKey, List<String> clustering, SchemaRow... rows) throws IOException
+    {
+        TableMetadata metadata = DseTableReader.metadataFromSSTables(List.of(new File(data)), keyspace, table, partitionKey, clustering);
+        long timestamp = FBUtilities.timestampMicros();
+        Map<String, PartitionUpdate.SimpleBuilder> partitions = new TreeMap<>();
+        for (SchemaRow row : rows)
+        {
+            PartitionUpdate.SimpleBuilder partition = partitions.computeIfAbsent(Arrays.toString(row.partitionKey),
+                                                                                 k -> PartitionUpdate.simpleBuilder(metadata, row.partitionKey).timestamp(timestamp));
+            Row.SimpleBuilder builder = partition.row(row.clustering);
+            row.columns.forEach(builder::add);
+        }
+        List<PartitionUpdate> updates = new ArrayList<>();
+        partitions.values().forEach(p -> updates.add(p.build()));
+        write(format, keyspace, table, metadata, updates);
+    }
+
+    /** Deletes the partitions of {@code keyspace.table} with the keys given, in one more sstable. */
+    void deletePartitions(String keyspace, String table, List<String> partitionKey, List<String> clustering, Object... keys) throws IOException
+    {
+        TableMetadata metadata = DseTableReader.metadataFromSSTables(List.of(new File(data)), keyspace, table, partitionKey, clustering);
+        long timestamp = FBUtilities.timestampMicros();
+        List<PartitionUpdate> updates = new ArrayList<>();
+        for (Object key : keys)
+            updates.add(PartitionUpdate.simpleBuilder(metadata, key).timestamp(timestamp).delete().build());
+        write(BtiFormat.getInstance(), keyspace, table, metadata, updates);
+    }
+
+    /**
      * Starts writing {@code row} to {@code keyspace.table} as one more sstable, as a flush of DSE in progress: the writer
      * has appended it but is neither finished nor aborted, so the transaction log lists the sstable as new and its
      * {@code TOC.txt} is not written yet. The caller aborts it.
@@ -249,12 +288,12 @@ final class DseNodeFixture
         PartitionUpdate.SimpleBuilder partition = PartitionUpdate.simpleBuilder(metadata, row.partitionKey).timestamp(FBUtilities.timestampMicros());
         Row.SimpleBuilder builder = partition.row(row.clustering);
         row.columns.forEach(builder::add);
-        SSTableTxnWriter writer = writer(keyspace, table, metadata, 1);
+        SSTableTxnWriter writer = writer(BtiFormat.getInstance(), keyspace, table, metadata, 1);
         writer.append(partition.build().unfilteredIterator());
         return writer;
     }
 
-    private SSTableTxnWriter writer(String keyspace, String table, TableMetadata metadata, int keys) throws IOException
+    private SSTableTxnWriter writer(SSTableFormat<?, ?> format, String keyspace, String table, TableMetadata metadata, int keys) throws IOException
     {
         Path directory;
         try (Stream<Path> tables = Files.list(data.resolve(keyspace)))
@@ -262,9 +301,20 @@ final class DseNodeFixture
             directory = tables.filter(p -> DseTableReader.isDirectoryOf(p.getFileName().toString(), table)).findFirst()
                               .orElseThrow(() -> new IllegalStateException("no directory of " + keyspace + '.' + table));
         }
-        Descriptor descriptor = new Descriptor(new File(directory), keyspace, table, new SequenceBasedSSTableId(generation++), BtiFormat.getInstance());
+        Descriptor descriptor = new Descriptor(new File(directory), keyspace, table, new SequenceBasedSSTableId(generation++), format);
         SerializationHeader header = new SerializationHeader(true, metadata, metadata.regularAndStaticColumns(), EncodingStats.NO_STATS);
         return SSTableTxnWriter.create(TableMetadataRef.forOfflineTools(metadata), descriptor, keys, 0, null, false, header, Collections.emptyList(), null);
+    }
+
+    private void write(SSTableFormat<?, ?> format, String keyspace, String table, TableMetadata metadata, List<PartitionUpdate> updates) throws IOException
+    {
+        updates.sort((a, b) -> a.partitionKey().compareTo(b.partitionKey()));
+        try (SSTableTxnWriter writer = writer(format, keyspace, table, metadata, updates.size()))
+        {
+            for (PartitionUpdate update : updates)
+                writer.append(update.unfilteredIterator());
+            writer.finish(false, null);
+        }
     }
 
     // ---- read-only check ----

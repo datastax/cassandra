@@ -26,6 +26,8 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,14 +52,20 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.config.YamlConfigurationLoader;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.hints.HintsDescriptorBytes;
 import org.apache.cassandra.io.sstable.SSTableTxnWriter;
 import org.apache.cassandra.io.sstable.UUIDBasedSSTableId;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.service.DseUpgradeMarker;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JsonUtils;
@@ -77,6 +85,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 public class DsePreflightTest
 {
+    private static final List<String> KEYSPACES_KEY = List.of("keyspace_name");
+    private static final List<String> TABLES_KEY = List.of("table_name");
+    private static final List<String> COLUMNS_KEY = List.of("table_name", "column_name");
+    private static final List<String> INDEXES_KEY = List.of("table_name", "index_name");
+    private static final List<String> FUNCTIONS_KEY = List.of("function_name", "argument_types");
+    private static final List<String> ROLE_KEY = List.of("role");
+    private static final List<String> RESOURCE_KEY = List.of("resource");
+    private static final String SIMPLE_STRATEGY = "org.apache.cassandra.locator.SimpleStrategy";
     /** The end of every warning INTERNODE_TLS message of a node report: where internode TLS with DSE is validated. */
     private static final String TLS_VALIDATED = "internode TLS between DSE and HCD 2.0 is validated on DSE 6.9.26 with all, " +
                                                 "rack and dc, in one data center and between two, and on DSE 6.8.65 with all in " +
@@ -312,13 +328,34 @@ public class DsePreflightTest
                                                .containsEntry("internode_compression", "all");
         // the printed variant is the one the DSE_6 mode accepts
         assertThat(DatabaseDescriptor.isDse6PaxosVariant(Config.PaxosVariant.valueOf(report.upgradePath.settings.get("paxos_variant")))).isTrue();
-        assertThat(report.upgradePath.upgradeSteps).anyMatch(s -> s.contains("-Dcassandra.sai.latest.version=aa"));
+        assertThat(report.upgradePath.upgradeSteps).anyMatch(s -> s.contains("-Dcassandra.sai.latest.version=aa"))
+                                                   .contains("Materialized views: 1 view(s), none to drop")
+                                                   // DSE grants the proxy permissions to the creator of every role
+                                                   .contains("Security: review the access control warnings above")
+                                                   .contains("DSE core only: no trace of DSE Search, Graph, Analytics, DSEFS or Advanced " +
+                                                             "Replication was found");
+        // DSE core's own keyspaces, solr_admin and dse_leases included, are no trace of a forbidden feature
         // LOW_DISK_SPACE depends on the file system of the temporary directory, so it is not asserted either way
-        assertThat(run.codes(Finding.Severity.WARNING)).contains("AUTH_CONFIG_CHANGE")
-                                                       .doesNotContain("NODESYNC", "SNITCH", "IDENTITY_MISMATCH", "PENDING_HINTS", "SSTABLE_WITHOUT_TOC");
+        assertThat(run.codes(Finding.Severity.WARNING)).contains("AUTH_CONFIG_CHANGE", "PROXY_GRANT")
+                                                       .doesNotContain("NODESYNC", "SNITCH", "IDENTITY_MISMATCH", "PENDING_HINTS",
+                                                                       "LONE_WRITE_GRANT", "DSE_ONLY_PERMISSION", "DSE_ONLY_RESOURCE", "DELEGATION",
+                                                                       "SSTABLE_WITHOUT_TOC", "NO_ROLE_PERMISSIONS", "TRIGGER");
+        assertThat(run.messages("SSTABLES_ONLY")).endsWith("run nodetool flush system_schema && nodetool flush system_auth " +
+                                                           "(two commands, one keyspace each) right before the tool");
+        assertThat(report.accessControls.authorizationEnabled).isTrue();
+        assertThat(report.accessControls.rolePermissionsRows).isEqualTo(25);
+        assertThat(run.messages("PROXY_GRANT")).contains("role 'cassandra' on roles/dseadmin: [PROXY.EXECUTE, PROXY.LOGIN]");
+        assertThat(run.messages("AUTH_REPLICA")).contains("read from this node's replica (25 rows)")
+                                                .endsWith("so check the reports of every node");
+        assertThat(run.messages("VIEWS_HANDLED")).contains("lab.wide_by_v (hidden column .v)");
         assertThat(run.messages("DSE_RELEASE")).isEqualTo("DSE 6.8 (6.8.65) is accepted; the upgrade requires the latest DSE 6.8 or 6.9 patch " +
                                                           "release, which this tool does not check; DSE 6.9 is preferred");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> schema = (Map<String, Object>) report.inputs.get("schema");
+        assertThat((Integer) schema.get("keyspaces")).isGreaterThan(10);
+        assertThat(schema).containsEntry("views", 1).doesNotContainKey("role_permissions_rows");
         assertThat(report.upgradePath.upgradeSteps).contains("Sstable formats: every sstable is in DSE 6's trie format");
+        assertThat((List<String>) schema.get("keyspace_names")).contains("lab", "solr_admin", "dse_leases", "dse_system", "system_auth");
         assertThat(run.out).contains("Result: READY").contains("SAI on-disk version to pin: aa").contains("Upgrade steps for this node:");
     }
 
@@ -349,6 +386,33 @@ public class DsePreflightTest
                                                           "which this tool does not check");
         // that node ran in another cluster, which the configuration of the 6.8.65 node does not describe
         assertThat(run.messages("IDENTITY_MISMATCH")).contains("Test Cluster");
+    }
+
+    @Test
+    public void theKeyspacesDse6926CreatesAreNoTrace() throws IOException
+    {
+        DseNodeFixture node = node();
+        Pattern keyspace = Pattern.compile("CREATE KEYSPACE (\\w+) WITH replication = \\{'class': '(\\w+)'([^}]*)\\}");
+        Matcher matcher = keyspace.matcher(new String(Files.readAllBytes(DseFixtures.describeSchema(DseVersion.DSE_6_9_26)), StandardCharsets.UTF_8));
+        List<DseNodeFixture.SchemaRow> rows = new ArrayList<>();
+        Pattern option = Pattern.compile("'(\\w+)': '([^']*)'");
+        while (matcher.find())
+        {
+            Map<String, String> replication = new LinkedHashMap<>();
+            replication.put("class", "org.apache.cassandra.locator." + matcher.group(2));
+            Matcher options = option.matcher(matcher.group(3));
+            while (options.find())
+                replication.put(options.group(1), options.group(2));
+            rows.add(row(matcher.group(1)).with("durable_writes", true).with("replication", replication));
+        }
+        assertThat(rows).extracting(r -> r.partitionKey[0]).contains("solr_admin", "dse_leases", "dse_system_local", "dse_insights", "system_backups");
+        node.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(), rows.toArray(new DseNodeFixture.SchemaRow[0]));
+        node.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(), row("preflight_sentinel").with("durable_writes", true).with("replication", simpleStrategy()));
+        Run run = assertReady(run(node));
+        assertThat(run.codes(Finding.Severity.BLOCKING)).doesNotContain("NON_CORE_KEYSPACE", "GRAPH_KEYSPACE", "UNLOADABLE_KEYSPACE");
+        @SuppressWarnings("unchecked")
+        List<String> names = (List<String>) ((Map<String, Object>) run.report.inputs.get("schema")).get("keyspace_names");
+        assertThat(names).contains("preflight_sentinel").containsAll(rows.stream().map(r -> (String) r.partitionKey[0]).collect(Collectors.toList()));
     }
 
     // ---- workloads ----
@@ -388,6 +452,17 @@ public class DsePreflightTest
     // ---- DSE Search, Graph, Analytics, DSEFS, Advanced Replication ----
 
     @Test
+    public void aSearchIndexBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "indexes", KEYSPACES_KEY, INDEXES_KEY,
+                       row("lab", "wide", "wide_solr").with("kind", "CUSTOM")
+                                                      .with("options", Map.of("class_name", "com.datastax.bdp.search.solr.Cql3SolrSecondaryIndex", "target", "v")));
+        Run run = assertBlocked(run(node), "SEARCH_INDEX");
+        assertThat(run.messages("SEARCH_INDEX")).contains("lab.wide.wide_solr (com.datastax.bdp.search.solr.Cql3SolrSecondaryIndex)");
+    }
+
+    @Test
     public void aSolrDataDirectoryBlocks() throws IOException
     {
         DseNodeFixture node = node();
@@ -396,6 +471,31 @@ public class DsePreflightTest
         node.editYaml("dse.yaml", yaml -> yaml.put("solr_data_dir", relocated.toString()));
         Run run = assertBlocked(run(node), "SOLR_DATA");
         assertThat(run.messages("SOLR_DATA")).contains(node.data.resolve("solr.data").toString()).contains(relocated + " (solr_data_dir in dse.yaml)");
+    }
+
+    @Test
+    public void aGraphKeyspaceBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(),
+                       row("people").with("durable_writes", true).with("replication", simpleStrategy()).with("graph_engine", "Core"));
+        node.writeRows("system_schema", "vertices", KEYSPACES_KEY, List.of("table_name", "label_name"), row("classic_graph", "person", "person"));
+        Run run = assertBlocked(run(node), "GRAPH_KEYSPACE");
+        assertThat(run.messages("GRAPH_KEYSPACE")).contains("people (graph_engine Core)").contains("classic_graph (rows in system_schema.vertices or system_schema.edges)");
+    }
+
+    @Test
+    public void analyticsDsefsAndAdvancedReplicationKeyspacesBlockEvenEmpty() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.editYaml("dse.yaml", yaml -> section(yaml, "dsefs_options").put("keyspace_name", "files"));
+        List<DseNodeFixture.SchemaRow> rows = new ArrayList<>();
+        for (String keyspace : List.of("dse_analytics", "HiveMetaStore", "dsefs", "cfs", "cfs_archive", "dse_advrep", "files"))
+            rows.add(row(keyspace).with("durable_writes", true).with("replication", simpleStrategy()));
+        node.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(), rows.toArray(new DseNodeFixture.SchemaRow[0]));
+        Run run = assertBlocked(run(node), "NON_CORE_KEYSPACE");
+        assertThat(run.messages("NON_CORE_KEYSPACE")).contains("DSE Analytics, DSEFS and CFS keyspaces: HiveMetaStore, cfs, cfs_archive, dse_analytics, dsefs, files")
+                                                     .contains("DSE Advanced Replication keyspaces: dse_advrep");
     }
 
     @Test
@@ -421,20 +521,114 @@ public class DsePreflightTest
     public void tieredStorageBlocks() throws IOException
     {
         DseNodeFixture node = node();
+        addTable(node, "lab", "tiered", Map.of("class", SchemaInspector.TIERED_COMPACTION_STRATEGY, "tiering_strategy", "TimeWindowStorageStrategy"),
+                 lz4(), Set.of("compound"), Map.of());
         node.editYaml("dse.yaml", yaml -> section(yaml, "tiered_storage_options").put("strategy1", Map.of("tiers", List.of(Map.of("paths", List.of("/mnt1"))))));
         Run run = assertBlocked(run(node), "TIERED_STORAGE");
-        assertThat(run.messages("TIERED_STORAGE")).contains("tiered_storage_options [strategy1]");
+        assertThat(run.messages("TIERED_STORAGE")).contains("lab.tiered (compaction class " + SchemaInspector.TIERED_COMPACTION_STRATEGY + ')')
+                                                  .contains("tiered_storage_options [strategy1]");
+        // a compaction strategy both products have (UnifiedCompactionStrategy is not checked on DSE 6.8)
+        assertThat(run.findings("TIERED_STORAGE")).anyMatch(f -> f.remedy.contains("{'class': 'SizeTieredCompactionStrategy'} or {'class': " +
+                                                                                 "'LeveledCompactionStrategy'} (both strategies exist in DSE and " +
+                                                                                 "in HCD 2.0)"))
+                                                  .noneMatch(f -> f.remedy.contains("Unified"));
+    }
+
+    @Test
+    public void classesHcd20DoesNotHaveBlock() throws IOException
+    {
+        DseNodeFixture node = node();
+        addTable(node, "lab", "custom_compaction", Map.of("class", "com.example.NoSuchCompactionStrategy"), lz4(), Set.of("compound"), Map.of());
+        addTable(node, "lab", "custom_compression", stcs(), Map.of("class", "com.example.NoSuchCompressor", "chunk_length_in_kb", "64"), Set.of("compound"), Map.of());
+        node.writeRows("system_schema", "indexes", KEYSPACES_KEY, INDEXES_KEY,
+                       row("lab", "wide", "wide_custom").with("kind", "CUSTOM").with("options", Map.of("class_name", "com.example.NoSuchIndex", "target", "v")));
+        Run run = assertBlocked(run(node), "UNLOADABLE_CLASS");
+        assertThat(run.messages("UNLOADABLE_CLASS")).contains("lab.custom_compaction: compaction class com.example.NoSuchCompactionStrategy")
+                                                    .contains("lab.custom_compression: compression")
+                                                    .contains("lab.wide.wide_custom (com.example.NoSuchIndex)");
+        assertThat(run.findings("UNLOADABLE_CLASS").get(0).remedy).contains("SizeTieredCompactionStrategy or LeveledCompactionStrategy")
+                                                                  .doesNotContain("Unified");
+    }
+
+    /**
+     * A non-finite {@code min_compress_ratio}, which older releases accepted and stored: the schema load of HCD 2.0
+     * keeps it ({@link CompressionParams#fromStoredMap}), so the tool does not flag the table, although the parse of a
+     * new definition refuses it.
+     */
+    @Test
+    public void aStoredNonFiniteMinCompressRatioDoesNotBlock() throws IOException
+    {
+        DseNodeFixture node = node();
+        for (String ratio : new String[]{ "NaN", "Infinity" })
+        {
+            Map<String, String> compression = Map.of("class", "org.apache.cassandra.io.compress.LZ4Compressor", "chunk_length_in_kb", "64",
+                                                     "min_compress_ratio", ratio);
+            addTable(node, "lab", "ratio_" + ratio.toLowerCase(), stcs(), compression, Set.of("compound"), Map.of());
+            assertThatThrownBy(() -> CompressionParams.fromMap(compression)).isInstanceOf(ConfigurationException.class)
+                                                                            .hasMessage("Invalid value for min_compress_ratio: " + ratio);
+        }
+        assertReady(run(node));
+    }
+
+    @Test
+    public void aColumnTypeHcd20DoesNotHaveBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        addTable(node, "lab", "places", stcs(), lz4(), Set.of("compound"), Map.of("location", "'com.example.marshal.NoSuchType'"));
+        Run run = assertBlocked(run(node), "UNLOADABLE_TABLE");
+        assertThat(run.messages("UNLOADABLE_TABLE")).contains("lab.places").contains("com.example.marshal.NoSuchType");
     }
 
     @Test
     public void encryptedTablesBlock() throws IOException
     {
         DseNodeFixture node = node();
+        addTable(node, "lab", "secret", stcs(), Map.of("class", "org.apache.cassandra.io.compress.Encryptor", "cipher_algorithm", "AES/ECB/PKCS5Padding"),
+                 Set.of("compound"), Map.of());
         node.editYaml("dse.yaml", yaml -> section(yaml, "system_info_encryption").put("enabled", true));
         Run run = assertBlocked(run(node), "TDE_TABLE");
-        assertThat(run.findings("TDE_TABLE")).hasSize(1);
-        assertThat(run.messages("TDE_TABLE")).isEqualTo(SYSTEM_INFO_ENCRYPTION_MESSAGE);
-        assertThat(run.findings("TDE_TABLE").get(0).remedy).isEqualTo(SYSTEM_INFO_ENCRYPTION_REMEDY);
+        assertThat(run.findings("TDE_TABLE")).hasSize(2);
+        assertThat(run.messages("TDE_TABLE")).contains("lab.secret (compression class org.apache.cassandra.io.compress.Encryptor)")
+                                             .contains("system_info_encryption.enabled is true");
+        assertThat(run.messages("TDE_TABLE")).contains("encrypted (TDE) tables: lab.secret (compression class org.apache.cassandra.io.compress.Encryptor); " +
+                                                       "the upgrade applies to clusters without encrypted tables or views")
+                                             .contains(SYSTEM_INFO_ENCRYPTION_MESSAGE);
+        assertThat(run.findings("TDE_TABLE")).filteredOn(f -> f.message.equals(SYSTEM_INFO_ENCRYPTION_MESSAGE)).singleElement()
+                                             .extracting(f -> f.remedy).isEqualTo(SYSTEM_INFO_ENCRYPTION_REMEDY);
+    }
+
+    @Test
+    public void compactStorageAndLegacyAuthTablesBlock() throws IOException
+    {
+        DseNodeFixture node = node();
+        addTable(node, "lab", "thrift_era", stcs(), lz4(), Set.of("dense"), Map.of());
+        addTable(node, "system_auth", "users", stcs(), lz4(), Set.of("compound"), Map.of());
+        Run run = assertBlocked(run(node), "COMPACT_STORAGE");
+        assertThat(run.messages("COMPACT_STORAGE")).contains("lab.thrift_era (flags [dense])");
+        assertThat(run.messages("LEGACY_AUTH_TABLES")).contains("system_auth.users");
+    }
+
+    @Test
+    public void javascriptFunctionsBlockWhateverTheCase() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "functions", KEYSPACES_KEY, FUNCTIONS_KEY,
+                       function("lab", "plus_one", "JavaScript"), function("lab", "minus_one", "javascript"), function("lab", "java_ok", "java"));
+        Run run = assertBlocked(run(node), "JAVASCRIPT_UDF");
+        assertThat(run.messages("JAVASCRIPT_UDF")).contains("lab.plus_one(int)").contains("lab.minus_one(int)").doesNotContain("java_ok");
+    }
+
+    @Test
+    public void viewHiddenColumnsOtherThanTheRegularKeyColumnBlock() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", SchemaInspector.HIDDEN_COLUMNS, KEYSPACES_KEY, COLUMNS_KEY,
+                       row("lab", "wide_by_v", ".extra").with("kind", "regular").with("required_for_liveness", false).with("type", "int")
+                                                       .with("position", -1).with("clustering_order", "none")
+                                                       .with("column_name_bytes", ByteBufferUtil.bytes(".extra")));
+        Run run = assertBlocked(run(node), "VIEW_HIDDEN_COLUMNS");
+        assertThat(run.messages("VIEW_HIDDEN_COLUMNS")).contains("lab.wide_by_v: DSE keeps the hidden columns [");
+        assertThat(run.report.upgradePath.upgradeSteps).anyMatch(s -> s.startsWith("Materialized views: drop lab.wide_by_v"));
     }
 
     // ---- access controls and authentication ----
@@ -450,6 +644,25 @@ public class DsePreflightTest
     }
 
     @Test
+    public void restrictAndRowLevelAccessControlBlock() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_auth", "role_permissions", ROLE_KEY, RESOURCE_KEY,
+                       row("analyst", "data/lab/wide").with("restricted", Set.of("SELECT")),
+                       row("analyst", "rows/tenant1/data/lab/wide").with("permissions", Set.of("SELECT")));
+        node.writeRows("system_schema", "tables", KEYSPACES_KEY, TABLES_KEY,
+                       row("lab", "wide").with("extensions", Map.of("DSE_RLACA", ByteBufferUtil.bytes("pk"), "other", ByteBufferUtil.bytes("x"))));
+        node.editYaml("dse.yaml", yaml -> section(yaml, "authorization_options").put("allow_row_level_security", true));
+        Run run = assertBlocked(run(node), "RESTRICT");
+        assertThat(run.messages("RESTRICT")).contains("role 'analyst' on data/lab/wide: [SELECT]");
+        assertThat(run.findings("ROW_LEVEL_ACCESS")).hasSize(3);
+        assertThat(run.messages("ROW_LEVEL_ACCESS")).contains("role 'analyst' on rows/tenant1/data/lab/wide: [SELECT]")
+                                                    .contains("lab.wide (tenant column pk)")
+                                                    .contains("allow_row_level_security is true");
+        assertThat(run.messages("TABLE_EXTENSIONS")).contains("lab.wide: [other]");
+    }
+
+    @Test
     public void ldapKerberosAndLdapRolesBlock() throws IOException
     {
         DseNodeFixture node = node();
@@ -462,6 +675,27 @@ public class DsePreflightTest
         Run run = assertBlocked(run(node), "AUTH_SCHEME");
         assertThat(run.messages("AUTH_SCHEME")).contains("[kerberos, ldap]").contains("role_management_options.mode is ldap");
         assertThat(run.codes(Finding.Severity.WARNING)).doesNotContain("AUTH_CONFIG_CHANGE");
+    }
+
+    @Test
+    public void loneWriteGrantsDsePermissionsAndDelegationsWarn() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_auth", "role_permissions", ROLE_KEY, RESOURCE_KEY,
+                       row("app", "data/lab/wide").with("permissions", Set.of("UPDATE", "SELECT")),
+                       row("app", "data/lab").with("permissions", Set.of("SELECT", "BACKUP")).with("grantables", Set.of("SELECT")),
+                       row("app", "search/lab/wide").with("permissions", Set.of("SEARCH.UPDATE")),
+                       row("writer", "data/lab/wide").with("permissions", Set.of("UPDATE", "TRUNCATE")),
+                       row("bell\u0007role", "data/lab/wide").with("permissions", Set.of("TRUNCATE")));
+        Run run = assertReady(run(node));
+        assertThat(run.messages("LONE_WRITE_GRANT")).startsWith("DSE UPDATE or TRUNCATE granted alone: ")
+                                                    .contains("role 'app' on data/lab/wide: [UPDATE]").doesNotContain("writer")
+                                                    .contains("on data/lab/wide: [TRUNCATE]").doesNotContain("\u0007");
+        assertThat(run.findings("LONE_WRITE_GRANT").get(0).remedy).isEqualTo("GRANT MODIFY where the role should also have the other permission, or " +
+                                                                             "accept the loss");
+        assertThat(run.messages("DSE_ONLY_PERMISSION")).contains("role 'app' on data/lab: [BACKUP]");
+        assertThat(run.messages("DSE_ONLY_RESOURCE")).contains("role 'app' on search/lab/wide: [SEARCH.UPDATE]");
+        assertThat(run.messages("DELEGATION")).contains("role 'app' on data/lab: [SELECT]");
     }
 
     // ---- releases ----
@@ -567,6 +801,16 @@ public class DsePreflightTest
     }
 
     @Test
+    public void aKeyspaceDseDroppedIsNoTrace() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(), row("dse_analytics").with("durable_writes", true).with("replication", simpleStrategy()));
+        assertBlocked(run(node), "NON_CORE_KEYSPACE");
+        node.deletePartitions("system_schema", "keyspaces", KEYSPACES_KEY, List.of(), "dse_analytics");
+        assertReady(run(node));
+    }
+
+    @Test
     public void filesTheToolCannotReadBlock() throws IOException
     {
         DseNodeFixture node = node();
@@ -574,6 +818,21 @@ public class DsePreflightTest
         Files.delete(node.conf.resolve("dse.yaml"));
         Run run = assertBlocked(run(node), "NOT_A_DSE_NODE");
         assertThat(run.messages("UNREADABLE_INPUT")).contains("cannot read dse.yaml");
+        // DseAuthorizer without dse.yaml: whether DSE checks permissions is not known
+        assertThat(run.report.accessControls.authorizationEnabled).isNull();
+
+        DseNodeFixture noSchema = node();
+        try (Stream<Path> paths = Files.walk(noSchema.data.resolve("system_schema")))
+        {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).collect(Collectors.toList()))
+                Files.delete(path);
+        }
+        Run schemaRun = assertBlocked(run(noSchema), "UNREADABLE_SCHEMA");
+        assertThat(schemaRun.messages("UNREADABLE_SCHEMA")).contains("no data directory holds system_schema.keyspaces");
+        assertThat(schemaRun.report.upgradePath.upgradeSteps)
+        .contains("Security: review the access control warnings above; not checked completely (not read: the schema)",
+                  "DSE core only: not checked completely (not read: the schema)",
+                  "Materialized views: not checked completely (not read: the schema)");
     }
 
     // ---- live state ----
@@ -642,6 +901,46 @@ public class DsePreflightTest
     }
 
     // ---- more blocking findings, one modified copy each ----
+
+    @Test
+    public void aReplicationHcd20DoesNotHaveBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(),
+                       row("custom_replication").with("durable_writes", true).with("replication", Map.of("class", "com.example.NoSuchStrategy", "dc1", "3")));
+        Run run = assertBlocked(run(node), "UNLOADABLE_KEYSPACE");
+        assertThat(run.messages("UNLOADABLE_KEYSPACE")).contains("custom_replication: ").contains("com.example.NoSuchStrategy");
+    }
+
+    @Test
+    public void aUserTypeHcd20CannotLoadBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "types", KEYSPACES_KEY, List.of("type_name"),
+                       row("lab", "geo").with("field_names", List.of("place")).with("field_types", List.of("'com.example.marshal.NoSuchType'")));
+        Run run = assertBlocked(run(node), "UNLOADABLE_TYPE");
+        assertThat(run.messages("UNLOADABLE_TYPE")).contains("lab: ").contains("com.example.marshal.NoSuchType");
+    }
+
+    @Test
+    public void aDroppedColumnOfATypeHcd20CannotLoadBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "dropped_columns", KEYSPACES_KEY, COLUMNS_KEY,
+                       row("lab", "wide", "old").with("dropped_time", new Date(1)).with("kind", "regular")
+                                                .with("type", "'com.example.marshal.NoSuchType'"));
+        Run run = assertBlocked(run(node), "UNLOADABLE_TABLE");
+        assertThat(run.messages("UNLOADABLE_TABLE")).contains("dropped columns of a type HCD 2.0 cannot load").contains("lab.wide.old");
+    }
+
+    @Test
+    public void aFunctionInAnotherLanguageBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "functions", KEYSPACES_KEY, FUNCTIONS_KEY, function("lab", "py", "python"));
+        Run run = assertBlocked(run(node), "UDF_LANGUAGE");
+        assertThat(run.messages("UDF_LANGUAGE")).contains("lab.py(int) (language python)");
+    }
 
     @Test
     public void aPartitionerHcd20DoesNotHaveBlocks() throws IOException
@@ -885,7 +1184,8 @@ public class DsePreflightTest
         assertThat(malformedRun.messages("UNREADABLE_INPUT")).contains("cannot read dse.yaml").contains("not valid YAML").contains("at line ");
         String malformedReport = new String(Files.readAllBytes(malformedJson), StandardCharsets.UTF_8);
         assertThat(malformedRun.out + malformedRun.err + malformedReport).doesNotContain("ldap-s3cr3t");
-        assertThat(malformedRun.report.upgradePath.upgradeSteps).contains("Security: not checked (dse.yaml cannot be read)");
+        assertThat(malformedRun.report.upgradePath.upgradeSteps).contains("Security: review the access control warnings above; not checked " +
+                                                                          "completely (not read: dse.yaml)");
     }
 
     /** The JSON report is written through a temporary file of its own, which does not stay; a report that cannot be written is an error. */
@@ -919,6 +1219,43 @@ public class DsePreflightTest
         assertThat(NodeLayout.isTrue("1")).isFalse();
         assertThat(NodeLayout.isFalse("Off")).isTrue();
         assertThat(NodeLayout.isFalse(null)).isFalse();
+    }
+
+    @Test
+    public void theOlderSearchIndexClassBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "indexes", KEYSPACES_KEY, INDEXES_KEY,
+                       row("lab", "wide", "old_solr").with("kind", "CUSTOM")
+                                                     .with("options", Map.of("class_name", "com.datastax.bdp.cassandra.index.solr.SolrSecondaryIndex", "target", "v")));
+        Run run = assertBlocked(run(node), "SEARCH_INDEX");
+        assertThat(run.messages("SEARCH_INDEX")).contains("lab.wide.old_solr (com.datastax.bdp.cassandra.index.solr.SolrSecondaryIndex)");
+    }
+
+    @Test
+    public void aViewOnTieredStorageBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "views", KEYSPACES_KEY, List.of("view_name"),
+                       row("lab", "wide_by_v").with("compaction", Map.of("class", SchemaInspector.TIERED_COMPACTION_STRATEGY)));
+        Run run = assertBlocked(run(node), "TIERED_STORAGE");
+        assertThat(run.messages("TIERED_STORAGE")).contains("materialized views using DSE tiered storage: lab.wide_by_v");
+        assertThat(run.findings("TIERED_STORAGE").get(0).remedy).contains("ALTER MATERIALIZED VIEW ... WITH compaction = {'class': " +
+                                                                          "'SizeTieredCompactionStrategy'}").doesNotContain("Unified");
+    }
+
+    @Test
+    public void anEncryptedViewBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "views", KEYSPACES_KEY, List.of("view_name"),
+                       row("lab", "wide_by_v").with("compression", Map.of("class", "org.apache.cassandra.io.compress.Encryptor",
+                                                                          "cipher_algorithm", "AES/ECB/PKCS5Padding")));
+        Run run = assertBlocked(run(node), "TDE_TABLE");
+        assertThat(run.messages("TDE_TABLE"))
+        .isEqualTo("encrypted (TDE) materialized views: lab.wide_by_v (compression class org.apache.cassandra.io.compress.Encryptor); the " +
+                   "upgrade applies to clusters without encrypted tables or views");
+        assertThat(run.findings("TDE_TABLE").get(0).remedy).startsWith("decrypt them on DSE (ALTER MATERIALIZED VIEW ... WITH compression = ");
     }
 
     @Test
@@ -1056,11 +1393,63 @@ public class DsePreflightTest
             assertThat(run.codes(Finding.Severity.BLOCKING)).doesNotContain("NOT_A_DSE_NODE");
             // the other parts still ran
             assertThat(run.report.inputs).containsKey("live_sstable_bytes");
+            assertThat(run.messages("VIEWS_HANDLED")).contains("lab.wide_by_v");
         }
         finally
         {
             Files.setPosixFilePermissions(nodes, PosixFilePermissions.fromString("rwx------"));
         }
+    }
+
+    @Test
+    public void schemaTheToolCannotReadBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        try (Stream<Path> tables = Files.list(node.data.resolve("system_schema")))
+        {
+            for (Path directory : tables.filter(p -> p.getFileName().toString().startsWith(SchemaInspector.HIDDEN_COLUMNS + '-')).collect(Collectors.toList()))
+                deleteTree(directory);
+        }
+        Run noHiddenColumns = assertBlocked(run(node), "UNREADABLE_SCHEMA");
+        assertThat(noHiddenColumns.messages("UNREADABLE_SCHEMA")).contains("materialized views but no data directory holds DSE's system_schema.hidden_columns");
+        assertThat(noHiddenColumns.report.upgradePath.upgradeSteps).contains("Materialized views: not checked completely (not read: system_schema.hidden_columns)");
+
+        DseNodeFixture corrupt = node();
+        try (Stream<Path> files = Files.walk(corrupt.data.resolve("system_schema")))
+        {
+            for (Path data : files.filter(p -> p.toString().contains("/tables-") && p.getFileName().toString().endsWith("-Data.db")).collect(Collectors.toList()))
+                Files.write(data, new byte[]{ 0, 1, 2, 3 });
+        }
+        Run corrupted = assertBlocked(run(corrupt), "UNREADABLE_SCHEMA");
+        assertThat(corrupted.messages("UNREADABLE_SCHEMA")).contains("cannot read system_schema.tables");
+        assertThat(corrupted.findings("UNREADABLE_SCHEMA").get(0).remedy).contains("if DSE is running, an sstable may have been compacted away");
+    }
+
+    @Test
+    public void anSSTableWithoutTocIsReadWithoutWritingOne() throws IOException
+    {
+        DseNodeFixture node = node();
+        Path toc;
+        try (Stream<Path> files = Files.walk(node.data.resolve("system_schema")))
+        {
+            toc = files.filter(p -> p.toString().contains("/keyspaces-") && p.getFileName().toString().endsWith("-TOC.txt")).findFirst().orElseThrow();
+        }
+        Files.delete(toc);
+        Map<String, String> before = node.fingerprint();
+        Run run = assertReady(run(node));
+        assertThat(node.fingerprint()).as("the tool wrote to the node's files").isEqualTo(before);
+        assertThat(toc).doesNotExist();
+        assertThat(run.messages("SSTABLE_WITHOUT_TOC")).contains(toc.getFileName().toString().replace("-TOC.txt", ""))
+                                                       .startsWith("sstables without a TOC.txt (HCD 2.0 writes the missing one when it opens them; " +
+                                                                   "neither DSE 6.8 nor DSE 6.9 writes it at its start): ");
+        assertThat(run.findings("SSTABLE_WITHOUT_TOC").get(0).remedy)
+        .isEqualTo("find out why they have none before the upgrade; a likely cause right after a repair or another streaming operation is " +
+                   "DSE's zero-copy streaming, which writes an sstable without TOC.txt (DSE 6.8 and 6.9 alike; a partially streamed one also " +
+                   "without Filter.db and Digest.crc32): if DSE's system.log or its archives have the line ZeroCopySSTableWriter ... Writing " +
+                   "partial component DATA to <the sstable's Data.db file> (or, for an sstable streamed whole, ... Writing entire component " +
+                   "DATA to <the sstable's Data.db file>) for every such sstable of the table (the finding names the first 20 of each table), " +
+                   "the warning can be accepted (HCD 2.0 reads such an sstable); otherwise look for an incomplete copy or restore, or a " +
+                   "damaged disk");
     }
 
     @Test
@@ -1104,6 +1493,185 @@ public class DsePreflightTest
     }
 
     // ---- more warnings ----
+
+    @Test
+    public void aRowLevelResourceWithoutPermissionsIsNoGrant() throws IOException
+    {
+        // as the startup check reads it: a rows/ row with no permissions grants nothing; its delegation is still reported
+        DseNodeFixture node = node();
+        node.writeRows("system_auth", "role_permissions", ROLE_KEY, RESOURCE_KEY,
+                       row("analyst", "rows/tenant1/data/lab/wide").with("grantables", Set.of("SELECT")));
+        Run run = assertReady(run(node));
+        assertThat(run.codes(Finding.Severity.BLOCKING)).doesNotContain("ROW_LEVEL_ACCESS");
+        assertThat(run.messages("DELEGATION")).contains("role 'analyst' on rows/tenant1/data/lab/wide: [SELECT]");
+    }
+
+    @Test
+    public void withoutAnyGrantTheSecurityStepNamesWhatWasRead() throws IOException
+    {
+        DseNodeFixture node = node();
+        List<Object> roles = new ArrayList<>();
+        for (UntypedResultSet.Row row : DseTableReader.read(List.of(new File(node.data)), "system_auth", "role_permissions",
+                                                            ROLE_KEY, RESOURCE_KEY).rows)
+            if (!roles.contains(row.getString("role")))
+                roles.add(row.getString("role"));
+        node.deletePartitions("system_auth", "role_permissions", ROLE_KEY, RESOURCE_KEY, roles.toArray());
+        Run run = assertReady(run(node));
+        assertThat(run.report.accessControls.rolePermissionsRows).isZero();
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Security: no DSE access control this software ignores was found in dse.yaml, the " +
+                                                                 "schema and this node's replica of system_auth.role_permissions");
+    }
+
+    @Test
+    public void anUnreadableRolePermissionsTableBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        corruptData(rolePermissionsDirectory(node));
+        Run run = assertBlocked(run(node), "UNREADABLE_SCHEMA");
+        assertThat(run.messages("UNREADABLE_SCHEMA")).contains("cannot read system_auth.role_permissions");
+        assertThat(run.report.accessControls.rolePermissionsRows).isNull();
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Security: not checked completely (not read: system_auth.role_permissions)");
+    }
+
+    @Test
+    public void anUnreadableOptionalSchemaTableLeavesTheStepsIncomplete() throws IOException
+    {
+        DseNodeFixture indexes = node();
+        corruptData(schemaTableDirectory(indexes, "indexes"));
+        Run run = assertBlocked(run(indexes), "UNREADABLE_SCHEMA");
+        assertThat(run.messages("UNREADABLE_SCHEMA")).contains("cannot read system_schema.indexes");
+        assertThat(run.report.upgradePath.upgradeSteps).contains("DSE core only: not checked completely (not read: system_schema.indexes)");
+
+        DseNodeFixture hidden = node();
+        corruptData(schemaTableDirectory(hidden, SchemaInspector.HIDDEN_COLUMNS));
+        Run hiddenRun = assertBlocked(run(hidden), "UNREADABLE_SCHEMA");
+        assertThat(hiddenRun.findings("UNREADABLE_SCHEMA")).hasSize(1);
+        assertThat(hiddenRun.messages("UNREADABLE_SCHEMA")).contains("cannot read system_schema." + SchemaInspector.HIDDEN_COLUMNS)
+                                                           .doesNotContain("no data directory holds");
+        assertThat(hiddenRun.report.upgradePath.upgradeSteps).contains("Materialized views: not checked completely (not read: system_schema." +
+                                                                       SchemaInspector.HIDDEN_COLUMNS + ')');
+    }
+
+    @Test
+    public void anSSTableOfTheBigFormatIsNotOpened() throws IOException
+    {
+        // opening a big sstable loads its summary, which may delete Summary.db or rewrite TOC.txt: the tool refuses it
+        DseNodeFixture node = node();
+        node.writeRows(BigFormat.getInstance(), "system_schema", "keyspaces", KEYSPACES_KEY, List.of(),
+                       row("big_written").with("durable_writes", true).with("replication", simpleStrategy()));
+        Map<String, String> before = node.fingerprint();
+        Run run = assertBlocked(run(node), "UNREADABLE_SCHEMA");
+        assertThat(node.fingerprint()).as("the tool wrote to the node's files").isEqualTo(before);
+        assertThat(run.messages("UNREADABLE_SCHEMA")).contains("format, which this tool does not read: run nodetool upgradesstables on DSE first");
+        assertThat(run.codes(Finding.Severity.BLOCKING)).contains("SSTABLE_FORMAT");
+    }
+
+    @Test
+    public void aViewDseListsNoHiddenColumnForIsANote() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.deletePartitions("system_schema", SchemaInspector.HIDDEN_COLUMNS, KEYSPACES_KEY, COLUMNS_KEY, "lab");
+        Run run = assertReady(run(node));
+        assertThat(run.messages("VIEW_OLD_FORMAT")).contains("lab.wide_by_v");
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Materialized views: 1 view(s), none to drop");
+    }
+
+    @Test
+    public void viewsHcd20CannotLoadAreToDrop() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "views", KEYSPACES_KEY, List.of("view_name"),
+                       view("lab", "no_columns", "wide"), view("lab", "orphan", "gone"));
+        node.writeRows("system_schema", "columns", KEYSPACES_KEY, COLUMNS_KEY,
+                       column("lab", "orphan", "pk", "partition_key", 0, "int"), column("lab", "orphan", "v", "clustering", 0, "text"));
+        Run run = assertBlocked(run(node), "UNLOADABLE_TABLE");
+        assertThat(run.messages("UNLOADABLE_TABLE")).contains("lab.no_columns: no column in system_schema.columns")
+                                                    .contains("lab.orphan: its base table lab.gone cannot be loaded");
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Materialized views: drop lab.no_columns, lab.orphan before the upgrade");
+    }
+
+    @Test
+    public void anIndexClassThatIsNoIndexBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "indexes", KEYSPACES_KEY, INDEXES_KEY,
+                       row("lab", "wide", "not_an_index").with("kind", "CUSTOM").with("options", Map.of("class_name", "java.lang.String", "target", "v")));
+        Run run = assertBlocked(run(node), "UNLOADABLE_CLASS");
+        assertThat(run.messages("UNLOADABLE_CLASS")).contains("lab.wide.not_an_index (java.lang.String is not an index class)");
+    }
+
+    @Test
+    public void triggersWarn() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "triggers", KEYSPACES_KEY, List.of("table_name", "trigger_name"),
+                       row("lab", "wide", "audit\u0007log").with("options", Map.of("class", "com.example.AuditTrigger")));
+        Run run = assertReady(run(node));
+        assertThat(run.messages("TRIGGER")).isEqualTo("triggers: lab.wide.audit\\u0007log (class com.example.AuditTrigger)");
+        // a character beyond the basic multilingual plane takes eight digits, so that no digit after it reads as its own
+        assertThat(SchemaInspector.safe("tag\uDB40\uDC01" + "1")).isEqualTo("tag\\U000e00011");
+    }
+
+    @Test
+    public void theToolAsksForAFlushOfTheTablesItReadsWhateverTheCommitLog() throws IOException
+    {
+        // a running DSE node always has a commit log segment, and so has a drained one: the segments tell nothing
+        DseNodeFixture node = node();
+        DseFixtures.unpackCommitLogSegment(DseVersion.DSE_6_8_65, node.commitLog);
+        Run run = assertReady(run(node));
+        assertThat(run.messages("SSTABLES_ONLY")).endsWith("run nodetool flush system_schema && nodetool flush system_auth " +
+                                                           "(two commands, one keyspace each) right before the tool");
+        assertThat(run.codes(Finding.Severity.WARNING)).doesNotContain("COMMITLOG_VERSION");
+    }
+
+    @Test
+    public void aSchemaWithoutKeyspaceBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        @SuppressWarnings("unchecked")
+        List<String> keyspaces = (List<String>) ((Map<String, Object>) assertReady(run(node)).report.inputs.get("schema")).get("keyspace_names");
+        node.deletePartitions("system_schema", "keyspaces", KEYSPACES_KEY, List.of(), keyspaces.toArray());
+        Run run = assertBlocked(run(node), "UNREADABLE_SCHEMA");
+        assertThat(run.messages("UNREADABLE_SCHEMA")).contains("system_schema.keyspaces holds no row");
+    }
+
+    @Test
+    public void aMissingRolePermissionsTableWarnsAndAnEmptyOneIsANote() throws IOException
+    {
+        DseNodeFixture missing = node();
+        deleteTree(rolePermissionsDirectory(missing));
+        Run run = assertReady(run(missing));
+        assertThat(run.messages("NO_ROLE_PERMISSIONS")).contains("no data directory holds system_auth.role_permissions");
+        assertThat(run.codes(Finding.Severity.WARNING)).contains("NO_ROLE_PERMISSIONS");
+
+        DseNodeFixture empty = node();
+        Path directory = rolePermissionsDirectory(empty);
+        try (Stream<Path> files = Files.list(directory))
+        {
+            for (Path file : files.collect(Collectors.toList()))
+                Files.delete(file);
+        }
+        Run emptyRun = assertReady(run(empty));
+        assertThat(emptyRun.codes(Finding.Severity.INFO)).contains("NO_ROLE_PERMISSIONS");
+        assertThat(emptyRun.codes(Finding.Severity.WARNING)).doesNotContain("NO_ROLE_PERMISSIONS");
+        assertThat(emptyRun.report.accessControls.rolePermissionsRows).isZero();
+    }
+
+    @Test
+    public void aSchemaTableInADirectoryWithoutIdIsRead() throws IOException
+    {
+        DseNodeFixture node = node();
+        Path keyspaces;
+        try (Stream<Path> tables = Files.list(node.data.resolve("system_schema")))
+        {
+            keyspaces = tables.filter(p -> p.getFileName().toString().startsWith("keyspaces-")).findFirst().orElseThrow();
+        }
+        Files.move(keyspaces, keyspaces.resolveSibling("keyspaces"));
+        Run run = assertReady(run(node));
+        @SuppressWarnings("unchecked")
+        List<String> names = (List<String>) ((Map<String, Object>) run.report.inputs.get("schema")).get("keyspace_names");
+        assertThat(names).contains("lab", "system_auth", "solr_admin");
+    }
 
     @Test
     public void aTransitionalAuthenticationModeWarns() throws IOException
@@ -1178,10 +1746,8 @@ public class DsePreflightTest
     public void anSSTableBeingWrittenIsNoFinding() throws IOException
     {
         DseNodeFixture node = node();
-        try (SSTableTxnWriter writer = node.startWriting("system_schema", "keyspaces", List.of("keyspace_name"), List.of(),
-                                                         row("being_written").with("durable_writes", true)
-                                                                             .with("replication", Map.of("class", "org.apache.cassandra.locator.SimpleStrategy",
-                                                                                                         "replication_factor", "1"))))
+        try (SSTableTxnWriter writer = node.startWriting("system_schema", "keyspaces", KEYSPACES_KEY, List.of(),
+                                                         row("being_written").with("durable_writes", true).with("replication", simpleStrategy())))
         {
             List<Path> inProgress;
             try (Stream<Path> files = Files.walk(node.data.resolve("system_schema")))
@@ -1192,6 +1758,9 @@ public class DsePreflightTest
                                   .noneMatch(p -> p.toString().endsWith("-TOC.txt"));
             Run run = assertReady(run(node));
             assertThat(run.codes(Finding.Severity.WARNING)).doesNotContain("SSTABLE_WITHOUT_TOC");
+            @SuppressWarnings("unchecked")
+            List<String> names = (List<String>) ((Map<String, Object>) run.report.inputs.get("schema")).get("keyspace_names");
+            assertThat(names).doesNotContain("being_written");
             writer.abort();
         }
     }
@@ -1286,6 +1855,8 @@ public class DsePreflightTest
         DseNodeFixture node = node();
         Files.write(node.conf.resolve("dse.yaml"), new byte[0]);
         Run run = run(node);
+        // DseAuthorizer without authorization_options: DSE checks no permission
+        assertThat(run.report.accessControls.authorizationEnabled).isFalse();
         assertThat(run.findings("UNREADABLE_INPUT")).noneMatch(f -> f.message.contains("dse.yaml"));
     }
 
@@ -1306,6 +1877,14 @@ public class DsePreflightTest
             Run run = run(node, "--nodetool", "/bin/false", "--nodetool-timeout", timeout);
             assertThat(run.exitCode).as(timeout).isEqualTo(DsePreflight.EXIT_ERROR);
             assertThat(run.err).contains("--nodetool-timeout must be a number of seconds, 1 or more: " + timeout);
+        }
+    }
+
+    private static Path rolePermissionsDirectory(DseNodeFixture node) throws IOException
+    {
+        try (Stream<Path> tables = Files.list(node.data.resolve("system_auth")))
+        {
+            return tables.filter(p -> p.getFileName().toString().startsWith("role_permissions-")).findFirst().orElseThrow();
         }
     }
 
@@ -1947,6 +2526,115 @@ public class DsePreflightTest
     }
 
     // ---- helpers ----
+
+    private static void deleteTree(Path root) throws IOException
+    {
+        try (Stream<Path> paths = Files.walk(root))
+        {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).collect(Collectors.toList()))
+                Files.delete(path);
+        }
+    }
+
+    private static Map<String, String> simpleStrategy()
+    {
+        return Map.of("class", SIMPLE_STRATEGY, "replication_factor", "1");
+    }
+
+    private static Map<String, String> stcs()
+    {
+        return Map.of("class", "org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy", "max_threshold", "32", "min_threshold", "4");
+    }
+
+    private static Map<String, String> lz4()
+    {
+        return Map.of("class", "org.apache.cassandra.io.compress.LZ4Compressor", "chunk_length_in_kb", "64");
+    }
+
+    /**
+     * Adds a table {@code (pk int PRIMARY KEY, v text, <extra columns>)} with DSE's table options to the schema of the
+     * node, in the keyspace given, which must exist ({@code lab} or {@code system_auth}, for instance): no keyspace row is
+     * written.
+     */
+    private static void addTable(DseNodeFixture node, String keyspace, String table, Map<String, String> compaction, Map<String, String> compression,
+                                 Set<String> flags, Map<String, String> extraColumns) throws IOException
+    {
+        node.writeRows("system_schema", "tables", KEYSPACES_KEY, TABLES_KEY,
+                       withTableOptions(row(keyspace, table), compaction, compression).with("flags", flags));
+        List<DseNodeFixture.SchemaRow> columns = new ArrayList<>();
+        columns.add(column(keyspace, table, "pk", "partition_key", 0, "int"));
+        columns.add(column(keyspace, table, "v", "regular", -1, "text"));
+        extraColumns.forEach((name, type) -> columns.add(column(keyspace, table, name, "regular", -1, type)));
+        node.writeRows("system_schema", "columns", KEYSPACES_KEY, COLUMNS_KEY, columns.toArray(new DseNodeFixture.SchemaRow[0]));
+    }
+
+    /** {@code row} with a new id and DSE's table options, those of a table and of a view alike. */
+    private static DseNodeFixture.SchemaRow withTableOptions(DseNodeFixture.SchemaRow row, Map<String, String> compaction, Map<String, String> compression)
+    {
+        return row.with("id", UUID.randomUUID())
+                                           .with("bloom_filter_fp_chance", 0.01)
+                                           .with("caching", Map.of("keys", "ALL", "rows_per_partition", "NONE"))
+                                           .with("comment", "")
+                                           .with("compaction", compaction)
+                                           .with("compression", compression)
+                                           .with("crc_check_chance", 1.0)
+                                           .with("dclocal_read_repair_chance", 0.0)
+                                           .with("default_time_to_live", 0)
+                                           .with("extensions", Map.of())
+                                           .with("gc_grace_seconds", 864000)
+                                           .with("max_index_interval", 2048)
+                                           .with("memtable_flush_period_in_ms", 0)
+                                           .with("min_index_interval", 128)
+                                           .with("nodesync", Map.of("enabled", "true", "incremental", "true"))
+                                           .with("read_repair", "BLOCKING")
+                                           .with("read_repair_chance", 0.0)
+                                           .with("speculative_retry", "99PERCENTILE");
+    }
+
+    /** A row of {@code system_schema.views}: the view {@code keyspace.view} of {@code baseTable}, with DSE's table options. */
+    private static DseNodeFixture.SchemaRow view(String keyspace, String view, String baseTable)
+    {
+        return withTableOptions(row(keyspace, view), stcs(), lz4()).with("base_table_id", UUID.randomUUID())
+                                                                    .with("base_table_name", baseTable)
+                                                                    .with("include_all_columns", false)
+                                                                    .with("where_clause", "v IS NOT NULL AND pk IS NOT NULL");
+    }
+
+    private static Path schemaTableDirectory(DseNodeFixture node, String table) throws IOException
+    {
+        try (Stream<Path> tables = Files.list(node.data.resolve("system_schema")))
+        {
+            return tables.filter(p -> p.getFileName().toString().startsWith(table + '-')).findFirst().orElseThrow();
+        }
+    }
+
+    /** Overwrites the {@code Data.db} files of a table directory with bytes no sstable reader can decode. */
+    private static void corruptData(Path tableDirectory) throws IOException
+    {
+        try (Stream<Path> files = Files.list(tableDirectory))
+        {
+            for (Path data : files.filter(p -> p.getFileName().toString().endsWith("-Data.db")).collect(Collectors.toList()))
+                Files.write(data, new byte[]{ 0, 1, 2, 3 });
+        }
+    }
+
+    private static DseNodeFixture.SchemaRow column(String keyspace, String table, String name, String kind, int position, String type)
+    {
+        return row(keyspace, table, name).with("clustering_order", "none")
+                                         .with("column_name_bytes", ByteBufferUtil.bytes(name))
+                                         .with("kind", kind)
+                                         .with("position", position)
+                                         .with("type", type);
+    }
+
+    private static DseNodeFixture.SchemaRow function(String keyspace, String name, String language)
+    {
+        return row(keyspace, name, List.of("int")).with("argument_names", List.of("x"))
+                                                  .with("body", "return x + 1;")
+                                                  .with("called_on_null_input", true)
+                                                  .with("language", language)
+                                                  .with("return_type", "int");
+    }
 
     /** A {@code nodetool} that records its arguments, one line per call, runs {@code body} and exits with {@code exitCode}. */
     private static Path fakeNodetool(Path directory, Path arguments, int exitCode, String body) throws IOException

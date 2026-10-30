@@ -56,6 +56,8 @@ import org.apache.cassandra.config.Replacements;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.commitlog.CommitLogDescriptor;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
@@ -85,8 +87,8 @@ import static org.apache.cassandra.tools.dsepreflight.NodeLayout.isTrue;
 
 /**
  * The preflight inspection of one DSE node: reads its files ({@link NodeLayout}), runs every check and fills the
- * {@link NodeReport}. Nothing is written: the files are opened for reading only, the directories are only listed, and
- * the optional {@code nodetool} commands are read-only ones ({@link LiveState}).
+ * {@link NodeReport}. Nothing is written: the files are opened for reading only, the sstables without validation (see
+ * {@link DseTableReader}), and the optional {@code nodetool} commands are read-only ones ({@link LiveState}).
  */
 final class NodeInspector
 {
@@ -184,6 +186,7 @@ final class NodeInspector
     private boolean dataDirectoriesScanned;
     /** the table directories whose transaction logs could not be read */
     private final List<String> unreadableTransactionLogs = new ArrayList<>();
+    private SchemaInspector schema;
 
     NodeInspector(NodeLayout layout, @Nullable Map<String, NodeReport.LiveCommand> live)
     {
@@ -231,9 +234,27 @@ final class NodeInspector
 
         guarded("nodes/local and nodes/peers", this::inspectNodesFiles);
         guarded("cassandra.yaml and dse.yaml", this::inspectConfiguration);
+        schema = new SchemaInspector(layout.dataDirectories, dsefsKeyspace(), partitioner(), findings);
+        guarded("the schema and the access controls", schema::inspect);
+        report.accessControls.rolePermissionsRows = schema.rolePermissionsRead ? schema.rolePermissionsRows : null;
+        report.accessControls.authorizationEnabled = authorizationEnabled();
+        if (schema.schemaRead)
+        {
+            Map<String, Object> summary = new LinkedHashMap<>();
+            summary.put("keyspaces", schema.keyspaceCount);
+            summary.put("tables", schema.tableCount);
+            summary.put("views", schema.viewCount);
+            summary.put("keyspace_names", schema.keyspaceNames());
+            report.inputs.put("schema", summary);
+        }
+
         guarded("the data directories", this::inspectDataDirectories);
         guarded("the hints directory", this::inspectHints);
         guarded("the commit log directory", this::inspectCommitLog);
+        findings.add(info("SSTABLES_ONLY",
+                          "system_schema and system_auth are read from their sstables, so changes a running DSE node has not flushed yet (a GRANT, a " +
+                          "RESTRICT, a schema change) are not seen: run nodetool flush system_schema && nodetool flush system_auth (two " +
+                          "commands, one keyspace each) right before the tool"));
         guarded("the metadata directory", this::inspectMetadataDirectory);
         if (live != null)
             guarded("the live state", this::inspectLive);
@@ -560,6 +581,50 @@ final class NodeInspector
             findings.add(blocking("SOLR_DATA",
                                   "the DSE Search data directory " + solrDataDir + " (solr_data_dir in dse.yaml) exists",
                                   "drop every search index on DSE, then delete the directory"));
+    }
+
+    /**
+     * The partitioner of the cluster, as DSE's {@code cassandra.yaml} names it (DSE's default, {@code Murmur3Partitioner},
+     * when it does not), for the table metadata the schema is checked with; {@code Murmur3Partitioner} when the one named
+     * is not in this software, which the configuration check reports.
+     */
+    private IPartitioner partitioner()
+    {
+        String name = getString(layout.cassandraConf, "partitioner");
+        try
+        {
+            return name == null ? Murmur3Partitioner.instance : FBUtilities.newPartitioner(name);
+        }
+        catch (RuntimeException e)
+        {
+            return Murmur3Partitioner.instance;
+        }
+    }
+
+    /**
+     * Whether DSE checks permissions on this node: {@code DseAuthorizer} with {@code authorization_options.enabled}, or
+     * any authorizer but {@code AllowAllAuthorizer}; null when it is not known: {@code cassandra.yaml} cannot be read, or
+     * the authorizer is {@code DseAuthorizer} and {@code dse.yaml} cannot be read.
+     */
+    @Nullable
+    private Boolean authorizationEnabled()
+    {
+        if (layout.unreadable.containsKey(NodeLayout.CASSANDRA_YAML))
+            return null;
+        String authorizer = getString(layout.cassandraConf, "authorizer");
+        if (authorizer == null || authorizer.endsWith("AllowAllAuthorizer"))
+            return false;
+        if (authorizer.endsWith(".DseAuthorizer"))
+            return layout.unreadable.containsKey(NodeLayout.DSE_YAML) ? null : isTrue(get(layout.dseConf, "authorization_options", "enabled"));
+        return true;
+    }
+
+    /** The DSEFS keyspace named in {@code dse.yaml} when it is not DSE's default, else null. */
+    @Nullable
+    private String dsefsKeyspace()
+    {
+        String name = getString(layout.dseConf, "dsefs_options", "keyspace_name");
+        return name == null || name.equals("dsefs") ? null : name;
     }
 
     private void checkAuthentication(Map<String, Object> yaml, Map<String, Object> dse)
@@ -1349,7 +1414,8 @@ final class NodeInspector
         // operation this build does not know, a race with a commit) falls back to every Data.db file of the directory:
         // files in progress (DSE 6 writes bb sstables with numeric generations) can then only add TOC warnings, but an
         // sstable an operation already replaced and not yet deleted is checked too, which the TXN_LOG_UNREADABLE warning
-        // says.
+        // says. The schema read, which must be exact, refuses such a log instead (DseTableReader), as the startup of HCD 2.0
+        // would.
         List<File> committed;
         try
         {
@@ -1911,11 +1977,20 @@ final class NodeInspector
                          "must pass"
                        : "set enable_legacy_ssl_storage_port: true on every DSE node, then " + legacyPortRestart() + " (see INTERNODE_TLS)"));
         boolean dseYamlRead = !layout.unreadable.containsKey(NodeLayout.DSE_YAML);
-        if (has("ROW_LEVEL_ACCESS", "SCHEME_PERMISSIONS"))
-            steps.add("Security: resolve the blocking access control findings above");
+        List<String> securityNotRead = new ArrayList<>();
+        if (!dseYamlRead)
+            securityNotRead.add("dse.yaml");
+        securityNotRead.addAll(schema == null ? List.of("the schema", "system_auth.role_permissions") : schema.accessControlInputsNotRead());
+        String securityIncomplete = securityNotRead.isEmpty() ? "" : "not checked completely (not read: " + String.join(", ", securityNotRead) + ')';
+        if (has("RESTRICT", "ROW_LEVEL_ACCESS", "SCHEME_PERMISSIONS"))
+            steps.add("Security: resolve the blocking access control findings above" + (securityIncomplete.isEmpty() ? "" : "; " + securityIncomplete));
+        else if (warns("PROXY_GRANT", "DELEGATION", "LONE_WRITE_GRANT", "DSE_ONLY_PERMISSION", "DSE_ONLY_RESOURCE"))
+            steps.add("Security: review the access control warnings above" + (securityIncomplete.isEmpty() ? "" : "; " + securityIncomplete));
+        else if (!securityIncomplete.isEmpty())
+            steps.add("Security: " + securityIncomplete);
         else
-            steps.add("Security: " + (dseYamlRead ? "no DSE access control setting this software ignores was found in dse.yaml"
-                                                  : "not checked (dse.yaml cannot be read)"));
+            steps.add("Security: no DSE access control this software ignores was found in dse.yaml, the schema and this node's replica of " +
+                      "system_auth.role_permissions");
         List<String> notRead = new ArrayList<>();
         if (local == null)
             notRead.add("nodes/local");
@@ -1923,13 +1998,21 @@ final class NodeInspector
             notRead.add("dse.yaml");
         if (!dataDirectoriesScanned)
             notRead.add("every data directory");
-        if (has("NON_CORE_WORKLOAD", "SOLR_DATA", "ADVANCED_REPLICATION", "DSEFS"))
+        notRead.addAll(schema == null ? List.of("the schema") : schema.nonCoreInputsNotRead());
+        if (has("NON_CORE_WORKLOAD", "NON_CORE_KEYSPACE", "GRAPH_KEYSPACE", "SEARCH_INDEX", "SOLR_DATA", "ADVANCED_REPLICATION", "DSEFS"))
             steps.add("DSE core only: remove the traces of DSE Search, Graph, Analytics, DSEFS and Advanced Replication listed above");
         else if (notRead.isEmpty())
-            steps.add("DSE core only: no trace of DSE Search, Graph, Analytics, DSEFS or Advanced Replication was found in the workloads, " +
-                      "dse.yaml and the data directories");
+            steps.add("DSE core only: no trace of DSE Search, Graph, Analytics, DSEFS or Advanced Replication was found");
         else
             steps.add("DSE core only: not checked completely (not read: " + String.join(", ", notRead) + ')');
+        List<String> viewsNotRead = schema == null ? List.of("the schema") : schema.viewInputsNotRead();
+        if (schema != null && !schema.viewsToDrop.isEmpty())
+            steps.add("Materialized views: drop " + list(schema.viewsToDrop) + " before the upgrade" +
+                      (viewsNotRead.isEmpty() ? "" : "; not checked completely (not read: " + String.join(", ", viewsNotRead) + ')'));
+        else if (!viewsNotRead.isEmpty())
+            steps.add("Materialized views: not checked completely (not read: " + String.join(", ", viewsNotRead) + ')');
+        else
+            steps.add("Materialized views: " + schema.viewCount + " view(s), none to drop");
         steps.add("NodeSync: " + (nodesyncDisabledInYaml ? "enabled: false is set under nodesync: in DSE's cassandra.yaml; check nodetool nodesyncservice status"
                                                          : "add enabled: false under nodesync: in DSE's cassandra.yaml and run nodetool nodesyncservice disable"));
         steps.add("SAI version pin: " + (path.saiVersion == null ? "no SAI version can be chosen for this release"
@@ -1980,6 +2063,13 @@ final class NodeInspector
     {
         Set<String> wanted = Set.of(codes);
         return findings.stream().anyMatch(f -> f.severity == Finding.Severity.BLOCKING && wanted.contains(f.code));
+    }
+
+    /** Whether a warning with one of {@code codes} was found. */
+    private boolean warns(String... codes)
+    {
+        Set<String> wanted = Set.of(codes);
+        return findings.stream().anyMatch(f -> f.severity == Finding.Severity.WARNING && wanted.contains(f.code));
     }
 
     private static String mapped(String className, String dseSimpleName, String replacement)
