@@ -108,6 +108,12 @@ final class NodeInspector
     static final String LOCATOR_PACKAGE = "org.apache.cassandra.locator.";
     /** The major version of HCD 2.0's releases, for a build whose release is not known (no version.properties). */
     static final int HCD_20_MAJOR = 5;
+    /** The tables DSE 6.8.65 and 6.9.26 encrypt while system_info_encryption is enabled in dse.yaml. */
+    static final String SYSTEM_INFO_ENCRYPTED_TABLES = "the tables system.batches, system.paxos, system_backups.backup_stores and " +
+                                                       "system_backups.backup_configurations";
+    /** The rewrite of {@link #SYSTEM_INFO_ENCRYPTED_TABLES} once DSE runs with system_info_encryption off. */
+    static final String SYSTEM_INFO_REWRITE = "nodetool upgradesstables -a system batches paxos and nodetool upgradesstables -a system_backups " +
+                                              "on every node";
     /** What DSE's nodetool answers for a command it does not have (DSE 6.8 has no listpendinghints). */
     static final String UNKNOWN_COMMAND = "Found unexpected parameters";
     /** The longest parameters the header of a DSE hints file is taken to hold; a longer length is a damaged header. */
@@ -474,11 +480,12 @@ final class NodeInspector
         }
         if (isTrue(get(yaml, "transparent_data_encryption_options", "enabled")))
             findings.add(blocking("TDE_COMMITLOG",
-                                  "transparent_data_encryption_options.enabled is true in DSE's cassandra.yaml: the commit log and hints DSE writes are encrypted; " +
-                                  "encryption is out of scope of this upgrade, and HCD 2.0's replay of DSE's commit log and " +
-                                  "conversion of its hints were not validated with encrypted files",
-                                  "set enabled: false under transparent_data_encryption_options and restart DSE on every node, so that the segments and hints " +
-                                  "it writes from then on are not encrypted, before the upgrade"));
+                                  "transparent_data_encryption_options.enabled is true in DSE's cassandra.yaml: the commit log DSE writes is encrypted; " +
+                                  "encryption is out of scope of this upgrade, and HCD 2.0's replay of DSE's commit log was not validated with " +
+                                  "encrypted segments",
+                                  "set enabled: false under transparent_data_encryption_options and restart DSE on every node, with the keystore that " +
+                                  "section names still in place, so that DSE replays the commit log segments written before and writes its segments " +
+                                  "unencrypted from then on, before the upgrade"));
         Object hintsCompression = yaml.get("hints_compression");
         if (isSetValue(hintsCompression))
             findings.add(blocking("HINTS_COMPRESSION",
@@ -487,15 +494,21 @@ final class NodeInspector
                                   "remove hints_compression from DSE's cassandra.yaml and restart DSE on this node, so that the hints files it writes from " +
                                   "then on are not compressed; the files written before keep their compression: with every node up, wait until DSE has " +
                                   "delivered them and they are gone from its hints directory, before the first node of the cluster is upgraded (this tool " +
-                                  "names the compressed files left)"));
+                                  "names the compressed or encrypted files left)"));
 
         if (dse.isEmpty())
             return;
         if (isTrue(get(dse, "system_info_encryption", "enabled")))
             findings.add(blocking("TDE_TABLE",
-                                  "system_info_encryption.enabled is true in dse.yaml: DSE encrypts its system tables; encrypted tables are out of scope of " +
-                                  "this upgrade",
-                                  "turn it off on DSE and rewrite the system tables (nodetool upgradesstables -a system) on every node before the upgrade"));
+                                  "system_info_encryption.enabled is true in dse.yaml: DSE encrypts " + SYSTEM_INFO_ENCRYPTED_TABLES + ", its commit " +
+                                  "log, its saved caches and its hints files; encryption is out of scope of this upgrade",
+                                  "set enabled: false under system_info_encryption in dse.yaml; restart DSE on every node, with the system key still in " +
+                                  "place, so that DSE replays the commit log segments written before and writes its commit log, saved caches and hints " +
+                                  "files unencrypted from then on (HCD 2.0 skips a saved cache it cannot read); then run " + SYSTEM_INFO_REWRITE + ", so " +
+                                  "that those tables are rewritten unencrypted (this tool does not check that the rewrite is done); and keep the system " +
+                                  "key in place until the rewrite is done and, with every node up, DSE has delivered the hints files written before, " +
+                                  "which stay encrypted (this tool names those left, under HINTS_COMPRESSION); all of it before the first node of the " +
+                                  "cluster is upgraded"));
         if (isTrue(get(dse, "config_encryption_active")))
             findings.add(warning("CONFIG_ENCRYPTION",
                                  "config_encryption_active is true in dse.yaml: some values of DSE's configuration files are encrypted, and the tool sees them " +
@@ -1530,8 +1543,11 @@ final class NodeInspector
                                   "encryption as a compression): remove hints_compression from DSE's cassandra.yaml and set enabled: false under " +
                                   "system_info_encryption in dse.yaml, each one that is set, and restart DSE on this node, so that the hints files it " +
                                   "writes from then on are neither compressed nor encrypted; the files written before keep their compression or " +
-                                  "encryption: with every node up, and the key DSE encrypted them with still in place, wait until DSE has delivered " +
-                                  "them and they are gone, before the first node of the cluster is upgraded, then run this tool again"));
+                                  "encryption: with every node up, and for encrypted files the system key still in place, wait until DSE has delivered " +
+                                  "them and they are gone, before the first node of the cluster is upgraded, then run this tool again; if " +
+                                  "system_info_encryption was enabled, it also encrypted " + SYSTEM_INFO_ENCRYPTED_TABLES + ": once DSE runs with it " +
+                                  "off on every node, run " + SYSTEM_INFO_REWRITE + ", with the system key still in place, before the first node of " +
+                                  "the cluster is upgraded (this tool does not check that the rewrite is done)"));
         if (!unreadableHeaders.isEmpty())
             findings.add(warning("HINTS_UNREADABLE",
                                  "DSE hints files whose header cannot be read, so whether they are compressed or encrypted is not known: " + list(unreadableHeaders),
