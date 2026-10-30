@@ -58,7 +58,12 @@ public class ResponseVerbHandler implements IVerbHandler
             return;
         }
 
-        long latencyNanos = approxTime.now() - callbackInfo.createdAtNanos;
+        long now = approxTime.now();
+        long latencyNanos = now - callbackInfo.createdAtNanos;
+        // Per-peer RTT: time from just-before-send (sentAtNanos) to this handler executing on
+        // REQUEST_RESPONSE stage.  Unlike latencyNanos this is not affected by how long ago the
+        // CQL request arrived; it measures only the internode round-trip for this specific peer.
+        long rttNanos = now - callbackInfo.sentAtNanos;
         Tracing.trace("Processing response from {}", message.from());
 
         RequestCallback<?> cb = callbackInfo.callback;
@@ -69,6 +74,7 @@ public class ResponseVerbHandler implements IVerbHandler
         else
         {
             MessagingService.instance().latencySubscribers.maybeAdd(cb, message.verb(), message.from(), latencyNanos, NANOSECONDS, false);
+            MessagingService.instance().metrics.recordRtt(callbackInfo.requestVerb, message.from(), rttNanos);
             trackReplicaSensors(callbackInfo, message);
             cb.onResponse(message);
         }

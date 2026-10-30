@@ -15,15 +15,22 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<project basedir="." name="apache-cassandra--resolver-tasks"
+<project basedir="." name="apache-cassandra-resolver-tasks"
          xmlns:resolver="antlib:org.apache.maven.resolver.ant"
          xmlns:if="ant:if"
          xmlns:unless="ant:unless">
 
     <!-- details of what version of Resolver ANT Tasks to fetch -->
-    <property name="resolver-ant-tasks.version" value="1.3.0" />
+    <property name="resolver-ant-tasks.version" value="1.6.1" />
     <property name="resolver-ant-tasks.local" value="${local.repository}/org/apache/maven/resolver/maven-resolver-ant-tasks/${resolver-ant-tasks.version}/maven-resolver-ant-tasks-${resolver-ant-tasks.version}.jar"/>
     <property name="resolver-ant-tasks.url" value="https://repo1.maven.org/maven2/org/apache/maven/resolver/maven-resolver-ant-tasks" />
+    <!-- CI may override resolver-ant-tasks.url to a local mirror and supply credentials via
+         -Dresolver-ant-tasks.url.username=... -Dresolver-ant-tasks.url.password=... -->
+    <property name="resolver-ant-tasks.url.username" value=""/>
+    <property name="resolver-ant-tasks.url.password" value=""/>
+    <condition property="resolver-ant-tasks.url.auth.enabled">
+        <not><equals arg1="${resolver-ant-tasks.url.username}" arg2=""/></not>
+    </condition>
     <condition property="resolver-ant-tasks.jar.exists">
         <available file="${resolver-ant-tasks.local}" />
     </condition>
@@ -46,8 +53,17 @@
         <echo>Downloading Resolver ANT Tasks...</echo>
         <mkdir dir="${local.repository}/org/apache/maven/resolver/maven-resolver-ant-tasks/${resolver-ant-tasks.version}" />
 
-        <get src="${resolver-ant-tasks.url}/${resolver-ant-tasks.version}/maven-resolver-ant-tasks-${resolver-ant-tasks.version}-uber.jar"
-             dest="${resolver-ant-tasks.local}" usetimestamp="true" quiet="true"/>
+        <retry retrycount="3" retrydelay="10" >
+            <sequential>
+                <get src="${resolver-ant-tasks.url}/${resolver-ant-tasks.version}/maven-resolver-ant-tasks-${resolver-ant-tasks.version}-uber.jar"
+                     dest="${resolver-ant-tasks.local}" usetimestamp="true" quiet="true"
+                     username="${resolver-ant-tasks.url.username}" password="${resolver-ant-tasks.url.password}"
+                     if:set="resolver-ant-tasks.url.auth.enabled"/>
+                <get src="${resolver-ant-tasks.url}/${resolver-ant-tasks.version}/maven-resolver-ant-tasks-${resolver-ant-tasks.version}-uber.jar"
+                     dest="${resolver-ant-tasks.local}" usetimestamp="true" quiet="true"
+                     unless:set="resolver-ant-tasks.url.auth.enabled"/>
+            </sequential>
+        </retry>
     </target>
 
     <target name="resolver-init" depends="init,_resolver_download" unless="resolver-ant-tasks.initialized" description="Initialize Resolver ANT Tasks">
@@ -58,16 +74,27 @@
 
         <typedef uri="antlib:org.apache.maven.resolver.ant" resource="org/apache/maven/resolver/ant/antlib.xml" classpathref="resolver-ant-tasks.classpath" />
         <resolver:remoterepos id="all">
-            <remoterepo id="resolver-central"  url="${artifact.remoteRepository.central}"/>
-            <remoterepo id="resolver-apache"   url="${artifact.remoteRepository.apache}"/>
             <remoterepo id="resolver-datastax" url="${artifact.remoteRepository.datastax}"/>
-            <!-- Snapshots are not allowed, but for feature branches they may be needed, so uncomment the below to allow snapshots to work -->
-            <!-- <remoterepo id="resolver-apache-snapshot" url="https://repository.apache.org/content/repositories/snapshots" releases="false" snapshots="true" updates="always" checksums="fail" /> -->
+            <remoterepo id="resolver-central" url="${artifact.remoteRepository.central}"/>
+            <remoterepo id="resolver-apache" url="${artifact.remoteRepository.apache}"/>
+            <!-- Snapshot artifacts must not exist in nor be downloaded by any Cassandra release artifact.
+                 Please validate that all artifacts included in parent-pom-template.xml are release
+                 artifacts before committing.
+
+                 To build with a snapshot dependency, ensure build.properties or build.properties.default
+                 contain the correct resolution for "artifact.remoteRepository.apacheSnapshot" and uncomment
+                 the following line.
+
+                 You may also need to add an exclusion for "resolver-apache-snapshot" to your mirrors in ~/.m2/settings.xml
+                 or ~/.ant/settings.xml (maven ant resolver supersedes) as mirrors will, by default, catch and override
+                 all dependency resolution regardless of it being a -SNAPSHOT lib or not.
+             -->
+            <!-- <remoterepo id="resolver-apache-snapshot" url="${artifact.remoteRepository.apacheSnapshot}" releases="false" snapshots="true" updates="always" checksums="fail" /> -->
         </resolver:remoterepos>
 
         <macrodef name="resolve">
             <!--
-              maven-resolver-ant-tasks's resolve logic doesn't have retry logic and does not respect settings.xml, 
+              maven-resolver-ant-tasks's resolve logic doesn't have retry logic and does not respect settings.xml,
               this causes issues when overriding maven central is required (such as when behind a corporate firewall);
               it is critical to always provide the 'all' remoterepos to override resolve's default hard coded logic.
 
@@ -241,7 +268,7 @@
            <delete dir="${local.repository}/org/apache/cassandra/deps/geomet-temp"/>
        </sequential>
 
-        
+
         <copy todir="${build.lib}" quiet="true">
             <file file="${local.repository}/org/apache/cassandra/deps/futures-2.1.6-py2.py3-none-any.zip"/>
             <file file="${local.repository}/org/apache/cassandra/deps/geomet-1.1.0.zip"/>
