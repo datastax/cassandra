@@ -129,6 +129,7 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.DefaultFSErrorHandler;
 import org.apache.cassandra.service.Dse6AccessControlCheck;
+import org.apache.cassandra.service.Dse6NonCoreTraces;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
@@ -674,6 +675,16 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 catch (Exception e)
                 {
                     throw e;
+                }
+
+                // as CassandraDaemon.setup: the DSE 6 check of the DSE features this software does not support
+                try
+                {
+                    Dse6NonCoreTraces.verifyAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
                 }
 
                 // Start up virtual table support

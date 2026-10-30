@@ -593,6 +593,15 @@ public enum CassandraRelevantProperties
      */
     INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS("cassandra.internode_compatibility_mode.ignore_dse_peers", "false"),
     /**
+     * Lets a node start in {@code internode_compatibility_mode: DSE_6} although DSE's {@code nodes/peers} file records a
+     * peer with a DSE workload other than Cassandra (Search, Analytics, Graph): for a stale entry of a node since
+     * restarted as a Cassandra-only node, or since removed, which this software cannot refresh since it never rewrites
+     * DSE's file; it also lets the node start when {@code nodes/peers} cannot be read, leaving it unchecked. Only
+     * {@code nodes/peers} is ignored: the other traces of DSE Search, Graph, Analytics, DSEFS, CFS and Advanced
+     * Replication still refuse the start. Logged at WARN on every start.
+     */
+    INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEER_WORKLOADS("cassandra.internode_compatibility_mode.ignore_dse_peer_workloads", "false"),
+    /**
      * Lets a node start in {@code internode_compatibility_mode: DSE_6} although {@code system_auth.role_permissions}
      * or the schema still hold DSE access controls this software does not enforce (RESTRICT, row-level grants, tables
      * restricted to rows), which are then dropped: the operator has reviewed the list the refusal printed and accepts
