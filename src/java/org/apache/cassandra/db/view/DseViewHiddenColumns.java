@@ -225,7 +225,8 @@ public final class DseViewHiddenColumns
     }
 
     /**
-     * {@link #requiredHiddenColumn(TableMetadata)} for a view and its base table given, which need not be in the schema.
+     * {@link #requiredHiddenColumn(TableMetadata)} for a view and its base table given, which need not be in the schema
+     * (the DSE 6 preflight inspection builds them from DSE's {@code system_schema} rows, offline).
      *
      * @return the column, or {@code null} when {@code view} is not a materialized view, or its primary key holds no
      * regular column of {@code baseTable} or more than one

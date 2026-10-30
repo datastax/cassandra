@@ -1178,8 +1178,17 @@ public final class SchemaKeyspace
                             .build();
     }
 
-    @VisibleForTesting
-    static TableParams createTableParamsFromRow(UntypedResultSet.Row row, String keyspaceName, String tableName)
+    /**
+     * The table parameters of a row of {@code system_schema.tables} or {@code system_schema.views}, as the schema load
+     * reads them; also used by the DSE 6 preflight inspection on the rows it reads offline from DSE's sstables.
+     *
+     * @param keyspaceName the keyspace of the table or view, named in the warning on stored compression options this
+     *                     software normalises ({@link CompressionParams#fromStoredMap})
+     * @param tableName the name of the table or view, as above
+     * @throws RuntimeException (a {@code ConfigurationException}, for instance) when a parameter cannot be loaded, such
+     * as a compaction or compression class this software does not have
+     */
+    public static TableParams createTableParamsFromRow(UntypedResultSet.Row row, String keyspaceName, String tableName)
     {
         TableParams.Builder builder = TableParams.builder(SchemaConstants.SCHEMA_KEYSPACE_NAME)
                                                  .bloomFilterFpChance(row.getDouble("bloom_filter_fp_chance"))
