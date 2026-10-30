@@ -426,6 +426,8 @@ public interface StorageServiceMBean extends NotificationEmitter
 
     public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, boolean reinsertOverflowedTTL, int jobs, String keyspaceName, String... columnFamilies) throws IOException, ExecutionException, InterruptedException;
 
+    public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, String overwriteTTLMode, int jobs, String keyspaceName, String... columnFamilies) throws IOException, ExecutionException, InterruptedException;
+
     /**
      * Verify (checksums of) the given keyspace.
      * If tableNames array is empty, all CFs are verified.

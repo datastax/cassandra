@@ -50,6 +50,8 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.AbstractCell;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.ColumnData;
@@ -60,6 +62,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.db.rows.WrappingUnfilteredRowIterator;
+import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -102,6 +105,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     protected final ScrubInfo scrubInfo;
 
     protected final NegativeLocalDeletionInfoMetrics negativeLocalDeletionInfoMetrics = new NegativeLocalDeletionInfoMetrics();
+    protected final OverwrittenTTLInfoMetrics overwrittenTTLInfoMetrics = new OverwrittenTTLInfoMetrics();
 
     private static final Comparator<Partition> partitionComparator = Comparator.comparing(Partition::partitionKey);
     protected final SortedSet<Partition> outOfOrder = new TreeSet<>(partitionComparator);
@@ -164,8 +168,10 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 
         this.scrubInfo = new ScrubInfo(dataFile, sstable, fileAccessLock.readLock());
 
-        if (options.reinsertOverflowedTTLRows)
+        if (options.overwriteTTLMode == IScrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL)
             outputHandler.output("Starting scrub with reinsert overflowed TTL option");
+        else if (options.overwriteTTLMode != IScrubber.OverwriteTTLMode.NONE)
+            outputHandler.output("Starting scrub with option: " + options.overwriteTTLMode);
     }
 
     public static void deleteOrphanedComponents(Descriptor descriptor, Set<Component> components)
@@ -235,6 +241,8 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             outputHandler.output("Scrub of %s complete: %d partitions in new sstable and %d empty (tombstoned) partitions dropped", sstable, goodPartitions, emptyPartitions);
             if (negativeLocalDeletionInfoMetrics.fixedRows > 0)
                 outputHandler.output("Fixed %d rows with overflowed local deletion time.", negativeLocalDeletionInfoMetrics.fixedRows);
+            if (overwrittenTTLInfoMetrics.getNoTTLOverwrittenRows() > 0)
+                outputHandler.output("Overwrote %d rows with NO_TTL.", overwrittenTTLInfoMetrics.getNoTTLOverwrittenRows());
             if (badPartitions > 0)
                 outputHandler.warn("Unable to recover %d partitions that were skipped.  You can attempt manual recovery from the pre-scrub snapshot.  You can also run nodetool repair to transfer the data from a healthy replica, if any", badPartitions);
         }
@@ -278,7 +286,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     public ScrubResult scrubWithResult()
     {
         List<SSTableReader> scrubbed = scrub();
-        return new ScrubResult(goodPartitions, badPartitions, emptyPartitions, scrubbed);
+        return new ScrubResult(goodPartitions, badPartitions, emptyPartitions, overwrittenTTLInfoMetrics.getNoTTLOverwrittenRows(), scrubbed);
     }
 
     @Override
@@ -342,22 +350,30 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 
     private RowMergingSSTableIterator getRowMergingIterator(DecoratedKey key)
     {
+        // Pass preserveRows=true whenever rows must not be silently dropped by RowMergingSSTableIterator.
+        // For NO_TTL mode, rows must reach NoTTLTransformer; for REINSERT_OVERFLOWED_TTL, they must reach
+        // FixNegativeLocalDeletionTimeIterator.
+        boolean preserveRows = options.overwriteTTLMode != IScrubber.OverwriteTTLMode.NONE;
         return new RowMergingSSTableIterator(SSTableIdentityIterator.create(sstable, dataFile, key),
                                              outputHandler,
                                              sstable.descriptor.version,
-                                             options.reinsertOverflowedTTLRows);
+                                             preserveRows);
     }
 
     /**
-     * Only wrap with {@link FixNegativeLocalDeletionTimeIterator} if {@link IScrubber.Options#reinsertOverflowedTTLRows} option
-     * is specified
+     * Wrap with the appropriate iterator based on {@link IScrubber.Options#overwriteTTLMode}.
      */
     private UnfilteredRowIterator getIterator(RowMergingSSTableIterator rowMergingIterator)
     {
-        if (options.reinsertOverflowedTTLRows)
-            return new FixNegativeLocalDeletionTimeIterator(rowMergingIterator, outputHandler, negativeLocalDeletionInfoMetrics);
-        else
-            return rowMergingIterator;
+        switch (options.overwriteTTLMode)
+        {
+            case REINSERT_OVERFLOWED_TTL:
+                return new FixNegativeLocalDeletionTimeIterator(rowMergingIterator, outputHandler, negativeLocalDeletionInfoMetrics);
+            case NO_TTL:
+                return Transformation.apply(rowMergingIterator, new NoTTLTransformer(outputHandler, realm.metadata(), overwrittenTTLInfoMetrics));
+            default:
+                return rowMergingIterator;
+        }
     }
 
     private void saveOutOfOrderPartition(DecoratedKey prevKey, DecoratedKey key, UnfilteredRowIterator iterator)
@@ -788,5 +804,123 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     {
         public volatile int fixedRows = 0;
         public volatile int droppedRows = 0;
+    }
+
+    protected static class OverwrittenTTLInfoMetrics
+    {
+        private volatile int noTTLOverwrittenRows = 0;
+
+        public int getNoTTLOverwrittenRows()
+        {
+            return noTTLOverwrittenRows;
+        }
+
+        public void incrementNoTTLOverwrittenRows()
+        {
+            noTTLOverwrittenRows++;
+        }
+    }
+
+    @VisibleForTesting
+    public static class NoTTLTransformer extends Transformation<UnfilteredRowIterator>
+    {
+        private final TableMetadata metadata;
+        private final OutputHandler outputHandler;
+        private final OverwrittenTTLInfoMetrics overwrittenTTLInfoMetrics;
+
+        public NoTTLTransformer(OutputHandler outputHandler, TableMetadata metadata, OverwrittenTTLInfoMetrics overwrittenTTLInfoMetrics)
+        {
+            this.metadata = metadata;
+            this.outputHandler = outputHandler;
+            this.overwrittenTTLInfoMetrics = overwrittenTTLInfoMetrics;
+        }
+
+        @Override
+        public Row applyToStatic(Row row)
+        {
+            return removeTTL(row);
+        }
+
+        @Override
+        protected Row applyToRow(Row row)
+        {
+            return removeTTL(row);
+        }
+
+        // Rewrites the row replacing expiring liveness/cells with permanent equivalents, preserving timestamp and value.
+        protected Row removeTTL(Row row)
+        {
+            if (!hasAnyTTL(row))
+                return row;
+
+            boolean ttlWasOverwritten = false;
+            Row.Builder builder = BTreeRow.sortedBuilder();
+            builder.newRow(row.clustering());
+
+            // Handle primary key liveness info — remove TTL if present
+            LivenessInfo livenessInfo = row.primaryKeyLivenessInfo();
+            if (livenessInfo.isExpiring())
+            {
+                builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(livenessInfo.timestamp(), LivenessInfo.NO_TTL, FBUtilities.nowInSeconds()));
+                ttlWasOverwritten = true;
+            }
+            else
+                builder.addPrimaryKeyLivenessInfo(livenessInfo);
+
+            // Preserve row deletion
+            builder.addRowDeletion(row.deletion());
+
+            // Process all columns as there can be cell level TTL
+            for (ColumnData cd : row)
+            {
+                if (cd.column().isSimple())
+                    ttlWasOverwritten |= stripCellTTL(builder, (Cell<?>) cd);
+                else
+                    ttlWasOverwritten |= stripComplexColumnTTL(builder, (ComplexColumnData) cd);
+            }
+
+            if (ttlWasOverwritten)
+            {
+                outputHandler.debug(String.format("Found row with TTL to remove: %s", row.toString(metadata, false)));
+                overwrittenTTLInfoMetrics.incrementNoTTLOverwrittenRows();
+            }
+
+            return builder.build();
+        }
+
+        // Returns true if the cell's TTL was stripped.
+        private boolean stripCellTTL(Row.Builder builder, Cell<?> cell)
+        {
+            if (cell.isExpiring())
+            {
+                builder.addCell(BufferCell.live(cell.column(), cell.timestamp(), cell.buffer(), cell.path()));
+                return true;
+            }
+            builder.addCell(cell);
+            return false;
+        }
+
+        // Returns true if any cell in the complex column had its TTL stripped.
+        private boolean stripComplexColumnTTL(Row.Builder builder, ComplexColumnData complexData)
+        {
+            boolean stripped = false;
+            builder.addComplexDeletion(complexData.column(), complexData.complexDeletion());
+            for (Cell<?> cell : complexData)
+                stripped |= stripCellTTL(builder, cell);
+            return stripped;
+        }
+
+        // Checks if the row has any TTL columns
+        @VisibleForTesting
+        public static boolean hasAnyTTL(Row row)
+        {
+            if (row.primaryKeyLivenessInfo().isExpiring()) return true;
+            for (ColumnData cd : row)
+            {
+                if (cd.column().isSimple()) { if (((Cell<?>) cd).isExpiring()) return true; }
+                else { for (Cell<?> c : (ComplexColumnData) cd) if (c.isExpiring()) return true; }
+            }
+            return false;
+        }
     }
 }
