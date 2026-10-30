@@ -40,6 +40,7 @@ import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.DseCompatRefusals;
+import org.apache.cassandra.net.DseDialectVersions;
 import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -67,15 +68,19 @@ import static org.apache.cassandra.utils.Clock.Global.nanoTime;
  * value, so there every guard is inert. A new node is also checked against the gossip states of its shadow round
  * ({@link #refuseJoinWithDsePeersInGossip}), before any version is recorded.
  * <p>
- * A DSE 6 node lost for good during the upgrade (down, and silent for {@link #lostPeerSilenceNanos()}: see
- * {@link #isLostDsePeer}) can be removed without finishing the upgrade first, in both modes: {@code assassinate} of it,
- * and {@code removenode force} of a removal of such nodes only, are allowed, since they stream nothing;
- * {@code removenode} of it is allowed once every other DSE 6 node is lost too, since it streams data from the other
- * replicas, which DSE 6 nodes cannot do with this software. Once every node runs without the
- * mode, a node without the mode can replace it if no other DSE 6 node is in gossip
- * ({@link #refuseJoinWithDsePeersInGossip} does not count the replaced node); a replacement in {@code DSE_6} mode stays
- * refused, and a node without the mode cannot join nodes in the mode anyway (their schema is of another major
- * version to it).
+ * A node lost for good during the upgrade, a DSE 6 node or a node of this software (down, and silent for
+ * {@link #lostNodeSilenceNanos()}: see {@link #isLostNode}), can be removed without finishing the upgrade first, in both
+ * modes: {@code assassinate} of it, and {@code removenode force} of a removal of lost nodes only, are allowed, since
+ * they stream nothing; {@code removenode} of it is allowed once every DSE 6 node still in the cluster is lost too,
+ * since it streams data between the other replicas and the nodes that take over its ranges, which DSE 6 nodes cannot
+ * do with this software (nodes of this software stream with each other within either mode). Once removed, the node has
+ * left the ring, and the record of DSE 6 peers of every node that sees its removal, so it no longer keeps the upgrade
+ * from finishing. A replacement in {@code DSE_6} mode stays refused, its message naming the removal, and a node without
+ * the mode cannot join nodes in the mode anyway (their schema is of another major version to it). The code lets a node
+ * without the mode replace a lost node once every node runs without the mode and no other DSE 6 node is in gossip
+ * ({@link #refuseJoinWithDsePeersInGossip} does not count the replaced node), but a lost DSE 6 node stays on the record
+ * of DSE 6 peers of the nodes that saw it until it is removed, and their start without the mode is refused until then
+ * (unless {@code -Dcassandra.internode_compatibility_mode.ignore_dse_peers=true}): the removal is the way out.
  */
 public final class DseUpgradeGuards
 {
@@ -95,21 +100,21 @@ public final class DseUpgradeGuards
 
     private static final String DSE6_REMEDY = "finish the upgrade of every node and drop the mode first";
     private static final String NONE_REMEDY = "finish upgrading (or remove) the DSE 6 nodes first";
-    /** The remedy of a refused replacement in {@code DSE_6} mode. */
-    private static final String REPLACE_REMEDY = "a replacement cannot start in internode_compatibility_mode DSE_6; remove a DSE 6 node lost " +
-                                                 "for good instead (nodetool removenode once every other DSE 6 node is lost too, nodetool " +
-                                                 "assassinate otherwise) and add a node once the upgrade is finished; it can be replaced " +
-                                                 "only once every node runs internode_compatibility_mode NONE and no other DSE 6 node is " +
-                                                 "in gossip, as can a node of this software lost during the upgrade";
+    /** The remedy of a refused replacement in {@code DSE_6} mode: the removal, which needs no node to change its mode first. */
+    private static final String REPLACE_REMEDY = "a replacement cannot start in internode_compatibility_mode DSE_6; remove the node lost for " +
+                                                 "good instead, a DSE 6 node or a node of this software (nodetool removenode once every DSE 6 " +
+                                                 "node still in the cluster is lost, nodetool assassinate otherwise), and add a new node once " +
+                                                 "the upgrade is finished";
 
-    /** What the removal of a lost DSE 6 node leaves to the operator, logged when it is allowed. */
+    /** What the removal of a lost node leaves to the operator, logged when it is allowed. */
     private static final String LOST_NODE_CAVEAT = "the guard cannot tell a node lost for good from one silent for longer (restarting slowly, " +
-                                                   "being upgraded): make sure first that it will not come back; after a rollback to DSE the " +
-                                                   "node is back in DSE's ring, down (DSE keeps its own record of its peers): remove it again " +
-                                                   "there with DSE's nodetool removenode";
+                                                   "being upgraded or rolled back): make sure first that it will not come back; after a rollback " +
+                                                   "to DSE the node is back in DSE's ring, down (DSE keeps its own record of its peers): remove " +
+                                                   "it again there with DSE's nodetool removenode";
 
-    /** The silence of a lost DSE 6 peer set by tests, in nanoseconds; negative for the default. */
-    private static volatile long lostPeerSilenceNanosForTesting = -1;
+    /** The kinds of lost node ({@link #lostNodeKind}). */
+    private static final String LOST_DSE_NODE = "DSE 6 node";
+    private static final String LOST_NODE_OF_THIS_SOFTWARE = "node of this software";
 
     private static final AtomicBoolean STATUS_LOG_STARTED = new AtomicBoolean();
 
@@ -203,8 +208,8 @@ public final class DseUpgradeGuards
 
     /**
      * Refuses the start of a replacement node while the upgrade is in progress (in {@code DSE_6} mode, in practice: a
-     * node without the mode is checked by its shadow round), with the ways to replace or remove a DSE 6 node lost for
-     * good. Not counted: the node exits.
+     * node without the mode is checked by its shadow round), naming the removal of a node lost for good, which the
+     * operator can run without finishing the upgrade first. Not counted: the node exits.
      *
      * @throws ConfigurationException while the upgrade is in progress; the daemon reports it and exits
      */
@@ -216,48 +221,129 @@ public final class DseUpgradeGuards
     }
 
     /**
-     * True when {@code endpoint} is a DSE 6 node lost to this node: a node that gossips a pre-4.0 {@code NET_VERSION}
-     * or is recorded at a pre-4.0 messaging version (a peer that is only on the record of DSE 6 peers or presumed is
-     * not enough), whose gossip state this node holds, that is not alive to this node, and of which nothing new has
-     * been heard for {@link #lostPeerSilenceNanos()}: no newer heartbeat, directly or relayed by another node, and no
-     * new generation. A node that restarts, or that this node cannot talk to but others can (a DSE 6 node seen by a
-     * node without the mode, which never completes an echo with it), keeps its gossip state fresh and is not lost; a
-     * peer without a gossip state is not lost either, since nothing says it is down.
+     * True when {@code endpoint} is a node lost to this node during the upgrade: a peer whose gossip state this node
+     * holds, that is not alive to this node, and of which nothing new has been heard for {@link #lostNodeSilenceNanos()}
+     * (no newer heartbeat, directly or relayed by another node, and no new generation), and that is either a DSE 6 node
+     * (it gossips a pre-4.0 {@code NET_VERSION} or is recorded at a pre-4.0 messaging version; a peer that is only on
+     * the record of DSE 6 peers or presumed is not enough) or a node of this software (it gossips a {@code NET_VERSION}
+     * of 4.0 or later: a node in {@code DSE_6} mode gossips 4.0, one without the mode its own version; in a cluster
+     * upgraded from DSE 6 no other node gossips such a value). A node that restarts, or that this node cannot talk to
+     * but others can (a DSE 6 node seen by a node without the mode, which never completes an echo with it), keeps its
+     * gossip state fresh and is not lost; neither is this node itself, a peer without a gossip state, nor a peer whose
+     * gossip state carries no {@code NET_VERSION} this check can read and that is not recorded at a pre-4.0 version,
+     * since nothing says it is down or what it runs.
      */
-    public static boolean isLostDsePeer(InetAddressAndPort endpoint)
+    public static boolean isLostNode(InetAddressAndPort endpoint)
     {
-        EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-        if (state == null || isAlive(endpoint) || nanoTime() - state.getUpdateTimestamp() < lostPeerSilenceNanos())
-            return false;
-        return gossipsPre40Version(state) || pre40Peers().contains(endpoint);
+        return lostNodeKind(endpoint) != null;
+    }
+
+    /** True when {@code endpoint} is a DSE 6 node lost to this node ({@link #isLostNode}). */
+    @VisibleForTesting
+    static boolean isLostDsePeer(InetAddressAndPort endpoint)
+    {
+        return LOST_DSE_NODE.equals(lostNodeKind(endpoint));
     }
 
     /**
-     * How long nothing must have been heard of a DSE 6 peer that is down for it to be lost: the largest of 30 minutes,
-     * the hint window ({@code max_hint_window}) and twice the ring delay, so that a node that restarts, even slowly (a
-     * long commit log replay), is being upgraded in place, or is briefly cut off is not taken as lost. The guard still
-     * cannot tell a node lost for good from one that stays silent for longer: the operator confirms it is gone.
+     * The kind of lost node {@code endpoint} is ({@link #isLostNode}), {@link #LOST_DSE_NODE} or
+     * {@link #LOST_NODE_OF_THIS_SOFTWARE}; null when it is not lost.
      */
-    static long lostPeerSilenceNanos()
+    private static String lostNodeKind(InetAddressAndPort endpoint)
     {
-        long forTesting = lostPeerSilenceNanosForTesting;
-        if (forTesting >= 0)
-            return forTesting;
+        if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
+            return null;
+        EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        if (state == null || isAlive(endpoint) || nanoTime() - state.getUpdateTimestamp() < lostNodeSilenceNanos())
+            return null;
+        if (gossipsPre40Version(state) || pre40Peers().contains(endpoint))
+            return LOST_DSE_NODE;
+        return DseDialectVersions.gossipedVersion40OrLater(state) > 0 ? LOST_NODE_OF_THIS_SOFTWARE : null;
+    }
+
+    /** How a lost node of {@code kind} ({@link #lostNodeKind}) is named in the log lines and the refusals. */
+    private static String describe(String kind, InetAddressAndPort endpoint)
+    {
+        return LOST_DSE_NODE.equals(kind) ? "the DSE 6 node " + endpoint : "the node " + endpoint + " of this software";
+    }
+
+    /**
+     * How long nothing must have been heard of a peer that is down for it to be lost. By default the largest of 30
+     * minutes, the hint window ({@code max_hint_window}) and twice the ring delay, so that a node that restarts, even
+     * slowly (a long commit log replay), is being upgraded or rolled back in place, or is briefly cut off is not taken as
+     * lost; {@code -Dcassandra.internode_compatibility_mode.lost_node_silence_seconds} replaces it. The property is read
+     * at each use and checked only at startup ({@link #checkLostNodeSilence}); a negative value read later counts as
+     * zero, and one that is not a number makes {@code removenode}, {@code assassinate} and {@code removenode force}
+     * fail with a {@link ConfigurationException}, not counted among the refusals. The guard still cannot tell a node
+     * lost for good from one that stays silent for longer: the operator confirms it is gone.
+     */
+    static long lostNodeSilenceNanos()
+    {
+        String seconds = CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getString();
+        if (seconds != null)
+            return TimeUnit.SECONDS.toNanos(Math.max(0, parseLostNodeSilenceSeconds(seconds)));
         long millis = Math.max(TimeUnit.MINUTES.toMillis(30), Math.max(DatabaseDescriptor.getMaxHintWindow(), 2L * StorageService.RING_DELAY_MILLIS));
         return TimeUnit.MILLISECONDS.toNanos(millis);
     }
 
-    /** Sets how long a DSE 6 peer that is down must be silent to be lost; a negative value restores the default. */
-    @VisibleForTesting
-    public static void setLostPeerSilenceMillis(long millis)
+    /**
+     * The smallest silence {@code cassandra.internode_compatibility_mode.lost_node_silence_seconds} may set: the larger
+     * of one minute and twice the ring delay, the time gossip takes to settle, so that the heartbeats of a node that only
+     * this node cannot reach, relayed by the others, have arrived before it can count as lost (the minute holds when the
+     * ring delay is set very low). The ring delay is read from {@code cassandra.ring_delay_ms} as {@code StorageService}
+     * reads it, without initialising {@code StorageService}, which the startup checks run before.
+     */
+    static long lostNodeSilenceFloorMillis()
     {
-        lostPeerSilenceNanosForTesting = millis < 0 ? -1 : TimeUnit.MILLISECONDS.toNanos(millis);
+        return Math.max(TimeUnit.MINUTES.toMillis(1), 2L * CassandraRelevantProperties.RING_DELAY.getInt(StorageService.DEFAULT_RING_DELAY_MILLIS));
     }
 
     /**
-     * The DSE 6 nodes not known to be lost ({@link #isLostDsePeer}): the known DSE 6 peers and the endpoints whose
-     * gossip state carries a pre-4.0 {@code NET_VERSION} (unless they left the ring), alive, recently heard of, or of
-     * no known state (on the record of DSE 6 peers only, or presumed). Those a stream could involve. Sorted.
+     * Checks {@code cassandra.internode_compatibility_mode.lost_node_silence_seconds} at startup, in every mode (the
+     * removal of a lost node is allowed in both): a value that is not a whole number of seconds, or that is below
+     * {@link #lostNodeSilenceFloorMillis()}, refuses the start rather than being corrected, so that the node never uses a
+     * silence the operator did not set.
+     *
+     * @return the silence set, in seconds, or -1 when the property is not set (the default applies)
+     * @throws ConfigurationException when the value is refused
+     */
+    public static long checkLostNodeSilence() throws ConfigurationException
+    {
+        String value = CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getString();
+        if (value == null)
+            return -1;
+        long seconds = parseLostNodeSilenceSeconds(value);
+        long floorMillis = lostNodeSilenceFloorMillis();
+        if (seconds < TimeUnit.MILLISECONDS.toSeconds(floorMillis + 999))
+            throw new ConfigurationException(String.format("-D%s=%s is refused: the silence after which a node that is down counts as lost during " +
+                                                           "the DSE 6 upgrade must be at least %d seconds, the larger of one minute and twice the " +
+                                                           "ring delay; unset it for the default (the largest of 30 minutes, max_hint_window and " +
+                                                           "twice the ring delay)",
+                                                           CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getKey(),
+                                                           value, TimeUnit.MILLISECONDS.toSeconds(floorMillis + 999)),
+                                             false);
+        return seconds;
+    }
+
+    private static long parseLostNodeSilenceSeconds(String value) throws ConfigurationException
+    {
+        try
+        {
+            return Long.parseLong(value.trim());
+        }
+        catch (NumberFormatException e)
+        {
+            throw new ConfigurationException(String.format("-D%s=%s is refused: not a whole number of seconds",
+                                                           CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getKey(), value),
+                                             false);
+        }
+    }
+
+    /**
+     * The DSE 6 nodes not known to be lost: the known DSE 6 peers and the endpoints whose gossip state carries a
+     * pre-4.0 {@code NET_VERSION} (unless they left the ring), alive, recently heard of, or of no known state (on the
+     * record of DSE 6 peers only, or presumed), less the lost nodes ({@link #isLostNode}; a peer on the record that
+     * gossips 4.0 or later was upgraded meanwhile). Those a stream could involve. Sorted.
      */
     public static Set<InetAddressAndPort> liveDsePeers()
     {
@@ -266,15 +352,15 @@ public final class DseUpgradeGuards
         for (Map.Entry<InetAddressAndPort, EndpointState> e : Gossiper.instance.endpointStateMap.entrySet())
             if (!e.getKey().equals(self) && !DsePeers.hasLeftTheRing(e.getValue()) && gossipsPre40Version(e.getValue()))
                 peers.add(e.getKey());
-        peers.removeIf(DseUpgradeGuards::isLostDsePeer);
+        peers.removeIf(DseUpgradeGuards::isLostNode);
         return peers;
     }
 
-    /** How long nothing has been heard of {@code endpoint}, in whole minutes, for the log lines. */
-    private static long silenceMinutes(InetAddressAndPort endpoint)
+    /** How long nothing has been heard of {@code endpoint}, in whole seconds, for the log lines. */
+    private static long silenceSeconds(InetAddressAndPort endpoint)
     {
         EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-        return state == null ? 0 : TimeUnit.NANOSECONDS.toMinutes(nanoTime() - state.getUpdateTimestamp());
+        return state == null ? 0 : TimeUnit.NANOSECONDS.toSeconds(nanoTime() - state.getUpdateTimestamp());
     }
 
     private static boolean isAlive(InetAddressAndPort endpoint)
@@ -284,11 +370,11 @@ public final class DseUpgradeGuards
 
     /**
      * The guard of {@code nodetool removenode}: refuses it while the upgrade is in progress, unless {@code endpoint} is a
-     * DSE 6 node lost for good ({@link #isLostDsePeer}) and every other DSE 6 node is lost too ({@link #liveDsePeers}):
-     * the removal streams the data of the lost node from its other replicas to the nodes that take over its ranges,
-     * which a DSE 6 node cannot do with this software, so it then involves nodes of this software only. A DSE 6 node
-     * that comes back during the removal takes over its ranges without their data, which a full repair restores
-     * once the upgrade is finished: the WARN says so.
+     * node lost for good ({@link #isLostNode}), a DSE 6 node or a node of this software, and every DSE 6 node still in
+     * the cluster is lost too ({@link #liveDsePeers}): the removal streams the data of the lost node from its other
+     * replicas to the nodes that take over its ranges, which a DSE 6 node cannot do with this software, so it then
+     * involves nodes of this software only. A DSE 6 node that comes back during the removal takes over its ranges
+     * without their data, which a full repair restores once the upgrade is finished: the WARN says so.
      *
      * @param endpoint the node to remove, or null when its host id is unknown
      * @throws UnsupportedOperationException when refused
@@ -297,7 +383,8 @@ public final class DseUpgradeGuards
     {
         if (!upgradeInProgress())
             return;
-        if (endpoint == null || !isLostDsePeer(endpoint))
+        String kind = endpoint == null ? null : lostNodeKind(endpoint);
+        if (kind == null)
         {
             refuseWhileUpgrading("removenode");
             return;
@@ -305,9 +392,9 @@ public final class DseUpgradeGuards
         Set<InetAddressAndPort> live = liveDsePeers();
         if (live.isEmpty())
         {
-            logger.warn("Allowing the removal of the DSE 6 node {}, silent for {} minutes, during the DSE 6 upgrade: its data is streamed " +
-                        "from its other replicas, all of this software (a DSE 6 node that comes back meanwhile takes over ranges without " +
-                        "their data until a full repair, which runs once the upgrade is finished); " + LOST_NODE_CAVEAT, endpoint, silenceMinutes(endpoint));
+            logger.warn("Allowing the removal of {}, silent for {} seconds, during the DSE 6 upgrade: its data is streamed from its other " +
+                        "replicas, all of this software (a DSE 6 node that comes back meanwhile takes over ranges without their data until " +
+                        "a full repair, which runs once the upgrade is finished); " + LOST_NODE_CAVEAT, describe(kind, endpoint), silenceSeconds(endpoint));
             return;
         }
         Set<InetAddressAndPort> withoutState = new TreeSet<>();
@@ -315,8 +402,8 @@ public final class DseUpgradeGuards
             if (Gossiper.instance.getEndpointStateForEndpoint(peer) == null)
                 withoutState.add(peer);
         DseCompatRefusals.refused("removenode");
-        throw new UnsupportedOperationException("removenode of the DSE 6 node " + endpoint + " lost for good is refused while DSE 6 nodes not known " +
-                                                "to be lost are in the cluster (" + live +
+        throw new UnsupportedOperationException("removenode of " + describe(kind, endpoint) + " lost for good is refused while DSE 6 nodes not " +
+                                                "known to be lost are in the cluster (" + live +
                                                 (withoutState.isEmpty() ? "" : "; known without a gossip state (on record or presumed): " + withoutState) +
                                                 "): it streams data with the other replicas, which DSE 6 nodes cannot do with this software; " +
                                                 "upgrade those DSE 6 nodes first, or remove the lost node with nodetool assassinate " +
@@ -326,8 +413,8 @@ public final class DseUpgradeGuards
 
     /**
      * The guard of {@code nodetool assassinate}: refuses it while the upgrade is in progress, unless {@code endpoint} is
-     * a DSE 6 node lost for good ({@link #isLostDsePeer}), which it then removes without streaming, whatever DSE 6 nodes
-     * are alive.
+     * a node lost for good ({@link #isLostNode}), a DSE 6 node or a node of this software, which it then removes
+     * without streaming, whatever DSE 6 nodes are alive.
      *
      * @throws UnsupportedOperationException when refused
      */
@@ -335,20 +422,21 @@ public final class DseUpgradeGuards
     {
         if (!upgradeInProgress())
             return;
-        if (!isLostDsePeer(endpoint))
+        String kind = lostNodeKind(endpoint);
+        if (kind == null)
         {
             refuseWhileUpgrading("assassinate");
             return;
         }
-        logger.warn("Allowing the assassination of the DSE 6 node {}, silent for {} minutes, during the DSE 6 upgrade: nothing is streamed, " +
-                    "so the data of its ranges is held by fewer replicas until a full repair, which runs once the upgrade is finished; " +
-                    LOST_NODE_CAVEAT, endpoint, silenceMinutes(endpoint));
+        logger.warn("Allowing the assassination of {}, silent for {} seconds, during the DSE 6 upgrade: nothing is streamed, so the data " +
+                    "of its ranges is held by fewer replicas until a full repair, which runs once the upgrade is finished; " +
+                    LOST_NODE_CAVEAT, describe(kind, endpoint), silenceSeconds(endpoint));
     }
 
     /**
      * The guard of {@code nodetool removenode force}: refuses it while the upgrade is in progress, unless every node
-     * being removed ({@code leaving}) is a DSE 6 node lost for good ({@link #isLostDsePeer}); forcing the removal
-     * streams nothing.
+     * being removed ({@code leaving}) is a node lost for good ({@link #isLostNode}), a DSE 6 node or a node of this
+     * software; forcing the removal streams nothing.
      *
      * @throws UnsupportedOperationException when refused
      */
@@ -356,14 +444,14 @@ public final class DseUpgradeGuards
     {
         if (!upgradeInProgress())
             return;
-        if (leaving.isEmpty() || !leaving.stream().allMatch(DseUpgradeGuards::isLostDsePeer))
+        if (leaving.isEmpty() || !leaving.stream().allMatch(DseUpgradeGuards::isLostNode))
         {
             refuseWhileUpgrading("removenode force");
             return;
         }
-        logger.warn("Allowing the forced removal of the DSE 6 nodes {}, each silent for at least {} minutes, during the DSE 6 upgrade: the " +
+        logger.warn("Allowing the forced removal of the lost nodes {}, each silent for at least {} seconds, during the DSE 6 upgrade: the " +
                     "data not yet streamed is held by fewer replicas until a full repair, which runs once the upgrade is finished; " +
-                    LOST_NODE_CAVEAT, leaving, TimeUnit.NANOSECONDS.toMinutes(lostPeerSilenceNanos()));
+                    LOST_NODE_CAVEAT, leaving, TimeUnit.NANOSECONDS.toSeconds(lostNodeSilenceNanos()));
     }
 
     /**
@@ -382,10 +470,11 @@ public final class DseUpgradeGuards
      * earlier, before its shadow round ({@link #refuseAtStartupWhileUpgrading}). The remedy of the message is the one
      * for a node without the mode.
      * <p>
-     * The node a replacement replaces is not counted ({@code replaced}): a DSE 6 node lost for good can be replaced
-     * once no other DSE 6 node is in gossip, since the replacement streams its data from the other replicas, which are
-     * then all of this software (and without the mode, as a node without the mode joins no node in the mode). The
-     * replacement keeps its own check that the replaced node is not alive.
+     * The node a replacement replaces is not counted ({@code replaced}): this check lets a DSE 6 node lost for good be
+     * replaced once no other DSE 6 node is in gossip, since the replacement streams its data from the other replicas,
+     * which are then all of this software (and without the mode, as a node without the mode joins no node in the mode);
+     * the procedure removes the node instead (see the class javadoc). The replacement keeps its own check that the
+     * replaced node is not alive.
      *
      * @param states   the endpoint states of the shadow round
      * @param replaced the node being replaced, or null for a bootstrap

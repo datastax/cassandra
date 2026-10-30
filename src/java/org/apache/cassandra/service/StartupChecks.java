@@ -172,6 +172,7 @@ public class StartupChecks
                                                                       loadDsePeersRecord,
                                                                       checkDse6Artefacts,
                                                                       checkDse6GossipedDseVersion,
+                                                                      checkLostNodeSilence,
                                                                       checkSSTablesFormat,
                                                                       checkSystemKeyspaceState,
                                                                       checkDse6SaiVersionPin,
@@ -912,6 +913,32 @@ public class StartupChecks
                             "the range reads of storage-attached index queries with a verb it cannot receive, unless they run with " +
                             "-Ddse.disable_endpoint_group_range_reads=true",
                             CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getKey(), DseCompat.NO_DSE_VERSION);
+        }
+    };
+
+    /**
+     * Refuses to start when {@code cassandra.internode_compatibility_mode.lost_node_silence_seconds} is set to a value
+     * that is not a whole number of seconds or is below the larger of one minute and twice the ring delay, and logs the
+     * silence when it is set ({@link DseUpgradeGuards#checkLostNodeSilence}). In every mode, since the removal of a node
+     * lost during the DSE 6 upgrade is allowed in both; a no-op when the property is not set.
+     */
+    public static final StartupCheck checkLostNodeSilence = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            long seconds;
+            try
+            {
+                seconds = DseUpgradeGuards.checkLostNodeSilence();
+            }
+            catch (ConfigurationException e)
+            {
+                throw new StartupException(StartupException.ERR_WRONG_CONFIG, e.getMessage());
+            }
+            if (seconds >= 0)
+                logger.info("A node that is down counts as lost during the DSE 6 upgrade once nothing has been heard of it for {} seconds ({}={})",
+                            seconds, CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getKey(), seconds);
         }
     };
 
