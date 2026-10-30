@@ -55,7 +55,8 @@ public final class WithProperties implements AutoCloseable
     public WithProperties clear(CassandraRelevantProperties prop)
     {
         return set(prop, () -> {
-            String prev = prop.getString();
+            // null for an absent property, not the default getString() returns for it: close() must clear it again
+            String prev = prop.isPresent() ? prop.getString() : null;
             prop.clearValue(); // checkstyle: suppress nearby 'clearValueSystemPropertyUsage'
             return prev;
         });
