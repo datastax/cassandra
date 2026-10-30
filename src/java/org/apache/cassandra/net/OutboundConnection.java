@@ -1315,11 +1315,15 @@ public class OutboundConnection
                 SslFallbackConnectionType[] fallBackSslFallbackConnectionTypes = SslFallbackConnectionType.values();
                 int index = sslFallbackEnabled && settings.withEncryption() && settings.encryption.getOptional() ?
                             (int) (connectionAttempts - 1) % fallBackSslFallbackConnectionTypes.length : 0;
-                if (fallBackSslFallbackConnectionTypes[index] != SslFallbackConnectionType.SERVER_CONFIG)
+                SslFallbackConnectionType sslConnectionType = fallBackSslFallbackConnectionTypes[index];
+                // DSE 6 compatibility mode: no plain-text retry of an encrypted connection to a peer not known at 4.0 or
+                // later (DseTlsPorts; a no-op otherwise)
+                sslConnectionType = DseTlsPorts.sslFallback(settings, messagingVersion, sslConnectionType);
+                if (sslConnectionType != SslFallbackConnectionType.SERVER_CONFIG)
                 {
-                    logger.info("ConnectionId {} is falling back to {} reconnect strategy for retry", id(), fallBackSslFallbackConnectionTypes[index]);
+                    logger.info("ConnectionId {} is falling back to {} reconnect strategy for retry", id(), sslConnectionType);
                 }
-                initiateMessaging(eventLoop, type, fallBackSslFallbackConnectionTypes[index], settings, messagingVersion, result)
+                initiateMessaging(eventLoop, type, sslConnectionType, settings, messagingVersion, result)
                 .addListener(future -> {
                     if (future.isCancelled())
                         return;
