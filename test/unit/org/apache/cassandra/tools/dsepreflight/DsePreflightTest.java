@@ -85,20 +85,29 @@ public class DsePreflightTest
     private static final String TLS_CARRY = "; on HCD 2.0, carry the keys DSE sets in server_encryption_options into the cassandra.yaml of HCD 2.0";
     /** The message of TDE_TABLE for system_info_encryption enabled in dse.yaml. */
     private static final String SYSTEM_INFO_ENCRYPTION_MESSAGE = "system_info_encryption.enabled is true in dse.yaml: DSE encrypts the tables " +
-                                                                 "system.batches, system.paxos, system_backups.backup_stores and " +
-                                                                 "system_backups.backup_configurations, its commit log, its saved caches and its " +
+                                                                 "system.batches, system.paxos, system_backups.backup_configurations and " +
+                                                                 "system_backups.backup_stores, its commit log, its saved caches and its " +
                                                                  "hints files; encryption is out of scope of this upgrade";
+    /** What the remedies of the encryption findings ask to keep while encrypted data is left. */
+    private static final String SYSTEM_KEY_DIRECTORY = "the whole directory that system_key_directory names in dse.yaml (by default " +
+                                                       "/etc/dse/conf), its system/system_table_keytab included,";
+    /** How the remedies of the encryption findings end: what happens without the keytab. */
+    private static final String SYSTEM_KEY_LOSS = "without the original system/system_table_keytab of that directory, DSE cannot read " +
+                                                  "what it encrypted before (DSE 6.8.65, started without it, made a new one with no warning, " +
+                                                  "failed on its encrypted hints files and, under disk_failure_policy: stop, stopped serving)";
     /** The remedy of TDE_TABLE for system_info_encryption enabled in dse.yaml. */
     private static final String SYSTEM_INFO_ENCRYPTION_REMEDY = "set enabled: false under system_info_encryption in dse.yaml; restart DSE on every " +
-                                                                "node, with the system key still in place, so that DSE replays the commit log " +
-                                                                "segments written before and writes its commit log, saved caches and hints files " +
+                                                                "node, with " + SYSTEM_KEY_DIRECTORY + " still in place, so that " +
+                                                                "DSE replays the commit log segments written before and writes its " +
+                                                                "commit log, saved caches and hints files " +
                                                                 "unencrypted from then on (HCD 2.0 skips a saved cache it cannot read); then run " +
                                                                 "nodetool upgradesstables -a system batches paxos and nodetool upgradesstables -a " +
                                                                 "system_backups on every node, so that those tables are rewritten unencrypted (this " +
-                                                                "tool does not check that the rewrite is done); and keep the system key in place " +
+                                                                "tool does not check that the rewrite is done); and keep that directory in place " +
                                                                 "until the rewrite is done and, with every node up, DSE has delivered the hints " +
                                                                 "files written before, which stay encrypted (this tool names those left, under " +
-                                                                "HINTS_COMPRESSION); all of it before the first node of the cluster is upgraded";
+                                                                "HINTS_COMPRESSION); all of it before the first node of the cluster is upgraded; " +
+                                                                SYSTEM_KEY_LOSS;
     /**
      * An id of the project's plan an operator cannot look up, which no text of the tool may hold: a decision ("decision
      * 3i", "decisions 3i and 3l"), a collection answer or question ("A58", "A06.01", "Q48"), a proposed runbook change
@@ -621,7 +630,7 @@ public class DsePreflightTest
         assertThat(run.messages("LIVE_UNAVAILABLE")).contains("nodetool status: exit code 1 nodetool: Failed to connect");
         Run missing = assertReady(run(node, "--nodetool", node.root.resolve("no-such-nodetool").toString()));
         assertThat(missing.messages("LIVE_UNAVAILABLE")).contains("cannot run");
-        // DSE 6.8's nodetool has no listpendinghints
+        // the nodetool of DSE 6.8.65 and 6.9.26 has no listpendinghints
         Path older = fakeNodetool(node.root, node.root.resolve("arguments"), 0,
                                  "case \"$*\" in\n" +
                                  "  *listpendinghints*) echo 'nodetool: Found unexpected parameters: [listpendinghints]'; exit 1 ;;\n" +
@@ -718,6 +727,24 @@ public class DsePreflightTest
     }
 
     /**
+     * The four tables system_info_encryption encrypts: sorted, as the schema inspection lists them, and so named; the
+     * names joined as a sentence joins them.
+     */
+    @Test
+    public void systemInfoEncryptedTablesAreSortedAndNamed()
+    {
+        assertThat(NodeInspector.SYSTEM_INFO_ENCRYPTED_TABLE_NAMES).isSorted()
+                                                                   .containsExactly("system.batches", "system.paxos",
+                                                                                    "system_backups.backup_configurations",
+                                                                                    "system_backups.backup_stores");
+        assertThat(NodeInspector.SYSTEM_INFO_ENCRYPTED_TABLES).isEqualTo("the tables system.batches, system.paxos, " +
+                                                                        "system_backups.backup_configurations and " +
+                                                                        "system_backups.backup_stores");
+        assertThat(NodeInspector.namesWithAnd(List.of("a"))).isEqualTo("a");
+        assertThat(NodeInspector.namesWithAnd(List.of("a", "b"))).isEqualTo("a and b");
+    }
+
+    /**
      * HINTS_COMPRESSION from the hints files themselves: a DSE hints file whose header records a compression blocks, so
      * that the files written before hints_compression was removed are found, and so does a file DSE encrypted while
      * system_info_encryption was enabled in dse.yaml, whose header records the encryption as a compression (TDE_TABLE blocks
@@ -741,13 +768,14 @@ public class DsePreflightTest
                    "encryption as a compression): remove hints_compression from DSE's cassandra.yaml and set enabled: false under " +
                    "system_info_encryption in dse.yaml, each one that is set, and restart DSE on this node, so that the hints files it " +
                    "writes from then on are neither compressed nor encrypted; the files written before keep their compression or " +
-                   "encryption: with every node up, and for encrypted files the system key still in place, wait until DSE has delivered " +
-                   "them and they are gone, before the first node of the cluster is upgraded, then run this tool again; if " +
+                   "encryption: with every node up, and for encrypted files " + SYSTEM_KEY_DIRECTORY + " still in place, wait " +
+                   "until DSE has delivered them and they are gone, before the first node of the cluster is upgraded, then run " +
+                   "this tool again; if " +
                    "system_info_encryption was enabled, it also encrypted the tables system.batches, system.paxos, " +
-                   "system_backups.backup_stores and system_backups.backup_configurations: once DSE runs with it off on every node, run " +
+                   "system_backups.backup_configurations and system_backups.backup_stores: once DSE runs with it off on every node, run " +
                    "nodetool upgradesstables -a system batches paxos and nodetool upgradesstables -a system_backups on every node, with " +
-                   "the system key still in place, before the first node of the cluster is upgraded (this tool does not check that the " +
-                   "rewrite is done)");
+                   "that directory still in place, before the first node of the cluster is upgraded (this tool does not check that the " +
+                   "rewrite is done); for encrypted files, " + SYSTEM_KEY_LOSS);
         assertThat(run.out).doesNotContain("s3cr3t");
         assertThat(run.codes(Finding.Severity.WARNING)).doesNotContain("HINTS_UNREADABLE");
         assertThat(NodeInspector.hintsFileParameters(node.hints.resolve(plain))).isEmpty();

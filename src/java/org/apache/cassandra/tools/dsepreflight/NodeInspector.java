@@ -108,13 +108,34 @@ final class NodeInspector
     static final String LOCATOR_PACKAGE = "org.apache.cassandra.locator.";
     /** The major version of HCD 2.0's releases, for a build whose release is not known (no version.properties). */
     static final int HCD_20_MAJOR = 5;
-    /** The tables DSE 6.8.65 and 6.9.26 encrypt while system_info_encryption is enabled in dse.yaml. */
-    static final String SYSTEM_INFO_ENCRYPTED_TABLES = "the tables system.batches, system.paxos, system_backups.backup_stores and " +
-                                                       "system_backups.backup_configurations";
+    /** The names of the tables DSE 6.8.65 and 6.9.26 encrypt while system_info_encryption is enabled in dse.yaml, sorted. */
+    static final List<String> SYSTEM_INFO_ENCRYPTED_TABLE_NAMES = List.of("system.batches", "system.paxos", "system_backups.backup_configurations",
+                                                                          "system_backups.backup_stores");
+    /** {@link #SYSTEM_INFO_ENCRYPTED_TABLE_NAMES}, as the texts name them. */
+    static final String SYSTEM_INFO_ENCRYPTED_TABLES = "the tables " + namesWithAnd(SYSTEM_INFO_ENCRYPTED_TABLE_NAMES);
     /** The rewrite of {@link #SYSTEM_INFO_ENCRYPTED_TABLES} once DSE runs with system_info_encryption off. */
     static final String SYSTEM_INFO_REWRITE = "nodetool upgradesstables -a system batches paxos and nodetool upgradesstables -a system_backups " +
                                               "on every node";
-    /** What DSE's nodetool answers for a command it does not have (DSE 6.8 has no listpendinghints). */
+    /**
+     * What to keep while DSE still has data that system_info_encryption encrypted: the whole key directory, as the table
+     * key is its system/system_table_keytab.
+     */
+    static final String SYSTEM_KEY_DIRECTORY = "the whole directory that system_key_directory names in dse.yaml (by default /etc/dse/conf), " +
+                                               "its system/system_table_keytab included,";
+    /** What happens without that keytab, as DSE 6.8.65 showed when started with the directory moved aside. */
+    static final String SYSTEM_KEY_LOSS = "without the original system/system_table_keytab of that directory, DSE cannot read what it encrypted " +
+                                          "before (DSE 6.8.65, started without it, made a new one with no warning, failed on its encrypted hints " +
+                                          "files and, under disk_failure_policy: stop, stopped serving)";
+    /**
+     * How the remedies of the findings on system_info_encryption end: the key directory kept until the rewrite of
+     * {@link #SYSTEM_INFO_ENCRYPTED_TABLES} and the delivery of the encrypted hints files, before the first upgrade, and
+     * {@link #SYSTEM_KEY_LOSS}.
+     */
+    static final String SYSTEM_INFO_KEEP_UNTIL = "keep that directory in place until the rewrite is done and, with every node up, DSE has " +
+                                                 "delivered the hints files written before, which stay encrypted (this tool names those left, " +
+                                                 "under HINTS_COMPRESSION); all of it before the first node of the cluster is upgraded; " +
+                                                 SYSTEM_KEY_LOSS;
+    /** What DSE's nodetool answers for a command it does not have (DSE 6.8.65 and 6.9.26 have no listpendinghints). */
     static final String UNKNOWN_COMMAND = "Found unexpected parameters";
     /** The longest parameters the header of a DSE hints file is taken to hold; a longer length is a damaged header. */
     static final int MAX_HINTS_PARAMETERS_BYTES = 64 * 1024;
@@ -502,13 +523,11 @@ final class NodeInspector
             findings.add(blocking("TDE_TABLE",
                                   "system_info_encryption.enabled is true in dse.yaml: DSE encrypts " + SYSTEM_INFO_ENCRYPTED_TABLES + ", its commit " +
                                   "log, its saved caches and its hints files; encryption is out of scope of this upgrade",
-                                  "set enabled: false under system_info_encryption in dse.yaml; restart DSE on every node, with the system key still in " +
-                                  "place, so that DSE replays the commit log segments written before and writes its commit log, saved caches and hints " +
-                                  "files unencrypted from then on (HCD 2.0 skips a saved cache it cannot read); then run " + SYSTEM_INFO_REWRITE + ", so " +
-                                  "that those tables are rewritten unencrypted (this tool does not check that the rewrite is done); and keep the system " +
-                                  "key in place until the rewrite is done and, with every node up, DSE has delivered the hints files written before, " +
-                                  "which stay encrypted (this tool names those left, under HINTS_COMPRESSION); all of it before the first node of the " +
-                                  "cluster is upgraded"));
+                                  "set enabled: false under system_info_encryption in dse.yaml; restart DSE on every node, with " + SYSTEM_KEY_DIRECTORY +
+                                  " still in place, so that DSE replays the commit log segments written before and writes its commit log, saved " +
+                                  "caches and hints files unencrypted from then on (HCD 2.0 skips a saved cache it cannot read); then run " +
+                                  SYSTEM_INFO_REWRITE + ", so that those tables are rewritten unencrypted (this tool does not check that the rewrite " +
+                                  "is done); and " + SYSTEM_INFO_KEEP_UNTIL));
         if (isTrue(get(dse, "config_encryption_active")))
             findings.add(warning("CONFIG_ENCRYPTION",
                                  "config_encryption_active is true in dse.yaml: some values of DSE's configuration files are encrypted, and the tool sees them " +
@@ -1543,11 +1562,11 @@ final class NodeInspector
                                   "encryption as a compression): remove hints_compression from DSE's cassandra.yaml and set enabled: false under " +
                                   "system_info_encryption in dse.yaml, each one that is set, and restart DSE on this node, so that the hints files it " +
                                   "writes from then on are neither compressed nor encrypted; the files written before keep their compression or " +
-                                  "encryption: with every node up, and for encrypted files the system key still in place, wait until DSE has delivered " +
-                                  "them and they are gone, before the first node of the cluster is upgraded, then run this tool again; if " +
+                                  "encryption: with every node up, and for encrypted files " + SYSTEM_KEY_DIRECTORY + " still in place, wait until DSE " +
+                                  "has delivered them and they are gone, before the first node of the cluster is upgraded, then run this tool again; if " +
                                   "system_info_encryption was enabled, it also encrypted " + SYSTEM_INFO_ENCRYPTED_TABLES + ": once DSE runs with it " +
-                                  "off on every node, run " + SYSTEM_INFO_REWRITE + ", with the system key still in place, before the first node of " +
-                                  "the cluster is upgraded (this tool does not check that the rewrite is done)"));
+                                  "off on every node, run " + SYSTEM_INFO_REWRITE + ", with that directory still in place, before the first node of " +
+                                  "the cluster is upgraded (this tool does not check that the rewrite is done); for encrypted files, " + SYSTEM_KEY_LOSS));
         if (!unreadableHeaders.isEmpty())
             findings.add(warning("HINTS_UNREADABLE",
                                  "DSE hints files whose header cannot be read, so whether they are compressed or encrypted is not known: " + list(unreadableHeaders),
@@ -2000,6 +2019,13 @@ final class NodeInspector
             return String.join(", ", items);
         List<String> shown = new ArrayList<>(items).subList(0, LISTED);
         return String.join(", ", shown) + " and " + (items.size() - LISTED) + " more";
+    }
+
+    /** One or more names as a sentence names them: "a", "a and b", "a, b and c". */
+    static String namesWithAnd(List<String> names)
+    {
+        int last = names.size() - 1;
+        return last == 0 ? names.get(0) : String.join(", ", names.subList(0, last)) + " and " + names.get(last);
     }
 
     /** The message of the innermost cause of an error, which names what went wrong rather than what failed with it. */
