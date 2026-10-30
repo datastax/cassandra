@@ -28,7 +28,7 @@ import java.util.concurrent.TimeoutException;
 import org.apache.cassandra.utils.WithResources;
 import org.apache.cassandra.utils.concurrent.Future;
 
-public class WrappedExecutorPlus implements ExecutorPlus
+public class WrappedExecutorPlus implements ExecutorPlus, RunningTaskSource
 {
     protected final ExecutorPlus executor;
 
@@ -128,6 +128,12 @@ public class WrappedExecutorPlus implements ExecutorPlus
     public String getLongestRunningTaskClass()
     {
         return executor.getLongestRunningTaskClass();
+    }
+
+    @Override
+    public RunningTaskSnapshot longestRunningTask()
+    {
+        return RunningTaskSnapshot.longestRunningTask(executor);
     }
 
     public int getCorePoolSize()
