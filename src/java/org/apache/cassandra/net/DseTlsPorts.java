@@ -16,9 +16,13 @@
 
 package org.apache.cassandra.net;
 
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
@@ -28,12 +32,14 @@ import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.OutboundConnectionInitiator.SslFallbackConnectionType;
 import org.apache.cassandra.utils.CassandraVersion;
 
 /**
  * The internode TLS ports of the DSE 6 compatibility mode: where this node listens for DSE 6 nodes and which port it
- * dials them on, when internode encryption is on. Outside DSE 6 compatibility mode every public method answers what
- * upstream does: no extra socket, no pre-4.0 port choice.
+ * dials them on, when internode encryption is on, and that a connection the configuration encrypts is not retried in
+ * plain text towards them. Outside DSE 6 compatibility mode every public method answers what upstream
+ * does: no extra socket, no pre-4.0 port choice, no change to the SSL fallback.
  * <p>
  * DSE has two port models, read in DSE's code:
  * <ul>
@@ -57,7 +63,7 @@ import org.apache.cassandra.utils.CassandraVersion;
  *       the peer's version, have neither the setting nor {@code DSE_697}, and under {@code all} listen on
  *       {@code ssl_storage_port} only; 6.9.7 is the first release with the choice by version.</li>
  * </ul>
- * Hence the two rules of this class, both for DSE 6 compatibility mode only:
+ * Hence the rules of this class, all for DSE 6 compatibility mode only:
  * <ul>
  *   <li>{@link #listensOnSslStoragePortForDse}: with internode encryption on, this node also listens, TLS only, on
  *       {@code ssl_storage_port} when {@code legacy_ssl_storage_port_enabled} is false (with it true it does already,
@@ -65,6 +71,15 @@ import org.apache.cassandra.utils.CassandraVersion;
  *   <li>{@link #dialsSslStoragePort}: a DSE 6 peer is dialled the way DSE 6.9.7+ dials its own peers, by its DSE
  *       version: {@code ssl_storage_port} below 6.9.7, {@code storage_port} from 6.9.7 on; a peer whose DSE version is
  *       not known follows {@code legacy_ssl_storage_port_enabled}.</li>
+ *   <li>{@link #sslFallback}: a connection the configuration encrypts to a peer that is not known at messaging version
+ *       4.0 or later (a pre-4.0 version, or none known) is never retried without TLS. {@code internode_encryption: dc}
+ *       and {@code rack} make the encryption options optional whatever {@code optional} says, and with optional
+ *       encryption {@link OutboundConnection} (messaging) and the streaming connection factory retry a failed TLS
+ *       connection with each SSL fallback strategy in turn, the last one ({@link SslFallbackConnectionType#NO_SSL})
+ *       in plain text. Against the optional {@code storage_port} of a DSE 6.9.7+ node that could open an unencrypted
+ *       connection to another data center (or rack); that strategy is replaced by the configured TLS one for
+ *       messaging and not tried for streaming, so a peer that accepts only plain text is never reached, and the
+ *       refusal is logged at WARN once per peer.</li>
  * </ul>
  * So no setting of either side has to change for internode TLS: neither DSE's {@code enable_legacy_ssl_storage_port}
  * nor this node's {@code legacy_ssl_storage_port_enabled}; {@code ssl_storage_port} and {@code internode_encryption}
@@ -76,6 +91,11 @@ public final class DseTlsPorts
     /** The DSE version of a peer is not known: neither gossip nor the stored release names one. */
     @VisibleForTesting
     static final int UNKNOWN = -1;
+
+    private static final Logger logger = LoggerFactory.getLogger(DseTlsPorts.class);
+
+    /** The peers whose refused unencrypted fallback was logged: once each, for the life of the process. */
+    private static final Set<InetAddressAndPort> plainFallbackRefusalLogged = ConcurrentHashMap.newKeySet();
 
     private DseTlsPorts()
     {
@@ -119,6 +139,97 @@ public final class DseTlsPorts
         if (dseMessagingVersion == UNKNOWN)
             return legacySslStoragePortEnabled;
         return dseMessagingVersion < DseCompat.DSE_697_VERSION;
+    }
+
+    /**
+     * The SSL fallback strategy a connection attempt to {@code settings.to} uses instead of {@code strategy}, the one
+     * {@link OutboundConnection} (or the streaming connection factory) picked: {@code strategy} itself, but for
+     * {@link SslFallbackConnectionType#NO_SSL} when {@link #plainFallbackRefusal} refuses it, which is replaced by
+     * {@link SslFallbackConnectionType#SERVER_CONFIG}, the configured TLS connection (the encrypted strategies,
+     * {@code SERVER_CONFIG}, {@code MTLS} and {@code SSL}, are kept), with a WARN the first time for each peer.
+     * {@link OutboundConnection} connects with the strategy returned; the streaming connection factory stops when it
+     * differs from {@code strategy}, after the encrypted strategies, which come first. Always {@code strategy} outside
+     * DSE 6 compatibility mode, where nothing else is looked up.
+     *
+     * @param settings the settings of the attempt, with the port already chosen; their messaging versions are the
+     *                 connection's own
+     * @param messagingVersion the messaging version the attempt connects at
+     */
+    public static SslFallbackConnectionType sslFallback(OutboundConnectionSettings settings, int messagingVersion, SslFallbackConnectionType strategy)
+    {
+        if (strategy != SslFallbackConnectionType.NO_SSL || !DseCompat.enabled() || !settings.withEncryption())
+            return strategy;
+
+        String refusal = plainFallbackRefusal(settings, messagingVersion, settings.endpointToVersion(), MessagingService.instance().versions);
+        if (refusal == null)
+            return strategy;
+
+        if (plainFallbackRefusalLogged.add(settings.to))
+            logger.warn("DSE 6 compatibility mode: refusing the unencrypted fallback of the internode connections to {}: internode_encryption ({}) " +
+                        "encrypts the connections to this peer and {}, so a failed TLS connection is not retried in plain text: the " +
+                        "connections to it keep failing while the peer does not accept TLS on port {}; check the peer's " +
+                        "internode_encryption and ssl_storage_port, and the certificates and truststores of both nodes",
+                        settings.to, settings.encryption.internode_encryption, refusal, settings.connectTo().getPort());
+        return SslFallbackConnectionType.SERVER_CONFIG;
+    }
+
+    /**
+     * Why a connection with these settings must not fall back to plain text, or null when it may: in DSE 6
+     * compatibility mode, when the configuration encrypts the connection ({@link OutboundConnectionSettings#withEncryption}:
+     * with {@code internode_encryption: all}, and with {@code dc} or {@code rack} for a peer in another data center or
+     * rack) and the peer is not known at messaging version 4.0 or later. It is known there only when the attempt
+     * connects at 4.0 or later, at least one of the connection's versions and the node's knows the peer, and neither
+     * knows it at a pre-4.0 version: a raw DSE version gossiped by a DSE node (256 or more) counts as the dialect, not
+     * as a version above the current one, and the node's versions count because the connection's are a copy taken when
+     * it was created, which a version learned since (from gossip or an inbound connection) does not reach until a
+     * handshake succeeds. A peer known at 4.0 or later, an unencrypted connection and mode {@code NONE} keep the
+     * upstream fallback.
+     */
+    @VisibleForTesting
+    @Nullable
+    static String plainFallbackRefusal(OutboundConnectionSettings settings, int messagingVersion,
+                                       EndpointMessagingVersions connectionVersions, EndpointMessagingVersions nodeVersions)
+    {
+        if (!DseCompat.enabled() || !settings.withEncryption())
+            return null;
+
+        int connectionVersion = knownVersion(connectionVersions, settings.to);
+        int nodeVersion = knownVersion(nodeVersions, settings.to);
+        if (connectionVersion == UNKNOWN && nodeVersion == UNKNOWN)
+            return "its messaging version is not known yet (it may be a DSE 6 node)";
+
+        int below40 = messagingVersion < MessagingService.VERSION_40 ? messagingVersion
+                      : connectionVersion != UNKNOWN && connectionVersion < MessagingService.VERSION_40 ? connectionVersion
+                      : nodeVersion != UNKNOWN && nodeVersion < MessagingService.VERSION_40 ? nodeVersion
+                      : UNKNOWN;
+        if (below40 == UNKNOWN)
+            return null;
+        return "it is at messaging version " + below40 + ", below 4.0 (DSE 6 nodes are at " + DseCompat.DSE_DIALECT + ')';
+    }
+
+    /**
+     * The messaging version at which {@code versions} knows {@code peer}, a raw DSE version (256 or more) read as the
+     * dialect, or {@link #UNKNOWN}.
+     */
+    private static int knownVersion(EndpointMessagingVersions versions, InetAddressAndPort peer)
+    {
+        if (!versions.knows(peer))
+            return UNKNOWN;
+        try
+        {
+            return DseCompat.messagingVersionFromGossip(versions.getRaw(peer));
+        }
+        catch (IllegalStateException e)
+        {
+            return UNKNOWN; // forgotten since knows()
+        }
+    }
+
+    /** Forgets the peers whose refused fallback was logged, so that a test sees the WARN again. */
+    @VisibleForTesting
+    static void resetPlainFallbackRefusalLog()
+    {
+        plainFallbackRefusalLogged.clear();
     }
 
     /**
