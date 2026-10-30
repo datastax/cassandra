@@ -25,6 +25,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
@@ -36,12 +37,15 @@ import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.Dse6AccessControlCheck;
+import org.apache.cassandra.service.Dse6NonCoreTraces;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEER_WORKLOADS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.REPLACE_ADDRESS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CURRENT_VERSION;
@@ -74,7 +78,8 @@ public class Dse6GuardsTest extends TestBaseImpl
 
     /**
      * The {@code DSE_6} mode sets {@code cassandra.trie_index_format_version} as a system property, which the in-JVM
-     * instances share: every test starts without it and restores it, so that the order of the tests does not matter.
+     * instances share: every test starts without it and restores it, so that the order of the tests does not matter
+     * (the {@code NONE} test must not run with the trie version of the mode).
      */
     private WithProperties trieIndexFormatVersion;
 
@@ -437,6 +442,125 @@ public class Dse6GuardsTest extends TestBaseImpl
             node.shutdown().get();
             node.startup();
             assertThat(node.nodetoolResult("compatstatus").getStdout()).contains("DSE access controls ignored  : 0 (found by a LOCAL_QUORUM read)\n");
+        }
+    }
+
+    @Test
+    public void aKeyspaceOfAnUnsupportedDseFeatureRefusesTheStart() throws Throwable
+    {
+        try (Cluster cluster = formerDseNodes(1, builder -> {}))
+        {
+            IInvokableInstance node = cluster.get(1);
+            // the start in DSE_6 mode found no trace, and compatstatus says so
+            assertThat(node.logs().grep("INFO .*DSE 6 compatibility mode: no trace of DSE Search, Graph, Analytics, DSEFS, CFS or " +
+                                        "Advanced Replication found").getResult()).hasSize(1);
+            assertThat(node.nodetoolResult("compatstatus").getStdout()).contains("Non-core DSE traces          : none\n");
+
+            // the keyspace of DSE Advanced Replication, empty, as DSE creates it; the schema is frozen in DSE_6 mode, the
+            // property lets the test create it
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                cluster.schemaChange("CREATE KEYSPACE dse_advrep WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}");
+            }
+            String refusal = "internode_compatibility_mode DSE_6 refused: found traces of DSE features that this software does not " +
+                             "support; only DSE core (the Cassandra workload) can be upgraded. DSE Advanced Replication: keyspace " +
+                             "dse_advrep. Roll this node back to DSE, remove them there (stop Advanced Replication, migrate what its " +
+                             "keyspace holds if it is needed and drop it, empty or not) and upgrade it again";
+            Throwable check = catchThrowable(() -> node.runOnInstance(Dse6GuardsTest::nonCoreTracesCheck));
+            assertThat(check).isNotNull();
+            assertThat(messages(check)).contains(refusal);
+
+            // the node does not start again in DSE_6 mode while the keyspace exists; the override of the entries of
+            // nodes/peers does not cover it
+            node.shutdown().get();
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEER_WORKLOADS, true))
+            {
+                Throwable failure = catchThrowable(node::startup);
+                assertThat(failure).isNotNull();
+                assertThat(messages(failure)).contains(refusal);
+            }
+            shutdownIfRunning(node);
+        }
+    }
+
+    @Test
+    public void aSearchIndexAndASolrDataDirectoryRefuseTheStart() throws Throwable
+    {
+        try (Cluster cluster = formerDseNodes(1, builder -> {}))
+        {
+            IInvokableInstance node = cluster.get(1);
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                cluster.schemaChange(withKeyspace("CREATE TABLE %s.searched (k int PRIMARY KEY, v text)"));
+            }
+            // the row of system_schema.indexes DSE writes for CREATE SEARCH INDEX ON the table (its class and target), and
+            // the empty solr.data directory of a Search node, in the first data directory
+            node.executeInternal("INSERT INTO system_schema.indexes (keyspace_name, table_name, index_name, kind, options) " +
+                                 "VALUES (?, 'searched', 'searched_solr_query_index', 'CUSTOM', " +
+                                 "{'class_name': 'com.datastax.bdp.search.solr.Cql3SolrSecondaryIndex', 'target': 'solr_query'})", KEYSPACE);
+            node.flush("system_schema");
+            String solrData = node.callOnInstance(() -> {
+                File directory = new File(DatabaseDescriptor.getAllDataFileLocations()[0], Dse6NonCoreTraces.SOLR_DATA);
+                directory.createDirectoriesIfNotExists();
+                return directory.toString();
+            });
+
+            // one refusal from the startup check, before the index is instantiated
+            node.shutdown().get();
+            Throwable failure = catchThrowable(node::startup);
+            assertThat(failure).isNotNull();
+            assertThat(messages(failure)).contains("internode_compatibility_mode DSE_6 refused: found traces of DSE features that this software " +
+                                                   "does not support; only DSE core (the Cassandra workload) can be upgraded. DSE Search: " +
+                                                   "index " + KEYSPACE + ".searched.searched_solr_query_index (com.datastax.bdp.search.solr." +
+                                                   "Cql3SolrSecondaryIndex), directory " + solrData + ". Roll this node back to DSE, remove " +
+                                                   "them there (drop the search indexes (DROP SEARCH INDEX ON <keyspace>.<table>); delete the " +
+                                                   "solr.data directories once no search index is left) and upgrade it again");
+            assertThat(messages(failure)).doesNotContain("the schema contains the DSE Search index");
+            shutdownIfRunning(node);
+        }
+    }
+
+    /** The startup check of the traces of the DSE features this software does not support, run inside an instance. */
+    private static void nonCoreTracesCheck()
+    {
+        try
+        {
+            Dse6NonCoreTraces.verifyAtStartup();
+        }
+        catch (StartupException e)
+        {
+            throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
+    @Test
+    public void noneModeIsUnchanged() throws Throwable
+    {
+        try (Cluster cluster = init(Cluster.build(1).withSubnet(SUBNET).withDynamicPortAllocation(true).withConfig(c -> c.with(Feature.NETWORK, Feature.GOSSIP)).start()))
+        {
+            cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (id int PRIMARY KEY, v text)"));
+            cluster.coordinator(1).execute(withKeyspace("ALTER TABLE %s.t ADD w int"), ConsistencyLevel.ALL);
+            cluster.coordinator(1).execute("INSERT INTO system_auth.role_permissions (role, resource, permissions) " +
+                                           "VALUES ('analyst', 'rows/top_secret/data/ks1/table1', {'SELECT'})", ConsistencyLevel.ALL);
+            cluster.get(1).nodetoolResult("upgradesstables", KEYSPACE, "t").asserts().success();
+            cluster.get(1).nodetoolResult("refresh", KEYSPACE, "t").asserts().success();
+            cluster.get(1).runOnInstance(Dse6GuardsTest::localPass);
+            cluster.get(1).runOnInstance(Dse6GuardsTest::quorumPass);
+            String out = cluster.get(1).nodetoolResult("compatstatus").getStdout();
+            assertThat(out).contains("Internode compatibility mode : NONE");
+            assertThat(out).contains("Requests refused (upgrade)   : 0\n");
+            assertThat(cluster.get(1).logs().grep("DSE 6 upgrade status").getResult()).isEmpty();
+            assertThat(cluster.get(1).logs().grep("DSE access controls").getResult()).isEmpty();
+
+            // the traces of the DSE features this software does not support are not looked for: a node with the keyspace of
+            // DSE Advanced Replication and a solr.data directory restarts
+            cluster.schemaChange("CREATE KEYSPACE dse_advrep WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}");
+            cluster.get(1).runOnInstance(() -> new File(DatabaseDescriptor.getAllDataFileLocations()[0], Dse6NonCoreTraces.SOLR_DATA).createDirectoriesIfNotExists());
+            cluster.get(1).shutdown().get();
+            cluster.get(1).startup();
+            assertThat(cluster.get(1).nodetoolResult("compatstatus").getStdout())
+            .contains("Non-core DSE traces          : not checked (internode_compatibility_mode NONE)\n");
+            assertThat(cluster.get(1).logs().grep("trace of DSE Search").getResult()).isEmpty();
         }
     }
 

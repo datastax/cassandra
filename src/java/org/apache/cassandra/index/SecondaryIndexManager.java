@@ -125,6 +125,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.Dse6NonCoreTraces;
 import org.apache.cassandra.service.pager.SinglePartitionPager;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -974,7 +975,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return "internode_compatibility_mode NONE refused: the schema still contains the DSE-only index " +
                baseCfs.getKeyspaceName() + '.' + baseCfs.getTableName() + '.' + indexDef.name + " (" + className + "). DSE Search and the " +
                "other DSE features outside DSE core are not supported by this software, and a cluster using them cannot be upgraded: the " +
-               "index must be dropped on DSE before the upgrade";
+               "index must be dropped on DSE before the upgrade (a node in DSE_6 mode refuses a DSE Search index and loads any other as a " +
+               "no-op index)";
     }
 
     @Nullable
@@ -999,7 +1001,12 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 {
                     // ConfigurationException can only be thrown from FBUtilities.classForName(…)
                     //  anything from the index constructor will get wrapped in an InvocationTargetException
-                    if (INDEX_UNKNOWN_IGNORE.getBoolean())
+                    if (DatabaseDescriptor.isDse6CompatibilityMode() && Dse6NonCoreTraces.isSearchIndexClass(className))
+                    {
+                        // DSE Search is not supported, whatever the properties: the startup check refuses such a schema first
+                        throw new ConfigurationException(Dse6NonCoreTraces.searchIndexRefusal(baseCfs.getKeyspaceName(), baseCfs.getTableName(), indexDef.name, className), e);
+                    }
+                    else if (INDEX_UNKNOWN_IGNORE.getBoolean())
                     {
                         logger.error("Cannot find index type {}, but '{}' is true so creating noop index {}",
                                      className, INDEX_UNKNOWN_IGNORE.getKey(), indexDef.name);
@@ -1008,10 +1015,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                     }
                     else if (DatabaseDescriptor.isDse6CompatibilityMode())
                     {
-                        // an index type this software does not have, in a schema from the product being upgraded from
+                        // an index type this software does not have, in a schema from the product being upgraded from (DSE
+                        // Search indexes are refused above)
                         logger.warn("Cannot find index type {} of index {}; running in internode_compatibility_mode DSE_6, " +
-                                    "so it is loaded as a no-op index (drop it before switching internode_compatibility_mode back to NONE; " +
-                                    "a node in NONE mode refuses to load it)", className, indexDef.name);
+                                    "so it is loaded as a no-op index (a node in NONE mode refuses to load it: it must be dropped on DSE before the " +
+                                    "upgrade)", className, indexDef.name);
                         indexClass = NoopIndex.class;
                     }
                     else if (className.startsWith(DSE_INDEX_CLASS_PREFIX))
