@@ -51,6 +51,7 @@ import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.Dse6AccessControlCheck;
+import org.apache.cassandra.service.Dse6NonCoreTraces;
 import org.apache.cassandra.service.Dse6SaiVersionPin;
 import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.service.StartupChecks;
@@ -61,6 +62,7 @@ import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEER_WORKLOADS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_SAI_VERSION_PIN;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CURRENT_VERSION;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -110,6 +112,7 @@ public class CompatStatusTest extends CQLTester
             assertThat(out).contains("DSE peers                    : not tracked (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("DSE 6 peers on record        : not maintained (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("SAI version pinned           : not checked (internode_compatibility_mode NONE)\n");
+            assertThat(out).contains("Non-core DSE traces          : not checked (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("DSE access controls ignored  : not checked (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("Requests refused (upgrade)   : 0\n");
         }
@@ -139,14 +142,15 @@ public class CompatStatusTest extends CQLTester
             tool.assertOnCleanExit();
             List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
             assertThat(lines).contains("Requests refused (upgrade)   : 3");
-            // the peer versions, the DSE peers, the record of DSE peers, the SAI pin, the access controls, the lone DSE
-            // write grants, then the refusals
+            // the peer versions, the DSE peers, the record of DSE peers, the SAI pin, the non-core DSE traces, the access controls,
+            // the lone DSE write grants, then the refusals
             String out = tool.getStdout();
             assertThat(out.indexOf("Peers with a known version")).isNotNegative()
                                                                   .isLessThan(out.indexOf("DSE peers                    :"));
             assertThat(out.indexOf("DSE peers                    :")).isLessThan(out.indexOf("DSE 6 peers on record        :"));
             assertThat(out.indexOf("DSE 6 peers on record        :")).isLessThan(out.indexOf("SAI version pinned           :"));
-            assertThat(out.indexOf("SAI version pinned           :")).isLessThan(out.indexOf("DSE access controls ignored  :"));
+            assertThat(out.indexOf("SAI version pinned           :")).isLessThan(out.indexOf("Non-core DSE traces          :"));
+            assertThat(out.indexOf("Non-core DSE traces          :")).isLessThan(out.indexOf("DSE access controls ignored  :"));
             assertThat(out.indexOf("DSE access controls ignored  :")).isLessThan(out.indexOf("DSE UPDATE/TRUNCATE alone    :"));
             assertThat(out.indexOf("DSE UPDATE/TRUNCATE alone    :")).isLessThan(out.indexOf("Requests refused (upgrade)"));
             assertThat(lines).contains(String.format("  %-45s %d", "read with an index hint", 1));
@@ -305,6 +309,35 @@ public class CompatStatusTest extends CQLTester
     }
 
     @Test
+    public void printsTheNonCoreTracesInDse6Mode() throws Exception
+    {
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            // before the startup check: unknown
+            Dse6NonCoreTraces.resetStatus();
+            assertThat(ToolRunner.invokeNodetool("compatstatus").getStdout()).contains("Non-core DSE traces          : unknown (not checked yet)\n");
+
+            // the startup check of the non-core DSE traces: this node has none
+            Dse6NonCoreTraces.verifyAtStartup();
+            assertThat(ToolRunner.invokeNodetool("compatstatus").getStdout()).contains("Non-core DSE traces          : none\n");
+            // the override is shown even when it ignores nothing
+            try (WithProperties override = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEER_WORKLOADS, true))
+            {
+                Dse6NonCoreTraces.verifyAtStartup();
+            }
+            assertThat(ToolRunner.invokeNodetool("compatstatus").getStdout())
+            .contains("Non-core DSE traces          : none (" + INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEER_WORKLOADS.getKey() + "=true is set)\n");
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+            Dse6NonCoreTraces.resetStatus();
+        }
+    }
+
+    @Test
     public void aDseNodeKnownFromGossipOnlyWithoutTheMode() throws Exception
     {
         InetAddressAndPort dseNode = InetAddressAndPort.getByName("127.0.0.46:7000");
@@ -367,6 +400,7 @@ public class CompatStatusTest extends CQLTester
         Mockito.when(probe.getDsePeers()).thenReturn(Map.of("127.0.0.45:7000", "release 4.0.0.6865, NET_VERSION 1024"));
         Mockito.when(probe.getDsePeersOnRecord()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DsePeersOnRecord")));
         Mockito.when(probe.getDseSaiVersionPin()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseSaiVersionPin")));
+        Mockito.when(probe.getDseNonCoreTraces()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseNonCoreTraces")));
         Mockito.when(probe.getDseAccessControlCheck()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseAccessControlCheck")));
         Mockito.when(probe.getDseLoneWriteGrantsSource()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseLoneWriteGrantsSource")));
         Mockito.when(probe.getDseCompatRefusals()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseCompatRefusals")));
@@ -383,6 +417,7 @@ public class CompatStatusTest extends CQLTester
                          String.format("  %-45s %s", "127.0.0.45:7000", "release 4.0.0.6865, NET_VERSION 1024"),
                          "DSE 6 peers on record        : unknown (this node does not report them)",
                          "SAI version pinned           : unknown (this node does not report it)",
+                         "Non-core DSE traces          : unknown (this node does not report them)",
                          "DSE access controls ignored  : unknown (this node does not report them)",
                          "DSE UPDATE/TRUNCATE alone    : unknown (this node does not report them)",
                          "Requests refused (upgrade)   : unknown (this node does not report them)");
