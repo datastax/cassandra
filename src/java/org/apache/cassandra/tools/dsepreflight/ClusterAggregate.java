@@ -157,6 +157,7 @@ final class ClusterAggregate
         Map<Path, NodeReport> reports = new TreeMap<>();
         List<String> unreadable = new ArrayList<>();
         List<String> skipped = new ArrayList<>();
+        List<String> skippedPaxos = new ArrayList<>();
         List<String> notFiles = new ArrayList<>();
         List<String> stale = new ArrayList<>();
         try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, "*.json"))
@@ -183,6 +184,12 @@ final class ClusterAggregate
                         NodeReport.AGGREGATE.equals(tree.path("kind").textValue()))
                     {
                         skipped.add(name);
+                        continue;
+                    }
+                    if (tree != null && tree.isObject() && NodeReport.TOOL.equals(tree.path("tool").textValue()) &&
+                        PaxosRollbackReport.KIND.equals(tree.path("kind").textValue()))
+                    {
+                        skippedPaxos.add(name);
                         continue;
                     }
                     String problem = problem(tree);
@@ -242,6 +249,8 @@ final class ClusterAggregate
                                                     "skipped: " + list(notFiles)));
         if (!skipped.isEmpty())
             findings.add(info("AGGREGATE_REPORT_SKIPPED", "aggregate reports in the directory, skipped: " + list(skipped)));
+        if (!skippedPaxos.isEmpty())
+            findings.add(info("PAXOS_ROLLBACK_REPORT_SKIPPED", "Paxos rollback reports (--paxos-rollback) in the directory, skipped: " + list(skippedPaxos)));
 
         Map<String, List<String>> releases = new TreeMap<>();
         Map<String, List<String>> schemaVersions = new TreeMap<>();
