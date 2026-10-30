@@ -404,20 +404,35 @@ public final class HintsService implements HintsServiceMBean
     /**
      * Transfer all local hints to the hostId supplied by hostIdSupplier
      *
-     * Flushes the buffer to make sure all hints are on disk and closes the hint writers
-     * so we don't leave any hint files around.
+     * Waits for the transfer already running, if any, and for the dispatches in progress, flushes the buffer to
+     * make sure all hints are on disk and closes the hint writers so we don't leave any hint files around.
      *
-     * After that, we serially dispatch all the hints in the HintsCatalog.
+     * After that, we serially dispatch all the hints in the HintsCatalog. Hints written meanwhile (this node keeps
+     * coordinating writes during a decommission) are flushed and transferred in further rounds, see
+     * {@link HintsDispatchExecutor#transfer}.
      *
      * If we fail delivering all hints, we will ask the hostIdSupplier for a new target host
      * and retry delivering any remaining hints there, once, with a delay of 10 seconds before retrying.
      *
      * @param hostIdSupplier supplier of stream target host ids. This is generally
      *                       the closest one according to the DynamicSnitch
-     * @return When this future is done, it either has streamed all hints to remote nodes or has failed with a proper
-     *         log message
+     * @return When this future is done, it either has delivered every hint found by a round (see
+     *         {@link HintsDispatchExecutor#transfer}, hints may keep being written for as long as this node
+     *         coordinates) or has failed with a proper log message
      */
     public Future transferHints(Supplier<UUID> hostIdSupplier)
+    {
+        // unpause dispatch, or else the transfer would stop at its first file
+        resumeDispatch();
+
+        return dispatchExecutor.transfer(catalog, hostIdSupplier, this::flushAndCloseAllWriters);
+    }
+
+    /**
+     * Flushes the buffered hints to disk and closes all the writers, so that every hint written so far is in a
+     * file that can be dispatched.
+     */
+    private void flushAndCloseAllWriters()
     {
         Future flushFuture = writeExecutor.flushBufferPool(bufferPool);
         Future closeFuture = writeExecutor.closeAllWriters();
@@ -434,14 +449,6 @@ public final class HintsService implements HintsServiceMBean
         {
             throw new RuntimeException(e);
         }
-
-        // unpause dispatch, or else transfer() will return immediately
-        resumeDispatch();
-
-        // wait for the current dispatch session to end
-        catalog.stores().forEach(dispatchExecutor::completeDispatchBlockingly);
-
-        return dispatchExecutor.transfer(catalog, hostIdSupplier);
     }
 
     /**

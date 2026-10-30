@@ -42,6 +42,18 @@ public interface HintsRateLimiterFactory
      */
     RateLimiter create(UUID hostId);
 
+    /**
+     * return {@link RateLimiter} for current dispatch task
+     *
+     * @param isTransfer whether the task transfers the hints of this node to the given host, as decommission does.
+     *                   This node is then the only one sending hints to that host, so the default factory does not
+     *                   scale the rate down by the number of nodes.
+     */
+    default RateLimiter create(UUID hostId, boolean isTransfer)
+    {
+        return create(hostId);
+    }
+
     class DefaultHintsRateLimiterFactory implements HintsRateLimiterFactory
     {
         DefaultHintsRateLimiterFactory()
@@ -51,14 +63,21 @@ public interface HintsRateLimiterFactory
         @Override
         public RateLimiter create(UUID hostId)
         {
+            return create(hostId, false);
+        }
+
+        @Override
+        public RateLimiter create(UUID hostId, boolean isTransfer)
+        {
             // rate limit is in bytes per second. Uses Double.MAX_VALUE if disabled (set to 0 in cassandra.yaml).
             // max rate is scaled by the number of nodes in the cluster (CASSANDRA-5272).
             // the goal is to bound maximum hints traffic going towards a particular node from the rest of the cluster,
             // not total outgoing hints traffic from this node - this is why the rate limiter is not shared between
             // all the dispatch tasks (as there will be at most one dispatch task for a particular host id at a time).
-            int nodesCount = Math.max(1, StorageService.instance.getTokenMetadata().getSizeOfAllEndpoints() - 1);
-            int throttleInKB = DatabaseDescriptor.getHintedHandoffThrottleInKiB() / nodesCount;
-            return RateLimiter.create(throttleInKB == 0 ? Double.MAX_VALUE : throttleInKB * 1024);
+            // On a transfer this node is the only one sending to the host, so the rate is not scaled.
+            int nodesCount = isTransfer ? 1 : Math.max(1, StorageService.instance.getTokenMetadata().getSizeOfAllEndpoints() - 1);
+            double throttleInBytes = DatabaseDescriptor.getHintedHandoffThrottleInKiB() * 1024.0 / nodesCount;
+            return RateLimiter.create(throttleInBytes == 0 ? Double.MAX_VALUE : throttleInBytes);
         }
     }
 

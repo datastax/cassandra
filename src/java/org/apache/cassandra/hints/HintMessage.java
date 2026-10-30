@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.UUID;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 
 import javax.annotation.Nullable;
@@ -211,6 +212,12 @@ public final class HintMessage implements SerializableHintMessage
         public long getHintCreationTime()
         {
             return Hint.serializer.getHintCreationTime(hint, version);
+        }
+
+        @VisibleForTesting
+        UUID hostId()
+        {
+            return hostId;
         }
     }
 }

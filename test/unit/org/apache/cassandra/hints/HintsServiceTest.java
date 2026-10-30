@@ -18,18 +18,31 @@
 package org.apache.cassandra.hints;
 
 import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -39,8 +52,10 @@ import org.junit.Test;
 import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.DurationSpec;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
@@ -56,6 +71,7 @@ import org.apache.cassandra.net.MockMessagingService;
 import org.apache.cassandra.net.MockMessagingSpy;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.concurrent.Future;
 
 import static org.apache.cassandra.hints.HintsTestUtil.*;
 import static org.junit.Assert.assertEquals;
@@ -70,6 +86,7 @@ import static org.apache.cassandra.net.Verb.HINT_RSP;
 import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class HintsServiceTest
@@ -79,6 +96,7 @@ public class HintsServiceTest
     private final MockFailureDetector failureDetector = new MockFailureDetector();
     private static TableMetadata metadata;
     private final AtomicBoolean isAlive = new AtomicBoolean(true);
+    private final List<InetAddressAndPort> members = new ArrayList<>();
 
     @BeforeClass
     public static void defineSchema()
@@ -102,6 +120,8 @@ public class HintsServiceTest
     public void cleanup()
     {
         MockMessagingService.cleanup();
+        members.forEach(StorageService.instance.getTokenMetadata()::removeEndpoint);
+        members.clear();
     }
 
     @Before
@@ -211,6 +231,400 @@ public class HintsServiceTest
         // wait until hints have been send
         spy.interceptMessageOut(100).get();
         spy.interceptNoMsg(500, TimeUnit.MILLISECONDS).get();
+    }
+
+    @Test
+    public void testTransferHintsForDownHost() throws Exception
+    {
+        // only the transfer target is alive, the host the hints were written for is down
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID downHost = addMember("127.0.0.2");
+        restartWithLiveHosts(target);
+
+        MockMessagingSpy spy = MockMessagingService.when(verb(HINT_REQ))
+                                                   .respond(Message.internalResponse(HINT_RSP, NoPayload.noPayload));
+        HintsStore store = writeAndFlushHints(downHost, 100);
+        assertTrue(store.hasFiles());
+
+        // the transfer must not be aborted because the host the hints are for is down (HCD-473)
+        HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
+
+        spy.interceptMessageOut(100).get(30, TimeUnit.SECONDS);
+        assertFalse(store.hasFiles());
+    }
+
+    @Test
+    public void testTransferHintsWrittenDuringTransfer() throws Exception
+    {
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID downHost = addMember("127.0.0.2");
+        restartWithLiveHosts(target);
+
+        // this node keeps coordinating writes, and so writing hints, while the transfer runs: write some
+        // while the first hint is in flight, into the buffer the transfer has to flush and close
+        AtomicBoolean written = new AtomicBoolean();
+        AtomicInteger delivered = new AtomicInteger();
+        MockMessagingService.when(verb(HINT_REQ)).respond((message, to) -> {
+            if (written.compareAndSet(false, true))
+                writeHints(downHost, 50);
+            delivered.incrementAndGet();
+            return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+        });
+        HintsStore store = writeAndFlushHints(downHost, 100);
+
+        // the transfer completes only once every hint it sent was acknowledged, so the count is final here
+        HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
+
+        assertEquals(150, delivered.get());
+        assertFalse(store.hasFiles());
+        assertFalse(store.isWriting());
+    }
+
+    @Test
+    public void testTransferNotFailedByHintsFilesClosedDuringTransfer() throws Exception
+    {
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID downHost1 = addMember("127.0.0.2");
+        UUID downHost2 = addMember("127.0.0.3");
+        restartWithLiveHosts(target);
+
+        // Whenever the transfer moves on to a store, give the other one a new file, as the dispatch trigger does
+        // when it closes the writer of a live host's store: whichever store goes first, it has a file again once
+        // the round is over. Do it twice per store, so that the old success criterion fails the first attempt
+        // and the retry too.
+        Map<UUID, AtomicInteger> newFiles = ImmutableMap.of(downHost1, new AtomicInteger(), downHost2, new AtomicInteger());
+        AtomicReference<UUID> current = new AtomicReference<>();
+        AtomicInteger delivered = new AtomicInteger();
+        MockMessagingService.when(verb(HINT_REQ)).respond((message, to) -> {
+            UUID hinted = hostIdOf(message);
+            if (!hinted.equals(current.getAndSet(hinted)))
+            {
+                UUID other = hinted.equals(downHost1) ? downHost2 : downHost1;
+                if (newFiles.get(other).getAndIncrement() < 2)
+                    writeAndFlushHints(other, 10);
+            }
+            delivered.incrementAndGet();
+            return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+        });
+        writeAndFlushHints(downHost1, 10);
+        writeAndFlushHints(downHost2, 10);
+
+        HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
+
+        assertEquals(60, delivered.get());
+        assertFalse(HintsService.instance.getCatalog().hasFiles());
+    }
+
+    @Test
+    public void testTransferWaitsForDispatchInFlight() throws Exception
+    {
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID downHost = addMember("127.0.0.2");
+        restartWithLiveHosts(target);
+        HintsDispatchExecutor executor = HintsService.instance.dispatcherExecutor();
+        // the held dispatch needs a delivery thread of its own next to the transfer's
+        assertTrue(executor.getDispatcherCorePoolSize() >= 2);
+
+        // Hold the dispatch of the target's own hints in flight: the transfer must wait for it before delivering
+        // anything, or that dispatch could put a file it failed to deliver back after the transfer had found the
+        // store empty. The held hints must not time out meanwhile, which would end that dispatch by itself.
+        DurationSpec.LongMillisecondsBound savedTimeout = DatabaseDescriptor.getRawConfig().hints_request_timeout;
+        DatabaseDescriptor.getRawConfig().hints_request_timeout = new DurationSpec.LongMillisecondsBound("60s");
+        HintsStore targetStore = writeAndFlushHints(target, 10);
+        writeAndFlushHints(downHost, 10);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger targetDelivered = new AtomicInteger();
+        AtomicBoolean transferWaited = new AtomicBoolean(true);
+        MockMessagingService.when(verb(HINT_REQ)).respond((message, to) -> {
+            if (hostIdOf(message).equals(target))
+            {
+                Uninterruptibles.awaitUninterruptibly(release);
+                targetDelivered.incrementAndGet();
+            }
+            else if (targetDelivered.get() != 10 || executor.isScheduled(targetStore))
+                transferWaited.set(false);
+            return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+        });
+
+        ExecutorService thread = Executors.newSingleThreadExecutor();
+        try
+        {
+            executor.dispatch(targetStore);
+            // transferHints() waits for the held dispatch on its caller's thread, once the transfer is registered
+            java.util.concurrent.Future<Future> transfer = thread.submit(() -> HintsService.instance.transferHints(() -> target));
+            Awaitility.await().atMost(30, TimeUnit.SECONDS).until(executor::isTransferring);
+            release.countDown();
+            transfer.get(30, TimeUnit.SECONDS).get(30, TimeUnit.SECONDS);
+        }
+        finally
+        {
+            release.countDown();
+            thread.shutdownNow();
+            DatabaseDescriptor.getRawConfig().hints_request_timeout = savedTimeout;
+        }
+
+        assertTrue(transferWaited.get());
+        assertEquals(10, targetDelivered.get());
+        assertFalse(HintsService.instance.getCatalog().hasFiles());
+        assertFalse(executor.isTransferring());
+    }
+
+    @Test
+    public void testNoDispatchScheduledDuringTransfer() throws Exception
+    {
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID downHost = addMember("127.0.0.2");
+        restartWithLiveHosts(target);
+        HintsDispatchExecutor executor = HintsService.instance.dispatcherExecutor();
+
+        // While the transfer runs, hints for the target itself are written and their dispatch is asked for, as the
+        // trigger does for a live host: nothing is scheduled, the transfer picks them up in its next round.
+        AtomicInteger delivered = new AtomicInteger();
+        AtomicBoolean asked = new AtomicBoolean();
+        AtomicBoolean scheduled = new AtomicBoolean();
+        MockMessagingService.when(verb(HINT_REQ)).respond((message, to) -> {
+            if (asked.compareAndSet(false, true))
+            {
+                HintsStore targetStore = writeAndFlushHints(target, 10);
+                executor.dispatch(targetStore);
+                scheduled.set(executor.isScheduled(targetStore));
+            }
+            delivered.incrementAndGet();
+            return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+        });
+        writeAndFlushHints(downHost, 10);
+
+        HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
+
+        assertTrue(asked.get());
+        assertFalse(scheduled.get());
+        assertEquals(20, delivered.get());
+        assertFalse(HintsService.instance.getCatalog().hasFiles());
+    }
+
+    @Test
+    public void testTransferSucceedsWhileHintsKeepComing() throws Exception
+    {
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID downHost = addMember("127.0.0.2");
+        restartWithLiveHosts(target);
+
+        // A coordinator under load never stops writing hints for a down replica: every round finds one more.
+        // Write one during the first round, then one per delivery, so that no round ever finds the store empty.
+        AtomicInteger delivered = new AtomicInteger();
+        MockMessagingService.when(verb(HINT_REQ)).respond((message, to) -> {
+            int n = delivered.incrementAndGet();
+            if (n == 1 || n > 100)
+                writeHints(downHost, 1);
+            return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+        });
+        HintsStore store = writeAndFlushHints(downHost, 100);
+
+        // the transfer must not fail because of them: it stops after its rounds, with every hint it found delivered
+        HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
+
+        assertEquals(100 + HintsDispatchExecutor.MAX_TRANSFER_ROUNDS - 1, delivered.get());
+        assertTrue(store.hasFiles());
+    }
+
+    @Test
+    public void testTransferRetriesWithAnotherTargetWhenTargetLeft() throws Exception
+    {
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID leftTarget = UUID.randomUUID();
+        UUID downHost = addMember("127.0.0.2");
+        restartWithLiveHosts(target, leftTarget);
+
+        AtomicInteger delivered = new AtomicInteger();
+        MockMessagingService.when(verb(HINT_REQ)).respond((message, to) -> {
+            delivered.incrementAndGet();
+            return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+        });
+        HintsStore store = writeAndFlushHints(downHost, 100);
+
+        // the first target cannot be resolved any more: the hints must neither be dropped nor rewritten for it,
+        // the transfer retries with the next target (after its 10 seconds delay)
+        AtomicInteger targets = new AtomicInteger();
+        HintsService.instance.transferHints(() -> targets.getAndIncrement() == 0 ? leftTarget : target).get(60, TimeUnit.SECONDS);
+
+        assertEquals(2, targets.get());
+        assertEquals(100, delivered.get());
+        assertFalse(store.hasFiles());
+        assertFalse(HintsService.instance.dispatcherExecutor().isTransferring());
+    }
+
+    @Test
+    public void testTransferRetriesWhenTargetVersionIsUnknown() throws Exception
+    {
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID unknownTarget = addMember("127.0.0.3");
+        UUID downHost = addMember("127.0.0.2");
+        restartWithLiveHosts(target, unknownTarget);
+        MessagingService.instance().versions.reset(HintsEndpointProvider.instance.endpointForHost(unknownTarget));
+
+        AtomicInteger delivered = new AtomicInteger();
+        MockMessagingService.when(verb(HINT_REQ)).respond((message, to) -> {
+            delivered.incrementAndGet();
+            return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+        });
+        HintsStore store = writeAndFlushHints(downHost, 100);
+
+        // the messaging version of the first target is not known: a failure, and the file must go back to the
+        // store, so that the retry with the next target finds it
+        AtomicInteger targets = new AtomicInteger();
+        HintsService.instance.transferHints(() -> targets.getAndIncrement() == 0 ? unknownTarget : target).get(60, TimeUnit.SECONDS);
+
+        assertEquals(2, targets.get());
+        assertEquals(100, delivered.get());
+        assertFalse(store.hasFiles());
+    }
+
+    @Test
+    public void testTransferSkipsCorruptedFile() throws Exception
+    {
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID downHost = addMember("127.0.0.2");
+        restartWithLiveHosts(target);
+
+        AtomicInteger delivered = new AtomicInteger();
+        MockMessagingService.when(verb(HINT_REQ)).respond((message, to) -> {
+            delivered.incrementAndGet();
+            return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+        });
+        HintsStore store = writeAndFlushHints(downHost, 10);
+        HintsDescriptor corrupted = store.poll();
+        store.offerFirst(corrupted);
+        writeAndFlushHints(downHost, 10);
+        File file = corrupted.file(DatabaseDescriptor.getHintsDirectory());
+        Files.write(file.toPath(), new byte[(int) file.length()]);
+
+        // a corrupted file can be transferred by no one: it is set aside, and the transfer carries on with the next
+        // file within the same attempt (a retry asks the supplier again)
+        AtomicInteger targets = new AtomicInteger();
+        HintsService.instance.transferHints(() -> { targets.incrementAndGet(); return target; }).get(30, TimeUnit.SECONDS);
+
+        assertEquals(1, targets.get());
+        assertEquals(10, delivered.get());
+        assertFalse(store.hasFiles());
+        assertEquals(1, store.getCorruptedFilesNum());
+    }
+
+    @Test
+    public void testTransferWaitsForRunningTransfer() throws Exception
+    {
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID downHost = addMember("127.0.0.2");
+        restartWithLiveHosts(target);
+
+        // hold the first transfer at its first deliveries
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger delivered = new AtomicInteger();
+        MockMessagingService.when(verb(HINT_REQ)).respond((message, to) -> {
+            Uninterruptibles.awaitUninterruptibly(release);
+            delivered.incrementAndGet();
+            return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+        });
+        HintsStore store = writeAndFlushHints(downHost, 10);
+        Future first = HintsService.instance.transferHints(() -> target);
+
+        // A decommission retried while the transfer of the previous attempt still runs waits for it, rather than
+        // running a second transfer alongside or refusing. The wait on the first transfer is the only wait on the
+        // second call's way, hence the thread state check.
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread second = new Thread(() -> {
+            try
+            {
+                HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
+            }
+            catch (Throwable t)
+            {
+                failure.set(t);
+            }
+        });
+        try
+        {
+            second.start();
+            Awaitility.await().atMost(30, TimeUnit.SECONDS).until(() -> second.getState() == Thread.State.WAITING);
+            assertEquals(0, delivered.get());
+            release.countDown();
+            first.get(30, TimeUnit.SECONDS);
+            second.join(TimeUnit.SECONDS.toMillis(30));
+        }
+        finally
+        {
+            release.countDown();
+        }
+
+        assertFalse(second.isAlive());
+        assertNull(failure.get());
+        assertEquals(10, delivered.get());
+        assertFalse(store.hasFiles());
+        assertFalse(HintsService.instance.dispatcherExecutor().isTransferring());
+    }
+
+    @Test
+    public void testTransferDropsHintsForLeftHost() throws Exception
+    {
+        UUID target = StorageService.instance.getLocalHostUUID();
+        UUID downHost = addMember("127.0.0.2");
+        UUID leftHost = UUID.randomUUID();
+        restartWithLiveHosts(target);
+
+        AtomicInteger delivered = new AtomicInteger();
+        MockMessagingService.when(verb(HINT_REQ)).respond((message, to) -> {
+            delivered.incrementAndGet();
+            return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
+        });
+        HintsStore downStore = writeAndFlushHints(downHost, 10);
+        HintsStore leftStore = writeAndFlushHints(leftHost, 100);
+
+        // hints for a host that left are not handed to the target, which could never dispatch them: with
+        // SKIP_REWRITING_HINTS_ON_HOST_LEFT set they are dropped, as their own dispatch would
+        HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
+
+        assertEquals(10, delivered.get());
+        assertFalse(downStore.hasFiles());
+        assertFalse(leftStore.hasFiles());
+    }
+
+    @Test
+    public void testTransferWithNoHints() throws Exception
+    {
+        UUID target = StorageService.instance.getLocalHostUUID();
+        restartWithLiveHosts(target);
+
+        // nothing to transfer: done at once, no target is even looked up
+        HintsService.instance.transferHints(() -> { throw new AssertionError("no target needed"); }).get(5, TimeUnit.SECONDS);
+        assertFalse(HintsService.instance.dispatcherExecutor().isTransferring());
+    }
+
+    /**
+     * Registers a member of the cluster hints can be written for: a host the endpoint provider resolves, unlike
+     * a random host id, which is a host that left. Whether it is alive is up to the liveness predicate.
+     */
+    private UUID addMember(String address) throws UnknownHostException
+    {
+        InetAddressAndPort endpoint = InetAddressAndPort.getByName(address);
+        UUID hostId = UUID.randomUUID();
+        TokenMetadata tokenMetadata = StorageService.instance.getTokenMetadata();
+        tokenMetadata.updateHostId(hostId, endpoint);
+        tokenMetadata.updateNormalToken(DatabaseDescriptor.getPartitioner().getRandomToken(), endpoint);
+        members.add(endpoint);
+        return hostId;
+    }
+
+    private void restartWithLiveHosts(UUID... liveHosts) throws Exception
+    {
+        Set<UUID> live = ImmutableSet.copyOf(liveHosts);
+        HintsService.instance.shutdownBlocking();
+        HintsService.instance = new HintsService(live::contains);
+        HintsService.instance.startDispatch();
+    }
+
+    private static UUID hostIdOf(Message<?> message)
+    {
+        return message.payload instanceof HintMessage ? ((HintMessage) message.payload).hostId
+                                                      : ((HintMessage.Encoded) message.payload).hostId();
     }
 
     @Test

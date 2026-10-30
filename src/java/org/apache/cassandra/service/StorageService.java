@@ -5315,6 +5315,32 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             PendingRangeCalculatorService.instance.blockUntilFinished();
 
+            // In 5.0 we need to handle DECOMMISSION_FAILED which can be legitimately resumed
+            // hence operationMode != NORMAL clause chosen, and kept same on 4.0/4.1/5.0 for simplicity
+            // Checking OperationMode alone is insufficient since consider the following sequence:
+            //
+            // 1. Run a decommission, get far enough to persist transferred ranges, then fail, setting operationMode to DECOMMISSION_FAILED
+            // 2. Restart instance go NORMAL again, lose pending endpoints
+            // 3. Write comes in and is now not written to pending endpoint for one of the transferred ranges
+            // 4. Attempt decommission which fails before resetTransferredRanges, leaving operationMode as DECOMMISSION_FAILED
+            // 5. Re-attempt decommission which now sees operationMode == DECOMMISSION_FAILED
+            // (!= NORMAL) so skips resetting transferred ranges
+            // 6. decommission completes and write from step 3 has not been transferred via streaming or write path to the new owner.
+            //
+            // So checking tokenMetadata.isLeaving in addition means that on step 5 we now fail the isLeaving check
+            // (cleared by the restart in step 2, and step 4 never reached startLeaving) and truncate transferred ranges
+            boolean resumingInFlightDecommission = getTokenMetadata().isLeaving(FBUtilities.getBroadcastAddressAndPort())
+                                                   && operationMode != Mode.NORMAL;
+
+            // We reset transferred ranges upon starting a new decommission so that we fully stream
+            // anything written since a previous attempt, which may not have been persisted to a pending endpoint.
+            // See CASSANDRA-16290.
+            if (!resumingInFlightDecommission)
+            {
+                logger.info("resetting transferred ranges to force re-streaming");
+                SystemKeyspace.resetTransferredRanges();
+            }
+
             String dc = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
 
             // If we're already decommissioning there is no point checking RF/pending ranges
@@ -5361,7 +5387,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             setMode(Mode.LEAVING, "sleeping " + timeout + " ms for batch processing and pending range setup", true);
             Thread.sleep(timeout);
 
-            unbootstrap();
+            // read once: the setting can be changed over JMX, and the two transfers below must agree
+            boolean transferHints = DatabaseDescriptor.getTransferHintsOnDecommission();
+            unbootstrap(transferHints);
 
             // Hooks run here, in the window unbootstrap() opens and the shutdown below closes:
             // this node has left the ring (so no coordinator routes mutations to it) and the batch
@@ -5371,9 +5399,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // thrown -- see the report after the finally block.
             failedHooks = runDecommissionHooks();
 
-            // shutdown cql, gossip, messaging, Stage and set state to DECOMMISSIONED
+            // shutdown cql, transfer the hints written meanwhile, shutdown gossip, messaging, Stage and set state
+            // to DECOMMISSIONED
 
             shutdownClientServers();
+            transferHintsWrittenAfterLeaving(transferHints);
             Gossiper.instance.stop();
             try
             {
@@ -5505,6 +5535,66 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return failed;
     }
 
+    /**
+     * unbootstrap() transferred the hints, but this node kept coordinating writes, and so writing hints for the
+     * replicas that were down or timed out, until shutdownClientServers() just before this runs, decommission
+     * hooks included. Hand those over too while messaging is still up, or they would be left on a node that is
+     * going away.
+     *
+     * Best effort, and never throws: like the hooks, this runs past leaveRing(), where anything escaping strands
+     * the node. A failure is only reported, and the interrupt flag is consumed for the same reason as in
+     * runDecommissionHooks().
+     */
+    private void transferHintsWrittenAfterLeaving(boolean transferHints)
+    {
+        if (!transferHints || !DatabaseDescriptor.hintedHandoffEnabled())
+            return;
+
+        try
+        {
+            // Let the writes still in flight complete or time out: a hint is written when the write's callback
+            // expires, which the callback reporter checks every getMinRpcTimeout() / 2 (the delay excise() uses
+            // for the same reason); this node hints as a counter leader too, with the counter write timeout.
+            // Requests still queued in the native transport when it stopped are not covered.
+            long inFlightWrites = DatabaseDescriptor.getMinRpcTimeout(MILLISECONDS)
+                                  + Math.max(DatabaseDescriptor.getWriteRpcTimeout(MILLISECONDS),
+                                             DatabaseDescriptor.getCounterWriteRpcTimeout(MILLISECONDS));
+            setMode(Mode.LEAVING, "waiting " + inFlightWrites + " ms for the in-flight writes to complete", true);
+            Thread.sleep(inFlightWrites);
+            // the hints of the writes that timed out are written on the mutation stage: give them as long again
+            long deadline = nanoTime() + MILLISECONDS.toNanos(inFlightWrites);
+            while (StorageMetrics.totalHintsInProgress.getCount() > 0 && nanoTime() < deadline)
+                Thread.sleep(100);
+
+            setMode(Mode.LEAVING, "streaming the hints written after leaving the ring to other nodes", true);
+            HintsService.instance.transferHints(this::getPreferredHintsStreamTarget).get();
+            int filesLeft = HintsService.instance.getPendingHintsInfo().stream().mapToInt(info -> info.totalFiles).sum();
+            if (filesLeft == 0)
+                logger.info("Transferred the hints written after leaving the ring");
+            else
+                logger.warn("{} hints files are still on this node after transferring the hints written after " +
+                            "leaving the ring; run a full repair to make sure the replicas they were for have the data",
+                            filesLeft);
+        }
+        catch (InterruptedException e)
+        {
+            // the transfer, if started, runs on; it cannot be cancelled
+            logger.error("Interrupted while transferring the hints written after leaving the ring; whatever it does " +
+                         "not deliver is left on this node, run a full repair to make sure the replicas they were for " +
+                         "have the data");
+        }
+        catch (Throwable t)
+        {
+            logger.error("Failed to transfer the hints written after leaving the ring; they are left on this node, " +
+                         "run a full repair to make sure the replicas they were for have the data", t);
+        }
+        finally
+        {
+            if (Thread.interrupted())
+                logger.warn("The hints transfer left the interrupt flag set; clearing it");
+        }
+    }
+
     /** A hook is third-party code: even name() may misbehave, and must not abort the run. */
     private static String hookName(DecommissionHook hook)
     {
@@ -5556,7 +5646,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return () -> streamRanges(rangesToStream);
     }
 
-    private void unbootstrap() throws ExecutionException, InterruptedException
+    private void unbootstrap(boolean transferHints) throws ExecutionException, InterruptedException
     {
         Supplier<Future<StreamState>> startStreaming = prepareUnbootstrapStreaming();
 
@@ -5573,7 +5663,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         Future<?> hintsSuccess = ImmediateFuture.success(null);
 
-        if (DatabaseDescriptor.getTransferHintsOnDecommission())
+        if (transferHints)
         {
             setMode(Mode.LEAVING, "streaming hints to other nodes", true);
             hintsSuccess = streamHints();
@@ -6512,8 +6602,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (rangesWithEndpoints.isEmpty())
                 continue;
 
-            //Description is always Unbootstrap? Is that right?
-            Map<InetAddressAndPort, Set<Range<Token>>> transferredRangePerKeyspace = SystemKeyspace.getTransferredRanges("Unbootstrap",
+            Map<InetAddressAndPort, Set<Range<Token>>> transferredRangePerKeyspace = SystemKeyspace.getTransferredRanges(StreamOperation.DECOMMISSION,
                                                                                                                          keyspace,
                                                                                                                          StorageService.instance.getTokenMetadata().partitioner);
             RangesByEndpoint.Builder replicasPerEndpoint = new RangesByEndpoint.Builder();
@@ -6524,7 +6613,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 Set<Range<Token>> transferredRanges = transferredRangePerKeyspace.get(remote.endpoint());
                 if (transferredRanges != null && transferredRanges.contains(local.range()))
                 {
-                    logger.debug("Skipping transferred range {} of keyspace {}, endpoint {}", local, keyspace, remote);
+                    logger.info("Skipping transferred range {} of keyspace {}, endpoint {}", local, keyspace, remote);
                     continue;
                 }
 
