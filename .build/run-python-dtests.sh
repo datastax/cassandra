@@ -109,7 +109,7 @@ project_name=$(grep '<project\s*basedir=' build.xml |sed -ne 's/.*name=\"\([^"]*
 version=$(grep 'property\s*name=\"base.version\"' ${CASSANDRA_DIR}/build.xml |sed -ne 's/.*value=\"\([^"]*\)\".*/\1/p')
 java_version_default=`grep 'property\s*name="java.default"' ${CASSANDRA_DIR}/build.xml |sed -ne 's/.*value="\([^"]*\)".*/\1/p'`
 
-if [ "${java_version}" -eq 17 ] && [[ "${target}" == "dtest-upgrade" ]] ; then
+if { [ "${java_version}" -eq 17 ] || [ "${java_version}" -eq 21 ]; } && [[ "${target}" == "dtest-upgrade" ]] ; then
     echo "Invalid JDK${java_version}. Only overlapping supported JDKs can be used when upgrading, as the same jdk must be used over the upgrade path."
     exit 1
 fi

@@ -56,7 +56,13 @@ fi
 ################################
 
 if grep "^ID=" /etc/os-release | grep -q 'debian\|ubuntu' ; then
-    sudo update-java-alternatives --set java-1.${java_version}.0-openjdk-$(dpkg --print-architecture)
+    if [ -d "/usr/lib/jvm/temurin-${java_version}" ] ; then
+        # JDKs installed from tarballs (e.g. JDK 21 on debian bullseye) are registered with update-alternatives only
+        sudo update-alternatives --set java /usr/lib/jvm/temurin-${java_version}/bin/java
+        sudo update-alternatives --set javac /usr/lib/jvm/temurin-${java_version}/bin/javac
+    else
+        sudo update-java-alternatives --set java-1.${java_version}.0-openjdk-$(dpkg --print-architecture)
+    fi
 else
     sudo alternatives --set java $(alternatives --display java | grep "family java-${java_version}-openjdk" | cut -d' ' -f1)
     sudo alternatives --set javac $(alternatives --display javac | grep "family java-${java_version}-openjdk" | cut -d' ' -f1)
