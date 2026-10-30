@@ -162,6 +162,23 @@ public class PartitionRangeReadCommandCQLTest extends ReadCommandCQLTester<Parti
         assertToCQLString("SELECT * FROM %s WHERE v LIKE '%%abc%%'",
                           "SELECT * FROM %s WHERE v LIKE '%%abc%%' ALLOW FILTERING",
                           "SELECT * FROM %s WHERE v LIKE ? ALLOW FILTERING");
+        // patterns with inner wildcards keep their leading/trailing wildcards
+        assertToCQLString("SELECT * FROM %s WHERE v LIKE '%%a%%bc%%'",
+                          "SELECT * FROM %s WHERE v LIKE '%%a%%bc%%' ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE v LIKE ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE v LIKE 'a%%bc'",
+                          "SELECT * FROM %s WHERE v LIKE 'a%%bc' ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE v LIKE ? ALLOW FILTERING");
+        // '_' wildcards, and escapes, rendered with the internal escape character
+        assertToCQLString("SELECT * FROM %s WHERE v LIKE 'a_c'",
+                          "SELECT * FROM %s WHERE v LIKE 'a_c' ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE v LIKE ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE v LIKE 'a!_c%%' ESCAPE '!'",
+                          "SELECT * FROM %s WHERE v LIKE 'a\\_c%%' ESCAPE '\\' ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE v LIKE ? ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE v LIKE 'a!%%_\\' ESCAPE '!'",
+                          "SELECT * FROM %s WHERE v LIKE 'a\\%%_\\\\' ESCAPE '\\' ALLOW FILTERING",
+                          "SELECT * FROM %s WHERE v LIKE ? ALLOW FILTERING");
 
         // test with quoted identifiers
         createKeyspace("CREATE KEYSPACE \"K\" WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");

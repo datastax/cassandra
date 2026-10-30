@@ -64,6 +64,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
@@ -731,9 +732,49 @@ public class IndexContext
         return null;
     }
 
+    /**
+     * Returns whether this index supports the CQL {@code LIKE} restrictions: prefix ({@code LIKE '<term>%'}),
+     * suffix, contains and generic patterns.
+     * <p>
+     * These are supported on non-tokenized indexes of plain {@code text}/{@code ascii} columns: the terms
+     * dictionary then contains whole (though possibly normalized, e.g. lowercased) terms in sorted order, so
+     * prefixes map to contiguous scans of it and the other patterns to automaton intersections with it.
+     * Tokenizing (Lucene) analyzers break the 1:1 mapping between column values and indexed terms, making
+     * pattern semantics over the indexed terms undefined.
+     * <p>
+     * Collections are not supported, frozen (the term is the whole serialized collection) or not: {@code LIKE}
+     * is a restriction on the value of a column, and CQL defines no element-wise semantics for it, as it does for
+     * {@code CONTAINS}/{@code CONTAINS KEY} (which {@code LIKE_KEY}/{@code LIKE_VALUE} operators and the
+     * corresponding post-filtering would have to introduce). The terms of the keys/values/entries indexes of
+     * non-frozen collections could serve such a feature (the entries index excepted: its terms are composites).
+     * <p>
+     * Reversed (DESC clustering) string columns are supported: their terms are the raw, un-reversed value bytes.
+     */
+    public boolean supportsLikeQueries()
+    {
+        // a string type: the validators of frozen collections and of map entries are not
+        return TypeUtil.isUTF8OrAscii(validator)
+               // not the keys or values of a non-frozen collection, whose validator is the element type
+               && !isNonFrozenCollection()
+               // no tokenizing analyzer, so that the terms are whole (possibly normalized) values
+               && !hasCustomAnalyzer();
+    }
+
+    /**
+     * @return whether this index uses a custom (Lucene) index or query analyzer, i.e. one that may tokenize
+     * a value into multiple terms. Indexes with only the non-tokenizing options (case_sensitive, normalize,
+     * ascii) are not considered custom-analyzed.
+     */
+    private boolean hasCustomAnalyzer()
+    {
+        return config != null && (config.options.containsKey(LuceneAnalyzer.INDEX_ANALYZER)
+                                  || config.options.containsKey(LuceneAnalyzer.QUERY_ANALYZER));
+    }
+
     public boolean supports(Operator op)
     {
-        if (op.isLike() || op == Operator.LIKE) return false;
+        if (op.isLike())
+            return supportsLikeQueries();
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
         // The only supported operators are ANALYZER_MATCHES and BM25.
         if (op == Operator.ANALYZER_MATCHES) return isAnalyzed;

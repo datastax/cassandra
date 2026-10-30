@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +36,9 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Interval;
 import org.apache.cassandra.utils.IntervalTree;
 
@@ -55,14 +58,51 @@ public class RangeTermTree implements TermTree
 
     public Set<SSTableIndex> search(Expression e)
     {
+        if (e.getOp() == Expression.Op.PREFIX)
+            return searchPrefix(ByteBufferUtil.getArray(e.lower.value.encoded));
+        if (e.getOp() == Expression.Op.AUTOMATON)
+            return searchPrefix(e.getAutomatonCommonPrefix());
+
+        // Get the bounds given the version. Notice that we use the partially-encoded representation for bounds
+        // because that is how we store them in the range tree. The comparator is used to compare the bounds to
+        // each tree's min/max to see if the sstable index is in the query range.
+        return searchRange(version -> e.lower == null ? null : new Term(e.getPartiallyEncodedLowerBound(version), comparator, version),
+                           version -> e.upper == null ? null : new Term(e.getPartiallyEncodedUpperBound(version), comparator, version));
+    }
+
+    /**
+     * Searches the indexes that may hold terms starting with the given raw term bytes, i.e. in the range
+     * {@code [prefix, nextOf(prefix))} (every index for an empty prefix). The bounds of a pattern expression are the
+     * pattern, not a term range, so they can't be used as such. Only valid for non-composite literal types, whose
+     * terms are their raw bytes.
+     */
+    private Set<SSTableIndex> searchPrefix(byte[] prefix)
+    {
+        byte[] upperBytes = AutomatonQueries.prefixUpperBound(prefix);
+        // an empty prefix, or one made of 0xFF bytes only (not valid UTF-8): no pruning
+        if (upperBytes == null)
+            return searchRange(version -> null, version -> null);
+
+        Function<Version, Term> lower = version -> new Term(ByteBuffer.wrap(prefix), comparator, version);
+        Function<Version, Term> upper = version -> new Term(ByteBuffer.wrap(upperBytes), comparator, version);
+        // the comparator of a reversed (DESC clustering) column orders the terms in reverse; the interval is
+        // inclusive, so it also admits the indexes whose only term in range would be nextOf(prefix) itself
+        return comparator.isReversed() ? searchRange(upper, lower) : searchRange(lower, upper);
+    }
+
+    /**
+     * Searches the indexes whose term range intersects the given bounds, built for the version of each range tree.
+     * A {@code null} bound is unbounded.
+     */
+    private Set<SSTableIndex> searchRange(Function<Version, Term> lower, Function<Version, Term> upper)
+    {
         Set<SSTableIndex> result = new HashSet<>();
         rangeTrees.forEach((version, rangeTree) -> {
-            // Get the bounds given the version. Notice that we use the partially-encoded representation for bounds
-            // because that is how we store them in the range tree. The comparator is used to compare the bounds to
-            // each tree's min/max to see if the sstable index is in the query range.
-            Term minTerm = e.lower == null ? rangeTree.min() : new Term(e.getPartiallyEncodedLowerBound(version), comparator, version);
-            Term maxTerm = e.upper == null ? rangeTree.max() : new Term(e.getPartiallyEncodedUpperBound(version), comparator, version);
-            result.addAll(rangeTree.search(Interval.create(minTerm, maxTerm, null)));
+            Term minTerm = lower.apply(version);
+            Term maxTerm = upper.apply(version);
+            result.addAll(rangeTree.search(Interval.create(minTerm == null ? rangeTree.min() : minTerm,
+                                                           maxTerm == null ? rangeTree.max() : maxTerm,
+                                                           null)));
         });
         return result;
     }
