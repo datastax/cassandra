@@ -581,6 +581,13 @@ public enum CassandraRelevantProperties
      * Logged at WARN on every start.
      */
     INTERNODE_COMPATIBILITY_MODE_IGNORE_SAI_VERSION_PIN("cassandra.internode_compatibility_mode.ignore_sai_version_pin", "false"),
+    /**
+     * How long, in seconds, nothing must have been heard of a node that is down for it to count as lost for good while
+     * the DSE 6 upgrade is in progress, so that it can be removed ({@code DseUpgradeGuards#isLostNode}). Unset by
+     * default: the largest of 30 minutes, {@code max_hint_window} and twice the ring delay. Checked at startup: a value
+     * below the larger of one minute and twice the ring delay, or one that is not a whole number, refuses the start.
+     */
+    INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS("cassandra.internode_compatibility_mode.lost_node_silence_seconds"),
     INTERNODE_EVENT_THREADS("cassandra.internode-event-threads"),
     IO_NETTY_EVENTLOOP_THREADS("io.netty.eventLoopThreads"),
     IO_NETTY_TRANSPORT_ESTIMATE_SIZE_ON_SUBMIT("io.netty.transport.estimateSizeOnSubmit"),
