@@ -24,6 +24,7 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.BooleanSerializer;
 import org.apache.cassandra.utils.StringSerializer;
 import org.apache.cassandra.utils.UUIDSerializer;
 
@@ -60,10 +61,12 @@ public enum ParamType
      * Messages with tracing sessions are decorated with the traced keyspace.
      */
     TRACE_KEYSPACE      (8, "TraceKeyspace", StringSerializer.serializer),
+    // TODO(scottfines) is this the optimal way to store and hold the probabilistic tracing information?
+    TRACED_PROBABILISTICALLY       (9, "TracedProbabilistically", BooleanSerializer.serializer),
     /**
      * Failure response messages contain verb name of the incoming message.
      */
-    REQUEST_VERB_NAME   (9, "RequestVerbName", StringSerializer.serializer),
+    REQUEST_VERB_NAME   (10, "RequestVerbName", StringSerializer.serializer),
 
     CUSTOM_MAP          (14, "CUSTOM",       CustomParamsSerializer.serializer);
 

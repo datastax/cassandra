@@ -24,11 +24,12 @@ import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.UUID;
 
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.db.Mutation;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.utils.WrappedRunnable;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 
 /**
@@ -37,17 +38,42 @@ import org.apache.cassandra.utils.WrappedRunnable;
  */
 class TracingImpl extends Tracing
 {
+    private static final TraceStorage storage;
+
+    static
+    {
+        TraceStorage instance = null;
+        String customTracingClass = System.getProperty("cassandra.custom_tracing_storage_class");
+        if (null != customTracingClass)
+        {
+            try
+            {
+                instance = FBUtilities.construct(customTracingClass, "Tracing Storage");
+                LoggerFactory.getLogger(TraceKeyspace.class).info("Using {} as trace storage (as requested with -Dcassandra.custom_tracing_storage_class)", customTracingClass);
+            }
+            catch (Exception e)
+            {
+                JVMStabilityInspector.inspectThrowable(e);
+                LoggerFactory.getLogger(TraceKeyspace.class)
+                             .error(String.format("Cannot use class %s for trace storage, ignoring by defaulting to normal tracing", customTracingClass), e);
+            }
+        }
+        storage = instance == null ? TraceKeyspace.asStorage() : instance;
+    }
+
     public void stopSessionImpl()
     {
         final TraceStateImpl state = getStateImpl();
         if (state == null)
             return;
 
-        int elapsed = state.elapsed();
-        ByteBuffer sessionId = state.sessionIdBytes;
-        int ttl = state.ttl;
+//        int elapsed = state.elapsed();
+//        ByteBuffer sessionId = state.sessionIdBytes;
+//        int ttl = state.ttl;
 
-        state.executeMutation(TraceKeyspace.makeStopSessionMutation(sessionId, elapsed, ttl));
+        state.stopSession();
+//        storage.stopSession(state);
+//        state.executeMutation(TraceKeyspace.makeStopSessionMutation(sessionId, elapsed, ttl));
     }
 
     public TraceState begin(final String request, final InetAddress client, final Map<String, String> parameters)
@@ -58,11 +84,12 @@ class TracingImpl extends Tracing
         assert state != null;
 
         final long startedAt = System.currentTimeMillis();
-        final ByteBuffer sessionId = state.sessionIdBytes;
-        final String command = state.traceType.toString();
-        final int ttl = state.ttl;
+//        final ByteBuffer sessionId = state.sessionIdBytes;
+//        final String command = state.traceType.toString();
+//        final int ttl = state.ttl;
 
-        state.executeMutation(TraceKeyspace.makeStartSessionMutation(sessionId, client, parameters, request, startedAt, command, ttl));
+        state.begin(client, request, parameters);
+//        state.executeMutation(TraceKeyspace.makeStartSessionMutation(sessionId, client, parameters, request, startedAt, command, ttl));
         return state;
     }
 
@@ -95,9 +122,10 @@ class TracingImpl extends Tracing
     }
 
     @Override
-    protected TraceState newTraceState(ClientState state, InetAddressAndPort coordinator, UUID sessionId, TraceType traceType)
+    protected TraceState newTraceState(ClientState state, InetAddressAndPort coordinator, UUID sessionId, TraceType traceType,
+                                       boolean wasProbabilistic)
     {
-        return new TraceStateImpl(state, coordinator, sessionId, traceType);
+        return new TraceStateImpl(state, coordinator, sessionId, traceType, wasProbabilistic, storage);
     }
 
     /**
@@ -107,13 +135,17 @@ class TracingImpl extends Tracing
     {
         final String threadName = Thread.currentThread().getName();
 
-        Stage.TRACING.execute(new WrappedRunnable()
-        {
-            public void runMayThrow()
-            {
-                Mutation mutation = TraceKeyspace.makeEventMutation(sessionId, message, -1, threadName, ttl);
-                TraceStateImpl.mutateWithCatch(clientState, mutation);
-            }
-        });
+        // TODO(scottfines)this is fire-and-forget. The future will not be checked for completion. This repeats
+        // the prior behavior, so it's PROBABLY ok, but maybe not?
+        storage.recordNonLocalEvent(clientState, sessionId, message, -1, threadName, ttl);
+
+//        Stage.TRACING.execute(new WrappedRunnable()
+//        {
+//            public void runMayThrow()
+//            {
+//                Mutation mutation = TraceKeyspace.makeEventMutation(sessionId, message, -1, threadName, ttl);
+//                TraceStateImpl.mutateWithCatch(clientState, mutation);
+//            }
+//        });
     }
 }
