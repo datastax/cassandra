@@ -123,29 +123,7 @@ public class ExecutionFailure
      */
     private static Runnable enforceOptions(WithResources withResources, Runnable wrap, boolean propagate)
     {
-        return new Runnable()
-        {
-            @Override
-            public void run()
-            {
-                try (@SuppressWarnings("unused") Closeable close = withResources.get())
-                {
-                    wrap.run();
-                }
-                catch (Throwable t)
-                {
-                    handle(t);
-                    if (propagate)
-                        throw t;
-                }
-            }
-
-            @Override
-            public String toString()
-            {
-                return wrap.toString();
-            }
-        };
+        return new EnforcedRunnable(withResources, wrap, propagate);
     }
 
     /**
@@ -153,47 +131,88 @@ public class ExecutionFailure
      */
     private static RunnableDebuggableTask enforceOptionsDebuggable(WithResources withResources, RunnableDebuggableTask debuggable, boolean propagate)
     {
-        return new RunnableDebuggableTask()
+        return new EnforcedDebuggableRunnable(withResources, debuggable, propagate);
+    }
+
+    // a named class rather than an anonymous one, so the executor can stamp it when queued and report the wrapped class
+    private static class EnforcedRunnable implements Runnable, TimedTask
+    {
+        final WithResources withResources;
+        final Runnable wrap;
+        final boolean propagate;
+        private long enqueuedAtNanos;
+
+        EnforcedRunnable(WithResources withResources, Runnable wrap, boolean propagate)
         {
-            @Override
-            public void run()
-            {
-                try (@SuppressWarnings("unused") Closeable close = withResources.get())
-                {
-                    debuggable.run();
-                }
-                catch (Throwable t)
-                {
-                    handle(t);
-                    if (propagate)
-                        throw t;
-                }
-            }
+            this.withResources = withResources;
+            this.wrap = wrap;
+            this.propagate = propagate;
+        }
 
-            @Override
-            public String toString()
+        @Override
+        public void run()
+        {
+            try (@SuppressWarnings("unused") Closeable close = withResources.get())
             {
-                return debuggable.toString();
+                wrap.run();
             }
+            catch (Throwable t)
+            {
+                handle(t);
+                if (propagate)
+                    throw t;
+            }
+        }
 
-            @Override
-            public long creationTimeNanos()
-            {
-                return debuggable.creationTimeNanos();
-            }
+        @Override
+        public String toString()
+        {
+            return wrap.toString();
+        }
 
-            @Override
-            public long startTimeNanos()
-            {
-                return debuggable.startTimeNanos();
-            }
+        @Override
+        public long enqueuedAtNanos()
+        {
+            return enqueuedAtNanos;
+        }
 
-            @Override
-            public String description()
-            {
-                return debuggable.description();
-            }
-        };
+        @Override
+        public void markEnqueued(long approxNanos)
+        {
+            enqueuedAtNanos = approxNanos;
+        }
+
+        @Override
+        public Class<?> taskClass()
+        {
+            return WrappedTask.classOf(wrap);
+        }
+    }
+
+    private static class EnforcedDebuggableRunnable extends EnforcedRunnable implements RunnableDebuggableTask
+    {
+        EnforcedDebuggableRunnable(WithResources withResources, RunnableDebuggableTask debuggable, boolean propagate)
+        {
+            super(withResources, debuggable, propagate);
+        }
+
+        @Override
+        public long creationTimeNanos()
+        {
+            return ((RunnableDebuggableTask) wrap).creationTimeNanos();
+        }
+
+        @Override
+        public long startTimeNanos()
+        {
+            return ((RunnableDebuggableTask) wrap).startTimeNanos();
+        }
+
+        @Override
+        public String description()
+        {
+            return ((RunnableDebuggableTask) wrap).description();
+        }
     }
 
     /**

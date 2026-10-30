@@ -32,6 +32,7 @@ import static org.apache.cassandra.concurrent.SEPExecutor.TakeTaskPermitResult.R
 import static org.apache.cassandra.concurrent.SEPExecutor.TakeTaskPermitResult.TOOK_PERMIT;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SET_SEP_THREAD_NAME;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
 final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnable
 {
@@ -49,7 +50,15 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
     long prevStopCheck = 0;
     long soleSpinnerSpinTime = 0;
 
-    private final AtomicReference<Runnable> currentTask = new AtomicReference<>();
+    final AtomicReference<Runnable> currentTask = new AtomicReference<>();
+
+    // liveness: the executor this worker is taking work from, null between assignments so an idle worker does not
+    // keep it reachable, and when its current task was taken. Written only by this worker's thread. The plain
+    // taskStartedAtNanos is written first and published by the release store of runningFor (on assignment) and of
+    // currentTask (per task), so a reader that reads currentTask, then runningFor, then the stamp sees a stamp at
+    // least as new as the task and executor it read, and never over-reports (see SEPExecutor.oldestRunningTask).
+    final AtomicReference<SEPExecutor> runningFor = new AtomicReference<>();
+    long taskStartedAtNanos;
 
     SEPWorker(ThreadGroup threadGroup, Long workerId, Work initialState, SharedExecutorPool pool)
     {
@@ -124,6 +133,8 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
                 if (SET_THREAD_NAME)
                     Thread.currentThread().setName(assigned.name + '-' + workerId);
 
+                taskStartedAtNanos = approxTime.now();
+                runningFor.lazySet(assigned);
                 task = assigned.tasks.poll();
                 currentTask.lazySet(task);
 
@@ -151,11 +162,13 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
                         break;
 
                     task = assigned.tasks.poll();
+                    taskStartedAtNanos = approxTime.now();
                     currentTask.lazySet(task);
                 }
 
                 // return our work permit, and maybe signal shutdown
                 currentTask.lazySet(null);
+                runningFor.lazySet(null);
 
                 if (status != RETURNED_WORK_PERMIT)
                     assigned.returnWorkPermit();
@@ -202,6 +215,7 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
         finally
         {
             currentTask.lazySet(null);
+            runningFor.lazySet(null);
             pool.workerEnded(this);
         }
     }

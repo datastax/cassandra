@@ -27,6 +27,7 @@ import java.util.stream.Stream;
 
 import com.google.common.collect.Multimap;
 
+import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.tools.nodetool.formatter.TableBuilder;
 
 import static java.util.stream.Collectors.toList;
@@ -52,7 +53,7 @@ public class TpStatsPrinter
         public void print(TpStatsHolder data, PrintStream out)
         {
             final TableBuilder poolBuilder = new TableBuilder();
-            poolBuilder.add("Pool Name", "Active", "Pending", "Completed", "Blocked", "All time blocked");
+            poolBuilder.add("Pool Name", "Active", "Pending", "Completed", "Blocked", "All time blocked", "Oldest task queue (micros)", "Longest running task (micros)");
 
             final Multimap<String, String> threadPools = data.probe.getThreadPools();
 
@@ -63,7 +64,9 @@ public class TpStatsPrinter
                                  data.probe.getThreadPoolMetric(tpool.getKey(), tpool.getValue(), "PendingTasks").toString(),
                                  data.probe.getThreadPoolMetric(tpool.getKey(), tpool.getValue(), "CompletedTasks").toString(),
                                  data.probe.getThreadPoolMetric(tpool.getKey(), tpool.getValue(), "CurrentlyBlockedTasks").toString(),
-                                 data.probe.getThreadPoolMetric(tpool.getKey(), tpool.getValue(), "TotalBlockedTasks").toString());
+                                 data.probe.getThreadPoolMetric(tpool.getKey(), tpool.getValue(), "TotalBlockedTasks").toString(),
+                                 TpStatsHolder.nanosToMicros(data.probe.getThreadPoolMetric(tpool.getKey(), tpool.getValue(), ThreadPoolMetrics.OLDEST_TASK_QUEUE_TIME)).toString(),
+                                 TpStatsHolder.nanosToMicros(data.probe.getThreadPoolMetric(tpool.getKey(), tpool.getValue(), ThreadPoolMetrics.LONGEST_RUNNING_TASK_TIME)).toString());
             }
 
             poolBuilder.printTo(out);
