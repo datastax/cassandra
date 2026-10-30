@@ -95,6 +95,11 @@ New features
     - Storage-attached indexes (SAI) on non-tokenized string columns support LIKE restrictions with the '%' and
       '_' wildcards and optional escaping with ESCAPE, e.g. LIKE 'a!_%' ESCAPE '!'. No index rebuild, new index
       version or messaging change is needed.
+    - SAI indexes serve range restrictions (<, <=, >, >=) on text, ascii, boolean and uuid columns, the CQL
+      counterpart of Solr term ranges (field:[a TO b] is f >= 'a' AND f <= 'b', field:{a TO *] is f > 'a').
+      Strings are ordered by their bytes (code points, no collation) and need an index without a tokenizing
+      analyzer; indexes normalizing their terms ('case_sensitive': false, 'normalize', 'ascii') normalize the bounds
+      too. No index rebuild, new index version or messaging change is needed.
 
 Upgrading
 ---------
@@ -104,6 +109,10 @@ Upgrading
       match more rows; use ESCAPE to match them literally.
     - Use LIKE on SAI-indexed columns only once all nodes are upgraded: older replicas don't serve it from the index
       and filter it with the old semantics.
+    - Use range restrictions on SAI-indexed text, ascii, boolean and uuid columns only once all nodes are upgraded:
+      older replicas don't serve them from the index and filter them without normalizing the values.
+    - ALLOW FILTERING evaluates range restrictions on text and ascii columns with an index normalizing its terms on
+      the normalized values, as equality and LIKE already did.
     - memtable_offheap_space: 0 is now rejected at startup when memtable_allocation_type is
     offheap_buffers or offheap_objects. Set a positive memtable_offheap_space, or an allocation
     type that does not allocate off-heap. See CASSANDRA-21019.
