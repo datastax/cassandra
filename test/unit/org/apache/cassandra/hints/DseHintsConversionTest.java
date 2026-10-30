@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -58,6 +59,9 @@ import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog.HiddenColumn;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.exceptions.UnrecoverableIllegalStateException;
@@ -75,12 +79,16 @@ import org.apache.cassandra.metrics.HintsServiceMetrics;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaTestUtil;
+import org.apache.cassandra.schema.SchemaTransformations;
+import org.apache.cassandra.schema.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
@@ -99,6 +107,8 @@ public class DseHintsConversionTest extends CQLTester
     private static final String FIXTURE_KEYSPACE = DseFixtures.FIXTURE_KEYSPACE;
     private static final TableId ROLE_PERMISSIONS = TableId.fromUUID(DseFixtures.ROLE_PERMISSIONS_TABLE_ID);
     private static final TableId NODESYNC_STATUS = TableId.fromUUID(DseFixtures.NODESYNC_STATUS_TABLE_ID);
+    /** DSE's hidden column of a view of the fixture table keyed by {@code v}, as system_schema.hidden_columns lists it. */
+    private static final HiddenColumn DSE_V = new HiddenColumn(".v", "regular", true, "text");
     /** DSE's hints file header: version, timestamp, host id, parameters length, CRC32, {@code {}}, CRC32. */
     private static final int HEADER_SIZE = 4 + 8 + 16 + 4 + 4 + 2 + 4;
 
@@ -109,6 +119,9 @@ public class DseHintsConversionTest extends CQLTester
     private final List<HintsDescriptor> handedOver = new ArrayList<>();
     private Logger converterLogger;
     private ListAppender<ILoggingEvent> appender;
+
+    /** The creation time of the hints {@link #writeViewHint} writes. */
+    private final long viewHintCreationTime = currentTimeMillis();
 
     /** {@code system_auth}, whose {@code role_permissions} DSE hints with the fixture tables. */
     @BeforeClass
@@ -1447,6 +1460,143 @@ public class DseHintsConversionTest extends CQLTester
         }
         assertThat(fixtureHints).isEqualTo(deletions);
         assertRows(execute("SELECT id, ck FROM " + t + " WHERE id = 1"));
+    }
+
+    /**
+     * In {@code DSE_6}, a DSE hint holding the update of a materialized view, which names DSE's hidden column of the view,
+     * is converted when the catalog of DSE's hidden columns lists that column for the view: the new file holds the update
+     * in this software's encoding, whose rows have the liveness of their hidden cells, so the entry DSE wrote dead (a
+     * hidden tombstone) stays dead.
+     */
+    @Test
+    public void aDseHintOfAViewIsConvertedInDse6Mode() throws Throwable
+    {
+        TableMetadata view = createFixtureView("t_by_v");
+        Path dseFile = writeViewHint(view);
+
+        DseHintsConverter.Counts counts = withMode(InternodeCompatibilityMode.DSE_6, () -> withCatalog(
+            Collections.singletonMap(Pair.create(FIXTURE_KEYSPACE, view.name), Collections.singletonList(DSE_V)),
+            () -> converter(id -> true).convert(dseFile, viewHintCreationTime + 1000)));
+
+        assertThat(counts.converted).isEqualTo(1);
+        assertThat(counts.dropped()).isZero();
+        assertThat(dseFile).doesNotExist();
+        assertThat(warnings()).isEmpty();
+        HintsDescriptor converted = handedOver.get(0);
+        List<byte[]> written = DseFixtures.hintsRecords(converted.file(directory).toPath());
+        assertThat(written).hasSize(1);
+        Hint hint;
+        try (DataInputBuffer in = new DataInputBuffer(written.get(0)))
+        {
+            hint = Hint.serializer.deserialize(in, converted.messagingVersion());
+        }
+        assertThat(hint.creationTime).isEqualTo(viewHintCreationTime);
+        assertThat(hint.mutation.getPartitionUpdate(view).columns().regulars).isEmpty();
+        hint.mutation.apply();
+        assertRows(execute("SELECT v, id, ck FROM " + view + " WHERE v = 'x'"), row("x", 1, "a"));
+    }
+
+    /**
+     * A DSE hint holding the update of a materialized view is dropped and counted among the hints for an unknown column,
+     * as before, when the translation of the hidden column is not certain (in {@code DSE_6}, the catalog of DSE's hidden
+     * columns lists no hidden column for the view, or cannot be read; a WARN says why) or not made (without the mode, where
+     * the catalog is not read).
+     */
+    @Test
+    public void aDseHintOfAViewIsDroppedWhenItsTranslationIsUncertain() throws Throwable
+    {
+        TableMetadata unlistedView = createFixtureView("unlisted_by_v");
+        TableMetadata unreadableView = createFixtureView("unreadable_by_v");
+        TableMetadata view = createFixtureView("t_by_v");
+
+        Path unlisted = writeViewHint(unlistedView);
+        assertViewHintDroppedWithWarning(unlisted, unlistedView, Collections.emptyMap(),
+                                         "DSE's system_schema.hidden_columns on this node lists no hidden column for that view.");
+
+        appender.list.clear();
+        Path unreadable = writeViewHint(unreadableView);
+        assertViewHintDroppedWithWarning(unreadable, unreadableView, null,
+                                         "DSE 6 compatibility mode: cannot read DSE's system_schema.hidden_columns from the data directories of this node");
+
+        appender.list.clear();
+        Path withoutTheMode = writeViewHint(view);
+        DseHintsConverter.Counts counts = withMode(InternodeCompatibilityMode.NONE, () -> withCatalog(null, () -> {
+            DseHintsConverter.Counts noneCounts = converter(id -> true).convert(withoutTheMode, viewHintCreationTime + 1000);
+            assertThat(DseViewHiddenColumnCatalog.setInstance(null)).as("the catalog was not read").isNull();
+            return noneCounts;
+        }));
+        assertViewHintDropped(counts, withoutTheMode, view);
+        for (TableMetadata dropped : new TableMetadata[]{ unlistedView, unreadableView, view })
+            assertRows(execute("SELECT * FROM " + dropped));
+    }
+
+    /**
+     * In {@code DSE_6}, with the catalog of DSE's hidden columns listing {@code hiddenColumns} (none read yet when null),
+     * the hint of {@code dseFile} for {@code view} is dropped, with a WARN of the translation containing {@code reason}.
+     */
+    private void assertViewHintDroppedWithWarning(Path dseFile, TableMetadata view, Map<Pair<String, String>, List<HiddenColumn>> hiddenColumns,
+                                                  String reason) throws Throwable
+    {
+        withLogAppender(DseViewWireFormat.class, translation -> {
+            DseHintsConverter.Counts counts = withMode(InternodeCompatibilityMode.DSE_6, () -> withCatalog(
+                hiddenColumns, () -> converter(id -> true).convert(dseFile, viewHintCreationTime + 1000)));
+            assertViewHintDropped(counts, dseFile, view);
+            assertThat(translation.list).singleElement().satisfies(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                assertThat(event.getFormattedMessage()).contains("names the column .v of materialized view " + view + ", which is not translated: " + reason);
+            });
+        });
+    }
+
+    private void assertViewHintDropped(DseHintsConverter.Counts counts, Path dseFile, TableMetadata view) throws IOException
+    {
+        assertThat(counts.unknownColumn).isEqualTo(1);
+        assertThat(counts.converted).isZero();
+        assertThat(dseFile).doesNotExist();
+        assertThat(warnings()).singleElement().asString()
+                              .contains("that name a column this node does not know (column .v of " + view + ")");
+    }
+
+    /**
+     * The view {@code name} of the 6.8.65 fixture table, keyed by {@code (v, id, ck)}, with the fixture schema when it is
+     * not there yet. The keyspace system_distributed, where the build of a view is recorded, is created here: the tests
+     * run without the network, which creates it otherwise.
+     */
+    private TableMetadata createFixtureView(String name) throws Throwable
+    {
+        Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(SystemDistributedKeyspace.metadata(), SystemDistributedKeyspace.GENERATION));
+        if (Schema.instance.getKeyspaceMetadata(FIXTURE_KEYSPACE) == null)
+            createFixtureSchema(DseVersion.DSE_6_8_65);
+        execute("CREATE MATERIALIZED VIEW " + FIXTURE_KEYSPACE + '.' + name + " AS SELECT id, ck, v FROM " + FIXTURE_KEYSPACE + ".t " +
+                "WHERE v IS NOT NULL AND id IS NOT NULL AND ck IS NOT NULL PRIMARY KEY (v, id, ck)");
+        return Schema.instance.getTableMetadata(FIXTURE_KEYSPACE, name);
+    }
+
+    /**
+     * Writes a hints file as DSE writes one, for a host of its own, holding one hint: the update
+     * {@link DseFixtures#dseViewUpdate} of {@code view}.
+     */
+    private Path writeViewHint(TableMetadata view) throws IOException
+    {
+        byte[] hint = DseFixtures.dseHint(viewHintCreationTime, view.params.gcGraceSeconds, DseFixtures.dse68Mutation(DseFixtures.dseViewUpdate(view, "x")));
+        return DseFixtures.writeDseHintsFile(directory.toPath(), UUID.randomUUID(), viewHintCreationTime, Collections.singletonList(hint));
+    }
+
+    /**
+     * Runs {@code body} with the catalog of DSE's hidden columns listing {@code hiddenColumns}, or with none read yet when
+     * {@code hiddenColumns} is null, then restores the catalog.
+     */
+    private static <T> T withCatalog(Map<Pair<String, String>, List<HiddenColumn>> hiddenColumns, ThrowingSupplier<T> body) throws Throwable
+    {
+        DseViewHiddenColumnCatalog before = DseViewHiddenColumnCatalog.setInstance(hiddenColumns == null ? null : new DseViewHiddenColumnCatalog(hiddenColumns));
+        try
+        {
+            return body.get();
+        }
+        finally
+        {
+            DseViewHiddenColumnCatalog.setInstance(before);
+        }
     }
 
     /** A DSE file for this node's own host id holds no hint any peer needs: the default ring check drops them all. */
