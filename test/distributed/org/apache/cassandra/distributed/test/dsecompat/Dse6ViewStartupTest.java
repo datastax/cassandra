@@ -117,8 +117,8 @@ public class Dse6ViewStartupTest extends TestBaseImpl
                 }
             }
             node.startup();
-            assertThat(node.logs().grep("DSE 6 compatibility mode: DSE keeps the hidden column .v for materialized view " + KEYSPACE + ".t_by_v, " +
-                                        "which this software reproduces").getResult()).hasSize(1);
+            assertThat(node.logs().grep("DSE 6 compatibility mode: the data of materialized view " + KEYSPACE + ".t_by_v is exchanged with DSE 6 " +
+                                        "nodes with DSE's hidden column .v").getResult()).hasSize(1);
             assertThat(cluster.coordinator(1).execute(withKeyspace("SELECT pk, ck FROM %s.t_by_v WHERE v = 'a'"), ConsistencyLevel.ONE).length).isEqualTo(1);
             node.shutdown().get();
 
@@ -129,8 +129,8 @@ public class Dse6ViewStartupTest extends TestBaseImpl
             node.startup();
             assertThat(node.logs().grep("DSE 6 compatibility mode: DSE's system_schema.hidden_columns lists hidden columns for 0 materialized views").getResult()).hasSize(1);
             assertThat(node.logs().grep("DSE 6 compatibility mode: DSE's system_schema.hidden_columns on this node lists no hidden column for " +
-                                        "materialized view " + KEYSPACE + ".t_by_v, taken to be a view of DSE's old format or one created by " +
-                                        "this software").getResult()).hasSize(1);
+                                        "materialized view " + KEYSPACE + ".t_by_v, whose data is exchanged with DSE 6 nodes as it is, as for a " +
+                                        "view of DSE's old format or one created by this software").getResult()).hasSize(1);
             assertThat(cluster.coordinator(1).execute(withKeyspace("SELECT pk, ck FROM %s.t_by_v WHERE v = 'a'"), ConsistencyLevel.ONE).length).isEqualTo(1);
             node.shutdown().get();
 
@@ -139,8 +139,8 @@ public class Dse6ViewStartupTest extends TestBaseImpl
             assertThatThrownBy(node::startup)
             .hasStackTraceContaining("DSE 6 compatibility mode: cannot read DSE's system_schema.hidden_columns from the data directories of this node " +
                                      "(no data directory holds system_schema/" + HIDDEN_COLUMNS_DIRECTORY + ": ")
-            .hasStackTraceContaining(" are not the data directories of a node that ran DSE 6); a node in DSE 6 compatibility mode with materialized " +
-                                     "views does not start");
+            .hasStackTraceContaining(" are not the data directories of a node that ran DSE 6); the data of materialized views is not exchanged " +
+                                     "with DSE 6 nodes");
         }
     }
 }

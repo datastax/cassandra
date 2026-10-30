@@ -47,6 +47,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIteratorSerializer;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -490,13 +491,24 @@ public interface PartitionUpdate extends Partition
         {
             Preconditions.checkArgument(version != MessagingService.VERSION_DSE_68,
                                         "Can't serialize to version " + version);
-            try (UnfilteredRowIterator iter = update.unfilteredIterator())
+            try (UnfilteredRowIterator iter = forPeer(update, version))
             {
                 assert !iter.isReverseOrder();
 
                 update.metadata().id.serialize(out);
                 UnfilteredRowIteratorSerializer.serializer.serialize(iter, null, out, version, update.rowCount());
             }
+        }
+
+        /**
+         * The rows of {@code update} as they are sent at {@code version}: as they are, except for a materialized view
+         * sent to a DSE 6 peer, whose rows carry DSE's hidden cells ({@link DseViewWireFormat}).
+         */
+        private static UnfilteredRowIterator forPeer(PartitionUpdate update, int version)
+        {
+            UnfilteredRowIterator iter = update.unfilteredIterator();
+            ColumnMetadata dseHidden = DseViewWireFormat.hiddenColumn(update.metadata(), version);
+            return dseHidden == null ? iter : DseViewWireFormat.withHiddenCells(iter, dseHidden);
         }
 
         public PartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
@@ -520,10 +532,25 @@ public interface PartitionUpdate extends Partition
             }
         }
 
+        /**
+         * {@link #isEmpty(ByteBuffer, DeserializationHelper.Flag, DecoratedKey, int)} at the current version; no caller in
+         * this tree, kept for the projects built on it.
+         */
         public static boolean isEmpty(ByteBuffer in, DeserializationHelper.Flag flag, DecoratedKey key) throws IOException
+        {
+            return isEmpty(in, flag, key, MessagingService.current_version);
+        }
+
+        /**
+         * Whether the update serialized at {@code version} in {@code in} is empty, read from its flags without decoding it.
+         * At {@link MessagingService#VERSION_DSE_68} the table id is followed by DSE's maximum timestamp.
+         */
+        public static boolean isEmpty(ByteBuffer in, DeserializationHelper.Flag flag, DecoratedKey key, int version) throws IOException
         {
             int position = in.position();
             position += 16; // CFMetaData.serializer.deserialize(in, version);
+            if (version == MessagingService.VERSION_DSE_68)
+                position += TypeSizes.LONG_SIZE; // the maxTimestamp deserialize() skips
             if (position >= in.limit())
                 throw new EOFException();
             // DecoratedKey key = metadata.decorateKey(ByteBufferUtil.readWithVIntLength(in));
@@ -537,7 +564,7 @@ public interface PartitionUpdate extends Partition
 
         public long serializedSize(PartitionUpdate update, int version)
         {
-            try (UnfilteredRowIterator iter = update.unfilteredIterator())
+            try (UnfilteredRowIterator iter = forPeer(update, version))
             {
                 return update.metadata().id.serializedSize()
                        + (version == MessagingService.VERSION_DSE_68 ? TypeSizes.LONG_SIZE : 0)

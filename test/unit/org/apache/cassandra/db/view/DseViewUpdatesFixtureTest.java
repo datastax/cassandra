@@ -103,7 +103,9 @@ public class DseViewUpdatesFixtureTest extends CQLTester
     @AfterClass
     public static void restoreDdlFreeze()
     {
-        allowDdl.close();
+        // null when the class setup failed before it set the property: nothing to restore, and the real error stays the only one
+        if (allowDdl != null)
+            allowDdl.close();
     }
 
     @BeforeClass
@@ -329,9 +331,10 @@ public class DseViewUpdatesFixtureTest extends CQLTester
         assertThat(appender.list).filteredOn(e -> e.getLevel() == Level.WARN)
                                  .extracting(ILoggingEvent::getFormattedMessage)
                                  .containsExactly("DSE 6 compatibility mode: DSE's system_schema.hidden_columns on this node lists no hidden column for " +
-                                                  "materialized view " + DSE_KEYSPACE + '.' + LEGACY_VIEW + ", taken to be a view of DSE's old format or one " +
-                                                  "created by this software; if DSE created the view in its new format, the data directories of this node " +
-                                                  "do not hold the table DSE wrote");
+                                                  "materialized view " + DSE_KEYSPACE + '.' + LEGACY_VIEW + ", whose data is exchanged with DSE 6 nodes as " +
+                                                  "it is, as for a view of DSE's old format or one created by this software; if DSE created the view in " +
+                                                  "its new format, the data directories of this node do not hold the table DSE wrote, and DSE reads the " +
+                                                  "view rows of this node as dead");
     }
 
     /** The tables and views of the fixtures, as DSE created them, in the keyspace DSE's system_schema.hidden_columns names. */

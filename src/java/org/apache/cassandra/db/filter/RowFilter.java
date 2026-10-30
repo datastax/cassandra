@@ -73,13 +73,16 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.sai.utils.GeoUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -1317,7 +1320,19 @@ public class RowFilter
                 // Compact storage tables, when used with thrift, used to allow falling through this withouot throwing an
                 // exception. However, since thrift was removed in 4.0, this behaviour was not restored in CASSANDRA-16217
                 if (column == null)
+                {
+                    // DSE 6 never filters on the hidden columns of its views, whose cells have no value; fail with a clear
+                    // error rather than drop the expression or evaluate it on a column this software does not keep
+                    if (DseViewWireFormat.translates(metadata, version) && DseViewWireFormat.resolveHiddenColumn(metadata, name) != null)
+                    {
+                        DseCompatRefusals.refused(DseViewWireFormat.REFUSED_HIDDEN_COLUMN_FILTER);
+                        throw new UnknownColumnException(String.format("A read of materialized view %s from a DSE 6 peer filters on the DSE hidden column %s, " +
+                                                                       "which this software does not keep; it refuses the message rather than " +
+                                                                       "return wrong view rows",
+                                                                       metadata, UTF8Type.instance.getString(name)));
+                    }
                     throw new RuntimeException("Unknown (or dropped) column " + UTF8Type.instance.getString(name) + " during deserialization");
+                }
 
                 switch (kind)
                 {

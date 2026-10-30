@@ -25,6 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -32,6 +33,7 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -141,7 +143,12 @@ public abstract class ReadResponse
     protected static ByteBuffer makeDigest(UnfilteredPartitionIterator iterator, ReadCommand command)
     {
         Digest digest = Digest.forReadResponse();
-        UnfilteredPartitionIterators.digest(iterator, digest, command.digestVersion());
+        // a read of a materialized view with a DSE 6 replica: digested as DSE digests the rows it holds for the same data
+        ColumnMetadata dseHidden = DseViewWireFormat.digestHiddenColumn(command);
+        if (dseHidden == null)
+            UnfilteredPartitionIterators.digest(iterator, digest, command.digestVersion());
+        else
+            DseViewWireFormat.digest(DseViewWireFormat.withHiddenCells(iterator, dseHidden), digest, dseHidden);
         return ByteBuffer.wrap(digest.digest());
     }
 
@@ -196,7 +203,7 @@ public abstract class ReadResponse
     {
         private LocalDataResponse(UnfilteredPartitionIterator iter, ReadCommand command, RepairedDataInfo rdi)
         {
-            super(build(iter, command.columnFilter()),
+            super(build(forCoordinator(iter, command), DseViewWireFormat.responseColumnFilter(command)),
                   rdi.getDigest(), rdi.isConclusive(),
                   MessagingService.current_version,
                   DeserializationHelper.Flag.LOCAL);
@@ -205,6 +212,17 @@ public abstract class ReadResponse
         private LocalDataResponse(UnfilteredPartitionIterator iter, ColumnFilter selection)
         {
             super(build(iter, selection), null, false, MessagingService.current_version, DeserializationHelper.Flag.LOCAL);
+        }
+
+        /**
+         * The data of the response as the coordinator reads it: as it is, except for a read of a materialized view sent
+         * by a DSE 6 coordinator, whose rows carry DSE's hidden cells, and which is serialized with the column filter that
+         * coordinator sent ({@link DseViewWireFormat}).
+         */
+        private static UnfilteredPartitionIterator forCoordinator(UnfilteredPartitionIterator iter, ReadCommand command)
+        {
+            ColumnMetadata dseHidden = DseViewWireFormat.responseHiddenColumn(command);
+            return dseHidden == null ? iter : DseViewWireFormat.withHiddenCells(iter, dseHidden);
         }
 
         private static ByteBuffer build(UnfilteredPartitionIterator iter, ColumnFilter selection)
@@ -265,10 +283,14 @@ public abstract class ReadResponse
                 // Note that the command parameter shadows the 'command' field and this is intended because
                 // the later can be null (for RemoteDataResponse as those are created in the serializers and
                 // those don't have easy access to the command). This is also why we need the command as parameter here.
+                // a DSE 6 replica serialized its data with the column filter it was sent (DseViewWireFormat)
+                ColumnFilter selection = DseCompat.isPre40Layout(dataSerializationVersion)
+                                         ? DseViewWireFormat.columnFilterFor(command, dataSerializationVersion)
+                                         : command.columnFilter();
                 return UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in,
                                                                                          dataSerializationVersion,
                                                                                          command.metadata(),
-                                                                                         command.columnFilter(),
+                                                                                         selection,
                                                                                          flag);
             }
             catch (IOException e)
@@ -295,6 +317,25 @@ public abstract class ReadResponse
 
         public ByteBuffer digest(ReadCommand command)
         {
+            // The data of a materialized view from a DSE 6 replica, when the digests are DSE's: digested as that replica
+            // holds it, with the primary key liveness DSE gave its rows, which reading the data replaces by the liveness
+            // of their hidden cells.
+            ColumnMetadata dseHidden = DseViewWireFormat.digestHiddenColumn(command);
+            if (dseHidden != null && DseCompat.isPre40Layout(dataSerializationVersion))
+            {
+                Digest digest = Digest.forReadResponse();
+                try
+                {
+                    DseViewWireFormat.digestDseData(data, dataSerializationVersion, command, dseHidden, digest);
+                }
+                catch (IOException e)
+                {
+                    // We're deserializing in memory so this shouldn't happen
+                    throw new RuntimeException(e);
+                }
+                return ByteBuffer.wrap(digest.digest());
+            }
+
             try (UnfilteredPartitionIterator iterator = makeIterator(command))
             {
                 return makeDigest(iterator, command);

@@ -1184,7 +1184,7 @@ public final class SystemKeyspace
         if (promised.uuidTimestamp() < purgeBefore) promised = Ballot.none();
 
         // either we have both a recently accepted ballot and update or we have neither
-        Accepted accepted = PaxosRows.getAccepted(row, purgeBefore, overrideTtlSeconds);
+        Accepted accepted = PaxosRows.getAccepted(partitionKey, row, purgeBefore, overrideTtlSeconds);
         Committed committed = PaxosRows.getCommitted(metadata, partitionKey, row, purgeBefore, overrideTtlSeconds);
         // fix a race with TTL/deletion resolution, where TTL expires after equal deletion is inserted; TTL wins the resolution, and is read using an old ballot's nowInSec
         if (accepted != null && !accepted.isAfter(committed))
