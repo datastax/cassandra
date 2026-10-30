@@ -49,6 +49,7 @@ import static java.lang.String.format;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.concurrent.Stage.INTERNAL_RESPONSE;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 import static org.apache.cassandra.utils.MonotonicClock.preciseTime;
 
 /**
@@ -275,6 +276,14 @@ public class RequestCallbacks implements OutboundMessageCallbacks
 
     public static class CallbackInfo
     {
+        /**
+         * Timestamp taken at registration time ({@code approxTime.now()}) — i.e. the moment
+         * {@link RequestCallbacks#addWithExpiration} is called, just before the message is
+         * handed to the outbound queue.  Used to compute the true per-peer request/response
+         * round-trip time independently of when the {@link Message} object was constructed.
+         */
+        final long sentAtNanos;
+        final Verb requestVerb;
         final long createdAtNanos;
         final long expiresAtNanos;
 
@@ -286,6 +295,8 @@ public class RequestCallbacks implements OutboundMessageCallbacks
 
         private CallbackInfo(Message message, InetAddressAndPort peer, RequestCallback callback)
         {
+            this.sentAtNanos    = approxTime.now();          // stamped first, as close to send as possible
+            this.requestVerb = message.verb();
             this.createdAtNanos = message.createdAtNanos();
             this.expiresAtNanos = message.expiresAtNanos();
             this.peer = peer;

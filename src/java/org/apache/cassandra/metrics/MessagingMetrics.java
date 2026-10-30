@@ -160,6 +160,29 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
         // NOOP
     }
 
+    /**
+     * Called by {@link org.apache.cassandra.net.ResponseVerbHandler} when a response message arrives and its
+     * matching callback is found.  The {@code rttNanos} value is the elapsed time between the moment
+     * {@link org.apache.cassandra.net.RequestCallbacks.CallbackInfo#sentAtNanos} was stamped (just before the
+     * request was handed to the outbound queue) and the moment {@code ResponseVerbHandler.doVerb()} begins
+     * executing on the {@code REQUEST_RESPONSE} stage.
+     *
+     * <p>This therefore captures the full coordinator-observed per-peer round-trip time:
+     * outbound queue wait + network transit of REQ + peer stage queue wait + peer processing +
+     * network transit of RSP + coordinator {@code REQUEST_RESPONSE} stage queue wait.</p>
+     *
+     * <p>The base implementation is a no-op.  Override in a custom {@link MessagingMetrics} subclass
+     * (e.g. CNDB's {@code CndbMessagingMetrics}) to record the value into a metrics backend.</p>
+     *
+     * @param requestVerb the request verb (e.g. {@code MUTATION_REQ}, {@code READ_REQ})
+     * @param peer        the remote endpoint that processed the request
+     * @param rttNanos    round-trip time in nanoseconds
+     */
+    public void recordRtt(Verb requestVerb, InetAddressAndPort peer, long rttNanos)
+    {
+        // no-op in base class; override in CNDB CndbMessagingMetrics
+    }
+
     public void recordDroppedMessage(Message<?> message, long timeElapsed, TimeUnit timeUnit)
     {
         recordDroppedMessage(message.verb(), timeElapsed, timeUnit, message.isCrossNode());
