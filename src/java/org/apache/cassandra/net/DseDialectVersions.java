@@ -46,7 +46,8 @@ import static org.apache.cassandra.net.MessagingService.VERSION_40;
  * version and then reads the rest of that 19-byte message as a third handshake message, which fails with an error and a
  * stack trace in DSE's log before this node reconnects at 11 (observed with DSE 6.8.65). So the peers this node can
  * tell are DSE 6 nodes before any connection are assumed at 11 when the messaging service starts listening, and the
- * first message they get is the 8-byte pre-4.0 one at 11, which DSE echoes.
+ * first message they get is the 8-byte pre-4.0 one at 11, which DSE 6.9.26 echoes and DSE 6.8.65 answers with its own
+ * version (1024), as observed with both.
  * <p>
  * Rule: the {@code release_version} this node stores for the peer ({@code system.peers}, from gossip or imported from
  * DSE's {@code nodes/peers}) is a DSE 6 one, {@code 4.0.0.<build>} ({@link DseCompat#isDse6ReleaseVersion}).

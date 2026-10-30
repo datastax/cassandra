@@ -97,7 +97,8 @@ class HandshakeProtocol
          *   <li>In DSE 6 compatibility mode a 4.0-style first message carries the version we request, raised to at
          *       least 13 ({@code VERSION_50}; the current version for an unknown peer, as HCD 1.2 does), so that a DSE
          *       peer answers with its own version ({@code relative << 8}) and we reconnect in the dialect:
-         *       DSE echoes 12 as a 4-byte 12, which a 4.0 reader cannot tell from the start of a 12-byte Accept.</li>
+         *       DSE echoes 12 as a 4-byte 12 (as the source of DSE 6.9 has it), which a 4.0 reader cannot tell from the
+         *       start of a 12-byte Accept.</li>
          *   <li>Pre-4.0 first messages carry only this and no accepted range: {@link #acceptVersions} is null for them.
          *       They exist only in DSE 6 compatibility mode: DSE sends one with {@link DseCompat#DSE_VERSION_BYTE},
          *       and we send one at {@link DseCompat#DSE_DIALECT} to a peer we know to speak the dialect.</li>

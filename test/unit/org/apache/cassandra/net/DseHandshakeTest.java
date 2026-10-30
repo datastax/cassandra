@@ -926,7 +926,8 @@ public class DseHandshakeTest
      * The storage port of a DSE 6.9.7+ node, answering the first message of a non-DSE peer as {@code handleStart}
      * does: the version byte (bits 8-15 of the flags) below 10 is closed without an answer, 10 to 12 are
      * echoed, anything higher is overridden with DSE's own version (1536), and so is another DSE node's first message.
-     * A pre-4.0 first message answered with its own version is followed by our third message, which is recorded. DSE
+     * A pre-4.0 first message answered with its own version, or with a DSE version that maps to it (a fixed answer: DSE
+     * 6.8.65 answers 1024 to a request at 11), is followed by our third message, which is recorded. DSE
      * reads only the 8 bytes of magic and flags as the first message; here the rest of a 4.0-style one (address and
      * CRC, which DSE would take for a third message) is read too, so the test can assert the whole message.
      * <p>
@@ -1077,9 +1078,12 @@ public class DseHandshakeTest
             if (fortyStyle)
                 return false; // DSE reads our address and CRC as a third message, fails and closes
 
-            if (answer == ((flags >>> 8) & 0xFF))
+            int requested = (flags >>> 8) & 0xFF;
+            // the rule of DseCompat.isDseHandshakeVersion written out on purpose: a wrong production rule fails the tests
+            if (answer == requested || (requested == DseCompat.DSE_DIALECT && answer >= 256 && answer <= 255 << 8 && (answer & 0xFF) == 0))
             {
-                // our third message: version and address in the 3.0 layout
+                // the requested version, or at the dialect a DSE version (relative << 8, relative 1 to 255), is followed
+                // by our third message: version and address in the 3.0 layout
                 byte[] version = new byte[4];
                 in.readFully(version);
                 int size = in.readUnsignedByte();
@@ -1160,7 +1164,7 @@ public class DseHandshakeTest
             assertThat(dse.answers.get(1)).isEqualTo(DseCompat.DSE_DIALECT);
             second.success().channel.close();
             // the DSE version in the first answer identified the peer as a DSE node
-            assertThat(DsePeers.isDse(settings.to)).isTrue();
+            assertThat(DsePeers.snapshot()).containsEntry(settings.to, "handshake reply with the DSE messaging version " + DSE_697_HANDSHAKE_VERSION);
             dse.thread.join(10_000);
             byte[] address = settings.from.getAddress().getAddress();
             assertThat(dse.thirdMessages).hasSize(1);
@@ -1170,18 +1174,23 @@ public class DseHandshakeTest
 
     /**
      * A pre-4.0 peer that answers our 4.0-style first message with 11 (HCD 1.2 at the dialect) is retried at the dialect
-     * like DSE, but is not identified as a DSE node.
+     * like DSE, but is not identified as a DSE node; nor is a peer answering 256 or more with a value that is not a DSE
+     * version ({@code relative << 8}), which is retried at the dialect too.
      */
     @Test
     public void pre40AnswerWithoutADseVersionDoesNotIdentifyADseNode() throws Exception
     {
         dse6();
-        try (FakeDse hcd = new FakeDse(1, DseCompat.DSE_DIALECT))
+        for (int answer : new int[]{ DseCompat.DSE_DIALECT, 300, 1025 })
         {
-            Result<MessagingSuccess> result = connect(hcd.endpoint(), current_version).get(20, TimeUnit.SECONDS);
-            assertThat(result.outcome).isEqualTo(Result.Outcome.RETRY);
-            assertThat(result.retry().withMessagingVersion).isEqualTo(DseCompat.DSE_DIALECT);
-            assertThat(DsePeers.isDse(hcd.endpoint())).isFalse();
+            DsePeers.reset();
+            try (FakeDse peer = new FakeDse(1, answer))
+            {
+                Result<MessagingSuccess> result = connect(peer.endpoint(), current_version).get(20, TimeUnit.SECONDS);
+                assertThat(result.outcome).as("answer " + answer).isEqualTo(Result.Outcome.RETRY);
+                assertThat(result.retry().withMessagingVersion).as("answer " + answer).isEqualTo(DseCompat.DSE_DIALECT);
+                assertThat(DsePeers.isDse(peer.endpoint())).as("answer " + answer).isFalse();
+            }
         }
     }
 
@@ -1203,29 +1212,76 @@ public class DseHandshakeTest
     }
 
     /**
-     * A pre-4.0 first message answered with another version is final: incompatible, never a retry. That includes a DSE
-     * version, which maps to the dialect requested but is not its echo.
+     * A pre-4.0 first message answered with another version is final: incompatible, never a retry, reported with the
+     * version the peer sent, and identifies no DSE node. That includes a DSE version answering a request at 10, since it
+     * maps to the dialect (11), and an answer to a request at 11 of 256 or more that is not a DSE version
+     * ({@code relative << 8}, relative 1 to 255).
      */
     @Test
     public void pre40RequestAnsweredWithAnotherVersionIsIncompatible() throws Exception
     {
         dse6();
-        for (int answer : new int[]{ VERSION_30, VERSION_40, DSE_697_HANDSHAKE_VERSION })
+        int[][] requestedAndAnswer = { { DseCompat.DSE_DIALECT, VERSION_30 },
+                                       { DseCompat.DSE_DIALECT, VERSION_40 },
+                                       { VERSION_30, DseCompat.DSE_681_VERSION },
+                                       { DseCompat.DSE_DIALECT, 300 },
+                                       { DseCompat.DSE_DIALECT, 1025 },
+                                       { DseCompat.DSE_DIALECT, 0x10000 },
+                                       { DseCompat.DSE_DIALECT, Integer.MAX_VALUE },
+                                       { DseCompat.DSE_DIALECT, 255 },
+                                       { DseCompat.DSE_DIALECT, 0 } };
+        for (int[] pair : requestedAndAnswer)
         {
+            int requested = pair[0];
+            int answer = pair[1];
+            DsePeers.reset();
             try (FakeDse dse = new FakeDse(1, answer))
             {
+                Result<MessagingSuccess> result = connect(dse.endpoint(), requested).get(20, TimeUnit.SECONDS);
+                String what = "requested " + requested + ", answer " + answer;
+                assertThat(result.outcome).as(what).isEqualTo(Result.Outcome.INCOMPATIBLE);
+                assertThat(result.incompatible().maxMessagingVersion).as(what).isEqualTo(answer);
+                assertThat(dse.firstMessages.get(0)).as(what).containsExactly(0xCA, 0x55, 0x2D, 0xFA, 0x00, 0x00, requested, SMALL_CRC_FLAGS);
+                assertThat(dse.thirdMessages).as(what).isEmpty();
+                assertThat(DsePeers.isDse(dse.endpoint())).as(what).isFalse();
+            }
+        }
+    }
+
+    /**
+     * A DSE version answering our pre-4.0 first message at the dialect is accepted, and our third message completes the
+     * handshake at the dialect: DSE 6.8.65 answers its own version (1024) there instead of echoing 11 (observed with
+     * DSE 6.8.65); any other DSE version (relative 1 to 255) is accepted as well. Such an answer identifies a DSE node.
+     */
+    @Test
+    public void dseVersionAnsweringOurPre40MessageIsAccepted() throws Exception
+    {
+        dse6();
+        for (int answer : new int[]{ DseCompat.DSE_681_VERSION, DSE_697_HANDSHAKE_VERSION, DseCompat.DSE_60_VERSION, 0xFF00 })
+        {
+            DsePeers.reset();
+            try (FakeDse dse = new FakeDse(1, answer))
+            {
+                OutboundConnectionSettings settings = settings(dse.endpoint());
                 Result<MessagingSuccess> result = connect(dse.endpoint(), DseCompat.DSE_DIALECT).get(20, TimeUnit.SECONDS);
-                assertThat(result.outcome).as("answer " + answer).isEqualTo(Result.Outcome.INCOMPATIBLE);
-                assertThat(result.incompatible().maxMessagingVersion).isEqualTo(answer);
-                assertThat(dse.thirdMessages).isEmpty();
+                String what = "answer " + answer;
+                assertThat(result.outcome).as(what).isEqualTo(Result.Outcome.SUCCESS);
+                assertThat(result.success().messagingVersion).as(what).isEqualTo(DseCompat.DSE_DIALECT);
+                assertThat(dse.firstMessages.get(0)).as(what).containsExactly(0xCA, 0x55, 0x2D, 0xFA, 0x00, 0x00, 0x0B, SMALL_CRC_FLAGS);
+                result.success().channel.close();
+                dse.thread.join(10_000);
+                byte[] address = settings.from.getAddress().getAddress();
+                assertThat(dse.thirdMessages).as(what).hasSize(1);
+                assertThat(dse.thirdMessages.get(0)).as(what).containsExactly(concat(new byte[]{ 0, 0, 0, 11, 4 }, address));
+                assertThat(DsePeers.snapshot()).as(what).containsEntry(settings.to, "pre-4.0 handshake reply with the DSE messaging version " + answer);
             }
         }
     }
 
     /**
      * With the mode off our first message is the 4.0-style one with acceptVersions.min (12) in the legacy byte, as
-     * before, even for a peer stored at 11; DSE echoes 12, which a 4.0 reader takes for the start of a 12-byte Accept,
-     * and the handshake fails once DSE closes the socket.
+     * before, even for a peer stored at 11; DSE echoes 12 (as the source of DSE 6.9 has it), which a 4.0 reader takes
+     * for the start of a 12-byte Accept, and the handshake fails once DSE closes the socket.
      */
     @Test
     public void dseAnswerIsAFailureWithTheModeOff() throws Exception
@@ -1267,7 +1323,11 @@ public class DseHandshakeTest
     /**
      * A peer stored with a DSE 6 release is seeded at the dialect, and the first message the connection sends it is the
      * 8-byte pre-4.0 one at 11, laid out as DSE's own first message (same magic, same length, the version where DSE puts
-     * 0xFF): DSE echoes 11 and never sees the 19-byte 4.0-style probe it would read the rest of as a third message.
+     * 0xFF), so that DSE never sees the 19-byte 4.0-style probe it would read the rest of as a third message. DSE 6.9.26
+     * echoes 11; DSE 6.8.65 answers with its own version instead (observed with DSE 6.8.65; the value is the 4-byte
+     * answer of its captured handshake with another DSE node, 1024, its answer to our message at 11 being known from the
+     * upgraded node's log, not from a capture), which identifies it as a DSE node. Either way the connection is
+     * established at the dialect on that first socket, with no retry and no refusal.
      */
     @Test
     public void knownDsePeerIsFirstSentThePre40MessageNeverTheProbe() throws Exception
@@ -1276,7 +1336,13 @@ public class DseHandshakeTest
         for (DseVersion version : DseVersion.values())
         {
             Handshake captured = DseFixtures.handshakes(version).get(0);
-            try (FakeDse dse = new FakeDse(1))
+            int ownVersion = ByteBuffer.wrap(captured.msg2).getInt();
+            assertThat(ownVersion).as(version + ": the captured answer").isEqualTo(version.relativeMessagingVersion << 8);
+            // DSE 6.8.65 answers with its own version, DSE 6.9.26 echoes (null: the fake's own answer, the echo)
+            Integer fixedAnswer = version == DseVersion.DSE_6_8_65 ? Integer.valueOf(ownVersion) : null;
+            int expectedAnswer = fixedAnswer != null ? fixedAnswer : DseCompat.DSE_DIALECT;
+            DsePeers.reset();
+            try (FakeDse dse = new FakeDse(1, fixedAnswer))
             {
                 InetAddressAndPort endpoint = dse.endpoint();
                 assertThat(DseDialectVersions.seed(Stream.of(DseDialectVersionsTest.peer(endpoint, version.releaseVersion)), MessagingService.instance().versions))
@@ -1293,7 +1359,7 @@ public class DseHandshakeTest
                     assertThat(Arrays.copyOf(sent, 4)).as(version + ": the magic").containsExactly(Arrays.copyOf(captured.msg1, 4));
                     assertThat(captured.msg1[6] & 0xFF).as(version + ": where DSE puts 0xFF").isEqualTo(DseCompat.DSE_VERSION_BYTE);
                     assertThat(sent[6] & 0xFF).isEqualTo(DseCompat.DSE_DIALECT);
-                    assertThat(dse.answers).containsExactly(DseCompat.DSE_DIALECT);
+                    assertThat(dse.answers).as(version + ": the answer").containsExactly(expectedAnswer);
                     // our third message: version and address, laid out as the start of DSE's own (4-byte version, address size, address)
                     byte[] address = outbound.settings().from.getAddress().getAddress();
                     assertThat(dse.thirdMessages).hasSize(1);
@@ -1301,7 +1367,9 @@ public class DseHandshakeTest
                     assertThat(captured.msg3[4]).as(version + ": address size in DSE's third message").isEqualTo((byte) address.length);
                     // our third message is flushed before the event loop completes the connection: the count may lag
                     Util.spinAssertEquals(1L, outbound::successfulConnections, 10);
+                    assertThat(outbound.connectionAttempts()).as(version + ": no retry").isEqualTo(1);
                     assertThat(outbound.messagingVersion()).isEqualTo(DseCompat.DSE_DIALECT);
+                    assertThat(DsePeers.isDse(endpoint)).as(version + ": identified by the answer").isEqualTo(fixedAnswer != null);
                 }
                 finally
                 {
