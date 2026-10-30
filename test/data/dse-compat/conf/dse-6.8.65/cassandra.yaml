@@ -1,0 +1,132 @@
+aggregated_request_timeout_in_ms: 120000
+allocate_tokens_for_local_replication_factor: 3
+authenticator: com.datastax.bdp.cassandra.auth.DseAuthenticator
+authorizer: com.datastax.bdp.cassandra.auth.DseAuthorizer
+auto_hints_cleanup_enabled: false
+auto_snapshot: true
+back_pressure_enabled: false
+back_pressure_strategy:
+- class_name: org.apache.cassandra.net.RateBasedBackPressure
+  parameters:
+  - factor: 5
+    flow: FAST
+    high_ratio: 0.9
+batchlog_replay_throttle_in_kb: 1024
+broadcast_address: 192.168.57.12
+cas_contention_timeout_in_ms: 1000
+cdc_enabled: false
+cdc_raw_directory: /var/lib/cassandra/cdc_raw
+client_encryption_options:
+  enabled: false
+  keystore: resources/dse/conf/.keystore
+  keystore_password: cassandra
+  optional: false
+cluster_name: dse-lab
+column_index_cache_size_in_kb: 2
+column_index_size_in_kb: 16
+commit_failure_policy: stop
+commitlog_directory: /var/lib/cassandra/commitlog
+commitlog_segment_size_in_mb: 32
+commitlog_sync: periodic
+commitlog_sync_period_in_ms: 10000
+compaction_throughput_mb_per_sec: 16
+concurrent_materialized_view_builders: 2
+continuous_paging:
+  cancel_timeout_sec: 5
+  client_timeout_sec: 600
+  max_concurrent_sessions: 60
+  max_local_query_time_ms: 5000
+  max_page_size_mb: 8
+  max_session_pages: 4
+  paused_check_interval_ms: 1
+counter_cache_save_period: 7200
+counter_cache_size_in_mb: null
+counter_write_request_timeout_in_ms: 5000
+cross_node_timeout: false
+data_file_directories:
+- /var/lib/cassandra/data
+disk_failure_policy: stop
+dynamic_snitch_badness_threshold: 0.1
+dynamic_snitch_reset_interval_in_ms: 600000
+dynamic_snitch_update_interval_in_ms: 100
+enable_scripted_user_defined_functions: false
+enable_user_defined_functions: false
+enable_user_defined_functions_threads: true
+endpoint_snitch: GossipingPropertyFileSnitch
+hinted_handoff_enabled: true
+hinted_handoff_throttle_in_kb: 1024
+hints_directory: /var/lib/cassandra/hints
+hints_flush_period_in_ms: 10000
+incremental_backups: false
+inter_dc_tcp_nodelay: false
+internode_compression: all
+listen_address: 192.168.57.12
+max_hint_window_in_ms: 10800000
+max_hints_delivery_threads: 2
+max_hints_file_size_in_mb: 128
+memtable_allocation_type: offheap_objects
+metadata_directory: /var/lib/cassandra/metadata
+native_transport_address: 192.168.57.12
+native_transport_allow_older_protocols: true
+native_transport_broadcast_address: 192.168.57.12
+native_transport_keepalive: true
+native_transport_port: 9042
+nodesync:
+  enabled: false
+  rate_in_kb: 1024
+num_tokens: 8
+partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+permissions_validity_in_ms: 120000
+prepared_statements_cache_size_mb: null
+range_request_timeout_in_ms: 10000
+read_request_timeout_in_ms: 5000
+request_timeout_in_ms: 10000
+role_manager: com.datastax.bdp.cassandra.auth.DseRoleManager
+roles_validity_in_ms: 120000
+row_cache_save_period: 0
+row_cache_size_in_mb: 0
+saved_caches_directory: /var/lib/cassandra/saved_caches
+seed_provider:
+- class_name: org.apache.cassandra.locator.SimpleSeedProvider
+  parameters:
+  - seeds: 192.168.57.11,192.168.57.12,192.168.57.13
+server_encryption_options:
+  internode_encryption: none
+  keystore: resources/dse/conf/.keystore
+  keystore_password: cassandra
+  truststore: resources/dse/conf/.truststore
+  truststore_password: cassandra
+slow_query_log_timeout_in_ms: 500
+snapshot_before_compaction: false
+snapshot_before_dropping_column: false
+ssl_storage_port: 7001
+sstable_preemptive_open_interval_in_mb: 50
+start_native_transport: true
+storage_port: 7000
+system_keyspaces_filtering: false
+tracetype_query_ttl: 86400
+tracetype_repair_ttl: 604800
+transparent_data_encryption_options:
+  chunk_length_kb: 64
+  cipher: AES/CBC/PKCS5Padding
+  enabled: false
+  key_alias: testing:1
+  key_provider:
+  - class_name: org.apache.cassandra.security.JKSKeyProvider
+    parameters:
+    - key_password: cassandra
+      keystore: conf/.keystore
+      keystore_password: cassandra
+      store_type: JCEKS
+trickle_fsync: true
+trickle_fsync_interval_in_kb: 10240
+truncate_request_timeout_in_ms: 60000
+user_defined_function_fail_heap_mb: 500
+user_defined_function_fail_micros: 10000
+user_defined_function_warn_heap_mb: 200
+user_defined_function_warn_micros: 500
+user_function_timeout_policy: die
+windows_timer_interval: 1
+write_request_timeout_in_ms: 2000
+zerocopy_max_sstables: 256
+zerocopy_max_unused_metadata_in_mb: 200

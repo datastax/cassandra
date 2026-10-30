@@ -34,6 +34,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.io.sstable.format.big.BigFormatPartitionWriter;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -140,7 +141,11 @@ public class UnfilteredRowIteratorSerializer
         SerializationHelper helper = new SerializationHelper(header);
 
         if (!partitionDeletion.isLive())
+        {
+            if (DseCompat.isPre40Layout(version))
+                UnfilteredSerializer.checkPre40DeletionTime(partitionDeletion.localDeletionTime(), version);
             header.writeDeletionTime(partitionDeletion, out);
+        }
 
         if (hasStatic)
             UnfilteredSerializer.serializer.serialize(staticRow, helper, out, version);

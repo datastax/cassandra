@@ -66,6 +66,17 @@ public final class SchemaConstants
     public static final Set<String> REPLICATED_SYSTEM_KEYSPACE_NAMES = ImmutableSet.of(TRACE_KEYSPACE_NAME, AUTH_KEYSPACE_NAME, DISTRIBUTED_KEYSPACE_NAME);
 
     /**
+     * The keyspaces DataStax Enterprise 6 creates with {@code LocalStrategy} replication for its own use
+     * ({@code DseLocalKeyspace} and the insights schema manager). They are ordinary rows of
+     * {@code system_schema} on a node upgraded in place from DSE 6, so they load with the rest of the
+     * distributed schema whatever the configuration of the node, and they stay there until an operator drops them:
+     * {@link Schema} accepts {@code LocalStrategy} for exactly these names.
+     * They hold node-local data only and are left out of ring operations (bootstrap, decommission, move, pending
+     * ranges, ...) and of the default keyspace lists of repair and cleanup.
+     */
+    public static final Set<String> DSE_LOCAL_STRATEGY_KEYSPACE_NAMES = ImmutableSet.of("dse_system_local", "dse_insights_local");
+
+    /**
      * Longest acceptable file name. Longer names lead to file write or read errors.
      */
     public static final int FILENAME_LENGTH = 255;
@@ -128,6 +139,15 @@ public final class SchemaConstants
     public static boolean isLocalSystemKeyspace(String keyspaceName)
     {
         return LOCAL_SYSTEM_KEYSPACE_NAMES.contains(keyspaceName.toLowerCase()) || isVirtualSystemKeyspace(keyspaceName);
+    }
+
+    /**
+     * @return whether the keyspace is one of the {@link #DSE_LOCAL_STRATEGY_KEYSPACE_NAMES}, the local keyspaces a
+     * DataStax Enterprise 6 node leaves in the schema (the name is compared exactly, keyspace names being case-sensitive)
+     */
+    public static boolean isDseLocalStrategyKeyspace(String keyspaceName)
+    {
+        return DSE_LOCAL_STRATEGY_KEYSPACE_NAMES.contains(keyspaceName);
     }
 
     /**

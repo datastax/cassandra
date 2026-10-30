@@ -1,0 +1,16 @@
+Consistency level set to ALL.
+Disabled Query paging.
+
+ v       | pk | ck | a
+---------+----+----+----
+      v1 |  1 |  1 | 13
+ changed |  1 |  2 | 12
+
+(2 rows)
+
+ pk | ck | a  | v
+----+----+----+---------
+  1 |  1 | 13 |      v1
+  1 |  2 | 12 | changed
+
+(2 rows)

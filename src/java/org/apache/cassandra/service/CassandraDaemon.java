@@ -49,6 +49,7 @@ import org.apache.cassandra.db.SizeEstimatesRecorder;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.SystemKeyspaceMigrator41;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
 import org.apache.cassandra.db.virtual.SystemViewsKeyspace;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
@@ -60,6 +61,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.StartupClusterConnectivityChecker;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.Schema;
@@ -287,6 +289,17 @@ public class CassandraDaemon
             throw e;
         }
 
+        // DSE 6 compatibility: refuse to start on any trace of the DSE features this software does not support (Search,
+        // Graph, Analytics, DSEFS/CFS, Advanced Replication), once the schema is loaded and before any keyspace is opened
+        try
+        {
+            Dse6NonCoreTraces.verifyAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
         setupVirtualKeyspaces();
 
         try
@@ -313,6 +326,16 @@ public class CassandraDaemon
                     store.disableAutoCompaction();
                 }
             }
+        }
+
+        // DSE 6 compatibility mode: whether this software reads the data DSE wrote for each materialized view as DSE does
+        try
+        {
+            DseViewHiddenColumnCatalog.checkViewsAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
         }
 
         try
@@ -377,6 +400,18 @@ public class CassandraDaemon
         // Prepared statements
         QueryProcessor.instance.preloadPreparedStatements();
 
+        // DSE 6 compatibility: refuse to start while DSE access controls this software does not enforce would grant
+        // access if dropped. First pass on this node's replica, here because it reads system_auth: after the schema is
+        // loaded and the commit log replayed, before the node joins the ring.
+        try
+        {
+            Dse6AccessControlCheck.verifyAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
         // start server internals
         StorageService.instance.registerDaemon(this);
         try
@@ -403,6 +438,8 @@ public class CassandraDaemon
 
         if (!FBUtilities.getBroadcastAddressAndPort().equals(InetAddressAndPort.getLoopbackAddress()))
             Gossiper.waitToSettle();
+        // DSE 6 compatibility mode: the cue that the mode is no longer needed (a no-op otherwise)
+        DsePeers.warnIfNoneKnownAtStartup();
 
         StorageService.instance.doAuthSetup(false);
 
@@ -430,6 +467,17 @@ public class CassandraDaemon
         }
 
         AuditLogManager.instance.initialize();
+
+        // DSE 6 compatibility, second pass: the same check on a cluster-wide read, now that the node has joined and can reach
+        // the other replicas of system_auth, before any client is served
+        try
+        {
+            Dse6AccessControlCheck.verifyAfterJoin();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
 
         // schedule periodic background compaction task submission. this is simply a backstop against compactions stalling
         // due to scheduling errors or race conditions

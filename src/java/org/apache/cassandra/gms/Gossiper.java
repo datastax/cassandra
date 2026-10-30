@@ -72,13 +72,17 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.service.DseUpgradeGuards;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.concurrent.NotScheduledFuture;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
@@ -170,6 +174,10 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
     /* Inflight echo requests. */
     private final Map<InetAddressAndPort, EndpointState> inflightEcho = new ConcurrentHashMap<>();
 
+    /* DSE 6 compatibility mode: the echo requests of inflightEcho, so that one a peer leaves unanswered, or answers with a failure, is sent again. */
+    @VisibleForTesting
+    final DseEchoRetries dseEchoRetries = new DseEchoRetries();
+
     /* unreachable member set */
     private final Map<InetAddressAndPort, Long> unreachableEndpoints = new ConcurrentHashMap<>();
 
@@ -205,6 +213,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         unreachableEndpoints.clear();
         liveEndpoints.clear();
         inflightEcho.clear();
+        dseEchoRetries.clear();
         justRemovedEndpoints.clear();
         expireTimeEndpointMap.clear();
         endpointStateMap.values().forEach(EndpointState::maybeRemoveUpdater);
@@ -766,7 +775,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
      *
      * @param endpoint endpoint to be removed from the current membership.
      */
-    private void evictFromMembership(InetAddressAndPort endpoint)
+    @VisibleForTesting
+    void evictFromMembership(InetAddressAndPort endpoint)
     {
         checkProperThreadForStateMutation();
         unreachableEndpoints.remove(endpoint);
@@ -774,6 +784,9 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         Nodes.peers().remove(endpoint, true, true);
         expireTimeEndpointMap.remove(endpoint);
         IFailureDetector.instance.remove(endpoint);
+        DsePeers.forget(endpoint);
+        if (DseCompat.enabled())
+            dseEchoRetries.forget(endpoint);
         quarantineEndpoint(endpoint);
         if (logger.isDebugEnabled())
             logger.debug("evicting {} from gossip", endpoint);
@@ -800,6 +813,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         }
 
         inflightEcho.remove(endpoint);
+        if (DseCompat.enabled())
+            dseEchoRetries.forget(endpoint);
         if (disableEndpointRemoval)
             return;
 
@@ -810,6 +825,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         liveEndpoints.remove(endpoint);
         unreachableEndpoints.remove(endpoint);
         MessagingService.instance().versions.reset(endpoint);
+        DsePeers.forget(endpoint);
         quarantineEndpoint(endpoint);
         MessagingService.instance().closeOutbound(endpoint);
         MessagingService.instance().removeInbound(endpoint);
@@ -986,6 +1002,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
     public void assassinateEndpoint(String address) throws UnknownHostException
     {
         InetAddressAndPort endpoint = InetAddressAndPort.getByName(address);
+        DseUpgradeGuards.refuseAssassinateWhileUpgrading(endpoint);
         runInGossipStageBlocking(() -> {
             EndpointState epState = endpointStateMap.get(endpoint);
             logger.warn("Assassinating {} via gossip", endpoint);
@@ -1626,11 +1643,15 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
 
         EndpointState prevState = inflightEcho.put(addr, localState);
         boolean sendEcho = !localState.equals(prevState);
+        // DSE 6 compatibility mode: the echo request a peer left unanswered, or answered with a failure, is sent again (DseEchoRetries)
+        boolean dse = DseCompat.enabled();
+        if (!sendEcho && dse)
+            sendEcho = dseEchoRetries.isDue(addr, localState);
         if (sendEcho)
         {
             Message<NoPayload> echoMessage = Message.out(ECHO_REQ, noPayload);
             logger.trace("Sending ECHO_REQ to {}", addr);
-            RequestCallback echoHandler = msg ->
+            RequestCallback echoHandler = dse ? dseEchoHandler(addr, localState, echoMessage) : msg ->
             {
                 runInGossipStageBlocking(() -> {
                     EndpointState epState = inflightEcho.remove(addr);
@@ -1644,6 +1665,44 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
             logger.trace("Skipping ECHO_REQ to {} since it is already inflight", addr);
 
         GossiperDiagnostics.markedAlive(this, addr, localState);
+    }
+
+    /**
+     * DSE 6 compatibility mode: records the echo request {@code echoMessage} about to be sent to {@code addr} for
+     * {@code localState} and returns its callback. An answer marks the peer up, as upstream; a failure is recorded, so
+     * that the request can be sent again ({@link DseEchoRetries}); it leaves the pending echo request in place. The
+     * request asks for a failure response (the failure-callback flag), to every peer, as HCD 1.2's echo requests do.
+     */
+    private RequestCallback<NoPayload> dseEchoHandler(InetAddressAndPort addr, EndpointState localState, Message<NoPayload> echoMessage)
+    {
+        int attempt = dseEchoRetries.sending(addr, localState, echoMessage.expiresAtNanos() - echoMessage.createdAtNanos());
+        return new RequestCallback<NoPayload>()
+        {
+            @Override
+            public void onResponse(Message<NoPayload> msg)
+            {
+                runInGossipStageBlocking(() -> {
+                    EndpointState epState = inflightEcho.remove(addr);
+                    if (epState != null)
+                    {
+                        dseEchoRetries.answered(addr, attempt);
+                        realMarkAlive(addr, epState);
+                    }
+                });
+            }
+
+            @Override
+            public boolean invokeOnFailure()
+            {
+                return true;
+            }
+
+            @Override
+            public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
+            {
+                dseEchoRetries.failed(addr, localState, attempt, failureReason);
+            }
+        };
     }
 
     @VisibleForTesting
@@ -1692,6 +1751,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
     {
         localState.markDead();
         inflightEcho.remove(addr);
+        if (DseCompat.enabled())
+            dseEchoRetries.forget(addr);
         if (!disableEndpointRemoval)
         {
             liveEndpoints.remove(addr);
@@ -1898,6 +1959,10 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
             EndpointState localEpStatePtr = endpointStateMap.get(ep);
             EndpointState remoteState = entry.getValue();
 
+            // DSE 6 compatibility mode: a DSE node gossips its addresses and ports as separate states
+            if (DseCompat.enabled())
+                DseGossipStates.deriveAddressesAndPorts(ep, remoteState, localEpStatePtr);
+
             if (!hasMajorVersion3Nodes)
                 remoteState.removeMajorVersion3LegacyApplicationStates();
 
@@ -2059,7 +2124,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
      * process also known as "empty", this is done for host replacement to be able to replace downed hosts that are
      * in the ring but have no state in gossip (see CASSANDRA-16213).
      *
-     * This method is different than {@link #examineGossiper(List, List, Map)} with respect to how "empty" states are
+     * This method is different than {@link #examineGossiper(List, List, Map, InetAddressAndPort)} with respect to how "empty" states are
      * dealt with; they are kept.
      */
     Map<InetAddressAndPort, EndpointState> examineShadowState()
@@ -2114,10 +2179,16 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
      * and the delta state are built up.
      *
      * When a {@link EndpointState} is "empty" then it is filtered out and not added to the delta state (see CASSANDRA-16213).
+     *
+     * @param from the peer that sent the digests; in DSE 6 compatibility mode a DSE node is sent only the states of this
+     *             node it asks for ({@link DseGossipStates#sendsAllOwnStates})
      */
-    void examineGossiper(List<GossipDigest> gDigestList, List<GossipDigest> deltaGossipDigestList, Map<InetAddressAndPort, EndpointState> deltaEpStateMap)
+    void examineGossiper(List<GossipDigest> gDigestList, List<GossipDigest> deltaGossipDigestList, Map<InetAddressAndPort, EndpointState> deltaEpStateMap,
+                         InetAddressAndPort from)
     {
         assert !gDigestList.isEmpty() : "examineGossiper called with empty digest list";
+        // in DSE 6 compatibility mode this may identify the peer by the NET_VERSION stored for it, or end its presumption
+        boolean allOwnStates = DseGossipStates.sendsAllOwnStates(from);
         for ( GossipDigest gDigest : gDigestList )
         {
             int remoteGeneration = gDigest.getGeneration();
@@ -2142,7 +2213,9 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
                     /* we request everything from the gossiper */
                     requestAll(gDigest, deltaGossipDigestList, remoteGeneration);
                 }
-                else if (remoteGeneration < localGeneration || FBUtilities.getBroadcastAddressAndPort().equals(gDigest.getEndpoint()))
+                // all of this node's states when the peer asks about it (CASSANDRA-19983); DSE 6 compatibility mode: not to a
+                // DSE node, see DseGossipStates.sendsAllOwnStates
+                else if (remoteGeneration < localGeneration || (allOwnStates && FBUtilities.getBroadcastAddressAndPort().equals(gDigest.getEndpoint())))
                 {
                     /* send all data with generation = localgeneration and version > -1 */
                     sendAll(gDigest, deltaEpStateMap, HeartBeatState.EMPTY_VERSION);
@@ -2869,7 +2942,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         if (epState == null)
             throw new IllegalStateException();
 
-        GossipDigestAck2 digestAck2Message = new GossipDigestAck2(Collections.singletonMap(getBroadcastAddressAndPort(), epState));
+        GossipDigestAck2 digestAck2Message = new GossipDigestAck2(Collections.singletonMap(getBroadcastAddressAndPort(), epState), ep);
         Message<GossipDigestAck2> message = Message.out(Verb.GOSSIP_DIGEST_ACK2, digestAck2Message);
         MessagingService.instance().send(message, ep);
     }

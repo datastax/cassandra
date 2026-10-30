@@ -20,6 +20,7 @@ package org.apache.cassandra.hints;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
 import com.google.common.util.concurrent.RateLimiter;
@@ -35,8 +36,10 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.HintsServiceMetrics;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.concurrent.Condition;
 
 
@@ -156,6 +159,8 @@ final class HintsDispatcher implements AutoCloseable
         if (failures > 0 || timeouts > 0)
         {
             HintDiagnostics.pageFailureResult(this, success, failures, timeouts);
+            if (DseCompat.isPre40Layout(messagingVersion))
+                warnUnacknowledgedByDse6(failures + timeouts);
             return Action.ABORT;
         }
         else
@@ -163,6 +168,34 @@ final class HintsDispatcher implements AutoCloseable
             HintDiagnostics.pageSuccessResult(this, success, failures, timeouts);
             return Action.CONTINUE;
         }
+    }
+
+    /**
+     * DSE 6 compatibility mode, for a page sent to a DSE 6 node (at a pre-4.0 messaging version,
+     * {@link DseCompat#isPre40Layout}): DSE 6.9 acknowledges every hint it applies, but not one it drops (a table it
+     * does not know, data it cannot validate, a range it no longer owns when configured to reject such hints); DSE 6.8
+     * is taken to do the same, so the WARN names DSE 6. A dropped hint is dropped again at every retry: the page is
+     * sent again at every dispatch, and the rest of the file and the later files for that node wait until the hint
+     * expires (the smallest gc_grace_seconds of its tables, capped by cassandra.maxHintTTL) or the node is upgraded
+     * (this software acknowledges the hints it drops). A node that is down or overloaded leaves hints unacknowledged
+     * too, and a hint that could not be sent (outbound queue full or expired, a serialization failure, the connection
+     * closed) fails its callback. The WARN gives the total of the timeouts and failures: no split between them is
+     * reliable, since a failure is a failure response from the node or one of those local failures, and the expiry of
+     * the hint's callback is reported as a timeout failure when it comes before the dispatcher's own deadline. Once
+     * every ten minutes per node at most.
+     */
+    private void warnUnacknowledgedByDse6(long unacknowledged)
+    {
+        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, "dse6-unacknowledged-hints-" + address, 10, TimeUnit.MINUTES,
+                         "DSE 6 compatibility mode: hints not acknowledged by DSE 6 node {}: {} in file {}; the file stays and is " +
+                         "sent again from that page. The node may be down or overloaded, it may have answered with a failure, the " +
+                         "hints may not have been sent (see the messaging log), or it dropped them: DSE 6 does not acknowledge a " +
+                         "hint it drops (unknown table, invalid data, range no longer owned if configured to reject such hints), " +
+                         "and such a hint holds back this file and the later ones for that node until it expires (the smallest " +
+                         "gc_grace_seconds of its tables, capped by cassandra.maxHintTTL) or the node is upgraded. If this repeats " +
+                         "for the same file, nodetool truncatehints {} deletes all the pending hints for that node, and the repair " +
+                         "after the compatibility mode is dropped brings their writes to it.",
+                         address, unacknowledged, reader.descriptor().fileName(), address.getHostAddress(false));
     }
 
     private void updateMetrics(long success, long failures, long timeouts)

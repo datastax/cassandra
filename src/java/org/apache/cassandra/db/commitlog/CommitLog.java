@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.commitlog;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.file.FileStore;
 import java.util.ArrayList;
@@ -66,6 +67,7 @@ import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
+import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.STARTUP;
@@ -83,6 +85,12 @@ public class CommitLog implements CommitLogMBean
 {
     private static final Logger logger = LoggerFactory.getLogger(CommitLog.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
+
+    /**
+     * Suffix of a DSE 6 commit log segment this software replayed and moved aside (see
+     * {@link #moveAsideReplayedDseSegment}).
+     */
+    public static final String REPLAYED_DSE_SEGMENT_SUFFIX = ".replayed";
 
     public static final CommitLog instance = CommitLog.construct();
 
@@ -276,11 +284,80 @@ public class CommitLog implements CommitLogMBean
 
             for (File f : files)
             {
-                segmentManager.handleReplayedSegment(f, segmentsWithInvalidMutations.contains(f.name()), segmentsWithFailedMutations.contains(f.name()));
+                boolean hasInvalidMutations = segmentsWithInvalidMutations.contains(f.name());
+                boolean hasFailedMutations = segmentsWithFailedMutations.contains(f.name());
+                if (flushReason == STARTUP && moveAsideReplayedDseSegment(f, hasInvalidMutations, hasFailedMutations))
+                {
+                    segmentManager.handleMovedAsideReplayedSegment(f);
+                    continue;
+                }
+                segmentManager.handleReplayedSegment(f, hasInvalidMutations, hasFailedMutations);
             }
         }
 
         return replayedKeyspaces;
+    }
+
+    /**
+     * A segment written by DataStax Enterprise 6 (version {@link CommitLogDescriptor#VERSION_DSE_68}) usually holds
+     * mutations of tables that exist only in DSE (in the captured segment, NodeSync's status and checkpoints). They are
+     * skipped as unknown tables, and a segment with skipped mutations is normally kept so that it can be replayed once
+     * the table exists: a DSE segment would then be replayed again at every start, re-applying rows a later deletion
+     * removed once its tombstone is purged. The reader flags a segment only for the first skipped mutation of each
+     * unknown table, so which of several DSE segments is kept would depend on the replay order; the decision therefore
+     * rests on the segment version alone. In {@code internode_compatibility_mode: DSE_6}, every DSE segment read at the
+     * start (replayed, or skipped as empty) without failed mutations is renamed with
+     * {@link #REPLAYED_DSE_SEGMENT_SUFFIX}, after the flush of what it replayed: no longer replayed by this software,
+     * which ignores the file from then on, and kept for inspection. A rollback to DSE should delete these files
+     * together with the segments this software wrote (of a version other than 680, which DSE cannot read): DSE does not
+     * replay a file of that name either, so the writes DSE had not flushed to the tables this software does not know
+     * (NodeSync's, which NodeSync rebuilds, and any other DSE-only table, which nothing rebuilds) are lost either way;
+     * the operator deletes them too when the mode is dropped. A segment with failed mutations, or one this software
+     * wrote, is left to the usual handling. The directory is synced after the rename; if that sync is lost to a power
+     * failure, the segment is replayed once more at the next start and renamed again. An existing file of the target
+     * name (a copy of the same segment moved aside before) is replaced. If the rename fails, the segment is left to the
+     * usual handling too: the default segment handler deletes it unless mutations of unknown tables were skipped in it;
+     * a segment kept that way is replayed again at the next start, and the WARN says so.
+     *
+     * @param hasInvalidMutations whether the reader flagged the segment for skipped mutations of unknown tables: only
+     *                            used to tell what the default segment handler does with it when the rename fails
+     * @return true if the segment was moved aside
+     */
+    @VisibleForTesting
+    static boolean moveAsideReplayedDseSegment(File segment, boolean hasInvalidMutations, boolean hasFailedMutations)
+    {
+        if (!DatabaseDescriptor.isDse6CompatibilityMode() || hasFailedMutations)
+            return false;
+        if (CommitLogDescriptor.fromFileName(segment.name()).version() != CommitLogDescriptor.VERSION_DSE_68)
+            return false;
+        File target = new File(segment.parent(), segment.name() + REPLAYED_DSE_SEGMENT_SUFFIX);
+        try
+        {
+            segment.move(target);
+        }
+        catch (FSWriteError | UncheckedIOException e)
+        {
+            if (hasInvalidMutations)
+                logger.warn("Unable to move the DSE commit log segment {} aside after its replay; it is left to the segment handler, " +
+                            "which by default keeps it: it will be replayed again at the next start, which brings back any row of it " +
+                            "whose deletion was purged since. Stop the node and delete the segment (what it replayed is flushed) or " +
+                            "rename it to {} by hand.",
+                            segment, target.name(), e);
+            else
+                logger.warn("Unable to move the DSE commit log segment {} aside after its replay; it is left to the segment handler, " +
+                            "which by default deletes it (what it replayed is flushed)", segment, e);
+            return false;
+        }
+        SyncUtil.trySyncDir(target.parent());
+        // WARN, not INFO: the segment's writes to tables unknown here are not applied, and the renamed file must be
+        // known to whoever rolls the node back or drops the mode
+        logger.warn("Commit log segment {} was written by DataStax Enterprise 6 and read at the start (replayed, or skipped as empty); " +
+                    "its mutations of tables unknown to this software (DSE-only tables, listed by the \"Skipped ... mutations from " +
+                    "unknown\" lines above), if any, were skipped. Renamed to {} so that it is not replayed again. Removing the {} " +
+                    "suffix replays it at the next start, which brings back any row of it whose deletion was purged since: do so only " +
+                    "to recover from a failed replay.",
+                    segment, target.name(), REPLAYED_DSE_SEGMENT_SUFFIX);
+        return true;
     }
 
     /**

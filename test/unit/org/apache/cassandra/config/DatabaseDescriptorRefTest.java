@@ -122,6 +122,7 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.config.EncryptionOptions$ServerEncryptionOptions",
     "org.apache.cassandra.config.EncryptionOptions$ServerEncryptionOptions$InternodeEncryption",
     "org.apache.cassandra.config.GuardrailsOptions",
+    "org.apache.cassandra.config.InternodeCompatibilityMode",
     "org.apache.cassandra.config.ParameterizedClass",
     "org.apache.cassandra.config.RepairConfig",
     "org.apache.cassandra.config.RepairRetrySpec",

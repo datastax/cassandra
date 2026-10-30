@@ -18,15 +18,32 @@
 package org.apache.cassandra.net;
 
 import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+import org.apache.cassandra.auth.CassandraAuthorizer;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.VersionedValue;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.security.SSLFactory;
+import org.apache.cassandra.service.Dse6AccessControlCheck;
+import org.apache.cassandra.service.Dse6NonCoreTraces;
+import org.apache.cassandra.service.Dse6SaiVersionPin;
+import org.apache.cassandra.service.DsePeersRecord;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
 
 public class MessagingServiceMBeanImpl implements MessagingServiceMBean
@@ -288,5 +305,141 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     public int getVersion(String address) throws UnknownHostException
     {
         return versions.get(address);
+    }
+
+    @Override
+    public String getInternodeCompatibilityMode()
+    {
+        return DatabaseDescriptor.getInternodeCompatibilityMode().name();
+    }
+
+    @Override
+    public String getStorageCompatibilityMode()
+    {
+        return DatabaseDescriptor.getStorageCompatibilityMode().name();
+    }
+
+    @Override
+    public String getSSTableFormatVersion()
+    {
+        SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
+        return format.name() + '-' + format.getLatestVersion().version;
+    }
+
+    @Override
+    public Map<String, Integer> getEndpointMessagingVersions()
+    {
+        Map<String, Integer> result = new HashMap<>();
+        for (Map.Entry<InetAddressAndPort, Integer> e : versions.snapshot().entrySet())
+            result.put(e.getKey().getHostAddressAndPort(), e.getValue());
+        return result;
+    }
+
+    /** The {@code dse_version} entry of the JSON DSE gossips as {@code DSE_GOSSIP_STATE}. */
+    private static final Pattern DSE_VERSION_IN_GOSSIP_STATE = Pattern.compile("\"dse_version\"\\s*:\\s*\"([^\"]+)\"");
+
+    @Override
+    public Map<String, String> getDsePeers()
+    {
+        // outside DSE 6 compatibility mode no peer is a DSE node this node talks to
+        if (!DseCompat.enabled())
+            return Collections.emptyMap();
+        Map<String, String> result = new HashMap<>();
+        Map<InetAddressAndPort, String> identified = DsePeers.snapshot();
+        InetAddressAndPort self = FBUtilities.getBroadcastAddressAndPort();
+        for (Map.Entry<InetAddressAndPort, EndpointState> e : Gossiper.instance.endpointStateMap.entrySet())
+        {
+            // a DSE node that left or was removed stays in gossip for days: it is not a peer any more
+            if (e.getKey().equals(self) || DsePeers.hasLeftTheRing(e.getValue()))
+                continue;
+            int version = DsePeers.gossipedDseVersion(e.getValue());
+            if (version < 0)
+                continue;
+            VersionedValue release = e.getValue().getApplicationState(ApplicationState.RELEASE_VERSION);
+            StringBuilder description = new StringBuilder("release ").append(release == null ? "unknown" : release.value)
+                                                                     .append(", NET_VERSION ").append(version);
+            // DSE gossips its DSE_GOSSIP_STATE at the ordinal of this software's X_11_PADDING
+            VersionedValue dseState = e.getValue().getApplicationState(ApplicationState.X_11_PADDING);
+            if (dseState != null)
+            {
+                Matcher dseVersion = DSE_VERSION_IN_GOSSIP_STATE.matcher(dseState.value);
+                if (dseVersion.find())
+                    description.append(", DSE ").append(dseVersion.group(1));
+            }
+            result.put(e.getKey().getHostAddressAndPort(), description.append(", ").append(ordinals(identified.get(e.getKey()))).toString());
+        }
+        // the other identified peers: identified by a handshake, with no gossip state yet, a state without NET_VERSION
+        // (after a restart) or a NET_VERSION of an earlier life (a node of this software rolled back to DSE)
+        for (Map.Entry<InetAddressAndPort, String> e : identified.entrySet())
+        {
+            String key = e.getKey().getHostAddressAndPort();
+            EndpointState state = Gossiper.instance.endpointStateMap.get(e.getKey());
+            if (e.getKey().equals(self) || result.containsKey(key) || DsePeers.hasLeftTheRing(state))
+                continue;
+            VersionedValue netVersion = state == null ? null : state.getApplicationState(ApplicationState.NET_VERSION);
+            result.put(key, "NET_VERSION " + (netVersion == null ? "unknown" : netVersion.value) + ", " + ordinals(e.getValue()));
+        }
+        return result;
+    }
+
+    /** Which ordinals gossip with a peer uses, from what {@link DsePeers} identified it by (null when it did not). */
+    private static String ordinals(String evidence)
+    {
+        return evidence == null ? "gossip ordinals: this software's (not identified as DSE yet)" : "gossip ordinals: DSE's (" + evidence + ')';
+    }
+
+    @Override
+    public Map<String, Long> getDseCompatRefusals()
+    {
+        return DseCompatRefusals.snapshot();
+    }
+
+    @Override
+    public Map<String, List<String>> getDseAccessControlCheck()
+    {
+        Map<String, List<String>> result = new HashMap<>();
+        Dse6AccessControlCheck.LastCheck check = Dse6AccessControlCheck.lastCheck();
+        if (check != null)
+            result.put(check.source, new ArrayList<>(check.findings));
+        return result;
+    }
+
+    @Override
+    public String getDseSaiVersionPin()
+    {
+        return DatabaseDescriptor.isDse6CompatibilityMode() ? Dse6SaiVersionPin.status() : null;
+    }
+
+    @Override
+    public String getDseNonCoreTraces()
+    {
+        return DatabaseDescriptor.isDse6CompatibilityMode() ? Dse6NonCoreTraces.status() : null;
+    }
+
+    @Override
+    public List<String> getDsePeersOnRecord()
+    {
+        List<String> result = new ArrayList<>();
+        for (InetAddressAndPort peer : DsePeersRecord.peers())
+            result.add(peer.getHostAddressAndPort());
+        // the lines of the persisted record that are not addresses with port refuse a start with NONE too
+        result.addAll(DsePeersRecord.unparsedEntries());
+        return result;
+    }
+
+    @Override
+    public List<String> getDseLoneWriteGrants()
+    {
+        if (!(DatabaseDescriptor.getAuthorizer() instanceof CassandraAuthorizer))
+            return Collections.emptyList();
+        return CassandraAuthorizer.loneDseWriteGrants();
+    }
+
+    @Override
+    public String getDseLoneWriteGrantsSource()
+    {
+        if (!(DatabaseDescriptor.getAuthorizer() instanceof CassandraAuthorizer))
+            return null;
+        return CassandraAuthorizer.loneDseWriteGrantsSource();
     }
 }

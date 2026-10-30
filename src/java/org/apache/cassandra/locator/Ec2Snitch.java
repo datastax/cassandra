@@ -106,6 +106,12 @@ public class Ec2Snitch extends AbstractCloudMetadataServiceSnitch
         return Pair.create(localDc, localRack);
     }
 
+    /** Whether this snitch uses the legacy EC2 names ({@code ec2_naming_scheme=legacy}); the DSE 6 upgrade checks it. */
+    public boolean usesLegacyNaming()
+    {
+        return usingLegacyNaming;
+    }
+
     private static boolean isUsingLegacyNaming(SnitchProperties props)
     {
         return props.get(SNITCH_PROP_NAMING_SCHEME, EC2_NAMING_STANDARD).equalsIgnoreCase(EC2_NAMING_LEGACY);

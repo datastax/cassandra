@@ -78,6 +78,7 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionLogger;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
 import org.apache.cassandra.db.virtual.SystemViewsKeyspace;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
@@ -98,6 +99,7 @@ import org.apache.cassandra.distributed.mock.nodetool.InternalNodeProbe;
 import org.apache.cassandra.distributed.mock.nodetool.InternalNodeProbeFactory;
 import org.apache.cassandra.distributed.shared.Metrics;
 import org.apache.cassandra.distributed.shared.ThrowingRunnable;
+import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.hints.DTestSerializer;
 import org.apache.cassandra.hints.HintsService;
@@ -128,6 +130,8 @@ import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.DefaultFSErrorHandler;
+import org.apache.cassandra.service.Dse6AccessControlCheck;
+import org.apache.cassandra.service.Dse6NonCoreTraces;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
@@ -675,6 +679,16 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                     throw e;
                 }
 
+                // as CassandraDaemon.setup: the DSE 6 check of the DSE features this software does not support
+                try
+                {
+                    Dse6NonCoreTraces.verifyAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
+
                 // Start up virtual table support
                 CassandraDaemon.getInstanceForTesting().setupVirtualKeyspaces();
 
@@ -682,6 +696,16 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 CassandraDaemon.getInstanceForTesting().scrubDataDirectories();
 
                 Keyspace.setInitialized();
+
+                // DSE 6 compatibility mode: whether this software reads the data DSE wrote for each materialized view as DSE does, see CassandraDaemon.setup
+                try
+                {
+                    DseViewHiddenColumnCatalog.checkViewsAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
 
                 // Replay any CommitLogSegments found on disk
                 try
@@ -708,6 +732,18 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 }
 
                 Verb.HINT_REQ.unsafeSetSerializer(DTestSerializer::new);
+
+                // as CassandraDaemon.setup: the first pass of the DSE 6 access-control check, on this node's replica, before
+                // the node joins the ring; the cluster-wide pass follows once gossip has settled (with the GOSSIP feature; the
+                // instances of the HCD 1.2 harness run without it, and Dse6AccessControlMixedTest calls that pass explicitly)
+                try
+                {
+                    Dse6AccessControlCheck.verifyAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
 
                 if (config.has(NETWORK))
                     MessagingService.instance().listen();
@@ -736,6 +772,17 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                     JVMStabilityInspector.removeShutdownHooks();
 
                     Gossiper.waitToSettle();
+
+                    // as CassandraDaemon.setup: the cluster-wide pass of the DSE 6 access-control check, after the node joined (here
+                    // before the auth setup of postStartup, which the daemon runs first: the pass reads system_auth without it)
+                    try
+                    {
+                        Dse6AccessControlCheck.verifyAfterJoin();
+                    }
+                    catch (StartupException e)
+                    {
+                        throw new RuntimeException(e.getMessage(), e);
+                    }
                 }
                 else
                 {

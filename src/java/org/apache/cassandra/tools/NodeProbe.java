@@ -1558,6 +1558,66 @@ public class NodeProbe implements AutoCloseable
         return msProxy.getDroppedMessages();
     }
 
+    public String getInternodeCompatibilityMode()
+    {
+        return msProxy.getInternodeCompatibilityMode();
+    }
+
+    public String getStorageCompatibilityMode()
+    {
+        return msProxy.getStorageCompatibilityMode();
+    }
+
+    public String getSSTableFormatVersion()
+    {
+        return msProxy.getSSTableFormatVersion();
+    }
+
+    public Map<String, Integer> getEndpointMessagingVersions()
+    {
+        return msProxy.getEndpointMessagingVersions();
+    }
+
+    public Map<String, String> getDsePeers()
+    {
+        return msProxy.getDsePeers();
+    }
+
+    public Map<String, Long> getDseCompatRefusals()
+    {
+        return msProxy.getDseCompatRefusals();
+    }
+
+    public List<String> getDsePeersOnRecord()
+    {
+        return msProxy.getDsePeersOnRecord();
+    }
+
+    public Map<String, List<String>> getDseAccessControlCheck()
+    {
+        return msProxy.getDseAccessControlCheck();
+    }
+
+    public String getDseSaiVersionPin()
+    {
+        return msProxy.getDseSaiVersionPin();
+    }
+
+    public String getDseNonCoreTraces()
+    {
+        return msProxy.getDseNonCoreTraces();
+    }
+
+    public List<String> getDseLoneWriteGrants()
+    {
+        return msProxy.getDseLoneWriteGrants();
+    }
+
+    public String getDseLoneWriteGrantsSource()
+    {
+        return msProxy.getDseLoneWriteGrantsSource();
+    }
+
     /** @deprecated See CASSANDRA-6719 */
     @Deprecated(since = "4.0")
     public void loadNewSSTables(String ksName, String cfName)

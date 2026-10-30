@@ -21,6 +21,7 @@ package org.apache.cassandra.net;
 
 import java.io.IOException;
 import java.net.UnknownHostException;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -149,6 +150,74 @@ public interface MessagingServiceMBean
     public boolean isBackPressureEnabled();
 
     public int getVersion(String address) throws UnknownHostException;
+
+    /** The configured {@code internode_compatibility_mode} ({@code NONE} or {@code DSE_6}). */
+    public String getInternodeCompatibilityMode();
+
+    /** The configured {@code storage_compatibility_mode}. */
+    public String getStorageCompatibilityMode();
+
+    /** The selected sstable format and the version it writes, e.g. {@code bti-bb}. */
+    public String getSSTableFormatVersion();
+
+    /** The raw messaging version recorded for every known peer, keyed by address with port. */
+    public Map<String, Integer> getEndpointMessagingVersions();
+
+    /**
+     * In DSE 6 compatibility mode, the peers whose gossip {@code NET_VERSION} is a DSE messaging version (256 or more),
+     * that is the DSE 6 nodes of the cluster, and the peers identified as DSE nodes by a handshake, keyed by address
+     * with port; the value names their release version, the gossiped {@code NET_VERSION}, when they gossip one, their
+     * DSE version, and whether gossip with them uses DSE's ordinals. This node and the nodes that left the ring
+     * (decommissioned or removed, {@code DsePeers.hasLeftTheRing}) are not listed. Empty with the mode off.
+     */
+    public Map<String, String> getDsePeers();
+
+    /** The requests refused because of the DSE 6 compatibility mode, by reason (see {@code DseCompatRefusals}). */
+    public Map<String, Long> getDseCompatRefusals();
+
+    /**
+     * The peers on record as speaking the pre-4.0 dialect (DSE 6), address with port, as this node also persists them,
+     * then the lines of the persisted record that are not addresses with port, trimmed and sorted; empty outside
+     * {@code DSE_6}.
+     */
+    public List<String> getDsePeersOnRecord();
+
+    /**
+     * The last check of the DSE access controls (RESTRICT, row-level grants, tables restricted to rows) this node does
+     * not enforce, in {@code DSE_6} mode: one entry, from how the check was made ({@code a LOCAL_QUORUM read}, ..., or
+     * {@code not checked: <reason>}) to what it found; empty before the first check and outside {@code DSE_6}.
+     */
+    public Map<String, List<String>> getDseAccessControlCheck();
+
+    /**
+     * In {@code DSE_6} mode, the SAI on-disk version the startup check found pinned and what it was derived from, or
+     * why it was not enforced ({@code Dse6SaiVersionPin}); null outside {@code DSE_6} and before the check.
+     */
+    public String getDseSaiVersionPin();
+
+    /**
+     * In {@code DSE_6} mode, what the startup check of the DSE features this software does not support found
+     * ({@code Dse6NonCoreTraces}): no trace ({@code none}), with the override of the entries of DSE's {@code nodes/peers}
+     * named when it is set, or no trace but what of {@code nodes/peers} the override ignored (its entries with a DSE
+     * workload other than Cassandra, or the file itself when it cannot be read); null outside {@code DSE_6} and before
+     * the check.
+     */
+    public String getDseNonCoreTraces();
+
+    /**
+     * The grants of DataStax Enterprise's {@code UPDATE} or {@code TRUNCATE} alone on data resources in
+     * {@code system_auth.role_permissions}, which {@code CassandraAuthorizer} drops (the two together are read as
+     * {@code MODIFY}), in every mode, as last read on this node: {@code role '<role>' on <resource>: <name>}, sorted.
+     * Empty when another authorizer is configured.
+     */
+    public List<String> getDseLoneWriteGrants();
+
+    /**
+     * How the list of {@link #getDseLoneWriteGrants()} was made: in {@code DSE_6} mode the last scan of the access-control
+     * check (at startup, then periodically), otherwise only the rows read since startup; null when another authorizer
+     * is configured.
+     */
+    public String getDseLoneWriteGrantsSource();
 
     void reloadSslCertificates() throws IOException;
 }

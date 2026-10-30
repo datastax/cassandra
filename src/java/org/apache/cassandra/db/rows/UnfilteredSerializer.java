@@ -30,6 +30,7 @@ import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.ByteArrayAccessor;
+import org.apache.cassandra.db.view.DseViewHiddenColumns;
 import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.rows.Row.Deletion;
@@ -37,6 +38,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.WrappedException;
@@ -159,6 +161,9 @@ public class UnfilteredSerializer
     private void serialize(Row row, SerializationHelper helper, DataOutputPlus out, long previousUnfilteredSize, int version)
     throws IOException
     {
+        if (DseCompat.isPre40Layout(version) && !helper.header.isForSSTable())
+            checkPre40DeletionTimes(row, version);
+
         int flags = 0;
         int extendedFlags = 0;
 
@@ -291,6 +296,18 @@ public class UnfilteredSerializer
     throws IOException
     {
         SerializationHeader header = helper.header;
+        if (DseCompat.isPre40Layout(version) && !header.isForSSTable())
+        {
+            if (marker.isBoundary())
+            {
+                checkPre40DeletionTime(((RangeTombstoneBoundaryMarker) marker).endDeletionTime().localDeletionTime(), version);
+                checkPre40DeletionTime(((RangeTombstoneBoundaryMarker) marker).startDeletionTime().localDeletionTime(), version);
+            }
+            else
+            {
+                checkPre40DeletionTime(((RangeTombstoneBoundMarker) marker).deletionTime().localDeletionTime(), version);
+            }
+        }
         out.writeByte((byte)IS_MARKER);
         ClusteringBoundOrBoundary.serializer.serialize(marker.clustering(), out, version, header.clusteringTypes());
 
@@ -310,6 +327,51 @@ public class UnfilteredSerializer
         {
             header.writeDeletionTime(((RangeTombstoneBoundMarker)marker).deletionTime(), out);
         }
+    }
+
+    /**
+     * DSE 6 compatibility mode: the pre-4.0 dialect has 32-bit local deletion times, the last one early in 2038, and a
+     * DSE 6 peer would read a later one as a negative, invalid, time. The mode requires the {@code HCD_1} storage
+     * compatibility mode, under which no deletion time goes past that cap, so this never fires; it fails fast, before
+     * anything is written, if one ever does. {@link Cell#NO_DELETION_TIME} (live) is never written as a deletion time.
+     * It covers what is serialized at the peer's version (mutations, hints, batches, Paxos commits); the data of a read
+     * response is serialized once, at the current version, when the replica builds it, and is sent as is.
+     */
+    static void checkPre40DeletionTime(long localDeletionTime, int version)
+    {
+        if (localDeletionTime > CellData.MAX_DELETION_TIME_2038_LEGACY_CAP && localDeletionTime != Cell.NO_DELETION_TIME)
+            throw new IllegalStateException("DSE 6 compatibility mode: local deletion time " + localDeletionTime + " is past 2038 and cannot be sent at messaging version " +
+                                            version + ", whose deletion times are 32-bit");
+    }
+
+    private static void checkPre40DeletionTimes(Row row, int version)
+    {
+        LivenessInfo pkLiveness = row.primaryKeyLivenessInfo();
+        if (pkLiveness.isExpiring())
+            checkPre40DeletionTime(pkLiveness.localExpirationTime(), version);
+        if (!row.deletion().isLive())
+            checkPre40DeletionTime(row.deletion().time().localDeletionTime(), version);
+        for (ColumnData data : row)
+        {
+            if (data.column().isSimple())
+            {
+                checkPre40DeletionTime((Cell<?>) data, version);
+            }
+            else
+            {
+                ComplexColumnData complex = (ComplexColumnData) data;
+                if (!complex.complexDeletion().isLive())
+                    checkPre40DeletionTime(complex.complexDeletion().localDeletionTime(), version);
+                for (Cell<?> cell : complex)
+                    checkPre40DeletionTime(cell, version);
+            }
+        }
+    }
+
+    private static void checkPre40DeletionTime(Cell<?> cell, int version)
+    {
+        if (cell.isExpiring() || cell.isTombstone())
+            checkPre40DeletionTime(cell.localDeletionTime(), version);
     }
 
     public long serializedSize(Unfiltered unfiltered, SerializationHelper helper, int version)
@@ -608,6 +670,12 @@ public class UnfilteredSerializer
                 rowLiveness = LivenessInfo.withExpirationTime(timestamp, ttl, localDeletionTime);
             }
 
+            // A view sstable written by DSE: the row's liveness comes from the cell of its hidden column (see
+            // DseViewHiddenColumns); everything else takes the path below, unchanged.
+            if (header.dseViewLivenessColumn() != null && !isStatic)
+                return deserializeDseViewRowBody(in, header, helper, hasDeletion, deletionIsShadowable, hasComplexDeletion,
+                                                 hasAllColumns, headerColumns, rowLiveness, builder);
+
             builder.addPrimaryKeyLivenessInfo(rowLiveness);
             builder.addRowDeletion(hasDeletion ? new Row.Deletion(header.readDeletionTime(in), deletionIsShadowable) : Row.Deletion.LIVE);
 
@@ -650,6 +718,67 @@ public class UnfilteredSerializer
             // exception, it just make we catch it properly and mark the sstable as corrupted.
             throw new IOException("Error building row with data deserialized from " + in, e);
         }
+    }
+
+    /**
+     * The rest of {@link #deserializeRowBody} for a row of a materialized view sstable written by DSE, whose header
+     * names DSE's hidden column of a regular base column in the view primary key: DSE ignores the primary key
+     * liveness of such a row, which is live exactly when that hidden cell is, so the row gets the liveness of the
+     * cell ({@link DseViewHiddenColumns#livenessOf}), or {@link DseViewHiddenColumns#LIVENESS_WITHOUT_HIDDEN_CELL}
+     * when it has no such cell; the cell itself is dropped.
+     * The liveness is added once the cells are read, since the cells may be encoded relative to the liveness
+     * written in the row.
+     */
+    private Row deserializeDseViewRowBody(DataInputPlus in,
+                                          SerializationHeader header,
+                                          DeserializationHelper helper,
+                                          boolean hasDeletion,
+                                          boolean deletionIsShadowable,
+                                          boolean hasComplexDeletion,
+                                          boolean hasAllColumns,
+                                          Columns headerColumns,
+                                          LivenessInfo rowLiveness,
+                                          Row.Builder builder)
+    throws IOException
+    {
+        ColumnMetadata livenessColumn = header.dseViewLivenessColumn();
+        builder.addRowDeletion(hasDeletion ? new Row.Deletion(header.readDeletionTime(in), deletionIsShadowable) : Row.Deletion.LIVE);
+
+        Columns columns = hasAllColumns ? headerColumns : Columns.serializer.deserializeSubset(headerColumns, in);
+        Cell<?>[] livenessCell = new Cell<?>[1];
+        try
+        {
+            columns.apply(column -> {
+                try
+                {
+                    if (column == livenessColumn)
+                        livenessCell[0] = Cell.serializer.deserialize(in, rowLiveness, column, header, helper, ByteArrayAccessor.instance);
+                    else if (column.isSimple())
+                        readSimpleColumn(column, in, header, helper, builder, rowLiveness);
+                    else
+                        readComplexColumn(column, in, header, helper, hasComplexDeletion, builder, rowLiveness);
+                }
+                catch (IOException e)
+                {
+                    throw new WrappedException(e);
+                }
+            });
+        }
+        catch (WrappedException e)
+        {
+            if (e.getCause() instanceof IOException)
+                throw (IOException) e.getCause();
+
+            throw e;
+        }
+
+        // the builder does not keep a liveness the row deletion shadows
+        if (livenessCell[0] != null)
+            builder.addPrimaryKeyLivenessInfo(DseViewHiddenColumns.livenessOf(livenessCell[0]));
+        // dead for DSE without the hidden cell, unless another source has it
+        else
+            builder.addPrimaryKeyLivenessInfo(DseViewHiddenColumns.LIVENESS_WITHOUT_HIDDEN_CELL);
+        return builder.build();
     }
 
     private void readSimpleColumn(ColumnMetadata column, DataInputPlus in, SerializationHeader header, DeserializationHelper helper, Row.Builder builder, LivenessInfo rowLiveness)

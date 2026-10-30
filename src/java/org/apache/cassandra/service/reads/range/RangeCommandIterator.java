@@ -38,6 +38,7 @@ import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRangeRequestMetrics;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.service.QueryInfoTracker;
@@ -178,10 +179,16 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
         concurrencyFactor = computeConcurrencyFactor(totalRangeCount, rangesQueried, maxConcurrencyFactor, command.limits().count(), liveReturned);
     }
 
-    private static boolean supportsEndpointGrouping(ReadCommand command)
+    @VisibleForTesting
+    static boolean supportsEndpointGrouping(ReadCommand command)
     {
         // With endpoint grouping, ranges executed on each endpoint are different, digest is unlikely to match.
         if (command.isDigestQuery())
+            return false;
+
+        // A DSE 6 replica has no multi-range read verb: in DSE 6 compatibility mode every range is
+        // queried on its own, whichever replicas would be chosen
+        if (DseCompat.enabled())
             return false;
 
         // Endpoint grouping is currently only supported by SAI

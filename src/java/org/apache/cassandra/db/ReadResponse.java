@@ -30,6 +30,7 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -310,7 +311,8 @@ public abstract class ReadResponse
     {
         public void serialize(ReadResponse response, DataOutputPlus out, int version) throws IOException
         {
-            assert version >= MessagingService.VERSION_40;
+            boolean pre40 = DseCompat.isPre40Layout(version);
+            assert pre40 || version >= MessagingService.VERSION_40;
             boolean isDigest = response instanceof DigestResponse;
             ByteBuffer digest = isDigest ? ((DigestResponse)response).digest : ByteBufferUtil.EMPTY_BYTE_BUFFER;
             ByteBufferUtil.writeWithVIntLength(digest, out);
@@ -325,8 +327,12 @@ public abstract class ReadResponse
                 // repaired sstables were read (but they might be on other replicas).
                 // If the coordinator did not request this info, the response contains an empty digest
                 // and a true for the isConclusive flag.
-                ByteBufferUtil.writeWithVIntLength(response.repairedDataDigest(), out);
-                out.writeBoolean(response.isRepairedDigestConclusive());
+                // The pre-4.0 layout (the DSE 6 dialect, which has no repaired-data tracking) omits them altogether.
+                if (!pre40)
+                {
+                    ByteBufferUtil.writeWithVIntLength(response.repairedDataDigest(), out);
+                    out.writeBoolean(response.isRepairedDigestConclusive());
+                }
 
                 ByteBuffer data = ((DataResponse)response).data;
                 ByteBufferUtil.writeWithVIntLength(data, out);
@@ -335,7 +341,8 @@ public abstract class ReadResponse
 
         public ReadResponse deserialize(DataInputPlus in, int version) throws IOException
         {
-            assert version >= MessagingService.VERSION_40;
+            boolean pre40 = DseCompat.isPre40Layout(version);
+            assert pre40 || version >= MessagingService.VERSION_40;
             ByteBuffer digest = ByteBufferUtil.readWithVIntLength(in);
             if (digest.hasRemaining())
                 return new DigestResponse(digest);
@@ -343,9 +350,18 @@ public abstract class ReadResponse
             // A data response may also contain a digest of the portion of its payload
             // that comes from the replica's repaired set, along with a flag indicating
             // whether or not the digest may be influenced by unrepaired/pending
-            // repaired data
-            digest = ByteBufferUtil.readWithVIntLength(in);
-            boolean repairedDigestConclusive = in.readBoolean();
+            // repaired data; a pre-4.0 peer (DSE 6) sends neither
+            boolean repairedDigestConclusive;
+            if (!pre40)
+            {
+                digest = ByteBufferUtil.readWithVIntLength(in);
+                repairedDigestConclusive = in.readBoolean();
+            }
+            else
+            {
+                digest = ByteBufferUtil.EMPTY_BYTE_BUFFER;
+                repairedDigestConclusive = true;
+            }
 
             ByteBuffer data = ByteBufferUtil.readWithVIntLength(in);
             return new RemoteDataResponse(data, digest, repairedDigestConclusive, version);
@@ -353,7 +369,8 @@ public abstract class ReadResponse
 
         public long serializedSize(ReadResponse response, int version)
         {
-            assert version >= MessagingService.VERSION_40;
+            boolean pre40 = DseCompat.isPre40Layout(version);
+            assert pre40 || version >= MessagingService.VERSION_40;
             boolean isDigest = response instanceof DigestResponse;
             ByteBuffer digest = isDigest ? ((DigestResponse)response).digest : ByteBufferUtil.EMPTY_BYTE_BUFFER;
             long size = ByteBufferUtil.serializedSizeWithVIntLength(digest);
@@ -362,8 +379,11 @@ public abstract class ReadResponse
             {
                 // From 4.0, a coordinator may request an additional info about the repaired data
                 // that makes up the response.
-                size += ByteBufferUtil.serializedSizeWithVIntLength(response.repairedDataDigest());
-                size += 1;
+                if (!pre40)
+                {
+                    size += ByteBufferUtil.serializedSizeWithVIntLength(response.repairedDataDigest());
+                    size += 1;
+                }
 
                 // In theory, we should deserialize/re-serialize if the version asked is different from the current
                 // version as the content could have a different serialization format. So far though, we haven't made
