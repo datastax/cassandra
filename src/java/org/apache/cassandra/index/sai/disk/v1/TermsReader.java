@@ -511,10 +511,9 @@ public class TermsReader implements Closeable
      * Iterates the terms of the terms dictionary read by the given reader, in its order, with their postings, keeping
      * only those accepted by the filter, if any.
      */
-    private abstract class AbstractTermsScanner implements TermsIterator
+    private abstract class AbstractTermsScanner<T extends Iterator<Pair<ByteComparable, Long>> & AutoCloseable> implements TermsIterator
     {
-        private final Iterator<Pair<ByteComparable, Long>> terms;
-        private final AutoCloseable termsCloser;
+        protected final T terms;
         @Nullable
         private final Predicate<byte[]> filter;
         private final IndexInput postingsInput;
@@ -522,10 +521,9 @@ public class TermsReader implements Closeable
         private Pair<ByteComparable, Long> entry;
         private Pair<ByteComparable, Long> pending;
 
-        <T extends Iterator<Pair<ByteComparable, Long>> & AutoCloseable> AbstractTermsScanner(T terms, @Nullable Predicate<byte[]> filter)
+        AbstractTermsScanner(T terms, @Nullable Predicate<byte[]> filter)
         {
             this.terms = terms;
-            this.termsCloser = terms;
             this.filter = filter;
             // If an open throws, the constructor exits before the caller could clean up: close what was already
             // opened on the way out instead of leaking it.
@@ -556,7 +554,7 @@ public class TermsReader implements Closeable
         @Override
         public void close()
         {
-            FileUtils.closeQuietly(termsCloser);
+            FileUtils.closeQuietly(terms);
             FileUtils.closeQuietly(postingsInput);
             FileUtils.closeQuietly(postingsSummaryInput);
         }
@@ -606,28 +604,23 @@ public class TermsReader implements Closeable
      * Iterates the terms in ascending order: all of them, or only those of an ordering scan restricted by a pattern
      * (see {@link #patternTerms}).
      */
-    private class TermsScanner extends AbstractTermsScanner
+    private class TermsScanner extends AbstractTermsScanner<TrieTermsDictionaryReader>
     {
         private final ByteBuffer minTerm, maxTerm;
 
         private TermsScanner(Version version, AbstractType<?> type)
         {
-            this(new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot, termDictionaryFileEncodingVersion), version, type);
-        }
-
-        private TermsScanner(TrieTermsDictionaryReader termsDictionaryReader, Version version, AbstractType<?> type)
-        {
-            super(termsDictionaryReader, null);
+            super(new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot, termDictionaryFileEncodingVersion), null);
             // We decode based on the logic used to encode the min and max terms in the trie.
             if (version.onOrAfter(Version.DB) && TypeUtil.isComposite(type))
             {
-                this.minTerm = indexContext.getValidator().fromComparableBytes(ByteSource.peekable(termsDictionaryReader.getMinTerm().asComparableBytes(termDictionaryFileEncodingVersion)), termDictionaryFileEncodingVersion);
-                this.maxTerm = indexContext.getValidator().fromComparableBytes(ByteSource.peekable(termsDictionaryReader.getMaxTerm().asComparableBytes(termDictionaryFileEncodingVersion)), termDictionaryFileEncodingVersion);
+                this.minTerm = indexContext.getValidator().fromComparableBytes(ByteSource.peekable(terms.getMinTerm().asComparableBytes(termDictionaryFileEncodingVersion)), termDictionaryFileEncodingVersion);
+                this.maxTerm = indexContext.getValidator().fromComparableBytes(ByteSource.peekable(terms.getMaxTerm().asComparableBytes(termDictionaryFileEncodingVersion)), termDictionaryFileEncodingVersion);
             }
             else
             {
-                this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(termDictionaryFileEncodingVersion)));
-                this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(termDictionaryFileEncodingVersion)));
+                this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(terms.getMinTerm().asComparableBytes(termDictionaryFileEncodingVersion)));
+                this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(terms.getMaxTerm().asComparableBytes(termDictionaryFileEncodingVersion)));
             }
         }
 
@@ -667,7 +660,7 @@ public class TermsReader implements Closeable
      * Iterates the terms in descending order: all of them, or only those of an ordering scan restricted by a pattern
      * (see {@link #patternTerms}).
      */
-    private class ReverseTermsScanner extends AbstractTermsScanner
+    private class ReverseTermsScanner extends AbstractTermsScanner<ReverseTrieTermsDictionaryReader>
     {
         private ReverseTermsScanner()
         {

@@ -265,17 +265,6 @@ public class TermsDistribution
     public static final int NON_NUMBER_RESOLUTION_BYTES = 20;
 
     /**
-     * Returns the given term prefix truncated to the first {@link #NON_NUMBER_RESOLUTION_BYTES} bytes, or the prefix
-     * itself if it is not longer. The range of the terms starting with a longer prefix converts to a single
-     * {@link BigDecimal} value, so it can't be interpolated, while the range of the terms starting with its truncation
-     * is a superset of it that can.
-     */
-    public static byte[] resolvablePrefix(byte[] prefix)
-    {
-        return prefix.length <= NON_NUMBER_RESOLUTION_BYTES ? prefix : Arrays.copyOf(prefix, NON_NUMBER_RESOLUTION_BYTES);
-    }
-
-    /**
      * Converts the term value stored in the index to a big decimal value. Preserves order.
      * If the type represents a number, the correspondence is linear.
      * For non-number types, it reinterprets a bytecomparable serialization as a number,
@@ -304,6 +293,30 @@ public class TermsDistribution
         // By flipping it, we correctly get values starting with 0 bit smaller than the ones starting with 1.
         fixedLengthBytes[0] ^= (byte) 0x80;
         return new BigDecimal(new BigInteger(fixedLengthBytes));
+    }
+
+    /**
+     * Like {@link #toBigDecimal(ByteComparable, AbstractType, Version, ByteComparable.Version)}, but a non-number value
+     * with non-zero bytes after the first {@link #NON_NUMBER_RESOLUTION_BYTES} converts to the next value, so the
+     * result is not smaller than the value. Converting an upper bound this way keeps a range whose bounds differ only
+     * after the resolution bytes, such as the range of the terms starting with a long prefix, from being empty.
+     */
+    public static BigDecimal toBigDecimalRoundingUp(ByteComparable value,
+                                                    AbstractType<?> termType,
+                                                    Version indexVersion,
+                                                    ByteComparable.Version byteComparableVersion)
+    {
+        BigDecimal truncated = toBigDecimal(value, termType, indexVersion, byteComparableVersion);
+        if (termType instanceof NumberType)
+            return truncated;
+
+        byte[] bytes = ByteSourceInverse.readBytes(value.asComparableBytes(byteComparableVersion));
+        for (int i = NON_NUMBER_RESOLUTION_BYTES; i < bytes.length; i++)
+        {
+            if (bytes[i] != 0)
+                return truncated.add(BigDecimal.ONE);
+        }
+        return truncated;
     }
 
     /**
