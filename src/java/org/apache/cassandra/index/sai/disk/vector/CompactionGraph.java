@@ -87,6 +87,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.v5.RemappedPostings;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
@@ -143,13 +144,38 @@ public class CompactionGraph implements Closeable, Accountable
     private int lastRowId = -1;
     private int rowsAdded = 0;
     private int maxOrdinal = -1; // Inclusive
-    // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
-    private final boolean useSyntheticOrdinals;
+    // Ordinals are always dense (assigned from `nextOrdinal`), because jvector does not handle sparse ordinals:
+    // they make the graph's id upper bound differ from its size. When every row has a distinct vector,
+    // ordinal == rowId and the structure is ONE_TO_ONE.
     private int nextOrdinal = 0;
 
     // protects the fine-tuning changes (done in maybeAddVector) from addGraphNode threads
     // (and creates happens-before events so we don't need to mark the other fields volatile)
     private final ReadWriteLock trainingLock = new ReentrantReadWriteLock();
+
+    /**
+     * Runs immediately before {@link #trainingLock}'s write lock is taken, to drain every in-flight
+     * {@link #addGraphNode} task off the shared build pool. Installed by the owning segment builder
+     * as {@code insertFanout::awaitCompletion}.
+     *
+     * <p>Why this exists: the critical section below refines the PQ codebook, re-encodes, and
+     * rescores the graph, and all three fan out onto the shared build pool. {@code addGraphNode}
+     * tasks run on that same pool and take the read lock. If the pool's workers are all inside
+     * {@code addGraphNode} when the write lock is taken, they block on the read lock, the training
+     * work can never get a worker, and the write lock is never released — a full deadlock of the
+     * build pool that also strands every other compaction sharing it.
+     *
+     * <p>Draining first guarantees no insert task is queued or running when the write lock is
+     * taken, so the training work has the whole pool.
+     */
+    private volatile Runnable quiesceInserts = () -> {};
+
+    /** Installs the pre-training drain; see {@link #quiesceInserts}. */
+    public void onBeforeTraining(Runnable quiesce)
+    {
+        this.quiesceInserts = quiesce == null ? () -> {} : quiesce;
+    }
+
     private boolean pqFinetuned = false;
     // not final; will be updated to different objects after fine-tuning
     private VectorCompressor<?> compressor;
@@ -158,7 +184,7 @@ public class CompactionGraph implements Closeable, Accountable
 
     private final VectorFloat<?> globalMean;
 
-    public CompactionGraph(IndexComponents.ForWrite perIndexComponents, VectorCompressor<?> compressor, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
+    public CompactionGraph(IndexComponents.ForWrite perIndexComponents, VectorCompressor<?> compressor, boolean unitVectors, long keyCount) throws IOException
     {
         this.perIndexComponents = perIndexComponents;
         this.context = perIndexComponents.context();
@@ -184,13 +210,6 @@ public class CompactionGraph implements Closeable, Accountable
         similarityFunction = indexConfig.getSimilarityFunction();
         postingsStructure = Structure.ONE_TO_ONE; // until proven otherwise
         this.compressor = compressor;
-        // `allRowsHaveVectors` only tells us about data for which we have already built indexes; if we
-        // are adding previously unindexed data then we could still encounter rows with null vectors,
-        // so this is just a best guess.  If the guess is wrong then the penalty is that we end up
-        // with "holes" in the ordinal sequence (and pq and data files) which we would prefer to avoid
-        // (hence the effort to predict `allRowsHaveVectors`) but will not cause correctness issues,
-        // and the next compaction will fill in the holes.
-        this.useSyntheticOrdinals = !V5OnDiskFormat.writeV5VectorPostings(context.version()) || !allRowsHaveVectors;
 
         // the extension here is important to signal to CFS.scrubDataDirectories that it should be removed if present at restart
         postingsFile = perIndexComponents.tmpFileFor("postings_chonicle_map");
@@ -323,7 +342,7 @@ public class CompactionGraph implements Closeable, Accountable
             {
                 // add a new entry
                 // this all runs on the same compaction thread, so we don't need to worry about concurrency
-                int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
+                int ordinal = nextOrdinal++;
                 assert ordinal > maxOrdinal : "Unexpected ordinal " + ordinal + " previous max " + maxOrdinal;
                 maxOrdinal = ordinal;
                 CompactionVectorPostings postings = new CompactionVectorPostings(ordinal, segmentRowId);
@@ -347,6 +366,10 @@ public class CompactionGraph implements Closeable, Accountable
                         vectorsByOrdinal.put(VectorPostings.Marshaller.extractOrdinal(entry), vectorClone);
                     });
 
+                    // Drain in-flight addGraphNode tasks off the shared pool BEFORE taking the write lock:
+                    // they take the read lock, the training work below needs pool workers, and a pool
+                    // full of blocked readers is a deadlock (see quiesceInserts).
+                    quiesceInserts.run();
                     // lock the addGraphNode threads out so they don't try to use old pq codepoints against the new codebook
                     trainingLock.writeLock().lock();
                     try
@@ -406,9 +429,10 @@ public class CompactionGraph implements Closeable, Accountable
                 return new InsertionResult(bytesUsed, ordinal, vector);
             }
 
-            // postings list already exists, just add the new key
+            // postings list already exists, just add the new key; duplicate vectors mean this cannot be
+            // ONE_TO_ONE, but we no longer write ONE_TO_MANY — go directly to ZERO_OR_ONE_TO_MANY.
             if (postingsStructure == Structure.ONE_TO_ONE)
-                postingsStructure = Structure.ONE_TO_MANY;
+                postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
 
             var postingsEntry = postingsQueryContext.entry();
             assert postingsEntry != null;
@@ -469,8 +493,8 @@ public class CompactionGraph implements Closeable, Accountable
 
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
-        assert !useSyntheticOrdinals || nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
-                                                                                                 nextOrdinal, builder.getGraph().size());
+        assert nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
+                                                                        nextOrdinal, builder.getGraph().size());
         assert compressedVectors.count() == builder.getGraph().getIdUpperBound() : String.format("Largest vector id %d != largest graph id %d",
                                                                                                  compressedVectors.count(), builder.getGraph().getIdUpperBound());
         assert postingsMap.keySet().size() == builder.getGraph().size() : String.format("postings map entry count %d != vector count %d",
@@ -506,23 +530,14 @@ public class CompactionGraph implements Closeable, Accountable
             long postingsOffset = postingsOutput.getFilePointer();
             var es = ExecutorFactory.Global.executorFactory().sequential("CompactionGraphPostingsWriter");
             var postingsFuture = es.submit(() -> {
-                // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;
-                // similarly, if we've been using synthetic ordinals then we can't map to ONE_TO_MANY
-                // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
-                // if a row with null vector in sstable A gets updated with a vector in sstable B)
-                // If there are too many holes, we leave the mapping on the disk.
-                if (postingsStructure == Structure.ONE_TO_MANY
-                    && (!V5OnDiskFormat.writeV5VectorPostings(version)
-                        || useSyntheticOrdinals
-                        || V5VectorPostingsWriter.tooManyOrdinalMappingHoles(postingsMap.size(), rowsAdded)))
-                {
-                    postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
-                }
-                var rp = V5VectorPostingsWriter.describeForCompaction(postingsStructure,
-                                                                      builder.getGraph().size(),
-                                                                      lastRowId,
-                                                                      maxOrdinal,
-                                                                      postingsMap);
+                // ONE_TO_MANY is no longer written; the write path only produces ONE_TO_ONE or
+                // ZERO_OR_ONE_TO_MANY. Assert to catch any regression.
+                assert postingsStructure != Structure.ONE_TO_MANY : "ONE_TO_MANY must not be set at flush time";
+                var rp = RemappedPostings.describeForCompaction(postingsStructure,
+                                                                builder.getGraph().size(),
+                                                                lastRowId,
+                                                                maxOrdinal,
+                                                                postingsMap);
                 ordinalMapper.set(rp.ordinalMapper);
                 try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
                 {
@@ -584,7 +599,7 @@ public class CompactionGraph implements Closeable, Accountable
                 }
 
                 SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
-                logger.info("Writing graph took {}ms", (nanoTime() - start) / 1_000_000);
+                logger.info("Writing graph took {} ms", (nanoTime() - start) / 1_000_000);
                 termsLength = writer.getOutput().position() - termsOffset;
             }
             // write remaining footers/checksums
@@ -610,12 +625,16 @@ public class CompactionGraph implements Closeable, Accountable
         return NVQuantization.create(globalMean, JVectorVersionUtil.NUM_SUB_VECTORS);
     }
 
-    private long writePostings(Version version, V5VectorPostingsWriter.RemappedPostings rp, IndexOutputWriter postingsOutput,
+    private long writePostings(Version version, RemappedPostings rp, IndexOutputWriter postingsOutput,
                               RandomAccessVectorValues vectorValues) throws IOException
     {
         if (V5OnDiskFormat.writeV5VectorPostings(version))
         {
-            return new V5VectorPostingsWriter<Integer>(rp).writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap);
+            // rows are added serially in ascending segment rowId order (see maybeAddVector), so each
+            // vector's rowIds are already ascending
+            return rp.writer(vectorValues, postingsMap)
+                     .skipRowIdSorting()
+                     .writeTo(postingsOutput.asSequentialWriter());
         }
         else
         {

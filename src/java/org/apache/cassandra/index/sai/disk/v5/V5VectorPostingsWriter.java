@@ -20,39 +20,19 @@ package org.apache.cassandra.index.sai.disk.v5;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.IntPredicate;
-import java.util.function.IntUnaryOperator;
-import java.util.stream.IntStream;
-import javax.annotation.Nullable;
+import java.util.Comparator;
+import java.util.function.IntFunction;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.BiMap;
-import com.google.common.collect.HashBiMap;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
-import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
-import io.github.jbellis.jvector.util.FixedBitSet;
-import io.github.jbellis.jvector.vector.types.VectorFloat;
-import net.openhft.chronicle.map.ChronicleMap;
 import org.agrona.collections.Int2IntHashMap;
-import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.vector.VectorPostings;
 import org.apache.cassandra.io.util.SequentialWriter;
 
 import static java.lang.Math.max;
-import static java.lang.Math.min;
 
-public class V5VectorPostingsWriter<T>
+public class V5VectorPostingsWriter
 {
-    private static final Logger logger = LoggerFactory.getLogger(V5VectorPostingsWriter.class);
-
     /**
      * Write a one-to-many mapping if the number of "holes" in the resulting ordinal sequence
      * is less than this fraction of the total rows.  Holes have two effects that make us not
@@ -97,344 +77,311 @@ public class V5VectorPostingsWriter<T>
         ZERO_OR_ONE_TO_MANY
     }
 
-    private final RemappedPostings remappedPostings;
+    /** Function from vector ordinal to its rowId list. A null return is treated as an empty list (a hole). */
+    private final IntFunction<IntArrayList> rowIdsOf;
+    /** Largest vector ordinal, inclusive. Negative means the relation is empty. */
+    private final int maxVectorOrdinal;
+    
+    /** Encoding structure hint. Defaults to {@link Structure#ZERO_OR_ONE_TO_MANY}, which is always correct, but may not be optimal. */
+    private Structure structure = Structure.ZERO_OR_ONE_TO_MANY;
+    /**
+     * Largest rowId in the segment.
+     * <ul>
+     *   <li>{@link Structure#ZERO_OR_ONE_TO_MANY}: <b>required</b>. Cannot be derived safely because
+     *       gap rows (rows with no vector) never appear in any {@link #rowIdsOf} list, yet the reader's
+     *       dense rowId→ordinal table must cover them. Omitting it throws from {@link #writeTo}.</li>
+     *   <li>{@link Structure#ONE_TO_ONE} and {@link Structure#ONE_TO_MANY}: must equal
+     *       {@code maxVectorOrdinal} (every row has a vector, so there are no gaps or tail rows).
+     *       Defaults to {@code maxVectorOrdinal} if not supplied; throws if supplied with a different value.</li>
+     * </ul>
+     * {@code -1} means not supplied.
+     */
+    private int maxRowId = -1;
+    /** When true each ordinal's rowId list is assumed to be already ascending; sorting is skipped. */
+    private boolean skipSorting = false;
 
     /**
-     * If Structure is ONE_TO_MANY then extraPostings should be the rowid -> ordinal map for the "extra" rows
-     * as determined by CassandraOnHeapGraph::buildOrdinalMap; otherwise it should be null
+     * Create a writer that encodes an ordinal→rowIds relation.
+     * {@code rowIdsOf(i)} returns the rowIds for ordinal {@code i}; an empty list means a hole.
+     * A {@code null} result is treated the same as an empty list (a hole), so callers whose lookup
+     * returns null for an absent ordinal need not map it themselves.
+     * Chain optional setters before calling {@link #writeTo}.
+     *
+     * @param maxVectorOrdinal largest ordinal (inclusive); negative means the relation is empty
+     * @param rowIdsOf         function from ordinal to rowId list; may return null, meaning empty,
+     *                         must return rowIds in ascending order if {@link #skipRowIdSorting} was called
      */
-    public V5VectorPostingsWriter(RemappedPostings remappedPostings)
+    public static V5VectorPostingsWriter create(int maxVectorOrdinal, IntFunction<IntArrayList> rowIdsOf)
     {
-        this.remappedPostings = remappedPostings;
+        return new V5VectorPostingsWriter(maxVectorOrdinal, rowIdsOf);
+    }
+
+    private V5VectorPostingsWriter(int maxVectorOrdinal, IntFunction<IntArrayList> rowIdsOf)
+    {
+        this.maxVectorOrdinal = maxVectorOrdinal;
+        this.rowIdsOf = rowIdsOf;
+    }
+
+    /** Shared stand-in for a null {@code rowIdsOf} result. Never mutated: the writer only reads these lists. */
+    private static final IntArrayList NO_ROW_IDS = new IntArrayList(0, IntArrayList.DEFAULT_NULL_VALUE);
+
+    /**
+     * The rowIds of {@code ordinal}, in ascending order; a null from {@link #rowIdsOf} is treated as an empty list,
+     * without allocating. This is the only place where rowIds are sorted: unless {@link #skipRowIdSorting()} was
+     * called, an unsorted list is copied and sorted (the caller's list is never mutated). Sortedness of the result
+     * is always asserted, whether or not sorting is enabled.
+     */
+    private IntArrayList rowIdsFor(int ordinal)
+    {
+        IntArrayList ids = rowIdsOf.apply(ordinal);
+        if (ids == null)
+            return NO_ROW_IDS;
+        if (!skipSorting && !isSorted(ids))
+        {
+            int[] sorted = ids.toIntArray();
+            Arrays.sort(sorted);
+            ids = new IntArrayList(sorted, sorted.length, IntArrayList.DEFAULT_NULL_VALUE);
+        }
+        assert isSorted(ids) : "rowIds of ordinal " + ordinal + " are not sorted: " + ids;
+        return ids;
+    }
+
+    private static boolean isSorted(IntArrayList ids)
+    {
+        for (int j = 1; j < ids.size(); j++)
+            if (ids.getInt(j - 1) > ids.getInt(j))
+                return false;
+        return true;
     }
 
     /**
-     * This method describes the mapping done during construction of the graph so that we can easily create
-     * an appropriate V5VectorPostingsWriter.  No ordinal remapping is performed because (V5) compaction writes
-     * vectors to disk as they are added to the graph, so there is no opportunity to reorder the way there is
-     * in a Memtable index.
+     * Encoding structure. Defaults to {@link Structure#ZERO_OR_ONE_TO_MANY} (always correct).
+     * Supply a tighter structure for a more compact encoding. Returns {@code this}.
      */
-    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, int maxRowId, int maxOrdinal, ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap)
+    public V5VectorPostingsWriter structure(Structure structure)
     {
-        assert !postingsMap.isEmpty(); // flush+compact should skip writing an index component in this case
+        this.structure = structure;
+        return this;
+    }
 
+    /**
+     * Largest rowId in the segment.
+     * <p>Required for {@link Structure#ZERO_OR_ONE_TO_MANY} — omitting it throws from {@link #writeTo}.
+     * <p>For {@link Structure#ONE_TO_ONE} and {@link Structure#ONE_TO_MANY} it may be omitted,
+     * in which case {@code maxVectorOrdinal} is used.
+     * <p>Any negative value is treated as "not supplied" (equivalent to not calling this method).
+     * Returns {@code this}.
+     */
+    public V5VectorPostingsWriter maxRowId(int maxRowId)
+    {
+        this.maxRowId = maxRowId >= 0 ? maxRowId : -1;
+        return this;
+    }
+
+    /**
+     * Assert that every ordinal's rowId list is already ascending; skip the defensive sort.
+     * Returns {@code this}.
+     */
+    public V5VectorPostingsWriter skipRowIdSorting()
+    {
+        this.skipSorting = true;
+        return this;
+    }
+
+    /**
+     * Encode the ordinal→rowIds relation to {@code writer} and return the writer position after
+     * the last byte written.
+     */
+    public long writeTo(SequentialWriter writer) throws IOException
+    {
+        // ---- empty case ----
+        if (maxVectorOrdinal < 0)
+        {
+            writer.writeInt(MAGIC);
+            writer.writeInt(structure.ordinal());
+            writer.writeInt(maxVectorOrdinal);
+            writer.writeInt(-1);
+            return writer.position();
+        }
+
+        // ---- validate maxRowId
+        if (maxRowId >= 0 && maxRowId < maxVectorOrdinal)
+            throw new IllegalStateException("maxRowId = " + maxRowId + " must not exceed maxVectorOrdinal = " + maxVectorOrdinal + " for " + structure.name());
+
+        if (structure == Structure.ZERO_OR_ONE_TO_MANY && maxRowId == -1)
+            throw new IllegalStateException(
+            "maxRowId must be supplied for ZERO_OR_ONE_TO_MANY (gap rows at the tail of the "
+            + "segment are not visible in rowIdsOf and would be silently omitted)");
+
+        // For anything other than ZERO_OR_ONE_TO_MANY we have a 1:1 between vector odinals and their primary row ids
+        if (maxRowId == -1)
+            maxRowId = maxVectorOrdinal;
+
+        // ---- ONE_TO_ONE: maxRowId == maxVectorOrdinal by definition; no scan needed ----
         if (structure == Structure.ONE_TO_ONE)
         {
-            return new RemappedPostings(Structure.ONE_TO_ONE,
-                                        graphSize - 1,
-                                        graphSize - 1,
-                                        null,
-                                        null,
-                                        new OrdinalMapper.IdentityMapper(graphSize - 1));
+            writer.writeInt(MAGIC);
+            writer.writeInt(Structure.ONE_TO_ONE.ordinal());
+            writer.writeInt(maxVectorOrdinal);
+            writer.writeInt(maxVectorOrdinal);
+            return writer.position();
         }
 
-        if (structure == Structure.ONE_TO_MANY)
-        {
-            // compute extraOrdinals from the postingsMap
-            var extraOrdinals = new Int2IntHashMap(Integer.MIN_VALUE);
-            postingsMap.forEachEntry(entry -> {
-                VectorPostings.CompactionVectorPostings.Marshaller.recordExtraOrdinals(entry, extraOrdinals);
-            });
 
-            var skippedOrdinals = extraOrdinals.keySet();
-            return new RemappedPostings(Structure.ONE_TO_MANY,
-                                        maxOrdinal,
-                                        maxRowId,
-                                        null,
-                                        extraOrdinals,
-                                        new OmissionAwareIdentityMapper(maxOrdinal, skippedOrdinals::contains));
-        }
-
-        assert structure == Structure.ZERO_OR_ONE_TO_MANY : structure;
-        return createGenericIdentityMapping(postingsMap, maxRowId, maxOrdinal);
-    }
-
-    public long writePostings(SequentialWriter writer,
-                              RandomAccessVectorValues vectorValues,
-                              Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
-    {
-        var structure = remappedPostings.structure;
-
+        // ---- write header ----
         writer.writeInt(MAGIC);
         writer.writeInt(structure.ordinal());
-        writer.writeInt(remappedPostings.maxNewOrdinal);
-        writer.writeInt(remappedPostings.maxRowId);
+        writer.writeInt(maxVectorOrdinal);
+        writer.writeInt(maxRowId);
 
-        if (structure == Structure.ONE_TO_ONE || remappedPostings.maxNewOrdinal < 0)
-        {
-            // nothing more to do
-        }
-        else if (structure == Structure.ONE_TO_MANY)
+        // ---- write body ----
+        if (structure == Structure.ONE_TO_MANY)
         {
             writeOneToManyOrdinalMapping(writer);
             writeOneToManyRowIdMapping(writer);
         }
         else
         {
-            assert structure == Structure.ZERO_OR_ONE_TO_MANY;
-            writeGenericOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
-            writeGenericRowIdMapping(writer, vectorValues, postingsMap);
+            writeGenericOrdinalToRowIdMapping(writer);
+            writeGenericRowIdMapping(writer);
         }
 
         return writer.position();
     }
 
+    // ---- ONE_TO_MANY encoders ----
+
     private void writeOneToManyOrdinalMapping(SequentialWriter writer) throws IOException
     {
-        // make sure we're in the right branch
-        assert !remappedPostings.extraPostings.isEmpty();
-
-        // Create a map of (original) ordinals to their extra rowids
-        var ordinalToExtraRowIds = new Int2ObjectHashMap<IntArrayList>();
-        for (var entry : remappedPostings.extraPostings.entrySet()) {
-            int rowId = entry.getKey();
-            int ordinal = entry.getValue();
-            ordinalToExtraRowIds.computeIfAbsent(ordinal, k -> new IntArrayList()).add(rowId);
+        // entryCount must be written before entries; collect entries first.
+        // Count: holes (size==0) + multi-row ordinals (size>1).
+        // Calling rowIdsOf directly (no sort needed — only sizes matter for counting).
+        int entryCount = 0;
+        for (int i = 0; i <= maxVectorOrdinal; i++)
+        {
+            IntArrayList ids = rowIdsOf.apply(i);
+            int sz = ids == null ? 0 : ids.size();
+            if (sz == 0 || sz > 1) entryCount++;
         }
+        writer.writeInt(entryCount);
 
-        // Write the ordinals and their extra rowids
-        int holeCount = (int) IntStream.range(0, remappedPostings.maxNewOrdinal + 1)
-                                       .map(remappedPostings.ordinalMapper::newToOld)
-                                       .filter(i -> i == OrdinalMapper.OMITTED)
-                                       .count();
-        writer.writeInt(holeCount + ordinalToExtraRowIds.size());
-        int entries = 0;
-        for (int newOrdinal = 0; newOrdinal <= remappedPostings.maxNewOrdinal; newOrdinal++) {
-            // write the "holes" so they are not incorrectly associated with the corresponding rowId
-            int oldOrdinal = remappedPostings.ordinalMapper.newToOld(newOrdinal);
-            if (oldOrdinal == OrdinalMapper.OMITTED)
+        for (int i = 0; i <= maxVectorOrdinal; i++)
+        {
+            IntArrayList ids = rowIdsFor(i);
+            int sz = ids.size();
+            if (sz == 0)
             {
-                writer.writeInt(newOrdinal);
+                writer.writeInt(i);
                 writer.writeInt(0);
-                entries++;
-                continue;
             }
-
-            // write the ordinals with multiple rows
-            var extraRowIds = ordinalToExtraRowIds.get(oldOrdinal);
-            if (extraRowIds != null)
+            else if (sz > 1)
             {
-                writer.writeInt(newOrdinal);
-                writer.writeInt(extraRowIds.size());
-                for (int rowId : extraRowIds) {
-                    writer.writeInt(rowId);
-                }
-                entries++;
+                int[] extras = extrasForOneToMany(i, ids);
+                writer.writeInt(i);
+                writer.writeInt(extras.length);
+                for (int extra : extras)
+                    writer.writeInt(extra);
             }
+            // sz == 1 && primary rowId == i: implicit, nothing written
         }
-        assert entries == holeCount + ordinalToExtraRowIds.size();
+    }
+
+    /**
+     * Returns extra rowIds for {@code ordinal} (everything except the primary row equal to
+     * {@code ordinal}), sorted ascending. Validates the ONE_TO_MANY invariant: min(ids) == ordinal.
+     */
+    private int[] extrasForOneToMany(int ordinal, IntArrayList ids)
+    {
+        int minVal = ids.getInt(0);
+        for (int j = 1; j < ids.size(); j++)
+            if (ids.getInt(j) < minVal) minVal = ids.getInt(j);
+        if (minVal != ordinal)
+            throw new IllegalStateException("ONE_TO_MANY violated: ordinal " + ordinal
+                                            + " has min rowId " + minVal + " (expected == ordinal)");
+        IntArrayList extras = new IntArrayList();
+        for (int j = 0; j < ids.size(); j++)
+            if (ids.getInt(j) != ordinal) extras.add(ids.getInt(j));
+        return extras.toIntArray(); // ids are sorted (see rowIdsFor), so extras are too
     }
 
     private void writeOneToManyRowIdMapping(SequentialWriter writer) throws IOException
     {
         long startOffset = writer.position();
 
-        // make sure we're in the right branch
-        assert !remappedPostings.extraPostings.isEmpty();
-
-        // sort the extra rowids.  this boxes, but there isn't a good way to avoid that
-        var extraRowIds = remappedPostings.extraPostings.keySet().stream().sorted().mapToInt(i -> i).toArray();
-        // only write the extra postings, everything else can be determined from those
-        int lastExtraRowId = -1;
-        for (int i = 0; i < extraRowIds.length; i++)
+        // Collect extra (non-primary) rowId→ordinal pairs.
+        // Primary rowId of ordinal i is i itself; the reader infers those without consulting disk.
+        IntArrayList extraPairs = new IntArrayList(); // interleaved: rowId, ordinal, rowId, ordinal, ...
+        for (int i = 0; i <= maxVectorOrdinal; i++)
         {
-            int rowId = extraRowIds[i];
-            int originalOrdinal = remappedPostings.extraPostings.get(rowId);
-            writer.writeInt(rowId);
-            writer.writeInt(remappedPostings.ordinalMapper.oldToNew(originalOrdinal));
-            // validate that we do in fact have contiguous rowids in the non-extra mapping
-            assert IntStream.range(lastExtraRowId + 1, rowId)
-                            .allMatch(j -> remappedPostings.ordinalMapper.newToOld(j) != OrdinalMapper.OMITTED) : "Non-contiguous rowids found in non-extra mapping";
-            lastExtraRowId = rowId;
+            IntArrayList ids = rowIdsFor(i);
+            for (int j = 0; j < ids.size(); j++)
+            {
+                int v = ids.getInt(j);
+                if (v != i) { extraPairs.add(v); extraPairs.add(i); }
+            }
         }
 
-        // Write the position of the beginning of rowid -> ordinals mappings to the end
+        int pairCount = extraPairs.size() / 2;
+
+        // Sort the pairs by rowId so the reader's Arrays.binarySearch lookup works correctly.
+        Integer[] indices = new Integer[pairCount];
+        for (int k = 0; k < pairCount; k++) indices[k] = k;
+        Arrays.sort(indices, Comparator.comparingInt(k -> extraPairs.getInt(k * 2)));
+
+        for (int k = 0; k < pairCount; k++)
+        {
+            writer.writeInt(extraPairs.getInt(indices[k] * 2));
+            writer.writeInt(extraPairs.getInt(indices[k] * 2 + 1));
+        }
         writer.writeLong(startOffset);
     }
 
-    // VSTODO add missing row information to remapping so we don't have to go through the vectorValues again
-    public void writeGenericOrdinalToRowIdMapping(SequentialWriter writer,
-                                                  RandomAccessVectorValues vectorValues,
-                                                  Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
+    // ---- ZERO_OR_ONE_TO_MANY encoders ----
+
+    private void writeGenericOrdinalToRowIdMapping(SequentialWriter writer) throws IOException
     {
         long ordToRowOffset = writer.getOnDiskFilePointer();
+        int ordinalCount = maxVectorOrdinal + 1;
 
-        var newToOldMapper = (IntUnaryOperator) remappedPostings.ordinalMapper::newToOld;
-        int ordinalCount = remappedPostings.maxNewOrdinal + 1; // may include unmapped ordinals
-        // Write the offsets of the postings for each ordinal
-        var offsetsStartAt = ordToRowOffset + 8L * ordinalCount;
-        var nextOffset = offsetsStartAt;
-        for (var i = 0; i < ordinalCount; i++) {
-            // (ordinal is implied; don't need to write it)
+        // Resolve all rowId lists once; reuse them for both the offset table and the data write.
+        IntArrayList[] allIds = new IntArrayList[ordinalCount];
+        for (int i = 0; i < ordinalCount; i++)
+            allIds[i] = rowIdsFor(i);
+
+        long nextOffset = ordToRowOffset + 8L * ordinalCount;
+        for (int i = 0; i < ordinalCount; i++)
+        {
             writer.writeLong(nextOffset);
-            int originalOrdinal = newToOldMapper.applyAsInt(i);
-            int postingListSize;
-            if (originalOrdinal == OrdinalMapper.OMITTED)
-            {
-                assert remappedPostings.structure == Structure.ZERO_OR_ONE_TO_MANY;
-                postingListSize = 0;
-            }
-            else
-            {
-                var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
-                postingListSize = rowIds.size();
-            }
-            nextOffset += 4 + (postingListSize * 4L); // 4 bytes for size and 4 bytes for each integer in the list
+            nextOffset += 4 + (allIds[i].size() * 4L);
         }
-        assert writer.position() == offsetsStartAt : "writer.position()=" + writer.position() + " offsetsStartAt=" + offsetsStartAt;
 
-        // Write postings lists
-        for (var i = 0; i < ordinalCount; i++) {
-            int originalOrdinal = newToOldMapper.applyAsInt(i);
-            if (originalOrdinal == OrdinalMapper.OMITTED)
-            {
-                assert remappedPostings.structure == Structure.ZERO_OR_ONE_TO_MANY;
-                writer.writeInt(0);
-                continue;
-            }
-            var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
-            writer.writeInt(rowIds.size());
-            for (int r = 0; r < rowIds.size(); r++)
-                writer.writeInt(rowIds.getInt(r));
+        for (int i = 0; i < ordinalCount; i++)
+        {
+            IntArrayList ids = allIds[i];
+            writer.writeInt(ids.size());
+            for (int j = 0; j < ids.size(); j++)
+                writer.writeInt(ids.getInt(j));
         }
-        assert writer.position() == nextOffset;
     }
 
-    public void writeGenericRowIdMapping(SequentialWriter writer,
-                                         RandomAccessVectorValues vectorValues,
-                                         Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
+    private void writeGenericRowIdMapping(SequentialWriter writer)
+            throws IOException
     {
         long startOffset = writer.position();
 
-        // Create a Map of rowId -> ordinal
-        int maxRowId = -1;
-        var rowIdToOrdinalMap = new Int2IntHashMap(remappedPostings.maxNewOrdinal, 0.65f, OrdinalMapper.OMITTED);
-        for (int i = 0; i <= remappedPostings.maxNewOrdinal; i++) {
-            int ord = remappedPostings.ordinalMapper.newToOld(i);
-            if (ord == OrdinalMapper.OMITTED)
-                continue;
-
-            var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
-            for (int r = 0; r < rowIds.size(); r++)
-            {
-                var rowId = rowIds.getInt(r);
-                rowIdToOrdinalMap.put(rowId, i);
-                maxRowId = max(maxRowId, rowId);
-            }
+        Int2IntHashMap rowIdToOrdinal = new Int2IntHashMap(max(maxVectorOrdinal, 1), 0.65f, -1);
+        for (int i = 0; i <= maxVectorOrdinal; i++)
+        {
+            IntArrayList ids = rowIdsFor(i);
+            for (int j = 0; j < ids.size(); j++)
+                rowIdToOrdinal.put(ids.getInt(j), i);
         }
-
-        // Write rowId -> ordinal mappings, filling in missing rowIds with -1
-        for (int currentRowId = 0; currentRowId <= maxRowId; currentRowId++) {
-            writer.writeInt(currentRowId);
-            if (rowIdToOrdinalMap.containsKey(currentRowId))
-                writer.writeInt(rowIdToOrdinalMap.get(currentRowId));
-            else
-                writer.writeInt(-1); // no corresponding ordinal
+        for (int r = 0; r <= maxRowId; r++)
+        {
+            writer.writeInt(r);
+            writer.writeInt(rowIdToOrdinal.getOrDefault(r, -1));
         }
-
-        // write the position of the beginning of rowid -> ordinals mappings to the end
         writer.writeLong(startOffset);
-    }
-
-    /**
-     * RemappedPostings is a
-     *   - BiMap of original vector ordinal to the first row id it is associated with
-     *   - Map of row id to original vector ordinal for rows that are NOT the first row associated with their vector
-     * <p>
-     * Example, using digits as ordianls and letters as row ids.  Postings map contains
-     * 0 -> B, C
-     * 1 -> A
-     * 2 -> D
-     * <p>
-     * The returned ordinalMap would be {0 <-> B, 1 <-> A, 2 <-> D} and the extraPostings would be {C -> 0}
-     */
-    public static class RemappedPostings
-    {
-        /** relationship of vector ordinals to row ids */
-        public final Structure structure;
-        /** the largest vector ordinal in the postings (inclusive) */
-        public final int maxNewOrdinal;
-        /** the largest rowId in the postings (inclusive) */
-        public final int maxRowId;
-        /** map from rowId to [original] vector ordinal */
-        @Nullable
-        private final Int2IntHashMap extraPostings;
-        /** public api */
-        public final OrdinalMapper ordinalMapper;
-
-        /** visible for V2VectorPostingsWriter.remapPostings, everyone else should use factory methods */
-        public RemappedPostings(Structure structure, int maxNewOrdinal, int maxRowId, BiMap<Integer, Integer> ordinalMap, Int2IntHashMap extraPostings, OrdinalMapper ordinalMapper)
-        {
-            this.structure = structure;
-            this.maxNewOrdinal = maxNewOrdinal;
-            this.maxRowId = maxRowId;
-            this.extraPostings = extraPostings;
-            this.ordinalMapper = ordinalMapper;
-        }
-    }
-
-    /**
-     * @see RemappedPostings
-     */
-    public static <T> RemappedPostings remapForMemtable(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap, Version version)
-    {
-        assert V5OnDiskFormat.writeV5VectorPostings(version);
-
-        BiMap<Integer, Integer> ordinalMap = HashBiMap.create();
-        Int2IntHashMap extraPostings = new Int2IntHashMap(Integer.MIN_VALUE);
-        int minRow = Integer.MAX_VALUE;
-        int maxRow = Integer.MIN_VALUE;
-        int maxNewOrdinal = Integer.MIN_VALUE;
-        int maxOldOrdinal = Integer.MIN_VALUE;
-        int totalRowsAssigned = 0;
-
-        // build the ordinalMap and extraPostings
-        for (var vectorPostings : postingsMap.values())
-        {
-            assert !vectorPostings.isEmpty(); // deleted vectors should be cleaned out before remapping
-            var a = vectorPostings.getRowIds().toIntArray();
-            Arrays.sort(a);
-            int rowId = a[0];
-            int oldOrdinal = vectorPostings.getOrdinal();
-            maxOldOrdinal = max(maxOldOrdinal, oldOrdinal);
-            minRow = min(minRow, rowId);
-            maxRow = max(maxRow, a[a.length - 1]);
-            assert !ordinalMap.containsKey(oldOrdinal); // vector <-> ordinal should be unique
-            ordinalMap.put(oldOrdinal, rowId);
-            maxNewOrdinal = max(maxNewOrdinal, rowId);
-            totalRowsAssigned += a.length; // all row ids should also be unique, but we can't easily check that
-            if (a.length > 1)
-            {
-                for (int i = 1; i < a.length; i++)
-                    extraPostings.put(a[i], oldOrdinal);
-            }
-        }
-        assert totalRowsAssigned == 0 || totalRowsAssigned <= maxRow + 1: "rowids are not unique -- " + totalRowsAssigned + " >= " + maxRow;
-
-        // derive the correct structure
-        Structure structure;
-        if (totalRowsAssigned > 0 && (minRow != 0 || totalRowsAssigned < maxRow + 1))
-        {
-            logger.debug("Not all rows are assigned vectors, cannot remap one-to-many");
-            structure = Structure.ZERO_OR_ONE_TO_MANY;
-        }
-        else
-        {
-            structure = extraPostings.isEmpty()
-                      ? Structure.ONE_TO_ONE
-                      : Structure.ONE_TO_MANY;
-            // override one-to-many to generic if there are too many holes
-            if (structure == Structure.ONE_TO_MANY && tooManyOrdinalMappingHoles(postingsMap.size(), maxRow))
-                structure = Structure.ZERO_OR_ONE_TO_MANY;
-            logger.debug("Remapped postings include {} unique vectors and {} 'extra' rows sharing them. Structure is {}",
-                         ordinalMap.size(), extraPostings.size(), structure);
-        }
-
-        // create the mapping
-        if (structure == Structure.ZERO_OR_ONE_TO_MANY)
-            return createGenericRenumberedMapping(ordinalMap.keySet(), maxOldOrdinal, maxRow);
-        var ordinalMapper = new BiMapMapper(maxNewOrdinal, ordinalMap);
-        return new RemappedPostings(structure, maxNewOrdinal, maxRow, ordinalMap, extraPostings, ordinalMapper);
     }
 
     /**
@@ -446,122 +393,5 @@ public class V5VectorPostingsWriter<T>
     public static boolean tooManyOrdinalMappingHoles(int totalVectorsIndexed, int totalRowsIndexed)
     {
         return totalRowsIndexed - totalVectorsIndexed > GLOBAL_HOLES_ALLOWED * totalRowsIndexed;
-    }
-
-    /**
-     * return an exhaustive zero-to-many mapping with the live ordinals renumbered sequentially
-     */
-    private static RemappedPostings createGenericRenumberedMapping(Set<Integer> liveOrdinals, int maxOldOrdinal, int maxRow)
-    {
-        var oldToNew = new Int2IntHashMap(maxOldOrdinal, 0.65f, Integer.MIN_VALUE);
-        int nextOrdinal = 0;
-        for (int i = 0; i <= maxOldOrdinal; i++) {
-            if (liveOrdinals.contains(i))
-                oldToNew.put(i, nextOrdinal++);
-        }
-        return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
-                                    nextOrdinal - 1,
-                                    maxRow,
-                                    null,
-                                    null,
-                                    new OrdinalMapper.MapMapper(oldToNew));
-    }
-
-    /**
-     * return an exhaustive zero-to-many mapping with no renumbering
-     */
-    public static <T> RemappedPostings createGenericIdentityMapping(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap)
-    {
-        var maxOldOrdinal = postingsMap.values().stream().mapToInt(VectorPostings::getOrdinal).max().orElseThrow();
-        int maxRow = postingsMap.values().stream().flatMap(p -> p.getRowIds().stream()).mapToInt(i -> i).max().orElseThrow();
-        var presentOrdinals = new FixedBitSet(maxOldOrdinal + 1);
-        for (var entry : postingsMap.entrySet())
-            presentOrdinals.set(entry.getValue().getOrdinal());
-        return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
-                                    maxOldOrdinal,
-                                    maxRow,
-                                    null,
-                                    null,
-                                    new OmissionAwareIdentityMapper(maxOldOrdinal, i -> !presentOrdinals.get(i)));
-    }
-
-    /**
-     * return an exhaustive zero-to-many mapping with no renumbering
-     */
-    public static RemappedPostings createGenericIdentityMapping(ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap, int maxRowId, int maxOldOrdinal)
-    {
-        var presentOrdinals = new FixedBitSet(maxOldOrdinal + 1);
-
-        // Iterate the whole map using the low level API that avoids deserialization penalties.
-        postingsMap.forEachEntry(entry -> {
-            presentOrdinals.set(VectorPostings.CompactionVectorPostings.Marshaller.extractOrdinal(entry));
-        });
-
-        return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
-                                    maxOldOrdinal,
-                                    maxRowId,
-                                    null,
-                                    null,
-                                    new OmissionAwareIdentityMapper(maxOldOrdinal, i -> !presentOrdinals.get(i)));
-    }
-
-    public static class BiMapMapper implements OrdinalMapper
-    {
-        private final int maxOrdinal;
-        private final BiMap<Integer, Integer> ordinalMap;
-
-        public BiMapMapper(int maxNewOrdinal, BiMap<Integer, Integer> ordinalMap)
-        {
-            this.maxOrdinal = maxNewOrdinal;
-            this.ordinalMap = ordinalMap;
-        }
-
-        @Override
-        public int maxOrdinal()
-        {
-            return maxOrdinal;
-        }
-
-        @Override
-        public int oldToNew(int i)
-        {
-            return ordinalMap.get(i);
-        }
-
-        @Override
-        public int newToOld(int i)
-        {
-            return ordinalMap.inverse().getOrDefault(i, OMITTED);
-        }
-    }
-
-    private static class OmissionAwareIdentityMapper implements OrdinalMapper
-    {
-        private final int maxVectorOrdinal;
-        private final IntPredicate toSkip;
-
-        public OmissionAwareIdentityMapper(int maxVectorOrdinal, IntPredicate toSkip)
-        {
-            this.maxVectorOrdinal = maxVectorOrdinal;
-            this.toSkip = toSkip;
-        }
-
-        @Override
-        public int maxOrdinal()
-        {
-            return maxVectorOrdinal;
-        }
-
-        @Override
-        public int oldToNew(int i)
-        {
-            return i;
-        }
-
-        @Override
-        public int newToOld(int i)
-        {
-            return toSkip.test(i) ? OrdinalMapper.OMITTED : i;
-        }
     }
 }
