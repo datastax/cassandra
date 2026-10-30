@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -242,7 +243,14 @@ public abstract class CassandraIndex implements Index
         metadata = indexDef;
         Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(baseCfs.metadata(), indexDef);
         functions = getFunctions(indexDef, target);
-        TableMetadataRef tableRef = TableMetadataRef.forOfflineTools(indexCfsMetadata(baseCfs.metadata(), indexDef));
+        // Use the live schema cache ref when available so that subsequent ALTER TABLE changes
+        // (e.g. enabling TDE, rotating keys) propagate to the index CFS automatically via the
+        // existing TableMetadataRefCache.withUpdatedRefs() update path. Fall back to a
+        // forOfflineTools snapshot for offline tools where Schema.instance is not populated.
+        TableMetadataRef tableRef = Schema.instance.getIndexTableMetadataRef(
+                baseCfs.metadata().keyspace, indexDef.name);
+        if (tableRef == null)
+            tableRef = TableMetadataRef.forOfflineTools(indexCfsMetadata(baseCfs.metadata(), indexDef));
         indexCfs = ColumnFamilyStore.createColumnFamilyStore(baseCfs.keyspace,
                                                              tableRef.name,
                                                              tableRef,
@@ -762,7 +770,7 @@ public abstract class CassandraIndex implements Index
         TableMetadata.Builder builder =
             TableMetadata.builder(baseCfsMetadata.keyspace, baseCfsMetadata.indexTableName(indexMetadata), baseCfsMetadata.id)
                          .kind(TableMetadata.Kind.INDEX)
-                         .partitioner(new LocalPartitioner(indexedValueType))
+                         .partitioner(LocalPartitioner.of(indexedValueType))
                          .addPartitionKeyColumn(indexedColumn.name, isCompatible ? indexedValueType : utils.getIndexedValueType(indexedColumn))
                          .addClusteringColumn("partition_key", isCompatible ? baseCfsMetadata.partitioner.partitionOrdering() : indexedTablePartitionKeyType);
 
