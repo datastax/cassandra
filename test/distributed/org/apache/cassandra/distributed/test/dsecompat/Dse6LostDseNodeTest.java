@@ -45,10 +45,10 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.HeartBeatState;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.service.DseUpgradeGuards;
 import org.apache.cassandra.service.StorageService;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.REPLACE_ADDRESS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CURRENT_VERSION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
@@ -65,14 +65,18 @@ import static org.awaitility.Awaitility.await;
  * The removal of a DSE 6 node lost for good during the upgrade, by nodes of this software in {@code DSE_6} mode and
  * without the mode: removenode once every other DSE 6 node is lost too (its data streamed between nodes of this
  * software), assassinate while one is not, and the replacement of the lost node once every node runs without the mode.
- * The lost node is a gossip state injected on node 1 as a ring member that is down: the in-JVM nodes of HCD 1.2 run
- * without gossip, so they cannot model the failure detection. A class of its own, so that one test JVM starts fewer
- * clusters.
+ * Once removed, the node is no longer on the record of DSE 6 peers. The lost node is a gossip state injected on node 1
+ * as a ring member that is down: the in-JVM nodes of HCD 1.2 run without gossip, so they cannot model the failure
+ * detection. The silence of a lost node is set to one second once the nodes have started, below the floor their startup
+ * check would refuse. A class of its own, so that one test JVM starts fewer clusters; the lost node of this software is
+ * {@link Dse6LostNodeOfThisSoftwareTest}'s, which uses the helpers here.
  */
 public class Dse6LostDseNodeTest extends TestBaseImpl
 {
     /** A DSE node lost for good: a ring member that exists only in the gossip state injected on node 1, convicted down. */
-    private static final String LOST_DSE_NODE = "127.0.10.98:7012";
+    static final String LOST_DSE_NODE = "127.0.10.98:7012";
+    /** The NET_VERSION a DSE 6.8 node gossips. */
+    static final int DSE_NET_VERSION = 1536;
     private static final String RF2 = "ks_rf2";
     private static final int ROWS = 100;
 
@@ -104,7 +108,7 @@ public class Dse6LostDseNodeTest extends TestBaseImpl
     {
         try (Cluster cluster = formerDseNodes(2, builder -> {}))
         {
-            removeALostDseNode(cluster);
+            removeLostNodes(cluster, new String[]{ LOST_DSE_NODE }, new int[]{ DSE_NET_VERSION }, new String[]{ "the DSE 6 node /" + LOST_DSE_NODE });
         }
     }
 
@@ -115,15 +119,18 @@ public class Dse6LostDseNodeTest extends TestBaseImpl
         try (Cluster cluster = init(Cluster.build(2).withSubnet(SUBNET).withDynamicPortAllocation(true)
                                            .withConfig(c -> c.with(Feature.NETWORK, Feature.GOSSIP)).start()))
         {
-            removeALostDseNode(cluster);
+            removeLostNodes(cluster, new String[]{ LOST_DSE_NODE }, new int[]{ DSE_NET_VERSION }, new String[]{ "the DSE 6 node /" + LOST_DSE_NODE });
         }
     }
 
     /**
-     * Injects a lost DSE 6 node on node 1, takes writes at ONE (those of its ranges reach one node only), removes it
-     * with removenode from node 1 and checks that the other node received the rows of those ranges by streaming.
+     * Injects the lost nodes {@code lostNodes} on node 1, each gossiping its entry of {@code netVersions} and owning a
+     * token of its own, takes writes at ONE (those of their ranges reach one node only), removes them in turn with
+     * removenode from node 1 and checks that each WARN names the node as its entry of {@code subjects}, that the other
+     * node received the rows of those ranges by streaming, and that in DSE_6 mode the record of DSE 6 peers lists the
+     * lost DSE 6 nodes before the removals and none after.
      */
-    private static void removeALostDseNode(Cluster cluster) throws Exception
+    static void removeLostNodes(Cluster cluster, String[] lostNodes, int[] netVersions, String[] subjects) throws Exception
     {
         try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
         {
@@ -131,25 +138,52 @@ public class Dse6LostDseNodeTest extends TestBaseImpl
             cluster.schemaChange("CREATE TABLE " + RF2 + ".t (k int PRIMARY KEY, v text)");
         }
         IInvokableInstance node = cluster.get(1);
-        String hostId = UUID.randomUUID().toString();
-        node.runOnInstance(() -> DseUpgradeGuards.setLostPeerSilenceMillis(1000));
-        node.runOnInstance(() -> injectDseRingMember(LOST_DSE_NODE, hostId, 0L));
-        awaitStatus(node, "DN", address(LOST_DSE_NODE));
-        // the rows of the ranges the lost node replicates reach a single node: the other one has fewer before the removal
-        for (int i = 0; i < ROWS; i++)
-            cluster.coordinator(1).execute("INSERT INTO " + RF2 + ".t (k, v) VALUES (?, ?)", ConsistencyLevel.ONE, i, "v" + i);
-        long before = localRows(cluster, 1) + localRows(cluster, 2);
-        assertThat(before).isGreaterThanOrEqualTo(ROWS).isLessThan(2L * ROWS);
-        Thread.sleep(1500); // the silence of a lost node
+        boolean dse6Mode = node.callOnInstance(DatabaseDescriptor::isDse6CompatibilityMode);
+        String[] hostIds = new String[lostNodes.length];
+        try (WithProperties silence = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS, 1))
+        {
+            int dseNodes = 0;
+            for (int n = 0; n < lostNodes.length; n++)
+            {
+                String lostNode = lostNodes[n];
+                String hostId = UUID.randomUUID().toString();
+                long token = n * (Long.MAX_VALUE / 2);
+                int netVersion = netVersions[n];
+                hostIds[n] = hostId;
+                node.runOnInstance(() -> injectRingMember(lostNode, hostId, token, netVersion));
+                awaitStatus(node, "DN", address(lostNode));
+                if (netVersion == DSE_NET_VERSION)
+                    dseNodes++;
+            }
+            // a DSE 6 node gossiped by a peer is on its record of DSE 6 peers, a node of this software is not
+            if (dse6Mode)
+                assertThat(node.nodetoolResult("compatstatus").getStdout())
+                .contains("DSE 6 peers on record        : " + (dseNodes == 0 ? "0\n" : dseNodes + " ["));
+            // the rows of the ranges the lost nodes replicate reach a single node: the other one has fewer before the removal
+            for (int i = 0; i < ROWS; i++)
+                cluster.coordinator(1).execute("INSERT INTO " + RF2 + ".t (k, v) VALUES (?, ?)", ConsistencyLevel.ONE, i, "v" + i);
+            long before = localRows(cluster, 1) + localRows(cluster, 2);
+            assertThat(before).isGreaterThanOrEqualTo(ROWS).isLessThan(2L * ROWS);
+            Thread.sleep(1500); // the silence of a lost node
 
-        node.nodetoolResult("removenode", hostId).asserts().success();
-        await().atMost(1, TimeUnit.MINUTES).pollInterval(1, TimeUnit.SECONDS)
-               .until(() -> !node.nodetoolResult("status").getStdout().contains(address(LOST_DSE_NODE)));
-        assertThat(node.logs().grep("Allowing the removal of the DSE 6 node /" + LOST_DSE_NODE + ", silent for 0 minutes, during the DSE 6 upgrade").getResult()).hasSize(1);
-        // both nodes now replicate every row, streamed from the node that had them
-        assertThat(localRows(cluster, 1)).isEqualTo(ROWS);
-        assertThat(localRows(cluster, 2)).isEqualTo(ROWS);
-        assertThat(node.nodetoolResult("compatstatus").getStdout()).contains("Requests refused (upgrade)   : 0\n");
+            for (int n = 0; n < lostNodes.length; n++)
+            {
+                String lostNode = lostNodes[n];
+                node.nodetoolResult("removenode", hostIds[n]).asserts().success();
+                await().atMost(1, TimeUnit.MINUTES).pollInterval(1, TimeUnit.SECONDS)
+                       .until(() -> !node.nodetoolResult("status").getStdout().contains(address(lostNode)));
+                assertThat(node.logs().grep(Pattern.quote("Allowing the removal of " + subjects[n] + ", silent for ") +
+                                            "[0-9]+ seconds, during the DSE 6 upgrade").getResult()).hasSize(1);
+            }
+            // both nodes now replicate every row, streamed from the node that had them
+            assertThat(localRows(cluster, 1)).isEqualTo(ROWS);
+            assertThat(localRows(cluster, 2)).isEqualTo(ROWS);
+            String out = node.nodetoolResult("compatstatus").getStdout();
+            assertThat(out).contains("Requests refused (upgrade)   : 0\n");
+            // the removed nodes no longer keep a start without the mode refused
+            if (dse6Mode)
+                assertThat(out).contains("DSE 6 peers on record        : 0\n");
+        }
     }
 
     private static long localRows(Cluster cluster, int node)
@@ -167,40 +201,60 @@ public class Dse6LostDseNodeTest extends TestBaseImpl
     {
         try (Cluster cluster = formerDseNodes(2, builder -> {}))
         {
-            IInvokableInstance node = cluster.get(1);
-            String hostId = UUID.randomUUID().toString();
-            node.runOnInstance(() -> DseUpgradeGuards.setLostPeerSilenceMillis(1000));
-            node.runOnInstance(() -> injectDseRingMember(LOST_DSE_NODE, hostId, 0L));
+            assassinateALostNode(cluster.get(1), LOST_DSE_NODE, DSE_NET_VERSION, "the DSE 6 node /" + LOST_DSE_NODE);
+        }
+    }
+
+    /**
+     * Injects on {@code node} a lost node gossiping {@code netVersion}, named {@code subject} in the texts, and a DSE 6
+     * node that is alive; removenode of the lost node is refused, assassinate of the live DSE 6 node too, and
+     * assassinate of the lost node removes it, with its WARN, and takes it off the record of DSE 6 peers if it was on it.
+     */
+    static void assassinateALostNode(IInvokableInstance node, String lostNode, int netVersion, String subject) throws Exception
+    {
+        String hostId = UUID.randomUUID().toString();
+        try (WithProperties silence = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS, 1))
+        {
+            node.runOnInstance(() -> injectRingMember(lostNode, hostId, 0L, netVersion));
             // a DSE 6 node marked alive and never convicted: it never sends a heartbeat, so this node's failure detector,
             // which has no arrival time for it, never convicts it
             node.runOnInstance(() -> Gossiper.runInGossipStageBlocking(() -> {
                 try
                 {
-                    Gossiper.instance.initializeNodeUnsafe(InetAddressAndPort.getByName(DSE_NODE), UUID.randomUUID(), 1536, 1);
+                    Gossiper.instance.initializeNodeUnsafe(InetAddressAndPort.getByName(DSE_NODE), UUID.randomUUID(), DSE_NET_VERSION, 1);
                 }
                 catch (UnknownHostException e)
                 {
                     throw new RuntimeException(e);
                 }
             }));
-            awaitStatus(node, "DN", address(LOST_DSE_NODE));
+            awaitStatus(node, "DN", address(lostNode));
+            // a lost DSE 6 node is on the record of DSE 6 peers, a lost node of this software is not
+            String onRecord = "DSE 6 peers on record +: [^\n]*" + Pattern.quote(lostNode);
+            if (netVersion == DSE_NET_VERSION)
+                assertThat(node.nodetoolResult("compatstatus").getStdout()).containsPattern(onRecord);
+            else
+                assertThat(node.nodetoolResult("compatstatus").getStdout()).doesNotContainPattern(onRecord);
             Thread.sleep(1500); // the silence of a lost node
 
             assertRefused(node.nodetoolResult("removenode", hostId),
-                          "removenode of the DSE 6 node /" + LOST_DSE_NODE + " lost for good is refused while DSE 6 nodes not known to be lost " +
-                          "are in the cluster ([/" + DSE_NODE + "])");
-            assertRefused(node.nodetoolResult("removenode", hostId), "remove the lost node with nodetool assassinate " + LOST_DSE_NODE);
+                          "removenode of " + subject + " lost for good is refused while DSE 6 nodes not known to be lost are in the cluster " +
+                          "([/" + DSE_NODE + "])");
+            assertRefused(node.nodetoolResult("removenode", hostId), "remove the lost node with nodetool assassinate " + lostNode);
             assertRefused(node.nodetoolResult("assassinate", DSE_NODE),
                           "assassinate is refused while the DSE 6 upgrade is in progress (internode_compatibility_mode: DSE_6, DSE 6 peers: [");
 
-            node.nodetoolResult("assassinate", LOST_DSE_NODE).asserts().success();
+            node.nodetoolResult("assassinate", lostNode).asserts().success();
             await().atMost(1, TimeUnit.MINUTES).pollInterval(1, TimeUnit.SECONDS)
-                   .until(() -> !node.nodetoolResult("status").getStdout().contains(address(LOST_DSE_NODE)));
-            assertThat(node.logs().grep("Allowing the assassination of the DSE 6 node /" + LOST_DSE_NODE + ", silent for 0 minutes, during the DSE 6 upgrade").getResult()).hasSize(1);
+                   .until(() -> !node.nodetoolResult("status").getStdout().contains(address(lostNode)));
+            assertThat(node.logs().grep(Pattern.quote("Allowing the assassination of " + subject + ", silent for ") +
+                                        "[0-9]+ seconds, during the DSE 6 upgrade").getResult()).hasSize(1);
             String out = node.nodetoolResult("compatstatus").getStdout();
             assertThat(out).contains("Requests refused (upgrade)   : 3\n");
             assertThat(out).containsPattern("  removenode +2\n");
             assertThat(out).containsPattern("  assassinate +1\n");
+            // the assassinated node is not on the record of DSE 6 peers any more
+            assertThat(out).doesNotContainPattern(onRecord);
         }
     }
 
@@ -222,7 +276,7 @@ public class Dse6LostDseNodeTest extends TestBaseImpl
         {
             IInvokableInstance node = cluster.get(1);
             String hostId = UUID.randomUUID().toString();
-            node.runOnInstance(() -> injectDseRingMember(LOST_DSE_NODE, hostId, 12345L));
+            node.runOnInstance(() -> injectRingMember(LOST_DSE_NODE, hostId, 12345L, DSE_NET_VERSION));
             awaitStatus(node, "DN", address(LOST_DSE_NODE));
             // the upgrade is in progress on node 1, without the mode, because of the lost DSE 6 node: other operations are
             // still refused
@@ -245,10 +299,11 @@ public class Dse6LostDseNodeTest extends TestBaseImpl
     }
 
     /**
-     * Adds a DSE 6 node to the gossip state of this instance as a ring member that never answers (its address has no
-     * node), marked down as the failure detector marks a node lost for good.
+     * Adds a node gossiping {@code netVersion} (a DSE 6 node's, or this software's) to the gossip state of this instance
+     * as a ring member that never answers (its address has no node), marked down as the failure detector marks a node
+     * lost for good.
      */
-    private static void injectDseRingMember(String address, String hostId, long token)
+    static void injectRingMember(String address, String hostId, long token, int netVersion)
     {
         try
         {
@@ -256,9 +311,9 @@ public class Dse6LostDseNodeTest extends TestBaseImpl
             VersionedValue.VersionedValueFactory values = StorageService.instance.valueFactory;
             Collection<Token> tokens = Collections.singleton(new Murmur3Partitioner.LongToken(token));
             Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
-            states.put(ApplicationState.NET_VERSION, values.networkVersion(1536));
+            states.put(ApplicationState.NET_VERSION, values.networkVersion(netVersion));
             states.put(ApplicationState.HOST_ID, values.hostId(UUID.fromString(hostId)));
-            states.put(ApplicationState.RELEASE_VERSION, values.releaseVersion("4.0.0.6865"));
+            states.put(ApplicationState.RELEASE_VERSION, netVersion == DSE_NET_VERSION ? values.releaseVersion("4.0.0.6865") : values.releaseVersion());
             states.put(ApplicationState.DC, values.datacenter(DatabaseDescriptor.getLocalDataCenter()));
             states.put(ApplicationState.RACK, values.rack(DatabaseDescriptor.getEndpointSnitch().getLocalRack()));
             states.put(ApplicationState.INTERNAL_ADDRESS_AND_PORT, values.internalAddressAndPort(endpoint));
@@ -277,13 +332,13 @@ public class Dse6LostDseNodeTest extends TestBaseImpl
         }
     }
 
-    private static String address(String addressAndPort)
+    static String address(String addressAndPort)
     {
         return addressAndPort.substring(0, addressAndPort.lastIndexOf(':'));
     }
 
     /** Waits until {@code nodetool status} of {@code node} shows {@code address} (without port) in {@code status}. */
-    private static void awaitStatus(IInvokableInstance node, String status, String address)
+    static void awaitStatus(IInvokableInstance node, String status, String address)
     {
         String line = "(?m)^" + status + " +" + Pattern.quote(address) + "\\b";
         await().atMost(1, TimeUnit.MINUTES).pollInterval(1, TimeUnit.SECONDS)
