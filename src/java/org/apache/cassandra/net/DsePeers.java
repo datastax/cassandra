@@ -45,22 +45,27 @@ import org.apache.cassandra.locator.InetAddressAndPort;
  *       socket after either first message, answered with 11, so a DSE 6.9.26 node is identified here by a connection
  *       it opens with one of them.
  *       DSE 6.8.65 does not: it closes the socket without a third message and reconnects at 11 on a new one, with a
- *       plain first message that identifies nothing;</li>
- *   <li>it answers our 4.0-style first handshake message with a DSE messaging version (256 or more).</li>
+ *       plain first message that identifies nothing; it is identified by the second or third item when this node
+ *       connects to it;</li>
+ *   <li>it answers our 4.0-style first handshake message with a DSE messaging version
+ *       ({@link DseCompat#isDseHandshakeVersion});</li>
+ *   <li>it answers our pre-4.0 first handshake message at 11 with a DSE messaging version instead of echoing 11, as
+ *       observed with DSE 6.8.65 (DSE 6.9.26 echoes 11, which identifies nothing).</li>
  * </ol>
  * A handshake cannot clear the record: a DSE node that stored 11 for this node reconnects with a plain pre-4.0 first
  * message at 11, which looks exactly like HCD 1.2's, so the record survives reconnects. Nothing else clears it while the
  * node runs, and it is not persisted: after a restart a DSE peer is identified again by the handshake when this node
- * does not know its version and sends the 4.0-style first message, which DSE answers with its own version, or by an
- * inbound first message only DSE sends when a third message follows, as DSE 6.9.26 sends it and DSE 6.8.65 does not
- * (see the first item). The record of peers at a pre-4.0 version that {@code DsePeersRecord} persists for the startup
- * checks does not tell a DSE node from HCD 1.2 at the dialect, so it does not identify a peer.
+ * does not know its version and sends the 4.0-style first message, which DSE answers with its own version, or when
+ * this node sends a DSE 6.8.65 peer the pre-4.0 first message, which it answers with its own version (see the third
+ * item), or by an inbound first message only DSE sends when a third message follows, as DSE 6.9.26 sends it and DSE
+ * 6.8.65 does not (see the first item). The record of peers at a pre-4.0 version that {@code DsePeersRecord} persists
+ * for the startup checks does not tell a DSE node from HCD 1.2 at the dialect, so it does not identify a peer.
  * <p>
  * Failure mode: a DSE peer not identified yet is treated like HCD 1.2 at the dialect. That takes a DSE node that
- * reconnected with a plain first message at 11 or less and that this node has not connected to with the 4.0-style
- * handshake: {@code nodetool compatstatus} lists it only when it gossips its DSE messaging version, and a connection to
- * it whose copy of the versions predates its handshake probes it once with the 4.0-style first message, whose answer
- * identifies it.
+ * reconnected with a plain first message at 11 or less and whose answers to this node's first messages carried no DSE
+ * messaging version (DSE 6.9.26 echoes the pre-4.0 one): {@code nodetool compatstatus} lists it only when it gossips
+ * its DSE messaging version, and a connection to it whose copy of the versions predates its handshake probes it once
+ * with the 4.0-style first message, whose answer identifies it.
  */
 public final class DsePeers
 {
@@ -107,13 +112,17 @@ public final class DsePeers
     }
 
     /**
-     * Records {@code peer} as a DSE node when the 4-byte reply to our 4.0-style first handshake message carries a DSE
-     * messaging version (256 or more): a 3.x or HCD 1.2 node answers 10 or 11.
+     * Records {@code peer} as a DSE node when the 4-byte reply to our first handshake message carries a DSE messaging
+     * version ({@link DseCompat#isDseHandshakeVersion}): a 3.x or HCD 1.2 node answers a version below 256, never
+     * {@code relative << 8}.
+     *
+     * @param toPre40FirstMessage whether our first message was the pre-4.0 one rather than the 4.0-style one, which the
+     *                            evidence tells apart
      */
-    static void fromPre40Reply(InetAddressAndPort peer, int peerVersion)
+    static void fromPre40Reply(InetAddressAndPort peer, int peerVersion, boolean toPre40FirstMessage)
     {
-        if (peerVersion >= DseCompat.DSE_HANDSHAKE_MIN)
-            identify(peer, "handshake reply with the DSE messaging version " + peerVersion);
+        if (DseCompat.isDseHandshakeVersion(peerVersion))
+            identify(peer, (toPre40FirstMessage ? "pre-4.0 handshake reply" : "handshake reply") + " with the DSE messaging version " + peerVersion);
     }
 
     /**

@@ -101,8 +101,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
     /**
      * The version we request. Only DSE 6 compatibility mode puts it on the wire: below 4.0 (a peer known to speak the
      * 3.0.14 dialect) the first message is the pre-4.0 one and the handshake has three messages; otherwise it goes,
-     * raised to at least 13 ({@code VERSION_50}, since DSE echoes 12), in the legacy version byte of the 4.0-style
-     * first message. With {@code NONE} that byte keeps carrying {@code acceptVersions.min}.
+     * raised to at least 13 ({@code VERSION_50}, since DSE echoes 12, as the source of DSE 6.9 has it), in the legacy
+     * version byte of the 4.0-style first message. With {@code NONE} that byte keeps carrying {@code acceptVersions.min}.
      */
     private final int requestMessagingVersion;
     private final Promise<Result<SuccessType>> resultPromise;
@@ -336,7 +336,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 // DSE 6 compatibility mode: the 4.0-style first message with the requested version (the current version
                 // for an unknown peer) in the legacy version byte, which DSE answers with its own version (relative << 8)
                 // so that we reconnect in the dialect; 4.0+ peers only check that byte is 4.0 or later.
-                // Never 12 there: DSE would echo a 4-byte 12, which cannot be told from the start of a 12-byte Accept.
+                // Never 12 there: DSE would echo a 4-byte 12 (as the source of DSE 6.9 has it), which cannot be told from
+                // the start of a 12-byte Accept.
                 // Streaming too: a DSE peer then answers with its own version, refused at once as incompatible, instead
                 // of echoing acceptVersions.min (12) and leaving the handshake to time out
                 msg = new Initiate(Math.max(requestMessagingVersion, VERSION_50), settings.acceptVersions, type, settings.framing, settings.from);
@@ -404,11 +405,16 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                     }
                     else if (requestMessagingVersion < VERSION_40)
                     {
-                        // we sent the pre-4.0 first message: the peer must echo the version we requested (compared as it
-                        // was sent, before a DSE version is mapped to the dialect), and we conclude with the third message;
-                        // any other answer is final (never retried, so no ping-pong)
-                        if (msg.pre40PeerVersion == requestMessagingVersion)
+                        // we sent the pre-4.0 first message: the peer must echo the version we requested or, at the
+                        // dialect, answer with a DSE messaging version (DSE 6.9.26 echoes 11, DSE 6.8.65 answers 1024, as
+                        // observed with both; HCD 1.2 accepts any answer it maps to the version it requested, or above
+                        // its maximum for its tests), and we conclude with the third message; any other answer is final
+                        // (never retried, so no ping-pong), reported with the version the peer sent
+                        int answer = msg.pre40PeerVersion;
+                        if (answer == requestMessagingVersion || (requestMessagingVersion == DseCompat.DSE_DIALECT && DseCompat.isDseHandshakeVersion(answer)))
                         {
+                            // a DSE version identifies a DSE node (DsePeers), which its plain first messages at 11 do not
+                            DsePeers.fromPre40Reply(settings.to, answer, true);
                             // pre-4.0 peers never CRC their frames: legacy encoders for CRC and UNPROTECTED alike
                             frameEncoder = settings.framing == OutboundConnectionSettings.Framing.LZ4 ? FrameEncoderLegacyLZ4.instance : FrameEncoderLegacy.instance;
                             result = (Result<SuccessType>) messagingSuccess(ctx.channel(), requestMessagingVersion, frameEncoder.allocator());
@@ -419,7 +425,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                         }
                         else
                         {
-                            result = incompatible(-1, msg.pre40PeerVersion);
+                            result = incompatible(-1, answer);
                         }
                     }
                     else if (peerMessagingVersion < DseCompat.OLDEST_PRE40_VERSION)
@@ -431,7 +437,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                         // our 4.0-style first message was answered by a pre-4.0 peer: reconnect with the pre-4.0 first
                         // message in the only dialect we speak with such peers; a DSE version in the answer tells a DSE
                         // node from HCD 1.2 at the dialect (DsePeers)
-                        DsePeers.fromPre40Reply(settings.to, msg.pre40PeerVersion);
+                        DsePeers.fromPre40Reply(settings.to, msg.pre40PeerVersion, false);
                         result = retry(DseCompat.DSE_DIALECT);
                     }
                 }
