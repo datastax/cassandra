@@ -592,9 +592,14 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (restrictions.isKeyRange() && restrictions.usesSecondaryIndexing() && !SchemaConstants.isLocalSystemKeyspace(table.keyspace))
             Guardrails.nonPartitionRestrictedIndexQueryEnabled.ensureEnabled(state);
 
-        ReadQuery query = restrictions.isKeyRange()
-                        ? getRangeCommand(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry)
-                        : getSliceCommands(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry);
+        ReadQuery query;
+
+        if (rowFilter.isUnsatisfiable())
+            query = ReadQuery.empty(table);
+        else if (restrictions.isKeyRange())
+            query = getRangeCommand(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry);
+        else
+            query = getSliceCommands(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry);
 
         // Handle additional validation for topK queries
         if (query.isTopK())
