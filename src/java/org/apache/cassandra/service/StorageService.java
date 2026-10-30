@@ -297,6 +297,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private static final Set<String> DSE6_DEFERRED_ADDITIONS_LOGGED = ConcurrentHashMap.newKeySet();
 
     public static final int INDEFINITE = -1;
+    /** The ring delay without {@code cassandra.ring_delay_ms}; a constant, so that reading it does not initialise this class. */
+    public static final int DEFAULT_RING_DELAY_MILLIS = 30 * 1000;
     public static final int RING_DELAY_MILLIS = getRingDelay(); // delay after which we assume ring has stablized
     public static final int SCHEMA_DELAY_MILLIS = getSchemaDelay();
 
@@ -315,7 +317,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private static int getRingDelay()
     {
-        int defaultDelay = 30 * 1000;
+        int defaultDelay = DEFAULT_RING_DELAY_MILLIS;
         int newDelay = CassandraRelevantProperties.RING_DELAY.getInt(defaultDelay);
         Preconditions.checkArgument(newDelay >= 0, "%s must be >= 0", CassandraRelevantProperties.RING_DELAY.getKey());
         if (newDelay != defaultDelay)

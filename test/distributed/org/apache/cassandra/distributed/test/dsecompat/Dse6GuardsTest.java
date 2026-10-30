@@ -52,8 +52,8 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 /**
  * The operational guards of the DSE 6 upgrade on a cluster of this software in {@code DSE_6} mode: every refused
  * operation answers with its error, the schema freeze applies to both statement paths and is lifted by the property,
- * no node can bootstrap or replace, and {@code compatstatus} counts the refusals (the removal of a DSE 6 node lost for
- * good is {@link Dse6LostDseNodeTest}'s).
+ * no node can bootstrap or replace, and {@code compatstatus} counts the refusals (the removal of a node lost for good is
+ * {@link Dse6LostDseNodeTest}'s and {@link Dse6LostNodeOfThisSoftwareTest}'s).
  * <p>
  * A node may only run in {@code DSE_6} mode once it has joined a ring (a former DSE node has), so the nodes
  * are started without the mode first, on the storage settings DSE reads (trie {@code bb}, numeric generations,
@@ -255,8 +255,10 @@ public class Dse6GuardsTest extends TestBaseImpl
             }
             assertThat(failure).isNotNull();
             assertThat(messages(failure)).contains("replacing a node " + REFUSED)
-                                         .contains("a replacement cannot start in internode_compatibility_mode DSE_6; remove a DSE 6 node " +
-                                                   "lost for good instead");
+                                         .contains("a replacement cannot start in internode_compatibility_mode DSE_6; remove the node lost " +
+                                                   "for good instead, a DSE 6 node or a node of this software (nodetool removenode once every " +
+                                                   "DSE 6 node still in the cluster is lost, nodetool assassinate otherwise), and add a new node " +
+                                                   "once the upgrade is finished");
             shutdownIfRunning(replacing);
 
             cluster.get(1).nodetoolResult("status").asserts().success();
