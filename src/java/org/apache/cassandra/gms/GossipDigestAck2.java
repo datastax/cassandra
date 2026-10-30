@@ -21,6 +21,8 @@ import java.io.*;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -38,6 +40,12 @@ public class GossipDigestAck2
     public static final IVersionedSerializer<GossipDigestAck2> serializer = new GossipDigestAck2Serializer();
 
     final Map<InetAddressAndPort, EndpointState> epStateMap;
+
+    @VisibleForTesting
+    public static GossipDigestAck2 getInstanceUnsafeForTesting(Map<InetAddressAndPort, EndpointState> epStateMap)
+    {
+        return new GossipDigestAck2(epStateMap);
+    }
 
     GossipDigestAck2(Map<InetAddressAndPort, EndpointState> epStateMap)
     {
