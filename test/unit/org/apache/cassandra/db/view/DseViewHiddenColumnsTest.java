@@ -108,7 +108,9 @@ public class DseViewHiddenColumnsTest extends CQLTester
     @AfterClass
     public static void restoreDdlFreeze()
     {
-        allowDdl.close();
+        // null when the class setup failed before it set the property: nothing to restore, and the real error stays the only one
+        if (allowDdl != null)
+            allowDdl.close();
     }
 
     private static final String VIEW_QUERY = "CREATE MATERIALIZED VIEW %s AS SELECT pk, ck, v FROM %s " +
