@@ -144,6 +144,11 @@ final class NodeInspector
     /** The default {@code ssl_storage_port} of DSE 6 and of HCD 2.0. */
     static final String DEFAULT_SSL_STORAGE_PORT = "7001";
     /**
+     * The default {@code storage_port} of DSE 6 and of HCD 2.0; the node report carries {@code storage_port} only when DSE's
+     * {@code cassandra.yaml} sets it.
+     */
+    static final String DEFAULT_STORAGE_PORT = "7000";
+    /**
      * What a remedy that has {@code ssl_storage_port} carried asks of DSE's JVM options: DSE honours a
      * {@code -Dcassandra.ssl_storage_port} over its {@code cassandra.yaml}, which this tool does not read.
      */
@@ -286,7 +291,7 @@ final class NodeInspector
 
     /**
      * The start of the message of an {@code UNREADABLE_INPUT} finding for the input {@code what} ({@link NodeLayout}'s
-     * names, such as {@link NodeLayout#CASSANDRA_YAML}).
+     * names, such as {@link NodeLayout#CASSANDRA_YAML}), which the aggregate mode reads back ({@code ClusterAggregate}).
      */
     static String cannotRead(String what)
     {
@@ -1961,7 +1966,7 @@ final class NodeInspector
             settings.put("role_manager", mapped(roleManager, "DseRoleManager", "CassandraRoleManager"));
 
         List<String> steps = path.upgradeSteps;
-        steps.add("Preflight: run this tool on every DSE node");
+        steps.add("Preflight: run this tool on every DSE node, collect the JSON reports and check them with dsepreflight --aggregate <directory>");
         if (isEc2Snitch(dseSnitch()))
         {
             String quoteNote = ec2DcSuffixQuoteNote();
@@ -1974,8 +1979,8 @@ final class NodeInspector
                       (legacyPortOn
                        ? "enable_legacy_ssl_storage_port: " + shownTrueValue(legacyPortValue) + " is set in this node's cassandra.yaml; " +
                          "check that DSE was restarted since " +
-                         "(ss -tln lists ssl_storage_port); the report of every DSE node checks its own file, and every one of them " +
-                         "must pass"
+                         "(ss -tln lists ssl_storage_port); the report of every DSE node checks its own file, and the aggregate is READY " +
+                         "only if all of them pass"
                        : "set enable_legacy_ssl_storage_port: true on every DSE node, then " + legacyPortRestart() + " (see INTERNODE_TLS)"));
         boolean dseYamlRead = !layout.unreadable.containsKey(NodeLayout.DSE_YAML);
         List<String> securityNotRead = new ArrayList<>();

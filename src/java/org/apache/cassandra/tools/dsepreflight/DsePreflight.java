@@ -23,11 +23,14 @@ import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -39,6 +42,7 @@ import org.apache.commons.cli.ParseException;
 import org.apache.cassandra.config.CassandraRelevantEnv;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.logging.LoggingSupportFactory;
 
@@ -46,10 +50,11 @@ import org.apache.cassandra.utils.logging.LoggingSupportFactory;
  * {@code dsepreflight}: the preflight inspection of a DataStax Enterprise 6.8/6.9 node before its in-place upgrade to
  * HCD 2.0. Run on every DSE node, DSE running or stopped, from the unpacked HCD 2.0 tarball; it reads the node's files
  * and never writes to them. It reports whether and how the node can be upgraded, and exits with {@value #EXIT_BLOCKED}
- * when it finds a feature that forbids the upgrade.
+ * when it finds a feature that forbids the upgrade. The aggregate mode checks the reports of every node of a cluster
+ * together.
  * <p>
- * Exit codes: {@value #EXIT_READY} ready (warnings allowed), {@value #EXIT_BLOCKED} blocking findings, {@value #EXIT_ERROR}
- * wrong usage or an error that stopped the inspection.
+ * Exit codes: {@value #EXIT_READY} ready (warnings allowed), {@value #EXIT_BLOCKED} blocking findings (or, in the
+ * aggregate mode, a cluster that is not ready), {@value #EXIT_ERROR} wrong usage or an error that stopped the inspection.
  */
 public final class DsePreflight
 {
@@ -58,7 +63,10 @@ public final class DsePreflight
     public static final int EXIT_ERROR = 2;
 
     static final long DEFAULT_NODETOOL_TIMEOUT_SECONDS = 120;
-    static final String USAGE = "dsepreflight [options]   inspect this DSE node";
+    static final String USAGE = "dsepreflight [options]                                 inspect this DSE node\n" +
+                                "       dsepreflight --aggregate <directory> [--json <file>]   check the reports of a cluster";
+    /** The options the aggregate mode takes; it refuses every other, so that none is silently ignored. */
+    static final Set<String> AGGREGATE_OPTIONS = Set.of("aggregate", "json", "help");
 
     private DsePreflight()
     {
@@ -133,14 +141,23 @@ public final class DsePreflight
             err.println("cannot initialise the tool: " + e);
             return EXIT_ERROR;
         }
+        String misuse = misuse(options, cmd);
+        if (misuse != null)
+        {
+            err.println(misuse);
+            printUsage(options, err);
+            return EXIT_ERROR;
+        }
         try
         {
+            if (cmd.hasOption("aggregate"))
+                return aggregate(cmd, out, err);
             return inspect(cmd, out, err);
         }
         catch (Throwable e)
         {
             // an error too, so that the exit code is never that of blocking findings
-            err.println("the inspection failed: " + e);
+            err.println((cmd.hasOption("aggregate") ? "the aggregate failed: " : "the inspection failed: ") + e);
             return EXIT_ERROR;
         }
     }
@@ -199,6 +216,57 @@ public final class DsePreflight
         return report.blocked() ? EXIT_BLOCKED : EXIT_READY;
     }
 
+    /** Why the options given do not go together; null when they do. */
+    private static String misuse(Options options, CommandLine cmd)
+    {
+        if (cmd.hasOption("aggregate"))
+            for (Option option : options.getOptions())
+                if (!AGGREGATE_OPTIONS.contains(option.getLongOpt()) && cmd.hasOption(option.getLongOpt()))
+                    return "--" + option.getLongOpt() + " does not apply to --aggregate";
+        return null;
+    }
+
+    private static int aggregate(CommandLine cmd, PrintStream out, PrintStream err) throws IOException
+    {
+        Path directory = Path.of(cmd.getOptionValue("aggregate"));
+        if (!Files.isDirectory(directory))
+        {
+            err.println("--aggregate needs a directory of JSON reports: " + directory);
+            return EXIT_ERROR;
+        }
+        Path json = cmd.hasOption("json") ? Path.of(cmd.getOptionValue("json")) : null;
+        if (json != null && Files.exists(json, LinkOption.NOFOLLOW_LINKS) && !isAggregateReport(json))
+        {
+            // a node report given by mistake would be lost
+            err.println("--json names an existing file that is not an aggregate report of " + NodeReport.TOOL + ", which it would replace: " + json);
+            return EXIT_ERROR;
+        }
+        ClusterAggregate.AggregateReport aggregate = ClusterAggregate.aggregate(directory);
+        aggregate.softwareVersion = FBUtilities.getReleaseVersionString();
+        aggregate.generatedAt = FBUtilities.now().toString();
+        // printed first, so that a report that cannot be written as JSON still leaves the findings with the operator
+        printAggregate(aggregate, out);
+        if (json != null)
+            writeAtomically(json, JsonUtils.JSON_OBJECT_PRETTY_WRITER.writeValueAsBytes(aggregate));
+        return NodeReport.READY.equals(aggregate.result) ? EXIT_READY : EXIT_BLOCKED;
+    }
+
+    /** Whether {@code file} is a regular file (not a link) holding an aggregate report of this tool. */
+    private static boolean isAggregateReport(Path file)
+    {
+        try
+        {
+            if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.size(file) > ClusterAggregate.MAX_REPORT_BYTES)
+                return false;
+            JsonNode tree = JsonUtils.JSON_OBJECT_MAPPER.readTree(Files.readAllBytes(file));
+            return tree != null && NodeReport.TOOL.equals(tree.path("tool").textValue()) && NodeReport.AGGREGATE.equals(tree.path("kind").textValue());
+        }
+        catch (IOException | RuntimeException e)
+        {
+            return false;
+        }
+    }
+
     static void printNodeReport(NodeReport report, PrintStream out)
     {
         NodeReport.Node node = report.node;
@@ -224,6 +292,48 @@ public final class DsePreflight
             out.println("Live state (nodetool):");
             report.live.forEach((command, result) -> out.println("  " + command + ": " + (result.error != null ? result.error : "exit code " + result.exitCode)));
         }
+    }
+
+    static void printAggregate(ClusterAggregate.AggregateReport aggregate, PrintStream out)
+    {
+        out.println("DSE 6 preflight inspection, cluster aggregate (" + NodeReport.TOOL + ' ' + aggregate.softwareVersion + ')');
+        out.println("Reports read: " + aggregate.reportsRead + dataCenterCounts(aggregate));
+        // the node lines grouped by data center, in the order of the report within each
+        for (String dataCenter : aggregate.dataCenters.keySet())
+        {
+            out.println("  Data center " + dataCenter + ':');
+            for (Map<String, Object> node : aggregate.nodes)
+                if (dataCenter.equals(node.get("data_center")))
+                    out.println("    " + node.get("node") + " (" + node.get("file") + "), rack " + node.get("rack") + ": " + node.get("result") + ", " +
+                                node.get("blocking") + " blocking, " + node.get("warnings") + " warnings");
+        }
+        out.println();
+        out.println("Result: " + aggregate.result);
+        printFindings(aggregate.findings, out);
+        if (!aggregate.warningsByCode.isEmpty())
+        {
+            out.println();
+            out.println("Warnings of the node reports, by code:");
+            aggregate.warningsByCode.forEach((code, nodes) -> out.println("  " + code + ": " + NodeInspector.list(nodes)));
+        }
+    }
+
+    /**
+     * {@code , in 2 data centers}, with {@code , 1 with no data center recorded} when some reports have none, or
+     * {@code , none with a data center recorded}; nothing without reports. For the line of the reports read.
+     */
+    private static String dataCenterCounts(ClusterAggregate.AggregateReport aggregate)
+    {
+        StringBuilder counts = new StringBuilder();
+        long known = aggregate.dataCenters.keySet().stream().filter(dc -> !ClusterAggregate.UNKNOWN.equals(dc)).count();
+        if (known > 0)
+            counts.append(", in ").append(known).append(known == 1 ? " data center" : " data centers");
+        Map<String, List<String>> unknown = aggregate.dataCenters.get(ClusterAggregate.UNKNOWN);
+        if (unknown != null && known == 0)
+            counts.append(", none with a data center recorded");
+        else if (unknown != null)
+            counts.append(", ").append(unknown.values().stream().mapToInt(List::size).sum()).append(" with no data center recorded");
+        return counts.toString();
     }
 
     private static void printFindings(List<Finding> findings, PrintStream out)
@@ -324,6 +434,8 @@ public final class DsePreflight
         options.addOption(Option.builder().longOpt("nodetool-timeout").hasArg().argName("seconds")
                                 .desc("the time limit of each nodetool command; default " + DEFAULT_NODETOOL_TIMEOUT_SECONDS).build());
         options.addOption(Option.builder().longOpt("json").hasArg().argName("file").desc("also write the report as JSON to this file").build());
+        options.addOption(Option.builder().longOpt("aggregate").hasArg().argName("directory")
+                                .desc("check the JSON reports (*.json) of the nodes of a cluster in this directory, instead of inspecting this node").build());
         options.addOption(Option.builder("h").longOpt("help").desc("print this help").build());
         return options;
     }
@@ -332,9 +444,10 @@ public final class DsePreflight
     {
         PrintWriter writer = new PrintWriter(new OutputStreamWriter(stream, StandardCharsets.UTF_8));
         new HelpFormatter().printHelp(writer, 120, USAGE,
-                                      "\nInspects a DSE 6.8/6.9 node, read-only, before its upgrade to HCD 2.0.\n\n",
+                                      "\nInspects a DSE 6.8/6.9 node, read-only, before its upgrade to HCD 2.0. " +
+                                      "With --aggregate, checks the JSON reports of the nodes of a cluster together.\n\n",
                                       options, 2, 2,
-                                      "\nExit codes: 0 ready (warnings allowed), 1 blocking findings, 2 usage or inspection error.");
+                                      "\nExit codes: 0 ready (warnings allowed), 1 blocking findings or cluster not ready, 2 usage or inspection error.");
         writer.flush();
     }
 }

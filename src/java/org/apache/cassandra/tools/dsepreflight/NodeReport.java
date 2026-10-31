@@ -27,8 +27,10 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * The report of the preflight inspection of one DSE node, written as JSON with {@code --json}. Plain fields; unknown
- * properties are ignored on reading, and {@link #FORMAT_VERSION} changes only when a field changes meaning.
+ * The report of the preflight inspection of one DSE node, written as JSON with {@code --json} and read back by the
+ * aggregate mode, which takes only complete reports of {@link #FORMAT_VERSION} written by the release of the tool it
+ * runs. Plain fields; unknown properties of the report and of its sections are ignored on reading (not those of a
+ * {@link Finding}, whose fields are fixed), and {@link #FORMAT_VERSION} changes only when a field changes meaning.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -38,14 +40,15 @@ public final class NodeReport
     public static final int FORMAT_VERSION = 1;
     public static final String READY = "READY";
     public static final String BLOCKED = "BLOCKED";
-    /** The {@link #kind} of a node report. */
+    /** The {@link #kind} of a node report; an aggregate report has {@code aggregate}. */
     public static final String NODE = "node";
+    public static final String AGGREGATE = "aggregate";
 
     @JsonProperty("tool")
     public String tool = TOOL;
     @JsonProperty("format_version")
     public int formatVersion = FORMAT_VERSION;
-    /** {@link #NODE}: what this report describes */
+    /** {@link #NODE}: what the aggregate mode reads; it skips the reports of kind {@link #AGGREGATE} */
     @JsonProperty("kind")
     public String kind = NODE;
     /** the release of the software the tool came with */
@@ -67,7 +70,7 @@ public final class NodeReport
     public List<Finding> findings = new ArrayList<>();
     @JsonProperty("upgrade_path")
     public UpgradePath upgradePath = new UpgradePath();
-    /** what the access control checks read */
+    /** what the access control checks read, for the aggregate mode */
     @JsonProperty("access_controls")
     public AccessControls accessControls = new AccessControls();
     /** the files and directories read, by role, and what the inspection measured in them (sizes, free space, segment counts) */
