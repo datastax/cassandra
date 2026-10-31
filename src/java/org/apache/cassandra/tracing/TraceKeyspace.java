@@ -30,6 +30,7 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -114,6 +115,17 @@ public final class TraceKeyspace
                                        Tables.of(Sessions, Events));
     }
 
+    /**
+     * Whether the trace rows carry the port columns ({@code coordinator_port}, {@code source_port}): not while a node
+     * older than 4.0 may be in the cluster, and not in the DSE 6 compatibility mode, where {@code system_traces} keeps
+     * the definition DSE 6 wrote, which has neither column, on this node as on the DSE replicas (the columns are added
+     * at the first start with {@code internode_compatibility_mode: NONE}).
+     */
+    private static boolean writesPortColumns()
+    {
+        return !DseCompat.enabled() && !Gossiper.instance.hasMajorVersion3OrUnknownNodes();
+    }
+
     static Mutation makeStartSessionMutation(ByteBuffer sessionId,
                                              InetAddress client,
                                              Map<String, String> parameters,
@@ -127,7 +139,7 @@ public final class TraceKeyspace
         rb.ttl(ttl)
           .add("client", client)
           .add("coordinator", FBUtilities.getBroadcastAddressAndPort().getAddress());
-        if (!Gossiper.instance.hasMajorVersion3OrUnknownNodes())
+        if (writesPortColumns())
             rb.add("coordinator_port", FBUtilities.getBroadcastAddressAndPort().getPort());
         rb.add("request", request)
           .add("started_at", new Date(startedAt))
@@ -154,7 +166,7 @@ public final class TraceKeyspace
 
         rowBuilder.add("activity", message)
                   .add("source", FBUtilities.getBroadcastAddressAndPort().getAddress());
-        if (!Gossiper.instance.hasMajorVersion3OrUnknownNodes())
+        if (writesPortColumns())
             rowBuilder.add("source_port", FBUtilities.getBroadcastAddressAndPort().getPort());
         rowBuilder.add("thread", threadName);
 

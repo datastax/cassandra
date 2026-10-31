@@ -188,6 +188,7 @@ import org.apache.cassandra.repair.SharedContext;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
+import org.apache.cassandra.schema.DseSystemKeyspaces;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.ReplicationParams;
@@ -291,6 +292,9 @@ import static org.apache.cassandra.utils.FBUtilities.now;
 public class StorageService extends NotificationBroadcasterSupport implements IEndpointStateChangeSubscriber, StorageServiceMBean
 {
     private static final Logger logger = LoggerFactory.getLogger(StorageService.class);
+
+    /** The replicated system keyspaces whose deferred additions were logged in the DSE 6 compatibility mode. */
+    private static final Set<String> DSE6_DEFERRED_ADDITIONS_LOGGED = ConcurrentHashMap.newKeySet();
 
     public static final int INDEFINITE = -1;
     public static final int RING_DELAY_MILLIS = getRingDelay(); // delay after which we assume ring has stablized
@@ -1506,7 +1510,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             if (setUpSchema)
             {
-                Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION));
+                setUpSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION);
             }
 
             DatabaseDescriptor.getRoleManager().setup();
@@ -1536,9 +1540,42 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     @VisibleForTesting
     public void setUpDistributedSystemKeyspaces()
     {
-        Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(TraceKeyspace.metadata(), TraceKeyspace.GENERATION));
-        Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(SystemDistributedKeyspace.metadata(), SystemDistributedKeyspace.GENERATION));
-        Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION));
+        setUpSystemKeyspace(TraceKeyspace.metadata(), TraceKeyspace.GENERATION);
+        setUpSystemKeyspace(SystemDistributedKeyspace.metadata(), SystemDistributedKeyspace.GENERATION);
+        setUpSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION);
+    }
+
+    /**
+     * Brings a replicated system keyspace to this software's definition, at the fixed timestamp of its generation.
+     * <p>
+     * In the DSE 6 compatibility mode a keyspace that exists keeps the definition it was loaded with, DSE's on an
+     * upgraded node: this software's additions would reach the DSE nodes, which pull and merge the schema of a peer
+     * whose schema version differs from theirs (see {@link DseSystemKeyspaces}). They are made at the first start with
+     * {@code NONE}, where this method runs as it always did. A keyspace that does not exist at all (a node that never ran
+     * DSE) is created as without the mode: there is no DSE definition to keep, and this node never sends its schema to a
+     * DSE peer, though the upgraded peers that pull it then hold this software's definition too. What is deferred is
+     * logged once per keyspace (the auth keyspace step runs again when a node started with {@code join_ring: false}
+     * joins).
+     */
+    @VisibleForTesting
+    static void setUpSystemKeyspace(KeyspaceMetadata keyspace, long generation)
+    {
+        if (DseCompat.enabled())
+        {
+            KeyspaceMetadata loaded = Schema.instance.getKeyspaceMetadata(keyspace.name);
+            if (loaded != null)
+            {
+                if (DSE6_DEFERRED_ADDITIONS_LOGGED.add(keyspace.name))
+                {
+                    List<String> deferred = DseSystemKeyspaces.deferredAdditions(keyspace, loaded);
+                    logger.info("internode_compatibility_mode DSE_6: {} keeps the definition it was loaded with (DSE's on an upgraded node); " +
+                                "this software's additions to it are made at the first start with internode_compatibility_mode NONE{}",
+                                keyspace.name, deferred.isEmpty() ? " (no table or column is missing, table options aside)" : ": " + deferred);
+                }
+                return;
+            }
+        }
+        Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(keyspace, generation));
     }
 
     public boolean isJoined()
