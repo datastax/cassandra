@@ -245,6 +245,18 @@ public final class Dse6NonCoreTraces
         status = null;
     }
 
+    /**
+     * The DSE feature a keyspace belongs to when it is one of the keyspaces of the features this software does not
+     * support (DSE Analytics, DSEFS and CFS, or Advanced Replication), as the refusal names it; null for any other
+     * keyspace. Names are case-sensitive.
+     */
+    @Nullable
+    public static String nonCoreKeyspaceFeature(String keyspace)
+    {
+        Feature feature = NON_CORE_KEYSPACES.get(keyspace);
+        return feature == null ? null : feature.displayName;
+    }
+
     /** Whether {@code className} is the class of a DSE Search index. */
     public static boolean isSearchIndexClass(String className)
     {

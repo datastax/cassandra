@@ -961,7 +961,7 @@ public class CassandraAuthorizer implements IAuthorizer
      * The DSE name, {@code UPDATE} or {@code TRUNCATE}, that a {@code role_permissions} row grants alone on a data
      * resource, which {@link #permissions} drops when it reads the row; null when the row grants both, or
      * {@code MODIFY}, or neither, or when the resource is not a data resource. Nothing is read, logged or recorded: for
-     * a caller that reads DSE's rows itself, offline for instance, before the upgrade.
+     * the DSE 6 preflight inspection, which reads DSE's rows offline before the upgrade.
      */
     public static String dseLoneWriteGrantName(String resource, Set<String> permissionNames)
     {
@@ -977,7 +977,7 @@ public class CassandraAuthorizer implements IAuthorizer
     /**
      * The names of a {@code role_permissions} row that {@link #permissions} skips as unknown: every name but this
      * software's permissions and, on a data resource, DSE's {@code UPDATE} and {@code TRUNCATE}
-     * ({@link #dseLoneWriteGrantName}); sorted. Nothing is logged: for a caller that reads DSE's rows itself.
+     * ({@link #dseLoneWriteGrantName}); sorted. Nothing is logged: for the DSE 6 preflight inspection.
      */
     public static List<String> unknownPermissionNames(String resource, Set<String> permissionNames)
     {
@@ -994,8 +994,8 @@ public class CassandraAuthorizer implements IAuthorizer
 
     /**
      * Whether this software parses the resource name of a {@code role_permissions} row; false for a resource type it
-     * does not have or a name it cannot parse, whose rows {@link #knownResource} skips. Nothing is logged: for a caller
-     * that reads DSE's rows itself.
+     * does not have or a name it cannot parse, whose rows {@link #knownResource} skips. Nothing is logged: for the
+     * DSE 6 preflight inspection.
      */
     public static boolean isKnownResourceName(String resourceName)
     {

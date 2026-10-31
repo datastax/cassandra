@@ -38,6 +38,7 @@ import org.apache.commons.cli.ParseException;
 
 import org.apache.cassandra.config.CassandraRelevantEnv;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.logging.LoggingSupportFactory;
 
@@ -72,11 +73,14 @@ public final class DsePreflight
 
     /**
      * Quiets the loggers whose messages are noise in the output of the tool, where anything that matters to the
-     * inspection is a finding: a transaction log the scan cannot read (finding TXN_LOG_UNREADABLE) is also logged with the
-     * whole listing of its directory.
+     * inspection is a finding: the statistics of a DSE sstable read for the schema can hold a partition size or cell
+     * count histogram with values beyond the largest bucket of this software, which it logs with a warning as it clears
+     * that bucket, and a transaction log the scan cannot read (finding TXN_LOG_UNREADABLE) is also logged with the whole
+     * listing of its directory.
      */
     private static void quietLibraryWarnings()
     {
+        quiet(StatsMetadata.class.getName(), "ERROR");
         quiet("org.apache.cassandra.db.lifecycle", "OFF");
     }
 
