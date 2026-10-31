@@ -27,6 +27,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -42,6 +43,7 @@ import org.apache.commons.cli.ParseException;
 import org.apache.cassandra.config.CassandraRelevantEnv;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.logging.LoggingSupportFactory;
@@ -64,7 +66,12 @@ public final class DsePreflight
 
     static final long DEFAULT_NODETOOL_TIMEOUT_SECONDS = 120;
     static final String USAGE = "dsepreflight [options]                                 inspect this DSE node\n" +
-                                "       dsepreflight --aggregate <directory> [--json <file>]   check the reports of a cluster";
+                                "       dsepreflight --aggregate <directory> [--json <file>]   check the reports of a cluster\n" +
+                                "       dsepreflight --paxos-rollback [options]                list the open Paxos rounds of a node to roll back to DSE";
+    /** The options of the Paxos rollback mode only. */
+    static final List<String> PAXOS_ROLLBACK_ONLY = List.of("snapshot", "paxos-dir", "not-restored", "dc", "serial-consistency", "cql");
+    /** The options the Paxos rollback mode does not take. */
+    static final List<String> PAXOS_ROLLBACK_EXCLUDED = List.of("aggregate", "nodetool", "nodetool-arg", "nodetool-timeout", "commitlog-dir", "hints-dir");
     /** The options the aggregate mode takes; it refuses every other, so that none is silently ignored. */
     static final Set<String> AGGREGATE_OPTIONS = Set.of("aggregate", "json", "help");
 
@@ -81,7 +88,7 @@ public final class DsePreflight
 
     /**
      * Quiets the loggers whose messages are noise in the output of the tool, where anything that matters to the
-     * inspection is a finding: the statistics of a DSE sstable read for the schema can hold a partition size or cell
+     * inspection is a finding: the statistics of an sstable read by the tool can hold a partition size or cell
      * count histogram with values beyond the largest bucket of this software, which it logs with a warning as it clears
      * that bucket, and a transaction log the scan cannot read (finding TXN_LOG_UNREADABLE) is also logged with the whole
      * listing of its directory.
@@ -152,12 +159,15 @@ public final class DsePreflight
         {
             if (cmd.hasOption("aggregate"))
                 return aggregate(cmd, out, err);
+            if (cmd.hasOption("paxos-rollback"))
+                return paxosRollback(cmd, out, err);
             return inspect(cmd, out, err);
         }
         catch (Throwable e)
         {
             // an error too, so that the exit code is never that of blocking findings
-            err.println((cmd.hasOption("aggregate") ? "the aggregate failed: " : "the inspection failed: ") + e);
+            err.println((cmd.hasOption("paxos-rollback") ? "the listing of the open Paxos rounds failed: "
+                         : cmd.hasOption("aggregate") ? "the aggregate failed: " : "the inspection failed: ") + e);
             return EXIT_ERROR;
         }
     }
@@ -219,11 +229,107 @@ public final class DsePreflight
     /** Why the options given do not go together; null when they do. */
     private static String misuse(Options options, CommandLine cmd)
     {
+        if (cmd.hasOption("paxos-rollback"))
+        {
+            for (String option : PAXOS_ROLLBACK_EXCLUDED)
+                if (cmd.hasOption(option))
+                    return "--" + option + " does not apply to --paxos-rollback";
+            return null;
+        }
         if (cmd.hasOption("aggregate"))
             for (Option option : options.getOptions())
                 if (!AGGREGATE_OPTIONS.contains(option.getLongOpt()) && cmd.hasOption(option.getLongOpt()))
                     return "--" + option.getLongOpt() + " does not apply to --aggregate";
+        for (String option : PAXOS_ROLLBACK_ONLY)
+            if (cmd.hasOption(option))
+                return "--" + option + " applies only to --paxos-rollback";
         return null;
+    }
+
+    /** The Paxos rollback mode: the open Paxos rounds of a node to roll back to DSE, and the serial reads that complete them. */
+    private static int paxosRollback(CommandLine cmd, PrintStream out, PrintStream err) throws IOException
+    {
+        NodeLayout layout = layout(cmd);
+        PaxosRollback.Options options = new PaxosRollback.Options();
+        options.dataDirectories.addAll(layout.dataDirectories);
+        options.metadataDirectory = layout.metadataDirectory;
+        options.defaultsAssumed.addAll(layout.defaultsAssumed);
+        options.cassandraYamlUnreadable = layout.unreadable.get(NodeLayout.CASSANDRA_YAML);
+        options.rackdcUnreadable = layout.unreadable.get(NodeLayout.RACKDC);
+        String rackdcDataCenter = layout.rackdcProperties.getProperty("dc");
+        options.rackdcDataCenter = rackdcDataCenter == null || rackdcDataCenter.trim().isEmpty() ? null : rackdcDataCenter.trim();
+        options.snapshot = cmd.getOptionValue("snapshot");
+        options.notRestored = cmd.hasOption("not-restored");
+        if (options.notRestored && cmd.hasOption("paxos-dir"))
+        {
+            err.println("--not-restored and --paxos-dir contradict each other: --paxos-dir names where the restore moved HCD 2.0's sstables");
+            return EXIT_ERROR;
+        }
+        if (cmd.hasOption("paxos-dir"))
+        {
+            for (String directory : cmd.getOptionValues("paxos-dir"))
+            {
+                if (!Files.isDirectory(Path.of(directory)))
+                {
+                    err.println("--paxos-dir needs a directory of system.paxos sstables: " + directory);
+                    return EXIT_ERROR;
+                }
+                options.paxosDirectories.add(new File(directory));
+            }
+        }
+        options.dataCenter = cmd.getOptionValue("dc");
+        if (cmd.hasOption("serial-consistency"))
+        {
+            for (String value : cmd.getOptionValues("serial-consistency"))
+            {
+                int equals = value.indexOf('=');
+                String keyspace = equals < 0 ? "" : value.substring(0, equals).trim();
+                String level = equals < 0 ? "" : value.substring(equals + 1).trim().toUpperCase(Locale.ROOT);
+                if (keyspace.isEmpty() || !(PaxosRollback.SERIAL.equals(level) || PaxosRollback.LOCAL_SERIAL.equals(level)))
+                {
+                    err.println("--serial-consistency needs <keyspace>=SERIAL or <keyspace>=LOCAL_SERIAL: " + value);
+                    return EXIT_ERROR;
+                }
+                if (options.serialConsistencies.put(keyspace, level) != null)
+                {
+                    err.println("--serial-consistency names keyspace " + keyspace + " more than once");
+                    return EXIT_ERROR;
+                }
+            }
+        }
+        options.hostname = hostname();
+        options.softwareVersion = FBUtilities.getReleaseVersionString();
+        options.generatedAt = FBUtilities.now().toString();
+
+        PaxosRollbackReport report;
+        try
+        {
+            report = new PaxosRollback(options).run();
+        }
+        catch (PaxosRollback.UsageException e)
+        {
+            err.println(e.getMessage());
+            return EXIT_ERROR;
+        }
+        String serial = PaxosRollback.cql(report, PaxosRollback.SERIAL);
+        String localSerial = PaxosRollback.cql(report, PaxosRollback.LOCAL_SERIAL);
+        if (cmd.hasOption("cql"))
+        {
+            // both files of an earlier run are deleted first and both are written, so that one left by an earlier run is never
+            // taken for this run's
+            Path file = Path.of(cmd.getOptionValue("cql")).toAbsolutePath();
+            Path localFile = PaxosRollback.localSerialFile(file);
+            report.cqlFile = file.toString();
+            report.cqlLocalSerialFile = localFile.toString();
+            Files.deleteIfExists(file);
+            Files.deleteIfExists(localFile);
+            writeAtomically(file, serial.getBytes(StandardCharsets.UTF_8));
+            writeAtomically(localFile, localSerial.getBytes(StandardCharsets.UTF_8));
+        }
+        if (cmd.hasOption("json"))
+            writeAtomically(Path.of(cmd.getOptionValue("json")), JsonUtils.JSON_OBJECT_PRETTY_WRITER.writeValueAsBytes(report));
+        PaxosRollback.print(report, serial, localSerial, out);
+        return PaxosRollbackReport.NEEDS_ATTENTION.equals(report.result) ? EXIT_BLOCKED : EXIT_READY;
     }
 
     private static int aggregate(CommandLine cmd, PrintStream out, PrintStream err) throws IOException
@@ -436,6 +542,30 @@ public final class DsePreflight
         options.addOption(Option.builder().longOpt("json").hasArg().argName("file").desc("also write the report as JSON to this file").build());
         options.addOption(Option.builder().longOpt("aggregate").hasArg().argName("directory")
                                 .desc("check the JSON reports (*.json) of the nodes of a cluster in this directory, instead of inspecting this node").build());
+        options.addOption(Option.builder().longOpt("paxos-rollback")
+                                .desc("instead of inspecting a DSE node: on a node to roll back to DSE, with HCD 2.0 stopped after its drain and DSE not started, " +
+                                      "list the partitions with an open Paxos round in system.paxos of HCD 2.0 and of the pre-hcd snapshot, and write the serial " +
+                                      "reads that complete them").build());
+        options.addOption(Option.builder().longOpt("snapshot").hasArg().argName("tag")
+                                .desc("with --paxos-rollback: the snapshot the rollback restores; default the only pre-hcd-* snapshot of the node").build());
+        options.addOption(Option.builder().longOpt("paxos-dir").hasArg().argName("dir")
+                                .desc("with --paxos-rollback: one more directory of system.paxos sstables to read, laid out as <...>/system/paxos-<id>; " +
+                                      "required after the restore of system, with the directories HCD 2.0's sstables were moved to (repeat for each). " +
+                                      "Only the directory given is read, not its subdirectories: one that holds no system.paxos sstable, such as " +
+                                      "<quarantine> or <quarantine>/system, is a problem of the report").build());
+        options.addOption(Option.builder().longOpt("not-restored")
+                                .desc("with --paxos-rollback: state that system has not been restored from the snapshot yet, when the system.paxos " +
+                                      "sstables of the data directories are all in the snapshot (HCD 2.0 wrote none on this node, and dropped none or only " +
+                                      "fully expired ones); no effect when they hold an sstable the snapshot lacks; refused with --paxos-dir").build());
+        options.addOption(Option.builder().longOpt("dc").hasArg().argName("name")
+                                .desc("with --paxos-rollback: this node's data center; default from nodes/local, else cassandra-rackdc.properties").build());
+        options.addOption(Option.builder().longOpt("serial-consistency").hasArg().argName("keyspace=level")
+                                .desc("with --paxos-rollback: the serial consistency (SERIAL or LOCAL_SERIAL) the tables of a keyspace are written at, " +
+                                      "needed where the two are different quorums (a keyspace with replicas outside this node's data center); keyspace * " +
+                                      "for every keyspace not named (repeat for each keyspace)").build());
+        options.addOption(Option.builder().longOpt("cql").hasArg().argName("file")
+                                .desc("with --paxos-rollback: write the SERIAL reads to this file and the LOCAL_SERIAL reads to <file>-local-serial.cql " +
+                                      "(<file> without its .cql), for cqlsh -f").build());
         options.addOption(Option.builder("h").longOpt("help").desc("print this help").build());
         return options;
     }
@@ -445,9 +575,12 @@ public final class DsePreflight
         PrintWriter writer = new PrintWriter(new OutputStreamWriter(stream, StandardCharsets.UTF_8));
         new HelpFormatter().printHelp(writer, 120, USAGE,
                                       "\nInspects a DSE 6.8/6.9 node, read-only, before its upgrade to HCD 2.0. " +
-                                      "With --aggregate, checks the JSON reports of the nodes of a cluster together.\n\n",
+                                      "With --aggregate, checks the JSON reports of the nodes of a cluster together. " +
+                                      "With --paxos-rollback, lists the open Paxos rounds of a node to roll back to DSE and writes their serial reads.\n\n",
                                       options, 2, 2,
-                                      "\nExit codes: 0 ready (warnings allowed), 1 blocking findings or cluster not ready, 2 usage or inspection error.");
+                                      "\nExit codes: 0 ready (warnings allowed), 1 blocking findings or cluster not ready, 2 usage or inspection error. " +
+                                      "With --paxos-rollback: 0 no open round, or every one covered by the reads listed (or needing none), 1 open rounds that " +
+                                      "cannot be protected or need a decision, or problems (see the report), 2 usage or inspection error.");
         writer.flush();
     }
 }

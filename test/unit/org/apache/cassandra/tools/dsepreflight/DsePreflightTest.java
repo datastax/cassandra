@@ -130,6 +130,11 @@ public class DsePreflightTest
      * ("R10", "R-e") or a local run ("L04").
      */
     private static final Pattern PLAN_DECISION_ID = Pattern.compile("(?i:\\bdecisions? [0-9]+[a-z]*\\b)|\\b(A[0-9]{2,3}(\\.[0-9]+)?|Q[0-9]{2,3}|R[0-9]+|R-[a-z]|L[0-9]{2})\\b");
+    /**
+     * A reference to a document of the project, which no text of the tool may hold: the texts state the problem and the
+     * fix themselves (the upgrade runbook, its sections and appendices, SECURITY.md).
+     */
+    private static final Pattern DOCUMENT_REFERENCE = Pattern.compile("(?i)\\brunbook|\\bappendix|SECURITY\\.md|\\bsections? [0-9]");
     /** An absolute path, as the texts quote the node's directories and files: a slash at the start of a word. */
     private static final Pattern MACHINE_PATH = Pattern.compile("(?<=^|[\\s(\"'=:])(/[^/\\s\"',;:()\\[\\]]+)+/?");
     /** This machine's host name as the tool records it, as a whole name; null when the tool records none or "unknown". */
@@ -230,7 +235,7 @@ public class DsePreflightTest
         return run;
     }
 
-    /** The texts the tool prints say what to do, never an id of the project's plan. */
+    /** The texts the tool prints say what to do, never an id of the project's plan nor a document of the project. */
     private static void assertNoPlanDecisionIds(Run run)
     {
         assertNoPlanDecisionIds(run.out, run.err);
@@ -248,8 +253,9 @@ public class DsePreflightTest
     }
 
     /**
-     * What a run of the tool printed or wrote (its output, its error output, its JSON) holds no id of the plan; the
-     * paths and this machine's host name, which the texts quote and which are not the tool's words, are left out.
+     * What a run of the tool printed or wrote (its output, its error output, its JSON) holds no id of the plan and no
+     * reference to a document of the project; the paths and this machine's host name, which the texts quote and which are
+     * not the tool's words, are left out.
      */
     static void assertNoPlanDecisionIds(String... texts)
     {
@@ -258,7 +264,7 @@ public class DsePreflightTest
             String own = MACHINE_PATH.matcher(text).replaceAll("<path>");
             if (HOST_NAME != null)
                 own = HOST_NAME.matcher(own).replaceAll("<host>");
-            assertThat(own).doesNotContainPattern(PLAN_DECISION_ID);
+            assertThat(own).doesNotContainPattern(PLAN_DECISION_ID).doesNotContainPattern(DOCUMENT_REFERENCE);
         }
     }
 
@@ -267,9 +273,11 @@ public class DsePreflightTest
     {
         // the string literals of the tool's sources, comments left out: the texts of findings no test reaches included;
         // each literal on its own, so an id split across two literals of one text would escape (the runs above see it),
-        // and a char literal holding a quote ('"') pairs with the next quote of its line (harmless: it only adds text)
+        // and a char literal holding a quote ('"') pairs with the next quote of its line (harmless: it only adds text);
+        // nor a reference to a document of the project
         Pattern literal = Pattern.compile("\"(?:[^\"\\\\]|\\\\.)*\"");
         List<String> found = new ArrayList<>();
+        List<String> documents = new ArrayList<>();
         int literals = 0;
         try (Stream<Path> sources = Files.list(Path.of("src", "java", "org", "apache", "cassandra", "tools", "dsepreflight")))
         {
@@ -287,12 +295,17 @@ public class DsePreflightTest
                         literals++;
                         if (PLAN_DECISION_ID.matcher(matcher.group()).find())
                             found.add(source.getFileName() + ":" + (i + 1) + ": " + matcher.group());
+                        if (DOCUMENT_REFERENCE.matcher(matcher.group()).find())
+                            documents.add(source.getFileName() + ":" + (i + 1) + ": " + matcher.group());
                     }
                 }
             }
         }
         assertThat(literals).isGreaterThan(500);
         assertThat(found).isEmpty();
+        assertThat(documents).isEmpty();
+        assertThat(DOCUMENT_REFERENCE.matcher("see section 4 of the runbook").find()).isTrue();
+        assertThat(DOCUMENT_REFERENCE.matcher("the table's sections").find()).isFalse();
     }
 
     // ---- the nodes as DSE left them ----
@@ -1654,7 +1667,8 @@ public class DsePreflightTest
         Map<String, String> before = node.fingerprint();
         Run run = assertBlocked(run(node), "UNREADABLE_SCHEMA");
         assertThat(node.fingerprint()).as("the tool wrote to the node's files").isEqualTo(before);
-        assertThat(run.messages("UNREADABLE_SCHEMA")).contains("format, which this tool does not read: run nodetool upgradesstables on DSE first");
+        assertThat(run.messages("UNREADABLE_SCHEMA")).contains("format, which this tool does not read: opening it could delete or rewrite some of its files");
+        assertThat(run.findings("UNREADABLE_SCHEMA").get(0).remedy).contains("if an sstable is not in DSE 6's trie format, run nodetool upgradesstables on DSE first");
         assertThat(run.codes(Finding.Severity.BLOCKING)).contains("SSTABLE_FORMAT");
     }
 
@@ -2624,13 +2638,18 @@ public class DsePreflightTest
             refused.add(name);
             Run misuse = run(json, "--aggregate", temporaryFolder.getRoot().toString(), option.hasArg() ? "--" + name + "=x" : "--" + name);
             assertThat(misuse.exitCode).as(name).isEqualTo(DsePreflight.EXIT_ERROR);
-            assertThat(misuse.err).as(name).startsWith("--" + name + " does not apply to --aggregate");
+            // the Paxos rollback mode refuses --aggregate first
+            assertThat(misuse.err).as(name).startsWith(name.equals("paxos-rollback") ? "--aggregate does not apply to --paxos-rollback"
+                                                                                     : "--" + name + " does not apply to --aggregate");
         }
         assertThat(refused).contains("dse-home", "data-dir", "nodetool", "nodetool-timeout");
         Run help = run(json, "--help");
         assertThat(help.exitCode).isEqualTo(DsePreflight.EXIT_READY);
         assertThat(help.out).contains("--aggregate").contains("With --aggregate, checks the JSON reports of the")
                             .contains("--nodetool").contains("Exit codes: 0 ready (warnings allowed), 1 blocking findings or cluster not ready");
+        // the lines of the Paxos rollback mode that the procedure looks for in the help
+        assertThat(help.out.lines()).anyMatch(l -> l.matches("^ +--paxos-rollback .*"));
+        assertThat(help.out.replaceAll("\\s+", " ")).contains("Only the directory given is read, not its subdirectories");
         assertThat(json).doesNotExist();
     }
 

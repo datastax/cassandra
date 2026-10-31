@@ -15,7 +15,8 @@
 # limitations under the License.
 
 # The preflight inspection of a DataStax Enterprise 6.8/6.9 node before its in-place upgrade to HCD 2.0.
-# Read-only; runs from the unpacked HCD 2.0 tarball, DSE running or stopped. See --help.
+# Read-only; runs from the unpacked HCD 2.0 tarball, DSE running or stopped. With --paxos-rollback, on a node to roll
+# back to DSE (HCD 2.0 stopped after its drain, DSE not started): the open Paxos rounds and their serial reads. See --help.
 
 # The environment of a DSE node may name DSE's own installation (CASSANDRA_HOME, CASSANDRA_CONF, CASSANDRA_INCLUDE) and
 # DSE's JVM options (JVM_OPTS, JAVA_AGENT): the tool always runs with the jars and the configuration directory of the
