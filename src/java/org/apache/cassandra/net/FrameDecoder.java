@@ -51,6 +51,12 @@ import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
           LZ4 compression with custom frame format; payload is protected by CRC32
  * 3. {@link FrameDecoderUnprotected}:
           no compression; no integrity protection
+ * 4. {@link FrameDecoderLegacy}:
+          no compression; no integrity protection; turns unframed streams of legacy messages (< 4.0) into frames
+          (DSE 6 compatibility mode only)
+ * 5. {@link FrameDecoderLegacyLZ4}:
+          LZ4 compression using the legacy LZ4 block format; groups legacy messages (< 4.0) into frames
+          (DSE 6 compatibility mode only)
  */
 public abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 {
@@ -252,6 +258,14 @@ public abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         }
         while (!frames.isEmpty())
             frames.poll().release();
+    }
+
+    /**
+     * @return true once {@link #discard()} has been called: no frame will ever be processed again
+     */
+    boolean isDiscarded()
+    {
+        return processor == CLOSED_PROCESSOR;
     }
 
     /**

@@ -1459,8 +1459,9 @@ public class Config
     /**
      * Transitional: {@code DSE_6} is set on every node of a cluster being upgraded in place from DataStax
      * Enterprise 6.9 (or 6.8) and removed with a rolling restart once every node runs this software. It keeps the
-     * on-disk output readable by DSE (trie version {@code bb}, numeric generations, compressors DSE reads) and
-     * requires {@code storage_compatibility_mode: HCD_1}. See {@link InternodeCompatibilityMode}.
+     * on-disk output readable by DSE (trie version {@code bb}, numeric generations, compressors DSE reads), requires
+     * {@code storage_compatibility_mode: HCD_1}, and lets the node speak DSE's pre-4.0 internode dialect with DSE 6
+     * peers. See {@link InternodeCompatibilityMode}.
      */
     public InternodeCompatibilityMode internode_compatibility_mode = InternodeCompatibilityMode.NONE;
 

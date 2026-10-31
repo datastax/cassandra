@@ -59,15 +59,9 @@ public class OutboundConnections
 {
     private static final Logger logger = LoggerFactory.getLogger(OutboundConnections.class);
 
-    private static final int HEADER_LENGTH = 8  // magic number
-                                            + 1  // token
-                                            + 4  // compressed length
-                                            + 4  // uncompressed length
-                                            + 4; // checksum
-
     @VisibleForTesting
     public static final int LARGE_MESSAGE_THRESHOLD = OTCP_LARGE_MESSAGE_THRESHOLD.getInt()
-    - max(max(HEADER_LENGTH, HEADER_AND_TRAILER_LENGTH), FrameEncoderLZ4.HEADER_AND_TRAILER_LENGTH);
+    - max(max(LegacyLZ4Constants.HEADER_LENGTH, HEADER_AND_TRAILER_LENGTH), FrameEncoderLZ4.HEADER_AND_TRAILER_LENGTH);
 
     private final Condition metricsReady = newOneTimeCondition();
     private volatile InternodeOutboundMetrics metrics;

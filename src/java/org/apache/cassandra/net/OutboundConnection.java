@@ -1125,6 +1125,8 @@ public class OutboundConnection
             // our connection settings, possibly updated on retry
             int messagingVersion = template.endpointToVersion().get(template.to);
             OutboundConnectionSettings settings;
+            /** DSE 6 compatibility mode: a connection made in a superseded dialect was made again at once already. */
+            boolean remadeAfterSupersededDialect;
 
             /**
              * If we failed for any reason, try again
@@ -1152,6 +1154,25 @@ public class OutboundConnection
                 }
             }
 
+            /**
+             * DSE 6 compatibility mode: schedules the next attempt after the current delay, as {@link #onFailure} does
+             * (the delay doubles up to a second), or none without messages, for a connection that is not a failure.
+             */
+            private void retryLater()
+            {
+                if (hasPending())
+                {
+                    Promise<Result<MessagingSuccess>> result = AsyncPromise.withExecutor(eventLoop);
+                    state = new Connecting(state.disconnected(), result, eventLoop.schedule(() -> attempt(result, false), max(100, retryRateMillis), MILLISECONDS));
+                    retryRateMillis = min(1000, retryRateMillis * 2);
+                }
+                else
+                {
+                    // this Initiate will be discarded
+                    state = Disconnected.dormant(state.disconnected().maintenance);
+                }
+            }
+
             void onCompletedHandshake(Result<MessagingSuccess> result)
             {
                 switch (result.outcome)
@@ -1161,6 +1182,25 @@ public class OutboundConnection
                         assert !state.isClosed();
 
                         MessagingSuccess success = result.success();
+                        // DSE 6 compatibility mode: the peer's version rose to 4.0 or later while this connection was made
+                        // in the dialect; it is made again, with the 4.0-style handshake: at once the first time, then
+                        // with the delays of a failed attempt, so that a version going back and forth cannot spin
+                        if (DseCompat.enabled() && DseDialectVersions.supersededDialect(settings.to, success.messagingVersion, MessagingService.instance().versions))
+                        {
+                            success.channel.close();
+                            if (remadeAfterSupersededDialect)
+                            {
+                                noSpamLogger.info("{} made in the pre-4.0 dialect again, although {} is at messaging version 4.0 or later; retrying later",
+                                                  id(), settings.to);
+                                retryLater();
+                            }
+                            else
+                            {
+                                remadeAfterSupersededDialect = true;
+                                initiate();
+                            }
+                            break;
+                        }
                         messagingVersion = success.messagingVersion;
                         settings.endpointToVersion.set(settings.to, messagingVersion);
                         debug.onConnect(success.messagingVersion, settings);
@@ -1207,6 +1247,9 @@ public class OutboundConnection
                         // the messaging version we connected with was incorrect; try again with the one supplied by the remote host
                         messagingVersion = result.retry().withMessagingVersion;
                         settings.endpointToVersion.set(settings.to, messagingVersion);
+                        // DSE 6 compatibility mode: a peer answering in the dialect is recorded at it by the node too
+                        if (DseCompat.enabled() && messagingVersion < MessagingService.VERSION_40)
+                            DseDialectVersions.answeredInTheDialect(settings.to, messagingVersion);
 
                         initiate();
                         break;
@@ -1245,6 +1288,10 @@ public class OutboundConnection
                  * port being selected if configured with legacy_ssl_storage_port_enabled=true.
                  */
                 int knownMessagingVersion = messagingVersion();
+                // DSE 6 compatibility mode: a peer taken for a pre-4.0 node that the node now knows at 4.0 or later
+                if (DseCompat.enabled())
+                    knownMessagingVersion = DseDialectVersions.connectionVersion(template.to, knownMessagingVersion, template.endpointToVersion(),
+                                                                                 MessagingService.instance().versions);
                 if (knownMessagingVersion != messagingVersion)
                 {
                     logger.trace("Endpoint version changed from {} to {} since connection initialized, updating.",
@@ -1269,7 +1316,7 @@ public class OutboundConnection
                 {
                     logger.info("ConnectionId {} is falling back to {} reconnect strategy for retry", id(), fallBackSslFallbackConnectionTypes[index]);
                 }
-                initiateMessaging(eventLoop, type, fallBackSslFallbackConnectionTypes[index], settings, result)
+                initiateMessaging(eventLoop, type, fallBackSslFallbackConnectionTypes[index], settings, messagingVersion, result)
                 .addListener(future -> {
                     if (future.isCancelled())
                         return;
