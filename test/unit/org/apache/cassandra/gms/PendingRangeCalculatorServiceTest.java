@@ -150,12 +150,19 @@ public class PendingRangeCalculatorServiceTest
     {
         DatabaseDescriptor.daemonInitialization();
 
-        // mock schema with 100 keyspaces ks0, ks1, ..., ks99
+        // mock schema with 100 keyspaces ks0, ks1, ..., ks99 that own token ranges, plus one
+        // LocalStrategy keyspace of the kind a DSE 6 node leaves in the schema; update() must
+        // read getNonLocalStrategyKeyspaces(), so the LocalStrategy keyspace is never handed
+        // to calculatePendingRanges()
         Schema schema = Mockito.mock(Schema.class);
         Keyspaces.Builder keyspaces = Keyspaces.builder();
         for (int i = 0; i < 100; i++)
             keyspaces.add(KeyspaceMetadata.create("ks" + i, KeyspaceParams.simple(1)));
-        when(schema.distributedKeyspaces()).thenReturn(keyspaces.build());
+        Keyspaces nonLocalStrategyKeyspaces = keyspaces.build();
+        keyspaces.add(KeyspaceMetadata.create("dse_system_local", KeyspaceParams.local()));
+        Keyspaces distributedKeyspaces = keyspaces.build();
+        when(schema.distributedKeyspaces()).thenReturn(distributedKeyspaces);
+        when(schema.getNonLocalStrategyKeyspaces()).thenReturn(nonLocalStrategyKeyspaces);
 
         // a set of keyspaces for which pending ranges have been calculated - once the calculation is requested, we put a keyspace name into this set
         Map<String, Boolean> processedKeyspaces = new ConcurrentHashMap<>();
@@ -179,12 +186,18 @@ public class PendingRangeCalculatorServiceTest
             LockSupport.parkNanos(100000); // 100 µs schedule interval
         }
 
+        // requesting the LocalStrategy keyspace must not calculate pending ranges for it: it
+        // does not own any token range
+        prcs.update(ks -> ks.equals("dse_system_local"));
+
         // wait for all pending range calculations to finish
         prcs.blockUntilFinished();
         prcs.shutdownAndWait(10, TimeUnit.SECONDS);
 
-        // verify that pending ranges have been calculated for all keyspaces
+        // verify that pending ranges have been calculated for all keyspaces that own token ranges,
+        // and never for the LocalStrategy keyspace
         assertThat(processedKeyspaces).withFailMessage("Test is broken or outdated. Expected at least 2 keyspaces to be calculated.").hasSizeGreaterThan(1);
+        assertThat(processedKeyspaces).doesNotContainKey("dse_system_local");
         assertThat(processedKeyspaces).hasSize(100);
     }
 }
