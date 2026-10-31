@@ -23,7 +23,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -78,6 +77,14 @@ import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.GossipDigest;
+import org.apache.cassandra.gms.GossipDigestSyn;
+import org.apache.cassandra.gms.GossipMessages;
+import org.apache.cassandra.gms.GossipShutdown;
+import org.apache.cassandra.gms.HeartBeatState;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintMessages;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -111,11 +118,11 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * The serializer audit of the DSE 6 compatibility mode: every verb a DSE 6 peer can receive or send at messaging
- * version 11, but the gossip verbs, is serialized through {@link Message.Serializer} in the pre-4.0 layout with a
- * representative payload, sized, size-inferred, deserialized and serialized again byte for byte; every other verb is
- * refused before anything is written. The header, the params and the payloads whose 3.0 layout differs from 4.0 are
- * checked byte by byte against the layout DSE 6 uses with non-DSE peers, the layout of Cassandra 3.0.14. The pre-4.0
- * layouts are only spoken in DSE 6 compatibility mode, which every test here runs in but
+ * version 11 is serialized through {@link Message.Serializer} in the pre-4.0 layout with a representative payload,
+ * sized, size-inferred, deserialized and serialized again byte for byte; every other verb is refused before anything
+ * is written. The header, the params and the payloads whose 3.0 layout differs from 4.0 are checked byte by byte
+ * against the layout DSE 6 uses with non-DSE peers, the layout of Cassandra 3.0.14. The pre-4.0 layouts are only
+ * spoken in DSE 6 compatibility mode, which every test here runs in but
  * {@link #pre40LayoutsAreNotUsedWithTheModeOff()}.
  */
 public class V11SerializationAuditTest extends CQLTester
@@ -220,6 +227,10 @@ public class V11SerializationAuditTest extends CQLTester
         long nowInSec = FBUtilities.nowInSeconds();
         Ballot ballot = BallotGenerator.Global.nextBallot(Ballot.Flag.NONE);
         Commit commit = Commit.Proposal.of(ballot, mutation.getPartitionUpdate(metadata));
+        EndpointState state = endpointState();
+        Map<InetAddressAndPort, EndpointState> states = new HashMap<>();
+        states.put(PEER, state);
+        GossipDigest digest = GossipMessages.digest(PEER, 7, 9);
 
         Map<Verb, Object> payloads = new HashMap<>();
         payloads.put(Verb.MUTATION_REQ, mutation);
@@ -229,6 +240,9 @@ public class V11SerializationAuditTest extends CQLTester
         payloads.put(Verb.BATCH_STORE_REQ, Batch.createLocal(TimeUUID.Generator.nextTimeUUID(), FBUtilities.timestampMicros(), Collections.singleton(mutation)));
         payloads.put(Verb.BATCH_REMOVE_REQ, TimeUUID.Generator.nextTimeUUID());
         payloads.put(Verb.RANGE_REQ, PartitionRangeReadCommand.allDataRead(metadata, nowInSec));
+        payloads.put(Verb.GOSSIP_DIGEST_SYN, new GossipDigestSyn("cluster", DatabaseDescriptor.getPartitionerName(), Collections.singletonList(digest)));
+        payloads.put(Verb.GOSSIP_DIGEST_ACK, GossipMessages.ack(Collections.singletonList(digest), states));
+        payloads.put(Verb.GOSSIP_DIGEST_ACK2, GossipMessages.ack2(states));
         payloads.put(Verb.SCHEMA_PUSH_REQ, Collections.singletonList(mutation));
         payloads.put(Verb.TRUNCATE_REQ, new TruncateRequest(metadata.keyspace, metadata.name));
         payloads.put(Verb.SCHEMA_VERSION_REQ, noPayload);
@@ -236,19 +250,15 @@ public class V11SerializationAuditTest extends CQLTester
         payloads.put(Verb.COUNTER_MUTATION_REQ, new CounterMutation(mutation, ConsistencyLevel.ONE));
         payloads.put(Verb.SNAPSHOT_REQ, new SnapshotCommand(metadata.keyspace, metadata.name, "tag", false));
         payloads.put(Verb.SCHEMA_PULL_REQ, noPayload);
+        payloads.put(Verb.GOSSIP_SHUTDOWN, new GossipShutdown(state));
         payloads.put(Verb.ECHO_REQ, noPayload);
         payloads.put(Verb.PAXOS_PREPARE_REQ, commit);
         payloads.put(Verb.PAXOS_PROPOSE_REQ, commit);
         payloads.put(Verb.PAXOS_COMMIT_REQ, new Commit.Agreed(ballot, mutation.getPartitionUpdate(metadata)));
 
-        // the gossip verbs map to the dialect too (everyVerbEitherMapsToThe30DialectOrIsRefused); their payloads are
-        // not audited here
-        Set<Verb> gossip = Set.of(Verb.GOSSIP_DIGEST_SYN, Verb.GOSSIP_DIGEST_ACK, Verb.GOSSIP_DIGEST_ACK2, Verb.GOSSIP_SHUTDOWN);
         for (int id : DSE_REQUEST_IDS)
         {
             Verb verb = Verb.fromId(id);
-            if (gossip.contains(verb))
-                continue;
             assertTrue("payload for " + verb, payloads.containsKey(verb));
             Message<?> request = Message.out(verb, payloads.get(verb));
             Message<?> received = roundTrip(request, verb.id);
@@ -1124,5 +1134,14 @@ public class V11SerializationAuditTest extends CQLTester
         PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, k).timestamp(1000);
         builder.row(1).add("v", "value");
         return builder.buildAsMutation();
+    }
+
+    private static EndpointState endpointState()
+    {
+        VersionedValue.VersionedValueFactory values = new VersionedValue.VersionedValueFactory(DatabaseDescriptor.getPartitioner());
+        EndpointState state = new EndpointState(new HeartBeatState(3, 4));
+        state.addApplicationState(ApplicationState.NET_VERSION, values.networkVersion(MessagingService.current_version));
+        state.addApplicationState(ApplicationState.HOST_ID, values.hostId(UUID.randomUUID()));
+        return state;
     }
 }

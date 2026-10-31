@@ -246,13 +246,13 @@ public class CompatStatusTest extends CQLTester
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
         try
         {
-            // DSE's own gossip value of a DSE node gossiped by an upgraded peer is stored as it is
+            // without the mode, DSE's own gossip value of a DSE node gossiped by an upgraded peer is stored as it is
             MessagingService.instance().versions.set(dseNode, 1536);
             ToolRunner.ToolResult tool = ToolRunner.invokeNodetool("compatstatus");
             tool.assertOnCleanExit();
             List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
             assertThat(lines).anyMatch(line -> line.matches("Peers with a known version   : \\d+ \\(0 speaking the pre-4.0 dialect, 1 DSE 6 node\\(s\\) known from gossip only\\)"))
-                             .contains(String.format("  %-45s %d  (DSE 6 node known from gossip only)", "127.0.0.46:7000", 1536))
+                             .contains(String.format("  %-45s %d  (DSE 6 node known from gossip only; reachable in DSE_6 mode only)", "127.0.0.46:7000", 1536))
                              .contains("DSE peers                    : not tracked (internode_compatibility_mode NONE)")
                              .contains("DSE 6 peers on record        : not maintained (internode_compatibility_mode NONE)");
             assertThat(DsePeersRecord.peers()).isEmpty();
@@ -365,7 +365,7 @@ public class CompatStatusTest extends CQLTester
             List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
             assertThat(lines).contains("DSE peers                    : 1")
                              .contains(String.format("  %-45s %s", "127.0.0.44:7000",
-                                                     "release 4.0.0.6865, NET_VERSION 1024, DSE 6.8.65, not identified as DSE by a handshake"));
+                                                     "release 4.0.0.6865, NET_VERSION 1024, DSE 6.8.65, gossip ordinals: this software's (not identified as DSE yet)"));
 
             // identified by a handshake: the evidence is shown, also for a peer without a gossip state
             InetAddressAndPort handshakeOnly = InetAddressAndPort.getByName("127.0.0.47:7000");
@@ -376,9 +376,9 @@ public class CompatStatusTest extends CQLTester
             assertThat(tool.getStdout().split("\\R"))
             .containsSequence("DSE peers                    : 2",
                               String.format("  %-45s %s", "127.0.0.44:7000",
-                                            "release 4.0.0.6865, NET_VERSION 1024, DSE 6.8.65, identified as DSE (DSE-flagged first handshake message)"),
+                                            "release 4.0.0.6865, NET_VERSION 1024, DSE 6.8.65, gossip ordinals: DSE's (DSE-flagged first handshake message)"),
                               String.format("  %-45s %s", "127.0.0.47:7000",
-                                            "NET_VERSION unknown, identified as DSE (handshake reply with the DSE messaging version 1536)"));
+                                            "NET_VERSION unknown, gossip ordinals: DSE's (handshake reply with the DSE messaging version 1536)"));
         }
         finally
         {
@@ -412,7 +412,7 @@ public class CompatStatusTest extends CQLTester
             DsePeers.identify(left, "DSE-flagged first handshake message");
             DsePeers.identify(removed, "DSE-flagged first handshake message");
             assertThat(MessagingService.instance().getDsePeers())
-            .containsExactlyInAnyOrderEntriesOf(Map.of("127.0.0.48:7000", "release unknown, NET_VERSION 1536, not identified as DSE by a handshake"));
+            .containsExactlyInAnyOrderEntriesOf(Map.of("127.0.0.48:7000", "release unknown, NET_VERSION 1536, gossip ordinals: this software's (not identified as DSE yet)"));
 
             DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
             assertThat(MessagingService.instance().getDsePeers()).isEmpty();

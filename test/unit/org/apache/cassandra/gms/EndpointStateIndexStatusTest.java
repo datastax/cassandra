@@ -36,7 +36,6 @@ import org.apache.cassandra.utils.CassandraVersion;
 import org.json.simple.JSONValue;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -179,11 +178,33 @@ public class EndpointStateIndexStatusTest
         assertEquals("other", received.getApplicationState(ApplicationState.HOST_ID).value);
     }
 
+    /**
+     * Pre-4.0 versions are spoken only in the DSE 6 compatibility mode; the serializer, which does not read the mode,
+     * is tested here on its own at those versions. A peer there that is not identified as a DSE 6 node (HCD 1.2 started
+     * at version 11 with {@code -Dds.current_messaging_version}, which then reads the states with its own ordinals,
+     * INDEX_STATUS at 20 as here) is sent this software's states, as at 4.0 and later, so it gets the legacy format like
+     * any HCD 1.2 peer.
+     */
     @Test
-    public void testIndexStatusDroppedForPre40Peers() throws Exception
+    public void testIndexStatusRewrittenForHcd12PeersAtPre40Versions() throws Exception
     {
         String compact = IndexStatusFormat.toSerializedFormat(STATUSES);
-        assertNull(roundTrip(compact, MessagingService.VERSION_30).getApplicationState(ApplicationState.INDEX_STATUS));
+        for (int version : new int[]{ MessagingService.VERSION_30, MessagingService.VERSION_3014 })
+        {
+            VersionedValue received = roundTrip(compact, version).getApplicationState(ApplicationState.INDEX_STATUS);
+            assertEquals(STATUSES, parseAsHcd12(received.value));
+            assertEquals(42, received.version);
+        }
+    }
+
+    /** A DSE 6 node, at version 11, does not know INDEX_STATUS and is not sent it. */
+    @Test
+    public void testIndexStatusNotSentToDsePeers() throws Exception
+    {
+        EndpointState received = roundTrip(IndexStatusFormat.toSerializedFormat(STATUSES), MessagingService.VERSION_3014, true);
+        assertEquals(1, received.states().size());
+        assertEquals("other", received.getApplicationState(ApplicationState.HOST_ID).value);
+        assertEquals(7, received.getApplicationState(ApplicationState.HOST_ID).version);
     }
 
     @Test
@@ -199,6 +220,12 @@ public class EndpointStateIndexStatusTest
 
     private static EndpointState roundTrip(String indexStatus, int version) throws IOException
     {
+        return roundTrip(indexStatus, version, false);
+    }
+
+    /** @param dseOrdinals whether the states are written for a peer identified as a DSE 6 node */
+    private static EndpointState roundTrip(String indexStatus, int version, boolean dseOrdinals) throws IOException
+    {
         Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
         states.put(ApplicationState.INDEX_STATUS, VersionedValue.unsafeMakeVersionedValue(indexStatus, 42));
         states.put(ApplicationState.HOST_ID, VersionedValue.unsafeMakeVersionedValue("other", 7));
@@ -206,8 +233,8 @@ public class EndpointStateIndexStatusTest
 
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            EndpointState.serializer.serialize(state, out, version);
-            assertEquals(EndpointState.serializer.serializedSize(state, version), out.getLength());
+            EndpointStateSerializer.instance.serialize(state, out, version, dseOrdinals);
+            assertEquals(EndpointStateSerializer.instance.serializedSize(state, version, dseOrdinals), out.getLength());
             try (DataInputBuffer in = new DataInputBuffer(out.getData()))
             {
                 return EndpointState.serializer.deserialize(in, version);

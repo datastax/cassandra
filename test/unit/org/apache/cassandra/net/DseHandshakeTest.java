@@ -30,6 +30,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -65,6 +66,11 @@ import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.dsecompat.DseFixtures.Handshake;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.GossipMessages;
+import org.apache.cassandra.gms.HeartBeatState;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -638,12 +644,12 @@ public class DseHandshakeTest
     }
 
     /**
-     * The first message tells a DSE node from HCD 1.2 at the dialect: DSE's flagged one and a pre-4.0 one requesting 12
-     * (DSE once it has stored 12 for us) identify the peer when a third message follows on the same socket, a plain one
-     * at 11 does not. A DSE node identified once stays identified when it reconnects with a plain message at 11, which it
-     * sends once it has stored 11 for us. DSE 6.9.26 sends that third message after a request at 12 or 255; DSE 6.8.65
-     * never does (it closes the socket and reconnects at 11,
-     * {@link #dseNodeReconnectingAt11IsNotIdentifiedByTheHandshakes}).
+     * The first message tells a DSE node from HCD 1.2 at the dialect, for the ordinals of gossip: DSE's flagged one and a
+     * pre-4.0 one requesting 12 (DSE once it knows our NET_VERSION) identify the peer when a third message follows on the
+     * same socket, a plain one at 11 does not. A DSE node identified once stays identified when it reconnects with a plain
+     * message at 11, which it sends once it has stored 11 for us. DSE 6.9.26 sends that third message after a request at
+     * 12 or 255; DSE 6.8.65 never does (it closes the socket and reconnects at 11,
+     * {@link #dseNodeReconnectingAt11IsIdentifiedByGossip}).
      */
     @Test
     public void inboundFirstMessageIdentifiesDseNodes() throws Exception
@@ -674,12 +680,13 @@ public class DseHandshakeTest
     }
 
     /**
-     * What DSE 6.8.65 does: its flagged first message, our answer 11, and the socket closed without a third message;
-     * then a new socket with a plain first message at 11, which completes. The handshakes identify nothing: the second
-     * looks exactly like HCD 1.2's.
+     * What DSE 6.8.65 does: its flagged first message, our answer 11, and the socket closed without a third
+     * message; then a new socket with a plain first message at 11, which completes. The handshakes identify nothing (the
+     * second looks exactly like HCD 1.2's); the DSE version the node gossips as its NET_VERSION identifies it, and the
+     * identification survives its next reconnection at 11.
      */
     @Test
-    public void dseNodeReconnectingAt11IsNotIdentifiedByTheHandshakes() throws Exception
+    public void dseNodeReconnectingAt11IsIdentifiedByGossip() throws Exception
     {
         dse6();
         InboundSockets inbound = openInbound();
@@ -696,6 +703,16 @@ public class DseHandshakeTest
             }
             pre40HandshakeFrom(endpoint, plainFirstMessage(DseCompat.DSE_DIALECT), dseNode);
             assertThat(DsePeers.snapshot()).as("identified by the handshakes").isEmpty();
+
+            // its first gossip message at the dialect carries its own state, with its DSE version as its NET_VERSION
+            EndpointState state = new EndpointState(new HeartBeatState(1, 1));
+            state.addApplicationState(ApplicationState.NET_VERSION,
+                                      VersionedValue.unsafeMakeVersionedValue(String.valueOf(DseVersion.DSE_6_8_65.relativeMessagingVersion << 8), 1));
+            GossipMessages.receivedAck2(dseNode, Collections.singletonMap(dseNode, state), DseCompat.DSE_DIALECT);
+            assertThat(DsePeers.isDse(dseNode)).as("identified by its gossiped NET_VERSION").isTrue();
+
+            pre40HandshakeFrom(endpoint, plainFirstMessage(DseCompat.DSE_DIALECT), dseNode);
+            assertThat(DsePeers.isDse(dseNode)).as("still identified after reconnecting at 11").isTrue();
         }
         finally
         {
@@ -1163,7 +1180,7 @@ public class DseHandshakeTest
             assertThat(dse.firstMessages.get(1)).containsExactly(0xCA, 0x55, 0x2D, 0xFA, 0x00, 0x00, 0x0B, SMALL_CRC_FLAGS);
             assertThat(dse.answers.get(1)).isEqualTo(DseCompat.DSE_DIALECT);
             second.success().channel.close();
-            // the DSE version in the first answer identified the peer as a DSE node
+            // the DSE version in the first answer identified the peer as a DSE node, for the ordinals of gossip
             assertThat(DsePeers.snapshot()).containsEntry(settings.to, "handshake reply with the DSE messaging version " + DSE_697_HANDSHAKE_VERSION);
             dse.thread.join(10_000);
             byte[] address = settings.from.getAddress().getAddress();
@@ -1174,8 +1191,9 @@ public class DseHandshakeTest
 
     /**
      * A pre-4.0 peer that answers our 4.0-style first message with 11 (HCD 1.2 at the dialect) is retried at the dialect
-     * like DSE, but is not identified as a DSE node; nor is a peer answering 256 or more with a value that is not a DSE
-     * version ({@code relative << 8}), which is retried at the dialect too.
+     * like DSE, but is not identified as a DSE node: gossip with it keeps this software's ordinals; nor is a peer
+     * answering 256 or more with a value that is not a DSE version ({@code relative << 8}), which is retried at the
+     * dialect too.
      */
     @Test
     public void pre40AnswerWithoutADseVersionDoesNotIdentifyADseNode() throws Exception
@@ -1326,8 +1344,8 @@ public class DseHandshakeTest
      * 0xFF), so that DSE never sees the 19-byte 4.0-style probe it would read the rest of as a third message. DSE 6.9.26
      * echoes 11; DSE 6.8.65 answers with its own version instead (observed with DSE 6.8.65; the value is the 4-byte
      * answer of its captured handshake with another DSE node, 1024, its answer to our message at 11 being known from the
-     * upgraded node's log, not from a capture), which identifies it as a DSE node. Either way the connection is
-     * established at the dialect on that first socket, with no retry and no refusal.
+     * upgraded node's log, not from a capture), which identifies it as a DSE node and ends its presumption. Either way
+     * the connection is established at the dialect on that first socket, with no retry and no refusal.
      */
     @Test
     public void knownDsePeerIsFirstSentThePre40MessageNeverTheProbe() throws Exception
@@ -1347,6 +1365,7 @@ public class DseHandshakeTest
                 InetAddressAndPort endpoint = dse.endpoint();
                 assertThat(DseDialectVersions.seed(Stream.of(DseDialectVersionsTest.peer(endpoint, version.releaseVersion)), MessagingService.instance().versions))
                 .containsExactly(endpoint);
+                assertThat(DsePeers.isPresumed(endpoint)).as(version + ": presumed once seeded").isTrue();
                 OutboundConnection outbound = outbound(endpoint);
                 try
                 {
@@ -1370,6 +1389,7 @@ public class DseHandshakeTest
                     assertThat(outbound.connectionAttempts()).as(version + ": no retry").isEqualTo(1);
                     assertThat(outbound.messagingVersion()).isEqualTo(DseCompat.DSE_DIALECT);
                     assertThat(DsePeers.isDse(endpoint)).as(version + ": identified by the answer").isEqualTo(fixedAnswer != null);
+                    assertThat(DsePeers.isPresumed(endpoint)).as(version + ": still presumed").isEqualTo(fixedAnswer == null);
                 }
                 finally
                 {

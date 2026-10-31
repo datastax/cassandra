@@ -24,7 +24,8 @@ package org.apache.cassandra.config;
  * sstables of version {@link #DSE_6_TRIE_INDEX_FORMAT_VERSION} with numeric generations), and requires
  * {@code storage_compatibility_mode: HCD_1}, the {@code bti} sstable format and {@code paxos_variant: v1}.
  * Offline tools and clients inherit the on-disk half only. A node in the mode also speaks, with DSE 6 peers, the
- * pre-4.0 handshake and the Cassandra 3.0.14 messaging dialect DSE uses with non-DSE peers.
+ * pre-4.0 handshake and the Cassandra 3.0.14 messaging dialect DSE uses with non-DSE peers, with DSE's gossip
+ * states.
  * <p>
  * The mode is removed with a rolling restart once every node runs this software.
  */

@@ -60,6 +60,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.StartupClusterConnectivityChecker;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.Schema;
@@ -403,6 +404,8 @@ public class CassandraDaemon
 
         if (!FBUtilities.getBroadcastAddressAndPort().equals(InetAddressAndPort.getLoopbackAddress()))
             Gossiper.waitToSettle();
+        // DSE 6 compatibility mode: the cue that the mode is no longer needed (a no-op otherwise)
+        DsePeers.warnIfNoneKnownAtStartup();
 
         StorageService.instance.doAuthSetup(false);
 

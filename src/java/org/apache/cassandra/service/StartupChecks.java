@@ -90,6 +90,7 @@ import org.apache.cassandra.locator.Ec2Snitch;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.locator.SnitchProperties;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -170,6 +171,7 @@ public class StartupChecks
                                                                       checkDsePeersWithoutFlag,
                                                                       loadDsePeersRecord,
                                                                       checkDse6Artefacts,
+                                                                      checkDse6GossipedDseVersion,
                                                                       checkSSTablesFormat,
                                                                       checkSystemKeyspaceState,
                                                                       checkDse6SaiVersionPin,
@@ -883,6 +885,35 @@ public class StartupChecks
         }
         return version > CommitLogDescriptor.VERSION_40 && version != CommitLogDescriptor.VERSION_DSE_68;
     }
+
+    /**
+     * With {@code internode_compatibility_mode: DSE_6}, refuses to start when the DSE version this node is to gossip to
+     * DSE nodes ({@code cassandra.internode_compatibility_mode.dse_version}) is not one it may gossip, before the node
+     * contacts any peer, and warns when it gossips none (see {@link DseCompat#gossipedDseVersion}).
+     */
+    public static final StartupCheck checkDse6GossipedDseVersion = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            if (!DatabaseDescriptor.isDse6CompatibilityMode())
+                return;
+            String dseVersion;
+            try
+            {
+                dseVersion = DseCompat.gossipedDseVersion();
+            }
+            catch (ConfigurationException e)
+            {
+                throw new StartupException(StartupException.ERR_WRONG_CONFIG, e.getMessage());
+            }
+            if (dseVersion == null)
+                logger.warn("This node gossips no DSE version to DSE nodes ({}={}): DSE nodes that stored one for it when it ran DSE send it " +
+                            "the range reads of storage-attached index queries with a verb it cannot receive, unless they run with " +
+                            "-Ddse.disable_endpoint_group_range_reads=true",
+                            CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getKey(), DseCompat.NO_DSE_VERSION);
+        }
+    };
 
     /**
      * With {@code internode_compatibility_mode: NONE}, refuses to start while the DSE 6 upgrade marker is present or

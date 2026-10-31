@@ -102,8 +102,8 @@ public class GossipDigestSynVerbHandler extends GossipVerbHandler<GossipDigestSy
         }
 
         Message<GossipDigestAck> gDigestAckMessage = gDigestList.isEmpty() ?
-                                                     createShadowReply() :
-                                                     createNormalReply(gDigestList);
+                                                     createShadowReply(from) :
+                                                     createNormalReply(gDigestList, from);
 
         if (logger.isTraceEnabled())
             logger.trace("Sending a GossipDigestAckMessage to {}", from);
@@ -112,20 +112,20 @@ public class GossipDigestSynVerbHandler extends GossipVerbHandler<GossipDigestSy
         super.doVerb(message);
     }
 
-    private static Message<GossipDigestAck> createNormalReply(List<GossipDigest> gDigestList)
+    private static Message<GossipDigestAck> createNormalReply(List<GossipDigest> gDigestList, InetAddressAndPort to)
     {
         List<GossipDigest> deltaGossipDigestList = new ArrayList<>();
         Map<InetAddressAndPort, EndpointState> deltaEpStateMap = new HashMap<>();
-        Gossiper.instance.examineGossiper(gDigestList, deltaGossipDigestList, deltaEpStateMap);
+        Gossiper.instance.examineGossiper(gDigestList, deltaGossipDigestList, deltaEpStateMap, to);
         logger.trace("sending {} digests and {} deltas", deltaGossipDigestList.size(), deltaEpStateMap.size());
 
-        return Message.out(GOSSIP_DIGEST_ACK, new GossipDigestAck(deltaGossipDigestList, deltaEpStateMap));
+        return Message.out(GOSSIP_DIGEST_ACK, new GossipDigestAck(deltaGossipDigestList, deltaEpStateMap, to));
     }
 
-    private static Message<GossipDigestAck> createShadowReply()
+    private static Message<GossipDigestAck> createShadowReply(InetAddressAndPort to)
     {
         Map<InetAddressAndPort, EndpointState> stateMap = Gossiper.instance.examineShadowState();
         logger.trace("sending 0 digests and {} deltas", stateMap.size());
-        return Message.out(GOSSIP_DIGEST_ACK, new GossipDigestAck(Collections.emptyList(), stateMap));
+        return Message.out(GOSSIP_DIGEST_ACK, GossipDigestAck.shadowRoundAnswer(stateMap, to));
     }
 }

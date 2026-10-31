@@ -40,7 +40,7 @@ public enum ApplicationState
     @Deprecated(since = "4.0") INTERNAL_IP, //Deprecated and unused in 4.0, stop publishing in 5.0, reclaim in 6.0
     /** @deprecated See CASSANDRA-7544 */
     @Deprecated(since = "4.0") RPC_ADDRESS, // ^ Same
-    X_11_PADDING, // padding specifically for 1.1
+    X_11_PADDING, // padding specifically for 1.1; DSE 6 nodes gossip their DSE_GOSSIP_STATE here, and so do the nodes in DSE_6 mode
     SEVERITY,
     NET_VERSION,
     HOST_ID,
@@ -62,6 +62,8 @@ public enum ApplicationState
     DISK_USAGE,
     INDEX_STATUS,
     // DO NOT EDIT OR REMOVE PADDING STATES BELOW - only add new states above.  See CASSANDRA-16484
+    // X2 to X7 are reserved while internode_compatibility_mode DSE_6 exists: they hold the states DSE 6 nodes
+    // gossip at ordinals 15 to 20 (see DseGossipStates) and are relayed between the nodes of this software.
     X1,
     X2,
     X3,
