@@ -31,6 +31,7 @@ import io.netty.channel.ChannelPipeline;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future; // checkstyle: permit this import
 import org.apache.cassandra.net.ConnectionCategory;
+import org.apache.cassandra.net.DseTlsPorts;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result.StreamingSuccess;
@@ -59,6 +60,10 @@ public class NettyStreamingConnectionFactory implements StreamingChannel.Factory
         Throwable cause = null;
         for (final SslFallbackConnectionType sslFallbackConnectionType : sslFallbacks)
         {
+            // DSE 6 compatibility mode: no plain-text retry of an encrypted connection to a peer not known at 4.0 or
+            // later; NO_SSL is the last strategy, and the configured TLS one was tried first (DseTlsPorts; a no-op otherwise)
+            if (DseTlsPorts.sslFallback(settings, messagingVersion, sslFallbackConnectionType) != sslFallbackConnectionType)
+                break;
             for (int i = 0; i < MAX_CONNECT_ATTEMPTS; i++)
             {
                 Future<Result<StreamingSuccess>> result = initiateStreaming(eventLoop, settings, sslFallbackConnectionType);

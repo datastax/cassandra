@@ -220,8 +220,18 @@ class InboundSockets
         InboundConnectionSettings       settings = template.withDefaults();
         InboundConnectionSettings legacySettings = template.withLegacySslStoragePortDefaults();
 
-        if (settings.encryption.legacy_ssl_storage_port_enabled)
+        // DSE 6 compatibility mode: DSE 6 nodes dial an upgraded node's ssl_storage_port for the connections they
+        // encrypt (DSE 6.8 and 6.9 before 6.9.7 always, DSE 6.9.7+ once it has stored a messaging version below DSE
+        // 6.9.7's for the node), whatever legacy_ssl_storage_port_enabled says (forDse is always false in mode NONE)
+        boolean forDse = DseTlsPorts.listensOnSslStoragePortForDse(settings.encryption);
+        if (settings.encryption.legacy_ssl_storage_port_enabled || forDse)
         {
+            if (forDse)
+                logger.info("DSE 6 compatibility mode: also listening for TLS-only internode connections on {} (ssl_storage_port) although " +
+                            "legacy_ssl_storage_port_enabled is false, because DSE 6 nodes connect to this node on ssl_storage_port " +
+                            "for the connections internode_encryption ({}) encrypts: DSE 6.8 and 6.9 before 6.9.7 always, DSE " +
+                            "6.9.7+ once it has stored a messaging version below DSE 6.9.7's for this node", legacySettings.bindAddress,
+                            settings.encryption.internode_encryption);
             // Initialize hot reloading here rather than in org.apache.cassandra.security.SSLFactory.initHotReloading
             // as the legacySettings.encryption.sslContextFactory is not shared outside the messaging system.
             // Any SslContexts created will be checked when checkCertFilesForHotReloading is called if initialization
