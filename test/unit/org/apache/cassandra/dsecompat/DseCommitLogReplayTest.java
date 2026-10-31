@@ -82,7 +82,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * other keyspaces, which do not exist here and are skipped as unknown tables. The replay at the start keeps
  * such a segment, and replays it again at the next start (shown here with {@code NONE}), unless {@code DSE_6} mode
  * moves it aside. What a real start adds (the startup checks letting version 680 through, a restart after the move)
- * is not exercised here: this test drives the replay directly.
+ * is not exercised here, where the test drives the replay directly: the in-JVM {@code Dse6RollbackArtefactsTest}
+ * covers it.
  */
 public class DseCommitLogReplayTest extends CQLTester
 {

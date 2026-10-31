@@ -2241,6 +2241,65 @@
     </testmacro>
   </target>
 
+  <!-- JVM arguments the DSE 6 compatibility dtests need on top of the usual ones (also pass them as
+       -Dtest.jvm.args="…" to test-jvm-dtest-some). On JDK 17: module opens for the HCD 1.2 instances' jamm (the
+       java.nio and sun.nio.ch ones are already in the JDK 17 java-jvmargs), and the permission for the security
+       manager the HCD 1.2 nodetool wrapper installs to catch exit codes. JDK 11 needs none of them (it permits
+       illegal reflective access and security managers by default, and a JVM given the "allow" token refuses to
+       start, hence the condition); the opens stay because they are valid there. JDK 22 already has all of them in
+       its java-jvmargs and test arguments, where they are repeated harmlessly. -->
+  <condition property="dse.compat.security.manager.arg" value="-Djava.security.manager=allow" else="">
+    <not><equals arg1="${ant.java.version}" arg2="11"/></not>
+  </condition>
+  <property name="dse.compat.test.jvm.args" value="--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens java.base/java.util.concurrent=ALL-UNNAMED --add-opens java.base/java.util.concurrent.locks=ALL-UNNAMED ${dse.compat.security.manager.arg}"/>
+  <!-- The HCD 1.2 dtest jar the DSE 6 compatibility dtests start their old nodes from; the version must match
+       DseDialectTestBase.HCD12_DTEST_JAR_VERSION, which _check-hcd12-dtest-jar checks, and
+       test/bin/build-hcd12-dtest-jar.sh checks the jar it builds against it. -->
+  <property name="dse.compat.hcd12.dtest.jar.version" value="4.0.11.0"/>
+  <property name="dse.compat.hcd12.dtest.jar" value="${build.dir}/dtest-${dse.compat.hcd12.dtest.jar.version}.jar"/>
+  <property name="dse.compat.test.base" value="${test.distributed.src}/org/apache/cassandra/distributed/test/dsecompat/DseDialectTestBase.java"/>
+
+  <!-- The DSE 6 compatibility tests (test/distributed/…/dsecompat): an HCD 1.2 cluster speaking the DSE dialect,
+       nodes upgraded in place to this build. The classes extending DseDialectTestBase are left out of the jvm-dtest
+       split of .build/run-tests.sh, which runs them as the jvm-dtest-dse target type. They need the HCD 1.2 dtest
+       jar (dse.compat.hcd12.dtest.jar), produced by test/bin/build-hcd12-dtest-jar.sh (JDK 11), and the dtest jar of
+       this build, which this target rebuilds so that the upgraded nodes run the current code (with
+       test-jvm-dtest-some, run `ant dtest-jar` first). The old nodes run the highest 4.0 dtest jar found in build/:
+       the jvm-dtest-upgrade flow of run-tests.sh puts upstream 4.0 dtest jars (dtest-4.0.1x.jar) into the same
+       directory, and with one of them present the tests fail with "build/ holds a 4.0 dtest jar that is not HCD 1.2";
+       remove those jars before running these tests. Without -Dtest.name the target runs every class of dsecompat,
+       also the plain in-JVM dtests there that need no HCD 1.2 node (Dse6ModeSmokeTest, Dse6GossipTest), which the
+       jvm-dtest split runs too. Run one class with -Dtest.name=<simple class name>, for example
+       -Dtest.name=Dse6DialectSmokeTest. Every class runs in its own JVM, with its own timeout. -->
+  <target name="_check-hcd12-dtest-jar">
+    <fail message="${dse.compat.hcd12.dtest.jar} is missing: build it with test/bin/build-hcd12-dtest-jar.sh (needs a JDK 11)">
+      <condition><not><available file="${dse.compat.hcd12.dtest.jar}"/></not></condition>
+    </fail>
+    <fail message="dse.compat.hcd12.dtest.jar.version (${dse.compat.hcd12.dtest.jar.version}) differs from HCD12_DTEST_JAR_VERSION in ${dse.compat.test.base}: the tests would skip themselves">
+      <condition>
+        <not><resourcecontains resource="${dse.compat.test.base}" substring="HCD12_DTEST_JAR_VERSION = &quot;${dse.compat.hcd12.dtest.jar.version}&quot;;"/></not>
+      </condition>
+    </fail>
+    <fail message="No DSE 6 compatibility test matches -Dtest.name=${test.name}: give a simple class name (or a file name pattern) under dsecompat/">
+      <condition>
+        <resourcecount when="equal" count="0">
+          <fileset dir="${test.distributed.src}" includes="**/dsecompat/${test.name}.java"/>
+        </resourcecount>
+      </condition>
+    </fail>
+  </target>
+  <target name="test-jvm-dtest-dse" depends="_check-hcd12-dtest-jar, dtest-jar" description="Execute the DSE 6 compatibility in-jvm dtests">
+    <testmacro inputdir="${test.distributed.src}" timeout="${test.distributed.timeout}" forkmode="perTest" showoutput="true" filter="**/dsecompat/${test.name}.java">
+      <!-- the HCD 1.2 instances carry an older jamm that measures objects by reflection on JDK 17 -->
+      <jvmarg line="${dse.compat.test.jvm.args}"/>
+      <jvmarg value="-Dlogback.configurationFile=test/conf/logback-dtest.xml"/>
+      <jvmarg value="-Dcassandra.ring_delay_ms=10000"/>
+      <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
+      <jvmarg value="-Dcassandra.skip_sync=true" />
+      <jvmarg value="-Xmx8G"/>
+    </testmacro>
+  </target>
+
   <!-- Use this with an FQDN for test class or upgrade test, and an optional csv list of methods like this:
       ant test-jvm-dtest-some -Dtest.name=org.apache.cassandra.distributed.test.ResourceLeakTest
       ant test-jvm-dtest-some -Dtest.name=org.apache.cassandra.distributed.test.ResourceLeakTest -Dtest.methods=looperTest
