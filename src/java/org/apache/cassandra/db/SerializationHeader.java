@@ -39,6 +39,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.view.DseViewHiddenColumns;
 import org.apache.cassandra.exceptions.InvalidColumnTypeException;
 import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -70,6 +71,13 @@ public class SerializationHeader
 
     private final Map<ByteBuffer, AbstractType<?>> typeMap;
 
+    /**
+     * The DSE hidden column whose cells give the rows of a DSE view sstable their liveness (see
+     * {@link DseViewHiddenColumns}), or {@code null}: always {@code null} unless the header was read from an
+     * sstable, or the header of an sstable stream, that names such a column.
+     */
+    private final ColumnMetadata dseViewLivenessColumn;
+
     private SerializationHeader(boolean isForSSTable,
                                 AbstractType<?> keyType,
                                 List<AbstractType<?>> clusteringTypes,
@@ -77,12 +85,24 @@ public class SerializationHeader
                                 EncodingStats stats,
                                 Map<ByteBuffer, AbstractType<?>> typeMap)
     {
+        this(isForSSTable, keyType, clusteringTypes, columns, stats, typeMap, null);
+    }
+
+    private SerializationHeader(boolean isForSSTable,
+                                AbstractType<?> keyType,
+                                List<AbstractType<?>> clusteringTypes,
+                                RegularAndStaticColumns columns,
+                                EncodingStats stats,
+                                Map<ByteBuffer, AbstractType<?>> typeMap,
+                                ColumnMetadata dseViewLivenessColumn)
+    {
         this.isForSSTable = isForSSTable;
         this.keyType = keyType;
         this.clusteringTypes = clusteringTypes;
         this.columns = columns;
         this.stats = stats;
         this.typeMap = typeMap;
+        this.dseViewLivenessColumn = dseViewLivenessColumn;
     }
 
     public static SerializationHeader makeWithoutStats(TableMetadata metadata)
@@ -110,7 +130,8 @@ public class SerializationHeader
             stats.updateTimestamp(sstable.getMinTimestamp());
             stats.updateLocalDeletionTime(sstable.getMinLocalDeletionTime());
             stats.updateTTL(sstable.getMinTTL());
-            columns.addAll(sstable.header.columns());
+            // the rows read from a DSE view sstable never carry its hidden column, see DseViewHiddenColumns
+            columns.addAll(sstable.header.withoutDseViewLivenessColumn().columns());
         }
         return new SerializationHeader(true, metadata, columns.build(), stats.get());
     }
@@ -141,6 +162,34 @@ public class SerializationHeader
     public RegularAndStaticColumns columns()
     {
         return columns;
+    }
+
+    /**
+     * The DSE hidden column of a regular base column in the view primary key, when this header was read from
+     * a view sstable written by DSE, or from the header of a stream of one (see {@link DseViewHiddenColumns});
+     * {@code null} otherwise.
+     */
+    public ColumnMetadata dseViewLivenessColumn()
+    {
+        return dseViewLivenessColumn;
+    }
+
+    /**
+     * This header without {@link #dseViewLivenessColumn()}: the rows read through this header never carry a cell
+     * of that column, so an sstable written with them must not name it (only sstables written by DSE do, which is
+     * what makes the reader apply DSE's liveness rule to their rows). Returns this header when it has no such column.
+     */
+    public SerializationHeader withoutDseViewLivenessColumn()
+    {
+        if (dseViewLivenessColumn == null)
+            return this;
+        Map<ByteBuffer, AbstractType<?>> types = null;
+        if (typeMap != null)
+        {
+            types = new HashMap<>(typeMap);
+            types.remove(dseViewLivenessColumn.name.bytes);
+        }
+        return new SerializationHeader(isForSSTable, keyType, clusteringTypes, columns.without(dseViewLivenessColumn), stats, types, null);
     }
 
     public boolean hasStatic()
@@ -288,7 +337,8 @@ public class SerializationHeader
     @Override
     public String toString()
     {
-        return String.format("SerializationHeader[key=%s, cks=%s, columns=%s, stats=%s, typeMap=%s]", keyType, clusteringTypes, columns, stats, typeMap);
+        String header = String.format("SerializationHeader[key=%s, cks=%s, columns=%s, stats=%s, typeMap=%s]", keyType, clusteringTypes, columns, stats, typeMap);
+        return dseViewLivenessColumn == null ? header : header + "[dseViewLivenessColumn=" + dseViewLivenessColumn + ']';
     }
 
     /**
@@ -500,6 +550,7 @@ public class SerializationHeader
             Map<ByteBuffer, AbstractType<?>> typeMap = new HashMap<>(staticColumns.size() + regularColumns.size());
 
             RegularAndStaticColumns.Builder builder = RegularAndStaticColumns.builder();
+            ColumnMetadata dseViewLivenessColumn = null;
             for (Map<ByteBuffer, AbstractType<?>> map : ImmutableList.of(staticColumns, regularColumns))
             {
                 boolean isStatic = map == staticColumns;
@@ -524,7 +575,18 @@ public class SerializationHeader
                         // deserialization. The column will be ignored later on anyway.
                         ColumnMetadata droppedColumn = metadata.getDroppedColumn(name, isStatic);
                         if (droppedColumn == null)
-                            throw new UnknownColumnException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
+                        {
+                            // A view sstable written by DSE names the hidden columns DSE does not list among the
+                            // view's columns: read the one that carries the liveness of the rows, refuse the others.
+                            ColumnMetadata hidden = column == null ? DseViewHiddenColumns.resolve(descriptor, metadata, name, type, isStatic) : null;
+                            if (hidden == null)
+                                throw new UnknownColumnException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
+                            if (dseViewLivenessColumn != null)
+                                throw DseViewHiddenColumns.multipleRequiredColumns(descriptor, metadata, dseViewLivenessColumn, hidden);
+                            dseViewLivenessColumn = hidden;
+                            builder.add(hidden);
+                            continue;
+                        }
 
                         // Use the SSTable's validated type for the dropped column metadata instead of the
                         // schema's type. This is critical because column ordering depends on isComplex() which depends
@@ -554,7 +616,7 @@ public class SerializationHeader
                                                                                sstableVersion.hasImplicitlyFrozenTuples(),
                                                                                isForOfflineTool);
 
-            return new SerializationHeader(true, keyType, clusteringTypes, builder.build(), stats, typeMap);
+            return new SerializationHeader(true, keyType, clusteringTypes, builder.build(), stats, typeMap, dseViewLivenessColumn);
         }
 
         @Override

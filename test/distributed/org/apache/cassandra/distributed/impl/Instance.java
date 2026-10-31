@@ -76,6 +76,7 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionLogger;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
 import org.apache.cassandra.db.virtual.SystemViewsKeyspace;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
@@ -96,6 +97,7 @@ import org.apache.cassandra.distributed.mock.nodetool.InternalNodeProbe;
 import org.apache.cassandra.distributed.mock.nodetool.InternalNodeProbeFactory;
 import org.apache.cassandra.distributed.shared.Metrics;
 import org.apache.cassandra.distributed.shared.ThrowingRunnable;
+import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.hints.DTestSerializer;
 import org.apache.cassandra.hints.HintsService;
@@ -680,6 +682,16 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 CassandraDaemon.getInstanceForTesting().scrubDataDirectories();
 
                 Keyspace.setInitialized();
+
+                // DSE 6 compatibility mode: whether this software reads the data DSE wrote for each materialized view as DSE does, see CassandraDaemon.setup
+                try
+                {
+                    DseViewHiddenColumnCatalog.checkViewsAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
 
                 // Replay any CommitLogSegments found on disk
                 try

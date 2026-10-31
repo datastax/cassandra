@@ -1,0 +1,54 @@
+=== bb-1-bti
+[
+  {
+    "partition" : {
+      "key" : [ "v2" ],
+      "position" : 0
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 36,
+        "clustering" : [ 1, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:10:57Z", "ttl" : 2147483647, "expires_at" : "2026-10-28T19:11:02Z", "expired" : true },
+        "cells" : [
+          { "name" : "a", "value" : 12 }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "v1" ],
+      "position" : 37
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 74,
+        "clustering" : [ 1, 1 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:10:57Z" },
+        "cells" : [
+          { "name" : "a", "value" : 13, "tstamp" : "2026-10-28T19:10:58Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "partition" : {
+      "key" : [ "changed" ],
+      "position" : 75
+    },
+    "rows" : [
+      {
+        "type" : "row",
+        "position" : 117,
+        "clustering" : [ 1, 2 ],
+        "liveness_info" : { "tstamp" : "2026-10-28T19:10:58Z" },
+        "cells" : [
+          { "name" : "a", "value" : 12, "tstamp" : "2026-10-28T19:10:57Z" }
+        ]
+      }
+    ]
+  }
+]
