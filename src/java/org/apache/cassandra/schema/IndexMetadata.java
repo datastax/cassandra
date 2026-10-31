@@ -39,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -83,6 +84,8 @@ public final class IndexMetadata
     {
         indexNameAliases.put(StorageAttachedIndex.NAME, StorageAttachedIndex.class.getCanonicalName());
         indexNameAliases.put(StorageAttachedIndex.class.getSimpleName().toLowerCase(), StorageAttachedIndex.class.getCanonicalName());
+        // the class name of SAI indexes created on DataStax Enterprise 6.8: same index, kept for in-place upgrades
+        indexNameAliases.put("com.datastax.bdp.index.storageattachedindex", StorageAttachedIndex.class.getCanonicalName());
         loadTrustedIndexImplementations(CassandraRelevantProperties.TRUSTED_INDEX_IMPLEMENTATIONS.getString());
     }
 
@@ -183,7 +186,20 @@ public final class IndexMetadata
             // Find any aliases to the fully qualified index class name:
             String className = expandAliases(options.get(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
 
-            Class<Index> indexerClass = FBUtilities.classForName(className, "custom indexer");
+            Class<Index> indexerClass;
+            try
+            {
+                indexerClass = FBUtilities.classForName(className, "custom indexer");
+            }
+            catch (ConfigurationException e)
+            {
+                // SecondaryIndexManager loads an index of an unknown class as a NoopIndex under these same two
+                // conditions; accept it here too, so that the table carrying it can still be altered. There are no
+                // options to validate for it.
+                if (CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE.getBoolean() || DatabaseDescriptor.isDse6CompatibilityMode())
+                    return;
+                throw e;
+            }
             if (!Index.class.isAssignableFrom(indexerClass))
                 throw new ConfigurationException(String.format("Specified Indexer class (%s) does not implement the Indexer interface", className));
             validateCustomIndexOptions(table, indexerClass, options);
