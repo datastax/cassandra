@@ -670,8 +670,8 @@ public class UnfilteredSerializer
                 rowLiveness = LivenessInfo.withExpirationTime(timestamp, ttl, localDeletionTime);
             }
 
-            // A view sstable written by DSE, or view data sent by a DSE 6 peer: the row's liveness comes from the cell of
-            // its hidden column (see DseViewHiddenColumns, DseViewWireFormat); everything else takes the path below, unchanged.
+            // A view sstable written by DSE, or view data sent by a DSE 6 peer or stored by DSE: the row's liveness comes from
+            // the cell of its hidden column (see DseViewHiddenColumns, DseViewWireFormat); everything else takes the path below, unchanged.
             if (header.dseViewLivenessColumn() != null && !isStatic)
                 return deserializeDseViewRowBody(in, header, helper, hasDeletion, deletionIsShadowable, hasComplexDeletion,
                                                  hasAllColumns, headerColumns, rowLiveness, builder);
@@ -723,11 +723,11 @@ public class UnfilteredSerializer
     /**
      * The rest of {@link #deserializeRowBody} for a row of a materialized view sstable written by DSE, whose header
      * names DSE's hidden column of a regular base column in the view primary key, or of the view data a DSE 6 peer
-     * sent (see {@link org.apache.cassandra.db.view.DseViewWireFormat}): DSE ignores the primary key
+     * sent or DSE stored on the disk of this node (see {@link org.apache.cassandra.db.view.DseViewWireFormat}): DSE ignores the primary key
      * liveness of such a row, which is live exactly when that hidden cell is, so the row gets the liveness of the
      * cell ({@link DseViewHiddenColumns#livenessOf}), or, when it has no such cell,
      * {@link DseViewHiddenColumns#LIVENESS_WITHOUT_HIDDEN_CELL} when it comes from an sstable and none when it comes
-     * from a DSE 6 peer; the cell itself is dropped.
+     * from a DSE 6 peer or from a view update DSE stored; the cell itself is dropped.
      * The liveness is added once the cells are read, since the cells may be encoded relative to the liveness
      * written in the row.
      */
@@ -778,7 +778,7 @@ public class UnfilteredSerializer
         if (livenessCell[0] != null)
             builder.addPrimaryKeyLivenessInfo(DseViewHiddenColumns.livenessOf(livenessCell[0]));
         // dead for DSE without the hidden cell, unless another source has it (a header read from an sstable; the view data
-        // of a DSE 6 peer keeps no liveness)
+        // of a DSE 6 peer, or a view update DSE stored, keeps no liveness)
         else if (header.isForSSTable())
             builder.addPrimaryKeyLivenessInfo(DseViewHiddenColumns.LIVENESS_WITHOUT_HIDDEN_CELL);
         return builder.build();

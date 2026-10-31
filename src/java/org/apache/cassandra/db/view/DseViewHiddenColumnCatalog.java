@@ -89,7 +89,10 @@ import org.apache.cassandra.utils.Pair;
  * ({@link #checkViewsAtStartup}), which refuses to start when the node cannot exchange the data of one of its views with
  * DSE 6 nodes: a view with a hidden column other than the one of its regular base column in the primary key, a view
  * whose own DSE sstables name a hidden column the table does not list, or data directories without DSE's table. For
- * each view, {@link #translatedColumn} then decides how its data is exchanged with DSE (see {@link DseViewWireFormat}).
+ * each view, {@link #translatedColumn} then decides how its data is exchanged with DSE, and how the view updates DSE
+ * stored on the disk of this node are decoded (see {@link DseViewWireFormat}). On a node with views, the startup reads
+ * it before the commit log is replayed, the hints files DSE left are converted and the batchlog is replayed, which
+ * decode those updates; otherwise it is read the first time it is needed.
  */
 public final class DseViewHiddenColumnCatalog
 {
@@ -171,6 +174,23 @@ public final class DseViewHiddenColumnCatalog
      */
     public static DseViewHiddenColumnCatalog instance()
     {
+        DseViewHiddenColumnCatalog catalog = readableInstance();
+        if (catalog == null)
+        {
+            DseCompatRefusals.refused(REFUSED_VIEW);
+            throw new IllegalStateException(loadFailure);
+        }
+        return catalog;
+    }
+
+    /**
+     * {@link #instance()} without counting a refusal, for the view updates DSE stored on the disk of this node, which are
+     * not data exchanged with DSE 6 nodes.
+     *
+     * @return the catalog of this node, or {@code null} when DSE's table cannot be read ({@link #loadFailure()} says why)
+     */
+    static DseViewHiddenColumnCatalog readableInstance()
+    {
         DseViewHiddenColumnCatalog catalog = instance;
         if (catalog == null && loadFailure == null)
         {
@@ -197,12 +217,13 @@ public final class DseViewHiddenColumnCatalog
                 catalog = instance;
             }
         }
-        if (catalog == null)
-        {
-            DseCompatRefusals.refused(REFUSED_VIEW);
-            throw new IllegalStateException(loadFailure);
-        }
         return catalog;
+    }
+
+    /** Why the catalog of this node could not be read, or {@code null} when it was read or not tried yet. */
+    static String loadFailure()
+    {
+        return loadFailure;
     }
 
     /**
@@ -335,6 +356,22 @@ public final class DseViewHiddenColumnCatalog
      */
     public ColumnMetadata translatedColumn(TableMetadata view)
     {
+        return translatedColumn(view, true);
+    }
+
+    /**
+     * {@link #translatedColumn(TableMetadata)} without counting a refusal, for the view updates DSE stored on the disk of
+     * this node, which are not data exchanged with DSE 6 nodes.
+     *
+     * @throws IllegalStateException as {@link #translatedColumn(TableMetadata)}
+     */
+    ColumnMetadata storedTranslatedColumn(TableMetadata view)
+    {
+        return translatedColumn(view, false);
+    }
+
+    private ColumnMetadata translatedColumn(TableMetadata view, boolean countRefusal)
+    {
         Translation translation = translations.get(view.id);
         if (translation == null)
         {
@@ -351,7 +388,8 @@ public final class DseViewHiddenColumnCatalog
         }
         if (translation.refusal != null)
         {
-            DseCompatRefusals.refused(REFUSED_VIEW);
+            if (countRefusal)
+                DseCompatRefusals.refused(REFUSED_VIEW);
             throw new IllegalStateException(translation.refusal);
         }
         return translation.column;
