@@ -360,6 +360,14 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
         public static final MessagingService instance = new MessagingService(false);
     }
 
+    private static volatile boolean instantiated;
+
+    /** Whether the node's MessagingService exists; unlike {@link #instance()}, this never creates it. */
+    public static boolean isInstantiated()
+    {
+        return instantiated;
+    }
+
     public static MessagingService instance()
     {
         return MSHandle.instance;
@@ -402,6 +410,8 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     MessagingService(boolean testOnly, EndpointMessagingVersions versions, MessagingMetrics metrics)
     {
         super(testOnly, versions, metrics);
+        if (!testOnly)
+            instantiated = true;
         if (UNUSED_CONNECTION_MONITORING)
             OutboundConnections.scheduleUnusedConnectionMonitoring(this, ScheduledExecutors.scheduledTasks, 1L, TimeUnit.HOURS);
     }

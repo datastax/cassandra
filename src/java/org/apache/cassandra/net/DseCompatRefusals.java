@@ -26,8 +26,10 @@ import com.google.common.annotations.VisibleForTesting;
 
 /**
  * Counts the requests this node refused because of the DSE 6 compatibility mode, by reason: the
- * message features that cannot be sent to a DSE 6 peer (verbs and reads the pre-4.0 dialect lacks). The counters are
- * shown by {@code nodetool compatstatus}, so that an operator sees what the upgrade window is holding back.
+ * message features that cannot be sent to a DSE 6 peer (verbs and reads the pre-4.0 dialect lacks) and
+ * the upgrade's operational guards (topology changes, repair, sstable rewrites, the schema freeze). The counters are
+ * shown by {@code nodetool compatstatus} and in the periodic status line of the upgrade, so that an operator sees what
+ * the upgrade window is holding back.
  * <p>
  * The reasons are free-form names chosen by the callers; a counter is created on first use.
  */

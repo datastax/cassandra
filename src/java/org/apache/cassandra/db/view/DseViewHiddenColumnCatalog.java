@@ -82,8 +82,8 @@ import org.apache.cassandra.utils.Pair;
  * new format. So a view the table lists nothing for is taken to have no hidden column.
  * Its sstables are complete: a DSE node is drained before it is upgraded, which flushes every table, and this software
  * does not replay DSE's commit log for a table it does not define. The table does not change while this software runs
- * in DSE 6 compatibility mode: no DDL is expected during the upgrade; a view created meanwhile by this software has no
- * entry.
+ * in DSE 6 compatibility mode: no DDL is expected during the upgrade, and the schema freeze of the mode enforces it; a
+ * view created meanwhile by this software has no entry.
  * <p>
  * In DSE 6 compatibility mode the catalog is read at startup, once the schema and the sstables are loaded
  * ({@link #checkViewsAtStartup}), which refuses to start when the node cannot read the data DSE wrote for one of its

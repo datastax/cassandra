@@ -5705,8 +5705,8 @@ public class DatabaseDescriptor
 
     /**
      * True while the node runs in {@code internode_compatibility_mode: DSE_6} (never for tools and clients); the gate
-     * of every DSE-specific code path: the on-disk format DSE reads and the pre-4.0 internode dialect spoken with DSE 6
-     * peers.
+     * of every DSE-specific code path: the on-disk format DSE reads, the pre-4.0 internode dialect spoken with DSE 6 peers,
+     * and the operations refused during the upgrade (refused with {@code NONE} too while DSE 6 peers are seen).
      */
     public static boolean isDse6CompatibilityMode()
     {

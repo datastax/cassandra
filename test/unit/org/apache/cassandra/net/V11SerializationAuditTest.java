@@ -158,6 +158,7 @@ public class V11SerializationAuditTest extends CQLTester
     {
         modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        // the tables of these tests are created in DSE_6 mode, whose schema freeze the property lifts
         allowDdl = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true);
     }
 

@@ -56,8 +56,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The record of DSE 6 peers: maintained from the messaging versions the node records (the dialect from a
- * handshake, DSE's own gossip values), loaded from the previous run at startup, persisted for the startup checks,
- * and untouched with {@code internode_compatibility_mode: NONE}.
+ * handshake, DSE's own gossip values), loaded from the previous run at startup, persisted for the startup checks
+ * (once more at a drain), and untouched with {@code internode_compatibility_mode: NONE}.
  */
 public class DsePeersRecordTest
 {
@@ -361,6 +361,46 @@ public class DsePeersRecordTest
         Mockito.when(rejecting.submit(Mockito.any(Runnable.class))).thenThrow(new RejectedExecutionException("shut down"));
         assertThat(DsePeersRecord.persistOn(rejecting)).isNull();
         assertThat(DsePeersRecord.persistedPeers()).containsExactly("127.0.0.44:7000");
+    }
+
+    @Test
+    public void theDrainWritesTheRecordOnceMoreWhenItChanged() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        // a record loaded from the previous run and not changed since: the file already holds it and is left as it is
+        Files.createDirectories(DsePeersRecord.path().getParent());
+        Files.write(DsePeersRecord.path(), "127.0.0.45:7000\n".getBytes(StandardCharsets.UTF_8));
+        DsePeersRecord.loadAtStartup();
+        Files.write(DsePeersRecord.path(), "# edited by hand\n127.0.0.45:7000\n".getBytes(StandardCharsets.UTF_8));
+        DsePeersRecord.persistAtDrain();
+        assertThat(Files.readString(DsePeersRecord.path(), StandardCharsets.UTF_8)).isEqualTo("# edited by hand\n127.0.0.45:7000\n");
+
+        // a change whose write did not reach the file (dropped by the drain): the final write, on the calling thread,
+        // puts the last state there
+        set(dsePeer, MessagingService.VERSION_3014);
+        Files.delete(DsePeersRecord.path());
+        DsePeersRecord.persistAtDrain();
+        assertThat(DsePeersRecord.persistedPeers()).containsExactly("127.0.0.44:7000", "127.0.0.45:7000");
+    }
+
+    @Test
+    public void theDrainWritesNothingInNoneMode() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        Files.createDirectories(DsePeersRecord.path().getParent());
+        Files.write(DsePeersRecord.path(), "127.0.0.45:7000\n".getBytes(StandardCharsets.UTF_8));
+        set(dsePeer, MessagingService.VERSION_3014);
+        DsePeersRecord.persistAtDrain();
+        assertThat(Files.readString(DsePeersRecord.path(), StandardCharsets.UTF_8)).isEqualTo("127.0.0.45:7000\n");
+
+        // nor for a record changed in DSE_6 mode once the mode is off
+        Files.delete(DsePeersRecord.path());
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        set(dsePeer, MessagingService.VERSION_3014);
+        Files.delete(DsePeersRecord.path());
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        DsePeersRecord.persistAtDrain();
+        assertThat(DsePeersRecord.path()).doesNotExist();
     }
 
     @Test

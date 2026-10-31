@@ -551,9 +551,9 @@ public class DseCommitLogReplayTest extends CQLTester
     }
 
     /**
-     * The schema the fixture segment was written with, created before its replay, with
-     * {@code cassandra.internode_compatibility_mode.allow_ddl}, which the tests of the mode set around their schema
-     * changes, set for the duration.
+     * The schema the fixture segment was written with, created before its replay: in {@code DSE_6} mode the schema is
+     * frozen ({@code DseUpgradeGuards}), so {@code cassandra.internode_compatibility_mode.allow_ddl} allows the schema
+     * changes for the duration.
      */
     private void createFixtureSchema(DseVersion version) throws Throwable
     {
