@@ -91,9 +91,12 @@ final class SchemaInspector
     /** The package of the replication strategies, which the class names of the schema's replication maps start with. */
     private static final String LOCATOR_PACKAGE = "org.apache.cassandra.locator.";
     private static final String NETWORK_TOPOLOGY_STRATEGY = "NetworkTopologyStrategy";
+    private static final String SIMPLE_STRATEGY = "SimpleStrategy";
+    private static final String EVERYWHERE_STRATEGY = "EverywhereStrategy";
     /**
-     * The replicas of {@code system_auth} each data center needs, or as many as its nodes if fewer: with three, an
-     * upgraded node still reads DSE's access controls at {@code LOCAL_QUORUM} while one replica of its data center is down.
+     * The replicas of {@code system_auth} recommended in each data center, or as many as its nodes if fewer: with
+     * three, an upgraded node still reads DSE's access controls at {@code LOCAL_QUORUM} while another node of its data
+     * center is down.
      */
     private static final int AUTH_REPLICAS = 3;
 
@@ -396,21 +399,34 @@ final class SchemaInspector
         if (!unloadable.isEmpty())
             findings.add(blocking("UNLOADABLE_KEYSPACE",
                                   "keyspaces whose replication HCD 2.0 cannot load: " + list(unloadable),
-                                  "ALTER KEYSPACE on DSE to a replication strategy HCD 2.0 has (NetworkTopologyStrategy, SimpleStrategy)"));
+                                  "ALTER KEYSPACE on DSE to a replication strategy HCD 2.0 has (NetworkTopologyStrategy, SimpleStrategy, " +
+                                  "EverywhereStrategy)"));
     }
 
     /**
-     * {@code system_auth} must be on {@code NetworkTopologyStrategy} with every data center of {@code nodes/local} and
-     * {@code nodes/peers} listed, at {@link #AUTH_REPLICAS} replicas or more in each (or as many as its nodes if fewer),
-     * and no more replicas than its nodes where that raises the quorum: an upgraded node reads DSE's access controls from
-     * it at {@code LOCAL_QUORUM} when it starts, and refuses to start when it cannot. With DSE's default,
-     * {@code SimpleStrategy} with one replica, it cannot start while the node holding that replica is down. Blocking; in
-     * the mixed phase, when the replication can no longer be changed, its remedy is to upgrade no further node and report
-     * to the upgrade owner. When the data centers of the nodes are not all known, or a nodes file could not be read, the
-     * nodes counted are a lower bound: no upper bound and no cap then, the remedy asking for {@link #AUTH_REPLICAS}
-     * replicas in each data center it names (the replicas listed kept when higher), to be lowered by hand where a data
-     * center has fewer nodes, and a warning asking for the check by hand when nothing else is found. A schema without
-     * {@code system_auth} blocks; a replication that cannot be read is left to {@code UNLOADABLE_KEYSPACE}.
+     * {@code system_auth} must give every data center of {@code nodes/local} and {@code nodes/peers} replicas whose
+     * {@code LOCAL_QUORUM} its nodes can meet: an upgraded node reads DSE's access controls from it at
+     * {@code LOCAL_QUORUM} when it starts (the whole of {@code role_permissions}), and refuses to start when it cannot.
+     * Blocking, as the upgrade cannot work then, where a data center with nodes has no replica (not listed by
+     * {@code NetworkTopologyStrategy}, or at 0), where {@code NetworkTopologyStrategy} lists no data center with a
+     * replica, where {@code SimpleStrategy} spans several data centers or has no {@code replication_factor}, or 0,
+     * where the class is none of {@code NetworkTopologyStrategy}, {@code SimpleStrategy} and {@code EverywhereStrategy}
+     * (or there is none) or the replicas are no number, or where a data center has more replicas than its nodes can
+     * make a {@code LOCAL_QUORUM} of ({@code EverywhereStrategy} over several data centers counts the replicas of the
+     * whole ring). A warning where the replication works with every node up but not while another node of the data
+     * center is down, which {@link #AUTH_REPLICAS} replicas (or as many as its nodes if fewer) would allow: a data
+     * center of 3 nodes or more with fewer than 3 replicas, or with so many more replicas than nodes that its
+     * {@code LOCAL_QUORUM} needs every node; never in a data center of 1 or 2 nodes, where no replication lets a node
+     * be down. With one data center, {@code SimpleStrategy} is the replication of that data center, so DSE's default
+     * (one replica) passes on a single node, and {@code EverywhereStrategy} gives every node a replica. In the mixed
+     * phase, when the replication can no longer be changed, the blocking remedy is to upgrade no further node and
+     * report to the upgrade owner, and the warning asks for no change, only that every node of the data center stays up
+     * while an upgraded node there starts. When the data centers of the nodes are not all known, or a nodes file could
+     * not be read, the nodes counted are a lower bound: no upper bound and no cap then, the remedy asking for
+     * {@link #AUTH_REPLICAS} replicas in each data center it names (the replicas listed kept when higher), to be
+     * lowered by hand where a data center has fewer nodes, and a warning asking for the check by hand when nothing
+     * blocks. A schema without {@code system_auth} blocks; a replication that cannot be read is left to
+     * {@code UNLOADABLE_KEYSPACE}.
      */
     private void checkAuthReplication()
     {
@@ -437,40 +453,72 @@ final class SchemaInspector
             return;
         }
         String shown = cql(replication);
-        boolean networkTopology = NETWORK_TOPOLOGY_STRATEGY.equals(shortClassName(replication.getOrDefault("class", "")));
+        String className = shortClassName(replication.getOrDefault("class", ""));
+        boolean networkTopology = NETWORK_TOPOLOGY_STRATEGY.equals(className);
+        boolean simple = SIMPLE_STRATEGY.equals(className);
+        // DSE's EverywhereStrategy, which HCD 2.0 has: a replica on every node, its factor the nodes of the whole ring
+        boolean everywhere = EVERYWHERE_STRATEGY.equals(className);
         // whether the nodes of each data center are all counted: the data center of every node known, from files read
         boolean countsExact = nodesFilesRead && nodesWithoutDataCenter == 0 && !nodesByDataCenter.isEmpty();
+        // what stops an upgraded node from starting even with every node up: blocking
         List<String> problems = new ArrayList<>();
-        // the replicas the remedy sets in each data center: those already there, raised to what is needed and kept
-        // within the nodes of the data center; with the nodes counted a lower bound, raised to AUTH_REPLICAS and not capped
+        // what stops an upgraded node from starting while another node of its data center is down, where the
+        // recommended replicas would not: a warning
+        List<String> shortfalls = new ArrayList<>();
+        // the data centers of the shortfalls, whose nodes must all be up while an upgraded node of them starts
+        List<String> shortOf = new ArrayList<>();
+        // whether a shortfall is too few replicas, and whether one is so many above the nodes that LOCAL_QUORUM needs
+        // them all
+        boolean fewerThanRecommended = false;
+        boolean aboveTheNodes = false;
+        // the replicas the replication gives each data center of nodes/local and nodes/peers, when it gives a number
+        // above 0
+        Map<String, Integer> replicasByDataCenter = new TreeMap<>();
+        // the replicas the remedy sets in each data center: those already there, raised to what is recommended and kept
+        // within the nodes of the data center; with the nodes counted a lower bound, raised to AUTH_REPLICAS and not
+        // capped
         Map<String, Integer> wanted = new TreeMap<>();
-        // the data centers listed with replicas that no node of nodes/local and nodes/peers is in, left out of the remedy
-        // when the nodes of each data center are all counted
+        // the data centers listed with replicas that no node of nodes/local and nodes/peers is in, left out of the
+        // remedy when the nodes of each data center are all counted
         Set<String> leftOut = new TreeSet<>();
         // the data centers listed, with no number of replicas, that no node of nodes/local and nodes/peers is known in
         Set<String> unnumbered = new TreeSet<>();
-        int listedWithReplicas = 0;
-        // the replication factor of SimpleStrategy, when the remedy does not carry it over
+        // what the remedy says of replicas it does not carry over (SimpleStrategy over several data centers,
+        // EverywhereStrategy)
         String factorNotCarried = "";
-        if (!networkTopology)
+        // the data centers NetworkTopologyStrategy lists with replicas
+        int listedWithReplicas = 0;
+        if (simple)
         {
-            problems.add(replication.containsKey("class") ? "its class is " + shortClassName(replication.get("class")) + " (not NetworkTopologyStrategy)"
-                                                          : "it has no replication class");
-            // with one data center, all its nodes counted, the replication factor of SimpleStrategy is the replicas of that
-            // data center
-            Integer factor = replication.containsKey("replication_factor") ? replicas(replication.get("replication_factor")) : null;
-            if (factor != null && factor > 0 && countsExact && nodesByDataCenter.size() == 1)
-                nodesByDataCenter.keySet().forEach(dataCenter -> wanted.put(dataCenter, factor));
-            else if (factor != null && factor > 0 && nodesByDataCenter.size() > 1)
-                factorNotCarried = "; the replication factor of SimpleStrategy spans the data centers, so it is not carried over";
+            String factorValue = replication.get("replication_factor");
+            Integer factor = factorValue == null ? null : replicas(factorValue);
+            if (factorValue == null)
+                problems.add("it has no replication_factor");
+            else if (factor == null)
+                problems.add("its replication_factor is '" + factorValue + "', not a number of replicas");
+            else if (factor == 0)
+                problems.add("its replication_factor is 0");
+            if (nodesByDataCenter.size() > 1)
+            {
+                // SimpleStrategy places the replicas around the ring regardless of the data centers
+                problems.add("SimpleStrategy does not place replicas in each data center, and nodes/local and nodes/peers name " +
+                             nodesByDataCenter.size() + " (" + list(nodesByDataCenter.keySet()) + "), so LOCAL_QUORUM cannot be met in each");
+                if (factor != null && factor > 0)
+                    factorNotCarried = "; the replication factor of SimpleStrategy spans the data centers, so it is not carried over";
+            }
             else if (factor != null && factor > 0)
-                factorNotCarried = "; the replication factor of SimpleStrategy is not carried over, the data centers of the nodes not all known";
+            {
+                // with one data center (none known: nothing to give), the replication factor of SimpleStrategy is the
+                // replicas of that data center
+                nodesByDataCenter.keySet().forEach(dataCenter -> replicasByDataCenter.put(dataCenter, factor));
+            }
         }
-        else
+        else if (networkTopology)
         {
             for (Map.Entry<String, String> option : new TreeMap<>(replication).entrySet())
             {
-                // replication_factor is an option of NetworkTopologyStrategy, not a data center, which DSE does not store
+                // replication_factor is an option of NetworkTopologyStrategy, not a data center, which DSE does not
+                // store
                 if (option.getKey().equals("class") || option.getKey().equals("replication_factor"))
                     continue;
                 Integer replicas = replicas(option.getValue());
@@ -478,49 +526,111 @@ final class SchemaInspector
                     problems.add(option.getKey() + " is listed with '" + option.getValue() + "', not a number of replicas");
                 if (replicas == null && !nodesByDataCenter.containsKey(option.getKey()))
                     unnumbered.add(option.getKey());
-                else if (replicas != null && replicas > 0 && (!countsExact || nodesByDataCenter.containsKey(option.getKey())))
+                else if (replicas != null && replicas > 0 && nodesByDataCenter.containsKey(option.getKey()))
+                    replicasByDataCenter.put(option.getKey(), replicas);
+                else if (replicas != null && replicas > 0 && !countsExact)
                     wanted.put(option.getKey(), replicas);
                 else if (replicas != null && replicas > 0)
                     leftOut.add(option.getKey());
                 if (replicas != null && replicas > 0)
                     listedWithReplicas++;
             }
-            if (listedWithReplicas == 0)
-                problems.add("it lists no data center with a replica");
         }
-        boolean fewNodes = false;
+        else if (everywhere)
+        {
+            // LOCAL_QUORUM is the quorum of the factor of the whole ring, met by the replicas in the node's data center
+            // only; known only when the nodes of each data center are all counted
+            int ring = nodesByDataCenter.values().stream().mapToInt(Integer::intValue).sum();
+            factorNotCarried = "; the replicas of EverywhereStrategy are those of the whole ring, so they are not carried over";
+            if (countsExact)
+                nodesByDataCenter.keySet().forEach(dataCenter -> replicasByDataCenter.put(dataCenter, ring));
+            // only a data center of more than half of the nodes meets that quorum, so at most one: with two known,
+            // whatever the nodes not counted, one of them cannot
+            else if (nodesByDataCenter.size() > 1)
+                problems.add("with EverywhereStrategy, LOCAL_QUORUM counts the replicas of the whole ring, which only a data center of " +
+                             "more than half of the nodes meets, and nodes/local and nodes/peers name " + nodesByDataCenter.size() + " (" +
+                             list(nodesByDataCenter.keySet()) + "), so LOCAL_QUORUM cannot be met in each");
+        }
+        else
+        {
+            problems.add(replication.containsKey("class") ? "its class is " + className + " (none of NetworkTopologyStrategy, SimpleStrategy and " +
+                                                            "EverywhereStrategy)"
+                                                          : "it has no replication class");
+        }
+        boolean twoNodes = false;
+        // whether a data center of the nodes is not listed, at 0 replicas or with no number, which says more than that
+        // none is listed
+        boolean dataCenterWithoutReplicas = false;
         for (Map.Entry<String, Integer> entry : nodesByDataCenter.entrySet())
         {
             String dataCenter = entry.getKey();
             int nodeCount = entry.getValue();
-            int needed = Math.min(AUTH_REPLICAS, nodeCount);
-            fewNodes |= countsExact && nodeCount < AUTH_REPLICAS;
+            int recommended = Math.min(AUTH_REPLICAS, nodeCount);
+            twoNodes |= countsExact && nodeCount == 2;
             String listed = networkTopology ? replication.get(dataCenter) : null;
-            Integer replicas = listed == null ? null : replicas(listed);
+            Integer listedReplicas = listed == null ? null : replicas(listed);
             if (networkTopology && listed == null)
                 problems.add(dataCenter + " (" + nodes(nodeCount) + ") is not listed");
-            else if (networkTopology && replicas != null && replicas < needed)
-                problems.add(dataCenter + " has " + replicas + (replicas == 1 ? " replica" : " replicas") + " and " + nodes(nodeCount));
-            // the nodes counted are a lower bound when the data centers are not all known: no upper bound then
-            else if (networkTopology && countsExact && replicas != null && replicas > nodeCount && quorum(replicas) > quorum(needed))
-                problems.add(dataCenter + " has " + replicas + " replicas and only " + nodes(nodeCount) + ", so LOCAL_QUORUM needs " + quorum(replicas) +
-                             " replicas up there");
-            Integer current = wanted.get(dataCenter);
-            wanted.put(dataCenter, countsExact ? Math.max(needed, current == null ? 0 : Math.min(current, nodeCount))
-                                               : Math.max(needed, current == null ? 0 : current));
+            else if (networkTopology && listedReplicas != null && listedReplicas == 0)
+                problems.add(dataCenter + " has 0 replicas and " + nodes(nodeCount));
+            dataCenterWithoutReplicas |= networkTopology && (listed == null || listedReplicas == null || listedReplicas == 0);
+            Integer replicas = replicasByDataCenter.get(dataCenter);
+            if (replicas != null)
+            {
+                int quorum = quorum(replicas);
+                String anotherDown = ": an upgraded node there cannot start while another node of " + dataCenter + " is down";
+                String has = dataCenter + " has " + replicas + (replicas == 1 ? " replica" : " replicas");
+                // EverywhereStrategy: the data center holds a replica on each of its nodes, of the factor of the whole
+                // ring
+                String above = everywhere ? dataCenter + " holds " + nodeCount + " of the " + replicas + " replicas of the ring " +
+                                            "(EverywhereStrategy: LOCAL_QUORUM counts the replicas of the whole ring)"
+                                          : has + " and only " + nodes(nodeCount);
+                // the nodes counted are a lower bound when the data centers are not all known: no upper bound then
+                if (countsExact && quorum > nodeCount)
+                    problems.add(above + ", so LOCAL_QUORUM needs " + quorum + " replicas up there, more than its nodes");
+                // with 1 or 2 replicas, LOCAL_QUORUM needs them all; from 3 nodes on, 3 replicas would let one node be
+                // down
+                else if (replicas < recommended && nodeCount >= AUTH_REPLICAS)
+                {
+                    shortfalls.add(has + " and " + (countsExact ? "" : "at least ") + nodes(nodeCount) + anotherDown);
+                    shortOf.add(dataCenter);
+                    fewerThanRecommended = true;
+                }
+                // so many replicas above the nodes that LOCAL_QUORUM needs every node, where as many as the nodes would
+                // not (from 3 nodes on, a quorum of every node implies more replicas than nodes: said for readability)
+                else if (countsExact && replicas > nodeCount && quorum == nodeCount && nodeCount >= AUTH_REPLICAS)
+                {
+                    shortfalls.add(above + ", so LOCAL_QUORUM needs " + quorum + " replicas up there" + anotherDown);
+                    shortOf.add(dataCenter);
+                    aboveTheNodes = true;
+                }
+            }
+            // the remedy's ALTER sets every data center, those that need no change included, to the recommended
+            // replicas, a higher factor kept up to its nodes (as listed when the nodes counted are a lower bound); in a
+            // data center of 2 nodes, 1 replica is raised and 3 lowered to 2, which costs nothing: the scan needs both
+            // nodes either way (the replicas of EverywhereStrategy are no factor chosen for the data center: not
+            // carried over)
+            Integer current = everywhere ? null : replicas;
+            wanted.put(dataCenter, countsExact ? Math.max(recommended, current == null ? 0 : Math.min(current, nodeCount))
+                                               : Math.max(recommended, current == null ? 0 : current));
         }
-        // with the nodes counted a lower bound, the remedy asks for the full 3 replicas in every data center it names, the
-        // listed ones that no node counted is in included, the replicas listed kept when higher
+        if (networkTopology && listedWithReplicas == 0 && !dataCenterWithoutReplicas)
+            problems.add("it lists no data center with a replica");
+        // with the nodes counted a lower bound, the remedy asks for the full 3 replicas in every data center it names,
+        // the listed ones that no node counted is in included, the replicas listed kept when higher
         if (!countsExact)
             wanted.replaceAll((dataCenter, replicas) -> Math.max(AUTH_REPLICAS, replicas));
         String everyDataCenter = nodesByDataCenter.isEmpty() ? "every data center of the cluster (nodetool status names them)"
                                                              : "every data center of nodes/local and nodes/peers";
-        String rule = AUTH_REPLICAS + " replicas or more in each (or as many as its nodes if fewer), and no more replicas than its nodes where that " +
-                      "raises the quorum";
+        String recommendation = AUTH_REPLICAS + " replicas, or as many as its nodes if fewer, are recommended: in a data center of " + AUTH_REPLICAS +
+                                " nodes or more they let the upgrade go on while a node is down";
         String otherKeyspaces = !countsExact || wanted.size() > 1
                                 ? "; with several data centers, the other replicated system keyspaces need every data center too, which this " +
                                   "tool does not check"
                                 : "";
+        String reads = "an upgraded node reads DSE's access controls from system_auth at LOCAL_QUORUM (HCD 2.0's default " +
+                       "auth_read_consistency_level) when it starts and refuses to start when it cannot";
+        String keepUp = shortOf.isEmpty() ? "" : "keep every node of " + NodeInspector.namesWithAnd(shortOf) + " up while an upgraded node there starts";
         String unknown;
         if (!nodesFilesRead)
             unknown = "nodes/local or nodes/peers is missing or could not be read, and the data centers of the nodes are not all known";
@@ -531,18 +641,25 @@ final class SchemaInspector
                       " not known from nodes/local and nodes/peers";
         if (problems.isEmpty() && !countsExact)
         {
-            String checked = nodesByDataCenter.isEmpty() ? "for its class only" : "against the nodes whose data center is known only";
+            // EverywhereStrategy has no replicas per data center: they are those of the whole ring, not known here
+            boolean classOnly = nodesByDataCenter.isEmpty() || everywhere;
+            String checked = classOnly ? "for its class only" : "against the nodes whose data center is known only";
             findings.add(warning("SYSTEM_AUTH_REPLICATION",
                                  unknown + ", so the replication of system_auth, " + shown + ", was checked " + checked +
-                                 (nodesByDataCenter.isEmpty() ? ", not for the replicas of each data center" : ""),
+                                 (classOnly ? ", not for the replicas of each data center" : "") +
+                                 (shortfalls.isEmpty() ? "" : "; " + items(shortfalls) + "; " + reads),
                                  "check by hand" + (mixedPhase ? "" : ", before the first node of the cluster is upgraded,") + " that system_auth " +
-                                 "lists every data center of the cluster (nodetool status names them), with " + rule +
+                                 "has replicas in every data center of the cluster (nodetool status names them; with several data centers, " +
+                                 "NetworkTopologyStrategy listing each), no more in a data center than its nodes can make a LOCAL_QUORUM of" +
+                                 (everywhere ? " (EverywhereStrategy: LOCAL_QUORUM counts the replicas of the whole ring, which only a data " +
+                                               "center of more than half of the nodes meets)" : "") +
                                  (mixedPhase ? "; if it does not, upgrade no further node and report to the upgrade owner, since the replication " +
-                                               "cannot be changed in the mixed phase" : otherKeyspaces)));
+                                               "cannot be changed in the mixed phase" + (shortfalls.isEmpty() ? "" : "; " + keepUp)
+                                             : "; " + recommendation + otherKeyspaces)));
             authReplicationStep = shown + ", checked " + checked + " (" + unknown + ")" + otherKeyspaces;
             return;
         }
-        if (problems.isEmpty())
+        if (problems.isEmpty() && shortfalls.isEmpty())
         {
             authReplicationStep = shown + ", enough in every data center of nodes/local and nodes/peers" + otherKeyspaces;
             return;
@@ -553,20 +670,6 @@ final class SchemaInspector
             alter.append(", '<dc>': ").append(AUTH_REPLICAS);
         wanted.forEach((dataCenter, replicas) -> alter.append(", ").append(quoted(dataCenter)).append(": ").append(replicas));
         alter.append("};");
-        String message = "the replication of system_auth is " + shown + ": " + list(problems) + "; an upgraded node reads DSE's access controls from " +
-                         "system_auth at LOCAL_QUORUM when it starts and refuses to start when it cannot, so system_auth needs " +
-                         "NetworkTopologyStrategy with " + everyDataCenter + " listed, at " + rule + ", or an upgraded node cannot start while too " +
-                         "few of the replicas in its data center are up for LOCAL_QUORUM";
-        if (mixedPhase)
-        {
-            findings.add(blocking("SYSTEM_AUTH_REPLICATION", message,
-                                  "the upgrade has started (UPGRADED_PEERS), and the replication cannot be changed in the mixed phase (no schema change " +
-                                  "and no repair then, and the upgraded nodes do not receive DSE's schema changes): upgrade no further node and report " +
-                                  "to the upgrade owner; until it is changed, an upgraded node cannot start while too few of the replicas in its data " +
-                                  "center are up for LOCAL_QUORUM, and never when its data center has no replica"));
-            authReplicationStep = "see SYSTEM_AUTH_REPLICATION";
-            return;
-        }
         String dataCenters = factorNotCarried +
                              (nodesByDataCenter.isEmpty() ? "; " + unknown + ": list each data center nodetool status shows, and lower the " +
                                                             AUTH_REPLICAS + " replicas of a data center of fewer nodes to its nodes"
@@ -580,19 +683,61 @@ final class SchemaInspector
                                                                    "and with no node in nodes/local and nodes/peers, left out"
                                                                  : "; " + list(new ArrayList<>(unnumbered)) + ", listed with no number of replicas, " +
                                                                    "left out: set it by hand if that data center has nodes");
-        findings.add(blocking("SYSTEM_AUTH_REPLICATION", message,
-                              "before the first node of the cluster is upgraded, with the NodeSync flag off on the tables of system_auth (DSE's repair " +
-                              "skips a table whose flag is on), through one DSE node: " + alter + " (every data center, its exact name as nodetool " +
-                              "status shows it, with " + AUTH_REPLICAS + " replicas, or as many as its nodes if fewer, a higher replication factor " +
-                              (countsExact ? "kept up to the nodes of the data center" : "kept as listed") + dataCenters + "); DESCRIBE KEYSPACE " +
-                              "system_auth then shows the new map and nodetool describecluster one schema version; right after, nodetool repair " +
-                              "-full system_auth on every node, one at a time, each exiting 0 and printing no Skipping anti-entropy repair line, a " +
-                              "failed one run again, whole, on its node (the ALTER and the repair in a quiet period, without a pause between them); " +
-                              "then nodetool flush system_schema on this node and run this tool again" +
-                              (fewNodes ? "; with fewer than " + AUTH_REPLICAS + " nodes in a data center, an upgraded node there still cannot start " +
-                                          "while another node of that data center is down" : "") +
-                              otherKeyspaces));
+        String change = "with the NodeSync flag off on the tables of system_auth (DSE's repair skips a table whose flag is on), through one DSE " +
+                        "node: " + alter + " (every data center, its exact name as nodetool status shows it; " + recommendation +
+                        "; a higher replication factor is " + (countsExact ? "kept up to the nodes of the data center" : "kept as listed") + dataCenters +
+                        "); DESCRIBE KEYSPACE system_auth then shows the new map and nodetool describecluster one schema version; right after, " +
+                        "nodetool repair -full system_auth on every node, one at a time, each exiting 0 and printing no Skipping anti-entropy " +
+                        "repair line, a failed one run again, whole, on its node (the ALTER and the repair in a quiet period, without a pause " +
+                        "between them); then nodetool flush system_schema on this node and run this tool again" +
+                        (twoNodes ? "; in a data center of 2 nodes, an upgraded node still cannot start while the other one is down" : "") +
+                        otherKeyspaces;
+        if (problems.isEmpty())
+        {
+            // in the mixed phase, when the replication can no longer be changed, the warning asks for no change, only
+            // that every node of the data center stays up while an upgraded node there starts
+            String more = fewerThanRecommended && aboveTheNodes
+                          ? "more replicas (" + AUTH_REPLICAS + " where a data center has fewer), and as many as its nodes where it has more " +
+                            "replicas than nodes, let"
+                          : fewerThanRecommended ? "more replicas (" + AUTH_REPLICAS + ", or up to the nodes of the data center) let"
+                                                 : "as many replicas as the nodes of the data center let";
+            String message = "the replication of system_auth is " + shown + ": " + items(shortfalls) + "; " + reads +
+                             (mixedPhase ? "" : "; " + more + " the upgrade go on while a node is down");
+            findings.add(warning("SYSTEM_AUTH_REPLICATION", message,
+                                 mixedPhase ? "the upgrade has started (UPGRADED_PEERS), so the replication stays as it is (no schema change and no " +
+                                              "repair in the mixed phase): " + keepUp
+                                            : "optional, before the first node of the cluster is upgraded, " + change));
+            authReplicationStep = "see SYSTEM_AUTH_REPLICATION";
+            return;
+        }
+        String message = "the replication of system_auth is " + shown + ": " + items(problems) + "; " + reads + ", so " + everyDataCenter + " needs " +
+                         "replicas of system_auth (with several data centers, NetworkTopologyStrategy listing each), no more in a data center " +
+                         "than its nodes can make a LOCAL_QUORUM of, or an upgraded node there cannot start, even with every node up" +
+                         (shortfalls.isEmpty() ? "" : "; besides, " + items(shortfalls));
+        if (mixedPhase)
+        {
+            findings.add(blocking("SYSTEM_AUTH_REPLICATION", message,
+                                  "the upgrade has started (UPGRADED_PEERS), and the replication cannot be changed in the mixed phase (no schema change " +
+                                  "and no repair then, and the upgraded nodes do not receive DSE's schema changes): upgrade no further node and report " +
+                                  "to the upgrade owner; until it is changed, an upgraded node cannot start while too few of the replicas in its data " +
+                                  "center are up for LOCAL_QUORUM, and never where its data center lacks replicas (not listed, at 0, or " +
+                                  "SimpleStrategy over several data centers) or has fewer nodes than its LOCAL_QUORUM needs (with " +
+                                  "EverywhereStrategy, the quorum of the whole ring), nor with a replication HCD 2.0 cannot use (no class or " +
+                                  "another class, replicas that are no number, or no replication_factor)"));
+            authReplicationStep = "see SYSTEM_AUTH_REPLICATION";
+            return;
+        }
+        findings.add(blocking("SYSTEM_AUTH_REPLICATION", message, "before the first node of the cluster is upgraded, " + change));
         authReplicationStep = "see SYSTEM_AUTH_REPLICATION";
+    }
+
+    /**
+     * The problems or shortfalls of the replication of {@code system_auth}, each with commas of its own: joined with
+     * semicolons.
+     */
+    private static String items(List<String> items)
+    {
+        return String.join("; ", items);
     }
 
     /** The replicas that make a {@code LOCAL_QUORUM} of {@code replicas}. */
