@@ -88,6 +88,14 @@ final class SchemaInspector
     /** The DSE class of tiered storage, the only one of its hierarchy that a table names. */
     static final String TIERED_COMPACTION_STRATEGY = "org.apache.cassandra.db.compaction.TieredCompactionStrategy";
     static final String PROXY_PERMISSION_PREFIX = "PROXY.";
+    /** The package of the replication strategies, which the class names of the schema's replication maps start with. */
+    private static final String LOCATOR_PACKAGE = "org.apache.cassandra.locator.";
+    private static final String NETWORK_TOPOLOGY_STRATEGY = "NetworkTopologyStrategy";
+    /**
+     * The replicas of {@code system_auth} each data center needs, or as many as its nodes if fewer: with three, an
+     * upgraded node still reads DSE's access controls at {@code LOCAL_QUORUM} while one replica of its data center is down.
+     */
+    private static final int AUTH_REPLICAS = 3;
 
     private final List<File> dataDirectories;
     /** the DSEFS keyspace named in {@code dse.yaml}, when it is not DSE's default */
@@ -101,6 +109,14 @@ final class SchemaInspector
      * sets their compression back itself at its first start with the setting off
      */
     private final boolean systemInfoEncryption;
+    /** the nodes of each data center, this node included, as nodes/local and nodes/peers record them */
+    private final Map<String, Integer> nodesByDataCenter;
+    /** the nodes whose data center nodes/local and nodes/peers do not give, not counted in {@link #nodesByDataCenter} */
+    private final int nodesWithoutDataCenter;
+    /** whether nodes/local and nodes/peers could both be read, so that every node is either counted or without a data center */
+    private final boolean nodesFilesRead;
+    /** whether a peer already runs HCD 2.0 (the mixed phase), when the replication of system_auth can no longer be changed */
+    private final boolean mixedPhase;
     private final List<Finding> findings;
 
     private final Map<String, UntypedResultSet.Row> keyspaces = new TreeMap<>();
@@ -127,6 +143,9 @@ final class SchemaInspector
     final List<String> viewsRefused = new ArrayList<>();
     /** the names of the materialized views to drop before the upgrade: those of {@link #viewsRefused} and the unloadable ones */
     final Set<String> viewsToDrop = new TreeSet<>();
+    /** the upgrade step on the replication of {@code system_auth}; null when the schema could not be read or its inspection failed */
+    @Nullable
+    String authReplicationStep;
     int keyspaceCount;
     int tableCount;
     int viewCount;
@@ -137,12 +156,18 @@ final class SchemaInspector
     /** whether a directory of {@code system_auth.role_permissions} exists in the data directories */
     boolean rolePermissionsFound;
 
-    SchemaInspector(List<File> dataDirectories, @Nullable String dsefsKeyspace, IPartitioner partitioner, boolean systemInfoEncryption, List<Finding> findings)
+    SchemaInspector(List<File> dataDirectories, @Nullable String dsefsKeyspace, IPartitioner partitioner, boolean systemInfoEncryption,
+                    Map<String, Integer> nodesByDataCenter, int nodesWithoutDataCenter, boolean nodesFilesRead,
+                    boolean mixedPhase, List<Finding> findings)
     {
         this.dataDirectories = dataDirectories;
         this.dsefsKeyspace = dsefsKeyspace;
         this.partitioner = partitioner;
         this.systemInfoEncryption = systemInfoEncryption;
+        this.nodesByDataCenter = nodesByDataCenter;
+        this.nodesWithoutDataCenter = nodesWithoutDataCenter;
+        this.nodesFilesRead = nodesFilesRead;
+        this.mixedPhase = mixedPhase;
         this.findings = findings;
     }
 
@@ -159,6 +184,15 @@ final class SchemaInspector
             checkDroppedColumns();
             checkFunctions();
             checkTriggers();
+            try
+            {
+                checkAuthReplication();
+            }
+            catch (RuntimeException | AssertionError e)
+            {
+                findings.add(blocking("INSPECTION_ERROR", "the inspection of the replication of system_auth failed (" + e + "), so it is incomplete",
+                                      "report the error with the output of the tool; the node cannot be declared ready until the inspection completes"));
+            }
         }
         checkAccessControls();
     }
@@ -363,6 +397,255 @@ final class SchemaInspector
             findings.add(blocking("UNLOADABLE_KEYSPACE",
                                   "keyspaces whose replication HCD 2.0 cannot load: " + list(unloadable),
                                   "ALTER KEYSPACE on DSE to a replication strategy HCD 2.0 has (NetworkTopologyStrategy, SimpleStrategy)"));
+    }
+
+    /**
+     * {@code system_auth} must be on {@code NetworkTopologyStrategy} with every data center of {@code nodes/local} and
+     * {@code nodes/peers} listed, at {@link #AUTH_REPLICAS} replicas or more in each (or as many as its nodes if fewer),
+     * and no more replicas than its nodes where that raises the quorum: an upgraded node reads DSE's access controls from
+     * it at {@code LOCAL_QUORUM} when it starts, and refuses to start when it cannot. With DSE's default,
+     * {@code SimpleStrategy} with one replica, it cannot start while the node holding that replica is down. Blocking; in
+     * the mixed phase, when the replication can no longer be changed, its remedy is to upgrade no further node and report
+     * to the upgrade owner. When the data centers of the nodes are not all known, or a nodes file could not be read, the
+     * nodes counted are a lower bound: no upper bound and no cap then, the remedy asking for {@link #AUTH_REPLICAS}
+     * replicas in each data center it names (the replicas listed kept when higher), to be lowered by hand where a data
+     * center has fewer nodes, and a warning asking for the check by hand when nothing else is found. A schema without
+     * {@code system_auth} blocks; a replication that cannot be read is left to {@code UNLOADABLE_KEYSPACE}.
+     */
+    private void checkAuthReplication()
+    {
+        UntypedResultSet.Row row = keyspaces.get(SchemaConstants.AUTH_KEYSPACE_NAME);
+        if (row == null)
+        {
+            authReplicationStep = "not checked (the schema has no system_auth keyspace)";
+            findings.add(blocking("SYSTEM_AUTH_REPLICATION",
+                                  "the schema read from this node's sstables has no system_auth keyspace, which DSE creates at its first start, so its " +
+                                  "replication cannot be checked",
+                                  "run nodetool flush system_schema on this node and this tool again; if system_auth is still missing, point the tool at " +
+                                  "the data directories of this DSE node (data_file_directories of DSE's cassandra.yaml, or --data-dir)"));
+            return;
+        }
+        Map<String, String> replication;
+        try
+        {
+            replication = row.has("replication") ? row.getFrozenTextMap("replication") : Map.of();
+        }
+        catch (RuntimeException e)
+        {
+            // UNLOADABLE_KEYSPACE reports it
+            authReplicationStep = "not checked (its replication cannot be read, see UNLOADABLE_KEYSPACE)";
+            return;
+        }
+        String shown = cql(replication);
+        boolean networkTopology = NETWORK_TOPOLOGY_STRATEGY.equals(shortClassName(replication.getOrDefault("class", "")));
+        // whether the nodes of each data center are all counted: the data center of every node known, from files read
+        boolean countsExact = nodesFilesRead && nodesWithoutDataCenter == 0 && !nodesByDataCenter.isEmpty();
+        List<String> problems = new ArrayList<>();
+        // the replicas the remedy sets in each data center: those already there, raised to what is needed and kept
+        // within the nodes of the data center; with the nodes counted a lower bound, raised to AUTH_REPLICAS and not capped
+        Map<String, Integer> wanted = new TreeMap<>();
+        // the data centers listed with replicas that no node of nodes/local and nodes/peers is in, left out of the remedy
+        // when the nodes of each data center are all counted
+        Set<String> leftOut = new TreeSet<>();
+        // the data centers listed, with no number of replicas, that no node of nodes/local and nodes/peers is known in
+        Set<String> unnumbered = new TreeSet<>();
+        int listedWithReplicas = 0;
+        // the replication factor of SimpleStrategy, when the remedy does not carry it over
+        String factorNotCarried = "";
+        if (!networkTopology)
+        {
+            problems.add(replication.containsKey("class") ? "its class is " + shortClassName(replication.get("class")) + " (not NetworkTopologyStrategy)"
+                                                          : "it has no replication class");
+            // with one data center, all its nodes counted, the replication factor of SimpleStrategy is the replicas of that
+            // data center
+            Integer factor = replication.containsKey("replication_factor") ? replicas(replication.get("replication_factor")) : null;
+            if (factor != null && factor > 0 && countsExact && nodesByDataCenter.size() == 1)
+                nodesByDataCenter.keySet().forEach(dataCenter -> wanted.put(dataCenter, factor));
+            else if (factor != null && factor > 0 && nodesByDataCenter.size() > 1)
+                factorNotCarried = "; the replication factor of SimpleStrategy spans the data centers, so it is not carried over";
+            else if (factor != null && factor > 0)
+                factorNotCarried = "; the replication factor of SimpleStrategy is not carried over, the data centers of the nodes not all known";
+        }
+        else
+        {
+            for (Map.Entry<String, String> option : new TreeMap<>(replication).entrySet())
+            {
+                // replication_factor is an option of NetworkTopologyStrategy, not a data center, which DSE does not store
+                if (option.getKey().equals("class") || option.getKey().equals("replication_factor"))
+                    continue;
+                Integer replicas = replicas(option.getValue());
+                if (replicas == null)
+                    problems.add(option.getKey() + " is listed with '" + option.getValue() + "', not a number of replicas");
+                if (replicas == null && !nodesByDataCenter.containsKey(option.getKey()))
+                    unnumbered.add(option.getKey());
+                else if (replicas != null && replicas > 0 && (!countsExact || nodesByDataCenter.containsKey(option.getKey())))
+                    wanted.put(option.getKey(), replicas);
+                else if (replicas != null && replicas > 0)
+                    leftOut.add(option.getKey());
+                if (replicas != null && replicas > 0)
+                    listedWithReplicas++;
+            }
+            if (listedWithReplicas == 0)
+                problems.add("it lists no data center with a replica");
+        }
+        boolean fewNodes = false;
+        for (Map.Entry<String, Integer> entry : nodesByDataCenter.entrySet())
+        {
+            String dataCenter = entry.getKey();
+            int nodeCount = entry.getValue();
+            int needed = Math.min(AUTH_REPLICAS, nodeCount);
+            fewNodes |= countsExact && nodeCount < AUTH_REPLICAS;
+            String listed = networkTopology ? replication.get(dataCenter) : null;
+            Integer replicas = listed == null ? null : replicas(listed);
+            if (networkTopology && listed == null)
+                problems.add(dataCenter + " (" + nodes(nodeCount) + ") is not listed");
+            else if (networkTopology && replicas != null && replicas < needed)
+                problems.add(dataCenter + " has " + replicas + (replicas == 1 ? " replica" : " replicas") + " and " + nodes(nodeCount));
+            // the nodes counted are a lower bound when the data centers are not all known: no upper bound then
+            else if (networkTopology && countsExact && replicas != null && replicas > nodeCount && quorum(replicas) > quorum(needed))
+                problems.add(dataCenter + " has " + replicas + " replicas and only " + nodes(nodeCount) + ", so LOCAL_QUORUM needs " + quorum(replicas) +
+                             " replicas up there");
+            Integer current = wanted.get(dataCenter);
+            wanted.put(dataCenter, countsExact ? Math.max(needed, current == null ? 0 : Math.min(current, nodeCount))
+                                               : Math.max(needed, current == null ? 0 : current));
+        }
+        // with the nodes counted a lower bound, the remedy asks for the full 3 replicas in every data center it names, the
+        // listed ones that no node counted is in included, the replicas listed kept when higher
+        if (!countsExact)
+            wanted.replaceAll((dataCenter, replicas) -> Math.max(AUTH_REPLICAS, replicas));
+        String everyDataCenter = nodesByDataCenter.isEmpty() ? "every data center of the cluster (nodetool status names them)"
+                                                             : "every data center of nodes/local and nodes/peers";
+        String rule = AUTH_REPLICAS + " replicas or more in each (or as many as its nodes if fewer), and no more replicas than its nodes where that " +
+                      "raises the quorum";
+        String otherKeyspaces = !countsExact || wanted.size() > 1
+                                ? "; with several data centers, the other replicated system keyspaces need every data center too, which this " +
+                                  "tool does not check"
+                                : "";
+        String unknown;
+        if (!nodesFilesRead)
+            unknown = "nodes/local or nodes/peers is missing or could not be read, and the data centers of the nodes are not all known";
+        else if (nodesByDataCenter.isEmpty())
+            unknown = "no data center is known from nodes/local and nodes/peers";
+        else
+            unknown = (nodesWithoutDataCenter == 1 ? "the data center of 1 node is" : "the data centers of " + nodesWithoutDataCenter + " nodes are") +
+                      " not known from nodes/local and nodes/peers";
+        if (problems.isEmpty() && !countsExact)
+        {
+            String checked = nodesByDataCenter.isEmpty() ? "for its class only" : "against the nodes whose data center is known only";
+            findings.add(warning("SYSTEM_AUTH_REPLICATION",
+                                 unknown + ", so the replication of system_auth, " + shown + ", was checked " + checked +
+                                 (nodesByDataCenter.isEmpty() ? ", not for the replicas of each data center" : ""),
+                                 "check by hand" + (mixedPhase ? "" : ", before the first node of the cluster is upgraded,") + " that system_auth " +
+                                 "lists every data center of the cluster (nodetool status names them), with " + rule +
+                                 (mixedPhase ? "; if it does not, upgrade no further node and report to the upgrade owner, since the replication " +
+                                               "cannot be changed in the mixed phase" : otherKeyspaces)));
+            authReplicationStep = shown + ", checked " + checked + " (" + unknown + ")" + otherKeyspaces;
+            return;
+        }
+        if (problems.isEmpty())
+        {
+            authReplicationStep = shown + ", enough in every data center of nodes/local and nodes/peers" + otherKeyspaces;
+            return;
+        }
+
+        StringBuilder alter = new StringBuilder("ALTER KEYSPACE system_auth WITH replication = {'class': 'NetworkTopologyStrategy'");
+        if (wanted.isEmpty())
+            alter.append(", '<dc>': ").append(AUTH_REPLICAS);
+        wanted.forEach((dataCenter, replicas) -> alter.append(", ").append(quoted(dataCenter)).append(": ").append(replicas));
+        alter.append("};");
+        String message = "the replication of system_auth is " + shown + ": " + list(problems) + "; an upgraded node reads DSE's access controls from " +
+                         "system_auth at LOCAL_QUORUM when it starts and refuses to start when it cannot, so system_auth needs " +
+                         "NetworkTopologyStrategy with " + everyDataCenter + " listed, at " + rule + ", or an upgraded node cannot start while too " +
+                         "few of the replicas in its data center are up for LOCAL_QUORUM";
+        if (mixedPhase)
+        {
+            findings.add(blocking("SYSTEM_AUTH_REPLICATION", message,
+                                  "the upgrade has started (UPGRADED_PEERS), and the replication cannot be changed in the mixed phase (no schema change " +
+                                  "and no repair then, and the upgraded nodes do not receive DSE's schema changes): upgrade no further node and report " +
+                                  "to the upgrade owner; until it is changed, an upgraded node cannot start while too few of the replicas in its data " +
+                                  "center are up for LOCAL_QUORUM, and never when its data center has no replica"));
+            authReplicationStep = "see SYSTEM_AUTH_REPLICATION";
+            return;
+        }
+        String dataCenters = factorNotCarried +
+                             (nodesByDataCenter.isEmpty() ? "; " + unknown + ": list each data center nodetool status shows, and lower the " +
+                                                            AUTH_REPLICAS + " replicas of a data center of fewer nodes to its nodes"
+                                                          : countsExact ? "" : "; " + unknown + ": check by hand the data center of each node " +
+                                                                               "and its replicas, and lower the " + AUTH_REPLICAS + " replicas of " +
+                                                                               "a data center of fewer nodes to its nodes") +
+                             (leftOut.isEmpty() ? "" : "; " + list(new ArrayList<>(leftOut)) + ", listed but with no node in nodes/local and " +
+                                                       "nodes/peers, left out") +
+                             (unnumbered.isEmpty() ? ""
+                                                   : countsExact ? "; " + list(new ArrayList<>(unnumbered)) + ", listed with no number of replicas " +
+                                                                   "and with no node in nodes/local and nodes/peers, left out"
+                                                                 : "; " + list(new ArrayList<>(unnumbered)) + ", listed with no number of replicas, " +
+                                                                   "left out: set it by hand if that data center has nodes");
+        findings.add(blocking("SYSTEM_AUTH_REPLICATION", message,
+                              "before the first node of the cluster is upgraded, with the NodeSync flag off on the tables of system_auth (DSE's repair " +
+                              "skips a table whose flag is on), through one DSE node: " + alter + " (every data center, its exact name as nodetool " +
+                              "status shows it, with " + AUTH_REPLICAS + " replicas, or as many as its nodes if fewer, a higher replication factor " +
+                              (countsExact ? "kept up to the nodes of the data center" : "kept as listed") + dataCenters + "); DESCRIBE KEYSPACE " +
+                              "system_auth then shows the new map and nodetool describecluster one schema version; right after, nodetool repair " +
+                              "-full system_auth on every node, one at a time, each exiting 0 and printing no Skipping anti-entropy repair line, a " +
+                              "failed one run again, whole, on its node (the ALTER and the repair in a quiet period, without a pause between them); " +
+                              "then nodetool flush system_schema on this node and run this tool again" +
+                              (fewNodes ? "; with fewer than " + AUTH_REPLICAS + " nodes in a data center, an upgraded node there still cannot start " +
+                                          "while another node of that data center is down" : "") +
+                              otherKeyspaces));
+        authReplicationStep = "see SYSTEM_AUTH_REPLICATION";
+    }
+
+    /** The replicas that make a {@code LOCAL_QUORUM} of {@code replicas}. */
+    private static int quorum(int replicas)
+    {
+        return replicas / 2 + 1;
+    }
+
+    /** A CQL string literal: {@code value} in single quotes, its quotes doubled. */
+    private static String quoted(String value)
+    {
+        return '\'' + value.replace("'", "''") + '\'';
+    }
+
+    /** The class name of a replication strategy without the package of this software's strategies. */
+    private static String shortClassName(String className)
+    {
+        return className.startsWith(LOCATOR_PACKAGE) ? className.substring(LOCATOR_PACKAGE.length()) : className;
+    }
+
+    /** The replicas of a replication option; null when it is no number, or a negative one. */
+    @Nullable
+    private static Integer replicas(String value)
+    {
+        try
+        {
+            int replicas = Integer.parseInt(value.trim());
+            return replicas < 0 ? null : replicas;
+        }
+        catch (NumberFormatException e)
+        {
+            return null;
+        }
+    }
+
+    private static String nodes(int nodes)
+    {
+        return nodes + (nodes == 1 ? " node" : " nodes");
+    }
+
+    /** A replication map as cqlsh shows it, the class without the package of this software's strategies. */
+    private static String cql(Map<String, String> replication)
+    {
+        if (replication.isEmpty())
+            return "not known";
+        List<String> options = new ArrayList<>();
+        if (replication.containsKey("class"))
+            options.add("'class': " + quoted(shortClassName(replication.get("class"))));
+        new TreeMap<>(replication).forEach((option, value) -> {
+            if (!option.equals("class"))
+                options.add(quoted(option) + ": " + quoted(value));
+        });
+        return '{' + String.join(", ", options) + '}';
     }
 
     // ---- types and tables ----

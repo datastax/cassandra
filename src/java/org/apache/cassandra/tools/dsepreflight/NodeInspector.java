@@ -175,6 +175,8 @@ final class NodeInspector
     @Nullable
     private Object legacyPortValue;
     private List<DseNodeRecord> peers = List.of();
+    /** whether nodes/peers exists and could be read */
+    private boolean peersRead;
     @Nullable
     private CassandraVersion localRelease;
     private final Map<String, Long> liveBytesByDataDirectory = new LinkedHashMap<>();
@@ -235,7 +237,8 @@ final class NodeInspector
         guarded("nodes/local and nodes/peers", this::inspectNodesFiles);
         guarded("cassandra.yaml and dse.yaml", this::inspectConfiguration);
         schema = new SchemaInspector(layout.dataDirectories, dsefsKeyspace(), partitioner(),
-                                     isTrue(get(layout.dseConf, "system_info_encryption", "enabled")), findings);
+                                     isTrue(get(layout.dseConf, "system_info_encryption", "enabled")), nodesByDataCenter(),
+                                     nodesWithoutDataCenter(), local != null && peersRead, mixedPhase(), findings);
         guarded("the schema and the access controls", schema::inspect);
         report.accessControls.rolePermissionsRows = schema.rolePermissionsRead ? schema.rolePermissionsRows : null;
         report.accessControls.authorizationEnabled = authorizationEnabled();
@@ -333,6 +336,8 @@ final class NodeInspector
         try
         {
             peers = DseNodesFiles.readPeers(nodes);
+            // DSE always writes nodes/peers, an empty map without peers: a node without it is not known to have none
+            peersRead = Files.exists(nodes.resolve("peers"));
         }
         catch (RuntimeException e)
         {
@@ -476,6 +481,37 @@ final class NodeInspector
         if (!unknown.isEmpty())
             findings.add(warning("PEER_RELEASE_UNKNOWN", "peers whose release nodes/peers does not record: " + list(unknown),
                                  "check their release with nodetool version on each, or with this tool's report of each"));
+    }
+
+    /**
+     * The nodes of each data center, this node included, as {@code nodes/local} and {@code nodes/peers} record them; a
+     * node whose data center is not recorded is not counted.
+     */
+    private Map<String, Integer> nodesByDataCenter()
+    {
+        Map<String, Integer> nodes = new TreeMap<>();
+        if (local != null && local.dataCenter != null)
+            nodes.merge(local.dataCenter, 1, Integer::sum);
+        for (DseNodeRecord peer : peers)
+            if (peer.dataCenter != null)
+                nodes.merge(peer.dataCenter, 1, Integer::sum);
+        return nodes;
+    }
+
+    /** The nodes of {@code nodes/local} and {@code nodes/peers} that record no data center, which {@link #nodesByDataCenter} leaves out. */
+    private int nodesWithoutDataCenter()
+    {
+        int nodes = local != null && local.dataCenter == null ? 1 : 0;
+        for (DseNodeRecord peer : peers)
+            if (peer.dataCenter == null)
+                nodes++;
+        return nodes;
+    }
+
+    /** Whether a peer already runs HCD 2.0 ({@code UPGRADED_PEERS}): the upgrade has started, the cluster is in the mixed phase. */
+    private boolean mixedPhase()
+    {
+        return report.peers.stream().anyMatch(peer -> peer.upgraded);
     }
 
     private static String restartAsCassandra(String who)
@@ -944,7 +980,7 @@ final class NodeInspector
         String restart = "restart each DSE node whose cassandra.yaml did not set it to true (this tool's report of each node says), one at a " +
                          "time, each drained before it stops, with every other node up and every node up and normal (UN in nodetool status) " +
                          "before the next one, and check with ss -tln on each that DSE listens on ssl_storage_port";
-        if (report.peers.stream().anyMatch(peer -> peer.upgraded))
+        if (mixedPhase())
             return "since the upgrade has started (UPGRADED_PEERS), report to the upgrade owner, then " + restart;
         return restart + ", before the first upgrade (in a rolling restart of DSE that is still to come before the upgrade, else in a " +
                "rolling restart of its own)";
@@ -2016,6 +2052,8 @@ final class NodeInspector
             steps.add("Materialized views: " + schema.viewCount + " view(s), none to drop");
         steps.add("NodeSync: " + (nodesyncDisabledInYaml ? "enabled: false is set under nodesync: in DSE's cassandra.yaml; check nodetool nodesyncservice status"
                                                          : "add enabled: false under nodesync: in DSE's cassandra.yaml and run nodetool nodesyncservice disable"));
+        steps.add("Replication of system_auth: " + (schema == null || schema.authReplicationStep == null ? "not checked (the schema could not be read, or its inspection failed)"
+                                                                                                         : schema.authReplicationStep));
         steps.add("SAI version pin: " + (path.saiVersion == null ? "no SAI version can be chosen for this release"
                                                                  : "add -Dcassandra.sai.latest.version=" + path.saiVersion + " to conf/jvm-server.options of HCD 2.0 before its first start"));
         steps.add("During the mixed phase: no topology or schema change, no repair and no upgradesstables");
