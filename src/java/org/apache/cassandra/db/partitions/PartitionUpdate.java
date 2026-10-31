@@ -520,10 +520,25 @@ public interface PartitionUpdate extends Partition
             }
         }
 
+        /**
+         * {@link #isEmpty(ByteBuffer, DeserializationHelper.Flag, DecoratedKey, int)} at the current version; no caller in
+         * this tree, kept for the projects built on it.
+         */
         public static boolean isEmpty(ByteBuffer in, DeserializationHelper.Flag flag, DecoratedKey key) throws IOException
+        {
+            return isEmpty(in, flag, key, MessagingService.current_version);
+        }
+
+        /**
+         * Whether the update serialized at {@code version} in {@code in} is empty, read from its flags without decoding it.
+         * At {@link MessagingService#VERSION_DSE_68} the table id is followed by DSE's maximum timestamp.
+         */
+        public static boolean isEmpty(ByteBuffer in, DeserializationHelper.Flag flag, DecoratedKey key, int version) throws IOException
         {
             int position = in.position();
             position += 16; // CFMetaData.serializer.deserialize(in, version);
+            if (version == MessagingService.VERSION_DSE_68)
+                position += TypeSizes.LONG_SIZE; // the maxTimestamp deserialize() skips
             if (position >= in.limit())
                 throw new EOFException();
             // DecoratedKey key = metadata.decorateKey(ByteBufferUtil.readWithVIntLength(in));
