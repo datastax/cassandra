@@ -1603,6 +1603,11 @@ public class NodeProbe implements AutoCloseable
         return msProxy.getDseSaiVersionPin();
     }
 
+    public String getDseNonCoreTraces()
+    {
+        return msProxy.getDseNonCoreTraces();
+    }
+
     public List<String> getDseLoneWriteGrants()
     {
         return msProxy.getDseLoneWriteGrants();

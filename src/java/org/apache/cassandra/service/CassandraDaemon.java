@@ -289,6 +289,17 @@ public class CassandraDaemon
             throw e;
         }
 
+        // DSE 6 compatibility: refuse to start on any trace of the DSE features this software does not support (Search,
+        // Graph, Analytics, DSEFS/CFS, Advanced Replication), once the schema is loaded and before any keyspace is opened
+        try
+        {
+            Dse6NonCoreTraces.verifyAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
         setupVirtualKeyspaces();
 
         try

@@ -37,11 +37,12 @@ import org.apache.cassandra.tools.NodeTool;
 /**
  * Shows the compatibility modes the node runs with, the sstable format it writes, what it knows about its peers'
  * messaging versions, the DSE peers it sees in gossip or has identified by a handshake, the DSE 6 peers it has on
- * record, the SAI on-disk version it pins for a rollback to DSE, the DSE access controls it does not enforce, the
- * DataStax Enterprise grants of UPDATE or TRUNCATE alone it drops and the requests it refused because of the upgrade:
- * the operator's view during an in-place upgrade from DataStax Enterprise 6.
+ * record, the SAI on-disk version it pins for a rollback to DSE, the traces of the DSE features it does not support
+ * that it ignored, the DSE access controls it does not enforce, the DataStax Enterprise grants of UPDATE or TRUNCATE
+ * alone it drops and the requests it refused because of the upgrade: the operator's view during an in-place upgrade
+ * from DataStax Enterprise 6.
  */
-@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE peers seen in gossip or identified by a handshake, the DSE 6 peers on record, the SAI on-disk version pinned, the DSE access controls not enforced, the DSE grants of UPDATE or TRUNCATE alone that are dropped and the requests refused during the upgrade")
+@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE peers seen in gossip or identified by a handshake, the DSE 6 peers on record, the SAI on-disk version pinned, the traces of the DSE features not supported that were ignored, the DSE access controls not enforced, the DSE grants of UPDATE or TRUNCATE alone that are dropped and the requests refused during the upgrade")
 public class CompatStatus extends NodeTool.NodeToolCmd
 {
     private static final String DSE_6 = InternodeCompatibilityMode.DSE_6.name();
@@ -109,6 +110,12 @@ public class CompatStatus extends NodeTool.NodeToolCmd
         else
             out.printf("SAI version pinned           : not checked%s%n", notInTheMode);
 
+        // the traces of the DSE features this software does not support, which refuse the start in DSE_6 mode
+        if (dse6)
+            printDseNonCoreTraces(probe, out);
+        else
+            out.printf("Non-core DSE traces          : not checked%s%n", notInTheMode);
+
         // what a DSE node restricts but this node does not enforce (the last check in DSE_6 mode), and how it was found
         if (dse6)
             printDseAccessControlCheck(probe, out);
@@ -150,6 +157,16 @@ public class CompatStatus extends NodeTool.NodeToolCmd
             out.printf("SAI version pinned           : unknown (this node does not report it)%n");
         else
             out.printf("SAI version pinned           : %s%n", pin.orElse("unknown (not checked yet)"));
+    }
+
+    private static void printDseNonCoreTraces(NodeProbe probe, PrintStream out)
+    {
+        // the server returns null before the check: an Optional tells it from a server without the attribute
+        Optional<String> traces = ifReported(() -> Optional.ofNullable(probe.getDseNonCoreTraces()));
+        if (traces == null)
+            out.printf("Non-core DSE traces          : unknown (this node does not report them)%n");
+        else
+            out.printf("Non-core DSE traces          : %s%n", traces.orElse("unknown (not checked yet)"));
     }
 
     private static void printDseAccessControlCheck(NodeProbe probe, PrintStream out)

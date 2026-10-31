@@ -27,9 +27,7 @@ import javax.annotation.Nullable;
  * {@code nodes/peers} file: {@code workloads}, the set of the DSE workloads the node runs ({@code Cassandra},
  * {@code Search}, {@code Analytics}, {@code Graph}, {@code Unknown}), {@code graph}, true when DSE Graph is enabled,
  * and {@code workload}, the legacy single string ({@code Cassandra}, {@code SearchAnalytics}, ...). This software does
- * not import them: {@link CC4UpgradeNodesPersistence#localWorkloadsInNodesDirectory()} and
- * {@link CC4UpgradeNodesPersistence#peerWorkloadsInNodesDirectory()} read them from the files DSE wrote, which stay in
- * place in {@code internode_compatibility_mode: DSE_6}.
+ * not import them: a node in {@code internode_compatibility_mode: DSE_6} only checks them ({@code Dse6NonCoreTraces}).
  */
 public final class DseNodeWorkloads
 {
