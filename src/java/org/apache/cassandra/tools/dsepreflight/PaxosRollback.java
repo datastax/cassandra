@@ -38,6 +38,8 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.Terms;
@@ -112,6 +114,15 @@ final class PaxosRollback
     private static final String HCD = "HCD 2.0";
     private static final String DSE = "DSE";
     private static final String PAXOS_DIRECTORY_OPTION = "--paxos-dir";
+    /**
+     * What a nodes file that cannot be read or trusted means for the rollback, after the nodes directory: the reads the
+     * data centers decide are left to the operator, before DSE starts.
+     */
+    private static final String DATA_CENTERS_UNKNOWN = ": the data centers of the cluster are unknown, so the reads of the keyspaces whose " +
+                                                       "replicas may span data centers are left to choose: name their consistency with " +
+                                                       "--serial-consistency <keyspace>=<level>; do not start DSE before every read has succeeded";
+    /** The remedy of a nodes file that cannot be read for its permissions, which holds with both products stopped. */
+    private static final String RUN_AS_DSE_USER = "run the tool as the user DSE runs as (or as root)";
     /** The key of {@code --serial-consistency} that applies to every keyspace not named. */
     private static final String ALL_KEYSPACES = "*";
     private static final List<String> PAXOS_KEY = List.of("row_key");
@@ -589,16 +600,44 @@ final class PaxosRollback
         DseNodeRecord local = null;
         List<DseNodeRecord> peers = null;
         Path nodes = options.metadataDirectory.toPath().resolve("nodes");
+        Path peersFile = nodes.resolve("peers");
+        // looked at before and after the read, as the node inspection does (NodeInspector.peersFileProblem)
+        NodeInspector.PeersFileState before = NodeInspector.PeersFileState.of(peersFile);
         try
         {
             local = DseNodesFiles.readLocal(nodes);
-            // an absent peers file tells nothing about the other nodes; an empty one says there is none
-            if (Files.exists(nodes.resolve("peers")))
-                peers = DseNodesFiles.readPeers(nodes);
         }
         catch (RuntimeException e)
         {
-            report.problems.add("cannot read the nodes files of " + nodes + " (" + e.getMessage() + "): the data centers of the cluster are unknown");
+            report.problems.add(NodeInspector.cannotRead("nodes/local") + e.getMessage() + " (" + nodes + ')' + DATA_CENTERS_UNKNOWN +
+                                "; if the file cannot be read for its permissions, " + RUN_AS_DSE_USER);
+        }
+        try
+        {
+            // an absent peers file tells nothing about the other nodes: a node that never had a peer writes none, but a
+            // lost file is absent too, and the replicas chosen from the nodes files decide between SERIAL and
+            // LOCAL_SERIAL, so the data centers stay unknown (the node inspection, which only counts, reads it as no
+            // peer); an empty one says there is none
+            if (before.exists)
+                peers = DseNodesFiles.readPeers(nodes);
+            // peers.old and peers.txn looked for before the second look at the file, as in the node inspection
+            boolean oldExists = Files.exists(nodes.resolve("peers.old"));
+            boolean txnExists = Files.exists(nodes.resolve("peers.txn"));
+            Finding problem = NodeInspector.peersFileProblem(before, NodeInspector.PeersFileState.of(peersFile), oldExists, txnExists);
+            if (problem != null)
+            {
+                // a nodes/peers being rewritten by DSE, or left half written, is not used
+                peers = null;
+                report.problems.add(peersNotUsed(problem, nodes));
+            }
+        }
+        catch (RuntimeException e)
+        {
+            // as the node inspection reports it: the file changed, a nodes/peers.old left, or a damaged file
+            peers = null;
+            boolean oldExists = Files.exists(nodes.resolve("peers.old"));
+            report.problems.add(peersNotUsed(NodeInspector.peersReadFailure(e.getMessage(), before, NodeInspector.PeersFileState.of(peersFile), oldExists),
+                                             nodes));
         }
         if (options.dataCenter != null)
         {
@@ -629,6 +668,19 @@ final class PaxosRollback
             nodesByDataCenter = counts;
             report.singleDataCenter = counts.size() == 1;
         }
+    }
+
+    /**
+     * The problem of a {@code nodes/peers} not used: what the node inspection says of it, without its clause on the
+     * releases of the peers, then what it means here. Not the node inspection's remedies that start DSE or run the tool
+     * again: this runs before DSE starts, with the restored node metadata, which nothing rewrites while both products
+     * are stopped; only the one on the permissions of the file is kept.
+     */
+    @VisibleForTesting
+    static String peersNotUsed(Finding problem, Path nodes)
+    {
+        return problem.message.replace(NodeInspector.PEERS_NOT_CHECKED, "") + " (" + nodes + ')' + DATA_CENTERS_UNKNOWN +
+               (problem.remedy.startsWith(RUN_AS_DSE_USER) ? "; if the file cannot be read for its permissions, " + RUN_AS_DSE_USER : "");
     }
 
     /** That this node's data center is one the nodes files or the replication of some keyspace name. */

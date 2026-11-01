@@ -120,6 +120,12 @@ public class PaxosRollbackTest
     private static final String NTS = "org.apache.cassandra.locator.NetworkTopologyStrategy";
     /** The keyspace of the table of DSE 6.9.26's sstable of system.paxos ({@code lab.lwt} on its test cluster). */
     private static final String DSE_6_9_26_KEYSPACE = "dse_6926";
+    /** How a problem of a nodes file not read or not trusted ends, after the nodes directory. */
+    private static final String DATA_CENTERS_UNKNOWN = ": the data centers of the cluster are unknown, so the reads of the keyspaces whose replicas may span " +
+                                                       "data centers are left to choose: name their consistency with --serial-consistency " +
+                                                       "<keyspace>=<level>; do not start DSE before every read has succeeded";
+    /** What a problem of a nodes file that cannot be read adds, for its permissions. */
+    private static final String RUN_AS_DSE_USER = "; if the file cannot be read for its permissions, run the tool as the user DSE runs as (or as root)";
     /** When DSE 6.9.26's sstable of system.paxos is read directly: 2026-10-03T12:00:00Z, before its cells expire. */
     private static final long DSE_6_9_26_READ_AT = 1791028800L;
 
@@ -1780,6 +1786,86 @@ public class PaxosRollbackTest
         assertThat(peersAbsent.report.dataCenterSource).endsWith("/nodes/local");
         assertThat(peersAbsent.report.singleDataCenter).isNull();
         assertThat(peersAbsent.reads(RF3, intKey(1))).containsExactly("null CHOOSE");
+
+        // a nodes/peers.old left: DSE is rewriting nodes/peers, or was interrupted while it did, so it is not used
+        DseNodeFixture oldLeft = nodeWithEmptyPaxosSnapshot();
+        Path oldNodes = oldLeft.metadata.resolve("nodes");
+        Files.copy(oldNodes.resolve("peers"), oldNodes.resolve("peers.old"));
+        writeSSTable(paxosDirectory(oldLeft), paxos, BtiFormat.getInstance(), List.of(emptyProposal(paxos, RF3, intKey(1))));
+        Run peersOld = assertExit(run(oldLeft), DsePreflight.EXIT_BLOCKED);
+        assertThat(peersOld.report.singleDataCenter).isNull();
+        assertThat(peersOld.reads(RF3, intKey(1))).containsExactly("null CHOOSE");
+        assertThat(peersOld.report.problems).containsExactly("cannot read nodes/peers: a nodes/peers.old is left, which DSE puts back in place of " +
+                                                             "nodes/peers at its next start (DSE is rewriting the file, or was interrupted while it " +
+                                                             "did), so the peers of this node are not known (" + oldNodes + ")" + DATA_CENTERS_UNKNOWN);
+
+        // nodes/peers missing with a nodes/peers.txn left: DSE is writing it for the first time, or was interrupted
+        DseNodeFixture txnLeft = nodeWithEmptyPaxosSnapshot();
+        Path txnNodes = txnLeft.metadata.resolve("nodes");
+        Files.move(txnNodes.resolve("peers"), txnNodes.resolve("peers.txn"));
+        writeSSTable(paxosDirectory(txnLeft), paxos, BtiFormat.getInstance(), List.of(emptyProposal(paxos, RF3, intKey(1))));
+        Run peersTxn = assertExit(run(txnLeft), DsePreflight.EXIT_BLOCKED);
+        assertThat(peersTxn.report.singleDataCenter).isNull();
+        assertThat(peersTxn.reads(RF3, intKey(1))).containsExactly("null CHOOSE");
+        assertThat(peersTxn.report.problems).containsExactly("cannot read nodes/peers: it is missing and a nodes/peers.txn is left (DSE is writing " +
+                                                             "the file for the first time, or was interrupted while it did), so the peers of this " +
+                                                             "node are not known (" + txnNodes + ")" + DATA_CENTERS_UNKNOWN);
+
+        // a damaged nodes/peers: classified as by the node inspection, with the same consequence
+        DseNodeFixture damaged = nodeWithEmptyPaxosSnapshot();
+        Path damagedNodes = damaged.metadata.resolve("nodes");
+        Files.write(damagedNodes.resolve("peers"), "not a nodes file".getBytes(StandardCharsets.UTF_8));
+        writeSSTable(paxosDirectory(damaged), paxos, BtiFormat.getInstance(), List.of(emptyProposal(paxos, RF3, intKey(1))));
+        Run peersDamaged = assertExit(run(damaged), DsePreflight.EXIT_BLOCKED);
+        assertThat(peersDamaged.report.singleDataCenter).isNull();
+        assertThat(peersDamaged.report.dataCenterSource).endsWith("/nodes/local");
+        assertThat(peersDamaged.reads(RF3, intKey(1))).containsExactly("null CHOOSE");
+        assertThat(peersDamaged.report.problems).hasSize(1);
+        assertThat(peersDamaged.report.problems.get(0)).startsWith("cannot read nodes/peers: ")
+                                                       .doesNotContain(": null (")
+                                                       .endsWith(" (" + damagedNodes + ")" + DATA_CENTERS_UNKNOWN + RUN_AS_DSE_USER);
+
+        // a damaged nodes/peers beside a nodes/peers.old: the file being rewritten by DSE
+        Files.copy(oldNodes.resolve("peers.old"), damagedNodes.resolve("peers.old"));
+        Run damagedOld = assertExit(run(damaged), DsePreflight.EXIT_BLOCKED);
+        assertThat(damagedOld.report.problems).containsExactly("cannot read nodes/peers: a nodes/peers.old is left, which DSE puts back in place of " +
+                                                               "nodes/peers at its next start (DSE is rewriting the file, or was interrupted while " +
+                                                               "it did), so the peers of this node are not known (" + damagedNodes + ")" + DATA_CENTERS_UNKNOWN);
+
+        // a damaged nodes/local beside a good nodes/peers: one problem, the data centers unknown
+        DseNodeFixture damagedLocal = nodeWithEmptyPaxosSnapshot();
+        Path localNodes = damagedLocal.metadata.resolve("nodes");
+        Files.write(localNodes.resolve("local"), "not a nodes file".getBytes(StandardCharsets.UTF_8));
+        writeSSTable(paxosDirectory(damagedLocal), paxos, BtiFormat.getInstance(), List.of(emptyProposal(paxos, RF3, intKey(1))));
+        Run localDamaged = assertExit(run(damagedLocal), DsePreflight.EXIT_BLOCKED);
+        assertThat(localDamaged.report.singleDataCenter).isNull();
+        assertThat(localDamaged.reads(RF3, intKey(1))).containsExactly("null CHOOSE");
+        assertThat(localDamaged.report.problems).hasSize(1);
+        assertThat(localDamaged.report.problems.get(0)).startsWith("cannot read nodes/local: ")
+                                                       .doesNotContain(": null (")
+                                                       .endsWith(" (" + localNodes + ")" + DATA_CENTERS_UNKNOWN + RUN_AS_DSE_USER);
+
+        // both damaged: one problem each, nodes/local first
+        Files.write(localNodes.resolve("peers"), "not a nodes file".getBytes(StandardCharsets.UTF_8));
+        Run bothDamaged = assertExit(run(damagedLocal), DsePreflight.EXIT_BLOCKED);
+        assertThat(bothDamaged.report.problems).hasSize(2);
+        assertThat(bothDamaged.report.problems.get(0)).startsWith("cannot read nodes/local: ")
+                                                      .endsWith(" (" + localNodes + ")" + DATA_CENTERS_UNKNOWN + RUN_AS_DSE_USER);
+        assertThat(bothDamaged.report.problems.get(1)).startsWith("cannot read nodes/peers: ")
+                                                      .endsWith(" (" + localNodes + ")" + DATA_CENTERS_UNKNOWN + RUN_AS_DSE_USER);
+
+        // the states of nodes/peers that no file of a run gives reliably: its attributes unreadable keep the clause on
+        // permissions, a file that changed while read does not (the node inspection's remedy, run the tool again, dropped)
+        NodeInspector.PeersFileState denied = new NodeInspector.PeersFileState(true, null, 0, 0, "java.io.IOException: denied");
+        Path someNodes = Path.of("/var/lib/cassandra/nodes");
+        assertThat(PaxosRollback.peersNotUsed(NodeInspector.peersFileProblem(denied, denied, false, false), someNodes))
+            .isEqualTo("cannot read nodes/peers: its attributes cannot be read (java.io.IOException: denied), so the peers of this node are not known " +
+                       "(" + someNodes + ")" + DATA_CENTERS_UNKNOWN + RUN_AS_DSE_USER);
+        assertThat(PaxosRollback.peersNotUsed(NodeInspector.peersFileProblem(new NodeInspector.PeersFileState(true, 7L, 100, 1000, null),
+                                                                             new NodeInspector.PeersFileState(true, 8L, 100, 1000, null), false, false),
+                                              someNodes))
+            .isEqualTo("cannot read nodes/peers: it changed while it was read (DSE wrote or rewrote it), so the peers of this node are not known " +
+                       "(" + someNodes + ")" + DATA_CENTERS_UNKNOWN);
 
         // no data center at all
         Files.delete(node.conf.resolve("cassandra-rackdc.properties"));
