@@ -195,6 +195,71 @@ public class ClusterAggregateTest
     }
 
     @Test
+    public void aReadyNodeThatRecordsNoPeerAmongOthersBlocksTheCluster() throws IOException
+    {
+        // a node whose nodes/peers is missing (NO_PEERS_FILE) or empty counted itself alone, wrongly once others have reports
+        Path reports = cluster(3);
+        rewrite(reports.resolve("node2.json"), report -> {
+            report.peers.clear();
+            report.findings.add(Finding.info("NO_PEERS_FILE", "no nodes/peers in /var/lib/cassandra/nodes: taken for a node that never had a peer"));
+        });
+        rewrite(reports.resolve("node3.json"), report -> report.peers.clear());
+        Aggregate aggregate = aggregate(reports);
+        assertThat(aggregate.exitCode).as(aggregate.out).isEqualTo(DsePreflight.EXIT_BLOCKED);
+        assertThat(aggregate.codes("BLOCKING")).containsExactly("NO_PEERS_RECORDED");
+        assertThat(aggregate.messages("NO_PEERS_RECORDED"))
+            .isEqualTo("nodes whose nodes/peers records no other node, although other nodes of the cluster have reports: 10.0.0.2 (no nodes/peers " +
+                       "file), 10.0.0.3 (no peer recorded); their reports counted each of them alone");
+        assertThat(aggregate.findings().stream().filter(f -> "NO_PEERS_RECORDED".equals(f.get("code"))).map(f -> f.get("remedy")))
+            .containsExactly("on each of them, restart DSE and wait until nodetool status shows its peers (DSE then writes nodes/peers anew), then " +
+                             "run the tool on it again and aggregate again; apply no remedy of SYSTEM_AUTH_REPLICATION or KEYSPACE_REPLICATION " +
+                             "from the reports it replaces; if nodes/peers still records no peer, report to the upgrade owner");
+    }
+
+    @Test
+    public void aSingleNodeThatRecordsNoPeerIsReady() throws IOException
+    {
+        // the report of a single node records no peer: nothing to compare it with
+        Path reports = cluster(1);
+        rewrite(reports.resolve("node1.json"),
+                report -> report.findings.add(Finding.info("NO_PEERS_FILE", "no nodes/peers in /var/lib/cassandra/nodes: taken for a node that never had a peer")));
+        assertThat(ClusterAggregate.READER.<NodeReport>readValue(Files.readAllBytes(reports.resolve("node1.json"))).peers).isEmpty();
+        Aggregate aggregate = aggregate(reports);
+        assertThat(aggregate.exitCode).as(aggregate.out).isEqualTo(DsePreflight.EXIT_READY);
+        assertThat(aggregate.codes("BLOCKING")).isEmpty();
+        assertThat(aggregate.messages("NO_PEERS_RECORDED")).isEmpty();
+
+        // a blocked node that records no peer is named by NODE_BLOCKED only
+        Path blocked = cluster(2);
+        rewrite(blocked.resolve("node2.json"), report -> {
+            report.peers.clear();
+            report.result = NodeReport.BLOCKED;
+            report.findings.add(Finding.blocking("UNREADABLE_INPUT", "cannot read nodes/peers: it changed while it was read", "run the tool again"));
+        });
+        Aggregate notReady = aggregate(blocked);
+        assertThat(notReady.codes("BLOCKING")).containsExactly("NODE_BLOCKED");
+
+        // a ready node that records no peer beside a blocked one: both named
+        Path besideBlocked = cluster(2);
+        rewrite(besideBlocked.resolve("node1.json"), report -> {
+            report.result = NodeReport.BLOCKED;
+            report.findings.add(Finding.blocking("SEARCH_INDEX", "DSE Search indexes: ks.t.i", "drop it"));
+        });
+        rewrite(besideBlocked.resolve("node2.json"), report -> report.peers.clear());
+        Aggregate both = aggregate(besideBlocked);
+        assertThat(both.codes("BLOCKING")).containsExactlyInAnyOrder("NODE_BLOCKED", "NO_PEERS_RECORDED");
+        assertThat(both.messages("NO_PEERS_RECORDED")).isEqualTo("nodes whose nodes/peers records no other node, although other nodes of the " +
+                                                                 "cluster have reports: 10.0.0.2 (no peer recorded); their reports counted each " +
+                                                                 "of them alone");
+
+        // two reports of one node that records no peer: DUPLICATE_REPORT only, as they are of one node
+        Path twice = cluster(1);
+        Files.copy(twice.resolve("node1.json"), twice.resolve("node1-again.json"));
+        Aggregate duplicate = aggregate(twice);
+        assertThat(duplicate.codes("BLOCKING")).containsExactly("DUPLICATE_REPORT");
+    }
+
+    @Test
     public void releasesSchemaVersionsAndClusterNamesMustAgree() throws IOException
     {
         Path reports = cluster(3);

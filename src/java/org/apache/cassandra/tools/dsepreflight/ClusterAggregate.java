@@ -66,7 +66,9 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.list;
  * entries that are not regular files (links are not followed). The cluster is ready when: every report reads and comes
  * from this tool; no report is blocked; every node runs the same DSE release, with one schema version and one cluster
  * name; no node is reported twice (one host id or one broadcast address); every node a report lists as a DSE peer has a
- * report of its own (a peer recorded with a release of this software is an upgraded node and needs none); and every
+ * report of its own (a peer recorded with a release of this software is an upgraded node and needs none); no ready
+ * node records no peer while another node has a report ({@code NO_PEERS_RECORDED}: its {@code nodes/peers} is missing
+ * or empty, so its report counted it alone, as on a single node, while the cluster has other nodes); and every
  * node has the same {@code storage_port} ({@code MIXED_STORAGE_PORTS}: DSE's pre-4.0 messages carry addresses without a
  * port, which HCD 2.0 completes with its own {@code storage_port}, so the port must be one and the same on every node).
  * It warns when the DSE nodes differ in their internode TLS settings ({@code internode_encryption},
@@ -259,6 +261,9 @@ final class ClusterAggregate
         Set<String> reportedHosts = new TreeSet<>();
         Set<String> reportedAddresses = new TreeSet<>();
         List<String> blockedNodes = new ArrayList<>();
+        // the nodes reported, by host id, or broadcast address, or file, and the ready ones that record no peer
+        Set<String> reportedNodes = new TreeSet<>();
+        List<String> withoutPeers = new ArrayList<>();
         for (Map.Entry<Path, NodeReport> entry : reports.entrySet())
         {
             NodeReport report = entry.getValue();
@@ -281,6 +286,18 @@ final class ClusterAggregate
                 report.findings.stream().filter(f -> f.severity == Finding.Severity.BLOCKING).forEach(f -> codes.add(f.code));
                 blockedNodes.add(node + (codes.isEmpty() ? " (" + report.result + ", without a blocking finding)" : " " + codes));
             }
+            else if (report.peers.isEmpty())
+            {
+                // NO_PEERS_FILE tells a missing file; without it the file is DSE's empty map, or missing beside a nodes/local
+                // that records no data center (the node inspection then says nothing of it)
+                withoutPeers.add(node + (report.findings.stream().anyMatch(f -> "NO_PEERS_FILE".equals(f.code)) ? " (no nodes/peers file)"
+                                                                                                                 : " (no peer recorded)"));
+            }
+            // a node reported with a host id and again without one (its nodes/local unread) counts twice: that second
+            // report is blocked and named by NODE_BLOCKED; a ready copy without peers is also named by NO_PEERS_RECORDED
+            reportedNodes.add(report.node.hostId != null ? "host id " + report.node.hostId
+                                                         : report.node.broadcastAddress != null ? "address " + report.node.broadcastAddress
+                                                                                                : "file " + entry.getKey());
             for (Finding finding : report.findings)
                 if (finding.severity == Finding.Severity.WARNING)
                     aggregate.warningsByCode.computeIfAbsent(finding.code, c -> new ArrayList<>()).add(node);
@@ -329,6 +346,14 @@ final class ClusterAggregate
         if (!blockedNodes.isEmpty())
             findings.add(blocking("NODE_BLOCKED", "nodes not ready: " + list(blockedNodes),
                                   "resolve the blocking findings of each node report, then run the tool on those nodes again"));
+        // a node that records no peer was counted alone by its report (the replication checks among others), which is
+        // wrong once another node of the cluster has a report: its nodes/peers is lost or stale
+        if (!withoutPeers.isEmpty() && reportedNodes.size() > 1)
+            findings.add(blocking("NO_PEERS_RECORDED", "nodes whose nodes/peers records no other node, although other nodes of the cluster have " +
+                                                       "reports: " + list(withoutPeers) + "; their reports counted each of them alone",
+                                  "on each of them, restart DSE and wait until nodetool status shows its peers (DSE then writes nodes/peers anew), " +
+                                  "then run the tool on it again and aggregate again; apply no remedy of SYSTEM_AUTH_REPLICATION or " +
+                                  "KEYSPACE_REPLICATION from the reports it replaces; if nodes/peers still records no peer, report to the upgrade owner"));
         if (releases.size() > 1)
             findings.add(blocking("MIXED_RELEASES", "the nodes run different DSE releases: " + groups(releases),
                                   "bring every DSE node to the same release (6.9 preferred) before the upgrade"));
