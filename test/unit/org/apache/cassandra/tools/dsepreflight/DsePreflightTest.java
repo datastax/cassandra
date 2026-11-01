@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -109,9 +110,63 @@ public class DsePreflightTest
      */
     private static final String AUTH_REPLICATION_BY_HAND = "check by hand, before the first node of the cluster is upgraded, " + AUTH_REPLICATION_CHECK +
                                                            "; " + AUTH_REPLICATION_RECOMMENDED;
-    /** How the remedies of SYSTEM_AUTH_REPLICATION end with several data centers. */
+    /**
+     * How the remedies of SYSTEM_AUTH_REPLICATION end when the data centers of the nodes are not all known and nodes/local
+     * and nodes/peers name one at most, so that the other replicated system keyspaces are not checked.
+     */
     private static final String AUTH_REPLICATION_OTHER_KEYSPACES = "; with several data centers, the other replicated system keyspaces need " +
-                                                                   "every data center too, which this tool does not check";
+                                                                   "every data center too, which this tool checks only when nodes/local and " +
+                                                                   "nodes/peers name several";
+    /**
+     * How the remedies of SYSTEM_AUTH_REPLICATION end when the data centers of the nodes are not all known and nodes/local
+     * and nodes/peers name several, so that the other replicated system keyspaces are checked against the nodes counted.
+     */
+    private static final String AUTH_REPLICATION_OTHERS_BY_HAND = "; the other replicated system keyspaces were checked against the nodes whose " +
+                                                                  "data center is known only: check by hand that each has replicas in every data " +
+                                                                  "center too";
+    /**
+     * Why the nodes counted are a lower bound, when nodes/local is missing, a nodes file cannot be read, or nodes/peers is
+     * being rewritten.
+     */
+    private static final String NODES_FILES_NOT_READ = "nodes/local is missing, or nodes/local or nodes/peers could not be read, or nodes/peers " +
+                                                       "was being rewritten by DSE, and the data centers of the nodes are not all known";
+    /** The UNREADABLE_INPUT of a nodes/peers.old left in the nodes directory. */
+    private static final String PEERS_OLD_LEFT = "cannot read nodes/peers: a nodes/peers.old is left, which DSE puts back in place of nodes/peers " +
+                                                 "at its next start (DSE is rewriting the file, or was interrupted while it did), so the peers of " +
+                                                 "this node are not known; the releases and workloads of the peers cannot be checked";
+    /** The remedy of {@link #PEERS_OLD_LEFT}. */
+    private static final String PEERS_OLD_LEFT_REMEDY = "run the tool again; if it persists with DSE stopped, start DSE on this node once (it puts " +
+                                                        "nodes/peers.old back), then run the tool again";
+    /**
+     * What the blocking remedy of SYSTEM_AUTH_REPLICATION, its check by hand and the remedy of KEYSPACE_REPLICATION add when
+     * nodes/peers cannot be read or trusted.
+     */
+    private static final String MIXED_PHASE_UNKNOWN = "; only if no peer already runs HCD 2.0, which this tool cannot tell while " +
+                                                      "nodes/peers cannot be read or trusted (in the mixed phase, no schema change and no " +
+                                                      "repair; if one does, upgrade no further node and report to the upgrade owner)";
+    /** What every KEYSPACE_REPLICATION message says after what HCD 2.0 does with the keyspace. */
+    private static final String KEYSPACE_REPLICATION_NOT_BLOCKING = ", so this does not stop the upgrade";
+    /** What a KEYSPACE_REPLICATION message says after SimpleStrategy over several data centers, before the keyspace. */
+    private static final String NO_REPLICA_OF_PART = ", so a data center of the nodes may hold no replica of part of ";
+    /** The upgrade step of the other keyspaces with one data center known at most and the nodes not all counted. */
+    private static final String OTHER_KEYSPACES_NOT_CHECKED_STEP = "Replication of the other system keyspaces: not checked (" + NODES_FILES_NOT_READ +
+                                                                   "); with several data centers, each needs replicas in every data center, 3 " +
+                                                                   "recommended, or as many as its nodes if fewer";
+    /** The start of the PENDING_HINTS info when nodes/local or nodes/peers could not be read or trusted. */
+    private static final String HINTS_NOT_CHECKED = "DSE hints files for host ids not checked against nodes/local and nodes/peers, which could " +
+                                                    "not both be read and trusted: ";
+    /** The end of the PENDING_HINTS info when nodes/local or nodes/peers could not be read or trusted. */
+    private static final String HINTS_NOT_CHECKED_END = "; some may be pending for live DSE peers: this tool checks them once it reads both";
+    /** What HCD 2.0 does with system_traces, as KEYSPACE_REPLICATION says it. */
+    private static final String TRACES_USE = "HCD 2.0 writes the traces of queries to system_traces at ANY (and, once repairs are allowed again " +
+                                             "after the upgrade, those of repairs, which it reads back at ONE)";
+    /** What HCD 2.0 does with system_distributed, as KEYSPACE_REPLICATION says it. */
+    private static final String DISTRIBUTED_USE = "HCD 2.0 writes the build status of materialized views to system_distributed at ONE and reads it " +
+                                                  "at ONE (and, once repairs are allowed again after the upgrade, writes the repair history there " +
+                                                  "at ANY)";
+    /** How a KEYSPACE_REPLICATION message ends outside the mixed phase. */
+    private static final String KEYSPACE_REPLICATION_RECOMMENDED = "; replicas in every data center, 3 (or as many as its nodes if fewer) recommended, " +
+                                                                   "keep it available in each";
     /** Why SYSTEM_AUTH_REPLICATION matters, in each of its messages. */
     private static final String AUTH_REPLICATION_READ = "; an upgraded node reads DSE's access controls from system_auth at LOCAL_QUORUM (HCD " +
                                                         "2.0's default auth_read_consistency_level) when it starts and refuses to start " +
@@ -1097,13 +1152,13 @@ public class DsePreflightTest
                                                                          "'replication_factor': '3'}: dc1 has 3 replicas and only 1 node, so " +
                                                                          "LOCAL_QUORUM needs 2 replicas up there, more than its nodes" +
                                                                          AUTH_REPLICATION_BLOCKING);
-        assertThat(simple.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 1", "", false, false));
+        assertThat(simple.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 1", "", false));
         writeAuthReplication(node, networkTopologyStrategy("dc1", "2"));
         Run two = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
         assertThat(two.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', 'dc1': '2'}: " +
                                                                       "dc1 has 2 replicas and only 1 node, so LOCAL_QUORUM needs 2 replicas up there, " +
                                                                       "more than its nodes" + AUTH_REPLICATION_BLOCKING);
-        assertThat(two.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 1", "", false, false));
+        assertThat(two.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 1", "", false));
     }
 
     @Test
@@ -1118,7 +1173,7 @@ public class DsePreflightTest
                                                                       "dc1 has 1 replica and 3 nodes: an upgraded node there cannot start while another " +
                                                                       "node of dc1 is down" + AUTH_REPLICATION_SHORT);
         // the data center has 3 nodes: the remedy says nothing of 2 nodes, nor of several data centers
-        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false, false));
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false));
         assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of system_auth: see SYSTEM_AUTH_REPLICATION");
 
         writeAuthReplication(node, Map.of("class", SIMPLE_STRATEGY, "replication_factor", "2"));
@@ -1126,7 +1181,7 @@ public class DsePreflightTest
         assertThat(two.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'SimpleStrategy', 'replication_factor': '2'}: " +
                                                                       "dc1 has 2 replicas and 3 nodes: an upgraded node there cannot start while another " +
                                                                       "node of dc1 is down" + AUTH_REPLICATION_SHORT);
-        assertThat(two.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false, false));
+        assertThat(two.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false));
 
         // with as many replicas as nodes, an upgraded node starts while another node is down
         writeAuthReplication(node, Map.of("class", SIMPLE_STRATEGY, "replication_factor", "3"));
@@ -1142,16 +1197,15 @@ public class DsePreflightTest
                                                                        "dc1 has 5 replicas and only 3 nodes, so LOCAL_QUORUM needs 3 replicas up there: " +
                                                                        "an upgraded node there cannot start while another node of dc1 is down" +
                                                                        AUTH_REPLICATION_ABOVE);
-        assertThat(five.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false, false));
+        assertThat(five.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false));
 
         // with the nodes of the data center not all known, the check is by hand
-        Files.delete(node.metadata.resolve("nodes").resolve("peers"));
+        node.editPeers(peers -> peers.forEach(peer -> peer.remove("data_center")));
         Run notKnown = assertReady(run(node));
         assertThat(notKnown.codes(Finding.Severity.WARNING)).contains("SYSTEM_AUTH_REPLICATION");
-        assertThat(notKnown.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("nodes/local or nodes/peers is missing or could not be read, and the data " +
-                                                                           "centers of the nodes are not all known, so the replication of system_auth, " +
-                                                                           "{'class': 'SimpleStrategy', 'replication_factor': '5'}, was checked against " +
-                                                                           "the nodes whose data center is known only");
+        assertThat(notKnown.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the data centers of 2 nodes are not known from nodes/local and nodes/peers, so the " +
+                                                                           "replication of system_auth, {'class': 'SimpleStrategy', 'replication_factor': " +
+                                                                           "'5'}, was checked against the nodes whose data center is known only");
         assertThat(notKnown.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES);
     }
 
@@ -1163,7 +1217,7 @@ public class DsePreflightTest
         Run none = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
         assertThat(none.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'SimpleStrategy', 'replication_factor': '0'}: " +
                                                                        "its replication_factor is 0" + AUTH_REPLICATION_BLOCKING);
-        assertThat(none.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false, false));
+        assertThat(none.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false));
 
         // a negative factor is no number of replicas
         writeAuthReplication(node, Map.of("class", SIMPLE_STRATEGY, "replication_factor", "-1"));
@@ -1171,13 +1225,13 @@ public class DsePreflightTest
         assertThat(negative.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'SimpleStrategy', " +
                                                                            "'replication_factor': '-1'}: its replication_factor is '-1', not a " +
                                                                            "number of replicas" + AUTH_REPLICATION_BLOCKING);
-        assertThat(negative.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false, false));
+        assertThat(negative.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false));
 
         writeAuthReplication(node, Map.of("class", SIMPLE_STRATEGY));
         Run missing = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
         assertThat(missing.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'SimpleStrategy'}: it has no " +
                                                                           "replication_factor" + AUTH_REPLICATION_BLOCKING);
-        assertThat(missing.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false, false));
+        assertThat(missing.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false));
     }
 
     @Test
@@ -1194,7 +1248,7 @@ public class DsePreflightTest
         // the replication factor of SimpleStrategy spans the data centers, so it gives no data center its replicas
         assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
             .isEqualTo(authReplicationRemedy("'dc1': 2, 'dc2': 1", "; the replication factor of SimpleStrategy spans the data centers, so it is not carried " +
-                                                                   "over", true, true));
+                                                                   "over", true));
 
         // DSE's default blocks too
         writeAuthReplication(node, simpleStrategy());
@@ -1205,7 +1259,7 @@ public class DsePreflightTest
                                                                             "LOCAL_QUORUM cannot be met in each" + AUTH_REPLICATION_BLOCKING);
         assertThat(byDefault.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
             .isEqualTo(authReplicationRemedy("'dc1': 2, 'dc2': 1", "; the replication factor of SimpleStrategy spans the data centers, so it is not carried " +
-                                                                   "over", true, true));
+                                                                   "over", true));
     }
 
     @Test
@@ -1216,7 +1270,7 @@ public class DsePreflightTest
         Run run = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
         assertThat(run.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is not known: it has no replication class" +
                                                                       AUTH_REPLICATION_BLOCKING);
-        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false, false));
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false));
 
         // a class HCD 2.0 does not have (removed in Cassandra 4.0), which UNLOADABLE_KEYSPACE reports too
         writeAuthReplication(node, Map.of("class", "org.apache.cassandra.locator.OldNetworkTopologyStrategy"));
@@ -1224,7 +1278,7 @@ public class DsePreflightTest
         assertThat(other.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'OldNetworkTopologyStrategy'}: " +
                                                                         "its class is OldNetworkTopologyStrategy (none of NetworkTopologyStrategy, " +
                                                                         "SimpleStrategy and EverywhereStrategy)" + AUTH_REPLICATION_BLOCKING);
-        assertThat(other.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false, false));
+        assertThat(other.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false));
         assertThat(other.messages("UNLOADABLE_KEYSPACE")).contains("system_auth: ").contains("OldNetworkTopologyStrategy");
     }
 
@@ -1247,7 +1301,7 @@ public class DsePreflightTest
                                                                           "of the 3 replicas of the ring " + EVERYWHERE + ", so LOCAL_QUORUM needs 2 " +
                                                                           "replicas up there, more than its nodes" + AUTH_REPLICATION_BLOCKING);
         // the replicas of the ring are not carried over
-        assertThat(several.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 2, 'dc2': 1", EVERYWHERE_NOT_CARRIED, true, true));
+        assertThat(several.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 2, 'dc2': 1", EVERYWHERE_NOT_CARRIED, true));
 
         // the two data centers of 3 nodes: 4 replicas up of the 6 of the ring, in each
         DseNodeFixture twoDataCenters = DseNodeFixture.create(temporaryFolder.newFolder().toPath(), DseFixtures.nodesDirectoryTwoDataCenters(1));
@@ -1260,7 +1314,7 @@ public class DsePreflightTest
         assertThat(six.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'EverywhereStrategy'}: " + sixOfTheRing +
                                                                       AUTH_REPLICATION_BLOCKING);
         assertThat(six.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3, 'dc2': 3", EVERYWHERE_NOT_CARRIED,
-                                                                                                           false, true));
+                                                                                                           false));
 
         // with a node of no data center, the two data centers known still cannot both meet the quorum of the ring
         addPeer(twoDataCenters, 199, false);
@@ -1273,19 +1327,18 @@ public class DsePreflightTest
         assertThat(uncounted.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
             .isEqualTo(authReplicationRemedyNotExact("'dc1': 3, 'dc2': 3", EVERYWHERE_NOT_CARRIED + "; the data center of 1 node is not known from " +
                                                                            "nodes/local and nodes/peers: check by hand the data center of each node " +
-                                                                           "and its replicas" + LOWER_TO_THE_NODES));
+                                                                           "and its replicas" + LOWER_TO_THE_NODES, AUTH_REPLICATION_OTHERS_BY_HAND));
 
-        // nodes/peers missing: only this node's data center known, so the class only
+        // the data centers of the peers not known: only this node's data center known, so the class only
         DseNodeFixture noPeers = node();
-        Files.delete(noPeers.metadata.resolve("nodes").resolve("peers"));
+        noPeers.editPeers(peers -> peers.forEach(peer -> peer.remove("data_center")));
         writeAuthReplication(noPeers, Map.of("class", "org.apache.cassandra.locator.EverywhereStrategy"));
         Run withoutPeers = run(noPeers);
         assertThat(withoutPeers.codes(Finding.Severity.BLOCKING)).doesNotContain("SYSTEM_AUTH_REPLICATION");
         assertThat(withoutPeers.codes(Finding.Severity.WARNING)).contains("SYSTEM_AUTH_REPLICATION");
-        assertThat(withoutPeers.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("nodes/local or nodes/peers is missing or could not be read, and the " +
-                                                                               "data centers of the nodes are not all known, so the replication of " +
-                                                                               "system_auth, {'class': 'EverywhereStrategy'}, was checked for its " +
-                                                                               "class only, not for the replicas of each data center");
+        assertThat(withoutPeers.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the data centers of 2 nodes are not known from nodes/local and nodes/peers, " +
+                                                                               "so the replication of system_auth, {'class': 'EverywhereStrategy'}, was " +
+                                                                               "checked for its class only, not for the replicas of each data center");
         assertThat(withoutPeers.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
             .isEqualTo("check by hand, before the first node of the cluster is upgraded, " + AUTH_REPLICATION_CHECK + " (EverywhereStrategy: " +
                        "LOCAL_QUORUM counts the replicas of the whole ring, which only a data center of more than half of the nodes meets); " +
@@ -1313,7 +1366,7 @@ public class DsePreflightTest
                                                                           "LOCAL_QUORUM needs 3 replicas up there: an upgraded node there cannot start " +
                                                                           "while another node of dc1 is down");
         assertThat(besides.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3, 'dc2': 1", EVERYWHERE_NOT_CARRIED,
-                                                                                                               false, true));
+                                                                                                               false));
 
         // with a data center of more than 3 nodes, the ALTER does not keep the replica on each of its nodes: dc1 of 4 nodes, dc2 of 1
         addPeer(fourNodes, 198, true);
@@ -1322,7 +1375,7 @@ public class DsePreflightTest
                                                                             "1 of the 5 replicas of the ring " + EVERYWHERE + ", so LOCAL_QUORUM needs 3 " +
                                                                             "replicas up there, more than its nodes" + AUTH_REPLICATION_BLOCKING);
         assertThat(fiveNodes.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3, 'dc2': 1", EVERYWHERE_NOT_CARRIED,
-                                                                                                                 false, true));
+                                                                                                                 false));
 
         // in one data center known, with a node of no data center: the class only, and the check by hand says how it
         // counts
@@ -1363,14 +1416,14 @@ public class DsePreflightTest
         assertThat(run.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', 'dc1': '1'}: " +
                                                                       "dc1 has 1 replica and 3 nodes: an upgraded node there cannot start while another " +
                                                                       "node of dc1 is down" + AUTH_REPLICATION_SHORT);
-        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false, false));
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false));
 
         writeAuthReplication(node, networkTopologyStrategy("dc1", "2"));
         Run two = assertReady(run(node));
         assertThat(two.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', 'dc1': '2'}: " +
                                                                       "dc1 has 2 replicas and 3 nodes: an upgraded node there cannot start while another " +
                                                                       "node of dc1 is down" + AUTH_REPLICATION_SHORT);
-        assertThat(two.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false, false));
+        assertThat(two.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false));
     }
 
     @Test
@@ -1382,14 +1435,14 @@ public class DsePreflightTest
         assertThat(none.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', 'dc1': '0'}: " +
                                                                        "dc1 has 0 replicas and 3 nodes" +
                                                                        AUTH_REPLICATION_BLOCKING);
-        assertThat(none.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false, false));
+        assertThat(none.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false));
 
         writeAuthReplication(node, networkTopologyStrategy("dc1", "three"));
         Run noNumber = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
         assertThat(noNumber.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', " +
                                                                            "'dc1': 'three'}: dc1 is listed with 'three', not a number of replicas" +
                                                                            AUTH_REPLICATION_BLOCKING);
-        assertThat(noNumber.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false, false));
+        assertThat(noNumber.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false));
 
         // a data center this node does not know of, with no replica, is no problem; with no number, it is left out of
         // the ALTER KEYSPACE
@@ -1402,7 +1455,7 @@ public class DsePreflightTest
                                                                                   "listed with 'x', not a number of replicas" + AUTH_REPLICATION_BLOCKING);
         assertThat(unknownNoNumber.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
             .isEqualTo(authReplicationRemedy("'dc1': 3", "; old, listed with no number of replicas and with no node in nodes/local and nodes/peers, " +
-                                                         "left out", false, false));
+                                                         "left out", false));
 
         // a negative number is no number of replicas
         writeAuthReplication(node, networkTopologyStrategy("dc1", "-1"));
@@ -1410,7 +1463,7 @@ public class DsePreflightTest
         assertThat(negative.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', 'dc1': " +
                                                                            "'-1'}: dc1 is listed with '-1', not a number of replicas" +
                                                                            AUTH_REPLICATION_BLOCKING);
-        assertThat(negative.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false, false));
+        assertThat(negative.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false));
 
         // replication_factor is no data center
         writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "replication_factor", "3"));
@@ -1442,7 +1495,7 @@ public class DsePreflightTest
         assertThat(four.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', 'dc1': '4'}: " +
                                                                        "dc1 has 4 replicas and only 2 nodes, so LOCAL_QUORUM needs 3 replicas up there, " +
                                                                        "more than its nodes" + AUTH_REPLICATION_BLOCKING);
-        assertThat(four.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 2", "", true, false));
+        assertThat(four.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 2", "", true));
     }
 
     @Test
@@ -1455,7 +1508,7 @@ public class DsePreflightTest
         assertThat(run.report.peers).hasSize(DseFixtures.TWO_DC_NODES - 1);
         assertThat(run.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', 'dc1': '3'}: " +
                                                                       "dc2 (3 nodes) is not listed" + AUTH_REPLICATION_BLOCKING);
-        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3, 'dc2': 3", "", false, true));
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3, 'dc2': 3", "", false));
 
         // a shortfall where something else blocks is named after it, since the ALTER raises that data center too
         writeAuthReplication(node, networkTopologyStrategy("dc1", "1"));
@@ -1464,7 +1517,7 @@ public class DsePreflightTest
                                                                        "dc2 (3 nodes) is not listed" + AUTH_REPLICATION_BLOCKING + "; besides, dc1 has " +
                                                                        "1 replica and 3 nodes: an upgraded node there cannot start while another node " +
                                                                        "of dc1 is down");
-        assertThat(both.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3, 'dc2': 3", "", false, true));
+        assertThat(both.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3, 'dc2': 3", "", false));
 
         // too few replicas in one data center and too many in the other: both said
         writeAuthReplication(node, networkTopologyStrategy("dc1", "1", "dc2", "4"));
@@ -1478,7 +1531,7 @@ public class DsePreflightTest
                                                                                 "fewer), and as many as its nodes where it has more replicas than nodes, let " +
                                                                                 "the upgrade go on while a node is down");
         assertThat(fewerAndAbove.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
-            .isEqualTo(authReplicationWarningRemedy("'dc1': 3, 'dc2': 3", "", false, true));
+            .isEqualTo(authReplicationWarningRemedy("'dc1': 3, 'dc2': 3", "", false));
 
         // a shortfall in the other data center is a warning once nothing blocks
         writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "1"));
@@ -1486,15 +1539,13 @@ public class DsePreflightTest
         assertThat(shortfall.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', " +
                                                                             "'dc1': '3', 'dc2': '1'}: dc2 has 1 replica and 3 nodes: an upgraded node " +
                                                                             "there cannot start while another node of dc2 is down" + AUTH_REPLICATION_SHORT);
-        assertThat(shortfall.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3, 'dc2': 3", "", false, true));
+        assertThat(shortfall.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3, 'dc2': 3", "", false));
 
         writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "3"));
         Run ready = assertReady(run(node));
         assertThat(ready.findings("SYSTEM_AUTH_REPLICATION")).isEmpty();
         assertThat(ready.report.upgradePath.upgradeSteps).contains("Replication of system_auth: {'class': 'NetworkTopologyStrategy', 'dc1': '3', 'dc2': '3'}, " +
-                                                                   "enough in every data center of nodes/local and nodes/peers; with several data " +
-                                                                   "centers, the other replicated system keyspaces need every data center too, which " +
-                                                                   "this tool does not check");
+                                                                   "enough in every data center of nodes/local and nodes/peers");
     }
 
     @Test
@@ -1507,7 +1558,7 @@ public class DsePreflightTest
         assertThat(run.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', " +
                                                                       "'dc1': '3'}: dc2 (1 node) is not listed" + AUTH_REPLICATION_BLOCKING);
         // 3 replicas in the 2 nodes of dc1 have the quorum of 2, so they are no problem, but the remedy keeps them within the nodes
-        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 2, 'dc2': 1", "", true, true));
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 2, 'dc2': 1", "", true));
 
         // every data center listed, one replica in the data center of one node: no finding, no warning
         writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "1"));
@@ -1527,7 +1578,7 @@ public class DsePreflightTest
                                                                        "dc1 has 5 replicas and only 3 nodes, so LOCAL_QUORUM needs 3 replicas up there: an " +
                                                                        "upgraded node there cannot start while another node of dc1 is down" +
                                                                        AUTH_REPLICATION_ABOVE);
-        assertThat(five.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false, false));
+        assertThat(five.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false));
         writeAuthReplication(node, networkTopologyStrategy("dc1", "4"));
         Run four = assertReady(run(node));
         assertThat(four.codes(Finding.Severity.WARNING)).contains("SYSTEM_AUTH_REPLICATION");
@@ -1535,14 +1586,14 @@ public class DsePreflightTest
                                                                        "dc1 has 4 replicas and only 3 nodes, so LOCAL_QUORUM needs 3 replicas up there: an " +
                                                                        "upgraded node there cannot start while another node of dc1 is down" +
                                                                        AUTH_REPLICATION_ABOVE);
-        assertThat(four.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false, false));
+        assertThat(four.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3", "", false));
         // 6 replicas over 3 nodes make LOCAL_QUORUM need 4: blocking
         writeAuthReplication(node, networkTopologyStrategy("dc1", "6"));
         Run six = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
         assertThat(six.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', 'dc1': '6'}: " +
                                                                       "dc1 has 6 replicas and only 3 nodes, so LOCAL_QUORUM needs 4 replicas up there, " +
                                                                       "more than its nodes" + AUTH_REPLICATION_BLOCKING);
-        assertThat(six.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false, false));
+        assertThat(six.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 3", "", false));
 
         // 3 replicas in a data center of one node need 2 replicas up there, which it never has
         node.editPeers(peers -> peers.get(1).put("data_center", "o'dc"));
@@ -1552,7 +1603,7 @@ public class DsePreflightTest
                                                                       "'o''dc': '3'}: o'dc has 3 replicas and only 1 node, so LOCAL_QUORUM needs 2 " +
                                                                       "replicas up there, more than its nodes" + AUTH_REPLICATION_BLOCKING);
         // a data center name is quoted as CQL quotes it
-        assertThat(one.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 2, 'o''dc': 1", "", true, true));
+        assertThat(one.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 2, 'o''dc': 1", "", true));
     }
 
     @Test
@@ -1572,14 +1623,14 @@ public class DsePreflightTest
                                                                       "dc1 has 6 replicas and only 4 nodes, so LOCAL_QUORUM needs 4 replicas up there: an " +
                                                                       "upgraded node there cannot start while another node of dc1 is down" +
                                                                       AUTH_REPLICATION_ABOVE);
-        assertThat(six.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 4", "", false, false));
+        assertThat(six.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 4", "", false));
         // 8 replicas have the LOCAL_QUORUM of 5, more than the nodes
         writeAuthReplication(node, networkTopologyStrategy("dc1", "8"));
         Run eight = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
         assertThat(eight.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', 'dc1': '8'}: " +
                                                                         "dc1 has 8 replicas and only 4 nodes, so LOCAL_QUORUM needs 5 replicas up there, " +
                                                                         "more than its nodes" + AUTH_REPLICATION_BLOCKING);
-        assertThat(eight.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 4", "", false, false));
+        assertThat(eight.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 4", "", false));
         // 2 replicas: too few, a warning
         writeAuthReplication(node, networkTopologyStrategy("dc1", "2"));
         assertThat(assertReady(run(node)).messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': " +
@@ -1602,7 +1653,7 @@ public class DsePreflightTest
         assertThat(run.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', 'dc1': '1', " +
                                                                       "'dc2': '1'}: dc1 has 1 replica and 3 nodes: an upgraded node there cannot start " +
                                                                       "while another node of dc1 is down" + AUTH_REPLICATION_SHORT);
-        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3, 'dc2': 2", "", true, true));
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationWarningRemedy("'dc1': 3, 'dc2': 2", "", true));
     }
 
     @Test
@@ -1614,7 +1665,7 @@ public class DsePreflightTest
         assertThat(unknown.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', " +
                                                                           "'dc1': '0', 'old': '3'}: dc1 has 0 replicas and 3 nodes" + AUTH_REPLICATION_BLOCKING);
         assertThat(unknown.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
-            .isEqualTo(authReplicationRemedy("'dc1': 3", "; old, listed but with no node in nodes/local and nodes/peers, left out", false, false));
+            .isEqualTo(authReplicationRemedy("'dc1': 3", "; old, listed but with no node in nodes/local and nodes/peers, left out", false));
 
         // and so does the remedy of the warning
         writeAuthReplication(node, networkTopologyStrategy("dc1", "1", "old", "3"));
@@ -1624,7 +1675,7 @@ public class DsePreflightTest
                                                                             "and 3 nodes: an upgraded node there cannot start while another node " +
                                                                             "of dc1 is down" + AUTH_REPLICATION_SHORT);
         assertThat(shortfall.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
-            .isEqualTo(authReplicationWarningRemedy("'dc1': 3", "; old, listed but with no node in nodes/local and nodes/peers, left out", false, false));
+            .isEqualTo(authReplicationWarningRemedy("'dc1': 3", "; old, listed but with no node in nodes/local and nodes/peers, left out", false));
     }
 
     @Test
@@ -1642,8 +1693,7 @@ public class DsePreflightTest
                                                                       "for its class only, not for the replicas of each data center");
         assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES);
         assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of system_auth: {'class': 'NetworkTopologyStrategy', 'dc1': '1'}, checked " +
-                                                                 "for its class only (no data center is known from nodes/local and nodes/peers)" +
-                                                                 AUTH_REPLICATION_OTHER_KEYSPACES);
+                                                                 "for its class only (no data center is known from nodes/local and nodes/peers)");
 
         // SimpleStrategy may be the replication of a single data center: checked by hand too
         writeAuthReplication(node, simpleStrategy());
@@ -1667,7 +1717,8 @@ public class DsePreflightTest
                                                                           "system_auth (with several data centers, NetworkTopologyStrategy listing " +
                                                                           "each), no more in a data center than its nodes can make a LOCAL_QUORUM of, " +
                                                                           "or an upgraded node there cannot start, even with every node up");
-        assertThat(nowhere.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedyNotExact("'<dc>': 3", noDataCenter));
+        assertThat(nowhere.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
+            .isEqualTo(authReplicationRemedyNotExact("'<dc>': 3", noDataCenter, AUTH_REPLICATION_OTHER_KEYSPACES));
     }
 
     @Test
@@ -1685,7 +1736,7 @@ public class DsePreflightTest
         assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES);
         assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of system_auth: {'class': 'NetworkTopologyStrategy', 'dc1': '2'}, checked " +
                                                                  "against the nodes whose data center is known only (the data center of 1 node is " +
-                                                                 "not known from nodes/local and nodes/peers)" + AUTH_REPLICATION_OTHER_KEYSPACES);
+                                                                 "not known from nodes/local and nodes/peers)");
 
         // with a problem, the remedy asks for the check by hand of that node, and keeps every data center listed
         String uncounted = "; the data center of 1 node is not known from nodes/local and nodes/peers: check by hand the data center of each " +
@@ -1694,7 +1745,8 @@ public class DsePreflightTest
         Run problem = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
         assertThat(problem.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', " +
                                                                           "'dc1': '0', 'dc2': '3'}: dc1 has 0 replicas and 2 nodes" + AUTH_REPLICATION_BLOCKING);
-        assertThat(problem.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedyNotExact("'dc1': 3, 'dc2': 3", uncounted));
+        assertThat(problem.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
+            .isEqualTo(authReplicationRemedyNotExact("'dc1': 3, 'dc2': 3", uncounted, AUTH_REPLICATION_OTHER_KEYSPACES));
 
         // a data center listed with no number that no node counted is in is named, and makes the replication one of several data centers
         writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "x"));
@@ -1704,7 +1756,7 @@ public class DsePreflightTest
                                                                              "with 'x', not a number of replicas" + AUTH_REPLICATION_BLOCKING);
         assertThat(unnumbered.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
             .isEqualTo(authReplicationRemedyNotExact("'dc1': 3", uncounted + "; dc2, listed with no number of replicas, left out: set it by hand if that " +
-                                                                 "data center has nodes"));
+                                                                 "data center has nodes", AUTH_REPLICATION_OTHER_KEYSPACES));
 
         // SimpleStrategy over the two data centers known still blocks, whatever the data center of the other node
         node.editPeers(peers -> peers.get(0).put("data_center", "dc2"));
@@ -1719,7 +1771,8 @@ public class DsePreflightTest
         // a data center listed that no node counted is in is raised to 3 replicas too, the unknown node perhaps in it
         writeAuthReplication(node, networkTopologyStrategy("dc1", "0", "dc2", "1"));
         Run raised = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
-        assertThat(raised.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedyNotExact("'dc1': 3, 'dc2': 3", uncounted));
+        assertThat(raised.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
+            .isEqualTo(authReplicationRemedyNotExact("'dc1': 3, 'dc2': 3", uncounted, AUTH_REPLICATION_OTHER_KEYSPACES));
 
         // with only this node counted, a replication listing another data center alone names both, and the other keyspaces
         node.editPeers(peers -> peers.forEach(peer -> peer.remove("data_center")));
@@ -1730,7 +1783,7 @@ public class DsePreflightTest
         assertThat(other.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
             .isEqualTo(authReplicationRemedyNotExact("'dc1': 3, 'dc2': 3", "; the data centers of 2 nodes are not known from nodes/local and nodes/peers: " +
                                                                            "check by hand the data center of each node and its replicas" +
-                                                                           LOWER_TO_THE_NODES));
+                                                                           LOWER_TO_THE_NODES, AUTH_REPLICATION_OTHER_KEYSPACES));
     }
 
     @Test
@@ -1774,7 +1827,7 @@ public class DsePreflightTest
         assertThat(run.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', " +
                                                                       "'dc1': '5'}: dc2 (1 node) is not listed" + AUTH_REPLICATION_BLOCKING);
         // no data center of 2 nodes: the remedy says nothing of one
-        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 5, 'dc2': 1", "", false, true));
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(authReplicationRemedy("'dc1': 5, 'dc2': 1", "", false));
     }
 
     @Test
@@ -1808,7 +1861,7 @@ public class DsePreflightTest
         assertThat(run.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the data center of 1 node is not known from nodes/local and nodes/peers, so the " +
                                                                       "replication of system_auth, {'class': 'NetworkTopologyStrategy', 'dc1': '3', " +
                                                                       "'dc2': '1'}, was checked against the nodes whose data center is known only");
-        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES);
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHERS_BY_HAND);
 
         // with a problem, the replicas listed are kept as they are, above the nodes counted and above 3
         writeAuthReplication(node, networkTopologyStrategy("dc1", "5"));
@@ -1817,7 +1870,8 @@ public class DsePreflightTest
                                                                           "'dc1': '5'}: dc2 (1 node) is not listed" + AUTH_REPLICATION_BLOCKING);
         assertThat(problem.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
             .isEqualTo(authReplicationRemedyNotExact("'dc1': 5, 'dc2': 3", "; the data center of 1 node is not known from nodes/local and nodes/peers: " +
-                                                                           "check by hand the data center of each node and its replicas" + LOWER_TO_THE_NODES));
+                                                                           "check by hand the data center of each node and its replicas" +
+                                                                           LOWER_TO_THE_NODES, AUTH_REPLICATION_OTHERS_BY_HAND));
 
         // so is a data center listed above 3 that no node counted is in
         writeAuthReplication(node, networkTopologyStrategy("dc1", "5", "old", "4"));
@@ -1825,7 +1879,7 @@ public class DsePreflightTest
         assertThat(old.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
             .isEqualTo(authReplicationRemedyNotExact("'dc1': 5, 'dc2': 3, 'old': 4", "; the data center of 1 node is not known from nodes/local and " +
                                                                                      "nodes/peers: check by hand the data center of each node and its " +
-                                                                                     "replicas" + LOWER_TO_THE_NODES));
+                                                                                     "replicas" + LOWER_TO_THE_NODES, AUTH_REPLICATION_OTHERS_BY_HAND));
     }
 
     @Test
@@ -1834,44 +1888,49 @@ public class DsePreflightTest
         DseNodeFixture node = node();
         Files.write(node.metadata.resolve("nodes").resolve("peers"), new byte[]{ (byte) 0xc1, 0, 1, 2 });
         writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        String hostId = UUID.randomUUID().toString();
+        Files.write(node.hints.resolve(hostId + "-1790335633208-v1.hints"), new byte[0]);
         Run run = assertBlocked(run(node), "UNREADABLE_INPUT");
+        assertThat(run.messages("UNREADABLE_INPUT")).startsWith("cannot read nodes/peers: cannot decode ")
+                                                    .endsWith("; the releases and workloads of the peers cannot be checked");
+        assertThat(run.findings("UNREADABLE_INPUT").get(0).remedy).isEqualTo("run the tool as the user DSE runs as (or as root); a damaged nodes/peers " +
+                                                                             "must be repaired on DSE first");
+        // a DSE hints file for a host id of no known node is only said, nodes/peers not being read
+        assertThat(run.findings("PENDING_HINTS")).hasSize(1);
+        assertThat(run.findings("PENDING_HINTS").get(0).severity).isEqualTo(Finding.Severity.INFO);
+        assertThat(run.messages("PENDING_HINTS")).isEqualTo(HINTS_NOT_CHECKED + hostId + ": 1 file(s)" + HINTS_NOT_CHECKED_END);
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Hints: 1 host id(s) with DSE hints files, not checked against nodes/local and " +
+                                                                 "nodes/peers (not both read and trusted); see PENDING_HINTS");
         assertThat(run.codes(Finding.Severity.BLOCKING)).doesNotContain("SYSTEM_AUTH_REPLICATION");
         assertThat(run.codes(Finding.Severity.WARNING)).contains("SYSTEM_AUTH_REPLICATION");
-        assertThat(run.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("nodes/local or nodes/peers is missing or could not be read, and the data centers " +
-                                                                      "of the nodes are not all known, so the replication of system_auth, {'class': " +
+        assertThat(run.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo(NODES_FILES_NOT_READ + ", so the replication of system_auth, {'class': " +
                                                                       "'NetworkTopologyStrategy', 'dc1': '3', 'dc2': '3'}, was checked against the " +
                                                                       "nodes whose data center is known only");
         // the nodes counted are a lower bound, so the remedy names the other keyspaces too
-        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES);
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES +
+                                                                                    MIXED_PHASE_UNKNOWN);
+
+        // with a file for this node too, a target known: both said
+        Files.write(node.hints.resolve(run.report.node.hostId + "-1790335633208-v1.hints"), new byte[0]);
+        assertThat(assertBlocked(run(node), "UNREADABLE_INPUT").report.upgradePath.upgradeSteps)
+            .contains("Hints: 1 target(s) with DSE hints files pending; see PENDING_HINTS; 1 host id(s) with DSE hints files, not checked " +
+                      "against nodes/local and nodes/peers (not both read and trusted); see PENDING_HINTS");
 
         // nodes/local missing too: no data center is known
         Files.delete(node.metadata.resolve("nodes").resolve("local"));
         Run noLocal = assertBlocked(run(node), "NOT_A_DSE_NODE");
         assertThat(noLocal.codes(Finding.Severity.BLOCKING)).doesNotContain("SYSTEM_AUTH_REPLICATION");
         assertThat(noLocal.codes(Finding.Severity.WARNING)).contains("SYSTEM_AUTH_REPLICATION");
-        assertThat(noLocal.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("nodes/local or nodes/peers is missing or could not be read, and the data " +
-                                                                          "centers of the nodes are not all known, so the replication of system_auth, " +
+        assertThat(noLocal.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo(NODES_FILES_NOT_READ + ", so the replication of system_auth, " +
                                                                           "{'class': 'NetworkTopologyStrategy', 'dc1': '3', 'dc2': '3'}, was checked for " +
                                                                           "its class only, not for the replicas of each data center");
-        assertThat(noLocal.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES);
+        assertThat(noLocal.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES +
+                                                                                        MIXED_PHASE_UNKNOWN);
     }
 
     @Test
-    public void systemAuthReplicationWithANodesFileMissingIsAWarning() throws IOException
+    public void systemAuthReplicationWithNodesLocalMissingIsAWarning() throws IOException
     {
-        // DSE always writes nodes/peers: without it, the peers are not known to be none
-        DseNodeFixture node = node();
-        Files.delete(node.metadata.resolve("nodes").resolve("peers"));
-        writeAuthReplication(node, networkTopologyStrategy("dc1", "3"));
-        Run noPeers = run(node);
-        assertThat(noPeers.codes(Finding.Severity.BLOCKING)).doesNotContain("SYSTEM_AUTH_REPLICATION");
-        assertThat(noPeers.codes(Finding.Severity.WARNING)).contains("SYSTEM_AUTH_REPLICATION");
-        assertThat(noPeers.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("nodes/local or nodes/peers is missing or could not be read, and the data " +
-                                                                          "centers of the nodes are not all known, so the replication of system_auth, {'class': " +
-                                                                          "'NetworkTopologyStrategy', 'dc1': '3'}, was checked against the nodes whose " +
-                                                                          "data center is known only");
-        assertThat(noPeers.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES);
-
         // nodes/local missing, nodes/peers read: the two peers of dc1 are counted, as a lower bound
         DseNodeFixture noLocalNode = node();
         Files.delete(noLocalNode.metadata.resolve("nodes").resolve("local"));
@@ -1879,8 +1938,384 @@ public class DsePreflightTest
         Run noLocal = assertBlocked(run(noLocalNode), "NOT_A_DSE_NODE");
         assertThat(noLocal.codes(Finding.Severity.BLOCKING)).doesNotContain("SYSTEM_AUTH_REPLICATION");
         assertThat(noLocal.codes(Finding.Severity.WARNING)).contains("SYSTEM_AUTH_REPLICATION");
-        assertThat(noLocal.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo(noPeers.messages("SYSTEM_AUTH_REPLICATION"));
+        assertThat(noLocal.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo(NODES_FILES_NOT_READ + ", so the replication of system_auth, " +
+                                                                          "{'class': 'NetworkTopologyStrategy', 'dc1': '3'}, was checked against the nodes " +
+                                                                          "whose data center is known only");
         assertThat(noLocal.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES);
+    }
+
+    @Test
+    public void aSingleNodeWithoutNodesPeersIsASingleNode() throws IOException
+    {
+        // a single DSE 6.9.26 node that never had a peer wrote no nodes/peers: nodes/local alone is a single node, said by
+        // an info, as a lost file would count this node alone wrongly
+        DseNodeFixture node = node();
+        Path nodes = node.metadata.resolve("nodes");
+        Files.delete(nodes.resolve("peers"));
+        writeAuthReplication(node, simpleStrategy());
+        writeDseDefaultReplications(node);
+        Run run = assertReady(run(node));
+        assertThat(run.report.peers).isEmpty();
+        assertThat(run.out).contains("Peers in nodes/peers: none (no nodes/peers file, see NO_PEERS_FILE)");
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION")).isEmpty();
+        assertThat(run.findings("KEYSPACE_REPLICATION")).isEmpty();
+        assertThat(run.findings("NO_PEERS_FILE")).hasSize(1);
+        assertThat(run.findings("NO_PEERS_FILE").get(0).severity).isEqualTo(Finding.Severity.INFO);
+        assertThat(run.messages("NO_PEERS_FILE")).isEqualTo("no nodes/peers in " + nodes + ": taken for a node that never had a peer (a single DSE " +
+                                                            "6.9.26 node writes none), so the replication checks count this node alone and no " +
+                                                            "other node's release, workloads or upgrade state is checked; if nodetool status " +
+                                                            "lists other nodes, the file is lost: apply no remedy of SYSTEM_AUTH_REPLICATION " +
+                                                            "or KEYSPACE_REPLICATION and report to the upgrade owner");
+        assertThat(run.codes(Finding.Severity.WARNING)).doesNotContain("NO_PEERS_FILE", "SYSTEM_AUTH_REPLICATION", "KEYSPACE_REPLICATION");
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of system_auth: {'class': 'SimpleStrategy', 'replication_factor': '1'}, " +
+                                                                 "enough in every data center of nodes/local and nodes/peers (no nodes/peers: this " +
+                                                                 "node counted alone, see NO_PEERS_FILE)",
+                                                                 "Replication of the other system keyspaces: with one data center they stay as they " +
+                                                                 "are (no nodes/peers: this node counted alone, see NO_PEERS_FILE)");
+
+        // the node's data center counts one node: 3 replicas there are more than it can make a LOCAL_QUORUM of
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3"));
+        Run three = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
+        assertThat(three.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'NetworkTopologyStrategy', 'dc1': '3'}: " +
+                                                                        "dc1 has 3 replicas and only 1 node, so LOCAL_QUORUM needs 2 replicas up there, " +
+                                                                        "more than its nodes" + AUTH_REPLICATION_BLOCKING);
+        // its remedy, which would lower the replicas, applies only if the node has no peer indeed
+        assertThat(three.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
+            .endsWith("; nodes/peers is missing, so this node was counted alone: apply this only if nodetool status lists no other node, otherwise " +
+                      "report to the upgrade owner (see NO_PEERS_FILE)");
+        // the same caveat on a keyspace of which no node holds a replica, whose remedy would drop the data center listed
+        writeAuthReplication(node, simpleStrategy());
+        writeKeyspaceReplication(node, "system_distributed", networkTopologyStrategy("dc2", "3"));
+        Run lost = assertReady(run(node));
+        assertThat(keyspaceReplication(lost, "system_distributed").remedy)
+            .isEqualTo(keyspaceReplicationRemedy("system_distributed", "'dc1': 1", "; dc2, listed but with no node in nodes/local and nodes/peers, " +
+                                                                                   "left out") +
+                       "; nodes/peers is missing, so this node was counted alone: apply this only if nodetool status lists no other node, " +
+                       "otherwise report to the upgrade owner (see NO_PEERS_FILE)");
+        assertThat(lost.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: see KEYSPACE_REPLICATION " +
+                                                                  "(system_distributed; no nodes/peers: this node counted alone, see NO_PEERS_FILE)");
+        // hints for other nodes on a node with no nodes/peers suggest that the file was lost
+        Files.write(node.hints.resolve(UUID.randomUUID() + "-1790335633208-v1.hints"), new byte[0]);
+        assertThat(assertReady(run(node)).messages("PENDING_HINTS")).endsWith("; with nodes/peers missing, hints for other nodes suggest that the " +
+                                                                              "file was lost: see NO_PEERS_FILE");
+        writeKeyspaceReplication(node, "system_distributed", Map.of("class", SIMPLE_STRATEGY, "replication_factor", "3"));
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3"));
+
+        // DSE's own empty nodes/peers map: no peer, and no such caveat
+        Files.copy(DseFixtures.nodesPeersEmpty(), nodes.resolve("peers"));
+        Run empty = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
+        assertThat(empty.findings("NO_PEERS_FILE")).isEmpty();
+        assertThat(empty.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).doesNotContain("nodes/peers is missing");
+        assertThat(empty.messages("PENDING_HINTS")).contains("neither in nodes/local nor in nodes/peers").doesNotContain("with nodes/peers missing");
+
+        // nodes/local missing too: no node is counted, so nothing is said of this one
+        Files.delete(nodes.resolve("peers"));
+        Files.delete(nodes.resolve("local"));
+        writeAuthReplication(node, Map.of("class", SIMPLE_STRATEGY, "replication_factor", "0"));
+        Run neither = assertBlocked(run(node), "NOT_A_DSE_NODE");
+        assertThat(neither.findings("NO_PEERS_FILE")).isEmpty();
+        assertThat(neither.codes(Finding.Severity.BLOCKING)).contains("SYSTEM_AUTH_REPLICATION");
+        assertThat(neither.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).doesNotContain("nodes/peers is missing");
+    }
+
+    @Test
+    public void aMissingNodesPeersWithOtherNodesInNodetoolStatusBlocks() throws IOException
+    {
+        Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
+        DseNodeFixture node = node();
+        Path nodes = node.metadata.resolve("nodes");
+        Files.delete(nodes.resolve("peers"));
+        writeAuthReplication(node, simpleStrategy());
+        writeDseDefaultReplications(node);
+        Path arguments = node.root.resolve("nodetool-arguments");
+        Path nodetool = fakeNodetool(node.root, arguments, 0,
+                                     "case \"$*\" in\n" +
+                                     "  *status*) printf 'Datacenter: dc1\\n--  Address  Load\\nUN  192.168.57.11  1 MiB\\nUN  192.168.57.12  1 MiB\\n" +
+                                     "UN  192.168.57.13  1 MiB\\n' ;;\n" +
+                                     "esac\n");
+        Run lost = assertBlocked(run(node, "--nodetool", nodetool.toString()), "UNREADABLE_INPUT");
+        assertThat(lost.findings("NO_PEERS_FILE")).isEmpty();
+        assertThat(lost.out).contains("Peers in nodes/peers: not used (see UNREADABLE_INPUT)");
+        assertThat(lost.messages("UNREADABLE_INPUT")).isEqualTo("cannot read nodes/peers: it is missing, but nodetool status lists 3 nodes, so the " +
+                                                                "file is lost and the peers of this node are not known; the releases and workloads " +
+                                                                "of the peers cannot be checked");
+        assertThat(lost.findings("UNREADABLE_INPUT").get(0).remedy)
+            .isEqualTo("restart DSE on this node and wait until nodetool status shows its peers (DSE then writes nodes/peers anew), then run the " +
+                       "tool again; if nodes/peers is still missing, report to the upgrade owner");
+        // its peers not known, the nodes counted are a lower bound, and the remedies cannot tell the mixed phase
+        assertThat(lost.findings("SYSTEM_AUTH_REPLICATION")).hasSize(1);
+        assertThat(lost.findings("SYSTEM_AUTH_REPLICATION").get(0).severity).isEqualTo(Finding.Severity.WARNING);
+        assertThat(lost.messages("SYSTEM_AUTH_REPLICATION")).startsWith(NODES_FILES_NOT_READ);
+        assertThat(lost.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).endsWith(MIXED_PHASE_UNKNOWN).doesNotContain("nodes/peers is missing");
+        // the other keyspaces, on DSE's defaults, are not checked with one data center known and the peers not known
+        assertThat(lost.findings("KEYSPACE_REPLICATION")).isEmpty();
+        assertThat(lost.report.upgradePath.upgradeSteps).contains(OTHER_KEYSPACES_NOT_CHECKED_STEP, "Hints: no DSE hints file pending");
+        // hints for another node are not checked against nodes files not both trusted
+        Path hint = Files.write(node.hints.resolve(UUID.randomUUID() + "-1790335633208-v1.hints"), new byte[0]);
+        Run lostHints = assertBlocked(run(node, "--nodetool", nodetool.toString()), "UNREADABLE_INPUT");
+        assertThat(lostHints.findings("PENDING_HINTS")).hasSize(1);
+        assertThat(lostHints.findings("PENDING_HINTS").get(0).severity).isEqualTo(Finding.Severity.INFO);
+        assertThat(lostHints.messages("PENDING_HINTS")).startsWith(HINTS_NOT_CHECKED);
+        Files.delete(hint);
+
+        // nodes/local recording no data center: the file is lost all the same
+        node.editLocal(local -> local.remove("data_center"));
+        Run noDataCenter = assertBlocked(run(node, "--nodetool", nodetool.toString()), "UNREADABLE_INPUT");
+        assertThat(noDataCenter.findings("NO_PEERS_FILE")).isEmpty();
+        assertThat(noDataCenter.messages("UNREADABLE_INPUT")).isEqualTo(lost.messages("UNREADABLE_INPUT"));
+        assertThat(noDataCenter.findings("UNREADABLE_INPUT").get(0).remedy).isEqualTo(lost.findings("UNREADABLE_INPUT").get(0).remedy);
+        node.editLocal(local -> local.put("data_center", "dc1"));
+
+        // nodes/local missing too: the tool may not look at DSE's metadata directory at all, so only NOT_A_DSE_NODE
+        Path local = nodes.resolve("local");
+        Path localCopy = node.root.resolve("local-copy");
+        Files.move(local, localCopy);
+        Run noLocal = assertBlocked(run(node, "--nodetool", nodetool.toString()), "NOT_A_DSE_NODE");
+        assertThat(noLocal.findings("UNREADABLE_INPUT")).isEmpty();
+        assertThat(noLocal.findings("NO_PEERS_FILE")).isEmpty();
+        assertThat(noLocal.report.live.get("status").exitCode).isZero();
+        // nodes/local that cannot be read: only its own UNREADABLE_INPUT
+        Files.write(local, "not a nodes file".getBytes(StandardCharsets.UTF_8));
+        Run damagedLocal = assertBlocked(run(node, "--nodetool", nodetool.toString()), "UNREADABLE_INPUT");
+        assertThat(damagedLocal.findings("UNREADABLE_INPUT")).hasSize(1);
+        assertThat(damagedLocal.findings("UNREADABLE_INPUT").get(0).message).startsWith("cannot read nodes/local: ");
+        assertThat(damagedLocal.findings("UNREADABLE_INPUT").get(0).remedy)
+            .isEqualTo("run the tool as the user DSE runs as (or as root); a damaged nodes/local must be repaired on DSE first");
+        assertThat(damagedLocal.report.live.get("status").exitCode).isZero();
+        assertThat(damagedLocal.findings("NO_PEERS_FILE")).isEmpty();
+        Files.move(localCopy, local, StandardCopyOption.REPLACE_EXISTING);
+
+        // DSE's empty map while nodetool status lists 3 nodes: the file is stale
+        Files.copy(DseFixtures.nodesPeersEmpty(), nodes.resolve("peers"));
+        Run stale = assertBlocked(run(node, "--nodetool", nodetool.toString()), "UNREADABLE_INPUT");
+        assertThat(stale.findings("NO_PEERS_FILE")).isEmpty();
+        assertThat(stale.messages("UNREADABLE_INPUT")).isEqualTo("cannot read nodes/peers: it records no peer, but nodetool status lists 3 nodes, so the " +
+                                                                 "file is stale and the peers of this node are not known; the releases and workloads " +
+                                                                 "of the peers cannot be checked");
+        assertThat(stale.findings("UNREADABLE_INPUT").get(0).remedy)
+            .isEqualTo("restart DSE on this node and wait until nodetool status shows its peers (DSE then writes nodes/peers anew), then run the " +
+                       "tool again; if nodes/peers still records no peer, report to the upgrade owner");
+        Files.delete(nodes.resolve("peers"));
+
+        // nodetool status listing this node alone: a single node
+        fakeNodetool(node.root, arguments, 0,
+                     "case \"$*\" in\n" +
+                     "  *status*) printf 'Datacenter: dc1\\n--  Address  Load\\nUN  192.168.57.11  1 MiB\\n' ;;\n" +
+                     "esac\n");
+        assertSingleNodeWithoutPeers(run(node, "--nodetool", nodetool.toString()));
+        // nodetool status listing no node it can parse: the same
+        fakeNodetool(node.root, arguments, 0,
+                     "case \"$*\" in\n" +
+                     "  *status*) echo 'nodetool: Failed to connect' ;;\n" +
+                     "esac\n");
+        assertSingleNodeWithoutPeers(run(node, "--nodetool", nodetool.toString()));
+        // nodetool status failing: nothing to compare, the same
+        fakeNodetool(node.root, arguments, 1, "");
+        Run failing = run(node, "--nodetool", nodetool.toString());
+        assertThat(failing.codes(Finding.Severity.WARNING)).contains("LIVE_UNAVAILABLE");
+        assertSingleNodeWithoutPeers(failing);
+    }
+
+    @Test
+    public void peersRecordedAreNotComparedWithTheNodesOfNodetoolStatus() throws IOException
+    {
+        // with peers recorded, nodes joining or leaving make nodetool status list another count for a while: not compared
+        Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
+        DseNodeFixture node = node();
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3"));
+        Path nodetool = fakeNodetool(node.root, node.root.resolve("nodetool-arguments"), 0,
+                                     "case \"$*\" in\n" +
+                                     "  *status*) printf 'Datacenter: dc1\\n--  Address  Load\\nUN  192.168.57.11  1 MiB\\nUN  192.168.57.12  1 MiB\\n" +
+                                     "UN  192.168.57.13  1 MiB\\nUN  192.168.57.14  1 MiB\\nUN  192.168.57.15  1 MiB\\n' ;;\n" +
+                                     "esac\n");
+        Run run = run(node, "--nodetool", nodetool.toString());
+        // nodetool status was read: 5 nodes against the 2 peers recorded and this node
+        assertThat(Files.readAllLines(node.root.resolve("nodetool-arguments"))).contains("status");
+        assertThat(run.report.live.get("status").exitCode).isZero();
+        assertThat(run.report.peers).hasSize(2);
+        assertThat(run.out).contains("Peers in nodes/peers: 2" + System.lineSeparator());
+        assertThat(run.findings("UNREADABLE_INPUT")).isEmpty();
+        assertThat(run.findings("NO_PEERS_FILE")).isEmpty();
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION")).isEmpty();
+    }
+
+    /** What a node with no nodes/peers, on DSE's defaults, gives when it is taken for a single node. */
+    private static void assertSingleNodeWithoutPeers(Run run)
+    {
+        assertThat(run.codes(Finding.Severity.BLOCKING)).doesNotContain("UNREADABLE_INPUT");
+        assertThat(run.findings("NO_PEERS_FILE")).hasSize(1);
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION")).isEmpty();
+        assertThat(run.findings("KEYSPACE_REPLICATION")).isEmpty();
+    }
+
+    @Test
+    public void nodesPeersBeingRewrittenByDseBlocks() throws IOException
+    {
+        // DSE rewriting nodes/peers, or interrupted while it did: peers.old holds the peers, which the tool does not take for none
+        DseNodeFixture node = node();
+        Path nodes = node.metadata.resolve("nodes");
+        Files.move(nodes.resolve("peers"), nodes.resolve("peers.old"));
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3"));
+        Run run = assertBlocked(run(node), "UNREADABLE_INPUT");
+        assertThat(run.messages("UNREADABLE_INPUT")).isEqualTo(PEERS_OLD_LEFT);
+        assertThat(run.findings("UNREADABLE_INPUT").get(0).remedy).isEqualTo(PEERS_OLD_LEFT_REMEDY);
+        // not a single node: the nodes counted are a lower bound, so 3 replicas in dc1 are no problem
+        assertThat(run.codes(Finding.Severity.BLOCKING)).doesNotContain("SYSTEM_AUTH_REPLICATION", "NOT_A_DSE_NODE");
+        // the peers of peers.old are not used either, and the other keyspaces are not checked, one data center known
+        assertThat(run.report.peers).isEmpty();
+        assertThat(run.findings("KEYSPACE_REPLICATION")).isEmpty();
+        assertThat(run.report.upgradePath.upgradeSteps).contains(OTHER_KEYSPACES_NOT_CHECKED_STEP);
+        assertThat(run.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo(NODES_FILES_NOT_READ + ", so the replication of system_auth, {'class': " +
+                                                                      "'NetworkTopologyStrategy', 'dc1': '3'}, was checked against the nodes whose " +
+                                                                      "data center is known only");
+        // the check by hand cannot tell the mixed phase either
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES +
+                                                                                    MIXED_PHASE_UNKNOWN);
+        // a replication that gives no node a replica is said, its remedy unable to tell the mixed phase either
+        writeKeyspaceReplication(node, "dse_security", Map.of("class", SIMPLE_STRATEGY, "replication_factor", "0"));
+        Finding security = keyspaceReplication(assertBlocked(run(node), "UNREADABLE_INPUT"), "dse_security");
+        assertThat(security.message).isEqualTo("the replication of dse_security is {'class': 'SimpleStrategy', 'replication_factor': '0'}: its " +
+                                               "replication_factor is 0, so no node holds a replica of dse_security; " + NODES_FILES_NOT_READ +
+                                               ", so it was checked against the nodes whose data center is known only; HCD 2.0 does not read " +
+                                               "or write dse_security, which only DSE uses" + KEYSPACE_REPLICATION_NOT_BLOCKING +
+                                               KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(security.remedy).isEqualTo(keyspaceReplicationRemedy("dse_security", "'dc1': 3", "; " + NODES_FILES_NOT_READ + ": check by " +
+                                                                        "hand the data center of each node and its replicas" + LOWER_TO_THE_NODES)
+                                                  .replace("kept up to the nodes of the data center", "kept as listed") + MIXED_PHASE_UNKNOWN);
+        node.deletePartitions("system_schema", "keyspaces", KEYSPACES_KEY, List.of(), "dse_security");
+        // a replication that blocks: its remedy says that it applies only outside the mixed phase, which the tool cannot tell
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "0"));
+        Run zero = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
+        assertThat(zero.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).endsWith(AUTH_REPLICATION_OTHER_KEYSPACES + MIXED_PHASE_UNKNOWN);
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3"));
+
+        // peers.txn alone: DSE writing the file for the first time, or interrupted while it did, which nothing recovers
+        Files.move(nodes.resolve("peers.old"), nodes.resolve("peers.txn"));
+        Run txn = assertBlocked(run(node), "UNREADABLE_INPUT");
+        assertThat(txn.messages("UNREADABLE_INPUT")).isEqualTo("cannot read nodes/peers: it is missing and a nodes/peers.txn is left (DSE is " +
+                                                               "writing the file for the first time, or was interrupted while it did), so the " +
+                                                               "peers of this node are not known; the releases and workloads of the peers cannot " +
+                                                               "be checked");
+        assertThat(txn.findings("UNREADABLE_INPUT").get(0).remedy).isEqualTo("run the tool again; if it persists with DSE stopped, start DSE once " +
+                                                                             "and wait until nodetool status shows its peers (DSE then writes " +
+                                                                             "nodes/peers anew), then run the tool again; if this node has no peer, " +
+                                                                             "delete nodes/peers.txn");
+        assertThat(txn.codes(Finding.Severity.BLOCKING)).doesNotContain("SYSTEM_AUTH_REPLICATION");
+        assertThat(txn.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo(run.messages("SYSTEM_AUTH_REPLICATION"));
+
+        // nodes/peers there with a peers.txn left beside it: DSE puts nothing back, so the peers are read, and counted exactly
+        Files.copy(nodes.resolve("peers.txn"), nodes.resolve("peers"));
+        Run txnLeft = assertReady(run(node));
+        assertThat(txnLeft.findings("UNREADABLE_INPUT")).isEmpty();
+        assertThat(txnLeft.report.peers).hasSize(2);
+        assertThat(txnLeft.findings("SYSTEM_AUTH_REPLICATION")).isEmpty();
+        assertThat(txnLeft.report.upgradePath.upgradeSteps).contains("Replication of system_auth: {'class': 'NetworkTopologyStrategy', 'dc1': '3'}, " +
+                                                                     "enough in every data center of nodes/local and nodes/peers");
+
+        // nodes/peers there with a peers.old left beside it: DSE, and the import of HCD 2.0, put peers.old back at the next start
+        Files.copy(nodes.resolve("peers"), nodes.resolve("peers.old"));
+        Run oldLeft = assertBlocked(run(node), "UNREADABLE_INPUT");
+        assertThat(oldLeft.messages("UNREADABLE_INPUT")).isEqualTo(PEERS_OLD_LEFT);
+        // the peers of nodes/peers, which DSE replaces at its next start, are not used: no peer, no check of their releases
+        assertThat(oldLeft.report.peers).isEmpty();
+
+        // peers recorded as upgraded, or of another release, in a nodes/peers that peers.old will replace: no mixed phase, no
+        // mixed releases; and a DSE hints file for a host id of no known node is only said, the peers not being known
+        String hostId = UUID.randomUUID().toString();
+        Files.write(node.hints.resolve(hostId + "-1790335633208-v1.hints"), new byte[0]);
+        node.editPeers(peers -> {
+            peers.get(0).put("release_version", "5.0.7.0-SNAPSHOT");
+            peers.get(1).put("release_version", "4.0.0.6926");
+        });
+        Run stale = assertBlocked(run(node), "UNREADABLE_INPUT");
+        assertThat(stale.report.peers).isEmpty();
+        assertThat(stale.findings("UPGRADED_PEERS")).isEmpty();
+        assertThat(stale.findings("MIXED_RELEASES")).isEmpty();
+        assertThat(stale.findings("PENDING_HINTS")).hasSize(1);
+        assertThat(stale.findings("PENDING_HINTS").get(0).severity).isEqualTo(Finding.Severity.INFO);
+        assertThat(stale.messages("PENDING_HINTS")).isEqualTo(HINTS_NOT_CHECKED + hostId + ": 1 file(s)" + HINTS_NOT_CHECKED_END);
+        assertThat(stale.report.upgradePath.upgradeSteps).contains("Hints: 1 host id(s) with DSE hints files, not checked against nodes/local and nodes/peers " +
+                                                                   "(not both read and trusted); see PENDING_HINTS");
+        // the same nodes/peers, trusted once peers.old is gone, gives both
+        Files.delete(nodes.resolve("peers.old"));
+        Run trusted = run(node);
+        assertThat(trusted.report.peers).hasSize(2);
+        assertThat(trusted.findings("UPGRADED_PEERS")).isNotEmpty();
+        assertThat(trusted.findings("MIXED_RELEASES")).isNotEmpty();
+        assertThat(trusted.findings("PENDING_HINTS")).hasSize(1);
+        assertThat(trusted.findings("PENDING_HINTS").get(0).severity).isEqualTo(Finding.Severity.WARNING);
+        assertThat(trusted.messages("PENDING_HINTS")).startsWith("DSE hints files for host ids neither in nodes/local nor in nodes/peers: " +
+                                                                 hostId + ": 1 file(s)");
+        assertThat(trusted.report.upgradePath.upgradeSteps).contains("Hints: 1 host id(s) of no known node with DSE hints files; see PENDING_HINTS");
+    }
+
+    @Test
+    public void peersFileProblemAndPeersReadFailure() throws IOException
+    {
+        // as looked at on disk: a missing file, and a file looked at twice, unchanged
+        Path folder = temporaryFolder.newFolder().toPath();
+        NodeInspector.PeersFileState absent = NodeInspector.PeersFileState.of(folder.resolve("peers"));
+        assertThat(absent.exists).isFalse();
+        assertThat(absent.error).isNull();
+        Path file = Files.write(folder.resolve("peers"), new byte[]{ 1, 2, 3 });
+        NodeInspector.PeersFileState present = NodeInspector.PeersFileState.of(file);
+        assertThat(present.exists).isTrue();
+        assertThat(present.error).isNull();
+        assertThat(present.size).isEqualTo(3);
+        assertThat(present.sameAs(NodeInspector.PeersFileState.of(file))).isTrue();
+
+        NodeInspector.PeersFileState there = new NodeInspector.PeersFileState(true, 7L, 100, 1000, null);
+        NodeInspector.PeersFileState missing = new NodeInspector.PeersFileState(false, null, 0, 0, null);
+        String changed = "cannot read nodes/peers: it changed while it was read (DSE wrote or rewrote it), so the peers of this node are not known; the " +
+                         "releases and workloads of the peers cannot be checked";
+        // appeared, disappeared, or rewritten in place: another file (moved away and back between the two looks), another
+        // size, another modification time
+        List<NodeInspector.PeersFileState> others = List.of(new NodeInspector.PeersFileState(true, 8L, 100, 1000, null),
+                                                            new NodeInspector.PeersFileState(true, 7L, 120, 1000, null),
+                                                            new NodeInspector.PeersFileState(true, 7L, 100, 2000, null));
+        List<NodeInspector.PeersFileState[]> pairs = new ArrayList<>();
+        pairs.add(new NodeInspector.PeersFileState[]{ missing, there });
+        pairs.add(new NodeInspector.PeersFileState[]{ there, missing });
+        others.forEach(other -> pairs.add(new NodeInspector.PeersFileState[]{ there, other }));
+        for (NodeInspector.PeersFileState[] states : pairs)
+        {
+            Finding finding = NodeInspector.peersFileProblem(states[0], states[1], false, false);
+            assertThat(finding).isNotNull();
+            assertThat(finding.code).isEqualTo("UNREADABLE_INPUT");
+            assertThat(finding.severity).isEqualTo(Finding.Severity.BLOCKING);
+            assertThat(finding.message).isEqualTo(changed);
+            assertThat(finding.remedy).isEqualTo("run the tool again");
+        }
+        // attributes that cannot be read are no missing file
+        Finding error = NodeInspector.peersFileProblem(there, new NodeInspector.PeersFileState(true, null, 0, 0, "java.io.IOException: denied"),
+                                                       false, false);
+        assertThat(error.code).isEqualTo("UNREADABLE_INPUT");
+        assertThat(error.severity).isEqualTo(Finding.Severity.BLOCKING);
+        assertThat(error.message).isEqualTo("cannot read nodes/peers: its attributes cannot be read (java.io.IOException: denied), so the peers of " +
+                                            "this node are not known; the releases and workloads of the peers cannot be checked");
+        assertThat(error.remedy).isEqualTo("run the tool as the user DSE runs as (or as root)");
+        // the error of the first look wins
+        Finding first = NodeInspector.peersFileProblem(new NodeInspector.PeersFileState(true, null, 0, 0, "java.io.IOException: first"),
+                                                       new NodeInspector.PeersFileState(true, null, 0, 0, "java.io.IOException: second"), false, false);
+        assertThat(first.message).contains("(java.io.IOException: first)");
+        // unchanged: read (or missing, no peer), and trusted
+        assertThat(NodeInspector.peersFileProblem(there, new NodeInspector.PeersFileState(true, 7L, 100, 1000, null), false, false)).isNull();
+        assertThat(NodeInspector.peersFileProblem(missing, missing, false, false)).isNull();
+        assertThat(NodeInspector.peersFileProblem(there, there, false, true)).isNull();
+        assertThat(NodeInspector.peersFileProblem(there, there, true, false).message).isEqualTo(PEERS_OLD_LEFT);
+
+        // a read that failed: the file gone since (moved away by DSE), a peers.old left beside it, or a damaged file
+        assertThat(NodeInspector.peersReadFailure("boom", there, missing, true).message).isEqualTo(changed);
+        assertThat(NodeInspector.peersReadFailure("boom", there, there, true).message).isEqualTo(PEERS_OLD_LEFT);
+        NodeInspector.PeersFileState denied = new NodeInspector.PeersFileState(true, null, 0, 0, "java.io.IOException: denied");
+        assertThat(NodeInspector.peersReadFailure("boom", denied, denied, true).message).isEqualTo(PEERS_OLD_LEFT);
+        // a file replaced while it was read changed, damaged or not
+        assertThat(NodeInspector.peersReadFailure("boom", there, new NodeInspector.PeersFileState(true, 8L, 100, 1000, null), false).message)
+            .isEqualTo(changed);
+        Finding damaged = NodeInspector.peersReadFailure("boom", there, there, false);
+        assertThat(damaged.severity).isEqualTo(Finding.Severity.BLOCKING);
+        assertThat(damaged.message).isEqualTo("cannot read nodes/peers: boom; the releases and workloads of the peers cannot be checked");
+        assertThat(damaged.remedy).isEqualTo("run the tool as the user DSE runs as (or as root); a damaged nodes/peers must be repaired on DSE first");
     }
 
     @Test
@@ -1900,7 +2335,7 @@ public class DsePreflightTest
                        "replication cannot be changed in the mixed phase");
         assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of system_auth: {'class': 'NetworkTopologyStrategy', 'dc1': '3'}, checked " +
                                                                  "against the nodes whose data center is known only (the data center of 1 node is " +
-                                                                 "not known from nodes/local and nodes/peers)" + AUTH_REPLICATION_OTHER_KEYSPACES);
+                                                                 "not known from nodes/local and nodes/peers)");
     }
 
     @Test
@@ -2040,6 +2475,502 @@ public class DsePreflightTest
                                                                          "each data center, and nodes/local and nodes/peers name 2 (dc1, dc2), so " +
                                                                          "LOCAL_QUORUM cannot be met in each" + AUTH_REPLICATION_BLOCKING);
         assertThat(simple.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_MIXED_PHASE_REMEDY);
+    }
+
+    @Test
+    public void otherSystemKeyspacesOnASingleNodeOnDseDefaultsGiveNothing() throws IOException
+    {
+        // a single-node installation on DSE's defaults: system_auth with one replica, system_distributed with 3, system_traces with 2,
+        // DSE's empty nodes/peers map
+        DseNodeFixture node = node();
+        Files.copy(DseFixtures.nodesPeersEmpty(), node.metadata.resolve("nodes").resolve("peers"), StandardCopyOption.REPLACE_EXISTING);
+        writeAuthReplication(node, simpleStrategy());
+        writeDseDefaultReplications(node);
+        Run run = assertReady(run(node));
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION")).isEmpty();
+        assertThat(run.findings("KEYSPACE_REPLICATION")).isEmpty();
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: with one data center they stay as they are");
+    }
+
+    @Test
+    public void otherSystemKeyspacesInOneDataCenterOfThreeNodesStayAsTheyAre() throws IOException
+    {
+        // DSE's defaults on the 3 nodes of dc1: system_auth warns, as graded on its own; the others are not checked with one data center
+        DseNodeFixture node = node();
+        writeAuthReplication(node, simpleStrategy());
+        writeDseDefaultReplications(node);
+        Run run = assertReady(run(node));
+        assertThat(run.codes(Finding.Severity.WARNING)).contains("SYSTEM_AUTH_REPLICATION");
+        assertThat(run.messages("SYSTEM_AUTH_REPLICATION")).isEqualTo("the replication of system_auth is {'class': 'SimpleStrategy', 'replication_factor': '1'}: " +
+                                                                      "dc1 has 1 replica and 3 nodes: an upgraded node there cannot start while another " +
+                                                                      "node of dc1 is down" + AUTH_REPLICATION_SHORT);
+        assertThat(run.findings("KEYSPACE_REPLICATION")).isEmpty();
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: with one data center they stay as they are");
+
+        // nor with a replication that would be short with several data centers
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "1"));
+        assertThat(assertReady(run(node)).findings("KEYSPACE_REPLICATION")).isEmpty();
+
+        // but a replication that gives no node a replica is said, with one data center too
+        writeKeyspaceReplication(node, "system_distributed", networkTopologyStrategy("old", "3"));
+        Run old = assertReady(run(node));
+        assertThat(old.findings("KEYSPACE_REPLICATION")).hasSize(1);
+        assertThat(keyspaceReplication(old, "system_distributed").message)
+            .isEqualTo("the replication of system_distributed is {'class': 'NetworkTopologyStrategy', 'old': '3'}: dc1 (3 nodes) is not listed, so " +
+                       "no node holds a replica of system_distributed; " + DISTRIBUTED_USE + KEYSPACE_REPLICATION_NOT_BLOCKING +
+                       KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(keyspaceReplication(old, "system_distributed").remedy)
+            .isEqualTo(keyspaceReplicationRemedy("system_distributed", "'dc1': 3", "; old, listed but with no node in nodes/local and nodes/peers, " +
+                                                                                   "left out"));
+        assertThat(old.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: see KEYSPACE_REPLICATION " +
+                                                                 "(system_distributed)");
+        writeKeyspaceReplication(node, "system_traces", Map.of("class", SIMPLE_STRATEGY, "replication_factor", "0"));
+        assertThat(keyspaceReplication(assertReady(run(node)), "system_traces").message)
+            .isEqualTo("the replication of system_traces is {'class': 'SimpleStrategy', 'replication_factor': '0'}: its replication_factor is 0, " +
+                       "so no node holds a replica of system_traces; " + TRACES_USE + KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+    }
+
+    @Test
+    public void systemDistributedOnSimpleStrategyWithTwoDataCentersWarns() throws IOException
+    {
+        DseNodeFixture node = twoDataCenterNode();
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        writeDseDefaultReplications(node);
+        Run run = assertReady(run(node));
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION")).isEmpty();
+        assertThat(run.codes(Finding.Severity.WARNING)).contains("KEYSPACE_REPLICATION");
+        assertThat(run.codes(Finding.Severity.BLOCKING)).doesNotContain("KEYSPACE_REPLICATION");
+        // one warning per keyspace on SimpleStrategy; those on EverywhereStrategy stay as they are
+        assertThat(run.findings("KEYSPACE_REPLICATION")).extracting(f -> f.message.substring(0, f.message.indexOf(" is ")))
+                                                        .containsExactly("the replication of dse_leases", "the replication of dse_perf",
+                                                                         "the replication of dse_security", "the replication of system_distributed",
+                                                                         "the replication of system_traces");
+        Finding distributed = keyspaceReplication(run, "system_distributed");
+        assertThat(distributed.message).isEqualTo("the replication of system_distributed is {'class': 'SimpleStrategy', 'replication_factor': '3'}: " +
+                                                  "SimpleStrategy does not place replicas in each data center, and nodes/local and nodes/peers name " +
+                                                  "2 (dc1, dc2)" + NO_REPLICA_OF_PART + "system_distributed; " + DISTRIBUTED_USE +
+                                                  KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(distributed.remedy).isEqualTo(keyspaceReplicationRemedy("system_distributed", "'dc1': 3, 'dc2': 3",
+                                                                           "; the replication factor of SimpleStrategy spans the data centers, so it is " +
+                                                                           "not carried over"));
+        assertThat(keyspaceReplication(run, "system_traces").message)
+            .isEqualTo("the replication of system_traces is {'class': 'SimpleStrategy', 'replication_factor': '2'}: SimpleStrategy does not place " +
+                       "replicas in each data center, and nodes/local and nodes/peers name 2 (dc1, dc2)" + NO_REPLICA_OF_PART + "system_traces; " +
+                       TRACES_USE + KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+        // a DSE keyspace, which HCD 2.0 does not use
+        Finding leases = keyspaceReplication(run, "dse_leases");
+        assertThat(leases.message).isEqualTo("the replication of dse_leases is {'class': 'SimpleStrategy', 'replication_factor': '1'}: " +
+                                             "SimpleStrategy does not place replicas in each data center, and nodes/local and nodes/peers " +
+                                             "name 2 (dc1, dc2)" + NO_REPLICA_OF_PART + "dse_leases; HCD 2.0 does not read or write dse_leases, " +
+                                             "which only DSE uses" + KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(leases.remedy).isEqualTo(keyspaceReplicationRemedy("dse_leases", "'dc1': 3, 'dc2': 3",
+                                                                      "; the replication factor of SimpleStrategy spans the data centers, so it is not " +
+                                                                      "carried over"));
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of system_auth: {'class': 'NetworkTopologyStrategy', 'dc1': '3', 'dc2': '3'}, " +
+                                                                 "enough in every data center of nodes/local and nodes/peers",
+                                                                 "Replication of the other system keyspaces: see KEYSPACE_REPLICATION (dse_leases, dse_perf, " +
+                                                                 "dse_security, system_distributed, system_traces)");
+
+        // with 3 replicas in each data center, nothing is left to say
+        for (String keyspace : List.of("system_distributed", "system_traces", "dse_security", "dse_leases", "dse_perf"))
+            writeKeyspaceReplication(node, keyspace, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        Run ready = assertReady(run(node));
+        assertThat(ready.findings("KEYSPACE_REPLICATION")).isEmpty();
+        assertThat(ready.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: dse_leases, dse_perf, dse_security, " +
+                                                                   "system_distributed, system_traces, enough in every data center of nodes/local " +
+                                                                   "and nodes/peers");
+    }
+
+    @Test
+    public void dseKeyspaceOnNetworkTopologyStrategyMissingADataCenterWarns() throws IOException
+    {
+        DseNodeFixture node = twoDataCenterNode();
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        for (String keyspace : List.of("system_distributed", "system_traces", "dse_leases", "dse_perf"))
+            writeKeyspaceReplication(node, keyspace, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "3"));
+        Run run = assertReady(run(node));
+        assertThat(run.findings("KEYSPACE_REPLICATION")).hasSize(1);
+        assertThat(run.codes(Finding.Severity.WARNING)).contains("KEYSPACE_REPLICATION");
+        Finding security = keyspaceReplication(run, "dse_security");
+        assertThat(security.message).isEqualTo("the replication of dse_security is {'class': 'NetworkTopologyStrategy', 'dc1': '3'}: dc2 (3 nodes) is " +
+                                               "not listed, so dc2 holds no replica of dse_security; HCD 2.0 does not read or write dse_security, " +
+                                               "which only DSE uses" +
+                                               KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(security.remedy).isEqualTo(keyspaceReplicationRemedy("dse_security", "'dc1': 3, 'dc2': 3", ""));
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: see KEYSPACE_REPLICATION (dse_security)");
+
+        // at 0 in a data center with nodes
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "3", "dc2", "0"));
+        assertThat(keyspaceReplication(assertReady(run(node)), "dse_security").message)
+            .isEqualTo("the replication of dse_security is {'class': 'NetworkTopologyStrategy', 'dc1': '3', 'dc2': '0'}: dc2 has 0 replicas and 3 " +
+                       "nodes, so dc2 holds no replica of dse_security; HCD 2.0 does not read or write dse_security, which only DSE " +
+                       "uses" + KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+
+        // no replica in any data center of the nodes: no node holds a replica, whatever a data center of no node holds
+        String dseOnly = "; HCD 2.0 does not read or write dse_security, which only DSE uses" + KEYSPACE_REPLICATION_NOT_BLOCKING +
+                         KEYSPACE_REPLICATION_RECOMMENDED;
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy());
+        assertThat(keyspaceReplication(assertReady(run(node)), "dse_security").message)
+            .isEqualTo("the replication of dse_security is {'class': 'NetworkTopologyStrategy'}: dc1 (3 nodes) is not listed; dc2 (3 nodes) is not " +
+                       "listed, so no node holds a replica of dse_security" + dseOnly);
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "0", "dc2", "0"));
+        assertThat(keyspaceReplication(assertReady(run(node)), "dse_security").message)
+            .isEqualTo("the replication of dse_security is {'class': 'NetworkTopologyStrategy', 'dc1': '0', 'dc2': '0'}: dc1 has 0 replicas and 3 " +
+                       "nodes; dc2 has 0 replicas and 3 nodes, so no node holds a replica of dse_security" + dseOnly);
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "0", "dc2", "0", "old", "3"));
+        Run old = assertReady(run(node));
+        assertThat(keyspaceReplication(old, "dse_security").message)
+            .isEqualTo("the replication of dse_security is {'class': 'NetworkTopologyStrategy', 'dc1': '0', 'dc2': '0', 'old': '3'}: dc1 has 0 " +
+                       "replicas and 3 nodes; dc2 has 0 replicas and 3 nodes, so no node holds a replica of dse_security" + dseOnly);
+        assertThat(keyspaceReplication(old, "dse_security").remedy)
+            .isEqualTo(keyspaceReplicationRemedy("dse_security", "'dc1': 3, 'dc2': 3", "; old, listed but with no node in nodes/local and nodes/peers, " +
+                                                                                        "left out"));
+
+        // with the data center of a node not known: no data center listed, so no node holds a replica; a data center of no
+        // node listed with replicas, which the unknown node may be in, so only the data centers known hold none
+        addPeer(node, 198, false);
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy());
+        assertThat(keyspaceReplication(assertReady(run(node)), "dse_security").message)
+            .startsWith("the replication of dse_security is {'class': 'NetworkTopologyStrategy'}: dc1 (3 nodes) is not listed; dc2 (3 nodes) is not " +
+                        "listed, so no node holds a replica of dse_security; the data center of 1 node is not known");
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("old", "3"));
+        assertThat(keyspaceReplication(assertReady(run(node)), "dse_security").message)
+            .startsWith("the replication of dse_security is {'class': 'NetworkTopologyStrategy', 'old': '3'}: dc1 (3 nodes) is not listed; dc2 (3 " +
+                        "nodes) is not listed, so dc1 and dc2 hold no replica of dse_security; the data center of 1 node is not known");
+        node.editPeers(peers -> peers.remove(peers.size() - 1));
+
+        // a data center without replicas and a low count in another: the remedy is not optional
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "1"));
+        Run both = assertReady(run(node));
+        assertThat(keyspaceReplication(both, "dse_security").message)
+            .isEqualTo("the replication of dse_security is {'class': 'NetworkTopologyStrategy', 'dc1': '1'}: dc2 (3 nodes) is not listed, so dc2 " +
+                       "holds no replica of dse_security; dc1 has 1 replica and 3 nodes, fewer than the 3 recommended" + dseOnly);
+        assertThat(keyspaceReplication(both, "dse_security").remedy).isEqualTo(keyspaceReplicationRemedy("dse_security", "'dc1': 3, 'dc2': 3", ""));
+
+        // fewer than the 3 replicas recommended in a data center of 3 nodes: 1, or 2
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "1", "dc2", "3"));
+        Run fewer = assertReady(run(node));
+        assertThat(keyspaceReplication(fewer, "dse_security").message)
+            .isEqualTo("the replication of dse_security is {'class': 'NetworkTopologyStrategy', 'dc1': '1', 'dc2': '3'}: dc1 has 1 replica and 3 " +
+                       "nodes, fewer than the 3 recommended; HCD 2.0 does not read or write dse_security, which only DSE uses" +
+                       KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(keyspaceReplication(fewer, "dse_security").remedy).isEqualTo(keyspaceReplicationOptionalRemedy("dse_security", "'dc1': 3, 'dc2': 3", ""));
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "3", "dc2", "2"));
+        Run two = assertReady(run(node));
+        assertThat(keyspaceReplication(two, "dse_security").message)
+            .isEqualTo("the replication of dse_security is {'class': 'NetworkTopologyStrategy', 'dc1': '3', 'dc2': '2'}: dc2 has 2 replicas and 3 " +
+                       "nodes, fewer than the 3 recommended; HCD 2.0 does not read or write dse_security, which only DSE uses" +
+                       KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(keyspaceReplication(two, "dse_security").remedy).isEqualTo(keyspaceReplicationOptionalRemedy("dse_security", "'dc1': 3, 'dc2': 3", ""));
+
+        // no shortfall in a data center of 2 nodes with 1 replica, nor in one of 1 node, and nothing for more replicas than nodes
+        // (6 on 3 nodes, 4 on 2 nodes, 2 on 1 node, which LOCAL_QUORUM would never meet, or 5 on 3 nodes, which it would only
+        // with every node up)
+        node.editPeers(peers -> peers.stream().filter(peer -> "dc2".equals(peer.get("data_center"))).findFirst().get().put("data_center", "dc3"));
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "2", "dc3", "1"));
+        for (String keyspace : List.of("system_distributed", "system_traces", "dse_leases", "dse_perf"))
+            writeKeyspaceReplication(node, keyspace, networkTopologyStrategy("dc1", "3", "dc2", "2", "dc3", "1"));
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "3", "dc2", "1", "dc3", "1"));
+        writeKeyspaceReplication(node, "dse_leases", networkTopologyStrategy("dc1", "6", "dc2", "4", "dc3", "2"));
+        writeKeyspaceReplication(node, "dse_perf", networkTopologyStrategy("dc1", "5", "dc2", "2", "dc3", "1"));
+        Run small = assertReady(run(node));
+        assertThat(small.findings("SYSTEM_AUTH_REPLICATION")).isEmpty();
+        assertThat(small.findings("KEYSPACE_REPLICATION")).isEmpty();
+
+        // with the data center of a node not known, the data centers known are checked against the nodes counted
+        addPeer(node, 199, false);
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "3", "dc2", "2"));
+        Run uncounted = assertReady(run(node));
+        assertThat(keyspaceReplication(uncounted, "dse_security").message)
+            .isEqualTo("the replication of dse_security is {'class': 'NetworkTopologyStrategy', 'dc1': '3', 'dc2': '2'}: dc3 (1 node) is not listed" +
+                       ", so dc3 holds no replica of dse_security; " +
+                       "the data center of 1 node is not known from nodes/local and nodes/peers, so it was checked against the nodes whose data " +
+                       "center is known only; HCD 2.0 does not read or write dse_security, which only DSE uses" + KEYSPACE_REPLICATION_NOT_BLOCKING +
+                       KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(keyspaceReplication(uncounted, "dse_security").remedy)
+            .isEqualTo(keyspaceReplicationRemedy("dse_security", "'dc1': 3, 'dc2': 3, 'dc3': 3",
+                                                 "; the data center of 1 node is not known from nodes/local and nodes/peers: check by hand the data " +
+                                                 "center of each node and its replicas" + LOWER_TO_THE_NODES)
+                           .replace("kept up to the nodes of the data center", "kept as listed"));
+
+        // nothing short among the nodes counted: no finding, the upgrade step says what was checked, and the remedy of
+        // system_auth asks for the check by hand of these keyspaces too
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "3", "dc2", "2", "dc3", "1"));
+        Run enough = assertReady(run(node));
+        assertThat(enough.findings("KEYSPACE_REPLICATION")).isEmpty();
+        assertThat(enough.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: dse_leases, dse_perf, dse_security, " +
+                                                                    "system_distributed, system_traces, enough in every data center of nodes/local " +
+                                                                    "and nodes/peers, checked against the nodes whose data center is known only (the " +
+                                                                    "data center of 1 node is not known from nodes/local and nodes/peers)");
+        assertThat(enough.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHERS_BY_HAND);
+    }
+
+    @Test
+    public void otherSystemKeyspacesNotCheckedWithOneDataCenterKnownAndANodeOfNoDataCenter() throws IOException
+    {
+        // dc1 known, one node of no data center: there may be several data centers, which the tool cannot tell
+        DseNodeFixture node = node();
+        node.editPeers(peers -> peers.get(1).remove("data_center"));
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3"));
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "1"));
+        Run run = assertReady(run(node));
+        assertThat(run.findings("KEYSPACE_REPLICATION")).isEmpty();
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHER_KEYSPACES);
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: not checked (the data center of 1 node is " +
+                                                                 "not known from nodes/local and nodes/peers); with several data centers, each needs " +
+                                                                 "replicas in every data center, 3 recommended, or as many as its nodes if fewer");
+
+        // a keyspace whose replication cannot be read is named
+        node.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(),
+                       row("dse_perf").with("durable_writes", true).with("replication", ByteBuffer.wrap(new byte[]{ 0, 0, 0, 9 })));
+        assertThat(assertBlocked(run(node), "UNLOADABLE_KEYSPACE").report.upgradePath.upgradeSteps)
+            .contains("Replication of the other system keyspaces: not checked (the data center of 1 node is not known from nodes/local and " +
+                      "nodes/peers); with several data centers, each needs replicas in every data center, 3 recommended, or as many as its nodes " +
+                      "if fewer; dse_perf not checked (its replication cannot be read, see UNLOADABLE_KEYSPACE)");
+        writeKeyspaceReplication(node, "dse_perf", simpleStrategy());
+
+        // a replication that gives no node a replica is said all the same
+        writeKeyspaceReplication(node, "dse_security", Map.of("class", SIMPLE_STRATEGY, "replication_factor", "0"));
+        Run zero = assertReady(run(node));
+        assertThat(keyspaceReplication(zero, "dse_security").message)
+            .isEqualTo("the replication of dse_security is {'class': 'SimpleStrategy', 'replication_factor': '0'}: its replication_factor is 0, so " +
+                       "no node holds a replica of dse_security; the data center of 1 node is not known from nodes/local and nodes/peers, so it " +
+                       "was checked against the nodes whose data center is known only; HCD 2.0 does not read or write dse_security, which only " +
+                       "DSE uses" + KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(zero.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: see KEYSPACE_REPLICATION (dse_security); " +
+                                                                  "otherwise not checked (the data center of 1 node is not known from nodes/local and " +
+                                                                  "nodes/peers); with several data centers, each needs replicas in every data center, " +
+                                                                  "3 recommended, or as many as its nodes if fewer");
+    }
+
+    @Test
+    public void aHintsDirectoryThatCannotBeListedIsNotCheckedInTheUpgradeStep() throws IOException
+    {
+        DseNodeFixture node = node();
+        Files.setPosixFilePermissions(node.hints, PosixFilePermissions.fromString("-w-------"));
+        try
+        {
+            Assume.assumeFalse("the directory is still readable (the tests run as root)", Files.isReadable(node.hints));
+            Run run = run(node);
+            assertThat(run.messages("PENDING_HINTS")).contains("cannot list the hints directory");
+            assertThat(run.report.upgradePath.upgradeSteps).contains("Hints: not checked (the hints directory cannot be listed); see PENDING_HINTS");
+        }
+        finally
+        {
+            Files.setPosixFilePermissions(node.hints, PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    @Test
+    public void otherSystemKeyspacesChosenByNameAndClass() throws IOException
+    {
+        DseNodeFixture node = twoDataCenterNode();
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        for (String keyspace : List.of("system_distributed", "dse_security", "dse_leases", "dse_perf"))
+            writeKeyspaceReplication(node, keyspace, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        // solr_admin and any other system_* keyspace are checked, on SimpleStrategy or NetworkTopologyStrategy
+        writeKeyspaceReplication(node, "solr_admin", simpleStrategy());
+        writeKeyspaceReplication(node, "system_backups", networkTopologyStrategy("dc1", "3"));
+        // a keyspace named system_* that is not DSE's: checked, without saying that only DSE uses it
+        writeKeyspaceReplication(node, "system_custom", networkTopologyStrategy("dc1", "3", "dc2", "1"));
+        // a SimpleStrategy with no replication_factor
+        writeKeyspaceReplication(node, "system_traces", Map.of("class", SIMPLE_STRATEGY));
+        // a user keyspace, and a DSE Graph keyspace named dse_*, which GRAPH_KEYSPACE blocks on, are not checked
+        writeKeyspaceReplication(node, "test_ks", simpleStrategy());
+        node.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(),
+                       row("dse_graphs").with("durable_writes", true).with("replication", simpleStrategy()).with("graph_engine", "Core"));
+        // the keyspaces of the DSE features HCD 2.0 does not support, which NON_CORE_KEYSPACE blocks on, are not: DSE
+        // Analytics' dse_analytics and a DSEFS keyspace named in dse.yaml
+        writeKeyspaceReplication(node, "dse_analytics", simpleStrategy());
+        node.editYaml("dse.yaml", yaml -> section(yaml, "dsefs_options").put("keyspace_name", "dse_files"));
+        writeKeyspaceReplication(node, "dse_files", simpleStrategy());
+        Run run = assertBlocked(run(node), "NON_CORE_KEYSPACE");
+        assertThat(run.codes(Finding.Severity.BLOCKING)).contains("GRAPH_KEYSPACE");
+        assertThat(run.findings("KEYSPACE_REPLICATION")).extracting(f -> f.message.substring(0, f.message.indexOf(" is ")))
+                                                        .containsExactly("the replication of solr_admin", "the replication of system_backups",
+                                                                         "the replication of system_custom", "the replication of system_traces");
+        assertThat(keyspaceReplication(run, "system_custom").message)
+            .isEqualTo("the replication of system_custom is {'class': 'NetworkTopologyStrategy', 'dc1': '3', 'dc2': '1'}: dc2 has 1 replica and 3 " +
+                       "nodes, fewer than the 3 recommended; HCD 2.0 itself does not use system_custom (its clients may)" +
+                       KEYSPACE_REPLICATION_NOT_BLOCKING +
+                       KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(keyspaceReplication(run, "solr_admin").message)
+            .isEqualTo("the replication of solr_admin is {'class': 'SimpleStrategy', 'replication_factor': '1'}: SimpleStrategy does not place " +
+                       "replicas in each data center, and nodes/local and nodes/peers name 2 (dc1, dc2)" + NO_REPLICA_OF_PART + "solr_admin; " +
+                       "HCD 2.0 does not read or write solr_admin, which only DSE uses" + KEYSPACE_REPLICATION_NOT_BLOCKING +
+                       KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(keyspaceReplication(run, "system_backups").message)
+            .isEqualTo("the replication of system_backups is {'class': 'NetworkTopologyStrategy', 'dc1': '3'}: dc2 (3 nodes) is not listed, " +
+                       "so dc2 holds no replica of system_backups; HCD 2.0 does not read or write system_backups, which only DSE uses" +
+                       KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(keyspaceReplication(run, "system_backups").remedy).isEqualTo(keyspaceReplicationRemedy("system_backups", "'dc1': 3, 'dc2': 3", ""));
+        assertThat(keyspaceReplication(run, "system_traces").message)
+            .isEqualTo("the replication of system_traces is {'class': 'SimpleStrategy'}: it has no replication_factor; SimpleStrategy does not " +
+                       "place replicas in each data center, and nodes/local and nodes/peers name 2 (dc1, dc2), so no node holds a replica of " +
+                       "system_traces; " + TRACES_USE + KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(keyspaceReplication(run, "system_traces").remedy).isEqualTo(keyspaceReplicationRemedy("system_traces", "'dc1': 3, 'dc2': 3", ""));
+
+        // a value that is no number
+        writeKeyspaceReplication(node, "system_backups", networkTopologyStrategy("dc1", "3", "dc2", "x"));
+        assertThat(keyspaceReplication(run(node), "system_backups").message)
+            .isEqualTo("the replication of system_backups is {'class': 'NetworkTopologyStrategy', 'dc1': '3', 'dc2': 'x'}: dc2 is listed with 'x', " +
+                       "not a number of replicas, so dc2 holds no replica of system_backups; HCD 2.0 does not read or write system_backups, which only " +
+                       "DSE uses" +
+                       KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+
+        // a data center of no node listed with a value that is no number: wrong, but no data center of the nodes lacks replicas
+        writeKeyspaceReplication(node, "system_backups", networkTopologyStrategy("dc1", "3", "dc2", "3", "old", "x"));
+        assertThat(keyspaceReplication(run(node), "system_backups").message)
+            .isEqualTo("the replication of system_backups is {'class': 'NetworkTopologyStrategy', 'dc1': '3', 'dc2': '3', 'old': 'x'}: old is " +
+                       "listed with 'x', not a number of replicas; HCD 2.0 does not read or write system_backups, which only DSE uses" +
+                       KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+        assertThat(keyspaceReplication(run(node), "system_backups").remedy)
+            .isEqualTo(keyspaceReplicationRemedy("system_backups", "'dc1': 3, 'dc2': 3", "; old, listed with no number of replicas and with no node in " +
+                                                                                          "nodes/local and nodes/peers, left out"));
+
+        // a replication factor of 0
+        writeKeyspaceReplication(node, "system_traces", Map.of("class", SIMPLE_STRATEGY, "replication_factor", "0"));
+        assertThat(keyspaceReplication(run(node), "system_traces").message)
+            .isEqualTo("the replication of system_traces is {'class': 'SimpleStrategy', 'replication_factor': '0'}: its replication_factor is 0; " +
+                       "SimpleStrategy does not place replicas in each data center, and nodes/local and nodes/peers name 2 (dc1, dc2), so no node " +
+                       "holds a replica of system_traces; " + TRACES_USE + KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+    }
+
+    @Test
+    public void otherSystemKeyspacesOnSimpleStrategyWithAReplicaOnEveryNodeAreNotWarnedAbout() throws IOException
+    {
+        // two data centers of one node on DSE's defaults: system_distributed (3 replicas) and system_traces (2) have a
+        // replica on each node, so in each data center; DSE's keyspaces, at 1, do not
+        DseNodeFixture node = node();
+        node.editPeers(peers -> {
+            peers.remove(1);
+            peers.get(0).put("data_center", "dc2");
+        });
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "1", "dc2", "1"));
+        writeDseDefaultReplications(node);
+        Run run = assertReady(run(node));
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION")).isEmpty();
+        assertThat(run.findings("KEYSPACE_REPLICATION")).extracting(f -> f.message.substring(0, f.message.indexOf(" is ")))
+                                                        .containsExactly("the replication of dse_leases", "the replication of dse_perf",
+                                                                         "the replication of dse_security");
+        // system_auth, on SimpleStrategy over the two data centers, is SYSTEM_AUTH_REPLICATION's only
+        writeAuthReplication(node, simpleStrategy());
+        Run auth = assertBlocked(run(node), "SYSTEM_AUTH_REPLICATION");
+        assertThat(auth.findings("KEYSPACE_REPLICATION")).noneMatch(f -> f.message.startsWith("the replication of system_auth "));
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "1", "dc2", "1"));
+
+        // with a node of no data center, the nodes counted are a lower bound: no replica on every node is known
+        addPeer(node, 199, false);
+        Run uncounted = run(node);
+        assertThat(uncounted.findings("KEYSPACE_REPLICATION")).extracting(f -> f.message.substring(0, f.message.indexOf(" is ")))
+                                                              .containsExactly("the replication of dse_leases", "the replication of dse_perf",
+                                                                               "the replication of dse_security",
+                                                                               "the replication of system_distributed",
+                                                                               "the replication of system_traces");
+        assertThat(keyspaceReplication(uncounted, "system_distributed").message)
+            .isEqualTo("the replication of system_distributed is {'class': 'SimpleStrategy', 'replication_factor': '3'}: SimpleStrategy does not " +
+                       "place replicas in each data center, and nodes/local and nodes/peers name 2 (dc1, dc2)" + NO_REPLICA_OF_PART +
+                       "system_distributed; the data center of 1 node is not known from nodes/local and nodes/peers, so it was checked against " +
+                       "the nodes whose data center is known only; " + DISTRIBUTED_USE + KEYSPACE_REPLICATION_NOT_BLOCKING +
+                       KEYSPACE_REPLICATION_RECOMMENDED);
+    }
+
+    @Test
+    public void otherSystemKeyspaceWithAReplicationThatCannotBeReadIsLeftToUnloadableKeyspace() throws IOException
+    {
+        DseNodeFixture node = twoDataCenterNode();
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        for (String keyspace : List.of("system_distributed", "system_traces", "dse_leases", "dse_perf"))
+            writeKeyspaceReplication(node, keyspace, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        node.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(),
+                       row("dse_security").with("durable_writes", true).with("replication", ByteBuffer.wrap(new byte[]{ 0, 0, 0, 9 })));
+        Run run = assertBlocked(run(node), "UNLOADABLE_KEYSPACE");
+        assertThat(run.messages("UNLOADABLE_KEYSPACE")).contains("dse_security: ");
+        assertThat(run.findings("KEYSPACE_REPLICATION")).isEmpty();
+        assertThat(run.findings("INSPECTION_ERROR")).isEmpty();
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: dse_leases, dse_perf, system_distributed, " +
+                                                                 "system_traces, enough in every data center of nodes/local and nodes/peers; " +
+                                                                 "dse_security not checked (its replication cannot be read, see " +
+                                                                 "UNLOADABLE_KEYSPACE)");
+    }
+
+    @Test
+    public void otherSystemKeyspacesWithNodesLocalMissing() throws IOException
+    {
+        // nodes/peers names dc1 (2 nodes) and dc2 (3): the other keyspaces are checked against the nodes counted
+        DseNodeFixture node = twoDataCenterNode();
+        Files.delete(node.metadata.resolve("nodes").resolve("local"));
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        writeDseDefaultReplications(node);
+        Run run = assertBlocked(run(node), "NOT_A_DSE_NODE");
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy).isEqualTo(AUTH_REPLICATION_BY_HAND + AUTH_REPLICATION_OTHERS_BY_HAND);
+        Finding leases = keyspaceReplication(run, "dse_leases");
+        assertThat(leases.message).isEqualTo("the replication of dse_leases is {'class': 'SimpleStrategy', 'replication_factor': '1'}: " +
+                                             "SimpleStrategy does not place replicas in each data center, and nodes/local and nodes/peers " +
+                                             "name 2 (dc1, dc2)" + NO_REPLICA_OF_PART + "dse_leases; " + NODES_FILES_NOT_READ + ", so it was " +
+                                             "checked against the nodes whose data center is known only; HCD 2.0 does not read or write " +
+                                             "dse_leases, which only DSE uses" + KEYSPACE_REPLICATION_NOT_BLOCKING + KEYSPACE_REPLICATION_RECOMMENDED);
+        // nodes/peers read: the mixed phase is known, so the remedy has no caveat on it
+        assertThat(leases.remedy).isEqualTo(keyspaceReplicationRemedy("dse_leases", "'dc1': 3, 'dc2': 3",
+                                                                      "; the replication factor of SimpleStrategy spans the data centers, so it is not " +
+                                                                      "carried over; " + NODES_FILES_NOT_READ + ": check by hand the data center " +
+                                                                      "of each node and its replicas" + LOWER_TO_THE_NODES)
+                                                .replace("kept up to the nodes of the data center", "kept as listed"));
+        // a DSE hints file for a host id of no known node, which may be this node's, is only said
+        String hostId = UUID.randomUUID().toString();
+        Files.write(node.hints.resolve(hostId + "-1790335633208-v1.hints"), new byte[0]);
+        Run hints = assertBlocked(run(node), "NOT_A_DSE_NODE");
+        assertThat(hints.messages("PENDING_HINTS")).isEqualTo(HINTS_NOT_CHECKED + hostId + ": 1 file(s)" + HINTS_NOT_CHECKED_END);
+    }
+
+    @Test
+    public void otherSystemKeyspaceAbsentFromTheSchemaGivesNothing() throws IOException
+    {
+        DseNodeFixture node = twoDataCenterNode();
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        writeDseDefaultReplications(node);
+        // as on a cluster that never had system_traces
+        node.deletePartitions("system_schema", "keyspaces", KEYSPACES_KEY, List.of(), "system_traces");
+        Run run = assertReady(run(node));
+        assertThat(run.findings("KEYSPACE_REPLICATION")).hasSize(4).noneMatch(f -> f.message.contains("system_traces"));
+        assertThat(run.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: see KEYSPACE_REPLICATION (dse_leases, dse_perf, " +
+                                                                 "dse_security, system_distributed)");
+
+        // EverywhereStrategy, a replica on every node, stays as it is: with the others on it, none is checked
+        for (String keyspace : List.of("system_distributed", "dse_security", "dse_leases", "dse_perf"))
+            writeKeyspaceReplication(node, keyspace, Map.of("class", "org.apache.cassandra.locator.EverywhereStrategy"));
+        Run everywhere = assertReady(run(node));
+        assertThat(everywhere.findings("KEYSPACE_REPLICATION")).isEmpty();
+        assertThat(everywhere.report.upgradePath.upgradeSteps).contains("Replication of the other system keyspaces: none on SimpleStrategy or " +
+                                                                        "NetworkTopologyStrategy");
+    }
+
+    @Test
+    public void otherSystemKeyspacesInTheMixedPhaseAskForNoChange() throws IOException
+    {
+        DseNodeFixture node = DseNodeFixture.create(temporaryFolder.newFolder().toPath(), DseFixtures.nodesDirectoryTwoDataCentersMixed(1));
+        Files.write(node.dseHome.resolve("ds_version.txt"), "DSVersion=6.9.26-0c77b67\n".getBytes(StandardCharsets.UTF_8));
+        writeAuthReplication(node, networkTopologyStrategy("dc1", "3", "dc2", "3"));
+        writeDseDefaultReplications(node);
+        writeKeyspaceReplication(node, "dse_security", networkTopologyStrategy("dc1", "3"));
+        Run run = run(node);
+        assertThat(run.codes(Finding.Severity.BLOCKING)).doesNotContain("KEYSPACE_REPLICATION", "SYSTEM_AUTH_REPLICATION");
+        assertThat(run.codes(Finding.Severity.WARNING)).contains("KEYSPACE_REPLICATION");
+        Finding distributed = keyspaceReplication(run, "system_distributed");
+        assertThat(distributed.message).isEqualTo("the replication of system_distributed is {'class': 'SimpleStrategy', 'replication_factor': '3'}: " +
+                                                  "SimpleStrategy does not place replicas in each data center, and nodes/local and nodes/peers name " +
+                                                  "2 (dc1, dc2)" + NO_REPLICA_OF_PART + "system_distributed; " + DISTRIBUTED_USE +
+                                                  KEYSPACE_REPLICATION_NOT_BLOCKING);
+        assertThat(distributed.remedy).isEqualTo("the upgrade has started (UPGRADED_PEERS), so the replication stays as it is (no schema change and no " +
+                                                 "repair in the mixed phase)");
+        Finding security = keyspaceReplication(run, "dse_security");
+        assertThat(security.message).isEqualTo("the replication of dse_security is {'class': 'NetworkTopologyStrategy', 'dc1': '3'}: dc2 (3 nodes) is " +
+                                               "not listed, so dc2 holds no replica of dse_security; HCD 2.0 does not read or write dse_security, " +
+                                               "which only DSE uses" +
+                                               KEYSPACE_REPLICATION_NOT_BLOCKING);
+        assertThat(security.remedy).isEqualTo(distributed.remedy);
+        assertThat(run.findings("KEYSPACE_REPLICATION")).allMatch(f -> !f.remedy.contains("ALTER KEYSPACE") && !f.remedy.contains("nodetool repair"));
     }
 
     @Test
@@ -3724,12 +4655,79 @@ public class DsePreflightTest
         node.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(), row("system_auth").with("durable_writes", true).with("replication", replication));
     }
 
+    /** Writes the replication of {@code keyspace}, over the one DSE stored. */
+    private static void writeKeyspaceReplication(DseNodeFixture node, String keyspace, Map<String, String> replication) throws IOException
+    {
+        node.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(), row(keyspace).with("durable_writes", true).with("replication", replication));
+    }
+
+    /**
+     * Writes the replications DSE 6.9.26 gives its replicated keyspaces other than system_auth, as the fixture
+     * {@code schema/dse-6.9.26/describe-schema.txt} shows them.
+     */
+    private static void writeDseDefaultReplications(DseNodeFixture node) throws IOException
+    {
+        writeKeyspaceReplication(node, "system_distributed", Map.of("class", SIMPLE_STRATEGY, "replication_factor", "3"));
+        writeKeyspaceReplication(node, "system_traces", Map.of("class", SIMPLE_STRATEGY, "replication_factor", "2"));
+        for (String keyspace : List.of("dse_security", "dse_leases", "dse_perf"))
+            writeKeyspaceReplication(node, keyspace, simpleStrategy());
+        for (String keyspace : List.of("dse_system", "dse_insights", "system_backups", "solr_admin"))
+            writeKeyspaceReplication(node, keyspace, Map.of("class", "org.apache.cassandra.locator.EverywhereStrategy"));
+        for (String keyspace : List.of("dse_system_local", "dse_insights_local"))
+            writeKeyspaceReplication(node, keyspace, Map.of("class", "org.apache.cassandra.locator.LocalStrategy"));
+    }
+
+    /** Node 1 of the two-data-center DSE 6.9.26 test cluster, 3 nodes in dc1 and 3 in dc2, with the schema of the fixtures. */
+    private DseNodeFixture twoDataCenterNode() throws IOException
+    {
+        DseNodeFixture node = DseNodeFixture.create(temporaryFolder.newFolder().toPath(), DseFixtures.nodesDirectoryTwoDataCenters(1));
+        Files.write(node.dseHome.resolve("ds_version.txt"), "DSVersion=6.9.26-0c77b67\n".getBytes(StandardCharsets.UTF_8));
+        return node;
+    }
+
+    /** The one KEYSPACE_REPLICATION finding of {@code keyspace}. */
+    private static Finding keyspaceReplication(Run run, String keyspace)
+    {
+        List<Finding> findings = run.findings("KEYSPACE_REPLICATION").stream()
+                                    .filter(f -> f.message.startsWith("the replication of " + keyspace + " is "))
+                                    .collect(Collectors.toList());
+        assertThat(findings).as("KEYSPACE_REPLICATION of %s; output:\n%s", keyspace, run.out).hasSize(1);
+        return findings.get(0);
+    }
+
+    /**
+     * The remedy of KEYSPACE_REPLICATION on a low count only, optional, before the first node is upgraded, the data centers
+     * of the nodes all known: the replicas per data center its ALTER KEYSPACE lists and what it says of the data centers
+     * after them.
+     */
+    private static String keyspaceReplicationOptionalRemedy(String keyspace, String replicas, String dataCenters)
+    {
+        return "optional, " + keyspaceReplicationRemedy(keyspace, replicas, dataCenters);
+    }
+
+    /**
+     * The remedy of KEYSPACE_REPLICATION with a data center without replicas, or a data center listed with a value that is
+     * no number, not optional though it does not block: see
+     * {@link #keyspaceReplicationOptionalRemedy}.
+     */
+    private static String keyspaceReplicationRemedy(String keyspace, String replicas, String dataCenters)
+    {
+        return "before the first node of the cluster is upgraded, with the NodeSync flag off on the tables of " + keyspace + " (DSE's repair " +
+               "skips a table whose flag is on), through one DSE node: ALTER KEYSPACE " + keyspace + " WITH replication = {'class': " +
+               "'NetworkTopologyStrategy', " + replicas + "}; (every data center, its exact name as nodetool status shows it; 3 replicas, or as many " +
+               "as its nodes if fewer, are recommended; a higher replication factor is kept up to the nodes of the data center" + dataCenters + "); " +
+               "DESCRIBE KEYSPACE " + keyspace + " then shows the new map and nodetool describecluster one schema version; right after, nodetool " +
+               "repair -full " + keyspace + " on every node, one at a time, each exiting 0 and printing no Skipping anti-entropy repair line, a " +
+               "failed one run again, whole, on its node (the ALTER and the repair in a quiet period, without a pause between them); then nodetool " +
+               "flush system_schema on this node and run this tool again";
+    }
+
     /**
      * The change the remedies of SYSTEM_AUTH_REPLICATION give before the first node is upgraded: the replicas per data
      * center its ALTER KEYSPACE lists, what it says of the data centers after them, and whether it ends with the clause
-     * on data centers of 2 nodes and with the one on several data centers.
+     * on data centers of 2 nodes, and the clause on the other keyspaces it ends with, if any.
      */
-    private static String authReplicationChange(String replicas, String dataCenters, boolean twoNodes, boolean severalDataCenters)
+    private static String authReplicationChange(String replicas, String dataCenters, boolean twoNodes, String others)
     {
         return "with the NodeSync flag off on the tables of system_auth (DSE's repair skips a table whose flag is on), through one DSE node: " +
                "ALTER KEYSPACE system_auth WITH replication = {'class': 'NetworkTopologyStrategy', " + replicas + "}; (every data center, its " +
@@ -3740,35 +4738,37 @@ public class DsePreflightTest
                "repair in a quiet period, without a pause between them); then nodetool flush system_schema on this node and run this tool " +
                "again" +
                (twoNodes ? "; in a data center of 2 nodes, an upgraded node still cannot start while the other one is down" : "") +
-               (severalDataCenters ? AUTH_REPLICATION_OTHER_KEYSPACES : "");
+               others;
     }
 
     /**
      * The remedy of a blocking SYSTEM_AUTH_REPLICATION before the first node is upgraded:
-     * {@link #authReplicationChange}.
+     * {@link #authReplicationChange}, the data centers of the nodes all known.
      */
-    private static String authReplicationRemedy(String replicas, String dataCenters, boolean twoNodes, boolean severalDataCenters)
+    private static String authReplicationRemedy(String replicas, String dataCenters, boolean twoNodes)
     {
-        return "before the first node of the cluster is upgraded, " + authReplicationChange(replicas, dataCenters, twoNodes, severalDataCenters);
+        return "before the first node of the cluster is upgraded, " + authReplicationChange(replicas, dataCenters, twoNodes, "");
     }
 
     /**
      * The remedy of a warning SYSTEM_AUTH_REPLICATION before the first node is upgraded:
-     * {@link #authReplicationChange}, optional.
+     * {@link #authReplicationChange}, optional, the data centers of the nodes all known.
      */
-    private static String authReplicationWarningRemedy(String replicas, String dataCenters, boolean twoNodes, boolean severalDataCenters)
+    private static String authReplicationWarningRemedy(String replicas, String dataCenters, boolean twoNodes)
     {
-        return "optional, before the first node of the cluster is upgraded, " + authReplicationChange(replicas, dataCenters, twoNodes, severalDataCenters);
+        return "optional, before the first node of the cluster is upgraded, " + authReplicationChange(replicas, dataCenters, twoNodes, "");
     }
 
     /**
      * {@link #authReplicationRemedy} when the nodes counted are a lower bound: the replicas are raised to 3 and kept when
-     * higher (the remedy says "kept as listed" instead of "kept up to the nodes of the data center"), and the remedy always
-     * ends with the clause on the other keyspaces, the data centers of the nodes not all known.
+     * higher (the remedy says "kept as listed" instead of "kept up to the nodes of the data center"), and the remedy ends
+     * with a clause on the other keyspaces: {@link #AUTH_REPLICATION_OTHER_KEYSPACES} when nodes/local and nodes/peers
+     * name one data center at most, {@link #AUTH_REPLICATION_OTHERS_BY_HAND} when they name several.
      */
-    private static String authReplicationRemedyNotExact(String replicas, String dataCenters)
+    private static String authReplicationRemedyNotExact(String replicas, String dataCenters, String others)
     {
-        return authReplicationRemedy(replicas, dataCenters, false, true).replace("kept up to the nodes of the data center", "kept as listed");
+        return ("before the first node of the cluster is upgraded, " + authReplicationChange(replicas, dataCenters, false, others))
+               .replace("kept up to the nodes of the data center", "kept as listed");
     }
 
     private static Map<String, String> stcs()

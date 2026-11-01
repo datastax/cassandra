@@ -206,7 +206,7 @@ public final class DsePreflight
         out.println("Node: " + (node.broadcastAddress != null ? node.broadcastAddress : report.hostname) + " (host " + report.hostname + ", host id " + node.hostId +
                     ", data center " + node.dataCenter + ", rack " + node.rack + ", cluster " + node.clusterName + ')');
         out.println("DSE release: " + (report.upgradePath.dseRelease == null ? "unknown" : report.upgradePath.dseRelease));
-        out.println("Peers in nodes/peers: " + report.peers.size() + (report.peers.stream().anyMatch(p -> p.upgraded) ? " (some already upgraded)" : ""));
+        out.println("Peers in nodes/peers: " + peersSummary(report));
         out.println();
         out.println("Result: " + report.result + " (" + report.count(Finding.Severity.BLOCKING) + " blocking, " + report.count(Finding.Severity.WARNING) +
                     " warnings, " + report.count(Finding.Severity.INFO) + " notes)");
@@ -224,6 +224,19 @@ public final class DsePreflight
             out.println("Live state (nodetool):");
             report.live.forEach((command, result) -> out.println("  " + command + ": " + (result.error != null ? result.error : "exit code " + result.exitCode)));
         }
+    }
+
+    /**
+     * The peers of the summary: none when nodes/peers is missing ({@code NO_PEERS_FILE}), not used when it cannot be read
+     * or trusted (its {@code UNREADABLE_INPUT}), otherwise how many it records.
+     */
+    private static String peersSummary(NodeReport report)
+    {
+        if (report.findings.stream().anyMatch(f -> "NO_PEERS_FILE".equals(f.code)))
+            return "none (no nodes/peers file, see NO_PEERS_FILE)";
+        if (report.findings.stream().anyMatch(f -> "UNREADABLE_INPUT".equals(f.code) && f.message.startsWith(NodeInspector.cannotRead("nodes/peers"))))
+            return "not used (see UNREADABLE_INPUT)";
+        return report.peers.size() + (report.peers.stream().anyMatch(p -> p.upgraded) ? " (some already upgraded)" : "");
     }
 
     private static void printFindings(List<Finding> findings, PrintStream out)

@@ -22,8 +22,10 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.file.FileStore;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -175,12 +177,23 @@ final class NodeInspector
     @Nullable
     private Object legacyPortValue;
     private List<DseNodeRecord> peers = List.of();
-    /** whether nodes/peers exists and could be read */
+    /** whether nodes/peers could be read and trusted, a missing file read as no peer ({@link #peersFileProblem}) */
     private boolean peersRead;
+    /**
+     * whether nodes/peers is missing and read as no peer, as on a node that never had a peer, with nodes/local read and
+     * recording a data center (otherwise this node is not counted)
+     */
+    private boolean peersFileMissing;
     @Nullable
     private CassandraVersion localRelease;
     private final Map<String, Long> liveBytesByDataDirectory = new LinkedHashMap<>();
     private final Map<String, Integer> pendingHintsByTarget = new TreeMap<>();
+    /** the number of host ids with DSE hints files not checked against nodes/local and nodes/peers, not both read and trusted */
+    private int hintHostIdsNotChecked;
+    /** the number of host ids with DSE hints files in neither nodes/local nor nodes/peers, both read and trusted */
+    private int hintHostIdsUnknown;
+    /** whether the hints directory could not be listed */
+    private boolean hintsNotListed;
     private boolean nodesyncDisabledInYaml;
     /** the blocking kinds of sstable problem found in the data directories */
     private final Set<String> formatProblems = new TreeSet<>();
@@ -238,7 +251,7 @@ final class NodeInspector
         guarded("cassandra.yaml and dse.yaml", this::inspectConfiguration);
         schema = new SchemaInspector(layout.dataDirectories, dsefsKeyspace(), partitioner(),
                                      isTrue(get(layout.dseConf, "system_info_encryption", "enabled")), nodesByDataCenter(),
-                                     nodesWithoutDataCenter(), local != null && peersRead, mixedPhase(), findings);
+                                     nodesWithoutDataCenter(), local != null && peersRead, peersRead, peersFileMissing, mixedPhase(), findings);
         guarded("the schema and the access controls", schema::inspect);
         report.accessControls.rolePermissionsRows = schema.rolePermissionsRead ? schema.rolePermissionsRows : null;
         report.accessControls.authorizationEnabled = authorizationEnabled();
@@ -288,6 +301,164 @@ final class NodeInspector
     }
 
     /**
+     * Whether {@code nodes/peers} exists, with its file key (the inode where the file system has one), size and
+     * modification time, as seen at one moment; {@code error} when its attributes could not be read.
+     */
+    @VisibleForTesting
+    static final class PeersFileState
+    {
+        final boolean exists;
+        @Nullable
+        final Object fileKey;
+        final long size;
+        final long lastModifiedMillis;
+        @Nullable
+        final String error;
+
+        @VisibleForTesting
+        PeersFileState(boolean exists, @Nullable Object fileKey, long size, long lastModifiedMillis, @Nullable String error)
+        {
+            this.exists = exists;
+            this.fileKey = fileKey;
+            this.size = size;
+            this.lastModifiedMillis = lastModifiedMillis;
+            this.error = error;
+        }
+
+        static PeersFileState of(Path file)
+        {
+            try
+            {
+                BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class);
+                return new PeersFileState(true, attributes.fileKey(), attributes.size(), attributes.lastModifiedTime().toMillis(), null);
+            }
+            catch (NoSuchFileException e)
+            {
+                return new PeersFileState(false, null, 0, 0, null);
+            }
+            catch (IOException e)
+            {
+                return new PeersFileState(true, null, 0, 0, e.toString());
+            }
+        }
+
+        /**
+         * Whether the two looks saw the same file: DSE rewrites nodes/peers by renaming a new file over it, which changes
+         * the file key (the inode) where the file system has one, and the size or the modification time otherwise, so
+         * no checksum of the content is needed.
+         */
+        boolean sameAs(PeersFileState other)
+        {
+            return exists == other.exists && Objects.equals(fileKey, other.fileKey) && size == other.size &&
+                   lastModifiedMillis == other.lastModifiedMillis;
+        }
+    }
+
+    /**
+     * What keeps the peers read from {@code nodes/peers} from being trusted, as a blocking {@code UNREADABLE_INPUT}
+     * (the releases and workloads of the peers, and the mixed phase, cannot be checked without them); null when they
+     * can be: the file read, or missing, as on a single DSE 6.9.26 node that never had a peer. Not trusted: its
+     * attributes cannot be read (any {@code IOException} but {@code NoSuchFileException}); the file changed between
+     * {@code before} and {@code after} the read (a running DSE rewrote it); a {@code nodes/peers.old} left, which DSE,
+     * and the import of HCD 2.0 at its start, put back in place of {@code nodes/peers} (DSE is rewriting it, or was
+     * interrupted while it did); the file missing with a {@code nodes/peers.txn} left (DSE is writing it for the first
+     * time, or was interrupted while it did, which DSE does not recover: it writes the file anew once it knows its
+     * peers).
+     */
+    @Nullable
+    @VisibleForTesting
+    static Finding peersFileProblem(PeersFileState before, PeersFileState after, boolean oldExists, boolean txnExists)
+    {
+        String cannotCheck = "; the releases and workloads of the peers cannot be checked";
+        String error = before.error != null ? before.error : after.error;
+        if (error != null)
+            return blocking("UNREADABLE_INPUT",
+                            cannotRead("nodes/peers") + "its attributes cannot be read (" + error + "), so the peers of this node are not known" +
+                            cannotCheck,
+                            "run the tool as the user DSE runs as (or as root)");
+        if (!before.sameAs(after))
+            return peersChanged();
+        if (oldExists)
+            return peersOldLeft();
+        if (!after.exists && txnExists)
+            return blocking("UNREADABLE_INPUT",
+                            cannotRead("nodes/peers") + "it is missing and a nodes/peers.txn is left (DSE is writing the file for the first " +
+                            "time, or was interrupted while it did), so the peers of this node are not known" + cannotCheck,
+                            "run the tool again; if it persists with DSE stopped, start DSE once and wait until nodetool status shows its " +
+                            "peers (DSE then writes nodes/peers anew), then run the tool again; if this node has no peer, delete " +
+                            "nodes/peers.txn");
+        return null;
+    }
+
+    /**
+     * The blocking {@code UNREADABLE_INPUT} of a {@code nodes/peers} that records no peer, missing ({@code exists} false)
+     * or DSE's empty map, while {@code nodetool status} lists {@code liveNodes} nodes, more than this one: the file is
+     * lost or stale.
+     */
+    private static Finding noPeerButLiveNodes(boolean exists, int liveNodes)
+    {
+        return blocking("UNREADABLE_INPUT",
+                        cannotRead("nodes/peers") + (exists ? "it records no peer" : "it is missing") + ", but nodetool status lists " + liveNodes +
+                        " nodes, so the file is " + (exists ? "stale" : "lost") + " and the peers of this node are not known; the releases and " +
+                        "workloads of the peers cannot be checked",
+                        "restart DSE on this node and wait until nodetool status shows its peers (DSE then writes nodes/peers anew), then run " +
+                        "the tool again; if nodes/peers " + (exists ? "still records no peer" : "is still missing") + ", report to the upgrade owner");
+    }
+
+    /** The blocking {@code UNREADABLE_INPUT} of a {@code nodes/peers.old} left beside or in place of {@code nodes/peers}. */
+    private static Finding peersOldLeft()
+    {
+        return blocking("UNREADABLE_INPUT",
+                        cannotRead("nodes/peers") + "a nodes/peers.old is left, which DSE puts back in place of nodes/peers at its next start (DSE " +
+                        "is rewriting the file, or was interrupted while it did), so the peers of this node are not known; the releases and " +
+                        "workloads of the peers cannot be checked",
+                        "run the tool again; if it persists with DSE stopped, start DSE on this node once (it puts nodes/peers.old back), then " +
+                        "run the tool again");
+    }
+
+    /** The blocking {@code UNREADABLE_INPUT} of a {@code nodes/peers} that changed while it was read: DSE rewrote it. */
+    private static Finding peersChanged()
+    {
+        return blocking("UNREADABLE_INPUT",
+                        cannotRead("nodes/peers") + "it changed while it was read (DSE wrote or rewrote it), so the peers of this node are not known; the " +
+                        "releases and workloads of the peers cannot be checked",
+                        "run the tool again");
+    }
+
+    /** What the upgrade step on hints says of the DSE hints files found. */
+    private String hintsStep()
+    {
+        if (hintsNotListed)
+            return "not checked (the hints directory cannot be listed); see PENDING_HINTS";
+        List<String> parts = new ArrayList<>();
+        if (!pendingHintsByTarget.isEmpty())
+            parts.add(pendingHintsByTarget.size() + " target(s) with DSE hints files pending; see PENDING_HINTS");
+        if (hintHostIdsUnknown > 0)
+            parts.add(hintHostIdsUnknown + " host id(s) of no known node with DSE hints files; see PENDING_HINTS");
+        if (hintHostIdsNotChecked > 0)
+            parts.add(hintHostIdsNotChecked + " host id(s) with DSE hints files, not checked against nodes/local and nodes/peers (not both read " +
+                      "and trusted); see PENDING_HINTS");
+        return parts.isEmpty() ? "no DSE hints file pending" : String.join("; ", parts);
+    }
+
+    /**
+     * The blocking {@code UNREADABLE_INPUT} of a read of {@code nodes/peers} that failed with {@code error}, as the file is
+     * seen {@code before} and {@code after} it: gone, or another file than the one seen before, DSE moved or rewrote it
+     * while it was read ({@link #peersChanged}); a {@code nodes/peers.old} left, DSE was rewriting it, or was
+     * interrupted while it did; otherwise the file cannot be read or is damaged.
+     */
+    @VisibleForTesting
+    static Finding peersReadFailure(String error, PeersFileState before, PeersFileState after, boolean oldExists)
+    {
+        if (!after.exists || !before.sameAs(after))
+            return peersChanged();
+        if (oldExists)
+            return peersOldLeft();
+        return blocking("UNREADABLE_INPUT", cannotRead("nodes/peers") + error + "; the releases and workloads of the peers cannot be checked",
+                        "run the tool as the user DSE runs as (or as root); a damaged nodes/peers must be repaired on DSE first");
+    }
+
+    /**
      * The start of the message of an {@code UNREADABLE_INPUT} finding for the input {@code what} ({@link NodeLayout}'s
      * names, such as {@link NodeLayout#CASSANDRA_YAML}).
      */
@@ -333,16 +504,63 @@ final class NodeInspector
             findings.add(blocking("UNREADABLE_INPUT", cannotRead("nodes/local") + e.getMessage(),
                                   "run the tool as the user DSE runs as (or as root); a damaged nodes/local must be repaired on DSE first"));
         }
+        // a node without a peer has an empty nodes/peers map, or no file at all: seen on a single DSE 6.9.26 node that
+        // never had a peer; a missing file reads as no peer, as DseNodesFiles reads it, unless DSE is writing it or was
+        // interrupted while it did; the file is looked at before and after the read, as a running DSE can rewrite it in
+        // between
+        Path peersFile = nodes.resolve("peers");
+        PeersFileState before = PeersFileState.of(peersFile);
+        List<DseNodeRecord> read = null;
+        Finding problem = null;
         try
         {
-            peers = DseNodesFiles.readPeers(nodes);
-            // DSE always writes nodes/peers, an empty map without peers: a node without it is not known to have none
-            peersRead = Files.exists(nodes.resolve("peers"));
+            read = DseNodesFiles.readPeers(nodes);
+            // peers.old and peers.txn are looked for before the second look at the file, so that DSE renaming peers.txn
+            // or peers.old to peers in between changes what the second look sees
+            boolean oldExists = Files.exists(nodes.resolve("peers.old"));
+            boolean txnExists = Files.exists(nodes.resolve("peers.txn"));
+            problem = peersFileProblem(before, PeersFileState.of(peersFile), oldExists, txnExists);
         }
         catch (RuntimeException e)
         {
-            findings.add(blocking("UNREADABLE_INPUT", cannotRead("nodes/peers") + e.getMessage() + "; the releases and workloads of the peers cannot be checked",
-                                  "run the tool as the user DSE runs as (or as root)"));
+            // as above, peers.old looked for before the second look at the file
+            boolean oldExists = Files.exists(nodes.resolve("peers.old"));
+            findings.add(peersReadFailure(e.getMessage(), before, PeersFileState.of(peersFile), oldExists));
+        }
+        if (read != null)
+        {
+            // no peer, the file missing or DSE's empty map, while nodetool status lists other nodes: the file is lost or
+            // stale; only with nodes/local read, as otherwise the tool may not look at DSE's metadata directory at all
+            // (NOT_A_DSE_NODE or UNREADABLE_INPUT blocks), and only the case of no peer is compared: with peers recorded,
+            // nodes joining or leaving make the count of nodetool status differ for a while, and the replication checks
+            // are then made with the peers recorded. Without --nodetool, DSE's empty map is trusted as before, being what
+            // DSE writes for a node without a peer, while a missing file can also be one deleted or not copied back, which
+            // NO_PEERS_FILE says
+            if (problem == null && read.isEmpty() && local != null)
+            {
+                int liveNodes = liveStatusNodes();
+                if (liveNodes > 1)
+                    problem = noPeerButLiveNodes(before.exists, liveNodes);
+            }
+            // peers not trusted are not used: no check of their releases and workloads, no mixed phase, no count
+            if (problem == null)
+            {
+                peers = read;
+                peersRead = true;
+                // with nodes/local missing or unreadable (NOT_A_DSE_NODE or UNREADABLE_INPUT blocks), or recording no
+                // data center, this node is not counted: nothing to say of it then
+                peersFileMissing = !before.exists && local != null && local.dataCenter != null;
+                if (peersFileMissing)
+                    findings.add(info("NO_PEERS_FILE",
+                                      "no nodes/peers in " + nodes + ": taken for a node that never had a peer (a single DSE 6.9.26 node writes " +
+                                      "none), so the replication checks count this node alone and no other node's release, workloads or upgrade " +
+                                      "state is checked; if nodetool status lists other nodes, the file is lost: apply no remedy of " +
+                                      "SYSTEM_AUTH_REPLICATION or KEYSPACE_REPLICATION and report to the upgrade owner"));
+            }
+            else
+            {
+                findings.add(problem);
+            }
         }
 
         String installed = null;
@@ -1634,6 +1852,7 @@ final class NodeInspector
         }
         catch (RuntimeException e)
         {
+            hintsNotListed = true;
             findings.add(warning("PENDING_HINTS", "cannot list the hints directory " + directory + " (" + e.getMessage() + ')',
                                  "check it by hand before the node is upgraded"));
             return;
@@ -1651,10 +1870,23 @@ final class NodeInspector
         {
             List<String> items = new ArrayList<>();
             notInRing.forEach((hostId, files) -> items.add(hostId + ": " + files + " file(s)"));
-            findings.add(warning("PENDING_HINTS",
-                                 "DSE hints files for host ids neither in nodes/local nor in nodes/peers: " + list(items) + "; they are dropped when HCD 2.0 " +
-                                 "converts them, and their writes come back only with a repair",
-                                 "find out which nodes they were for (nodetool status) before the upgrade"));
+            // with nodes/local or nodes/peers not read or not trusted, a host id may well be of a peer or of this node: said,
+            // not warned about
+            boolean known = local != null && peersRead;
+            if (known)
+                findings.add(warning("PENDING_HINTS",
+                                     "DSE hints files for host ids neither in nodes/local nor in nodes/peers: " + list(items) + "; they are dropped when " +
+                                     "HCD 2.0 converts them, and their writes come back only with a repair" +
+                                     (peersFileMissing ? "; with nodes/peers missing, hints for other nodes suggest that the file was lost: see " +
+                                                         "NO_PEERS_FILE" : ""),
+                                     "find out which nodes they were for (nodetool status) before the upgrade"));
+            else
+                findings.add(info("PENDING_HINTS",
+                                  "DSE hints files for host ids not checked against nodes/local and nodes/peers, which could not both be read " +
+                                  "and trusted: " + list(items) + "; some may be pending for live DSE peers: this tool checks them once it reads " +
+                                  "both"));
+            hintHostIdsNotChecked = known ? 0 : notInRing.size();
+            hintHostIdsUnknown = known ? notInRing.size() : 0;
         }
         if (!compressed.isEmpty())
             findings.add(blocking("HINTS_COMPRESSION",
@@ -1851,7 +2083,7 @@ final class NodeInspector
             for (String line : status.split("\n"))
             {
                 String trimmed = line.trim();
-                if (trimmed.length() > 3 && trimmed.matches("^[UD][NLJM]\\s+\\S+.*") && !trimmed.startsWith("UN"))
+                if (isStatusLine(trimmed) && !trimmed.startsWith("UN"))
                     notUp.add(trimmed.split("\\s+")[0] + ' ' + trimmed.split("\\s+")[1]);
             }
             if (!notUp.isEmpty())
@@ -1892,6 +2124,30 @@ final class NodeInspector
         if (hints != null && !hints.contains("does not have any pending hints") && !hints.trim().isEmpty())
             findings.add(warning("LIVE_HINTS", "the node has pending hints (nodetool listpendinghints)",
                                  "wait until the hints for DSE nodes are delivered before the node is upgraded"));
+    }
+
+    /**
+     * The nodes that the output of {@code nodetool status} lists, this node included; -1 when the live state is not read
+     * or {@code nodetool status} did not succeed.
+     */
+    private int liveStatusNodes()
+    {
+        String status = live == null ? null : output("status");
+        if (status == null)
+            return -1;
+        int nodes = 0;
+        for (String line : status.split("\n"))
+        {
+            if (isStatusLine(line.trim()))
+                nodes++;
+        }
+        return nodes;
+    }
+
+    /** Whether {@code trimmed}, a trimmed line of {@code nodetool status}, is the line of a node: state and status, then its address. */
+    private static boolean isStatusLine(String trimmed)
+    {
+        return trimmed.length() > 3 && trimmed.matches("^[UD][NLJM]\\s+\\S+.*");
     }
 
     /** The output of a live command that succeeded; null otherwise. */
@@ -2054,6 +2310,9 @@ final class NodeInspector
                                                          : "add enabled: false under nodesync: in DSE's cassandra.yaml and run nodetool nodesyncservice disable"));
         steps.add("Replication of system_auth: " + (schema == null || schema.authReplicationStep == null ? "not checked (the schema could not be read, or its inspection failed)"
                                                                                                          : schema.authReplicationStep));
+        steps.add("Replication of the other system keyspaces: " + (schema == null || schema.otherReplicationStep == null
+                                                                   ? "not checked (the schema could not be read, or its inspection failed)"
+                                                                   : schema.otherReplicationStep));
         steps.add("SAI version pin: " + (path.saiVersion == null ? "no SAI version can be chosen for this release"
                                                                  : "add -Dcassandra.sai.latest.version=" + path.saiVersion + " to conf/jvm-server.options of HCD 2.0 before its first start"));
         steps.add("During the mixed phase: no topology or schema change, no repair and no upgradesstables");
@@ -2072,7 +2331,7 @@ final class NodeInspector
         steps.add("Drivers: every driver pins native protocol V4; DSE continuous paging leaves no trace on disk, so check the drivers' settings " +
                   "(continuous paging is not available once a coordinator runs HCD 2.0)");
         steps.add("Hints: " + (has("HINTS_COMPRESSION") ? "compressed or encrypted DSE hints files, or hints_compression set: see HINTS_COMPRESSION; " : "") +
-                  (pendingHintsByTarget.isEmpty() ? "no DSE hints file pending" : pendingHintsByTarget.size() + " target(s) with DSE hints files pending; see the warning above"));
+                  hintsStep());
         steps.add("Snapshot: nodetool flush, then nodetool snapshot -t pre-hcd-<UTC timestamp>; copy cassandra.yaml, dse.yaml and cassandra-rackdc.properties aside");
         steps.add("Install: install HCD 2.0 with the settings to carry listed here");
         if (internodeTls)
