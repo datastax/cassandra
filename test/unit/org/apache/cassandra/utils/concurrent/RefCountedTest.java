@@ -454,7 +454,7 @@ public class RefCountedTest
                 @Override
                 public void run()
                 {
-                    System.out.println("aaa");
+                    System.out.println(a);
                 }
             };
         }
