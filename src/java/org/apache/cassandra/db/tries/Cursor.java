@@ -535,7 +535,8 @@ interface Cursor<T> extends Closeable
     /// It is an error to call `tailCursor` on an exhausted cursor or one positioned on the return path.
     ///
     /// This is one of the two methods that remain callable after [#close]; the returned cursor is independent of this
-    /// one and must be closed in its turn.
+    /// one and must be closed in its turn. An implementation that has to read the trie to build the tail must do so
+    /// with resources the new cursor takes for itself, never with this one's, which may already have been released.
     ///
     /// Descendants that override this class should return their specific cursor type.
     Cursor<T> tailCursor(Direction direction);
@@ -553,9 +554,11 @@ interface Cursor<T> extends Closeable
     /// no `close` for its holder to reach the retained cursor with. Being allowed to close the cursor first and make
     /// tails from it afterwards is what keeps those tries from holding a buffer for as long as they live.
     ///
-    /// An implementation that reads the trie inside `tailCursor` -- as the on-disk range cursor does, to work out the
-    /// deletions active at the tail's root -- must therefore take whatever it needs from the file here, before it lets
-    /// go of the buffer. See [OnDiskCursor.Range#close].
+    /// Closing only releases; it does not read ahead for a tail that may never be taken. An implementation that has to
+    /// read the trie to build a tail -- as the on-disk range cursor does, to work out the deletions active at the
+    /// tail's root -- leaves that read to the new tail, which opens the trie afresh for itself, and reads whatever
+    /// else it still answers after close, such as the state behind [RangeCursor#precedingStateCursor], with a fresh
+    /// reader of its own.
     @Override
     void close();
 

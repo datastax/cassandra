@@ -73,6 +73,7 @@ import org.apache.cassandra.db.TruncateRequest;
 import org.apache.cassandra.db.WriteOptions;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.db.memtable.ColumnNewerThanMemtableException;
 import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionIterators;
@@ -2009,7 +2010,8 @@ public class StorageProxy implements StorageProxyMBean
                 }
                 catch (Exception ex)
                 {
-                    if (!(ex instanceof WriteTimeoutException))
+                    // The memtable that failed a write holding a column newer than it has logged that.
+                    if (!(ex instanceof WriteTimeoutException || ex instanceof ColumnNewerThanMemtableException))
                         logger.error("Failed to apply mutation locally : ", ex);
                     handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.forException(ex));
                 }

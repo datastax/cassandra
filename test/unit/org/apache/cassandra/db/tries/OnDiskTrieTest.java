@@ -239,7 +239,7 @@ public class OnDiskTrieTest
         for (String key : keys)
             inMemTrie.putRecursive(TrieUtil.directComparable(key), key, (x, y) -> y);
 
-        try (OnDiskTrie<String> trie = TrieUtil.onDiskRoundtripStrings(inMemTrie, isOrdered))
+        try (FileTries.Plain<String> trie = TrieUtil.onDiskRoundtripStrings(inMemTrie, isOrdered))
         {
             String[] bounds = { null, "", "a", "aa", "ab", "abb", "abc", "abcd", "abd", "b", "ba", "bb", "bbc", "c" };
             for (String left : bounds)
@@ -308,7 +308,7 @@ public class OnDiskTrieTest
                 inMemTrie.putRecursive(TrieUtil.directComparable(key), key, (x, y) -> y);
             }
 
-            try (OnDiskTrie<String> trie = TrieUtil.onDiskRoundtripStrings(inMemTrie, isOrdered))
+            try (FileTries.Plain<String> trie = TrieUtil.onDiskRoundtripStrings(inMemTrie, isOrdered))
             {
                 for (Direction direction : Direction.values())
                 {
@@ -449,9 +449,9 @@ public class OnDiskTrieTest
             source.putRecursive(TrieUtil.directComparable(key), key, (x, y) -> y);
         File file = OnDiskTrieWriter.write(source, isOrdered, TrieUtil.STRING_SERDE, new File(java.io.File.createTempFile("release", ".trie")));
 
-        TrieUtil.CountingRebuffererFactory factory =
-            new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(new ChannelProxy(file)));
-        try (OnDiskTrie<String> trie = new OnDiskTrie<>(factory, TrieUtil.STRING_SERDE, VERSION, isOrdered, factory.fileLength(), factory.channel()))
+        ChannelProxy channel = new ChannelProxy(file);
+        TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(FileTries.openChunkReader(channel));
+        try (FileTries.Plain<String> trie = new FileTries.Plain<>(factory, channel, TrieUtil.STRING_SERDE, isOrdered))
         {
             ByteComparable.Preencoded a = TrieUtil.directComparable("a");
             ByteComparable.Preencoded b = TrieUtil.directComparable("b");
@@ -542,7 +542,7 @@ public class OnDiskTrieTest
             inMemTrie.putRecursive(e, test, afterBranch, (x, y) -> y);
         }
 
-        try (OnDiskTrie<String> trie = TrieUtil.onDiskRoundtripStrings(inMemTrie, isOrdered))
+        try (FileTries.Plain<String> trie = TrieUtil.onDiskRoundtripStrings(inMemTrie, isOrdered))
         {
             TrieUtil.assertTriesEqual(inMemTrie, trie);
 

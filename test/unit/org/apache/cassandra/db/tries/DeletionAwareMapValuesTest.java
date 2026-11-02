@@ -24,7 +24,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -91,15 +90,6 @@ public class DeletionAwareMapValuesTest extends DeletionAwareTestBase
     {
         // The on-disk readers pull in BufferPools, whose static initializer needs configuration.
         DatabaseDescriptor.toolInitialization();
-    }
-
-    private final List<OnDiskDeletionAwareTrie<LivePoint, DeletionMarker>> opened = new ArrayList<>();
-
-    @After
-    public void closeOpened()
-    {
-        opened.forEach(OnDiskDeletionAwareTrie::close);
-        opened.clear();
     }
 
     private static final Function<LivePoint, LivePoint> SHIFT_LIVE =
@@ -315,7 +305,6 @@ public class DeletionAwareMapValuesTest extends DeletionAwareTestBase
             OnDiskDeletionAwareTrieWriter.write(inMemory(points), LIVE, MARKER, out);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
-            opened.add(read);
             return read;
         }
         catch (IOException e)

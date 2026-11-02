@@ -45,6 +45,7 @@ import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.Cells;
 import org.apache.cassandra.db.rows.ColumnData;
@@ -63,7 +64,6 @@ import org.apache.cassandra.db.tries.OnDiskDeletionAwareTrie;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -84,19 +84,6 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         EnumSet.of(TrieTombstoneMarker.Kind.ROW, TrieTombstoneMarker.Kind.RANGE, TrieTombstoneMarker.Kind.PARTITION);
 
     final int dataSize;
-    int serializedSizeDS21 = -1;
-
-    /// The trie as [TriePartitionUpdateSerializer#serializedSize] laid it out at
-    /// [org.apache.cassandra.net.MessagingService#VERSION_DS_21], kept so that the write that follows does not have to
-    /// lay it out again. Sizing the trie means writing it -- the on-disk writer only knows the total once it has
-    /// emitted the root -- and [org.apache.cassandra.db.Mutation] sizes a mutation and then immediately serializes it,
-    /// so without this every update is laid out twice. Keyed by version like [#serializedSizeDS21], as writing one
-    /// version's bytes under another would put a message on the wire that the peer cannot read.
-    ///
-    /// Cleared by the write that consumes it. Volatile because the same update can be serialized from more than one
-    /// thread: the volatile write is what publishes the buffer, whose position and limit are not final and could
-    /// otherwise be seen before they are set.
-    volatile ByteBuffer serializedTrieDS21;
 
     /**
      * Package-private constructor used by {@link TriePartitionUpdateSerializer} and {@link TrieBuilder}
@@ -242,13 +229,13 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                     (shouldBeNull, o) ->
                     {
                         assert shouldBeNull == null;
-                        if (o instanceof Cell<?>)
-                            return ((Cell<?>) o).updateAllTimestamp(newTimestamp);
+                        if (o instanceof CellData)
+                            return ((CellData<?, ?>) o).updateAllTimestamp(newTimestamp);
 
                         if (o == TrieBackedRow.COMPLEX_COLUMN_MARKER)
                             return o;
 
-                        if (o instanceof LivenessInfo && ((LivenessInfo) o).isEmpty())
+                        if (o == LivenessInfo.EMPTY)
                             return o;   // Empty liveness should remain unchanged.
 
                         if (o instanceof LivenessInfo)
@@ -340,19 +327,16 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     @Override
     public long unsharedHeapSize()
     {
-        // The layout sizing keeps for the write that follows is held by the update until that write.
-        long laidOutSize = ObjectSizes.sizeOnHeapOf(serializedTrieDS21);
-
         // A deserialized update walks the bytes it arrived in and deserializes its content afresh on every access,
-        // so those bytes and the layout are all it holds on to.
+        // so those bytes are all it holds on to.
         if (trie instanceof OnDiskDeletionAwareTrie)
-            return laidOutSize + ((OnDiskDeletionAwareTrie<Object, TrieTombstoneMarker>) trie).sizeInBytes();
+            return ((OnDiskDeletionAwareTrie<Object, TrieTombstoneMarker>) trie).sizeInBytes();
 
         assert trie instanceof InMemoryDeletionAwareTrie;
         InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> inMemoryTrie = (InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>) trie;
         class Collector implements DeletionAwareTrie.ValueConsumer<Object, TrieTombstoneMarker>
         {
-            long heapSize = laidOutSize + inMemoryTrie.usedSizeOnHeap();
+            long heapSize = inMemoryTrie.usedSizeOnHeap();
 
             @Override
             public void deletionMarker(TrieTombstoneMarker marker)
@@ -363,8 +347,8 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             @Override
             public void content(Object o)
             {
-                if (o instanceof Cell)
-                    heapSize += ((Cell<?>) o).unsharedHeapSize();
+                if (o instanceof CellData)
+                    heapSize += ((CellData<?, ?>) o).unsharedHeapSize();
                 else if (o instanceof LivenessInfo)
                     heapSize += ((LivenessInfo) o).unsharedHeapSize();
             }
@@ -445,7 +429,11 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             ((InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>) trie).apply(
                 DeletionAwareTrie.<ByteBuffer, TrieTombstoneMarker>singleton(key, BYTE_COMPARABLE_VERSION, value),
-                (c, v) -> ((Cell) c).withUpdatedValue(v),
+                (c, v) ->
+                {
+                    CellData<?, ?> cell = (CellData<?, ?>) c;
+                    return cell.withNewData(cell.timestamp(), cell.localDeletionTime(), cell.ttl(), v);
+                },
                 (x, y) -> x,
                 (x, y) -> x,
                 (x, y) -> y,
@@ -457,16 +445,6 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             throw new AssertionError(e);
         }
-        // The cell just changed, so any size or layout computed before it no longer describes this update.
-        invalidateSerializationCaches();
-    }
-
-    /// Forgets the sizes and the layout [TriePartitionUpdateSerializer#serializedSize] kept on this update, which no
-    /// longer describe it once its content has changed.
-    void invalidateSerializationCaches()
-    {
-        serializedSizeDS21 = -1;
-        serializedTrieDS21 = null;
     }
 
     @Override
@@ -505,21 +483,24 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         return trie;
     }
 
-    /// Rebuild an update whose trie keys its columns by indices other than the ones its table metadata gives them --
-    /// those of the node that serialized it, when the schemas of the two nodes disagree -- with this node's indices.
+    /// Rebuild an update whose trie keys its columns by indices other than the ones `metadata` gives them, so that it
+    /// keys them by those: one read from a node whose schema numbers the columns differently from this node's, or one
+    /// built or read before a schema change that renumbered them, to merge into a memtable created after the change.
     /// `staticColumnIds` and `regularColumnIds` give the index the update's trie keys each of its columns by (see
-    /// [TrieBackedRow#columnIds]). Columns this node does not have, i.e. ones dropped here, are left out, and so is
-    /// the data of a column dropped here and added again that is not newer than the drop.
-    static TriePartitionUpdate withLocalColumnIndexes(TriePartitionUpdate source,
-                                                      Object2IntHashMap<ColumnIdentifier> staticColumnIds,
-                                                      Object2IntHashMap<ColumnIdentifier> regularColumnIds)
+    /// [TrieBackedRow#columnIds]). Columns `metadata` does not have are left out, and so is the data of a column
+    /// dropped and added again that is not newer than the drop.
+    public static TriePartitionUpdate withColumnIndexes(TriePartitionUpdate source,
+                                                        TableMetadata metadata,
+                                                        Object2IntHashMap<ColumnIdentifier> staticColumnIds,
+                                                        Object2IntHashMap<ColumnIdentifier> regularColumnIds)
     {
-        TableMetadata metadata = source.metadata();
         RegularAndStaticColumns.Builder columns = RegularAndStaticColumns.builder();
         for (ColumnMetadata column : source.columns())
         {
-            if (metadata.getColumn(column.name) != null)
-                columns.add(column);
+            // Of the same kind: a column dropped can have its name taken by a primary key column renamed since.
+            ColumnMetadata metadataColumn = metadata.getColumn(column.name);
+            if (metadataColumn != null && metadataColumn.kind == column.kind)
+                columns.add(metadataColumn);
         }
 
         Builder builder = new Builder(metadata, source.partitionKey(), columns.build());
@@ -658,12 +639,12 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         /** Merge in live data from the update trie. This can be various markers, liveness info or cells. */
         private Object mergeIncomingData(Object existing, Object update)
         {
-            if (update instanceof Cell)
+            if (update instanceof CellData)
             {
-                Cell<?> updateCell = (Cell<?>) update;
-                Cell<?> existingCell = (Cell<?>) existing; // existing must be either null or a cell
-                Cells.collectStats(updateCell, statsCollector);
-                Cell<?> reconciled;
+                CellData<?, ?> updateCell = (CellData<?, ?>) update;
+                CellData<?, ?> existingCell = (CellData<?, ?>) existing; // existing must be either null or a cell
+                statsCollector.update(updateCell);
+                CellData<?, ?> reconciled;
                 if (existingCell == null)
                 {
                     reconciled = updateCell;
@@ -671,7 +652,8 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 }
                 else
                 {
-                    reconciled = Cells.reconcile(existingCell, updateCell);
+                    //noinspection unchecked
+                    reconciled = Cells.<CellData>reconcile(existingCell, updateCell);
                     if (reconciled != existingCell)
                         dataSize += reconciled.dataSizeWithoutPath() - existingCell.dataSizeWithoutPath();
                 }
@@ -731,9 +713,9 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             if (deletion == null)
                 return o;
 
-            if (o instanceof Cell)
+            if (o instanceof CellData)
             {
-                Cell<?> cell = (Cell<?>) o;
+                CellData<?, ?> cell = (CellData<?, ?>) o;
                 if (!deletion.deletes(cell))
                     return o;
                 if (updateDataSize)

@@ -25,9 +25,9 @@ import java.util.concurrent.TimeUnit;
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.partitions.PartitionUpdateSizeCache;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -116,6 +116,9 @@ public class PartitionUpdateSerializationBench
     /** Immutable source for {@link #deserialize}, filled once in setup. */
     private ByteBuffer inBytes;
 
+    /** Serialization target of {@link #mutationSerialization}, which writes the update's mutation. */
+    private DataOutputBufferFixed mutationOut;
+
     @Setup(Level.Trial)
     public void setup() throws IOException
     {
@@ -144,7 +147,6 @@ public class PartitionUpdateSerializationBench
         if (!expectedType().isInstance(update))
             throw new IllegalStateException("format=" + format + " produced " + update.getClass().getName());
 
-        PartitionUpdateSizeCache.invalidate(update);
         int size = Math.toIntExact(PartitionUpdate.serializer.serializedSize(update, messagingVersion));
 
         outBytes = ByteBuffer.allocate(size);
@@ -159,6 +161,8 @@ public class PartitionUpdateSerializationBench
 
         if (inBytes.remaining() != size)
             throw new IllegalStateException("serializedSize said " + size + " but serialize wrote " + inBytes.remaining());
+
+        mutationOut = new DataOutputBufferFixed(ByteBuffer.allocate(Math.toIntExact(Mutation.serializer.serializedSize(new Mutation(update), messagingVersion))));
     }
 
     private Class<? extends PartitionUpdate> expectedType()
@@ -167,14 +171,13 @@ public class PartitionUpdateSerializationBench
     }
 
     /**
-     * Cost of sizing an update that has not been sized before — what the commit-log path pays for
-     * every mutation. On the on-disk trie format this is a full trie write, not a structure walk,
-     * so it is not the cheap call the name suggests.
+     * Cost of sizing an update — what the commit-log path pays for every mutation. On the on-disk
+     * trie format this is a full trie write to an output that only counts the bytes, not a
+     * structure walk, so it is not the cheap call the name suggests.
      */
     @Benchmark
     public long serializedSize()
     {
-        PartitionUpdateSizeCache.invalidate(update);
         return PartitionUpdate.serializer.serializedSize(update, messagingVersion);
     }
 
@@ -189,19 +192,32 @@ public class PartitionUpdateSerializationBench
 
     /**
      * The sequence the commit log actually performs per mutation: size it, allocate nothing, write
-     * it. Sizing lays the trie out and memoizes the bytes on the update, so serialization reuses
-     * the layout directly instead of walking the trie a second time.
+     * it. Each of the two walks the trie.
      */
     @Benchmark
     public int sizeThenSerialize() throws IOException
     {
-        PartitionUpdateSizeCache.invalidate(update);
         long size = PartitionUpdate.serializer.serializedSize(update, messagingVersion);
         out.clear();
         PartitionUpdate.serializer.serialize(update, out, messagingVersion);
         if (out.getLength() != size)
             throw new IllegalStateException("size " + size + " != written " + out.getLength());
         return out.getLength();
+    }
+
+    /**
+     * What a coordinator does with each mutation it builds: {@link Mutation#validateSize} sizes it at the storage
+     * version, which caches its serialization on the mutation, and the commit log then writes it. The mutation is a
+     * new one every time, as a mutation is serialized at most once per version.
+     */
+    @Benchmark
+    public int mutationSerialization() throws IOException
+    {
+        Mutation mutation = new Mutation(update);
+        mutation.validateSize(messagingVersion, 0);
+        mutationOut.clear();
+        Mutation.serializer.serialize(mutation, mutationOut, messagingVersion);
+        return mutationOut.getLength();
     }
 
     /** Commit-log replay / internode receive. */

@@ -48,12 +48,12 @@ public class OnDiskIntersectedTailsTest extends IntersectedTailsTest
         DatabaseDescriptor.toolInitialization();
     }
 
-    private final List<OnDiskTrie<ByteBuffer>> opened = new ArrayList<>();
+    private final List<FileTries.Plain<ByteBuffer>> opened = new ArrayList<>();
 
     @After
     public void closeOpened()
     {
-        opened.forEach(OnDiskTrie::close);
+        opened.forEach(FileTries.Plain::close);
         opened.clear();
     }
 
@@ -66,7 +66,7 @@ public class OnDiskIntersectedTailsTest extends IntersectedTailsTest
     private Trie<ByteBuffer> readBack(Trie<ByteBuffer> trie)
     {
         // The base class builds its trie with the ordered strategy, so it has to be written and read as ordered too.
-        OnDiskTrie<ByteBuffer> read = TrieUtil.onDiskRoundtrip(trie, true, BUFFER_SERDE, BUFFER_SERDE);
+        FileTries.Plain<ByteBuffer> read = TrieUtil.onDiskRoundtrip(trie, true, BUFFER_SERDE, BUFFER_SERDE);
         opened.add(read);
         return read;
     }

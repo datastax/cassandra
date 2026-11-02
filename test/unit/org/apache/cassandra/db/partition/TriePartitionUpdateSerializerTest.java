@@ -19,6 +19,7 @@ package org.apache.cassandra.db.partition;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
@@ -50,15 +51,17 @@ import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.context.CounterContext;
+import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.partitions.PartitionUpdateSizeCache;
 import org.apache.cassandra.db.partitions.TrieBackedPartition;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdateSerializer;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -68,6 +71,7 @@ import org.apache.cassandra.db.rows.TrieBackedRow;
 import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.tries.DeletionAwareTrie;
+import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.OnDiskDeletionAwareTrie;
 import org.apache.cassandra.db.tries.RangeTrie;
@@ -84,7 +88,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Hex;
-import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.assertArrayEquals;
@@ -220,55 +223,55 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         createRichTable();
 
         assertWireBytes("rich update", viaBTree(richUpdate()),
-                        "046b657930030380fdfffffadfb5522583e8ffffffffffa9ff6bdc00020173027373020176016d000100018160070183"
+                        "046b657930030380fdfffffadfb5522583e8ffffffffffa9ff6bdc00020173027373020176016d00010001814f070183"
                         + "e800010100000000000c604007010000000183e8000100000c6040070183e800010100000000000c2040070100000001"
                         + "83e8000100000c2040070183e700030100000000000c07010000000183e7000300000cf6014007010000000100000000"
                         + "010b07010000000100000000010bf73840655647381e140905018c00008042070183e700030100000000000c07010000"
                         + "000183e7000300000cf6014007010000000100000000010b07010000000100000000010bf73640188007010000000000"
-                        + "0008070001000000000008f703000083e800000021090040040083e804f5384003020083e80162013209380041030200"
-                        + "83e801610131093800410d62618040400501f503000083e80000000b090a010080040083e804f5384039030180000080"
-                        + "4203030483e801790738004103030483e80178073800410b79788040400501f503010083e800000007090a0100800400"
-                        + "83e804f5334018808c010601f7");
+                        + "0008070001000000000008f7090083e800000021080040040083e804f53840090083e83205380041090083e831053800"
+                        + "410962618040400501f5090083e80000000b0809010080040083e804f538403003018000008042090083e80438004109"
+                        + "0083e8043800410879788040400501f5090083e8000000070809010080040083e804f52c4018807b010601f7");
         assertWireBytes("row deletion only", viaBTree(build(builder -> builder.timestamp(1999).nowInSec(1500).row(1).delete())),
-                        "046b657930010119fffffadfb5522587cfffffffffffa9ff6bdc0000001f070100000200000108070001000002000108"
-                        + "f63801000080404500010601f6");
+                        "046b657930010119fffffadfb5522587cfffffffffffa9ff6bdc0000001e070100000200000108070001000002000108"
+                        + "f638010000804045000601f6");
         assertWireBytes("expiring row", viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).ttl(60).row(1).add("v", 11))),
-                        "046b65793001003dfffffadfb5522587d0ffffffffffa9ff6c183c00010176001f0300020000000000000b0a00400401"
-                        + "00000005f538010000804440400601f5");
+                        "046b65793001003dfffffadfb5522587d0ffffffffffa9ff6c183c00010176001e09020000000000000b090040040100"
+                        + "000005f538010000804440400601f5");
         assertWireBytes("row without primary key liveness",
                         viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).noPrimaryKeyLivenessInfo().add("v", 11))),
-                        "046b657930010031fffffadfb5522587d00000000101760019030000000000000b0800400801f5380100008044404006"
-                        + "01f5");
+                        "046b657930010031fffffadfb5522587d000000001017600180900000000000b0700400801f538010000804440400601"
+                        + "f5");
         assertWireBytes("deletions only", viaBTree(build(builder -> {
                             builder.timestamp(1000).nowInSec(1500).delete();
                             builder.timestamp(2000).nowInSec(1500);
                             builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
                         })),
-                        "046b657930000200fffffadfb5522583e8ffffffffffa9ff6bdc00000040070183e800010100000000000c2040070100"
-                        + "00000183e8000100000c20400f090580000080424040070100000000000008070001000000000008f700010601f6");
+                        "046b657930000200fffffadfb5522583e8ffffffffffa9ff6bdc0000003f070183e800010100000000000c2040070100"
+                        + "00000183e8000100000c20400f090580000080424040070100000000000008070001000000000008f7000601f6");
         assertWireBytes("point deletion inside a range tombstone", pointDeletionInsideRange(),
-                        "046b657930000200fffffadfb5522587cfffffffffffa9ff6bdc00020173027373020176016d00010001370701000001"
-                        + "00000008604007010000010100000101010002000e384007000100000100000820401c0b090605840000804043000106"
-                        + "01f6");
-        // The trie keys a column by its index among the table's columns, and a cell names its column by its index
-        // among the header's: 1 and 0 here, for the static column and the regular one alike.
+                        "046b657930000200fffffadfb5522587cfffffffffffa9ff6bdc00020173027373020176016d00010001360701000001"
+                        + "00000008604007010000010100000101010002000e384007000100000100000820401c0b090605840000804043000601"
+                        + "f6");
+        // The trie keys a column by its index among the table's columns, which the indexes after the header record for
+        // the columns it lists, and not by its index among those: 1 and not 0 here, for the static column and the
+        // regular one alike. A cell does not name its column.
         assertWireBytes("second static and second regular column only",
                         viaBTree(build(builder -> {
                             builder.timestamp(2000).nowInSec(1500);
                             builder.row().add("ss", ImmutableSet.of("x"));
                             builder.row(1).add("m", ImmutableMap.of("a", "1"));
                         })),
-                        "046b657930020071fffffadfb5522587cfffffffffffa9ff6bdc000102737301016d0101808d07010000030000000807"
+                        "046b657930020071fffffadfb5522587cfffffffffffa9ff6bdc000102737301016d0101808607010000030000000807"
                         + "0001000003000008f60140070000000105070000000105f7380100008044070100000300000008070001000003000008"
-                        + "f60140070000000105070000000105f7224018800300000101610131083800614240400501f5014004000103f5380100"
-                        + "008044030104010178063800784240400501f5014004000103f5174018803a010601f7");
+                        + "f60140070000000105070000000105f72240188009000131043800614240400501f5014004000103f538010000804409"
+                        + "0001033800784240400501f5014004000103f51440188033010601f7");
         assertWireBytes("cell tombstone", viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).delete("v"))),
-                        "046b65793001002dfffffadfb5522587d0ffffffffffa9ff6bdc00000101760018030005000005004004000003f53801"
-                        + "0000804440400601f5");
+                        "046b65793001002dfffffadfb5522587d0ffffffffffa9ff6bdc000001017600170901000004004004000003f5380100"
+                        + "00804440400601f5");
         assertWireBytes("map element deletion",
                         viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).appendAll("m", Collections.singletonMap("a", null)))),
-                        "046b65793001003afffffadfb5522587d0ffffffffffa9ff6bdc000001016d0123030005000001610738006142404005"
-                        + "01f5014004000003f538010000804440400601f5");
+                        "046b65793001003afffffadfb5522587d0ffffffffffa9ff6bdc000001016d012009010000043800614240400501f501"
+                        + "4004000003f538010000804440400601f5");
 
         // Through the entry point the mutation path uses: the table id, then the format byte of the trie encoding.
         TriePartitionUpdate update = richUpdate();
@@ -289,8 +292,8 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         createTable("CREATE TABLE %s (k text, c int, cnt counter, PRIMARY KEY(k, c))");
         assertWireBytes("counter update",
                         viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("cnt", CounterContext.instance().createUpdate(5L)))),
-                        "046b657930010051fffffadfb5522587d00000000103636e74003c0300000024000100000000000000000000c0000000"
-                        + "000000000000000000000001000000000000000529004004000003f538010000804440400601f5");
+                        "046b657930010051fffffadfb5522587d00000000103636e74003a090000000100000000000000000000c00000000000"
+                        + "00000000000000000001000000000000000527004004000003f538010000804440400601f5");
     }
 
     /**
@@ -379,102 +382,13 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         }
 
         // And through the entry point the mutation path actually uses, which adds the table id and
-        // the format byte and caches the size on the update.
+        // the format byte.
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             long size = PartitionUpdate.serializer.serializedSize(update, VERSION);
             PartitionUpdate.serializer.serialize(update, out, VERSION);
             assertEquals(size, out.getLength());
-            // Second call is served from the cache; it must still describe the same bytes.
-            assertEquals(size, PartitionUpdate.serializer.serializedSize(update, VERSION));
         }
-    }
-
-    /**
-     * Sizing an update lays its trie out and the write that follows reuses that layout instead of building it a
-     * second time. What is written must be exactly what the writer would have produced, so sizing first cannot
-     * change the bytes, and the layout must be handed over only once.
-     */
-    @Test
-    public void testSizingFirstDoesNotChangeTheBytesWritten() throws Throwable
-    {
-        createRichTable();
-
-        byte[] withoutSizing = serialize(richUpdate());
-
-        TriePartitionUpdate sizedFirst = richUpdate();
-        TriePartitionUpdateSerializer.serializedSize(sizedFirst, VERSION);
-        assertArrayEquals(withoutSizing, serialize(sizedFirst));
-
-        // The retained layout is consumed by that write; a second one has to build the trie again and must still
-        // produce the same bytes.
-        assertArrayEquals(withoutSizing, serialize(sizedFirst));
-    }
-
-    /**
-     * The layout sizing keeps is for {@link MessagingService#VERSION_DS_21}, like the size it keeps, and a write at
-     * another version must not take it. That is the only version the trie encoding is written at today, so this writes
-     * at a later, hypothetical, one; sizing at that version keeps nothing.
-     */
-    @Test
-    public void testRetainedLayoutNotTakenAtAnotherVersion() throws Throwable
-    {
-        createRichTable();
-        int otherVersion = MessagingService.VERSION_DS_21 + 1;
-
-        TriePartitionUpdate update = richUpdate();
-        TriePartitionUpdateSerializer.serializedSize(update, MessagingService.VERSION_DS_21);
-        assertTrue(PartitionUpdateSizeCache.hasRetainedTrie(update));
-        assertArrayEquals(serialize(richUpdate(), otherVersion), serialize(update, otherVersion));
-        assertTrue(PartitionUpdateSizeCache.hasRetainedTrie(update));
-
-        TriePartitionUpdate sizedAtOther = richUpdate();
-        TriePartitionUpdateSerializer.serializedSize(sizedAtOther, otherVersion);
-        assertFalse(PartitionUpdateSizeCache.hasRetainedTrie(sizedAtOther));
-    }
-
-    /**
-     * The layout sizing keeps on the update holds the trie's bytes and no more, rather than the buffer they were written
-     * to, which grows by doubling.
-     */
-    @Test
-    public void testRetainedLayoutIsTrimmed() throws Throwable
-    {
-        createRichTable();
-        TriePartitionUpdate update = richUpdate();
-        TriePartitionUpdateSerializer.serializedSize(update, VERSION);
-        ByteBuffer retained = PartitionUpdateSizeCache.retainedTrie(update);
-        assertEquals(retained.remaining(), retained.capacity());
-    }
-
-    /**
-     * {@link PartitionUpdateSizeCache#invalidate} goes through the update's own invalidation, the one a counter leader
-     * rewriting a counter cell uses, which must clear the cached serialized sizes and any retained trie layout. The
-     * update's heap size counts the retained layout for as long as the update holds it.
-     */
-    @Test
-    public void testPartitionUpdateSizeCacheInvalidate() throws Throwable
-    {
-        createRichTable();
-        TriePartitionUpdate update = richUpdate();
-        long heapSize = update.unsharedHeapSize();
-        TriePartitionUpdateSerializer.serializedSize(update, MessagingService.VERSION_DS_21);
-
-        assertTrue(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_21));
-        assertTrue(PartitionUpdateSizeCache.hasRetainedTrie(update));
-        assertEquals(heapSize + ObjectSizes.sizeOnHeapOf(PartitionUpdateSizeCache.retainedTrie(update)), update.unsharedHeapSize());
-
-        PartitionUpdateSizeCache.invalidate(update);
-
-        assertFalse(PartitionUpdateSizeCache.isSized(update, MessagingService.VERSION_DS_21));
-        assertFalse(PartitionUpdateSizeCache.hasRetainedTrie(update));
-        assertEquals(heapSize, update.unsharedHeapSize());
-
-        // The write that takes the layout off the update stops it being counted as well.
-        TriePartitionUpdateSerializer.serializedSize(update, MessagingService.VERSION_DS_21);
-        serialize(update);
-        assertFalse(PartitionUpdateSizeCache.hasRetainedTrie(update));
-        assertEquals(heapSize, update.unsharedHeapSize());
     }
 
     /**
@@ -688,8 +602,8 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
 
     /**
      * The counter leader rewrites each counter cell in place through {@link PartitionUpdate.CounterMark#setValue}
-     * after the update may already have been sized, which lays its trie out and keeps the layout for the write that
-     * follows. That write must carry the new counter context, not the one the layout was taken from.
+     * after the update may already have been sized. The write that follows must carry the new counter context, and
+     * the size must be that of the bytes written.
      */
     @Test
     public void testCounterValueChangeAfterSizingIsWritten() throws Throwable
@@ -776,6 +690,81 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         createRichTable();
         TriePartitionUpdate update = richUpdate();
         assertEquals(update.withOnlyPresentColumns(), deserialize(serialize(update)).withOnlyPresentColumns());
+    }
+
+    /**
+     * A cell's path is read back from its key in the trie, through byte-comparable decoding, which keeps a value's
+     * order but not always its bytes: a decimal loses its trailing zeros. A {@code set<decimal>} element written as 1.00
+     * reads back as 1, which its type compares equal to 1.00.
+     */
+    @Test
+    public void testDecimalCellPathReadsBackWithoutTrailingZeros() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k text, c int, s set<decimal>, PRIMARY KEY(k, c)) WITH memtable = 'skiplist'");
+        ColumnMetadata s = currentTableMetadata().getColumn(ByteBufferUtil.bytes("s"));
+        BigDecimal written = new BigDecimal("1.00");
+        TriePartitionUpdate update = build(builder -> builder.timestamp(2000).row(1).add("s", ImmutableSet.of(written)));
+        assertEquals(written, DecimalType.instance.compose(onlyElement(update, s)));
+
+        ByteBuffer read = onlyElement(deserialize(serialize(update)), s);
+        assertEquals(new BigDecimal("1"), DecimalType.instance.compose(read));
+        assertEquals(0, DecimalType.instance.compare(DecimalType.instance.decompose(written), read));
+    }
+
+    private static ByteBuffer onlyElement(TriePartitionUpdate update, ColumnMetadata column)
+    {
+        ComplexColumnData data = Iterators.getOnlyElement(update.rowIterator()).getComplexColumnData(column);
+        return Iterators.getOnlyElement(data.iterator()).path().get(0);
+    }
+
+    /**
+     * A cell's payload carries neither its column nor its path, which the cell's key in the trie gives, so a
+     * deserialized update holds the data of its cells rather than cells. What consumes the update's trie has to take
+     * that data: re-timestamping it, and building another update from its rows.
+     */
+    @Test
+    public void testDeserializedUpdateHoldsCellData() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = richUpdate();
+        TriePartitionUpdate read = deserialize(serialize(update));
+
+        DeletionAwareTrie<Object, TrieTombstoneMarker> trie = TriePartitionUpdate.asMergableTrieWithoutPartitionPrefix(read);
+        assertTrue(trie.contentOnlyTrie().filteredValuesIterator(Direction.FORWARD, CellData.class).hasNext());
+        assertFalse(trie.contentOnlyTrie().filteredValuesIterator(Direction.FORWARD, Cell.class).hasNext());
+
+        assertEquals(update.withUpdatedTimestamps(3000), read.withUpdatedTimestamps(3000));
+
+        TriePartitionUpdate expected = rebuiltFromRows(update);
+        TriePartitionUpdate rebuilt = rebuiltFromRows(read);
+        assertEquals(expected, rebuilt);
+        assertEquals(expected.stats(), rebuilt.stats());
+        assertEquals(expected.dataSize(), rebuilt.dataSize());
+    }
+
+    /** An update built by the trie update builder from the rows of the given one. */
+    private static TriePartitionUpdate rebuiltFromRows(TriePartitionUpdate update)
+    {
+        PartitionUpdate.Builder builder = TriePartitionUpdate.FACTORY.builder(update.metadata(), update.partitionKey(), update.columns(), 1);
+        for (Iterator<Row> rows = update.rowsIncludingStatic(); rows.hasNext();)
+            builder.add(rows.next());
+        return (TriePartitionUpdate) builder.build();
+    }
+
+    /**
+     * Merging a deserialized update into a trie memtable applies the memtable's deletions to the update's cell data
+     * before it is merged in, and a newer row deletion leaves it out.
+     */
+    @Test
+    public void testDeserializedUpdateUnderNewerRowDeletionInMemtable() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k text, c int, v int, PRIMARY KEY(k, c)) WITH memtable = 'trie'");
+        execute("DELETE FROM %s USING TIMESTAMP 3000 WHERE k = 'key0' AND c = 1");
+        TriePartitionUpdate update = build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11));
+
+        new Mutation(deserialize(serialize(update))).apply();
+
+        assertEmpty(execute("SELECT * FROM %s WHERE k = 'key0' AND c = 1"));
     }
 
     /**
@@ -1173,8 +1162,7 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         assertEquals(expected, read);
         assertEquals(expected.staticRow(), read.staticRow());
         assertEquals(expected.deletionInfo(), read.deletionInfo());
-        // A cell carries its column, so comparing rows does not show that the trie keys it by this node's numbering;
-        // looking each column up by its key does.
+        // Looking each column up by its key checks that the trie keys it by this node's numbering.
         for (Iterator<Row> rows = expected.rowsIncludingStatic(); rows.hasNext();)
         {
             Row row = rows.next();
@@ -1323,11 +1311,10 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
 
         // The trie is written last. The writer emits a deletion branch before the node that holds it, so this one
         // starts with the tag of the row deletion's first marker.
-        TriePartitionUpdateSerializer.serializedSize(update, VERSION);
-        int trieStart = bytes.length - PartitionUpdateSizeCache.retainedTrie(update).remaining();
+        int trieStart = trieStart(bytes);
         assertEquals(7, bytes[trieStart]);
 
-        for (int tag : new int[]{ 3, 4, 5, 6, 8 })
+        for (int tag : new int[]{ 4, 5, 6, 8, 9 })
         {
             bytes[trieStart] = (byte) tag;
             try
@@ -1357,7 +1344,7 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
 
         // The first marker: its tag, the presence of its left side, and the delta of that side's timestamp. Raising
         // the delta by one wraps the timestamp round to Long.MIN_VALUE.
-        int marker = trieStart(update, bytes);
+        int marker = trieStart(bytes);
         assertArrayEquals(new byte[]{ 7, 1, 0 }, Arrays.copyOfRange(bytes, marker, marker + 3));
         bytes[marker + 2] = 1;
 
@@ -1396,11 +1383,103 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         byte[] bytes = serialize(update);
 
         // The update has no deletion branch, so the trie starts with the tag of its first live payload, a cell.
-        int payload = trieStart(update, bytes);
-        assertEquals(3, bytes[payload]);
+        int payload = trieStart(bytes);
+        assertEquals(9, bytes[payload]);
         bytes[payload] = 7;
 
         assertCorruptionRejected(bytes, "Unknown content type tag: 7");
+    }
+
+    /**
+     * A cell used to be written under tag 3 with its column's index and its cell path, before the cell's key in the
+     * trie was left to give them, and its bytes read as a cell of the current layout are wrong without being invalid.
+     * These are the bytes that layout wrote for the expiring row of {@link #testWireBytesArePinned}. Its cell, 03 00 02
+     * 00 00 00 00 00 00 0b, is the tag, the column's index, then the flags, the deltas of the timestamp, local deletion
+     * time and TTL, and the value; read as the current layout, it is a cell that is not expiring, with a timestamp delta
+     * of 2 and a seven-byte value. Tag 3 is no longer used, so that they are rejected.
+     */
+    @Test
+    public void testCellOfEarlierLayoutIsRejected() throws Throwable
+    {
+        createRichTable();
+        byte[] bytes = Hex.hexToBytes("046b65793001003dfffffadfb5522587d0ffffffffffa9ff6c183c00010176001f0300020000000000000b0a00400401"
+                                      + "00000005f538010000804440400601f5");
+
+        assertCorruptionRejected(bytes, "Unknown content type tag: 3");
+    }
+
+    /**
+     * A cell's flags say which of its fields follow, and its value takes what they leave of the payload, so a cell
+     * with the wrong flags can fit its payload: one with a flag that is not used is corrupt, and so is one that is both
+     * deleted and expiring, which no cell is. 0x04 is among the unused ones: on a table without counters, it once had a
+     * cell's value cleared of local counter shards, and the cell kept as a counter.
+     */
+    @Test
+    public void testInvalidCellFlagsAreRejected() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).ttl(60).row(1).add("v", 11)));
+        byte[] bytes = serialize(update);
+
+        // The update has no deletion branch, so the trie starts with its first live payload, the cell: its tag, its
+        // flags, the deltas of its timestamp, local deletion time and TTL from the update's smallest ones, and its value.
+        int payload = trieStart(bytes);
+        assertArrayEquals(new byte[]{ 9, 2, 0, 0, 0, 0, 0, 0, 11 }, Arrays.copyOfRange(bytes, payload, payload + 9));
+
+        for (int flag = 0x04; flag <= 0x80; flag <<= 1)
+        {
+            byte[] corrupt = bytes.clone();
+            corrupt[payload + 1] |= (byte) flag;
+            assertCorruptionRejected(corrupt, "Unknown cell flags");
+        }
+
+        bytes[payload + 1] = 3;
+        assertCorruptionRejected(bytes, "both deleted and expiring");
+    }
+
+    /**
+     * A cell whose fields reach past the end of its payload, and so leave no value, is corrupt.
+     */
+    @Test
+    public void testCellFieldsPastPayloadEndAreRejected() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).delete("v")));
+        byte[] bytes = serialize(update);
+
+        // The cell tombstone: its tag, its flags, and the deltas of its timestamp and local deletion time. Flagged as
+        // expiring instead, it has a TTL read from the byte after its payload.
+        int payload = trieStart(bytes);
+        assertArrayEquals(new byte[]{ 9, 1, 0, 0 }, Arrays.copyOfRange(bytes, payload, payload + 4));
+        bytes[payload + 1] = 2;
+
+        assertCorruptionRejected(bytes, "Cell read 1 bytes past the end of its payload");
+    }
+
+    /**
+     * Whether a cell is a counter is not written: a live cell of a counter table is one, and has its local shards
+     * cleared as the BTree encoding's reader clears them, and a deleted one is not, nor is a cell of another table.
+     */
+    @Test
+    public void testCounterCellsAreTheLiveCellsOfCounterTables() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k text, c int, cnt counter, PRIMARY KEY(k, c))");
+        TriePartitionUpdate live = viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("cnt", CounterContext.instance().createUpdate(5L))));
+        TriePartitionUpdate deleted = viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).delete("cnt")));
+        assertTrue(onlyCell(deserialize(serialize(live))).isCounterCell());
+        assertFalse(onlyCell(deserialize(serialize(deleted))).isCounterCell());
+        assertEquals(deleted, deserialize(serialize(deleted)));
+
+        createRichTable();
+        assertFalse(onlyCell(deserialize(serialize(viaBTree(build(builder -> builder.timestamp(2000).row(1).add("v", 11)))))).isCounterCell());
+    }
+
+    private static Cell<?> onlyCell(TriePartitionUpdate update)
+    {
+        Iterator<Row> rows = update.rowIterator();
+        Cell<?> cell = Iterators.getOnlyElement(rows.next().cells().iterator());
+        assertFalse(rows.hasNext());
+        return cell;
     }
 
     /**
@@ -1417,18 +1496,62 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         // The row deletion's first marker: present on its left with a deletion time and kind, absent on its right,
         // no point deletion, and a row level marker. Marking the left side absent has the rest of it read as the right
         // side, the point deletion and the level marker, three bytes short of its end.
-        int marker = trieStart(update, bytes);
+        int marker = trieStart(bytes);
         assertArrayEquals(new byte[]{ 7, 1, 0, 0, 2, 0, 0, 1 }, Arrays.copyOfRange(bytes, marker, marker + 8));
         bytes[marker + 1] = 0;
 
         assertCorruptionRejected(bytes, "Read 5 bytes of a payload of 8");
     }
 
-    /** Where the trie starts in the bytes written for the update, the trie being written last. */
-    private static int trieStart(TriePartitionUpdate update, byte[] bytes)
+    /**
+     * Any empty liveness is written as {@link LivenessInfo#EMPTY}, under a tag of its own, and reads back as that
+     * instance, which the trie row and partition code recognise by identity. One under the tag of a non-empty
+     * liveness is corrupt, and would read back as another instance.
+     */
+    @Test
+    public void testEmptyLivenessUnderLivenessTagIsRejected() throws Throwable
     {
-        TriePartitionUpdateSerializer.serializedSize(update, VERSION);
-        return bytes.length - PartitionUpdateSizeCache.retainedTrie(update).remaining();
+        createRichTable();
+        // Timestamps are written as deltas from the update's smallest one, which is the row's own here.
+        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(Long.MAX_VALUE).nowInSec(1500).row(1).add("v", 11)));
+        assertEquals(Long.MAX_VALUE, update.stats().minTimestamp);
+        byte[] bytes = serialize(update);
+
+        // The row's liveness: its tag, not expiring, and the delta of its timestamp. Raising the delta by one wraps
+        // the timestamp round to Long.MIN_VALUE, which is LivenessInfo.NO_TIMESTAMP.
+        byte[] liveness = { 4, 0, 0 };
+        int payload = Bytes.indexOf(Arrays.copyOfRange(bytes, trieStart(bytes), bytes.length), liveness) + trieStart(bytes);
+        assertTrue(payload >= trieStart(bytes));
+        assertEquals(-1, Bytes.indexOf(Arrays.copyOfRange(bytes, payload + 1, bytes.length), liveness));
+        bytes[payload + 2] = 1;
+
+        assertCorruptionRejected(bytes, "Empty liveness under the tag of a non-empty one");
+    }
+
+    /**
+     * A deletion kind is written as its ordinal, and one past the last kind is corrupt.
+     */
+    @Test
+    public void testInvalidDeletionKindIsRejected() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(1999).nowInSec(1500).row(1).delete()));
+        byte[] bytes = serialize(update);
+
+        // The row deletion's first marker, as in testPayloadNotReadToItsEndIsRejected: its left side's kind is ROW.
+        int marker = trieStart(bytes);
+        assertArrayEquals(new byte[]{ 7, 1, 0, 0, 2, 0, 0, 1 }, Arrays.copyOfRange(bytes, marker, marker + 8));
+        bytes[marker + 4] = (byte) TrieTombstoneMarker.Kind.values().length;
+
+        assertCorruptionRejected(bytes, "Invalid TrieTombstoneMarker.Kind ordinal");
+    }
+
+    /** Where the trie starts in the bytes written for an update, the trie being written last. */
+    private int trieStart(byte[] bytes) throws IOException
+    {
+        TriePartitionUpdate read = deserialize(bytes);
+        assertTrue(isReadInPlace(read));
+        return bytes.length - (int) ((OnDiskDeletionAwareTrie<Object, TrieTombstoneMarker>) TriePartitionUpdate.asMergableTrieWithoutPartitionPrefix(read)).sizeInBytes();
     }
 
     private void assertCorruptionRejected(byte[] bytes, String expectedMessage) throws IOException

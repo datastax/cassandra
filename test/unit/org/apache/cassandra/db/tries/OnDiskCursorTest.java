@@ -22,7 +22,10 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.ToLongFunction;
 
 import com.google.common.collect.Iterables;
@@ -32,6 +35,7 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebufferingInputStream;
 import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -39,7 +43,9 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 
 /// Covers the back-to-front integer decoding of [OnDiskCursor], which the round-trip tests only reach
@@ -71,7 +77,7 @@ public class OnDiskCursorTest
             long[] ends = new long[VALUES.length];
             for (int i = 0; i < VALUES.length; ++i)
             {
-                OnDiskTrieWriter.writeReversedVint(out, VALUES[i]);
+                OnDiskBaseTrieWriter.writeReversedVint(out, VALUES[i]);
                 ends[i] = out.position();
             }
 
@@ -95,7 +101,7 @@ public class OnDiskCursorTest
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             out.write(new byte[8]);
-            OnDiskTrieWriter.writeReversedVint(out, 1 << 20);
+            OnDiskBaseTrieWriter.writeReversedVint(out, 1 << 20);
             long pos = out.position();
 
             OnDiskCursor<Void> cursor = cursorOver(out);
@@ -184,18 +190,42 @@ public class OnDiskCursorTest
         assertThrows(UncheckedIOException.class, cursor::advance);
     }
 
-    /// Closing a range cursor descends to the nearest content to work out the deletions at its position, along the same
-    /// pointers. The close must still give the buffer back, and a tail asked for afterwards must report the corruption.
+    /// A range tail descends to the nearest content to work out the deletions at its root, along the same pointers. A
+    /// tail taken from a closed cursor reads with a buffer of its own, which it must give back when it reports the
+    /// corruption.
     @Test(timeout = 60_000)
-    public void testSelfPointingChildIsRejectedOnRangeClose()
+    public void testSelfPointingChildIsRejectedOnRangeTail()
     {
         ByteBuffer buffer = selfPointingDenseNode();
         TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(buffer));
-        OnDiskCursor.Range<TestRangeState> cursor = new OnDiskCursor.Range<>(TrieUtil.RANGE_SERDE, factory,
-                                                                             VERSION, Direction.FORWARD, buffer.limit());
+        OnDiskRangeCursor<TestRangeState> cursor = new OnDiskRangeCursor<>(TrieUtil.RANGE_SERDE, factory,
+                                                                           VERSION, Direction.FORWARD, buffer.limit());
         cursor.close();
         assertEquals(0, factory.outstanding);
         assertThrows(UncheckedIOException.class, () -> cursor.tailCursor(Direction.FORWARD));
+        assertEquals(0, factory.outstanding);
+    }
+
+    /// The same descent, for the state of a closed range cursor: a skip to "a", where there is no content, leaves the
+    /// state to be worked out from the nearest content below, and [RangeCursor#precedingStateCursor] asks for it after
+    /// [Cursor#close]. The read takes a buffer of its own, which it must give back when it reports the corruption.
+    @Test(timeout = 60_000)
+    public void testSelfPointingChildIsRejectedForPrecedingStateOfClosedRangeCursor()
+    {
+        ByteBuffer node = selfPointingDenseNode();
+        ByteBuffer buffer = ByteBuffer.allocate(node.limit() + 2);
+        buffer.put(node);
+        buffer.put((byte) 'a');
+        buffer.put((byte) OnDiskWriteNodeType.CHAIN.bits);     // the root, a chain to the node with "a"
+        buffer.flip();
+        TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(buffer));
+        OnDiskRangeCursor<TestRangeState> cursor = new OnDiskRangeCursor<>(TrieUtil.RANGE_SERDE, factory,
+                                                                           VERSION, Direction.FORWARD, buffer.limit());
+        cursor.skipTo(Cursor.encode(1, 'a', Direction.FORWARD));
+        cursor.close();
+        assertEquals(0, factory.outstanding);
+        assertThrows(UncheckedIOException.class, () -> cursor.precedingStateCursor(Direction.FORWARD));
+        assertEquals(0, factory.outstanding);
     }
 
     /// A move that fails on corrupt bytes can leave a range cursor part way: here a skip to the return path of "b" has
@@ -218,8 +248,8 @@ public class OnDiskCursorTest
                 return TrieUtil.RANGE_SERDE.deserialize(rdr, length);
             };
             TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(buffer));
-            OnDiskCursor.Range<TestRangeState> cursor = new OnDiskCursor.Range<>(deserializer, factory,
-                                                                                 VERSION, Direction.FORWARD, buffer.limit());
+            OnDiskRangeCursor<TestRangeState> cursor = new OnDiskRangeCursor<>(deserializer, factory,
+                                                                               VERSION, Direction.FORWARD, buffer.limit());
             long target = Cursor.encode(1, 'b', Direction.FORWARD) | Cursor.ON_RETURN_PATH_BIT;
             assertThrows(UncheckedIOException.class, () -> cursor.skipTo(target));
             assertEquals(2, reads[0]);
@@ -238,7 +268,7 @@ public class OnDiskCursorTest
         testRangeCursorStateAfterAFailedMove(cursor -> cursor.advanceMultiple(null));
     }
 
-    private static void testRangeCursorStateAfterAFailedMove(ToLongFunction<OnDiskCursor.Range<TestRangeState>> move) throws IOException
+    private static void testRangeCursorStateAfterAFailedMove(ToLongFunction<OnDiskRangeCursor<TestRangeState>> move) throws IOException
     {
         RangeTrie<TestRangeState> trie = TestRangeState.fromList(TestRangeState.verify(Arrays.asList(
             new TestRangeState(TrieUtil.directComparable("a"), -1, 1),
@@ -254,8 +284,8 @@ public class OnDiskCursorTest
                 return TrieUtil.RANGE_SERDE.deserialize(rdr, length);
             };
             TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(buffer));
-            OnDiskCursor.Range<TestRangeState> cursor = new OnDiskCursor.Range<>(deserializer, factory,
-                                                                                 VERSION, Direction.FORWARD, buffer.limit());
+            OnDiskRangeCursor<TestRangeState> cursor = new OnDiskRangeCursor<>(deserializer, factory,
+                                                                               VERSION, Direction.FORWARD, buffer.limit());
             move.applyAsLong(cursor);     // to "a", whose range is active until the move to "c"
             assertNotNull(cursor.state());
             assertThrows(UncheckedIOException.class, () -> move.applyAsLong(cursor));
@@ -265,6 +295,102 @@ public class OnDiskCursorTest
             assertEquals(0, factory.outstanding);
             assertThrows(UncheckedIOException.class, cursor::state);
             assertThrows(UncheckedIOException.class, () -> cursor.tailCursor(Direction.FORWARD));
+        }
+    }
+
+    /// Closing a range cursor only gives its buffer back. Here a skip has left the state at the cursor's position to be
+    /// worked out from the nearest content, and close must not read it on the chance that the state or a tail is asked
+    /// for afterwards. Those read the file afresh when they are asked for, each with a buffer of its own that it gives
+    /// back in turn.
+    @Test
+    public void testRangeCursorCloseOnlyReleases() throws IOException
+    {
+        RangeTrie<TestRangeState> trie = TestRangeState.fromList(TestRangeState.verify(Arrays.asList(
+            new TestRangeState(TrieUtil.directComparable("a"), -1, 1),
+            new TestRangeState(TrieUtil.directComparable("ba"), 1, 2),
+            new TestRangeState(TrieUtil.directComparable("bc"), 2, -1))));
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskTrieWriter.write(trie, true, TrieUtil.RANGE_SERDE, out);
+            ByteBuffer buffer = out.asNewBuffer();
+            int[] reads = new int[1];
+            OnDiskCursor.DataDeserializer<TestRangeState> deserializer = (rdr, length) -> {
+                ++reads[0];
+                return TrieUtil.RANGE_SERDE.deserialize(rdr, length);
+            };
+            TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(buffer));
+            OnDiskRangeCursor<TestRangeState> cursor = new OnDiskRangeCursor<>(deserializer, factory,
+                                                                               VERSION, Direction.FORWARD, buffer.limit());
+            RangeCursor<TestRangeState> expected = trie.cursor(Direction.FORWARD);
+            long target = Cursor.encode(1, 'b', Direction.FORWARD);   // "b": inside the range "a" opens, no content
+            cursor.skipTo(target);
+            expected.skipTo(target);
+
+            int readsBeforeClose = reads[0];
+            cursor.close();
+            assertEquals("Close must not read", readsBeforeClose, reads[0]);
+            assertEquals(0, factory.outstanding);
+
+            try (RangeCursor<TestRangeState> expectedPreceding = expected.precedingStateCursor(Direction.FORWARD);
+                 RangeCursor<TestRangeState> actualPreceding = cursor.precedingStateCursor(Direction.FORWARD))
+            {
+                assertEquals(0, factory.outstanding);
+                TrieUtil.assertCursorWalksEqual(expectedPreceding, actualPreceding);
+            }
+            for (Direction direction : Direction.values())
+            {
+                try (RangeCursor<TestRangeState> expectedTail = expected.tailCursor(direction);
+                     RangeCursor<TestRangeState> actualTail = cursor.tailCursor(direction))
+                {
+                    assertEquals(1, factory.outstanding);
+                    TrieUtil.assertCursorWalksEqual(expectedTail, actualTail);
+                }
+                assertEquals(0, factory.outstanding);
+            }
+        }
+    }
+
+    /// A closed range cursor that is asked for its state reads the file with a reader of its own; it is not given a
+    /// rebufferer again for the read, and does not store the state it works out, but reads it again when asked again.
+    /// The tries made from a closed cursor make all their cursors from it, and could do so from more than one thread at
+    /// a time.
+    @Test
+    public void testClosedRangeCursorIsNotChangedByItsState() throws IOException
+    {
+        RangeTrie<TestRangeState> trie = TestRangeState.fromList(TestRangeState.verify(Arrays.asList(
+            new TestRangeState(TrieUtil.directComparable("a"), -1, 1),
+            new TestRangeState(TrieUtil.directComparable("ba"), 1, 2),
+            new TestRangeState(TrieUtil.directComparable("bc"), 2, -1))));
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskTrieWriter.write(trie, true, TrieUtil.RANGE_SERDE, out);
+            ByteBuffer buffer = out.asNewBuffer();
+            AtomicReference<OnDiskRangeCursor<TestRangeState>> closed = new AtomicReference<>();
+            List<Rebufferer> closedCursorRebufferers = new ArrayList<>();
+            OnDiskCursor.DataDeserializer<TestRangeState> deserializer = (rdr, length) -> {
+                if (closed.get() != null)
+                    closedCursorRebufferers.add(closed.get().rebufferer);
+                return TrieUtil.RANGE_SERDE.deserialize(rdr, length);
+            };
+            TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(buffer));
+            OnDiskRangeCursor<TestRangeState> cursor = new OnDiskRangeCursor<>(deserializer, factory,
+                                                                               VERSION, Direction.FORWARD, buffer.limit());
+            cursor.skipTo(Cursor.encode(1, 'b', Direction.FORWARD));   // "b": no content, the state is not known
+            cursor.close();
+            closed.set(cursor);
+
+            for (int i = 0; i < 2; ++i)
+            {
+                try (RangeCursor<TestRangeState> preceding = cursor.precedingStateCursor(Direction.FORWARD))
+                {
+                    assertNotNull(preceding);
+                }
+                assertFalse("state stored by a closed cursor", cursor.activeIsSet);
+                assertNull(cursor.activeRange);
+            }
+            assertEquals("the nearest content, read each time while the cursor stayed closed",
+                         Arrays.asList(null, null), closedCursorRebufferers);
+            assertEquals(0, factory.outstanding);
         }
     }
 
@@ -310,6 +436,9 @@ public class OnDiskCursorTest
     /// A range tail presents its root's ascent content through a backtrack entry that reads no bytes. A prefix whose
     /// descent content starts the data and which claims ascent content as well asks for that content at position 0,
     /// which must be rejected, not answered with the tail's root content.
+    ///
+    /// The root here closes on its return path the range that the corrupt prefix below it opens, so a tail taken at the
+    /// root presents that content on its own return path, through such an entry.
     @Test
     public void testRangeTailReadAtStartOfDataIsRejected()
     {
@@ -319,17 +448,24 @@ public class OnDiskCursorTest
                                                                 | OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT
                                                                 | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT),
                                                         'a',
-                                                        (byte) OnDiskWriteNodeType.CHAIN.bits });   // root, child "a"
+                                                        (byte) OnDiskWriteNodeType.CHAIN.bits,      // child "a"
+                                                        0,                                          // root's ascent content
+                                                        1,                                          // its length
+                                                        (byte) (OnDiskWriteNodeType.PREFIX.bits
+                                                                | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT
+                                                                | OnDiskWriteNodeType.PREFIX_HAS_CHILD) }); // root
         TestRangeState content = new TestRangeState(TrieUtil.directComparable("a"), -1, 1);
         TestRangeState rootAscentContent = new TestRangeState(ByteComparable.EMPTY, 1, -1);
-        OnDiskCursor.Range<TestRangeState> cursor = new OnDiskCursor.Range<>((rdr, length) -> content,
-                                                                             new ByteBufferRebufferer(buffer), VERSION,
-                                                                             Direction.FORWARD, buffer.limit() - 1,
-                                                                             OnDiskWriteNodeType.CHAIN.bits,
-                                                                             null, rootAscentContent);
-        cursor.advance();
-        assertEquals(content, cursor.content());
-        assertThrows(UncheckedIOException.class, cursor::advance);
+        OnDiskCursor.DataDeserializer<TestRangeState> deserializer =
+            (rdr, length) -> OnDiskCursor.position(rdr) == 0 ? content : rootAscentContent;
+        try (OnDiskRangeCursor<TestRangeState> parent = new OnDiskRangeCursor<>(deserializer, new ByteBufferRebufferer(buffer),
+                                                                                VERSION, Direction.FORWARD, buffer.limit());
+             RangeCursor<TestRangeState> cursor = parent.tailCursor(Direction.FORWARD))
+        {
+            cursor.advance();
+            assertEquals(content, cursor.content());
+            assertThrows(UncheckedIOException.class, cursor::advance);
+        }
     }
 
     /// The deletion branch pointer is a delta back from its slot. Eight bytes of it can read back negative, which would
@@ -340,8 +476,82 @@ public class OnDiskCursorTest
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             out.writeByte(OnDiskWriteNodeType.LEAF.bits);       // a branch root, at position 1
-            OnDiskTrieWriter.writeReversedSized(out, -1L, 8);   // the slot: delta -1
-            OnDiskTrieWriter.writeReversedVint(out, 8);
+            OnDiskBaseTrieWriter.writeReversedSized(out, -1L, 8);   // the slot: delta -1
+            OnDiskBaseTrieWriter.writeReversedVint(out, 8);
+            out.writeByte(OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
+            ByteBuffer buffer = out.asNewBuffer();
+            OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
+                                                           Direction.FORWARD, false, true, buffer.limit());
+            assertThrows(UncheckedIOException.class, cursor::alternateBranch);
+        }
+    }
+
+    /// A node without children has its deletion branch immediately before it, and the delta 0 to it is written as an
+    /// empty slot, which reads back as that branch.
+    @Test
+    public void testEmptyAlternateBranchSlotIsDeltaZero() throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            out.writeByte(OnDiskWriteNodeType.LEAF.bits);       // a branch root, at position 1
+            OnDiskBaseTrieWriter.writeReversedVint(out, 0);     // the slot: empty
+            out.writeByte(OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
+            ByteBuffer buffer = out.asNewBuffer();
+            OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
+                                                           Direction.FORWARD, false, true, buffer.limit());
+            assertEquals(1, cursor.alternateBranch());
+        }
+    }
+
+    /// The delta 0 of a node without children written as one byte, `00`, as it was before the empty slot, reads back
+    /// the same.
+    @Test
+    public void testOneByteZeroAlternateBranchSlotIsDeltaZero() throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            out.writeByte(OnDiskWriteNodeType.LEAF.bits);       // a branch root, at position 1
+            OnDiskBaseTrieWriter.writeReversedSized(out, 0, 1); // the slot: the delta 0 in one byte
+            OnDiskBaseTrieWriter.writeReversedVint(out, 1);
+            out.writeByte(OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
+            ByteBuffer buffer = out.asNewBuffer();
+            OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
+                                                           Direction.FORWARD, false, true, buffer.limit());
+            assertEquals(1, cursor.alternateBranch());
+        }
+    }
+
+    /// Only a node without children has its deletion branch immediately before it: a node's children are written
+    /// between its branch and the node. The delta 0 on a node with children, as an empty slot or as the one byte `00`,
+    /// would read its child as its branch.
+    @Test
+    public void testZeroAlternateBranchDeltaWithChildIsRejected() throws IOException
+    {
+        for (int slotLength = 0; slotLength <= 1; ++slotLength)
+        {
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                out.writeByte(OnDiskWriteNodeType.LEAF.bits);       // the child, at position 1
+                if (slotLength > 0)
+                    OnDiskBaseTrieWriter.writeReversedSized(out, 0, slotLength);   // the slot: the delta 0
+                OnDiskBaseTrieWriter.writeReversedVint(out, slotLength);
+                out.writeByte(OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT
+                              | OnDiskWriteNodeType.PREFIX_HAS_CHILD);
+                ByteBuffer buffer = out.asNewBuffer();
+                OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer),
+                                                               VERSION, Direction.FORWARD, false, true, buffer.limit());
+                assertThrows("slot of " + slotLength + " bytes", UncheckedIOException.class, cursor::alternateBranch);
+            }
+        }
+    }
+
+    /// An empty slot at the start of the data would put the branch root at 0, where no branch can end.
+    @Test
+    public void testEmptyAlternateBranchSlotAtStartIsRejected() throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskBaseTrieWriter.writeReversedVint(out, 0);     // the slot: empty, delta 0 back to position 0
             out.writeByte(OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
             ByteBuffer buffer = out.asNewBuffer();
             OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
@@ -420,7 +630,7 @@ public class OnDiskCursorTest
                     return super.rebuffer(position);
                 }
             };
-            OnDiskTrie<String> read = new OnDiskTrie<>(rebufferer, TrieUtil.STRING_SERDE, VERSION, false, buffer.limit(), null);
+            OnDiskTrie<String> read = new OnDiskTrie<>(rebufferer, TrieUtil.STRING_SERDE, VERSION, false, buffer.limit());
             assertEquals(Iterables.size(trie.values()), Iterables.size(read.values()));
             assertEquals(1, rebuffers[0]);
         }
@@ -469,7 +679,7 @@ public class OnDiskCursorTest
         plain.putRecursive(TrieUtil.directComparable("abc"), "one", (x, y) -> y);
         plain.putRecursive(TrieUtil.directComparable("abd"), "two", (x, y) -> y);
 
-        try (OnDiskTrie<String> read = TrieUtil.onDiskRoundtripStrings(plain, false))
+        try (FileTries.Plain<String> read = TrieUtil.onDiskRoundtripStrings(plain, false))
         {
             for (Direction direction : Direction.values())
             {

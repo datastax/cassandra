@@ -202,9 +202,7 @@ public class PartitionUpdateFormatTest extends CQLTester
     }
 
     /**
-     * Sizing an update memoizes its size on it and lays its trie out, so the state a write starts from depends on
-     * whether a sizing ran first. The bytes must not: a write that runs on its own has to write the same format and
-     * the same bytes as one that follows a sizing.
+     * A write that runs on its own has to write the same format and the same bytes as one that follows a sizing.
      */
     @Test
     public void testSerializingWithoutSizingFirstWritesTheSameBytes() throws Throwable
@@ -283,8 +281,7 @@ public class PartitionUpdateFormatTest extends CQLTester
      */
     private byte assertTrieEncodingIsWritten(String shape, Supplier<TriePartitionUpdate> updates) throws IOException
     {
-        // Measured on an update of its own: sizing one lays its trie out and memoizes, and the update that is
-        // written below must be in the state a freshly built one is in.
+        // Measured on an update of its own, which nothing has sized.
         byte[] expectedBody = trieEncoded(updates.get());
 
         TriePartitionUpdate update = updates.get();
@@ -315,7 +312,7 @@ public class PartitionUpdateFormatTest extends CQLTester
         PartitionUpdate.serializer.serializedSize(sizedFirst, VERSION);
         assertArrayEquals(shape, withoutSizing, serialize(sizedFirst));
 
-        // And a second write of the same update, which no longer has the layout the sizing retained.
+        // And a second write of the same update.
         assertArrayEquals(shape, withoutSizing, serialize(sizedFirst));
     }
 

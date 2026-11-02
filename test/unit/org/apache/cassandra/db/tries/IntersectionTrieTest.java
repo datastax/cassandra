@@ -495,7 +495,7 @@ public class IntersectionTrieTest
                 testIntersectionInMemoryTrieDelete(message + " delete", expected, trie, sets);
                 break;
             case ON_DISK_ROUNDTRIP:
-                try (OnDiskTrie<Integer> diskTrie = TrieUtil.onDiskRoundtripIntegers(trie, true))
+                try (FileTries.Plain<Integer> diskTrie = TrieUtil.onDiskRoundtripIntegers(trie, true))
                 {
                     testIntersectionTries(message, expected, diskTrie, sets);
                 }

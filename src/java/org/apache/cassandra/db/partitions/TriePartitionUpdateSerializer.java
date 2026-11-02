@@ -23,9 +23,6 @@ import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
-import com.google.common.primitives.Ints;
-
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -34,7 +31,9 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.db.rows.BufferCellData;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.TrieBackedRow;
@@ -44,10 +43,11 @@ import org.apache.cassandra.db.tries.OnDiskCursor;
 import org.apache.cassandra.db.tries.OnDiskDeletionAwareTrie;
 import org.apache.cassandra.db.tries.OnDiskDeletionAwareTrieWriter;
 import org.apache.cassandra.db.tries.OnDiskTrieWriter;
+import org.apache.cassandra.io.util.CountingDataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.io.util.LimitedDataOutputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.TableMetadata;
@@ -59,11 +59,15 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * trie keys each of the header's columns by, and writes the update's deletion-aware trie in the on-disk trie format
  * with {@link OnDiskDeletionAwareTrieWriter}, node payloads being encoded by {@link ContentSerDe} in the live branch
  * and by {@link MarkerSerDe} in the deletion branches.
+ * <p>
+ * Clusterings and cell paths are written only as the trie's keys, and are read back from them through byte-comparable
+ * decoding, which gives a value equal to the one written under its type's comparison but not always the same bytes:
+ * {@code DecimalType} drops trailing zeros, so a decimal clustering or a {@code set<decimal>} element written as 1.00
+ * is read back as 1.
  */
 public class TriePartitionUpdateSerializer
 {
-    // Tags 0 to 2 are unused.
-    private static final int TYPE_CELL = 3;
+    // Tags 0 to 3 are unused, and 3 is reserved: do not reuse it.
     private static final int TYPE_LIVENESS = 4;
     private static final int TYPE_COMPLEX_MARKER = 5;
     private static final int TYPE_PARTITION_MARKER = 6;
@@ -72,20 +76,18 @@ public class TriePartitionUpdateSerializer
     /// INSERT). Readers compare against it by identity, so it must come back as that instance, and it carries
     /// nothing worth encoding.
     private static final int TYPE_EMPTY_LIVENESS = 8;
+    private static final int TYPE_CELL = 9;
 
-    /// The largest trie layout [#serializedSize] will keep on the update for the write that follows it.
-    private static final long RETAINED_TRIE_SIZE_LIMIT = CassandraRelevantProperties.CACHEABLE_MUTATION_SIZE_LIMIT.getLong();
+    /// The flags a cell's payload starts with after its tag. Its timestamp follows, then its local deletion time if it
+    /// is deleted or expiring and its TTL if it is expiring, and its value takes the rest of the payload, whose length
+    /// the trie records. Its column and cell path are not written: the cell's key in the trie gives them. Nor is whether
+    /// it is a counter: a cell is one if it is live and its table is a counter table, as [Cell#isCounterCell] has it. A
+    /// cell is never both deleted and expiring, and no other flag is used.
+    private static final int CELL_IS_DELETED = 0x01;
+    private static final int CELL_IS_EXPIRING = 0x02;
 
     private TriePartitionUpdateSerializer()
     {
-    }
-
-    /// Whether [#serializedSize] keeps the size it arrives at, and the trie layout, on the update for the write that
-    /// follows. Only at [MessagingService#VERSION_DS_21], the one version the trie encoding is written at today, which
-    /// the fields that keep them are named after; another version would need fields of its own.
-    static boolean cachedAt(int version)
-    {
-        return version == MessagingService.VERSION_DS_21;
     }
 
     /// The trie encoding exists at the versions whose partition updates carry the format byte that says which encoding
@@ -113,7 +115,7 @@ public class TriePartitionUpdateSerializer
         SerializationHeader.serializer.serializeForMessaging(header, null, out, true);
         serializeColumnIndexes(trieUpdate.metadata(), header.columns(), out);
 
-        writeTrie(trieUpdate, header, out, version);
+        writeTrie(trieUpdate, header, out);
     }
 
     /// Writes the index the update's trie keys each of the header's columns by, static ones first: the column's position
@@ -150,7 +152,7 @@ public class TriePartitionUpdateSerializer
     /// number if this node does not have the column.
     private static int localIndex(TableMetadata metadata, ColumnMetadata column)
     {
-        return metadata.regularAndStaticColumns().columns(column.isStatic()).simpleIdx(column);
+        return TrieBackedRow.columnIdsMap(metadata.regularAndStaticColumns().columns(column.isStatic())).getValue(column.name);
     }
 
     private static int[] deserializeColumnIndexes(DataInputPlus in, Columns columns) throws IOException
@@ -181,25 +183,21 @@ public class TriePartitionUpdateSerializer
     /// writer emits the root last and pointers run backwards, so the trie is only readable once
     /// its extent is known.
     ///
-    /// If [#serializedSize] has already laid this trie out for this version, its bytes are written
-    /// instead of laying it out again, and the update stops holding them. Duplicated because the
-    /// retained buffer can be written from more than one thread at a time -- two writers can both
-    /// take it before either clears the field -- and not every [DataOutputPlus] leaves the
-    /// source's position alone.
+    /// An output that stops at a limit, as a mutation is written through to be kept only if it is smaller than the
+    /// cacheable size, would refuse a trie too long for it only once all of it was laid out. The trie is then laid out
+    /// under the room the output has, less the one byte its length takes at the least, so that the layout stops as
+    /// soon as the trie cannot fit, and the output decides on one that can.
     private static void writeTrie(TriePartitionUpdate trieUpdate,
                                   SerializationHeader header,
-                                  DataOutputPlus out,
-                                  int version) throws IOException
+                                  DataOutputPlus out) throws IOException
     {
-        ByteBuffer laidOut = takeRetainedTrie(trieUpdate, version);
-        if (laidOut != null)
+        try (DataOutputBuffer trieBytes = new DataOutputBuffer())
         {
-            ByteBufferUtil.writeWithVIntLength(laidOut.duplicate(), out);
-            return;
-        }
-
-        try (DataOutputBuffer trieBytes = layOut(trieUpdate, header))
-        {
+            layOut(trieUpdate,
+                   header,
+                   out instanceof LimitedDataOutputPlus
+                   ? new LimitedDataOutputPlus(trieBytes, ((LimitedDataOutputPlus) out).remaining() - 1)
+                   : trieBytes);
             // out.write copies the buffer synchronously and leaves its position alone, and nothing
             // touches trieBytes after this, so the trie does not have to be copied out first.
             ByteBufferUtil.writeWithVIntLength(trieBytes.unsafeGetBufferAndFlip(), out);
@@ -207,34 +205,9 @@ public class TriePartitionUpdateSerializer
     }
 
     /// Lays the update's trie out in the on-disk trie format.
-    private static DataOutputBuffer layOut(TriePartitionUpdate trieUpdate, SerializationHeader header) throws IOException
+    private static void layOut(TriePartitionUpdate trieUpdate, SerializationHeader header, DataOutputPlus out) throws IOException
     {
-        DataOutputBuffer trieBytes = new DataOutputBuffer();
-        OnDiskDeletionAwareTrieWriter.write(trieUpdate.trie(), new ContentSerDe(header), new MarkerSerDe(header), trieBytes);
-        return trieBytes;
-    }
-
-    /// The trie [#serializedSize] laid out for this version, if it did, taken off the update so that it is not held
-    /// any longer than the write that uses it.
-    private static ByteBuffer takeRetainedTrie(TriePartitionUpdate trieUpdate, int version)
-    {
-        if (!cachedAt(version))
-            return null;
-        ByteBuffer laidOut = trieUpdate.serializedTrieDS21;
-        if (laidOut != null)
-            trieUpdate.serializedTrieDS21 = null;
-        return laidOut;
-    }
-
-    /// Keep the laid-out trie on the update for the write that follows, unless it is large enough that holding it
-    /// is the problem [org.apache.cassandra.config.CassandraRelevantProperties#CACHEABLE_MUTATION_SIZE_LIMIT]
-    /// exists to avoid. Above that limit the mutation does not keep its own serialized bytes either, and the two
-    /// decisions should not diverge. What is kept is a copy of the written bytes, not the buffer they were written to,
-    /// which grows by doubling and can be up to twice their size. Kept only at the version whose size is kept too.
-    private static void retainTrie(TriePartitionUpdate trieUpdate, int version, DataOutputBuffer laidOut)
-    {
-        if (cachedAt(version) && laidOut.getLength() < RETAINED_TRIE_SIZE_LIMIT)
-            trieUpdate.serializedTrieDS21 = laidOut.asNewBuffer();
+        OnDiskDeletionAwareTrieWriter.write(trieUpdate.trie(), new ContentSerDe(header), new MarkerSerDe(header), out);
     }
 
     /**
@@ -276,7 +249,7 @@ public class TriePartitionUpdateSerializer
         ByteBuffer trieBytes = ByteBufferUtil.readWithVIntLength(in);
         DeletionAwareTrie<Object, TrieTombstoneMarker> trie =
             OnDiskDeletionAwareTrie.open(trieBytes,
-                                         new ContentSerDe(header, desHelper, mayHoldDroppedData),
+                                         new ContentSerDe(header, desHelper, metadata.isCounter()),
                                          new MarkerSerDe(header),
                                          TrieBackedPartition.BYTE_COMPARABLE_VERSION,
                                          -1);
@@ -284,17 +257,20 @@ public class TriePartitionUpdateSerializer
         // If the sender's schema numbers the columns differently from this node's, the trie's keys point at the wrong
         // columns here, and the update is rebuilt with this node's numbering; the result is in memory. An update that
         // may hold data of a column dropped here not newer than the drop is rebuilt as well, to leave that data out:
-        // the payload deserializer leaves out its cells (see deserializeCell), and the rebuild its complex deletions
-        // and the rows left empty, and counts the rows and tombstones that remain. A column that is dropped here and
-        // not added again has no index here, so the update is rebuilt whatever its timestamps.
+        // the rebuild filters each row by the table's dropped columns, which leaves out the column's cells and complex
+        // deletions, and the rows left empty, and counts the rows and tombstones that remain. A column that is dropped
+        // here and not added again has no index here, so the update is rebuilt whatever its timestamps. A schema change
+        // can still come between reading an update and merging it, so the memtable checks the numbering again
+        // (TrieMemtable.put).
         if (mayHoldDroppedData
             || !hasLocalIndexes(metadata, statics, staticIndexes)
             || !hasLocalIndexes(metadata, regulars, regularIndexes))
         {
             TriePartitionUpdate senderKeyed = new TriePartitionUpdate(metadata, key, header.columns(), header.stats(), rowCountIncludingStatic, tombstoneCount, dataSize, trie);
-            return TriePartitionUpdate.withLocalColumnIndexes(senderKeyed,
-                                                              TrieBackedRow.columnIds(statics, staticIndexes),
-                                                              TrieBackedRow.columnIds(regulars, regularIndexes));
+            return TriePartitionUpdate.withColumnIndexes(senderKeyed,
+                                                         metadata,
+                                                         TrieBackedRow.columnIds(statics, staticIndexes),
+                                                         TrieBackedRow.columnIds(regulars, regularIndexes));
         }
 
         // The counter leader rewrites the counter cells of the update it receives in place (CounterMark.setValue),
@@ -326,43 +302,33 @@ public class TriePartitionUpdateSerializer
     public static long serializedSize(TriePartitionUpdate trieUpdate, int version)
     {
         checkVersion(version);
-        if (cachedAt(version) && trieUpdate.serializedSizeDS21 >= 0)
-            return trieUpdate.serializedSizeDS21;
-
         SerializationHeader header = new SerializationHeader(false, trieUpdate.metadata(), trieUpdate.columns(), trieUpdate.stats());
 
-        long size = ByteBufferUtil.serializedSizeWithVIntLength(trieUpdate.partitionKey().getKey())
+        return ByteBufferUtil.serializedSizeWithVIntLength(trieUpdate.partitionKey().getKey())
                + TypeSizes.sizeofUnsignedVInt(trieUpdate.rowCountIncludingStatic)
                + TypeSizes.sizeofUnsignedVInt(trieUpdate.tombstoneCount)
                + TypeSizes.sizeofUnsignedVInt(trieUpdate.dataSize())
                + SerializationHeader.serializer.serializedSizeForMessaging(header, null, true)
                + columnIndexesSerializedSize(trieUpdate.metadata(), header.columns())
-               + serializedTrieSize(trieUpdate, header, version);
-
-        if (cachedAt(version))
-            trieUpdate.serializedSizeDS21 = Ints.saturatedCast(size);
-
-        return size;
+               + serializedTrieSize(trieUpdate, header);
     }
 
     /// Sizing the trie means writing it: [OnDiskTrieWriter] emits nodes as the walk ascends and the
     /// total is only known at the end, so unlike the previous format there is no cheap size to read
-    /// off the structure. The layout is therefore kept on the update, and [#writeTrie] writes it out
-    /// instead of building the same bytes a second time -- [org.apache.cassandra.db.Mutation]
-    /// sizes a mutation and then immediately serializes it, so the second build was the common
-    /// case rather than a rare one.
-    private static long serializedTrieSize(TriePartitionUpdate trieUpdate, SerializationHeader header, int version)
+    /// off the structure. It is written to an output that only counts the bytes.
+    private static long serializedTrieSize(TriePartitionUpdate trieUpdate, SerializationHeader header)
     {
-        try (DataOutputBuffer trieBytes = layOut(trieUpdate, header))
+        try
         {
-            int trieLength = trieBytes.getLength();
-            retainTrie(trieUpdate, version, trieBytes);
+            CountingDataOutputPlus trieBytes = new CountingDataOutputPlus();
+            layOut(trieUpdate, header, trieBytes);
+            long trieLength = trieBytes.position();
             return TypeSizes.sizeofUnsignedVInt(trieLength) + trieLength;
         }
         catch (IOException e)
         {
             // This is where a checked exception has to stop: serializedSize implements a contract
-            // that cannot report one. The destination is an in-memory buffer, so the only way here
+            // that cannot report one. The destination only counts bytes, so the only way here
             // is a failure to encode a payload, which the write path reports as IOException.
             throw new UncheckedIOException(e);
         }
@@ -377,50 +343,38 @@ public class TriePartitionUpdateSerializer
             throw new IOException("Read " + read + " bytes of a payload of " + length);
     }
 
-    private static final ColumnMetadata[] EMPTY_COLS = new ColumnMetadata[0];
-
     /**
-     * Encodes and decodes the payloads of the trie's live branch, each behind a tag: {@link Cell}, {@link LivenessInfo},
-     * and the row and partition markers.
+     * Encodes and decodes the payloads of the trie's live branch, each behind a tag: {@link CellData},
+     * {@link LivenessInfo}, and the row and partition markers.
      */
     private static final class ContentSerDe implements OnDiskTrieWriter.DataSerializer<Object>, OnDiskCursor.DataDeserializer<Object>
     {
         private final SerializationHeader header;
-        /// Only set, with the arrays below, for reading.
+        /// Only set for reading.
         private final DeserializationHelper desHelper;
-        private final ColumnMetadata[] regularCols;
-        private final ColumnMetadata[] staticCols;
-        /// Whether the update may hold data of a column dropped here that is not newer than the drop, without which
-        /// no cell is left out.
-        private final boolean mayHoldDroppedData;
+        /// Only set for reading.
+        private final boolean isCounterTable;
 
         /// For writing.
         ContentSerDe(SerializationHeader header)
         {
             this.header = header;
             this.desHelper = null;
-            this.regularCols = null;
-            this.staticCols = null;
-            this.mayHoldDroppedData = false;
+            this.isCounterTable = false;
         }
 
         /// For reading.
-        ContentSerDe(SerializationHeader header, DeserializationHelper desHelper, boolean mayHoldDroppedData)
+        ContentSerDe(SerializationHeader header, DeserializationHelper desHelper, boolean isCounterTable)
         {
             this.header = header;
             this.desHelper = desHelper;
-            this.mayHoldDroppedData = mayHoldDroppedData;
-
-            Columns regs = header.columns().regulars;
-            Columns stats = header.columns().statics;
-            this.regularCols = regs.isEmpty() ? EMPTY_COLS : regs.toArray(new ColumnMetadata[regs.size()]);
-            this.staticCols = stats.isEmpty() ? EMPTY_COLS : stats.toArray(new ColumnMetadata[stats.size()]);
+            this.isCounterTable = isCounterTable;
         }
 
         @Override
         public void serialize(DataOutputPlus out, Object content) throws IOException
         {
-            if (content instanceof Cell)                         { out.writeByte(TYPE_CELL); serializeCell((Cell<?>) content, out); return; }
+            if (content instanceof CellData)                     { out.writeByte(TYPE_CELL); serializeCell((CellData<?, ?>) content, out); return; }
             if (content instanceof LivenessInfo)                 { serializeLiveness((LivenessInfo) content, out); return; }
             if (content == TrieBackedRow.COMPLEX_COLUMN_MARKER)  { out.writeByte(TYPE_COMPLEX_MARKER); return; }
             if (content == TrieBackedPartition.PARTITION_MARKER) { out.writeByte(TYPE_PARTITION_MARKER); return; }
@@ -432,17 +386,18 @@ public class TriePartitionUpdateSerializer
         public Object deserialize(DataInputPlus in, int length) throws IOException
         {
             long start = OnDiskCursor.position(in);
-            Object content = deserializeContent(in);
+            Object content = deserializeContent(in, start + length);
             checkReadToEnd(in, start, length);
             return content;
         }
 
-        private Object deserializeContent(DataInputPlus in) throws IOException
+        /// `end` is the position the payload ends at.
+        private Object deserializeContent(DataInputPlus in, long end) throws IOException
         {
             int type = in.readByte();
             switch (type)
             {
-                case TYPE_CELL:                  return deserializeCell(in);
+                case TYPE_CELL:                  return deserializeCell(in, end);
                 case TYPE_LIVENESS:              return deserializeLiveness(in);
                 case TYPE_EMPTY_LIVENESS:        return LivenessInfo.EMPTY;
                 case TYPE_COMPLEX_MARKER:        return TrieBackedRow.COMPLEX_COLUMN_MARKER;
@@ -451,35 +406,58 @@ public class TriePartitionUpdateSerializer
             }
         }
 
-        private void serializeCell(Cell<?> cell, DataOutputPlus out) throws IOException
+        private <V> void serializeCell(CellData<V, ?> cell, DataOutputPlus out) throws IOException
         {
-            ColumnMetadata col = cell.column();
-            boolean isStatic = col.isStatic();
-            // The column's position among the header's columns, which is its index in the arrays the reader builds.
-            int idx = header.columns().columns(isStatic).simpleIdx(col);
-            if (idx < 0)
-                throw new IllegalArgumentException("Column not found in serialization header: " + col.name);
-            out.writeUnsignedVInt32((idx << 1) | (isStatic ? 1 : 0));
-            Cell.serializer.serialize(cell, col, out, LivenessInfo.EMPTY, header);
+            boolean isDeleted = cell.isTombstone();
+            boolean isExpiring = cell.isExpiring();
+            int flags = 0;
+            if (isDeleted)
+                flags |= CELL_IS_DELETED;
+            else if (isExpiring)
+                flags |= CELL_IS_EXPIRING;
+            out.writeByte(flags);
+
+            header.writeTimestamp(cell.timestamp(), out);
+            if (isDeleted || isExpiring)
+                header.writeLocalDeletionTime(cell.localDeletionTime(), out);
+            if (isExpiring)
+                header.writeTTL(cell.ttl(), out);
+            cell.accessor().write(cell.value(), out);
         }
 
-        private Cell<?> deserializeCell(DataInputPlus in) throws IOException
+        /// Reads the cell's data as [Cell.Serializer#deserialize] reads a cell's, from the layout [#CELL_IS_DELETED]
+        /// describes.
+        private CellData<?, ?> deserializeCell(DataInputPlus in, long end) throws IOException
         {
-            int encoded = in.readUnsignedVInt32();
-            boolean isStatic = (encoded & 1) != 0;
-            int idx = encoded >>> 1;
-            ColumnMetadata[] targetCols = isStatic ? staticCols : regularCols;
-            if (idx >= targetCols.length)
-                throw new IOException(String.format("Invalid column index %d for %s static columns (total %d)", idx, isStatic ? "" : "non-", targetCols.length));
-            ColumnMetadata column = targetCols[idx];
-            Cell<?> cell = Cell.serializer.deserialize(in, LivenessInfo.EMPTY, column, header, desHelper, ByteBufferAccessor.instance);
-            // A cell of a column dropped since it was written is not returned, as the BTree encoding's reader does not
-            // return it. isComplex is false even for a complex column: the helper then looks the column up by name,
-            // which is what its stateful complex-column path does too, and the trie can be read from several threads.
-            return mayHoldDroppedData && desHelper.isDropped(cell, false) ? null : cell;
+            int flags = in.readUnsignedByte();
+            if ((flags & ~(CELL_IS_DELETED | CELL_IS_EXPIRING)) != 0)
+                throw new IOException("Unknown cell flags: " + flags);
+            boolean isDeleted = (flags & CELL_IS_DELETED) != 0;
+            boolean isExpiring = (flags & CELL_IS_EXPIRING) != 0;
+            if (isDeleted && isExpiring)
+                throw new IOException("Cell flagged as both deleted and expiring");
+            boolean isCounter = isCounterTable && !isDeleted;
+
+            long timestamp = header.readTimestamp(in);
+            long localDeletionTime = isDeleted || isExpiring ? header.readLocalDeletionTime(in) : CellData.NO_DELETION_TIME;
+            int ttl = isExpiring ? header.readTTL(in) : CellData.NO_TTL;
+            if (ttl < 0)
+                throw new IOException("Invalid TTL: " + ttl);
+
+            long valueLength = end - OnDiskCursor.position(in);
+            if (valueLength < 0)
+                throw new IOException("Cell read " + -valueLength + " bytes past the end of its payload");
+            ByteBuffer value = ByteBufferUtil.read(in, (int) valueLength);
+            // An empty value has no shards to clear, and Cell.Serializer does not clear one either.
+            if (isCounter && valueLength > 0)
+                value = desHelper.maybeClearCounterValue(value, ByteBufferAccessor.instance);
+
+            localDeletionTime = Cell.decodeLocalDeletionTime(localDeletionTime, ttl, desHelper);
+            return new BufferCellData(value, timestamp, localDeletionTime, ttl, isCounter);
         }
 
-        /// Writes the tag as well, as there is one for [LivenessInfo#EMPTY] and one for any other liveness.
+        /// Writes the tag as well, as there is one for [LivenessInfo#EMPTY] and one for any other liveness. Any empty
+        /// liveness is written as [LivenessInfo#EMPTY], so that only that instance can come back.
         private void serializeLiveness(LivenessInfo info, DataOutputPlus out) throws IOException
         {
             if (info.isEmpty())
@@ -503,6 +481,8 @@ public class TriePartitionUpdateSerializer
         {
             boolean isExpiring = in.readBoolean();
             long ts = header.readTimestamp(in);
+            if (ts == LivenessInfo.NO_TIMESTAMP)
+                throw new IOException("Empty liveness under the tag of a non-empty one");
             if (isExpiring)
             {
                 int ttl = header.readTTL(in);
@@ -552,7 +532,7 @@ public class TriePartitionUpdateSerializer
         }
 
         /**
-         * Serializes a {@link TrieTombstoneMarker.Covering} instance (boolean presence tag, {@link DeletionTime}, and {@link TrieTombstoneMarker.Kind} code).
+         * Serializes a {@link TrieTombstoneMarker.Covering} instance (boolean presence tag, {@link DeletionTime}, and {@link TrieTombstoneMarker.Kind} ordinal).
          */
         private void serializeCovering(TrieTombstoneMarker.Covering covering, DataOutputPlus out) throws IOException
         {
@@ -564,9 +544,11 @@ public class TriePartitionUpdateSerializer
             {
                 out.writeBoolean(true);
                 header.writeDeletionTime(covering, out);
-                out.writeByte(covering.deletionKind().code);
+                out.writeByte(covering.deletionKind().ordinal());
             }
         }
+
+        private static final TrieTombstoneMarker.Kind[] KINDS = TrieTombstoneMarker.Kind.values();
 
         /**
          * Deserializes a {@link TrieTombstoneMarker.Covering} instance from stream.
@@ -578,11 +560,10 @@ public class TriePartitionUpdateSerializer
             DeletionTime dt = header.readDeletionTime(in);
             if (dt.isLive())
                 throw new IOException("Live deletion time in a deletion marker");
-            int code = in.readByte() & 0xFF;
-            TrieTombstoneMarker.Kind kind = TrieTombstoneMarker.Kind.fromCode(code);
-            if (kind == null)
-                throw new IOException("Invalid TrieTombstoneMarker.Kind code: " + code);
-            return TrieTombstoneMarker.covering(dt, kind);
+            int ordinal = in.readByte() & 0xFF;
+            if (ordinal >= KINDS.length)
+                throw new IOException("Invalid TrieTombstoneMarker.Kind ordinal: " + ordinal);
+            return TrieTombstoneMarker.covering(dt, KINDS[ordinal]);
         }
 
         /**

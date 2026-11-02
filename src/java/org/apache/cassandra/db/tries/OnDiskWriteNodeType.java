@@ -31,7 +31,7 @@ enum OnDiskWriteNodeType
     CHAIN(0b01000000)
     {
         @Override
-        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
+        void writeChildren(DataOutputPlus out, OnDiskBaseTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
         {
             assert node.childCount() == 1;
             out.writeByte(node.childTransition(0));
@@ -44,7 +44,7 @@ enum OnDiskWriteNodeType
     DENSE(0b11101000)
     {
         @Override
-        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
+        void writeChildren(DataOutputPlus out, OnDiskBaseTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
         {
             int size = node.childCount();
             // bytesPerPointer is sized for one more than the furthest delta, so that no real delta is all-ones, which
@@ -54,9 +54,9 @@ enum OnDiskWriteNodeType
             for (int i = 255; i >= 0; --i)
             {
                 if (index < size && i == node.childTransition(index))
-                    OnDiskTrieWriter.writeReversedSized(out, basePos - node.child(index++), bytesPerPointer);
+                    OnDiskBaseTrieWriter.writeReversedSized(out, basePos - node.child(index++), bytesPerPointer);
                 else
-                    OnDiskTrieWriter.writeReversedSized(out, -1L, bytesPerPointer);
+                    OnDiskBaseTrieWriter.writeReversedSized(out, -1L, bytesPerPointer);
             }
             assert index == size;
             out.writeByte(bits | (bytesPerPointer - 1));
@@ -66,7 +66,7 @@ enum OnDiskWriteNodeType
     BITMAP(0b11100000)
     {
         @Override
-        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
+        void writeChildren(DataOutputPlus out, OnDiskBaseTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
         {
             int size = writePointers(out, node, basePos, bytesPerPointer);
             // Bit t of the bitmap is bit t % 64 of word t / 64, the layout of BitSet.toLongArray.
@@ -74,7 +74,7 @@ enum OnDiskWriteNodeType
             for (int i = 0; i < size; ++i)
             {
                 int transition = node.childTransition(i);
-                bitsAsLong[transition >>> 6] |= 1L << (transition & 63);
+                bitsAsLong[Integer.divideUnsigned(transition, 64)] |= 1L << Integer.remainderUnsigned(transition, 64);
             }
             for (int i = 3; i >= 0; --i)
                 out.writeLong(bitsAsLong[i]);   // lowest-order bytes ends up last
@@ -85,7 +85,7 @@ enum OnDiskWriteNodeType
     SPARSE(0b10000000)
     {
         @Override
-        void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
+        void writeChildren(DataOutputPlus out, OnDiskBaseTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
         {
             int size = writePointers(out, node, basePos, bytesPerPointer);
             for (int i = 0; i < size; ++i)
@@ -125,7 +125,7 @@ enum OnDiskWriteNodeType
         {
             long ascentStart = out.position();
             serializer.serialize(out, ascentData);
-            OnDiskTrieWriter.writeReversedVint(out, out.position() - ascentStart);
+            OnDiskBaseTrieWriter.writeReversedVint(out, out.position() - ascentStart);
             code |= PREFIX_HAS_ASCENT_CONTENT;
         }
 
@@ -141,7 +141,7 @@ enum OnDiskWriteNodeType
         {
             if (descentDataSize >= 0)
             {
-                OnDiskTrieWriter.writeReversedVint(out, descentDataSize);
+                OnDiskBaseTrieWriter.writeReversedVint(out, descentDataSize);
                 code |= PREFIX_HAS_DESCENT_CONTENT;
             }
             if (hasChild)
@@ -169,7 +169,7 @@ enum OnDiskWriteNodeType
             return DENSE;
     }
 
-    void writeChildren(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
+    void writeChildren(DataOutputPlus out, OnDiskBaseTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
     {
         // Throw by default, only applies to CHAIN, SPARSE, BITMAP and DENSE
         throw new AssertionError();
@@ -177,11 +177,11 @@ enum OnDiskWriteNodeType
 
     /// Write the explicit pointers of a sparse or bitmap node: every child but the last written, whose delta is 0 and
     /// is left implicit.
-    static int writePointers(DataOutputPlus out, OnDiskTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
+    static int writePointers(DataOutputPlus out, OnDiskBaseTrieWriter.Node<?> node, long basePos, int bytesPerPointer) throws IOException
     {
         int size = node.childCount();
         for (int i = 0; i < size - 1; ++i)
-            OnDiskTrieWriter.writeReversedSized(out, basePos - node.child(i), bytesPerPointer);
+            OnDiskBaseTrieWriter.writeReversedSized(out, basePos - node.child(i), bytesPerPointer);
         return size;
     }
 }

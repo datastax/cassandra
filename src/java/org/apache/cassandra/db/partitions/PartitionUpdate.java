@@ -506,17 +506,24 @@ public interface PartitionUpdate extends Partition
                                         "Can't serialize to version " + version);
             update.metadata().id.serialize(out);
 
-            if (hasFormatByte(version))
+            if (!hasFormatByte(version))
             {
-                if (update instanceof TriePartitionUpdate)
-                {
-                    out.writeByte(1);
-                    TriePartitionUpdateSerializer.serialize((TriePartitionUpdate) update, out, version);
-                    return;
-                }
-                out.writeByte(0);
+                serializeBTree(update, out, version);
             }
+            else if (update instanceof TriePartitionUpdate)
+            {
+                out.writeByte(1);
+                TriePartitionUpdateSerializer.serialize((TriePartitionUpdate) update, out, version);
+            }
+            else
+            {
+                out.writeByte(0);
+                serializeBTree(update, out, version);
+            }
+        }
 
+        private static void serializeBTree(PartitionUpdate update, DataOutputPlus out, int version) throws IOException
+        {
             try (UnfilteredRowIterator iter = update.unfilteredIterator())
             {
                 assert !iter.isReverseOrder();
@@ -528,15 +535,23 @@ public interface PartitionUpdate extends Partition
         public PartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
         {
             TableMetadata metadata = tableMetadataResolver.apply(TableId.deserialize(in));
-            if (hasFormatByte(version))
+            if (!hasFormatByte(version))
+                return deserializeBTree(in, version, flag, metadata);
+
+            int format = in.readByte();
+            switch (format)
             {
-                int format = in.readByte();
-                if (format == 1)
+                case 0:
+                    return deserializeBTree(in, version, flag, metadata);
+                case 1:
                     return TriePartitionUpdateSerializer.deserialize(in, version, flag, metadata);
-                if (format != 0)
+                default:
                     throw new IOException("Unknown PartitionUpdate format byte: " + format);
             }
+        }
 
+        private static PartitionUpdate deserializeBTree(DataInputPlus in, int version, DeserializationHelper.Flag flag, TableMetadata metadata) throws IOException
+        {
             if (version == MessagingService.VERSION_DSE_68)
             {
                 // ignore maxTimestamp
@@ -597,20 +612,20 @@ public interface PartitionUpdate extends Partition
         {
             long size = update.metadata().id.serializedSize();
 
-            if (hasFormatByte(version))
-            {
-                if (update instanceof TriePartitionUpdate)
-                    return size + 1L + TriePartitionUpdateSerializer.serializedSize((TriePartitionUpdate) update, version);
+            if (!hasFormatByte(version))
+                return size + serializedSizeBTree(update, version);
+            else if (update instanceof TriePartitionUpdate)
+                return size + 1L + TriePartitionUpdateSerializer.serializedSize((TriePartitionUpdate) update, version);
+            else
+                return size + 1L + serializedSizeBTree(update, version);
+        }
 
-                size += 1L; // format byte (0 = BTree)
-            }
-
-            if (version == MessagingService.VERSION_DSE_68)
-                size += TypeSizes.LONG_SIZE;
-
+        private static long serializedSizeBTree(PartitionUpdate update, int version)
+        {
             try (UnfilteredRowIterator iter = update.unfilteredIterator())
             {
-                return size + UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, version, update.rowCount());
+                return (version == MessagingService.VERSION_DSE_68 ? TypeSizes.LONG_SIZE : 0)
+                       + UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, version, update.rowCount());
             }
         }
     }

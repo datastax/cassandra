@@ -20,11 +20,7 @@ package org.apache.cassandra.db.tries;
 
 import java.nio.ByteBuffer;
 
-import javax.annotation.Nullable;
-
 import org.apache.cassandra.io.util.ByteBufferRebufferer;
-import org.apache.cassandra.io.util.ChannelProxy;
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -32,9 +28,9 @@ public class OnDiskTrie<T> extends OnDiskBaseTrie<T, Cursor<T>, Trie<T>> impleme
 {
     final boolean isOrdered;
 
-    OnDiskTrie(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root, @Nullable ChannelProxy ownedChannel)
+    OnDiskTrie(RebuffererFactory rebuffererFactory, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version byteComparableVersion, boolean isOrdered, long root)
     {
-        super(rebuffererFactory, deserializer, byteComparableVersion, root, ownedChannel);
+        super(rebuffererFactory, deserializer, byteComparableVersion, root);
         this.isOrdered = isOrdered;
     }
 
@@ -47,24 +43,10 @@ public class OnDiskTrie<T> extends OnDiskBaseTrie<T, Cursor<T>, Trie<T>> impleme
             return new Cursor.Empty<>(direction, byteComparableVersion);
     }
 
-    public static <T> OnDiskTrie<T> open(File file, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version version, boolean isOrdered, long root)
-    {
-        ChannelProxy channel = new ChannelProxy(file);
-        try
-        {
-            return new OnDiskTrie<>(openChunkReader(channel), deserializer, version, isOrdered, root, channel);
-        }
-        catch (Throwable t)
-        {
-            channel.close();
-            throw t;
-        }
-    }
-
     /// Open a trie that is already fully in memory rather than a file. The buffer must outlive every cursor taken from
-    /// the result, and is not released by [#close].
+    /// the result.
     public static <T> OnDiskTrie<T> open(ByteBuffer buffer, OnDiskCursor.DataDeserializer<T> deserializer, ByteComparable.Version version, boolean isOrdered, long root)
     {
-        return new OnDiskTrie<>(new ByteBufferRebufferer(buffer), deserializer, version, isOrdered, root, null);
+        return new OnDiskTrie<>(new ByteBufferRebufferer(buffer), deserializer, version, isOrdered, root);
     }
 }

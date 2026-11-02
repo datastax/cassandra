@@ -18,10 +18,12 @@
 package org.apache.cassandra.exceptions;
 
 import java.io.IOException;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.db.memtable.ColumnNewerThanMemtableException;
 import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
@@ -87,6 +89,7 @@ public enum RequestFailureReason
 
         exceptionToReasonMap.put(TombstoneOverwhelmingException.class, READ_TOO_MANY_TOMBSTONES);
         exceptionToReasonMap.put(IncompatibleSchemaException.class, INCOMPATIBLE_SCHEMA);
+        exceptionToReasonMap.put(ColumnNewerThanMemtableException.class, INCOMPATIBLE_SCHEMA);
         exceptionToReasonMap.put(AbortedOperationException.class, TIMEOUT);
         exceptionToReasonMap.put(IndexNotAvailableException.class, INDEX_NOT_AVAILABLE);
         exceptionToReasonMap.put(UnknownColumnException.class, UNKNOWN_COLUMN);
@@ -94,7 +97,7 @@ public enum RequestFailureReason
         exceptionToReasonMap.put(IndexBuildInProgressException.class, INDEX_BUILD_IN_PROGRESS);
         exceptionToReasonMap.put(FeatureNeedsIndexRebuildException.class, FEATURE_NEEDS_INDEX_REBUILD);
 
-        if (exceptionToReasonMap.size() != reasons.length-5)
+        if (EnumSet.copyOf(exceptionToReasonMap.values()).size() != reasons.length-5)
             throw new RuntimeException("A new RequestFailureReasons was probably added and you may need to update the exceptionToReasonMap");
     }
 
