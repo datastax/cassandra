@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -26,6 +27,11 @@ import java.util.Map;
 
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.MarkerOrTerms;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -37,6 +43,7 @@ import org.apache.cassandra.db.MultiClusteringBuilder;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -972,21 +979,43 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
     public static final class LikeRestriction extends SingleColumnRestriction
     {
-        private static final ByteBuffer LIKE_WILDCARD = ByteBufferUtil.bytes("%");
+        /** The token of a {@code '%'} wildcard in {@link #tokenize}. */
+        @VisibleForTesting
+        static final int ANY_STRING = -1;
+        /** The token of a {@code '_'} wildcard in {@link #tokenize}. */
+        @VisibleForTesting
+        static final int ANY_CHAR = -2;
+
         private final Operator operator;
         private final Term value;
+        @Nullable
+        private final Term escape;
 
-        public LikeRestriction(ColumnMetadata columnDef, Operator operator, Term value)
+        public LikeRestriction(ColumnMetadata columnDef, Operator operator, Term value, @Nullable Term escape)
         {
             super(columnDef);
             this.operator = operator;
             this.value = value;
+            this.escape = escape;
+        }
+
+        /**
+         * The receiver of the {@code ESCAPE} operand of a LIKE restriction on the given column.
+         */
+        public static ColumnSpecification escapeReceiver(ColumnMetadata columnDef)
+        {
+            return new ColumnSpecification(columnDef.ksName,
+                                           columnDef.cfName,
+                                           new ColumnIdentifier("escape(" + columnDef.name + ')', true),
+                                           UTF8Type.instance);
         }
 
         @Override
         public void addFunctionsTo(List<Function> functions)
         {
             value.addFunctionsTo(functions);
+            if (escape != null)
+                escape.addFunctionsTo(functions);
         }
 
         @Override
@@ -1014,13 +1043,37 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                                    ANNOptions annOptions,
                                    IndexHints indexHints)
         {
-            Pair<Operator, ByteBuffer> operation = makeSpecific(value.bindAndGet(options));
+            Pair<Operator, ByteBuffer> operation = makeSpecific(value.bindAndGet(options), bindEscape(options));
 
             // there must be a suitable INDEX for LIKE_XXX expressions
             RowFilter.SimpleExpression expression = filter.add(columnDef, operation.left, operation.right);
             indexRegistry.getBestIndexFor(expression, indexHints)
                          .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
                                                            expression));
+
+            // whatever index serves it, the rows are filtered with the pattern (Operator#isSatisfiedBy): reject a
+            // pattern that can't be compiled here rather than on the replicas
+            if (operation.left != Operator.LIKE_PREFIX)
+                LikePatterns.forPatternOperator(operation.left, operation.right, columnDef.name);
+        }
+
+        /**
+         * Returns the UTF-8 bytes of the bound escape character, {@code null} if there is no {@code ESCAPE} clause.
+         */
+        @Nullable
+        private ByteBuffer bindEscape(QueryOptions options)
+        {
+            if (escape == null)
+                return null;
+
+            ByteBuffer bound = escape.bindAndGet(options);
+            if (bound == null || bound == ByteBufferUtil.UNSET_BYTE_BUFFER)
+                throw invalidRequest("Invalid null or unset ESCAPE for LIKE on column %s", columnDef.name);
+            String escapeChar = UTF8Type.instance.compose(bound);
+            if (escapeChar.codePointCount(0, escapeChar.length()) != 1)
+                throw invalidRequest("ESCAPE for LIKE on column %s must be a single character, got '%s'",
+                                     columnDef.name, escapeChar);
+            return bound;
         }
 
         @Override
@@ -1050,50 +1103,176 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             return index.supportsExpression(columnDef, operator);
         }
 
+        @VisibleForTesting
+        public static Pair<Operator, ByteBuffer> makeSpecific(ByteBuffer value)
+        {
+            return makeSpecific(value, null);
+        }
+
         /**
          * As the specific subtype of LIKE (LIKE_PREFIX, LIKE_SUFFIX, LIKE_CONTAINS, LIKE_MATCHES) can only be
          * determined by examining the value, which in turn can only be known after binding, all LIKE restrictions
-         * are initially created with the generic LIKE operator. This function takes the bound value, trims the
-         * wildcard '%' chars from it and returns a tuple of the inferred operator subtype and the final value
+         * are initially created with the generic LIKE operator. This function takes the bound value and returns a
+         * tuple of the inferred operator subtype and the value it applies to.
+         * <p>
+         * In a LIKE pattern, {@code '%'} matches any (possibly empty) character sequence and {@code '_'} matches
+         * any single character. With an {@code ESCAPE} clause, the escape character followed by {@code '%'},
+         * {@code '_'} or itself stands for that character literally; it can't be followed by anything else. Without
+         * one, there is no escape character. Runs of leading and trailing {@code '%'} are trimmed, and the rest of
+         * the pattern selects the operator:
+         * <ul>
+         *   <li>a rest that still contains a wildcard (e.g. {@code 'a%b'}, {@code 'a%b%'}, {@code '%a%b'},
+         *   {@code 'a_'} or {@code '%a_b%'}) is a generic pattern: {@link Operator#LIKE_MATCHES} with the whole,
+         *   untrimmed pattern in its internal form (see {@link LikePatterns#ESCAPE}), whose runs of {@code '%'} are
+         *   collapsed into one (a run matches what a single wildcard does);</li>
+         *   <li>otherwise the rest is a literal, which is unescaped, and leading/trailing wildcards select
+         *   {@link Operator#LIKE_CONTAINS} ({@code '%a%'}), {@link Operator#LIKE_PREFIX} ({@code 'a%'}),
+         *   {@link Operator#LIKE_SUFFIX} ({@code '%a'}) or, without wildcards, the exact match
+         *   {@link Operator#LIKE_MATCHES} ({@code 'a'}, in its internal form too).</li>
+         * </ul>
+         * A pattern made only of {@code '%'} (or empty) is rejected.
+         *
          * @param value the bound value for the LIKE operation
-         * @return  Pair containing the inferred LIKE subtype and the value with wildcards removed
+         * @param escape the UTF-8 bytes of the escape character, {@code null} if there is none
+         * @return Pair containing the inferred LIKE subtype and the value it applies to
          */
-        private static Pair<Operator, ByteBuffer> makeSpecific(ByteBuffer value)
+        @VisibleForTesting
+        public static Pair<Operator, ByteBuffer> makeSpecific(ByteBuffer value, @Nullable ByteBuffer escape)
         {
-            Operator operator;
-            int beginIndex = value.position();
-            int endIndex = value.limit() - 1;
-            if (ByteBufferUtil.endsWith(value, LIKE_WILDCARD))
+            int[] tokens = tokenize(value, escape);
+            int end = tokens.length;
+            int beginIndex = 0;
+            while (beginIndex < end && tokens[beginIndex] == ANY_STRING)
+                beginIndex++;
+            if (beginIndex == end)
+                throw invalidRequest("LIKE value can't be empty.");
+            int endIndex = end;
+            while (tokens[endIndex - 1] == ANY_STRING)
+                endIndex--;
+
+            boolean leadingWildcard = beginIndex > 0;
+            boolean trailingWildcard = endIndex < end;
+            boolean innerWildcard = false;
+            for (int i = beginIndex; i < endIndex && !innerWildcard; i++)
+                innerWildcard |= tokens[i] < 0;
+
+            // a generic pattern: the operator applies to the whole pattern
+            if (innerWildcard)
+                return Pair.create(Operator.LIKE_MATCHES, toPattern(tokens, 0, end));
+
+            if (leadingWildcard && trailingWildcard)
+                return Pair.create(Operator.LIKE_CONTAINS, toLiteral(tokens, beginIndex, endIndex));
+            if (trailingWildcard)
+                return Pair.create(Operator.LIKE_PREFIX, toLiteral(tokens, beginIndex, endIndex));
+            if (leadingWildcard)
+                return Pair.create(Operator.LIKE_SUFFIX, toLiteral(tokens, beginIndex, endIndex));
+            return Pair.create(Operator.LIKE_MATCHES, toPattern(tokens, beginIndex, endIndex));
+        }
+
+        /**
+         * Splits a LIKE pattern into its wildcards ({@link #ANY_STRING}, {@link #ANY_CHAR}) and literal bytes
+         * (0 to 255), resolving the escapes. {@code '%'}, {@code '_'} and the escape character are whole UTF-8
+         * characters, so comparing bytes never matches part of a multibyte character.
+         */
+        @VisibleForTesting
+        static int[] tokenize(ByteBuffer value, @Nullable ByteBuffer escape)
+        {
+            int[] tokens = new int[value.remaining()];
+            int count = 0;
+            int i = value.position();
+            while (i < value.limit())
             {
-                if (ByteBufferUtil.startsWith(value, LIKE_WILDCARD))
+                if (escape != null && startsWith(value, i, escape))
                 {
-                    operator = Operator.LIKE_CONTAINS;
-                    beginIndex =+ 1;
+                    i += escape.remaining();
+                    if (i >= value.limit())
+                        throw invalidRequest("LIKE pattern can't end with its escape character");
+                    if (value.get(i) == '%' || value.get(i) == '_')
+                    {
+                        tokens[count++] = value.get(i++);
+                    }
+                    else if (startsWith(value, i, escape))
+                    {
+                        for (int j = escape.position(); j < escape.limit(); j++)
+                            tokens[count++] = escape.get(j) & 0xFF;
+                        i += escape.remaining();
+                    }
+                    else
+                    {
+                        throw invalidRequest("The escape character of a LIKE pattern must be followed by '%', '_' or itself");
+                    }
+                    continue;
+                }
+
+                byte b = value.get(i++);
+                switch (b)
+                {
+                    case '%':
+                        tokens[count++] = ANY_STRING;
+                        break;
+                    case '_':
+                        tokens[count++] = ANY_CHAR;
+                        break;
+                    default:
+                        tokens[count++] = b & 0xFF;
+                }
+            }
+            return Arrays.copyOf(tokens, count);
+        }
+
+        private static boolean startsWith(ByteBuffer value, int index, ByteBuffer prefix)
+        {
+            if (value.limit() - index < prefix.remaining())
+                return false;
+            for (int j = 0; j < prefix.remaining(); j++)
+            {
+                if (value.get(index + j) != prefix.get(prefix.position() + j))
+                    return false;
+            }
+            return true;
+        }
+
+        /**
+         * Returns the literal bytes of the given wildcard-free tokens.
+         */
+        private static ByteBuffer toLiteral(int[] tokens, int from, int to)
+        {
+            ByteBuffer literal = ByteBuffer.allocate(to - from);
+            for (int i = from; i < to; i++)
+                literal.put((byte) tokens[i]);
+            literal.flip();
+            return literal;
+        }
+
+        /**
+         * Returns the given tokens as a pattern in internal form: {@code '%'} and {@code '_'} are the wildcards,
+         * {@link LikePatterns#ESCAPE} escapes their literal occurrences and its own, and runs of {@code '%'} are
+         * collapsed into one.
+         */
+        private static ByteBuffer toPattern(int[] tokens, int from, int to)
+        {
+            ByteBuffer pattern = ByteBuffer.allocate(2 * (to - from));
+            for (int i = from; i < to; i++)
+            {
+                int token = tokens[i];
+                if (token == ANY_STRING)
+                {
+                    if (i == from || tokens[i - 1] != ANY_STRING)
+                        pattern.put((byte) '%');
+                }
+                else if (token == ANY_CHAR)
+                {
+                    pattern.put((byte) '_');
                 }
                 else
                 {
-                    operator = Operator.LIKE_PREFIX;
+                    if (token == '%' || token == '_' || token == LikePatterns.ESCAPE)
+                        pattern.put((byte) LikePatterns.ESCAPE);
+                    pattern.put((byte) token);
                 }
             }
-            else if (ByteBufferUtil.startsWith(value, LIKE_WILDCARD))
-            {
-                operator = Operator.LIKE_SUFFIX;
-                beginIndex += 1;
-                endIndex += 1;
-            }
-            else
-            {
-                operator = Operator.LIKE_MATCHES;
-                endIndex += 1;
-            }
-
-            if (endIndex == 0 || beginIndex == endIndex)
-                throw invalidRequest("LIKE value can't be empty.");
-
-            ByteBuffer newValue = value.duplicate();
-            newValue.position(beginIndex);
-            newValue.limit(endIndex);
-            return Pair.create(operator, newValue);
+            pattern.flip();
+            return pattern;
         }
     }
 

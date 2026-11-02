@@ -90,8 +90,20 @@ otherwise the node does not start ("Invalid yaml. Please remove properties [...]
 5.0.9
 =====
 
+New features
+------------
+    - Storage-attached indexes (SAI) on non-tokenized string columns support LIKE restrictions with the '%' and
+      '_' wildcards and optional escaping with ESCAPE, e.g. LIKE 'a!_%' ESCAPE '!'. No index rebuild, new index
+      version or messaging change is needed.
+
 Upgrading
 ---------
+    - Breaking change in CQL LIKE patterns: every '%' is now a wildcard wherever it appears (previously only the
+      leading and trailing ones), '_' is now a single-character wildcard (previously a literal character), and a
+      pattern without wildcards matches only equal values. Queries whose pattern contains '_' or an inner '%' may
+      match more rows; use ESCAPE to match them literally.
+    - Use LIKE on SAI-indexed columns only once all nodes are upgraded: older replicas don't serve it from the index
+      and filter it with the old semantics.
     - memtable_offheap_space: 0 is now rejected at startup when memtable_allocation_type is
     offheap_buffers or offheap_objects. Set a positive memtable_offheap_space, or an allocation
     type that does not allocate off-heap. See CASSANDRA-21019.

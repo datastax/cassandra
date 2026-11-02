@@ -99,10 +99,33 @@ public class ExpressionTest
                 .isEqualTo("Expression{name: col, op: RANGE, lower: (sensitive_1, false), upper: (null, false), exclusions: [sensitive_2]}");
     }
 
+    @Test
+    public void testWildcardFreePatternsAreEqualities()
+    {
+        // wildcard-free LIKE patterns (LIKE_MATCHES without '%' or '_') match a single term: served as equalities
+        // on their unescaped literal
+        assertEquals(Expression.Op.EQ, makeExpression(Operator.LIKE_MATCHES, "abc").getOp());
+        assertEquals(makeExpression(Operator.EQ, "abc"), makeExpression(Operator.LIKE_MATCHES, "abc"));
+        assertEquals(makeExpression(Operator.EQ, "é日😀_%\\"), makeExpression(Operator.LIKE_MATCHES, "é日😀\\_\\%\\\\"));
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "a%c").getOp());
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "a_c").getOp());
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "a\\\\_").getOp());
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "%abc%").getOp());
+        // the other pattern operators carry the literal left once their leading/trailing wildcards were trimmed
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_SUFFIX, "abc").getOp());
+        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_CONTAINS, "abc").getOp());
+        assertEquals(Expression.Op.PREFIX, makeExpression(Operator.LIKE_PREFIX, "abc").getOp());
+    }
+
     private static Expression makeExpression(Operator op)
     {
+        return makeExpression(op, "sensitive");
+    }
+
+    private static Expression makeExpression(Operator op, String value)
+    {
         Expression expression = new Expression(SAITester.createIndexContext("col", UTF8Type.instance));
-        expression.add(op, UTF8Type.instance.decompose("sensitive"));
+        expression.add(op, UTF8Type.instance.decompose(value));
         return expression;
     }
 }

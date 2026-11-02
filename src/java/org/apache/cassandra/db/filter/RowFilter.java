@@ -38,6 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
@@ -73,6 +74,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.exceptions.InvalidPatternException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
@@ -1052,6 +1054,10 @@ public class RowFilter
         protected final Operator operator;
         protected final ByteBuffer value;
 
+        /** The LIKE_MATCHES pattern normalized by the analyzer of the index, computed on first use. */
+        @Nullable
+        private volatile ByteBuffer normalizedPattern;
+
         protected Expression(ColumnMetadata column, Operator operator, ByteBuffer value)
         {
             this.column = column;
@@ -1095,12 +1101,60 @@ public class RowFilter
             if (foundValue == null)
                 return false;
 
+            try
+            {
+                return isSatisfiedByNonNull(type, foundValue);
+            }
+            catch (InvalidPatternException e)
+            {
+                // a LIKE pattern that can't be compiled; the operator evaluating it doesn't know the column
+                throw e.withColumn(column.name);
+            }
+        }
+
+        /**
+         * Returns the {@link Operator#LIKE_MATCHES} pattern of this expression, its literals normalized like the
+         * values by the given analyzer (see {@link LikePatterns#normalizeLiterals}).
+         */
+        private ByteBuffer normalizedPattern(Index.Analyzer analyzer)
+        {
+            ByteBuffer pattern = normalizedPattern;
+            if (pattern == null)
+            {
+                pattern = LikePatterns.normalizeLiterals(value, literal -> {
+                    List<ByteBuffer> tokens = analyzer.indexedTokens(literal);
+                    return tokens.isEmpty() ? null : tokens.get(0);
+                });
+                normalizedPattern = pattern;
+            }
+            return pattern;
+        }
+
+        private boolean isSatisfiedByNonNull(AbstractType<?> type, ByteBuffer foundValue)
+        {
             Index.Analyzer analyzer = analyzer();
 
             // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
-            return analyzer == null
-                   ? operator.isSatisfiedBy(type, foundValue, value)
-                   : operator.isSatisfiedByAnalyzed(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
+            if (analyzer == null)
+                return operator.isSatisfiedBy(type, foundValue, value);
+
+            // Tokenizing indexes don't serve LIKE, so the value and the pattern each analyze to a single
+            // (normalized) token: match the normalized pattern against the normalized value, as the index does
+            // against its normalized terms.
+            if (operator.isLike())
+            {
+                List<ByteBuffer> indexedTokens = analyzer.indexedTokens(foundValue);
+                List<ByteBuffer> queriedTokens = operator == Operator.LIKE_MATCHES
+                                                 ? List.of(normalizedPattern(analyzer))
+                                                 : analyzer.queriedTokens();
+                assert indexedTokens.size() <= 1 && queriedTokens.size() <= 1
+                    : "LIKE on " + column.name + " is served by a tokenizing index: " + indexedTokens.size() + " value tokens, " + queriedTokens.size() + " pattern tokens";
+                return indexedTokens.size() == 1
+                       && queriedTokens.size() == 1
+                       && operator.isSatisfiedBy(type, indexedTokens.get(0), queriedTokens.get(0));
+            }
+
+            return operator.isSatisfiedByAnalyzed(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
         }
 
         @Nullable
@@ -1575,26 +1629,31 @@ public class RowFilter
                 case ANN:
                     return String.format("ORDER BY %s ANN OF %s", column.name.toCQLString(), truncateValue(type.toCQLString(value, redaction)));
                 case LIKE_PREFIX:
-                    return likeToCQLString("'%s%%'", type, redaction);
+                    return likeToCQLString("'%s%%'", type, redaction, true);
                 case LIKE_SUFFIX:
-                    return likeToCQLString("'%%%s'", type, redaction);
+                    return likeToCQLString("'%%%s'", type, redaction, true);
                 case LIKE_CONTAINS:
-                    return likeToCQLString("'%%%s%%'", type, redaction);
+                    return likeToCQLString("'%%%s%%'", type, redaction, true);
                 case LIKE_MATCHES:
-                    return likeToCQLString("'%s'", type, redaction);
+                    // already a pattern, in the internal form of LikePatterns#ESCAPE
+                    return likeToCQLString("'%s'", type, redaction, false);
                 default:
                     break;
             }
             return String.format("%s %s %s", column.name.toCQLString(), operator, truncateValue(type.toCQLString(value, redaction)));
         }
 
-        private String likeToCQLString(String pattern, AbstractType<?> type, Redaction redaction)
+        private String likeToCQLString(String pattern, AbstractType<?> type, Redaction redaction, boolean literal)
         {
             if (redaction == Redaction.REDACT)
                 return String.format("%s LIKE ?", column.name.toCQLString());
 
-            String stringValue = String.format(pattern, type.getString(value));
-            return String.format("%s LIKE %s", column.name.toCQLString(), truncateValue(stringValue));
+            String term = type.getString(value);
+            if (literal)
+                term = LikePatterns.escape(term);
+            String stringValue = String.format(pattern, term);
+            String escape = term.indexOf(LikePatterns.ESCAPE) >= 0 ? " ESCAPE '" + LikePatterns.ESCAPE + '\'' : "";
+            return String.format("%s LIKE %s%s", column.name.toCQLString(), truncateValue(stringValue), escape);
         }
 
         private static String truncateValue(String value)

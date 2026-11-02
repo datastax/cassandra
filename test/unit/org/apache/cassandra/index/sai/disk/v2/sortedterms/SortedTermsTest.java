@@ -181,6 +181,43 @@ public class SortedTermsTest extends SaiRandomizedTest
         });
     }
 
+    /**
+     * {@code ceiling()} on a single cursor is stateful: the trie walk restarts from the current cursor position. This
+     * pins that increasing keys (the documented contract), exact or between terms, return the least term greater
+     * than or equal to the key whether the bytes on the cursor path are below or above 0x80 (e.g. the sign-flipped
+     * first byte of every non-negative int/long/token encoding).
+     */
+    @Test
+    public void testCeilingOnSingleCursorWithBytesAbove0x7F() throws Exception
+    {
+        // in unsigned byte order; point ids 0..9
+        byte[] firstBytes = { 0x10, (byte) 0x90 };
+        byte[] secondBytes = { 0x10, 0x30, 0x50, (byte) 0x90, (byte) 0xB0 };
+        List<byte[]> terms = new ArrayList<>();
+        for (byte first : firstBytes)
+            for (byte second : secondBytes)
+                terms.add(new byte[]{ first, second });
+
+        IndexDescriptor descriptor = newIndexDescriptor();
+        writeSortedTerms(descriptor, terms);
+
+        withSortedTermsCursor(descriptor, cursor -> {
+            assertEquals(1, cursor.ceiling(key(0x10, 0x20)));
+            assertEquals(3, cursor.ceiling(key(0x10, 0x90)));
+            assertEquals(4, cursor.ceiling(key(0x10, 0xA0)));
+            assertEquals(5, cursor.ceiling(key(0x90, 0x00)));
+            assertEquals(6, cursor.ceiling(key(0x90, 0x30)));
+            assertEquals(8, cursor.ceiling(key(0x90, 0x60)));
+            assertEquals(9, cursor.ceiling(key(0x90, 0xB0)));
+            assertTrue(cursor.ceiling(key(0x90, 0xB1)) < 0);
+        });
+    }
+
+    private static ByteComparable key(int first, int second)
+    {
+        return ByteComparable.preencoded(VERSION, new byte[]{ (byte) first, (byte) second });
+    }
+
     @Test
     public void testSeekToTermMinMaxPrefixNoMatch() throws Exception
     {
@@ -358,6 +395,17 @@ public class SortedTermsTest extends SaiRandomizedTest
 
     private void writeTerms(IndexDescriptor indexDescriptor, List<byte[]> terms) throws IOException
     {
+        for (int x = 0; x < 1000 * 4; x++)
+        {
+            ByteBuffer buffer = Int32Type.instance.decompose(x);
+            ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
+            terms.add(ByteSourceInverse.readBytes(byteSource));
+        }
+        writeSortedTerms(indexDescriptor, terms);
+    }
+
+    private void writeSortedTerms(IndexDescriptor indexDescriptor, List<byte[]> terms) throws IOException
+    {
         IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
         try (MetadataWriter metadataWriter = new MetadataWriter(components))
         {
@@ -368,15 +416,8 @@ public class SortedTermsTest extends SaiRandomizedTest
                                                                   blockFPWriter,
                                                                   components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
             {
-                for (int x = 0; x < 1000 * 4; x++)
-                {
-                    ByteBuffer buffer = Int32Type.instance.decompose(x);
-                    ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
-                    byte[] bytes = ByteSourceInverse.readBytes(byteSource);
-                    terms.add(bytes);
-
+                for (byte[] bytes : terms)
                     writer.add(ByteComparable.preencoded(VERSION, bytes));
-                }
             }
         }
         components.markComplete();

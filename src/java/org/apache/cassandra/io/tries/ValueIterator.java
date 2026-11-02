@@ -106,10 +106,14 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
     }
 
     /**
-     * Skip to the given key or the closest after it in iteration order. Inclusive when admitPrefix = ADMIT_EXACT,
-     * exclusive when GREATER (ADMIT_PREFIXES is not supported).
+     * Skips forward to the given key: the next {@link #nextPayloadedNode()} returns the least entry greater than or
+     * equal to the key (strictly greater when admitPrefix = GREATER; ADMIT_PREFIXES is not supported) within the
+     * iterator's end bound. The walk restarts from the deepest node shared by the current position and the key.
+     * <p>
+     * The iterator never moves backwards: a key before the current position leaves it where it is, so that the
+     * entries are returned in order and at most once; a key equal to the entry last returned prepares that entry
+     * again, so it is returned a second time.
      * Requires that the iterator is collecting bytes.
-     * To get the next entry, use getNextPayloadedNode as normal.
      */
     protected void skipTo(ByteComparable skipTo, LeftBoundTreatment admitPrefix)
     {
@@ -127,9 +131,11 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
         final byte[] collectedBytes = collector.bytes;
         for (pos = 0; pos < collectedLength; ++pos)
         {
-            if (nextByte != collectedBytes[pos])
+            // the trie is ordered by unsigned bytes, the values ByteSource produces
+            int collectedByte = collectedBytes[pos] & 0xFF;
+            if (nextByte != collectedByte)
             {
-                if (nextByte < collectedBytes[pos])
+                if (nextByte < collectedByte)
                     return;    // the position we are already advanced to is beyond skipTo
                 else
                     break;     // matched a prefix of skipTo, now we need to advance through the rest of it

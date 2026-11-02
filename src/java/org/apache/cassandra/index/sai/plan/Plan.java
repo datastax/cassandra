@@ -1011,8 +1011,13 @@ abstract public class Plan
             double postingsCountExponent;
             double skipDistanceFactor;
             double skipDistanceExponent;
-            if (predicate == null || predicate.getOp() == Expression.Op.RANGE)
+            if (predicate == null
+                || predicate.getOp() == Expression.Op.RANGE
+                || predicate.getOp() == Expression.Op.PREFIX
+                || predicate.getOp() == Expression.Op.AUTOMATON)
             {
+                // prefix and pattern (automaton) predicates scan a range of terms and merge their posting lists,
+                // like range predicates
                 skipCostFactor = RANGE_SCAN_SKIP_COST;
                 postingsCountFactor = RANGE_SCAN_SKIP_COST_POSTINGS_COUNT_FACTOR;
                 postingsCountExponent = RANGE_SCAN_SKIP_COST_POSTINGS_COUNT_EXPONENT;

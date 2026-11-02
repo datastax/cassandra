@@ -413,17 +413,30 @@ public class AllowFilteringTest extends SAITester
     }
 
     @Test
-    public void testIndexedColumnDoesNotSupportLikeRestriction()
+    public void testIndexedColumnSupportsLikeRestriction() throws Throwable
     {
         createTable("CREATE TABLE %s (a text, b text, c text, d text, PRIMARY KEY (a, b))");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", StorageAttachedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", StorageAttachedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(d) USING '%s'", StorageAttachedIndex.class.getName()));
 
-        // LIKE restriction
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'b'), "SELECT * FROM %s WHERE b LIKE 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'c'), "SELECT * FROM %s WHERE c LIKE 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'd'), "SELECT * FROM %s WHERE d LIKE 'Test'");
+        execute("INSERT INTO %s (a, b, c, d) VALUES ('1', 'Test', 'Test', 'Test')");
+        execute("INSERT INTO %s (a, b, c, d) VALUES ('2', 'Test2', 'MyTest', 'Testing')");
+        execute("INSERT INTO %s (a, b, c, d) VALUES ('3', 'Other', 'Teest', 'Other')");
+
+        // All LIKE variants are supported by the index and don't require ALLOW FILTERING (the non-prefix
+        // variants are served by automaton intersection, see AutomatonQueryTest)
+        beforeAndAfterFlush(() -> {
+            assertRowsIgnoringOrder(execute("SELECT a FROM %s WHERE b LIKE 'Test'"), row("1"));
+            assertRowsIgnoringOrder(execute("SELECT a FROM %s WHERE c LIKE 'Test'"), row("1"));
+            assertRowsIgnoringOrder(execute("SELECT a FROM %s WHERE d LIKE 'Test'"), row("1"));
+            assertRowsIgnoringOrder(execute("SELECT a FROM %s WHERE c LIKE '%%Test'"), row("1"), row("2"));
+            assertRowsIgnoringOrder(execute("SELECT a FROM %s WHERE c LIKE '%%Test%%'"), row("1"), row("2"));
+            assertRowsIgnoringOrder(execute("SELECT a FROM %s WHERE c LIKE 'Te%%st'"), row("1"), row("3"));
+            assertRowsIgnoringOrder(execute("SELECT a FROM %s WHERE b LIKE 'Test%%'"), row("1"), row("2"));
+            assertRowsIgnoringOrder(execute("SELECT a FROM %s WHERE c LIKE 'Test%%'"), row("1"));
+            assertRowsIgnoringOrder(execute("SELECT a FROM %s WHERE d LIKE 'Test%%'"), row("1"), row("2"));
+        });
     }
 
     @Test

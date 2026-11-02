@@ -223,6 +223,7 @@ K_JSON:        J S O N;
 K_DEFAULT:     D E F A U L T;
 K_UNSET:       U N S E T;
 K_LIKE:        L I K E;
+K_ESCAPE:      E S C A P E;
 
 K_MASKED:      M A S K E D;
 K_UNMASK:      U N M A S K;

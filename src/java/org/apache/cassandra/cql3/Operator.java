@@ -233,7 +233,10 @@ public enum Operator
 
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            return ByteBufferUtil.contains(leftOperand, rightOperand);
+            // The value is a literal or a whole LIKE pattern, in the internal form of LikePatterns#ESCAPE (see
+            // LikeRestriction#makeSpecific). The column isn't known here: an InvalidPatternException for a
+            // pattern that can't be compiled is completed with it by the caller (RowFilter).
+            return LikePatterns.accepts(LikePatterns.forPatternOperator(this, rightOperand, null), leftOperand);
         }
     },
     LIKE(14)
@@ -563,7 +566,7 @@ public enum Operator
      */
     public boolean isLike()
     {
-        return this == LIKE_PREFIX || this == LIKE_CONTAINS || this == LIKE_SUFFIX || this == LIKE_MATCHES;
+        return this == LIKE || this == LIKE_PREFIX || this == LIKE_CONTAINS || this == LIKE_SUFFIX || this == LIKE_MATCHES;
     }
 
     /**

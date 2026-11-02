@@ -483,6 +483,46 @@ public class WalkerTest extends AbstractTrieTestBase
                      new int[] { 7, 8 });
     }
 
+    /**
+     * {@code skipTo} compares the collected path with the key as unsigned bytes, so the outcome does not depend on
+     * the byte values: a key before the current position is a no-op, and a key after it restarts the walk from the
+     * depth where it diverges from the current position. With a signed comparison a shared byte >= 0x80 looked
+     * like a divergence, so the walk restarted from that depth: a key before the current position then returned
+     * consumed entries again, and on a bounded iterator the end bound was re-read at the wrong depth, which ended
+     * the iteration early.
+     */
+    @Test
+    public void testSkipToComparesBytesAsUnsigned() throws IOException
+    {
+        for (char shared : new char[] { '\u0040', '\u0090' }) // a byte below and above 0x80 on the shared path
+        {
+            String prefix = "A" + shared;
+            String key1 = prefix + '\u0005';
+            String key2 = prefix + '\u0010';
+            String key3 = prefix + '\u0020';
+            DataOutputBuffer buf = new DataOutputBufferPaged();
+            IncrementalTrieWriter<Integer> builder = newTrieWriter(serializer, buf);
+            builder.add(source(key1), 1);
+            builder.add(source(key2), 2);
+            builder.add(source(key3), 3);
+            long rootPos = builder.complete();
+
+            // after key1 and key2 are consumed, skipping to key1 or to a prefix of the current position is a no-op
+            checkSkipsTo(buf.asNewBuffer(), rootPos, ValueIterator.LeftBoundTreatment.ADMIT_EXACT, null, null,
+                         new String[] { null, null, key1 }, new int[] { 1, 2, 3 });
+            checkSkipsTo(buf.asNewBuffer(), rootPos, ValueIterator.LeftBoundTreatment.ADMIT_EXACT, null, null,
+                         new String[] { null, null, prefix }, new int[] { 1, 2, 3 });
+            // skipping to the consumed key2 prepares it again
+            checkSkipsTo(buf.asNewBuffer(), rootPos, ValueIterator.LeftBoundTreatment.ADMIT_EXACT, null, null,
+                         new String[] { null, null, key2 }, new int[] { 1, 2, 2, 3 });
+            // forward skips on a bounded iterator (the end bound is inclusive)
+            checkSkipsTo(buf.asNewBuffer(), rootPos, ValueIterator.LeftBoundTreatment.ADMIT_EXACT, key1, key3,
+                         new String[] { null, prefix + '\u0008', key3 }, new int[] { 1, 2, 3 });
+            checkSkipsTo(buf.asNewBuffer(), rootPos, ValueIterator.LeftBoundTreatment.ADMIT_EXACT, key1, key2,
+                         new String[] { null, prefix + '\u0008' }, new int[] { 1, 2 });
+        }
+    }
+
     private void checkSkipsTo(ByteBuffer buffer, long rootPos, ValueIterator.LeftBoundTreatment leftBoundTreatment, String rightBound, String[] skips, int[] values)
     {
         checkSkipsTo(buffer, rootPos, leftBoundTreatment, null, rightBound, skips, values);

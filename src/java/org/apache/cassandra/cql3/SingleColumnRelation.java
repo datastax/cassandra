@@ -54,14 +54,22 @@ public final class SingleColumnRelation extends Relation
     private final Term.Raw mapKey;
     private final Term.Raw value;
     private final List<Term.Raw> inValues;
+    /** The escape character of a LIKE pattern ({@code LIKE <value> ESCAPE <escape>}), {@code null} if none. */
+    private final Term.Raw escape;
 
     private SingleColumnRelation(ColumnIdentifier entity, Term.Raw mapKey, Operator type, Term.Raw value, List<Term.Raw> inValues)
+    {
+        this(entity, mapKey, type, value, inValues, null);
+    }
+
+    private SingleColumnRelation(ColumnIdentifier entity, Term.Raw mapKey, Operator type, Term.Raw value, List<Term.Raw> inValues, Term.Raw escape)
     {
         this.entity = entity;
         this.mapKey = mapKey;
         this.relationType = type;
         this.value = value;
         this.inValues = inValues;
+        this.escape = escape;
 
         if (type == Operator.IS_NOT)
             assert value == Constants.NULL_LITERAL;
@@ -107,6 +115,18 @@ public final class SingleColumnRelation extends Relation
         return new SingleColumnRelation(entity, null, Operator.IN, null, inValues);
     }
 
+    /**
+     * Creates a {@code LIKE} relation.
+     *
+     * @param entity the restricted column
+     * @param pattern the LIKE pattern
+     * @param escape the escape character of the pattern, {@code null} if there is no {@code ESCAPE} clause
+     */
+    public static SingleColumnRelation createLikeRelation(ColumnIdentifier entity, Term.Raw pattern, Term.Raw escape)
+    {
+        return new SingleColumnRelation(entity, null, Operator.LIKE, pattern, null, escape);
+    }
+
     public static SingleColumnRelation createNotInRelation(ColumnIdentifier entity, List<Term.Raw> inValues)
     {
         return new SingleColumnRelation(entity, null, Operator.NOT_IN, null, inValues);
@@ -149,7 +169,7 @@ public final class SingleColumnRelation extends Relation
     public Relation renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
     {
         return entity.equals(from)
-               ? new SingleColumnRelation(to, mapKey, operator(), value, inValues)
+               ? new SingleColumnRelation(to, mapKey, operator(), value, inValues, escape)
                : this;
     }
 
@@ -163,13 +183,16 @@ public final class SingleColumnRelation extends Relation
         if (isIN())
             return String.format("%s IN %s", entityAsString, inValues == null ? value : Tuples.tupleToString(inValues));
 
+        if (escape != null)
+            return String.format("%s %s %s ESCAPE %s", entityAsString, relationType, value, escape);
+
         return String.format("%s %s %s", entityAsString, relationType, value);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(relationType, entity, mapKey, value, inValues);
+        return Objects.hash(relationType, entity, mapKey, value, inValues, escape);
     }
 
     @Override
@@ -186,7 +209,8 @@ public final class SingleColumnRelation extends Relation
             && Objects.equals(relationType, scr.relationType)
             && Objects.equals(mapKey, scr.mapKey)
             && Objects.equals(value, scr.value)
-            && Objects.equals(inValues, scr.inValues);
+            && Objects.equals(inValues, scr.inValues)
+            && Objects.equals(escape, scr.escape);
     }
 
     @Override
@@ -348,8 +372,12 @@ public final class SingleColumnRelation extends Relation
 
         ColumnMetadata columnDef = table.getExistingColumn(entity);
         Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
+        Term escapeTerm = escape == null
+                          ? null
+                          : toTerm(Collections.singletonList(SingleColumnRestriction.LikeRestriction.escapeReceiver(columnDef)),
+                                   escape, table.keyspace, boundNames);
 
-        return new SingleColumnRestriction.LikeRestriction(columnDef, operator, term);
+        return new SingleColumnRestriction.LikeRestriction(columnDef, operator, term, escapeTerm);
     }
 
     @Override
