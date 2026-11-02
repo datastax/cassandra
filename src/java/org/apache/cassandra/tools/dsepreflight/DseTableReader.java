@@ -22,31 +22,48 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.StatsComponent;
+import org.apache.cassandra.io.sstable.format.TOCComponent;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
- * The tables DSE left in a node's data directories, offline: whether a directory is one of a table's, and the table as
- * the sstables of committed transactions ({@link LifecycleTransaction#getFiles}) describe it in their serialization
- * headers (the union of their columns, with the types DSE wrote, so that a column DSE has and this software does not is
- * described too), the primary key columns named by the caller. Only the statistics component of each sstable is read.
+ * Reads the rows of one table from the sstables DSE left in a node's data directories, offline and read-only: the
+ * sstables of committed transactions only ({@link LifecycleTransaction#getFiles}), opened without validation, which
+ * neither rebuilds nor saves any component. The table is described by the serialization headers of its sstables (the
+ * union of their columns, with the types DSE wrote), so that a column DSE has and this software does not, such as the
+ * {@code restricted} set of DSE's {@code system_auth.role_permissions}, is read too; the primary key columns are named
+ * by the caller. The sstables are merged as a node merges them, so rows deleted later (a keyspace DSE dropped, for
+ * instance) are not returned.
  */
 final class DseTableReader
 {
@@ -57,12 +74,60 @@ final class DseTableReader
     {
     }
 
+    /** The rows of a table, and the sstables they were read from. */
+    static final class TableRows
+    {
+        final List<UntypedResultSet.Row> rows;
+        final List<String> sstables;
+        /** whether a directory of the table exists in any data directory */
+        final boolean found;
+
+        TableRows(List<UntypedResultSet.Row> rows, List<String> sstables, boolean found)
+        {
+            this.rows = rows;
+            this.sstables = sstables;
+            this.found = found;
+        }
+    }
+
+    /**
+     * Reads every live row of {@code keyspace.table} from the data directories.
+     *
+     * @param partitionKey the names of the partition key columns
+     * @param clustering the names of the clustering columns; an sstable with more clustering columns names the others
+     *                   {@code clustering<n>}
+     * @throws IOException when a directory or an sstable cannot be read, or an sstable is not in a trie format
+     * @throws RuntimeException when an sstable cannot be decoded
+     */
+    static TableRows read(List<File> dataDirectories, String keyspace, String table, List<String> partitionKey, List<String> clustering) throws IOException
+    {
+        List<Descriptor> descriptors = new ArrayList<>();
+        boolean found = descriptors(dataDirectories, keyspace, table, descriptors);
+        List<String> names = new ArrayList<>(descriptors.size());
+        for (Descriptor descriptor : descriptors)
+            names.add(descriptor.baseFile().toString());
+        if (descriptors.isEmpty())
+            return new TableRows(List.of(), names, found);
+        // only the trie formats DSE 6 writes are opened: opening an sstable of the big format loads its summary, which
+        // deletes a Summary.db it cannot load and may rewrite TOC.txt (the scan of the data directories reports such
+        // sstables, which DSE must rewrite with upgradesstables)
+        for (Descriptor descriptor : descriptors)
+            if (!(descriptor.version.format instanceof BtiFormat))
+                throw new IOException(descriptor.baseFile() + " is in the " + descriptor.version.format.name() + " format, which this tool does not " +
+                                      "read: run nodetool upgradesstables on DSE first");
+
+        TableMetadata metadata = metadataFromHeaders(keyspace, table, descriptors, partitionKey, clustering);
+        List<UntypedResultSet.Row> rows = new ArrayList<>();
+        rows(descriptors, metadata, rows::add);
+        return new TableRows(rows, names, found);
+    }
+
     /** The descriptors of the sstables of committed transactions in one table directory. */
     private static List<Descriptor> sstablesIn(File directory)
     {
         List<Descriptor> descriptors = new ArrayList<>();
-        // a transaction log that cannot be read fails, as the startup of HCD 2.0 would on the same log (the scan of the data
-        // directories, which is advisory, falls back instead)
+        // a transaction log that cannot be read fails the read: the schema must be exact, and the startup of HCD 2.0 would
+        // fail on the same log (the scan of the data directories, which is advisory, falls back instead)
         List<File> dataFiles = LifecycleTransaction.getFiles(directory.toPath(),
                                                              (file, type) -> type == Directories.FileType.FINAL && file.name().endsWith("-" + Components.DATA.name),
                                                              Directories.OnTxnErr.THROW);
@@ -71,8 +136,53 @@ final class DseTableReader
         return descriptors;
     }
 
+    /** Passes the live rows of the sstables given, merged as a node merges them, to {@code consumer}. */
+    private static void rows(List<Descriptor> descriptors, TableMetadata metadata, Consumer<UntypedResultSet.Row> consumer) throws IOException
+    {
+        List<SSTableReader> readers = new ArrayList<>(descriptors.size());
+        List<UnfilteredPartitionIterator> scanners = new ArrayList<>(descriptors.size());
+        try
+        {
+            for (Descriptor descriptor : descriptors)
+            {
+                // the components are given, so that opening the sstable never writes a TOC.txt for one that has none (as
+                // loading it without them would; the scan of the data directories reports such sstables), and it is opened
+                // offline without validation, which rebuilds nothing
+                Set<Component> components = descriptor.fileFor(Components.TOC).exists() ? TOCComponent.loadTOC(descriptor, false)
+                                                                                         : descriptor.discoverComponents();
+                readers.add(SSTableReader.open(null, descriptor, components, TableMetadataRef.forOfflineTools(metadata), false, true));
+            }
+            for (SSTableReader reader : readers)
+                scanners.add(reader.getScanner());
+            // from here the merge owns the scanners, and closes them
+            try (UnfilteredPartitionIterator merged = UnfilteredPartitionIterators.merge(new ArrayList<>(scanners), UnfilteredPartitionIterators.MergeListener.NOOP))
+            {
+                scanners.clear();
+                PartitionIterator partitions = UnfilteredPartitionIterators.filter(merged, FBUtilities.nowInSeconds());
+                while (partitions.hasNext())
+                {
+                    try (RowIterator partition = partitions.next())
+                    {
+                        while (partition.hasNext())
+                        {
+                            Row row = partition.next();
+                            consumer.accept(UntypedResultSet.Row.fromInternalRow(metadata, partition.partitionKey(), row));
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            for (UnfilteredPartitionIterator scanner : scanners)
+                FileUtils.closeQuietly(scanner);
+            for (SSTableReader reader : readers)
+                reader.selfRef().release();
+        }
+    }
+
     /**
-     * The table as the serialization headers of its sstables in the data directories describe it.
+     * The table as {@link #read} describes it from the serialization headers of its sstables.
      *
      * @throws IllegalStateException when the data directories hold no sstable of the table
      */
@@ -88,18 +198,23 @@ final class DseTableReader
 
     /**
      * Adds the descriptors of the sstables of committed transactions of {@code keyspace.table} in the data directories to
-     * {@code descriptors}.
+     * {@code descriptors}; returns whether a directory of the table exists.
      */
-    private static void descriptors(List<File> dataDirectories, String keyspace, String table, List<Descriptor> descriptors)
+    private static boolean descriptors(List<File> dataDirectories, String keyspace, String table, List<Descriptor> descriptors)
     {
+        boolean found = false;
         for (File dataDirectory : dataDirectories)
         {
             File keyspaceDirectory = new File(dataDirectory, keyspace);
             if (!keyspaceDirectory.isDirectory())
                 continue;
             for (File tableDirectory : keyspaceDirectory.listUnchecked(f -> f.isDirectory() && (isDirectoryOf(f.name(), table) || f.name().equals(table))))
+            {
+                found = true;
                 descriptors.addAll(sstablesIn(tableDirectory));
+            }
         }
+        return found;
     }
 
     /**

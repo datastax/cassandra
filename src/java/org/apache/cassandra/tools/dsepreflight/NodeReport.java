@@ -67,6 +67,9 @@ public final class NodeReport
     public List<Finding> findings = new ArrayList<>();
     @JsonProperty("upgrade_path")
     public UpgradePath upgradePath = new UpgradePath();
+    /** what the access control checks read */
+    @JsonProperty("access_controls")
+    public AccessControls accessControls = new AccessControls();
     /** the files and directories read, by role, and what the inspection measured in them (sizes, free space, segment counts) */
     @JsonProperty("inputs")
     public Map<String, Object> inputs = new LinkedHashMap<>();
@@ -145,6 +148,19 @@ public final class NodeReport
         /** the upgrade steps that apply to this node, with what this node needs */
         @JsonProperty("upgrade_steps")
         public List<String> upgradeSteps = new ArrayList<>();
+    }
+
+    /** What the access control checks of a node read. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static final class AccessControls
+    {
+        /** whether DSE checks permissions: {@code DseAuthorizer} with {@code authorization_options.enabled}, or any authorizer but {@code AllowAllAuthorizer} */
+        @JsonProperty("authorization_enabled")
+        public Boolean authorizationEnabled;
+        /** the rows of {@code system_auth.role_permissions} read from this node's replica; 0 when no data directory holds the table, null when it could not be read */
+        @JsonProperty("role_permissions_rows")
+        public Integer rolePermissionsRows;
     }
 
     /** One {@code nodetool} command. */
