@@ -306,10 +306,15 @@ final class NodeInspector
     }
 
     /**
-     * Whether {@code nodes/peers} exists, with its file key (the inode where the file system has one), size and
-     * modification time, as seen at one moment; {@code error} when its attributes could not be read.
+     * How the texts on a {@code nodes/peers} not trusted end; {@link PaxosRollback}, which checks no release, leaves it out.
      */
-    @VisibleForTesting
+    static final String PEERS_NOT_CHECKED = "; the releases and workloads of the peers cannot be checked";
+
+    /**
+     * Whether {@code nodes/peers} exists, with its file key (the inode where the file system has one), size and
+     * modification time, as seen at one moment; {@code error} when its attributes could not be read. Also used by
+     * {@link PaxosRollback}.
+     */
     static final class PeersFileState
     {
         final boolean exists;
@@ -368,18 +373,16 @@ final class NodeInspector
      * and the import of HCD 2.0 at its start, put back in place of {@code nodes/peers} (DSE is rewriting it, or was
      * interrupted while it did); the file missing with a {@code nodes/peers.txn} left (DSE is writing it for the first
      * time, or was interrupted while it did, which DSE does not recover: it writes the file anew once it knows its
-     * peers).
+     * peers). Also used by {@link PaxosRollback}.
      */
     @Nullable
-    @VisibleForTesting
     static Finding peersFileProblem(PeersFileState before, PeersFileState after, boolean oldExists, boolean txnExists)
     {
-        String cannotCheck = "; the releases and workloads of the peers cannot be checked";
         String error = before.error != null ? before.error : after.error;
         if (error != null)
             return blocking("UNREADABLE_INPUT",
                             cannotRead("nodes/peers") + "its attributes cannot be read (" + error + "), so the peers of this node are not known" +
-                            cannotCheck,
+                            PEERS_NOT_CHECKED,
                             "run the tool as the user DSE runs as (or as root)");
         if (!before.sameAs(after))
             return peersChanged();
@@ -388,7 +391,7 @@ final class NodeInspector
         if (!after.exists && txnExists)
             return blocking("UNREADABLE_INPUT",
                             cannotRead("nodes/peers") + "it is missing and a nodes/peers.txn is left (DSE is writing the file for the first " +
-                            "time, or was interrupted while it did), so the peers of this node are not known" + cannotCheck,
+                            "time, or was interrupted while it did), so the peers of this node are not known" + PEERS_NOT_CHECKED,
                             "run the tool again; if it persists with DSE stopped, start DSE once and wait until nodetool status shows its " +
                             "peers (DSE then writes nodes/peers anew), then run the tool again; if this node has no peer, delete " +
                             "nodes/peers.txn");
@@ -404,8 +407,7 @@ final class NodeInspector
     {
         return blocking("UNREADABLE_INPUT",
                         cannotRead("nodes/peers") + (exists ? "it records no peer" : "it is missing") + ", but nodetool status lists " + liveNodes +
-                        " nodes, so the file is " + (exists ? "stale" : "lost") + " and the peers of this node are not known; the releases and " +
-                        "workloads of the peers cannot be checked",
+                        " nodes, so the file is " + (exists ? "stale" : "lost") + " and the peers of this node are not known" + PEERS_NOT_CHECKED,
                         "restart DSE on this node and wait until nodetool status shows its peers (DSE then writes nodes/peers anew), then run " +
                         "the tool again; if nodes/peers " + (exists ? "still records no peer" : "is still missing") + ", report to the upgrade owner");
     }
@@ -415,8 +417,7 @@ final class NodeInspector
     {
         return blocking("UNREADABLE_INPUT",
                         cannotRead("nodes/peers") + "a nodes/peers.old is left, which DSE puts back in place of nodes/peers at its next start (DSE " +
-                        "is rewriting the file, or was interrupted while it did), so the peers of this node are not known; the releases and " +
-                        "workloads of the peers cannot be checked",
+                        "is rewriting the file, or was interrupted while it did), so the peers of this node are not known" + PEERS_NOT_CHECKED,
                         "run the tool again; if it persists with DSE stopped, start DSE on this node once (it puts nodes/peers.old back), then " +
                         "run the tool again");
     }
@@ -425,8 +426,8 @@ final class NodeInspector
     private static Finding peersChanged()
     {
         return blocking("UNREADABLE_INPUT",
-                        cannotRead("nodes/peers") + "it changed while it was read (DSE wrote or rewrote it), so the peers of this node are not known; the " +
-                        "releases and workloads of the peers cannot be checked",
+                        cannotRead("nodes/peers") + "it changed while it was read (DSE wrote or rewrote it), so the peers of this node are not known" +
+                        PEERS_NOT_CHECKED,
                         "run the tool again");
     }
 
@@ -450,16 +451,15 @@ final class NodeInspector
      * The blocking {@code UNREADABLE_INPUT} of a read of {@code nodes/peers} that failed with {@code error}, as the file is
      * seen {@code before} and {@code after} it: gone, or another file than the one seen before, DSE moved or rewrote it
      * while it was read ({@link #peersChanged}); a {@code nodes/peers.old} left, DSE was rewriting it, or was
-     * interrupted while it did; otherwise the file cannot be read or is damaged.
+     * interrupted while it did; otherwise the file cannot be read or is damaged. Also used by {@link PaxosRollback}.
      */
-    @VisibleForTesting
     static Finding peersReadFailure(String error, PeersFileState before, PeersFileState after, boolean oldExists)
     {
         if (!after.exists || !before.sameAs(after))
             return peersChanged();
         if (oldExists)
             return peersOldLeft();
-        return blocking("UNREADABLE_INPUT", cannotRead("nodes/peers") + error + "; the releases and workloads of the peers cannot be checked",
+        return blocking("UNREADABLE_INPUT", cannotRead("nodes/peers") + error + PEERS_NOT_CHECKED,
                         "run the tool as the user DSE runs as (or as root); a damaged nodes/peers must be repaired on DSE first");
     }
 
