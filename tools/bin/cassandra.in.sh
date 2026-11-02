@@ -105,7 +105,7 @@ elif [ "$short" = "21" ] ; then
      # Java 21 uses the Java 17 JVM options (jvm17-*.options)
      JAVA_VERSION=17
 elif [ "$JVM_VERSION" \< "22" ] ; then
-    echo "Cassandra requires Java 11, 17, 21 or 22 (or newer)."
+    echo "Cassandra requires Java 11, 17, 21+."
 fi
 
 jvm=`echo "$java_ver_output" | grep -A 1 '[openjdk|java] version' | awk 'NR==2 {print $1}'`
