@@ -643,8 +643,14 @@ interface Cursor<T> extends Closeable
                 long currentPosition = skipTo(positionForSkippingBranch(encodedPosition()));
                 if (isExhausted(currentPosition))
                     break;
-                walker.resetPathLength(depth(currentPosition) - 1);
-                walker.addPathByte(incomingTransition(currentPosition));
+                int depth = depth(currentPosition);
+                if (depth > 0)
+                {
+                    walker.resetPathLength(depth - 1);
+                    walker.addPathByte(incomingTransition(currentPosition));
+                }
+                else
+                    walker.resetPathLength(0);
                 content = content(this, currentPosition);
                 if (content == null)
                     content = advanceToContent(walker);

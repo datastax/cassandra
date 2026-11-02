@@ -271,10 +271,14 @@ public class MessageFiltersTest extends TestBaseImpl
     @Test
     public void hintSerializationTest() throws Exception
     {
+        // The hint has to be sent after its table is dropped, which only happens when the hints file is sent verbatim,
+        // i.e. written at the version of the connection. HCD_1 and CASSANDRA_4 write it at VERSION_40, below it, so the
+        // sender decodes each hint to re-encode it and skips the one whose table is gone.
         try (Cluster cluster = init(builder().withNodes(3)
                                              .withConfig(config -> config.with(GOSSIP)
                                                                          .with(NETWORK)
-                                                                         .set("hinted_handoff_enabled", true))
+                                                                         .set("hinted_handoff_enabled", true)
+                                                                         .set("storage_compatibility_mode", "NONE"))
                                              .start()))
         {
             cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (k int PRIMARY KEY, v int)"));

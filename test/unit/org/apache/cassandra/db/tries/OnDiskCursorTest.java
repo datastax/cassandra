@@ -45,6 +45,7 @@ import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 
@@ -465,6 +466,45 @@ public class OnDiskCursorTest
             cursor.advance();
             assertEquals(content, cursor.content());
             assertThrows(UncheckedIOException.class, cursor::advance);
+        }
+    }
+
+    /// A prefix with a child whose content starts the data has its child end at position 0, where no node can end.
+    /// Rejecting it must leave the cursor reading the file: the position before the start of the data is the one at
+    /// which a range tail presents its root's return-path content, and a move after the failure must not present that
+    /// content at the prefix.
+    @Test
+    public void testRangeTailPrefixWithChildAtStartOfDataIsRejected()
+    {
+        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ 0,                                          // descent content
+                                                        1,                                          // its length
+                                                        (byte) (OnDiskWriteNodeType.PREFIX.bits
+                                                                | OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT
+                                                                | OnDiskWriteNodeType.PREFIX_HAS_CHILD),
+                                                        'a',
+                                                        (byte) OnDiskWriteNodeType.CHAIN.bits,      // child "a"
+                                                        0,                                          // root's ascent content
+                                                        1,                                          // its length
+                                                        0,                                          // root's descent content
+                                                        1,                                          // its length
+                                                        (byte) (OnDiskWriteNodeType.PREFIX.bits
+                                                                | OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT
+                                                                | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT
+                                                                | OnDiskWriteNodeType.PREFIX_HAS_CHILD) }); // root
+        TestRangeState content = new TestRangeState(TrieUtil.directComparable("a"), -1, 2);
+        TestRangeState rootAscentContent = new TestRangeState(ByteComparable.EMPTY, 1, -1);
+        TestRangeState rootDescentContent = new TestRangeState(ByteComparable.EMPTY, -1, 1);
+        OnDiskCursor.DataDeserializer<TestRangeState> deserializer = (rdr, length) -> {
+            long position = OnDiskCursor.position(rdr);
+            return position == 0 ? content : position == 5 ? rootAscentContent : rootDescentContent;
+        };
+        try (OnDiskRangeCursor<TestRangeState> parent = new OnDiskRangeCursor<>(deserializer, new ByteBufferRebufferer(buffer),
+                                                                                VERSION, Direction.FORWARD, buffer.limit());
+             RangeCursor<TestRangeState> cursor = parent.tailCursor(Direction.FORWARD))
+        {
+            assertThrows(UncheckedIOException.class, cursor::advance);
+            cursor.advance();
+            assertNotSame(rootAscentContent, cursor.content());
         }
     }
 

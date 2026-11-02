@@ -55,8 +55,9 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * Serializer for {@link TriePartitionUpdate} across messaging versions (VERSION_DS_21+).
- * Encodes partition key, row and tombstone counts, data size footprint, {@link SerializationHeader}, the index the
- * trie keys each of the header's columns by, and writes the update's deletion-aware trie in the on-disk trie format
+ * Encodes partition key, whether the update is empty, row and tombstone counts, data size footprint,
+ * {@link SerializationHeader}, the index the trie keys each of the header's columns by, and writes the update's
+ * deletion-aware trie in the on-disk trie format
  * with {@link OnDiskDeletionAwareTrieWriter}, node payloads being encoded by {@link ContentSerDe} in the live branch
  * and by {@link MarkerSerDe} in the deletion branches.
  * <p>
@@ -86,6 +87,13 @@ public class TriePartitionUpdateSerializer
     private static final int CELL_IS_DELETED = 0x01;
     private static final int CELL_IS_EXPIRING = 0x02;
 
+    /// The flags an update starts with after its partition key. The only one is set if the update is empty, as
+    /// [TriePartitionUpdate#isEmpty] has it, so that whether a serialized update is empty can be read from its bytes
+    /// without its table or its trie ([PartitionUpdate.PartitionUpdateSerializer#isEmpty]), as Paxos does to tell
+    /// whether a proposal it keeps is empty. The row and tombstone counts do not tell: neither counts a row whose only
+    /// content is the deletion of a complex column.
+    static final int UPDATE_IS_EMPTY = 0x01;
+
     private TriePartitionUpdateSerializer()
     {
     }
@@ -107,6 +115,7 @@ public class TriePartitionUpdateSerializer
     {
         checkVersion(version);
         ByteBufferUtil.writeWithVIntLength(trieUpdate.partitionKey().getKey(), out);
+        out.writeByte(trieUpdate.isEmpty() ? UPDATE_IS_EMPTY : 0);
         out.writeUnsignedVInt32(trieUpdate.rowCountIncludingStatic);
         out.writeUnsignedVInt32(trieUpdate.tombstoneCount);
         out.writeUnsignedVInt32(trieUpdate.dataSize());
@@ -219,6 +228,7 @@ public class TriePartitionUpdateSerializer
     {
         checkVersion(version);
         DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.readWithVIntLength(in));
+        int flags = in.readUnsignedByte();
         int rowCountIncludingStatic = in.readUnsignedVInt32();
         int tombstoneCount = in.readUnsignedVInt32();
         int dataSize = in.readUnsignedVInt32();
@@ -226,6 +236,11 @@ public class TriePartitionUpdateSerializer
         // dataSize is an estimate that nothing on the read path depends on, so it is not validated here.
         if (rowCountIncludingStatic < 0 || tombstoneCount < 0)
             throw new IOException(String.format("Corrupt TriePartitionUpdate header counts: rows=%d, tombstones=%d",
+                                                rowCountIncludingStatic, tombstoneCount));
+        if ((flags & ~UPDATE_IS_EMPTY) != 0)
+            throw new IOException("Unknown partition update flags: " + flags);
+        if ((flags & UPDATE_IS_EMPTY) != 0 && (rowCountIncludingStatic != 0 || tombstoneCount != 0))
+            throw new IOException(String.format("Partition update flagged as empty counts rows=%d, tombstones=%d",
                                                 rowCountIncludingStatic, tombstoneCount));
 
         SerializationHeader header = SerializationHeader.serializer.deserializeForMessaging(in, metadata, null, true);
@@ -305,6 +320,7 @@ public class TriePartitionUpdateSerializer
         SerializationHeader header = new SerializationHeader(false, trieUpdate.metadata(), trieUpdate.columns(), trieUpdate.stats());
 
         return ByteBufferUtil.serializedSizeWithVIntLength(trieUpdate.partitionKey().getKey())
+               + TypeSizes.BYTE_SIZE
                + TypeSizes.sizeofUnsignedVInt(trieUpdate.rowCountIncludingStatic)
                + TypeSizes.sizeofUnsignedVInt(trieUpdate.tombstoneCount)
                + TypeSizes.sizeofUnsignedVInt(trieUpdate.dataSize())

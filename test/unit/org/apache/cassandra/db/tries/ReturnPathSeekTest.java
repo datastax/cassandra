@@ -29,6 +29,7 @@ import java.util.stream.Collectors;
 import com.google.common.base.Predicates;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Streams;
+import org.junit.After;
 import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -87,9 +88,22 @@ public class ReturnPathSeekTest
         DatabaseDescriptor.toolInitialization();
     }
 
+    private final List<FileTries.Plain<String>> opened = new ArrayList<>();
+
+    @After
+    public void closeOpened()
+    {
+        opened.forEach(FileTries.Plain::close);
+        opened.clear();
+    }
+
     Trie<String> maybeOnDisk(Trie<String> trie)
     {
-        return onDisk ? TrieUtil.onDiskRoundtripStrings(trie, true) : trie;
+        if (!onDisk)
+            return trie;
+        FileTries.Plain<String> read = TrieUtil.onDiskRoundtripStrings(trie, true);
+        opened.add(read);
+        return read;
     }
 
     Trie<String> makeSingleton(ByteComparable.Preencoded e, String v) throws TrieSpaceExhaustedException
