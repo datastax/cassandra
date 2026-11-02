@@ -272,7 +272,6 @@
         <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
-        <string>--add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED</string>
         <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
         <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
     </resources>
@@ -305,7 +304,6 @@
         <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
-        <string>--add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED</string>
         <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
         <string>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.io=ALL-UNNAMED</string>
