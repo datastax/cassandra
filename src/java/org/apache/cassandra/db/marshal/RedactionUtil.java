@@ -19,6 +19,10 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import javax.annotation.Nullable;
 
+import org.apache.commons.lang3.StringUtils;
+
+import org.apache.cassandra.cql3.ReservedKeywords;
+
 /**
  * Utility class for redacting sensitive data values while preserving some orientative size information.
  * <p>
@@ -135,5 +139,43 @@ public final class RedactionUtil
 
         // above 1 GiB
         return REDACTED_1GIB;
+    }
+
+    /**
+     * Redacts a CQL string that has not been parsed, so we can't know where its sensitive data is.
+     * Only the leading consecutive CQL reserved keywords are kept, followed by an ellipsis.
+     * For example, {@code INSERT  INTO k.t (k) VALUES (1)} is redacted as {@code INSERT INTO ...}.
+     *
+     * @param cql a CQL query
+     * @return the redacted CQL query
+     */
+    public static String redactUnparsedCQL(String cql)
+    {
+        if (cql == null || cql.isEmpty())
+            return StringUtils.EMPTY;
+
+        StringBuilder redacted = new StringBuilder();
+        int length = cql.length();
+        int i = 0;
+        while (true)
+        {
+            while (i < length && Character.isWhitespace(cql.charAt(i)))
+                i++;
+
+            int start = i;
+            while (i < length && !Character.isWhitespace(cql.charAt(i)))
+                i++;
+
+            if (start == i)
+                break; // no more words
+
+            String word = cql.substring(start, i).toUpperCase();
+            if (!ReservedKeywords.isReserved(word))
+                break;
+
+            redacted.append(word).append(' ');
+        }
+
+        return redacted.append("...").toString();
     }
 }
