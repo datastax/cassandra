@@ -45,6 +45,7 @@ import org.apache.cassandra.utils.Pair;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 /**
  * Tests the automaton-served SAI text query surface: the non-prefix {@code LIKE} variants
@@ -185,9 +186,8 @@ public class AutomatonQueryTest extends SAITester
 
         // A generic LIKE pattern ('a%a%a%...a', LIKE_MATCHES) whose NFA-to-DFA determinization exceeds the
         // Lucene work limit must fail at the coordinator with a clear invalid-request "Invalid pattern" error
-        // from the eager compile in StorageAttachedIndex#validate(ReadCommand). Without that eager compile the
-        // first compile happens on the replicas, mid-read, and surfaces as a generic read failure with an UNKNOWN
-        // failure reason.
+        // from the eager compile in LikeRestriction#addToRowFilter. Without that eager compile the first compile
+        // happens on the replicas, mid-read, and surfaces as a generic read failure with an UNKNOWN failure reason.
         StringBuilder pattern = new StringBuilder();
         for (int i = 0; i < 1000; i++)
             pattern.append("a%");
@@ -198,6 +198,51 @@ public class AutomatonQueryTest extends SAITester
 
         // ... while reasonable generic patterns keep working
         assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'a%%c'"), row(1));
+    }
+
+    /**
+     * Patterns like {@code '%a____b%'} have a DFA exponential in the number of {@code '_'}: after each {@code 'a'} the
+     * automaton must remember which of the following characters were {@code 'a'} too. Determinization stops at
+     * Lucene's work limit, so such a pattern is either served or rejected as an invalid request, quickly either way.
+     */
+    @Test
+    public void testExplodingPatterns()
+    {
+        createTableWithIndex();
+        String[] alphabet = { "a", "b", "c", "é", "日" };
+        Map<Integer, String> rows = new HashMap<>();
+        for (int pk = 0; pk < 500; pk++)
+        {
+            StringBuilder value = new StringBuilder();
+            int length = 8 + random.nextInt(10);
+            for (int i = 0; i < length; i++)
+                value.append(alphabet[random.nextInt(alphabet.length)]);
+            rows.put(pk, value.toString());
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, value.toString());
+        }
+
+        // the largest number of '_' that still compiles: the DFA has about 80k states
+        String served = "%a" + "_".repeat(10) + "b%";
+        Pattern regex = Pattern.compile(".*a.{10}b.*", Pattern.DOTALL);
+        Set<Integer> expected = expected(rows, value -> regex.matcher(value).matches());
+        assertFalse(expected.isEmpty());
+        for (int i = 0; i < 3; i++)
+        {
+            assertEquals(expected, keysOf(execute("SELECT pk FROM %s WHERE v LIKE ?", served)));
+
+            for (int underscores : new int[]{ 12, 50 })
+            {
+                String exploding = "%a" + "_".repeat(underscores) + "b%";
+                assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE ?", exploding))
+                    .isInstanceOf(InvalidRequestException.class)
+                    .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
+            }
+
+            if (i == 0)
+                flush();
+            else if (i == 1)
+                compact();
+        }
     }
 
     /**

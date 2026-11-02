@@ -312,6 +312,26 @@ public class LikePatternsTest
     }
 
     @Test
+    public void forPatternOperatorBoundsExplodingPatterns()
+    {
+        // the DFA of '%a<n x _>b%' has about 2^n states: it compiles up to the determinization work limit...
+        CompiledAutomaton served = LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, ByteBuffer.wrap(utf8("%a" + "_".repeat(10) + "b%")), "v");
+        assertTrue(LikePatterns.accepts(served, utf8("xa" + "aé日bcaaaaa" + "bx")));
+        assertTrue(LikePatterns.accepts(served, utf8("a" + "a".repeat(10) + "b")));
+        assertFalse(LikePatterns.accepts(served, utf8("a" + "a".repeat(9) + "b")));
+        assertFalse(LikePatterns.accepts(served, utf8("a" + "a".repeat(11) + "c")));
+
+        // ... and past it is rejected
+        for (int underscores : new int[]{ 12, 50, 1000 })
+        {
+            ByteBuffer pattern = ByteBuffer.wrap(utf8("%a" + "_".repeat(underscores) + "b%"));
+            assertThatThrownBy(() -> LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, pattern, "v"))
+                .isInstanceOf(InvalidPatternException.class)
+                .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
+        }
+    }
+
+    @Test
     public void compilesPatternsWithLongLeadingLiterals()
     {
         // Lucene's finiteness check recurses over the automaton and gives up past 1000 states; a LIKE pattern's
