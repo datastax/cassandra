@@ -2,7 +2,7 @@
 
 Status: APPROVED by the owner (2026-11-02) with these decisions:
 1. Same-element syntax: `col CONTAINS ELEMENT (...)` / `NOT CONTAINS ELEMENT (...)`; plain AND-ed leaf relations on a collection path are independent ("some element" each).
-2. Version gate: new `MessagingService.VERSION_DS_21 = 111` for CREATE INDEX on a path and for SELECT with field expressions.
+2. No version change (final owner decision): no new messaging version, no new SAI on-disk version, no file-format version, and no CREATE INDEX version gate (§E).
 3. `ALTER TYPE ... RENAME` of a field used by an index target is refused (drop the index first).
 4. Tuple components are addressed as `field1`, `field2`, ... (1-based, as DSE Search).
 
@@ -12,8 +12,8 @@ File:line references were checked against `hcd-653-sai-udt-fields` at `63868f5d7
 found in the code that any implementation must handle.
 
 ## 0. Hazards found while checking the code
-1. **`TargetParser.parse` has no fallback for a dotted target** (`index/TargetParser.java:49-96`). `getColumn("addr.city")` returns null, `parse` returns null, and `parse(TableMetadata, IndexMetadata)` throws `ConfigurationException` (:45). That parse runs in the `StorageAttachedIndex` constructor (:251). A node without this feature that receives the schema would fail to load the index. **CREATE INDEX on a field must be refused unless every node in the cluster has the feature.**
-2. **`RowFilter.Expression.Kind.fromVal`** (`RowFilter.java:1036-1048`) throws `IllegalArgumentException` on an unknown kind byte. Old replicas fail the request, so a new kind needs a gate.
+1. **`TargetParser.parse` has no fallback for a dotted target** (`index/TargetParser.java:49-96`). `getColumn("addr.city")` returns null, `parse` returns null, and `parse(TableMetadata, IndexMetadata)` throws `ConfigurationException` (:45). That parse runs in the `StorageAttachedIndex` constructor (:251). A node without this feature that receives the schema would fail to load the index. DDL is not allowed in mixed-version clusters, so field indexes are created only once every node is upgraded (§E).
+2. **`RowFilter.Expression.Kind.fromVal`** (`RowFilter.java:1036-1048`) throws `IllegalArgumentException` on an unknown kind byte. An old replica fails the request with "Unknown index expression kind": a clean error, never wrong results (§E).
 3. **SAI groups expressions by `ColumnMetadata`, never by field.**
    - `Operation.analyzeGroup` (`plan/Operation.java:73-87`) keeps a `ListMultimap<ColumnMetadata,…>` and `columnIsMultiExpression` per column. Its range merge (`range = Iterables.getLast(perColumn)`, :170-178) would fold `addr.city >= 'a'` and `addr.zip <= 5` into one wrong range.
    - `FilterTree.expressions` (`plan/FilterTree.java:52,91-123`) is keyed the same way.
@@ -75,7 +75,7 @@ API:
 - Refuse: vector or duration leaves, non-SAI index classes (2i), and paths through a map key.
 - `StorageAttachedIndex.validateOptions` (:301-402): replace `TypeUtil.cellValueType(target.left, target.right)` (:336) with `leafType`. The duplicate check (:309-322) compares the triple.
 - Analyzer validation (`AbstractAnalyzer.java:209`) runs on the leaf type, so analyzers work on text leaves.
-- Version gate (§E).
+- No version gate (§E).
 
 **"Index all leaves" form.** Not in v1. DSE builds all leaves by default (C2.4), but for SAI it would be N indexes hidden behind one name, each with its own options. That breaks the 1:1 model of index name to components to options. A scripting helper or documented DDL covers migration. If needed later: `CREATE INDEX … ON t (addr.*)` expanding to N named indexes. Owner to decide.
 
@@ -175,12 +175,11 @@ Rejected alternative: element ordinals in the postings, with a positional inters
 
 ## E. Versioning
 
-- **SAI on-disk: no version bump.** Each leaf index is an ordinary scalar or literal index with its own components named after the index. The terms and comparators are those of the leaf type: `TypeUtil.comparator` / `useFastByteOperations` (:349-367) run on the validator. Several values per row already exist for collection indexes. Default stays `ec`; works on every version from AA on, and on AA `update()` re-indexes (:429).
-- **Wire: a gate is needed for SELECT and for CREATE INDEX.**
-  - Recommendation: add `MessagingService.VERSION_DS_21 = 111`, "sub-field expressions".
-  - SELECT with `FIELD` / `ELEMENT_MATCH`: refuse with `endpointsWithConnectionsOnVersionBelow(ks, VERSION_DS_21)`, plus a check of `current_version`. Same as `ANNOptions` (:100-106) and `IndexHints` (:425-429).
-  - CREATE INDEX with a path is stricter, because a down node would fail on schema load (§0.1). Every endpoint that owns tokens must have a *known* messaging version ≥ DS_21 (`MessagingService.instance().versions`), otherwise refuse.
-  - Alternative if a messaging bump is unacceptable for CNDB / Converged Cassandra: compare `Gossiper.getMinVersion()` (as `QueryProcessor.java:777` does) with the first HCD release that has the feature. That depends on the HCD release-version scheme (`base.version` is 5.0.7.0, `build.xml:36`). Owner to decide.
+**No version change (final owner decision).** HCD-653 adds no messaging version, no SAI on-disk version and no file-format version, and CREATE INDEX on a field has no version gate.
+- **SAI on-disk.** A field index is written with the SAI version of the SSTable, like any other index (CNDB-8756: one version per SSTable, `IndexDescriptor.versionForNewComponents`). Its files are ordinary scalar or literal index files, with the terms and comparators of the leaf type (`TypeUtil.comparator` / `useFastByteOperations`, :349-367, run on the validator); only the index definition (the target `addr.city`) says which values they hold. Several values per row already exist for collection indexes. Works on every SAI version from AA on; on AA `update()` re-indexes (:429).
+- **Schema (DDL).** DDL is not allowed while the cluster has mixed versions (the Apache Cassandra rule for rolling upgrades), so field indexes are created only once every node runs a version with this feature, and a node without it never receives such an index (§0.1). There is no check in CREATE INDEX.
+- **Queries (from P2).** During an upgrade, a field restriction can reach an old replica only through ALLOW FILTERING (no field index can exist yet). The old replica fails to deserialize the new `RowFilter` kind with "Unknown index expression kind": a clean error, never wrong results. To be written in `NEWS.txt` (P6).
+- **Rejected alternatives**, kept for the record: a messaging version `VERSION_DS_21 = 111` with a CREATE INDEX / SELECT gate (with or without 110/111 equivalence for schema, repair and durable files); a SAI version `GB` selected per keyspace or forced per index; comparing release versions through `Gossiper.getMinVersion()`.
 - **Docs.** `NEWS.txt`: say the feature can be used only once all nodes are upgraded, that no index rebuild is needed, and that drivers show the target `addr.city` as a column name in index metadata.
 
 ## F. DSE `solr_query` to CQL
@@ -222,14 +221,13 @@ Rejected alternative: element ordinals in the postings, with a positional inters
 ## G. Phasing (one PR, one commit per phase)
 
 **P1: `FieldPath`, DDL, index build.**
-- Files: `FieldPath` (new), `Parser.g` (`indexIdent`), `IndexTarget`, `TargetParser` (triple), `CreateIndexStatement`, `StorageAttachedIndex` (validateOptions, constructor :251, `dependsOn`), `IndexContext` (path, validator, `isMultiValued`, `getValueOf`/`getValuesOf`), `SSTableIndexWriter`, `AlterTypeStatement.RenameFields` guard, default index name, CREATE INDEX version gate.
+- Files: `FieldPath` (new), `Parser.g` (`indexIdent`), `IndexTarget`, `TargetParser` (triple), `CreateIndexStatement`, `StorageAttachedIndex` (validateOptions, constructor :251, `dependsOn`), `IndexContext` (path, validator, `isMultiValued`, `getValueOf`/`getValuesOf`), `SSTableIndexWriter`, `AlterTypeStatement.RenameFields` guard, default index name.
 - Tests:
   - `FieldPathTest`: resolve, quoting, tuple `fieldN`, errors, extraction from frozen / non-frozen / nested / short values.
   - `cql/UdtFieldIndexDDLTest`: accepted and refused shapes; duplicates; DESCRIBE round trip; RENAME refused; `ADD` field then build; non-frozen UDT; index building after flush and compaction, checked through the `IndexesSystemView` / `SSTableIndexesSystemView` cell counts.
-  - Gate test with `DS_CURRENT_MESSAGING_VERSION`.
 
 **P2: leaf WHERE on single (non-collection) UDTs and tuples.**
-- Files: `Parser.g` `relation`, `FieldRelation`, restrictions with a path, `RowFilter` FIELD kind and serializer, `Index` / `IndexRegistry` path overloads, `QueryController`, `Operation`, `FilterTree`, `plan/Expression` keyed by (column, path), SELECT gate.
+- Files: `Parser.g` `relation`, `FieldRelation`, restrictions with a path, `RowFilter` FIELD kind and serializer, `Index` / `IndexRegistry` path overloads, `QueryController`, `Operation`, `FilterTree`, `plan/Expression` keyed by (column, path).
 - Tests: `cql/UdtFieldQueryTest`, parameterized frozen / non-frozen, nested, tuple:
   - EQ, IN, NEQ, ranges (numeric and text), LIKE, analyzers.
   - Each through `beforeAndAfterFlush` (`CQLTester.java:2754`) plus `compact()`.
@@ -252,12 +250,12 @@ Rejected alternative: element ordinals in the postings, with a positional inters
 
 **P6: DSE compatibility test and docs.**
 - `cql/DseSearchUdtCompatibilityTest`: mirrors the `Cql3TupleTest` scenarios (C6.2: `testSubFieldSearch`, `testNestedUDTSearch`, `testCollectionsInsideUDTSearch`, `testUDTCollectionInsideUDTSearch`, `testCollectionsOfUDTSSearch`, `testBlockJoins`, `testEmptySubFieldSearch`, `testDateSubFieldSearch`), `FrozenCollectionsTest` (:145, :169) and every row of `dse-runtime.md`, with a comment giving the `solr_query` beside each CQL query.
-- Distributed test (`test/distributed/.../sai/UdtFieldDistributedTest`, pattern of `ANNOptionsDistributedTest:51-143`): a mixed-version node refuses CREATE INDEX and SELECT.
+- Distributed test (`test/distributed/.../sai/UdtFieldDistributedTest`): field queries on a multi-node cluster; the mixed-version behaviour of §E (an old replica fails a filtering query with "Unknown index expression kind") if an upgrade test harness can run it.
 - `NEWS.txt` and the SAI docs (`supported-query-operators-list.adoc`, FAQ).
 
 ## H. Risks and open questions for the owner
 
-1. **Gate mechanism.** Bump to `VERSION_DS_21`, which needs coordination with CNDB / Converged Cassandra, or compare HCD release versions through Gossiper.
+1. **Versioning.** Decided: no version change (§E).
 2. **Group syntax.** Confirm `CONTAINS ELEMENT (…)` and the unreserved keyword `ELEMENT`. Also tuple naming `fieldN` vs `[n]`.
 3. **NEQ and nulls.** DSE `NOT zip:100` matches elements whose zip is null. CQL / SAI `!=` presumably excludes nulls; not verified, test before documenting. Also the "none" meaning of NEQ on multi-valued paths.
 4. **False positives.** The candidate superset for same-element groups may read many rows on wide collections, for example `city='Rome' AND zip=100` when both values are common but never in the same element. Add a metric or trace counter for "rows rejected by ElementFilter".

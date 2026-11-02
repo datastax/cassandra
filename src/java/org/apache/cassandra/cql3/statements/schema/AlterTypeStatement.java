@@ -20,8 +20,10 @@ package org.apache.cassandra.cql3.statements.schema;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.UnaryOperator;
 
 import com.google.common.collect.ImmutableList;
@@ -37,6 +39,8 @@ import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.index.TargetParser;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.TableMetadata;
@@ -226,6 +230,8 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
                           join(", ", dependentAggregates));
             }
 
+            ensureNoIndexOnRenamedFields(keyspace, userType);
+
             List<FieldIdentifier> fieldNames = new ArrayList<>(userType.fieldNames());
 
             renamedFields.forEach((oldName, newName) ->
@@ -247,6 +253,47 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
             });
 
             return new UserType(keyspaceName, userType.name, fieldNames, userType.fieldTypes(), true);
+        }
+
+        /**
+         * The targets of the indexes on the fields of UDTs designate the fields by name, so the fields used by an
+         * index target can't be renamed: the index has to be dropped first.
+         */
+        private void ensureNoIndexOnRenamedFields(KeyspaceMetadata keyspace, UserType userType)
+        {
+            Set<Integer> renamedPositions = new HashSet<>();
+            for (FieldIdentifier oldName : renamedFields.keySet())
+            {
+                int position = userType.fieldPosition(oldName);
+                if (position >= 0)
+                    renamedPositions.add(position);
+            }
+            if (renamedPositions.isEmpty())
+                return;
+
+            for (TableMetadata table : keyspace.tables)
+            {
+                for (IndexMetadata index : table.indexes)
+                {
+                    String targetOption = index.options.get(IndexTarget.TARGET_OPTION_NAME);
+                    if (targetOption == null)
+                        continue;
+                    TargetParser.Target target = TargetParser.parseTarget(table, targetOption);
+                    if (target == null || target.fieldPath == null)
+                        continue;
+
+                    target.fieldPath.forEachUserTypeField(target.column.type, (type, position) -> {
+                        if (type.keyspace.equals(userType.keyspace) && type.name.equals(userType.name) && renamedPositions.contains(position))
+                            throw ire("Cannot rename field %s of type %s because it is used by index %s on %s.%s (%s); drop the index first",
+                                      userType.fieldName(position),
+                                      userType.getCqlTypeName(),
+                                      index.name,
+                                      table.keyspace,
+                                      table.name,
+                                      targetOption);
+                    });
+                }
+            }
         }
     }
 

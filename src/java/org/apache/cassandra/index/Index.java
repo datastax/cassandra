@@ -470,6 +470,19 @@ public interface Index
     boolean dependsOn(ColumnMetadata column);
 
     /**
+     * Whether this index is on a field of the given column (a field of a UDT or tuple, see
+     * {@link org.apache.cassandra.cql3.FieldPath}) rather than on the column: it then {@link #dependsOn depends on}
+     * the column, but it never serves the restrictions on the whole column.
+     *
+     * @param column the column definition to check
+     * @return {@code true} if the index is on a field of the column
+     */
+    default boolean isOnFieldOf(ColumnMetadata column)
+    {
+        return false;
+    }
+
+    /**
      * Called to determine whether this index can provide a searcher to execute a query on the
      * supplied expression. This forms part of the query validation done before a CQL select
      * statement is executed.

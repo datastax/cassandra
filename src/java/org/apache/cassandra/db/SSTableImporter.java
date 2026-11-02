@@ -32,7 +32,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.index.Index;
@@ -48,7 +47,6 @@ import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -145,14 +143,15 @@ public class SSTableImporter
                                     {
                                         TableMetadata tableMetadata = cfs.metadata();
                                         IndexMetadata indexMetadata = index.getIndexMetadata();
-                                        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, indexMetadata);
+                                        TargetParser.Target target = TargetParser.parseTarget(tableMetadata, indexMetadata);
                                         IndexContext indexContext = new IndexContext(tableMetadata.keyspace,
                                                                                      tableMetadata.name,
                                                                                      tableMetadata.id,
                                                                                      tableMetadata.partitionKeyType,
                                                                                      tableMetadata.comparator,
-                                                                                     target.left,
-                                                                                     target.right,
+                                                                                     target.column,
+                                                                                     target.type,
+                                                                                     target.fieldPath,
                                                                                      indexMetadata,
                                                                                      cfs);
                                         if (!indexDescriptor.perIndexComponents(indexContext).isComplete())
