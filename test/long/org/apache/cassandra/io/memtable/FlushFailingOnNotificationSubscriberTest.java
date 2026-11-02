@@ -20,6 +20,7 @@ package org.apache.cassandra.io.memtable;
 
 import com.google.common.util.concurrent.AtomicDouble;
 
+import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DataStorageSpec;
@@ -66,9 +67,13 @@ public class FlushFailingOnNotificationSubscriberTest extends CQLTester
 
     static AtomicDouble failFlushProbability = new AtomicDouble(FLUSH_FAILURE_PROBABILITY);
 
+    // Intentionally hides CQLTester.setUpClass() so the memtable pool is created with the settings below before
+    // CQLTester.prepareServer is called and triggers a cascade of initializations, including the memtable pool.
     @BeforeClass
-    public static void setup()
+    public static void setUpClass()
     {
+        // must be initialized before touching the raw config
+        ServerTestUtils.daemonInitialization();
         Config conf = DatabaseDescriptor.getRawConfig();
         // frequent flushes
         conf.memtable_allocation_type = Config.MemtableAllocationType.offheap_objects;
