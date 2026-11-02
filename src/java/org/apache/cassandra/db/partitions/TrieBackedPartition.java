@@ -371,7 +371,9 @@ public class TrieBackedPartition implements Partition
     @Override
     public boolean isEmpty()
     {
-        return rowCountIncludingStatic + tombstoneCount == 0;
+        // A row whose only content is the deletion of a complex column adds to neither count, and only its deletion
+        // shows it, in the deletion branch at the root, where all of the partition's deletions are.
+        return rowCountIncludingStatic + tombstoneCount == 0 && !trie.deletionBranchAtRoot().valueIterator().hasNext();
     }
 
     private boolean hasStaticRow()

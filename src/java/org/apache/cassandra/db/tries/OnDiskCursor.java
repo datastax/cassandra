@@ -241,8 +241,8 @@ public class OnDiskCursor<T> implements Cursor<T>
     void descendPostPrefix(long nodePos)
     {
         // leave content and encodedPosition unchanged
-        this.postCodePos = nodePos - 1;
         this.nodeCode = readByteBefore(nodePos);
+        this.postCodePos = nodePos - 1;
         this.currentImpl = OnDiskReadNodeType.selectNodeImpl(nodeCode);
         this.currentImpl.load(this); // may modify currentEncodedPosition
     }

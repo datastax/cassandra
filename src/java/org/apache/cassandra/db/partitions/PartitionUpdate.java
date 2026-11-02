@@ -593,18 +593,15 @@ public interface PartitionUpdate extends Partition
             if (position >= in.limit())
                 throw new EOFException();
 
+            // Both encodings follow the key with flags, one of which says whether the update is empty.
+            int flags = in.get(position) & 0xff;
             if (format == 1)
             {
-                // The trie encoding: the row count including the static row, then the tombstone count, which is
-                // what TriePartitionUpdate.isEmpty tests.
-                int rowCountIncludingStatic = VIntCoding.getUnsignedVInt32(in, position);
-                position += VIntCoding.computeUnsignedVIntSize(rowCountIncludingStatic);
-                if (position >= in.limit())
-                    throw new EOFException();
-                return rowCountIncludingStatic == 0 && VIntCoding.getUnsignedVInt32(in, position) == 0;
+                // As TriePartitionUpdateSerializer.deserialize does, so that corrupt flags are not taken for empty.
+                if ((flags & ~TriePartitionUpdateSerializer.UPDATE_IS_EMPTY) != 0)
+                    throw new IOException("Unknown partition update flags: " + flags);
+                return (flags & TriePartitionUpdateSerializer.UPDATE_IS_EMPTY) != 0;
             }
-
-            int flags = in.get(position) & 0xff;
             return (flags & IS_EMPTY) != 0;
         }
 

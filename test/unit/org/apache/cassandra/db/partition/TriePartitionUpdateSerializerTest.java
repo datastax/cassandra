@@ -24,6 +24,8 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
@@ -44,6 +46,7 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.CounterMutation;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.Mutation;
@@ -223,7 +226,7 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         createRichTable();
 
         assertWireBytes("rich update", viaBTree(richUpdate()),
-                        "046b657930030380fdfffffadfb5522583e8ffffffffffa9ff6bdc00020173027373020176016d00010001814f070183"
+                        "046b65793000030380fdfffffadfb5522583e8ffffffffffa9ff6bdc00020173027373020176016d00010001814f070183"
                         + "e800010100000000000c604007010000000183e8000100000c6040070183e800010100000000000c2040070100000001"
                         + "83e8000100000c2040070183e700030100000000000c07010000000183e7000300000cf6014007010000000100000000"
                         + "010b07010000000100000000010bf73840655647381e140905018c00008042070183e700030100000000000c07010000"
@@ -232,24 +235,24 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
                         + "410962618040400501f5090083e80000000b0809010080040083e804f538403003018000008042090083e80438004109"
                         + "0083e8043800410879788040400501f5090083e8000000070809010080040083e804f52c4018807b010601f7");
         assertWireBytes("row deletion only", viaBTree(build(builder -> builder.timestamp(1999).nowInSec(1500).row(1).delete())),
-                        "046b657930010119fffffadfb5522587cfffffffffffa9ff6bdc0000001e070100000200000108070001000002000108"
+                        "046b65793000010119fffffadfb5522587cfffffffffffa9ff6bdc0000001e070100000200000108070001000002000108"
                         + "f638010000804045000601f6");
         assertWireBytes("expiring row", viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).ttl(60).row(1).add("v", 11))),
-                        "046b65793001003dfffffadfb5522587d0ffffffffffa9ff6c183c00010176001e09020000000000000b090040040100"
+                        "046b6579300001003dfffffadfb5522587d0ffffffffffa9ff6c183c00010176001e09020000000000000b090040040100"
                         + "000005f538010000804440400601f5");
         assertWireBytes("row without primary key liveness",
                         viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).noPrimaryKeyLivenessInfo().add("v", 11))),
-                        "046b657930010031fffffadfb5522587d000000001017600180900000000000b0700400801f538010000804440400601"
+                        "046b65793000010031fffffadfb5522587d000000001017600180900000000000b0700400801f538010000804440400601"
                         + "f5");
         assertWireBytes("deletions only", viaBTree(build(builder -> {
                             builder.timestamp(1000).nowInSec(1500).delete();
                             builder.timestamp(2000).nowInSec(1500);
                             builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
                         })),
-                        "046b657930000200fffffadfb5522583e8ffffffffffa9ff6bdc0000003f070183e800010100000000000c2040070100"
+                        "046b65793000000200fffffadfb5522583e8ffffffffffa9ff6bdc0000003f070183e800010100000000000c2040070100"
                         + "00000183e8000100000c20400f090580000080424040070100000000000008070001000000000008f7000601f6");
         assertWireBytes("point deletion inside a range tombstone", pointDeletionInsideRange(),
-                        "046b657930000200fffffadfb5522587cfffffffffffa9ff6bdc00020173027373020176016d00010001360701000001"
+                        "046b65793000000200fffffadfb5522587cfffffffffffa9ff6bdc00020173027373020176016d00010001360701000001"
                         + "00000008604007010000010100000101010002000e384007000100000100000820401c0b090605840000804043000601"
                         + "f6");
         // The trie keys a column by its index among the table's columns, which the indexes after the header record for
@@ -261,17 +264,28 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
                             builder.row().add("ss", ImmutableSet.of("x"));
                             builder.row(1).add("m", ImmutableMap.of("a", "1"));
                         })),
-                        "046b657930020071fffffadfb5522587cfffffffffffa9ff6bdc000102737301016d0101808607010000030000000807"
+                        "046b65793000020071fffffadfb5522587cfffffffffffa9ff6bdc000102737301016d0101808607010000030000000807"
                         + "0001000003000008f60140070000000105070000000105f7380100008044070100000300000008070001000003000008"
                         + "f60140070000000105070000000105f72240188009000131043800614240400501f5014004000103f538010000804409"
                         + "0001033800784240400501f5014004000103f51440188033010601f7");
         assertWireBytes("cell tombstone", viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).delete("v"))),
-                        "046b65793001002dfffffadfb5522587d0ffffffffffa9ff6bdc000001017600170901000004004004000003f5380100"
+                        "046b6579300001002dfffffadfb5522587d0ffffffffffa9ff6bdc000001017600170901000004004004000003f5380100"
                         + "00804440400601f5");
         assertWireBytes("map element deletion",
                         viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).appendAll("m", Collections.singletonMap("a", null)))),
-                        "046b65793001003afffffadfb5522587d0ffffffffffa9ff6bdc000001016d012009010000043800614240400501f501"
+                        "046b6579300001003afffffadfb5522587d0ffffffffffa9ff6bdc000001016d012009010000043800614240400501f501"
                         + "4004000003f538010000804440400601f5");
+
+        // An update that counts no row and no tombstone is flagged empty if it is (01 after the key), and not if it
+        // holds the deletion of a collection, which neither count includes as the trie update builder counts (00).
+        assertWireBytes("empty update",
+                        TriePartitionUpdate.asTrieUpdate(PartitionUpdate.emptyUpdate(currentTableMetadata(),
+                                                                                     currentTableMetadata().partitioner.decorateKey(ByteBufferUtil.bytes("key0")))),
+                        "046b657930010000000000000000020601");
+        assertWireBytes("collection deletion only, built",
+                        viaTrieBuilder(BTreePartitionUpdate.asBTreeUpdate(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).noPrimaryKeyLivenessInfo().delete("m")))),
+                        "046b65793000000000fffffadfb5522587d0ffffffffffa9ff6bdc000001016d012d0701000003000000080700010000"
+                        + "03000008f60140070000000105070000000105f738010000804045000601f6");
 
         // Through the entry point the mutation path uses: the table id, then the format byte of the trie encoding.
         TriePartitionUpdate update = richUpdate();
@@ -292,7 +306,7 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         createTable("CREATE TABLE %s (k text, c int, cnt counter, PRIMARY KEY(k, c))");
         assertWireBytes("counter update",
                         viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("cnt", CounterContext.instance().createUpdate(5L)))),
-                        "046b657930010051fffffadfb5522587d00000000103636e74003a090000000100000000000000000000c00000000000"
+                        "046b65793000010051fffffadfb5522587d00000000103636e74003a090000000100000000000000000000c00000000000"
                         + "00000000000000000001000000000000000527004004000003f538010000804440400601f5");
     }
 
@@ -456,19 +470,30 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
     public void testDeserializedUpdateConsumers() throws Throwable
     {
         createRichTable();
-        assertConsumersOfDeserialized("plain row", builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11));
-        assertConsumersOfDeserialized("row deletion and insert", builder -> {
+        for (Map.Entry<String, Consumer<PartitionUpdate.SimpleBuilder>> shape : shapes().entrySet())
+            assertConsumersOfDeserialized(shape.getKey(), shape.getValue());
+    }
+
+    /**
+     * The shapes an update takes, as the content a simple builder of a table with the columns of
+     * {@link #createRichTable} gives it.
+     */
+    private static Map<String, Consumer<PartitionUpdate.SimpleBuilder>> shapes()
+    {
+        Map<String, Consumer<PartitionUpdate.SimpleBuilder>> shapes = new LinkedHashMap<>();
+        shapes.put("plain row", builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11));
+        shapes.put("row deletion and insert", builder -> {
             builder.timestamp(1999).nowInSec(1500).row(1).delete();
             builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11);
         });
-        assertConsumersOfDeserialized("row deletion only", builder -> builder.timestamp(1999).nowInSec(1500).row(1).delete());
-        assertConsumersOfDeserialized("partition deletion only", builder -> builder.timestamp(1999).nowInSec(1500).delete());
-        assertConsumersOfDeserialized("range tombstone only", builder -> {
+        shapes.put("row deletion only", builder -> builder.timestamp(1999).nowInSec(1500).row(1).delete());
+        shapes.put("partition deletion only", builder -> builder.timestamp(1999).nowInSec(1500).delete());
+        shapes.put("range tombstone only", builder -> {
             builder.timestamp(1999).nowInSec(1500);
             builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
         });
-        assertConsumersOfDeserialized("map overwrite", builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("m", ImmutableMap.of("a", "1")));
-        assertConsumersOfDeserialized("everything", builder -> {
+        shapes.put("map overwrite", builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("m", ImmutableMap.of("a", "1")));
+        shapes.put("everything", builder -> {
             builder.timestamp(1000).nowInSec(1500).delete();
             builder.timestamp(2000).nowInSec(1500);
             builder.row().add("s", 7).add("ss", ImmutableSet.of("x", "y"));
@@ -476,6 +501,70 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
             builder.row(2).delete();
             builder.addRangeTombstone().start(5).end(9).inclStart().exclEnd();
         });
+        // What UPDATE ... SET m = null, SET m = {} and DELETE m make of a row: the collection's deletion, and nothing
+        // else, not even row liveness.
+        shapes.put("collection deletion only", builder -> builder.timestamp(2000).nowInSec(1500).row(1).noPrimaryKeyLivenessInfo().delete("m"));
+        shapes.put("static collection deletion only", builder -> builder.timestamp(2000).nowInSec(1500).row().noPrimaryKeyLivenessInfo().delete("ss"));
+        return shapes;
+    }
+
+    /**
+     * Paxos does not commit a proposal that is empty, so a trie update has to say whether it is as the BTree update of
+     * the same content does, however it was built: by the trie update builder, as a coordinator of a trie table builds
+     * it, converted from a BTree update, or read from its serialized form, in memory or, as Paxos v2 reads a proposal
+     * it keeps, from its bytes. A row whose only content is the deletion of a collection is counted neither as a row
+     * nor as a tombstone, and is not empty.
+     */
+    @Test
+    public void testIsEmptyAgreesWithBTreeUpdate() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k text, c int, v int, m map<text, text>, " +
+                    "s int static, ss set<text> static, PRIMARY KEY(k, c)) WITH memtable = 'skiplist'");
+        Map<String, Consumer<PartitionUpdate.SimpleBuilder>> shapes = shapes();
+        shapes.put("nothing", builder -> {});
+        Map<String, ByteBuffer> fromBytes = new LinkedHashMap<>();
+        Map<String, Boolean> emptiness = new LinkedHashMap<>();
+        for (Map.Entry<String, Consumer<PartitionUpdate.SimpleBuilder>> shape : shapes.entrySet())
+        {
+            PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(currentTableMetadata(), "key0");
+            shape.getValue().accept(builder);
+            PartitionUpdate btree = builder.build();
+            assertTrue(shape.getKey(), btree instanceof BTreePartitionUpdate);
+
+            TriePartitionUpdate built = viaTrieBuilder(btree);
+            assertEquals(shape.getKey() + ", built", btree.isEmpty(), built.isEmpty());
+            assertEquals(shape.getKey() + ", converted", btree.isEmpty(), TriePartitionUpdate.asTrieUpdate(btree).isEmpty());
+            assertEquals(shape.getKey() + ", read", btree.isEmpty(), deserialize(serialize(built)).isEmpty());
+            assertEquals(shape.getKey() + ", read from bytes",
+                         btree.isEmpty(),
+                         PartitionUpdate.PartitionUpdateSerializer.isEmpty(PartitionUpdate.toBytes(built, VERSION), VERSION, DeserializationHelper.Flag.LOCAL, built.partitionKey()));
+            fromBytes.put(shape.getKey(), PartitionUpdate.toBytes(built, VERSION));
+            emptiness.put(shape.getKey(), btree.isEmpty());
+        }
+
+        // The bytes say whether the update is empty without its table, as Paxos v2 reads a proposal it keeps, which
+        // can be of a table dropped since.
+        dropTable("DROP TABLE %s");
+        for (Map.Entry<String, ByteBuffer> shape : fromBytes.entrySet())
+        {
+            assertEquals(shape.getKey() + ", read from bytes of a dropped table",
+                         emptiness.get(shape.getKey()),
+                         PartitionUpdate.PartitionUpdateSerializer.isEmpty(shape.getValue(), VERSION, DeserializationHelper.Flag.LOCAL, null));
+        }
+    }
+
+    /** The update the trie update builder makes of the given update's content, as a coordinator of a trie table does. */
+    private static TriePartitionUpdate viaTrieBuilder(PartitionUpdate update)
+    {
+        PartitionUpdate.Builder builder = TriePartitionUpdate.FACTORY.builder(update.metadata(), update.partitionKey(), update.columns(), 1);
+        DeletionInfo deletionInfo = update.deletionInfo();
+        builder.addPartitionDeletion(deletionInfo.getPartitionDeletion());
+        for (Iterator<RangeTombstone> it = deletionInfo.rangeIterator(false); it.hasNext();)
+            builder.add(it.next());
+        builder.add(update.staticRow());
+        for (Iterator<Row> rows = update.rowIterator(); rows.hasNext();)
+            builder.add(rows.next());
+        return (TriePartitionUpdate) builder.build();
     }
 
     private void assertConsumersOfDeserialized(String shape, Consumer<PartitionUpdate.SimpleBuilder> content) throws Throwable
@@ -1402,7 +1491,7 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
     public void testCellOfEarlierLayoutIsRejected() throws Throwable
     {
         createRichTable();
-        byte[] bytes = Hex.hexToBytes("046b65793001003dfffffadfb5522587d0ffffffffffa9ff6c183c00010176001f0300020000000000000b0a00400401"
+        byte[] bytes = Hex.hexToBytes("046b6579300001003dfffffadfb5522587d0ffffffffffa9ff6c183c00010176001f0300020000000000000b0a00400401"
                                       + "00000005f538010000804440400601f5");
 
         assertCorruptionRejected(bytes, "Unknown content type tag: 3");
@@ -1526,6 +1615,77 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
         bytes[payload + 2] = 1;
 
         assertCorruptionRejected(bytes, "Empty liveness under the tag of a non-empty one");
+    }
+
+    /**
+     * The flags after the key have one flag, that the update is empty, which an update that counts a row or a
+     * tombstone is not.
+     */
+    @Test
+    public void testInvalidUpdateFlagsAreRejected() throws Throwable
+    {
+        createRichTable();
+        byte[] bytes = serialize(viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11))));
+        // The key, key0, is written after its length, and the flags follow it.
+        int flags = 5;
+        assertEquals(0, bytes[flags]);
+
+        for (int flag = 0x02; flag <= 0x80; flag <<= 1)
+        {
+            byte[] corrupt = bytes.clone();
+            corrupt[flags] = (byte) flag;
+            assertDeserializationRejected(corrupt, "Unknown partition update flags: " + flag);
+        }
+
+        byte[] corrupt = bytes.clone();
+        corrupt[flags] = 1;
+        assertDeserializationRejected(corrupt, "Partition update flagged as empty counts rows=1, tombstones=0");
+    }
+
+    private void assertDeserializationRejected(byte[] bytes, String expectedMessage)
+    {
+        IOException e = assertThrows(IOException.class, () -> deserialize(bytes));
+        assertEquals(expectedMessage, e.getMessage());
+    }
+
+    /**
+     * Whether an update is empty is read from its flags without deserializing it, as Paxos v2 reads a proposal it keeps,
+     * and the flags the deserializer rejects are rejected there as well, also with the empty flag set: an update taken
+     * for empty is not committed.
+     */
+    @Test
+    public void testInvalidUpdateFlagsAreRejectedFromBytes() throws Throwable
+    {
+        createRichTable();
+        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11)));
+        byte[] bytes = serialize(update);
+        byte[] withTableAndFormat = ByteBufferUtil.getArray(PartitionUpdate.toBytes(update, VERSION));
+        // The flags follow the key, as in testInvalidUpdateFlagsAreRejected, and the table id and the format byte come
+        // before the key there.
+        int flags = 5;
+        int flagsAfterTableAndFormat = withTableAndFormat.length - bytes.length + flags;
+        assertEquals(0, withTableAndFormat[flagsAfterTableAndFormat]);
+
+        for (int flag = 0x02; flag <= 0x80; flag <<= 1)
+        {
+            // Without and with the one flag there is, that the update is empty.
+            for (int corruptFlags : new int[]{ flag, flag | 0x01 })
+            {
+                String expectedMessage = "Unknown partition update flags: " + corruptFlags;
+                byte[] corrupt = bytes.clone();
+                corrupt[flags] = (byte) corruptFlags;
+                assertDeserializationRejected(corrupt, expectedMessage);
+
+                byte[] corruptWithTableAndFormat = withTableAndFormat.clone();
+                corruptWithTableAndFormat[flagsAfterTableAndFormat] = (byte) corruptFlags;
+                IOException e = assertThrows(IOException.class,
+                                             () -> PartitionUpdate.PartitionUpdateSerializer.isEmpty(ByteBuffer.wrap(corruptWithTableAndFormat),
+                                                                                                     VERSION,
+                                                                                                     DeserializationHelper.Flag.LOCAL,
+                                                                                                     update.partitionKey()));
+                assertEquals(expectedMessage, e.getMessage());
+            }
+        }
     }
 
     /**

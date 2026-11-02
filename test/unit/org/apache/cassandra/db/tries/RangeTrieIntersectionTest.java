@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import com.google.common.collect.Lists;
+import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -110,9 +111,22 @@ public class RangeTrieIntersectionTest
         return TrieSet.ranges(TrieUtil.VERSION, true, true, bounds);
     }
 
+    private final List<FileTries.Range<TestRangeState>> opened = new ArrayList<>();
+
+    @After
+    public void closeOpened()
+    {
+        opened.forEach(FileTries.Range::close);
+        opened.clear();
+    }
+
     private RangeTrie<TestRangeState> maybeDiskRoundtrip(RangeTrie<TestRangeState> trie)
     {
-        return onDisk ? TrieUtil.onDiskRoundtrip(trie) : trie;
+        if (!onDisk)
+            return trie;
+        FileTries.Range<TestRangeState> read = TrieUtil.onDiskRoundtrip(trie);
+        opened.add(read);
+        return read;
     }
 
     @Test

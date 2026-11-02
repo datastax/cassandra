@@ -122,8 +122,18 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
             if (Cursor.isExhausted(currentPosition))
                 break;
             if (Cursor.ascended(currentPosition, prevPosition))
-                walker.resetPathLength(Cursor.depth(currentPosition) - 1);
-            walker.addPathByte(Cursor.incomingTransition(currentPosition));
+            {
+                int depth = Cursor.depth(currentPosition);
+                if (depth > 0)
+                {
+                    walker.resetPathLength(depth - 1);
+                    walker.addPathByte(Cursor.incomingTransition(currentPosition));
+                }
+                else
+                    walker.resetPathLength(0);
+            }
+            else
+                walker.addPathByte(Cursor.incomingTransition(currentPosition));
         }
 
         return walker.complete();
