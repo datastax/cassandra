@@ -131,8 +131,7 @@ public class OnDiskDeletionAwareTrieTest
             writer.finish();
         }
 
-        try (OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
-                 OnDiskDeletionAwareTrie.open(file, LIVE, MARKER, VERSION, -1))
+        try (FileTries.DeletionAware<LivePoint, DeletionMarker> read = FileTries.openDeletionAware(file, LIVE, MARKER))
         {
             assertTriesEqual(source, read);
         }
@@ -157,7 +156,6 @@ public class OnDiskDeletionAwareTrieTest
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(buffer, LIVE, MARKER, VERSION, -1);
             assertTriesEqual(source, read);
-            read.close();
         }
     }
 
@@ -206,7 +204,6 @@ public class OnDiskDeletionAwareTrieTest
             assertTriesEqual(source, read);
             for (Direction d : Direction.values())
                 assertDeletionBranchesEqual(source.cursor(d), read.cursor(d));
-            read.close();
         }
     }
 
@@ -279,7 +276,6 @@ public class OnDiskDeletionAwareTrieTest
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             for (Direction direction : Direction.values())
                 assertEquals(mergedValues(source, direction), mergedValues(read, direction));
-            read.close();
         }
     }
 
@@ -297,7 +293,6 @@ public class OnDiskDeletionAwareTrieTest
             InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> expected = applyTo(liveOnlyTrie(live("010", 1)), source);
             InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> actual = applyTo(liveOnlyTrie(live("010", 1)), read);
             assertTriesEqual(expected, actual);
-            read.close();
         }
     }
 
@@ -358,7 +353,6 @@ public class OnDiskDeletionAwareTrieTest
                         assertEquals(expectedTails, mergedTails(actual, direction));
                     }
                 }
-                read.close();
             }
         }
     }
@@ -450,7 +444,6 @@ public class OnDiskDeletionAwareTrieTest
             assertNoDeletionBranchRecorded(read);
             // A branch that writes nothing leaves no node behind either, so what is left is the live point alone.
             assertTriesEqual(liveOnlyTrie(live), read);
-            read.close();
         }
     }
 
@@ -648,7 +641,6 @@ public class OnDiskDeletionAwareTrieTest
             for (int transition = 0; transition <= 0xFF; ++transition)
                 for (int length = 3; length <= KEY_LENGTH + 1; ++length)
                     assertApplicableDeletionEqual(source, read, wideKey(transition, length));
-            read.close();
         }
     }
 
@@ -691,7 +683,6 @@ public class OnDiskDeletionAwareTrieTest
                     assertTriesEqual(source, read);
                     for (Direction d : Direction.values())
                         assertDeletionBranchesEqual(source.cursor(d), read.cursor(d));
-                    read.close();
                 }
             }
         }
@@ -735,8 +726,33 @@ public class OnDiskDeletionAwareTrieTest
                 UncheckedIOException e = assertThrows(UncheckedIOException.class,
                                                       () -> read.cursor(Direction.FORWARD).deletionBranchCursor(Direction.FORWARD));
                 assertTrue(e.getMessage(), e.getMessage().contains("Corrupt serialized trie"));
-                read.close();
             }
+        }
+    }
+
+    /// A node without children has its deletion branch immediately before it, and the delta 0 to it takes no bytes: the
+    /// slot is empty. Here the root holds the branch and no live data, so it ends the buffer as
+    /// `<slot length 00> <node code>`, and reads back with its branch.
+    @Test
+    public void testEmptyDeletionBranchSlotReadsBack() throws IOException
+    {
+        List<DataPoint> points = points(marker("abc", -1, 5), marker("abd", 5, -1));
+        InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points, false, true);
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            ByteBuffer buffer = out.asNewBuffer();
+            int codePos = buffer.limit() - 1;
+            assertEquals("root is a prefix node with only an ascent-side slot",
+                         OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT,
+                         buffer.get(codePos) & 0xFF);
+            assertEquals("slot is empty", 0, buffer.get(codePos - 1));
+
+            OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
+                OnDiskDeletionAwareTrie.open(buffer, LIVE, MARKER, VERSION, -1);
+            assertTriesEqual(source, read);
+            for (Direction d : Direction.values())
+                assertDeletionBranchesEqual(source.cursor(d), read.cursor(d));
         }
     }
 
@@ -758,7 +774,6 @@ public class OnDiskDeletionAwareTrieTest
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             for (Direction direction : Direction.values())
                 assertDeletionBranchTailsEqual(source.cursor(direction), read.cursor(direction));
-            read.close();
         }
     }
 
@@ -781,8 +796,7 @@ public class OnDiskDeletionAwareTrieTest
         assertTrue("The trie must not fit in one buffer, was " + file.length() + " bytes",
                    file.length() > DEFAULT_BUFFER_SIZE);
 
-        try (OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
-                 OnDiskDeletionAwareTrie.open(file, LIVE, MARKER, VERSION, -1))
+        try (FileTries.DeletionAware<LivePoint, DeletionMarker> read = FileTries.openDeletionAware(file, LIVE, MARKER))
         {
             assertTriesEqual(source, read);
             for (Direction direction : Direction.values())
@@ -812,10 +826,8 @@ public class OnDiskDeletionAwareTrieTest
         }
 
         ChannelProxy channel = new ChannelProxy(file);
-        TrieUtil.CountingRebuffererFactory factory =
-            new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(channel));
-        try (OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
-                 new OnDiskDeletionAwareTrie<>(factory, LIVE, MARKER, VERSION, factory.fileLength(), channel))
+        TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(FileTries.openChunkReader(channel));
+        try (FileTries.DeletionAware<LivePoint, DeletionMarker> read = new FileTries.DeletionAware<>(factory, channel, LIVE, MARKER))
         {
             for (DataPoint point : points)
             {
@@ -852,10 +864,8 @@ public class OnDiskDeletionAwareTrieTest
         }
 
         ChannelProxy channel = new ChannelProxy(file);
-        TrieUtil.CountingRebuffererFactory factory =
-            new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(channel));
-        try (OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
-                 new OnDiskDeletionAwareTrie<>(factory, LIVE, MARKER, VERSION, factory.fileLength(), channel))
+        TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(FileTries.openChunkReader(channel));
+        try (FileTries.DeletionAware<LivePoint, DeletionMarker> read = new FileTries.DeletionAware<>(factory, channel, LIVE, MARKER))
         {
             InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> rootDeletion = DataPoint.fromList(points, false, true);
             Map<String, Runnable> reads = new LinkedHashMap<>();
@@ -939,7 +949,6 @@ public class OnDiskDeletionAwareTrieTest
             assertNull("data mutation cursor", mutator.mutationCursor);
             assertNull("deletion branch cursor applied to the data", mutator.deleter.mutationCursor);
             assertNull("deletion branch cursor merged into the deletions", mutator.deletionMutator.mutationCursor);
-            read.close();
         }
     }
 

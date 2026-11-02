@@ -269,16 +269,27 @@ public class BufferManagerMultibuf implements BufferManager
         return bufferOverhead;
     }
 
+    /**
+     * Discards and releases all off-heap buffers owned by this manager.
+     * <p>
+     * NOTE: This method MUST only be invoked when the trie is no longer accessible by any readers or writers
+     * (e.g. after a memtable discard). Because reads on the trie are lock-free, releasing buffers while concurrent
+     * reads are active would result in use-after-free memory corruption.
+     */
     @Override
     public void discardBuffers()
     {
         if (bufferType == BufferType.ON_HEAP)
             return; // no cleaning needed
 
-        for (UnsafeBuffer b : buffers)
+        for (int i = 0; i < buffers.length; i++)
         {
+            UnsafeBuffer b = buffers[i];
             if (b != null)
+            {
+                buffers[i] = null;
                 FileUtils.clean(b.byteBuffer());
+            }
         }
     }
 

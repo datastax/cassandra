@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
@@ -62,6 +63,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.TrieBackedRow;
 import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -84,12 +86,14 @@ import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.MBeanWrapper;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -147,6 +151,18 @@ public class TrieMemtable extends AbstractShardedMemtable
 
     @Unmetered
     private final TableMetadata actualMetadata;
+
+    /// The column lists of the last update found equal to this memtable's without being the same instance, which
+    /// [#keyedAsThisMemtable] compares by identity before it compares any lists column by column. A statement prepared
+    /// before a schema change that kept the columns makes its updates with the metadata it was prepared with
+    /// (ModificationStatement) until the node restarts, as only a change to the columns evicts it (QueryProcessor), and
+    /// TraceKeyspace makes the updates of the system_traces tables with metadata of its own.
+    ///
+    /// Written and read by the writers without synchronization. The lists are immutable, with final fields, so a
+    /// writer that reads this field sees null, or one of the instances written to it, whole; one that sees another
+    /// instance than the last written only compares its update's lists column by column.
+    @Unmetered
+    private RegularAndStaticColumns equalColumns;
 
     TrieMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner, Integer shardCountOption)
     {
@@ -266,7 +282,7 @@ public class TrieMemtable extends AbstractShardedMemtable
     {
         DecoratedKey key = update.partitionKey();
         MemtableShard shard = shards[boundaries.getShardForKey(key)];
-        long colUpdateTimeDelta = shard.put(update, indexer, opGroup);
+        long colUpdateTimeDelta = shard.put(keyedAsThisMemtable(update), indexer, opGroup);
 
         if (shard.data.reachedAllocatedSizeThreshold())
             signalFlushRequired(ColumnFamilyStore.FlushReason.TRIE_LIMIT, true);
@@ -274,12 +290,132 @@ public class TrieMemtable extends AbstractShardedMemtable
         return colUpdateTimeDelta;
     }
 
+    /// Converts the update to a trie update whose trie keys the columns as this memtable's does: by the numbering of
+    /// the metadata the memtable was created with, which its contents are read and flushed with, and not that of the
+    /// table's current metadata, which can be newer until a schema change that renumbers the columns has switched the
+    /// memtable. An update's trie keys each column by its index among the columns of the metadata it was built or read
+    /// with, and a schema change since then can number them differently; the update is then rebuilt with this
+    /// memtable's numbering, which leaves out the columns dropped since. Done before the shard takes its lock.
+    private TriePartitionUpdate keyedAsThisMemtable(PartitionUpdate update)
+    {
+        TriePartitionUpdate trieUpdate = TriePartitionUpdate.asTrieUpdate(update);
+        RegularAndStaticColumns columns = trieUpdate.metadata().regularAndStaticColumns();
+        RegularAndStaticColumns ownColumns = actualMetadata.regularAndStaticColumns();
+        // A schema change switches this memtable, as it gives the table a new comparator (see
+        // AbstractAllocatorMemtable.shouldSwitch), so an update made with the table's metadata normally has this
+        // memtable's column lists. One made with older metadata whose lists are equal has other instances, which the
+        // memtable remembers (equalColumns), as more updates made with the same metadata are likely to come.
+        if (columns == ownColumns || columns == equalColumns)
+            return trieUpdate;
+        // The lists are also equal when a column has been dropped and added again in the same place, and an update made
+        // before the drop is then not rebuilt to leave out its data of the column not newer than the drop, as the
+        // deserializer does (mayHoldDroppedData): reads and flushes leave that data out, as they take the dropped
+        // columns from the table's current metadata (metadata.get()).
+        if (columns.equals(ownColumns))
+        {
+            equalColumns = columns;
+            return trieUpdate;
+        }
+
+        // A schema change publishes the table's new metadata before it switches this memtable, and the switch can be
+        // lost to a concurrent one that created the next memtable with the old metadata (ColumnFamilyStore's
+        // switchMemtableIfCurrent). If the table's metadata is newer than this memtable's, ask for the switch, which an
+        // update made with the newer metadata may need. Only then: an update can be newer than the table's metadata as
+        // well (TraceKeyspace's definitions of the system_traces tables can run ahead of the live schema), and the next
+        // memtable could not take it either, so switching for it would switch and flush on every such write.
+        boolean switching = shouldSwitch(ColumnFamilyStore.FlushReason.SCHEMA_CHANGE);
+
+        // An update made after a schema change adding a column has published the table's new metadata, and before the
+        // change has switched this memtable, holds a column this memtable cannot key. Rather than leave its data out of
+        // a write that is acknowledged, fail the write before this memtable takes any of it. If this memtable asks for
+        // the switch, Keyspace.applyInternal applies the mutation again, in a write group of its own, which has a
+        // commit log record of its own, and must start after the switch to go past this memtable. A write that fails
+        // therefore asks for the switch also when another has asked first and can still be making it: the owner
+        // switches the memtable and issues the write barrier that sends the write groups started after it to the next
+        // memtable under the table's lock, so this memtable is no longer current when the call returns. The next
+        // memtable can have been created with the old metadata by a concurrent switch, and the write then fails there
+        // as well. The failed write's record is in this memtable's range: it is replayed only if the node stops before
+        // this memtable is flushed, into a memtable that has the column, and replaying it as well as the retry's is
+        // harmless.
+        ColumnMetadata newerColumn = columnNewerThan(actualMetadata, trieUpdate);
+        if (switching)
+            signalFlushRequired(ColumnFamilyStore.FlushReason.SCHEMA_CHANGE, newerColumn == null);
+        if (newerColumn != null)
+        {
+            if (switching)
+                NoSpamLogger.log(logger, NoSpamLogger.Level.INFO, 1, TimeUnit.MINUTES,
+                                 "Failed a write holding column {} of {}, which is newer than the memtable; switching the memtable to apply it again",
+                                 newerColumn.name, actualMetadata);
+            else
+                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                                 "Failed a write holding column {} of {}, which neither the memtable nor the table's schema has",
+                                 newerColumn.name, actualMetadata);
+            throw new ColumnNewerThanMemtableException(String.format("Column %s of the update is newer than this memtable of %s",
+                                                                     newerColumn.name, actualMetadata),
+                                                       switching);
+        }
+
+        return TriePartitionUpdate.withColumnIndexes(trieUpdate,
+                                                     actualMetadata,
+                                                     TrieBackedRow.columnIdsMap(columns.statics),
+                                                     TrieBackedRow.columnIdsMap(columns.regulars));
+    }
+
+    /// A column the update holds data of that is newer than `metadata`, or null if there is none: one added after it,
+    /// which `metadata` neither has nor lists as dropped, or one dropped and added again after it, which `metadata`
+    /// lists as dropped, and the update's metadata has after that drop or a later one. `metadata` has a column if it
+    /// has one of that name and kind: a column dropped can have its name taken by a primary key column renamed since.
+    ///
+    /// The drops are ordered by their times, which a clock running behind cannot reverse, as a table's metadata does
+    /// not take a drop older than the one it lists (`TableMetadata.Builder.recordColumnDrop`). It takes one at the same
+    /// time, and equal times cannot be told apart: after `DROP v USING TIMESTAMP T`, `ADD v` and `DROP v USING
+    /// TIMESTAMP T` again, an update made between the last two holds a `v` that seems newer than a memtable created
+    /// after them, and the write fails, where its `v` should have been left out. It is applied when it is made again
+    /// with the table's metadata, which has no `v`. Only a drop given the same explicit timestamp as the last does this.
+    ///
+    /// An update can list a column it holds no data of: a read repair lists the columns its read fetched
+    /// (RowIteratorMergeListener), and a partition streamed through the write path those of the sstable it comes from
+    /// (CassandraStreamReceiver). The rebuild leaves out a newer column such an update lists, and loses nothing.
+    private static ColumnMetadata columnNewerThan(TableMetadata metadata, TriePartitionUpdate update)
+    {
+        for (ColumnMetadata column : update.columns())
+        {
+            ColumnMetadata ownColumn = metadata.getColumn(column.name);
+            if (ownColumn != null && ownColumn.kind == column.kind)
+                continue;
+            DroppedColumn dropped = metadata.droppedColumns.get(column.name.bytes);
+            DroppedColumn droppedBeforeReAdding = update.metadata().droppedColumns.get(column.name.bytes);
+            boolean isNewer = dropped == null
+                              || update.metadata().getColumn(column.name) != null
+                                 && droppedBeforeReAdding != null
+                                 && droppedBeforeReAdding.droppedTime >= dropped.droppedTime;
+            if (isNewer && holdsDataOf(update, column))
+                return column;
+        }
+        return null;
+    }
+
+    /// Whether a row of the update, the static row included, holds data of the column: a cell, or the deletion of a
+    /// complex column.
+    private static boolean holdsDataOf(TriePartitionUpdate update, ColumnMetadata column)
+    {
+        for (Iterator<Row> rows = update.rowsIncludingStatic(); rows.hasNext();)
+        {
+            Row row = rows.next();
+            if (row.isStatic() == column.isStatic() && row.getColumnData(column) != null)
+                return true;
+        }
+        return false;
+    }
+
     @Override
     public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled)
     {
-        if (!switchRequested.getAndSet(true) || !skipIfSignaled)
+        boolean signaled = switchRequested.getAndSet(true);
+        if (!signaled || !skipIfSignaled)
         {
-            logger.info("Scheduling flush for table {} due to {}", this.metadata.get(), flushReason);
+            if (!signaled)
+                logger.info("Scheduling flush for table {} due to {}", this.metadata.get(), flushReason);
             owner.signalFlushRequired(this, flushReason);
         }
     }

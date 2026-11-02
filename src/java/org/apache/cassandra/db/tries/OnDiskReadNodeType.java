@@ -40,7 +40,7 @@ enum OnDiskReadNodeType
                     // Root content needs to be presented on the way back.
                     // Note: This takes advantage of the fact that leaf codes are 00llllll, which reads correctly as a
                     // varint length.
-                    state.addReturnPathBacktrack(state.postCodePos + 1);
+                    addReturnPathBacktrack(state, state.postCodePos + 1);
                     return;
                 }
                 state.currentEncodedPosition |= Cursor.ON_RETURN_PATH_BIT;
@@ -54,13 +54,13 @@ enum OnDiskReadNodeType
         @Override
         public long advance(OnDiskCursor<?> state)
         {
-            return state.exhausted;
+            return state.exhaustedPosition;
         }
 
         @Override
-        public long skipTo(OnDiskCursor<?> state, long encodedSkipPosition)
+        public long skipTo(OnDiskCursor<?> state, int transition)
         {
-            return state.exhausted;
+            return state.exhaustedPosition;
         }
 
         @Override
@@ -143,13 +143,11 @@ enum OnDiskReadNodeType
         }
 
         @Override
-        public long skipTo(OnDiskCursor<?> state, long encodedSkipPosition)
+        public long skipTo(OnDiskCursor<?> state, int transition)
         {
             int nextByte = state.readByteBefore(state.postCodePos);
-            // Compare the transition only: the child is still the one to descend into when the target is its return
-            // path position.
-            if (Cursor.direction(state.currentEncodedPosition).lt(nextByte, Cursor.incomingTransition(encodedSkipPosition)))
-                return state.exhausted;
+            if (Cursor.direction(state.currentEncodedPosition).lt(nextByte, transition))
+                return state.exhaustedPosition;
 
             return descend(state, nextByte);
         }
@@ -236,19 +234,16 @@ enum OnDiskReadNodeType
         }
 
         @Override
-        public long skipTo(OnDiskCursor<?> state, long encodedSkipPosition)
+        public long skipTo(OnDiskCursor<?> state, int transition)
         {
             Direction direction = Cursor.direction(state.currentEncodedPosition);
             int currIndex = index(state.nodeImplData);
             int length = length(state.nodeCode);
-            int skipTransition = Cursor.incomingTransition(encodedSkipPosition);
-            // Compare the transition only: the child is still the one to descend into when the target is its return
-            // path position.
-            while (direction.lt(state.readByteBefore(state.postCodePos - currIndex), skipTransition))
+            while (direction.lt(state.readByteBefore(state.postCodePos - currIndex), transition))
             {
                 currIndex += direction.increase;
                 if (!direction.inLoop(currIndex, 0, length - 1))
-                    return state.exhausted;
+                    return state.exhaustedPosition;
             }
 
             return descendToChild(state, currIndex, direction, length, encodedPositionForChild(state, currIndex));
@@ -327,15 +322,14 @@ enum OnDiskReadNodeType
         }
 
         @Override
-        public long skipTo(OnDiskCursor<?> state, long encodedSkipPosition)
+        public long skipTo(OnDiskCursor<?> state, int transition)
         {
             Direction direction = Cursor.direction(state.currentEncodedPosition);
-            int transition = Cursor.incomingTransition(encodedSkipPosition);
             if (direction.le(transition, (int) state.nodeImplData))
                 return advance(state);
             int currTransition = findNext(state, direction, state.nodeCode, state.postCodePos, transition);
             if (!direction.inLoop(currTransition, 0, 255))
-                return state.exhausted;
+                return state.exhaustedPosition;
             return descendToChild(state, direction, currTransition);
         }
 
@@ -435,16 +429,15 @@ enum OnDiskReadNodeType
         }
 
         @Override
-        public long skipTo(OnDiskCursor<?> state, long encodedSkipPosition)
+        public long skipTo(OnDiskCursor<?> state, int transition)
         {
             Direction direction = Cursor.direction(state.currentEncodedPosition);
-            int transition = Cursor.incomingTransition(encodedSkipPosition);
             if (direction.le(transition, transition(state)))
                 return advance(state);
 
             int currTransition = findNextEntry(state, state.postCodePos, direction, transition);
             if (!direction.inLoop(currTransition, 0, 255))
-                return state.exhausted;
+                return state.exhaustedPosition;
             int currIndex = cardinality(state, state.postCodePos, currTransition);
             return descendToChild(state, direction, currTransition, currIndex);
         }
@@ -620,7 +613,7 @@ enum OnDiskReadNodeType
                     if (Cursor.isRootPosition(state.currentEncodedPosition))
                     {
                         // the root position needs to be presented; add backtrack for the content
-                        state.addReturnPathBacktrack(currentPos);
+                        addReturnPathBacktrack(state, currentPos);
                         return;
                     }
 
@@ -672,7 +665,7 @@ enum OnDiskReadNodeType
         private long addBacktrackAndMaybeAdvanceOver(OnDiskCursor<?> state, long currentPos, boolean shouldAdvanceOverContent)
         {
             // Make up a node on the return path; its advance or skipTo will be called
-            state.addReturnPathBacktrack(currentPos);
+            addReturnPathBacktrack(state, currentPos);
             return maybeSkipOverContent(state, currentPos, shouldAdvanceOverContent);
         }
 
@@ -692,12 +685,13 @@ enum OnDiskReadNodeType
         }
 
         @Override
-        public long skipTo(OnDiskCursor<?> state, long encodedSkipPosition)
+        public long skipTo(OnDiskCursor<?> state, int transition)
         {
-            // nodeImplData is the return-path position; it may be before the target, in which case there is nothing
-            // here for the skip.
-            if (Cursor.compare(state.nodeImplData, encodedSkipPosition) < 0)
-                return state.exhausted;
+            // The only child of a return-path entry is the return path it presents, held in nodeImplData. Its
+            // transition may be before the target's, in which case there is nothing here for the skip.
+            long returnPathPosition = state.nodeImplData;
+            if (Cursor.direction(returnPathPosition).lt(Cursor.incomingTransition(returnPathPosition), transition))
+                return state.exhaustedPosition;
             return advance(state);
         }
 
@@ -713,6 +707,35 @@ enum OnDiskReadNodeType
             pos = maybeSkipOverContent(state, pos, hasDescent);
             pos = maybeSkipOverContent(state, pos, hasAscent);
             return pos;
+        }
+
+        @Override
+        public long getAlternateBranch(OnDiskCursor<?> state, int nodeCode, long postCodePos)
+        {
+            if ((nodeCode & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) == 0)
+                return -1;
+            long pos = maybeSkipOverContent(state, postCodePos,
+                                            (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0);
+            int vintlen = state.readVIntLength(pos);
+            int len = state.readContentLength(pos, vintlen);
+            // These bytes can be a corrupt commit-log record; a width readSizedInt cannot hold would make it return a
+            // wrong value, so reject it the way readContentLength rejects an impossible length.
+            if (len > 8)
+                throw OnDiskCursor.corrupt("alternate branch pointer of " + len + " bytes before position " + pos);
+            // The pointer is a delta back from the start of the slot, and an empty slot is the delta 0 of a node whose
+            // branch ends where it starts. A branch takes at least one byte, so its root is above 0, and it is written
+            // before the node, so its root is at or before the slot; anything else would have us seek to a position
+            // that is not in the data, or read the node as its own branch. An eight-byte delta can read back negative.
+            long slotStart = pos - vintlen - len;
+            long delta = len > 0 ? state.readSizedInt(pos - vintlen, len) : 0;
+            if (delta < 0 || delta >= slotStart)
+                throw OnDiskCursor.corrupt("alternate branch pointer delta " + delta + " from position " + slotStart);
+            // Only a node without children has the delta 0, however it is written: a node's children are written
+            // between its branch and the node, and the first would be read as the branch.
+            if (delta == 0 && (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_CHILD) != 0)
+                throw OnDiskCursor.corrupt("alternate branch pointer delta 0 of a node with children, from position "
+                                           + slotStart);
+            return slotStart - delta;
         }
 
         @Override
@@ -763,7 +786,7 @@ enum OnDiskReadNodeType
             {
                 if (state.alternateInAscentSlot)
                 {
-                    ascentContent = "alt: " + prefixAlternateBranch(state, nodeCode, state.postCodePos);
+                    ascentContent = "alt: " + getAlternateBranch(state, nodeCode, state.postCodePos);
                     pos = maybeSkipOverContent(state, pos, true);
                 }
                 else
@@ -781,11 +804,37 @@ enum OnDiskReadNodeType
     };
 
     // prefix with no content and no child is used for backtrack entry to return ascent-side content
-    static final int ASCENT_LEAF_CODE = OnDiskWriteNodeType.PREFIX.bits;
+    private static final int ASCENT_LEAF_CODE = OnDiskWriteNodeType.PREFIX.bits;
 
-    /**
-     * Abstract methods that each enum constant must implement for reading trie nodes from disk.
-     */
+    /// Record the content at `contentPos` to be presented on the return path of the cursor's current position, as a
+    /// backtrack entry for a made-up [#PREFIX] node with no content and no child ([#ASCENT_LEAF_CODE]), which presents
+    /// it when the walk comes back to it.
+    ///
+    /// Like the in-memory cursor, this stores the entry at the depth of the parent: on the parent's level the return
+    /// path of a child is ordered after the descent into it and before the next sibling, which is what
+    /// [OnDiskCursor#skipTo] relies on when the target is that return-path position. For the root the depth is -1.
+    static void addReturnPathBacktrack(OnDiskCursor<?> state, long contentPos)
+    {
+        state.addBacktrack(Cursor.depth(state.currentEncodedPosition) - 1,
+                           contentPos,
+                           ASCENT_LEAF_CODE,
+                           state.currentEncodedPosition | Cursor.ON_RETURN_PATH_BIT);
+    }
+
+    /// Whether a backtrack entry with the given node code is one [#addReturnPathBacktrack] recorded to present
+    /// return-path content, rather than a node to come back to for its remaining children.
+    static boolean isReturnPathEntry(int nodeCode)
+    {
+        return nodeCode == ASCENT_LEAF_CODE;
+    }
+
+    /// Abstract methods that each enum constant must implement for reading trie nodes from disk.
+    ///
+    /// [#load] sets the cursor up on the node it has just moved to, whose code and position the cursor has stored: it
+    /// reads the content the node presents at its position and prepares what [#advance] and [#skipTo] need to move on.
+    /// The only backtrack entry it may record is one for the node's return-path content ([#addReturnPathBacktrack]); a
+    /// node records entries for its remaining children only as the walk descends into one of them. A range tail relies
+    /// on this to find its root's return-path content on top of the stack before its first move.
     public abstract void load(OnDiskCursor<?> state);
     public abstract long advance(OnDiskCursor<?> state);
     public long advanceMultiple(OnDiskCursor<?> state, TransitionsReceiver receiver)
@@ -793,7 +842,11 @@ enum OnDiskReadNodeType
         // only implemented by chain
         return advance(state);
     }
-    public abstract long skipTo(OnDiskCursor<?> state, long encodedSkipPosition);
+    /// Move to the first remaining child at or after the given transition, in the cursor's direction, and return its
+    /// position, or the cursor's exhausted position if there is none. A backtrack entry that presents the return path
+    /// of a node has that return path, at the node's transition, as its only child. What the target is beyond its
+    /// transition -- e.g. the return path of the child found here -- is for [OnDiskCursor#skipTo] to resolve.
+    public abstract long skipTo(OnDiskCursor<?> state, int transition);
     public abstract String dump(OnDiskCursor<?> state);
 
     public <T> T getContent(OnDiskCursor<T> state, Direction direction, int nodeCode, long postCodePos)
@@ -801,30 +854,12 @@ enum OnDiskReadNodeType
         return null; // overridden by leaf and prefix
     }
 
-    /// The position of the alternate branch whose pointer is in the ascent-side content slot of the [#PREFIX] node
-    /// described by `nodeCode` and `postCodePos`, resolved from the delta stored there, or -1 if it has none.
-    /// Only PREFIX nodes can carry one.
-    static long prefixAlternateBranch(OnDiskCursor<?> state, int nodeCode, long postCodePos)
+    /// The position of the alternate branch whose pointer is in the ascent-side content slot of the node described by
+    /// `nodeCode` and `postCodePos`, resolved from the delta stored there, or -1 if it has none. Only PREFIX nodes can
+    /// carry one.
+    public long getAlternateBranch(OnDiskCursor<?> state, int nodeCode, long postCodePos)
     {
-        if ((nodeCode & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) == 0)
-            return -1;
-        long pos = maybeSkipOverContent(state, postCodePos,
-                                        (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0);
-        int vintlen = state.readVIntLength(pos);
-        int len = state.readContentLength(pos, vintlen);
-        // These bytes can be a corrupt commit-log record; a width readSizedInt cannot hold would make it return a
-        // wrong value, so reject it the way readContentLength rejects an impossible length.
-        if (len < 1 || len > 8)
-            throw OnDiskCursor.corrupt("alternate branch pointer of " + len + " bytes before position " + pos);
-        // The pointer is a delta back from the start of the slot. A branch takes at least one byte, so its root
-        // is above 0, and it is written before the node, so its root is at or before the slot; anything else would
-        // have us seek to a position that is not in the data, or read the node as its own branch. An eight-byte
-        // delta can read back negative.
-        long slotStart = pos - vintlen - len;
-        long delta = state.readSizedInt(pos - vintlen, len);
-        if (delta < 0 || delta >= slotStart)
-            throw OnDiskCursor.corrupt("alternate branch pointer delta " + delta + " from position " + slotStart);
-        return slotStart - delta;
+        return -1;
     }
 
     /// Step back over the length-prefixed content item that ends at `currentPos` if `shouldAdvanceOverContent` is set.

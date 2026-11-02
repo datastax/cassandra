@@ -110,6 +110,7 @@ import org.apache.cassandra.db.lifecycle.SSTableIntervalTree;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.lifecycle.View;
+import org.apache.cassandra.db.memtable.ColumnNewerThanMemtableException;
 import org.apache.cassandra.db.memtable.Flushing;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
@@ -1821,6 +1822,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 if (sensors != null)
                     sensors.incrementSensor(Context.from(this.metadata.get()), Type.WRITE_BYTES, dataSize);
             }
+        }
+        catch (ColumnNewerThanMemtableException e)
+        {
+            // Keyspace.applyInternal catches this to apply the mutation again.
+            throw e;
         }
         catch (RuntimeException e)
         {

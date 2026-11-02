@@ -40,7 +40,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 /// Pins the bytes [OnDiskTrieWriter] produces against the worked examples in `OnDiskTrie.md`. The round-trip suites
-/// only check that the reader agrees with the writer; this is what catches a change to the layout itself.
+/// only check that the reader agrees with the writer; this is what catches a change to the layout itself. The dense
+/// node example would take a trie of over 16 MiB to write, so it is read back instead.
 public class OnDiskTrieWriterTest
 {
     @BeforeClass
@@ -99,35 +100,88 @@ public class OnDiskTrieWriterTest
                     write(trie(false, "tractor", 1, "tree", 2, "trie", 3), false));
     }
 
-    /// The sparse node example from `OnDiskTrie.md`.
+    /// The leaf node example from `OnDiskTrie.md`, `00 00 00 01 04`: a 32-bit integer payload with value 1.
+    @Test
+    public void testDocumentedLeafExample() throws Exception
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskTrieWriter.write(trie(false, "", 1), false, (o, value) -> o.writeInt(value), out);
+            assertBytes("00 00 00 01 04", out.toByteArray());
+        }
+    }
+
+    /// The chain node example from `OnDiskTrie.md`, `43 42 41 42`: the transition `ABC ->`, here to a leaf, `01 01`.
+    @Test
+    public void testDocumentedChainExample() throws Exception
+    {
+        assertBytes("01 01  43 42 41 42", write(trie(false, "ABC", 1), false));
+    }
+
+    /// The sparse node example from `OnDiskTrie.md`, `04 01 82 00 43 42 41 85` ending at 0x20E, with the children it
+    /// points to at 0x206, 0x184 and 0x102. A value longer than 63 bytes is written as a prefix node: the value, its vint
+    /// length and the code. "C" is 255 bytes, 0x102 with a two-byte length; "Ba" and "Aa" are 126 bytes, 0x82 with a
+    /// one-byte length and the one-transition chain to them.
     @Test
     public void testDocumentedSparseExample() throws Exception
     {
-        assertBytes("03 01  02 01  01 01  04 02 43 42 41 84",
-                    write(trie(false, "A", 1, "B", 2, "C", 3), false));
+        byte[] bytes = writeSized(trie(false, "Aa", 126, "Ba", 126, "C", 255));
+        assertEquals(0x20E, bytes.length);
+        assertBytes("04 01 82 00 43 42 41 85", Arrays.copyOfRange(bytes, 0x206, 0x20E));
     }
 
-    /// The bitmap node example from `OnDiskTrie.md`: a child for each capital letter.
+    /// The bitmap node example from `OnDiskTrie.md`: a child for each capital letter, with three-byte pointers. "A" is
+    /// written last, as a prefix node of 0x2289 bytes (8838 + 2 + 1), and "B" before it, of 0x010380 - 0x2289 bytes
+    /// (57587 + 3 + 1); "C" to "Z" are empty leaves of one byte each.
     @Test
     public void testDocumentedBitmapExample() throws Exception
     {
         Object[] keysAndValues = new Object[52];
-        StringBuilder leaves = new StringBuilder();
         for (int i = 0; i < 26; ++i)
         {
             keysAndValues[2 * i] = String.valueOf((char) ('A' + i));
-            keysAndValues[2 * i + 1] = i + 1;
-            leaves.insert(0, String.format("%02x 01 ", i + 1));
+            keysAndValues[2 * i + 1] = i == 0 ? 8838 : i == 1 ? 57587 : 0;
         }
-        assertBytes(leaves + "32 30 2E 2C 2A 28 26 24 22 20 1E 1C 1A 18 16 14 12 10 0E 0C 0A 08 06 04 02 " +
+        // "Z" to "C" end at positions 1 to 24, and "B" and "A" take the 0x010380 bytes up to the start of the node.
+        long nodeStart = 24 + 0x010380;
+        // The pointers the example leaves out, those of "Z" to "D".
+        StringBuilder omittedPointers = new StringBuilder();
+        for (long leafEnd = 1; leafEnd <= 23; ++leafEnd)
+        {
+            long delta = nodeStart - leafEnd;
+            omittedPointers.append(String.format("%02x %02x %02x ", delta & 0xFF, (delta >> 8) & 0xFF, delta >> 16));
+        }
+
+        byte[] bytes = writeSized(trie(false, keysAndValues));
+        assertEquals(nodeStart + 25 * 3 + 32 + 1, bytes.length);
+        assertBytes(omittedPointers + "80 03 01 89 22 00 " +
                     "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07 FF FF FE 00 00 00 00 00 00 00 00 " +
-                    "E0",
-                    write(trie(false, keysAndValues), false));
+                    "E2",
+                    Arrays.copyOfRange(bytes, (int) nodeStart, bytes.length));
     }
 
-    /// The dense node example from `OnDiskTrie.md`: an empty leaf for every transition but 00.
+    /// The dense node example from `OnDiskTrie.md`, `... 00 00 00 00 FF FF FF FF EB`, read back: four-byte pointers,
+    /// no child for 00, and the 01 child immediately before the node. The node is built by hand, with no child for any
+    /// of the transitions the example leaves out.
     @Test
     public void testDocumentedDenseExample() throws Exception
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            out.write(Hex.hexToBytes("0101"));      // the 01 child, a leaf with the content 01
+            for (int i = 255; i >= 2; --i)
+                out.writeInt(-1);                   // FF FF FF FF, no child
+            out.write(Hex.hexToBytes("00 00 00 00 FF FF FF FF EB".replace(" ", "")));
+            OnDiskCursor.DataDeserializer<Integer> oneByte = (rdr, length) -> (int) rdr.readByte();
+            TrieUtil.assertTriesEqual(trie(false, "\u0001", 1),
+                                      OnDiskTrie.open(out.asNewBuffer(), oneByte, VERSION, false, out.getLength()));
+        }
+    }
+
+    /// A dense node as the writer lays it out: an empty leaf for every transition but 00, and one-byte pointers in
+    /// transition order reading back from the code, with `FF` for the absent 00 child.
+    @Test
+    public void testDenseNodeLayout() throws Exception
     {
         InMemoryTrie<Integer> trie = InMemoryTrie.shortLived(VERSION);
         StringBuilder expected = new StringBuilder();
@@ -146,39 +200,162 @@ public class OnDiskTrieWriterTest
         }
     }
 
-    /// The prefix node example from `OnDiskTrie.md`: content and a child.
-    @Test
-    public void testDocumentedPrefixExample() throws Exception
+    /// A range trie marker of one position only, as [RangeTrie#point] places one, with no range open on either side of
+    /// it, e.g. a row-level marker. It holds a single byte, which is how [#POINT_SERDE] writes it.
+    static final class PointState implements RangeState<PointState>
     {
-        assertBytes("02 01  62 40  01 01 F5  61 40",
-                    write(trie(false, "a", 1, "ab", 2), false));
+        final int value;
+
+        PointState(int value)
+        {
+            this.value = value;
+        }
+
+        @Override
+        public boolean isBoundary()
+        {
+            return true;
+        }
+
+        @Override
+        public PointState precedingState(Direction direction)
+        {
+            return null;
+        }
+
+        @Override
+        public PointState succedingState(Direction direction)
+        {
+            return null;
+        }
+
+        @Override
+        public PointState restrict(boolean applicableBefore, boolean applicableAfter)
+        {
+            return this;    // no sides to restrict
+        }
+
+        @Override
+        public PointState asBoundary(Direction direction)
+        {
+            throw new AssertionError("A point is never a covering state");
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            return o instanceof PointState && ((PointState) o).value == value;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return value;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "P" + value;
+        }
     }
 
-    /// The deletion-aware example from `OnDiskTrie.md`: live content and a deletion branch at the same node, with the
-    /// branch pointer in the node's ascent-side slot as a delta from the start of the slot.
-    @Test
-    public void testDocumentedDeletionBranchSlotExample() throws Exception
+    static class PointSerDe implements OnDiskTrieWriter.DataSerializer<PointState>,
+                                       OnDiskCursor.DataDeserializer<PointState>
     {
-        InMemoryDeletionAwareTrie<Integer, DeletionMarker> trie = InMemoryDeletionAwareTrie.shortLived(VERSION);
-        InMemoryDeletionAwareTrie<Integer, DeletionMarker>.Mutator<Integer, DeletionMarker> mutator =
-            trie.mutator((Integer x, Integer y) -> y,
+        @Override
+        public void serialize(DataOutputPlus out, PointState value) throws IOException
+        {
+            out.writeByte(value.value);
+        }
+
+        @Override
+        public PointState deserialize(DataInputPlus rdr, int length) throws IOException
+        {
+            return new PointState(rdr.readUnsignedByte());
+        }
+    }
+
+    static final PointSerDe POINT_SERDE = new PointSerDe();
+
+    /// Writes the range trie `trie` with [#POINT_SERDE], as range tries are written, ordered.
+    private static byte[] writePoints(RangeTrie<PointState> trie) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskTrieWriter.write(trie, true, POINT_SERDE, out);
+            return out.toByteArray();
+        }
+    }
+
+    /// The generic content node example from `OnDiskTrie.md`, `40 40 02 01 02 01 F7`: a range trie node with the
+    /// content `02` on both sides and a child, reached with the one-transition chain for 0x40. The child, `01 01`, a
+    /// leaf with the content `01`, precedes the chain; the example leaves it out.
+    @Test
+    public void testDocumentedGenericContentExample() throws Exception
+    {
+        RangeTrie<PointState> trie = RangeTrie.merge(Arrays.asList(
+            RangeTrie.point(ByteComparable.EMPTY, VERSION, true, new PointState(2)),    // before the branch
+            RangeTrie.point(key("@"), VERSION, true, new PointState(1)),
+            RangeTrie.point(ByteComparable.EMPTY, VERSION, false, new PointState(2))),  // after it
+            Trie.throwingResolver());
+        byte[] bytes = writePoints(trie);
+        assertBytes("01 01  40 40 02 01 02 01 F7", bytes);
+        TrieUtil.assertTriesEqual(trie,
+                                  OnDiskRangeTrie.open(ByteBuffer.wrap(bytes), POINT_SERDE, VERSION, bytes.length));
+    }
+
+    /// Markers as their two sides, one byte each.
+    static final OnDiskTrieWriter.DataSerializer<DeletionMarker> MARKER_SERIALIZER = (out, marker) -> {
+        out.writeByte(marker.leftSide);
+        out.writeByte(marker.rightSide);
+    };
+
+    /// A deletion-aware trie with the given live content and a deletion of `[ab, ac)`, written as a deletion branch at
+    /// "a", which [#MARKER_SERIALIZER] writes as `05 FF 02  FF 05 02  03 63 62 80`.
+    @SuppressWarnings("unchecked")
+    static <T> InMemoryDeletionAwareTrie<T, DeletionMarker> deletionAwareTrie(Object... keysAndValues) throws TrieSpaceExhaustedException
+    {
+        InMemoryDeletionAwareTrie<T, DeletionMarker> trie = InMemoryDeletionAwareTrie.shortLived(VERSION);
+        InMemoryDeletionAwareTrie<T, DeletionMarker>.Mutator<T, DeletionMarker> mutator =
+            trie.mutator((T x, T y) -> y,
                          (DeletionMarker x, DeletionMarker y) -> y,
-                         (Integer x, DeletionMarker y) -> x,
-                         (DeletionMarker x, Integer y) -> y,
+                         (T x, DeletionMarker y) -> x,
+                         (DeletionMarker x, T y) -> y,
                          false,
                          v -> false);
         mutator.apply(DeletionAwareTrie.deletedRange(key("a"), key("b"), key("c"), VERSION, new DeletionMarker(key("x"), 5, 5)));
-        mutator.apply(DeletionAwareTrie.singleton(key("a"), VERSION, 7));
+        for (int i = 0; i < keysAndValues.length; i += 2)
+            mutator.apply(DeletionAwareTrie.singleton(key((String) keysAndValues[i]), VERSION, (T) keysAndValues[i + 1]));
+        return trie;
+    }
 
-        // Markers as their two sides, one byte each.
-        OnDiskTrieWriter.DataSerializer<DeletionMarker> markerSerializer = (out, marker) -> {
-            out.writeByte(marker.leftSide);
-            out.writeByte(marker.rightSide);
-        };
+    /// The deletion-aware node example from `OnDiskTrie.md`, `34 12 02 07 01 F7`: live content `07`, a child, and a
+    /// deletion branch whose root is 0x1234 bytes before the start of the node. Between the two are the child "ad", a
+    /// 4655-byte value with a two-byte length and the code, and the chain to it, `64 40`; the root's chain to "a",
+    /// `61 40`, follows.
+    @Test
+    public void testDocumentedDeletionBranchExample() throws Exception
+    {
+        InMemoryDeletionAwareTrie<byte[], DeletionMarker> trie = deletionAwareTrie("a", new byte[]{ 7 }, "ad", new byte[4655]);
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            OnDiskDeletionAwareTrieWriter.write(trie, BYTE_SERIALIZER, markerSerializer, out);
-            assertBytes("05 FF 02  FF 05 02  03 63 62 80  00 01 07 01 F6  61 40", out.toByteArray());
+            OnDiskDeletionAwareTrieWriter.write(trie, BYTES_SERDE, MARKER_SERIALIZER, out);
+            byte[] bytes = out.toByteArray();
+            assertBytes("64 40  34 12 02 07 01 F7  61 40", Arrays.copyOfRange(bytes, bytes.length - 10, bytes.length));
+        }
+    }
+
+    /// The deletion-aware node example from `OnDiskTrie.md` without children, `00 07 01 F6`: the deletion branch ends
+    /// where the node starts, and the delta 0 is an empty slot.
+    @Test
+    public void testDocumentedDeletionBranchSlotExample() throws Exception
+    {
+        InMemoryDeletionAwareTrie<Integer, DeletionMarker> trie = deletionAwareTrie("a", 7);
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskDeletionAwareTrieWriter.write(trie, BYTE_SERIALIZER, MARKER_SERIALIZER, out);
+            assertBytes("05 FF 02  FF 05 02  03 63 62 80  00 07 01 F6  61 40", out.toByteArray());
         }
     }
 
@@ -207,6 +384,28 @@ public class OnDiskTrieWriterTest
     {
         Trie<Integer> withBranch = trie(true, "abcdef", 1, "abx", 2).mapValues(v -> v == 2 ? null : v);
         assertBytes(Hex.bytesToHex(write(trie(true, "abcdef", 1), true)), write(withBranch, true));
+    }
+
+    /// Walked in reverse, an ordered trie presents its root's content on the root's return path, after the walk has
+    /// been through "abc", which leaves no node behind. That content belongs to the root, not to "abc".
+    @Test
+    public void testUnproductiveBranchBeforeRootReturnPathContent() throws Exception
+    {
+        Trie<Integer> withBranch = trie(true, "", 1, "abc", 2).mapValues(v -> v == 2 ? null : v);
+        assertBytes(Hex.bytesToHex(write(trie(true, "", 1), true)), write(withBranch, true));
+    }
+
+    /// The same in a range trie, which is always written ordered, the way a deletion branch is: a marker placed before
+    /// the root's branch is presented on the root's return path in reverse. An intersection with a set that ends at
+    /// "abb" walks into "ab" with the set and drops "abc", which leaves the branch empty.
+    @Test
+    public void testUnproductiveBranchBeforeRootReturnPathContentInRangeTrie() throws Exception
+    {
+        RangeTrie<PointState> root = RangeTrie.point(ByteComparable.EMPTY, VERSION, true, new PointState(1));
+        RangeTrie<PointState> withBranch = root.mergeWith(RangeTrie.point(key("abc"), VERSION, true, new PointState(2)),
+                                                          Trie.throwingResolver())
+                                               .intersect(TrieSet.range(VERSION, null, true, key("abb"), false));
+        assertBytes(Hex.bytesToHex(writePoints(root)), writePoints(withBranch));
     }
 
     /// "abca" is reached after "abcdef", so when the walk moves to it the node at "abc" already exists with its "d"
@@ -262,7 +461,7 @@ public class OnDiskTrieWriterTest
             assertEquals(OnDiskWriteNodeType.BITMAP.bits | 1, out.toByteArray()[out.getLength() - 1] & 0xFF);
         }
 
-        try (OnDiskTrie<byte[]> read = TrieUtil.onDiskRoundtrip(trie, false, BYTES_SERDE, BYTES_SERDE))
+        try (FileTries.Plain<byte[]> read = TrieUtil.onDiskRoundtrip(trie, false, BYTES_SERDE, BYTES_SERDE))
         {
             assertNotNull("child 0xff must not read as absent", read.get(ByteComparable.preencoded(VERSION, new byte[]{ (byte) 0xff })));
             // Values are byte[], which assertTriesEqual would compare by identity.
@@ -294,7 +493,7 @@ public class OnDiskTrieWriterTest
             assertEquals(OnDiskWriteNodeType.DENSE.bits | 1, out.toByteArray()[out.getLength() - 1] & 0xFF);
         }
 
-        try (OnDiskTrie<byte[]> read = TrieUtil.onDiskRoundtrip(trie, false, BYTES_SERDE, BYTES_SERDE))
+        try (FileTries.Plain<byte[]> read = TrieUtil.onDiskRoundtrip(trie, false, BYTES_SERDE, BYTES_SERDE))
         {
             for (int b = 0x00; b <= 0xff; ++b)
             {
@@ -306,6 +505,20 @@ public class OnDiskTrieWriterTest
 
     /// Writes `value` zero bytes, so that a child's size in the file can be chosen.
     static final OnDiskTrieWriter.DataSerializer<Integer> SIZED_SERIALIZER = (out, value) -> out.write(new byte[value]);
+
+    /// Reads back the content [#SIZED_SERIALIZER] writes as its size.
+    static final OnDiskCursor.DataDeserializer<Integer> SIZE_DESERIALIZER = (rdr, length) -> length;
+
+    /// Writes `trie` with [#SIZED_SERIALIZER], checks that it reads back, and returns the bytes.
+    private static byte[] writeSized(InMemoryTrie<Integer> trie) throws Exception
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            OnDiskTrieWriter.write(trie, false, SIZED_SERIALIZER, out);
+            TrieUtil.assertTriesEqual(trie, OnDiskTrie.open(out.asNewBuffer(), SIZE_DESERIALIZER, VERSION, false, out.getLength()));
+            return out.toByteArray();
+        }
+    }
 
     /// A bitmap node is written when it is smaller than a dense one. With 224 one-byte children and one-byte pointers a
     /// bitmap takes 32 + 223 = 255 bytes against a dense node's 256.

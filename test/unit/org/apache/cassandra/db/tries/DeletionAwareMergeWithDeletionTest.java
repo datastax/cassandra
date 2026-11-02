@@ -25,7 +25,6 @@ import java.util.stream.IntStream;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Streams;
-import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -82,15 +81,6 @@ public class DeletionAwareMergeWithDeletionTest extends DeletionAwareTestBase
     {
         // The on-disk readers pull in BufferPools, whose static initializer needs configuration.
         DatabaseDescriptor.toolInitialization();
-    }
-
-    private final List<OnDiskDeletionAwareTrie<LivePoint, DeletionMarker>> opened = new ArrayList<>();
-
-    @After
-    public void closeOpened()
-    {
-        opened.forEach(OnDiskDeletionAwareTrie::close);
-        opened.clear();
     }
 
     /// Live content only: the trie has no deletion branch anywhere, so the merged deletion has nowhere to go but a
@@ -252,7 +242,6 @@ public class DeletionAwareMergeWithDeletionTest extends DeletionAwareTestBase
             OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
-            opened.add(read);
             return read;
         }
         catch (IOException e)

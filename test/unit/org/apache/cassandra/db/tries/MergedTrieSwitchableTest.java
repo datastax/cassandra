@@ -25,7 +25,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import com.google.common.collect.Streams;
-import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -77,15 +76,6 @@ public class MergedTrieSwitchableTest extends DeletionAwareTestBase
     {
         // The on-disk readers pull in BufferPools, whose static initializer needs configuration.
         DatabaseDescriptor.toolInitialization();
-    }
-
-    private final List<OnDiskDeletionAwareTrie<LivePoint, DeletionMarker>> opened = new ArrayList<>();
-
-    @After
-    public void closeOpened()
-    {
-        opened.forEach(OnDiskDeletionAwareTrie::close);
-        opened.clear();
     }
 
     /// Live points interleaved with deleted points, so that the walk alternates between the live trie and a
@@ -446,7 +436,6 @@ public class MergedTrieSwitchableTest extends DeletionAwareTestBase
             OnDiskDeletionAwareTrieWriter.write(inMemory(points), LIVE, MARKER, out);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
-            opened.add(read);
             return read;
         }
         catch (IOException e)

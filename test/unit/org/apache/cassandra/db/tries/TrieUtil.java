@@ -964,22 +964,22 @@ public class TrieUtil
     }
     public static final RangeSerDe RANGE_SERDE = new RangeSerDe();
 
-    public static OnDiskTrie<Integer> onDiskRoundtripIntegers(Trie<Integer> trie, boolean isOrdered)
+    public static FileTries.Plain<Integer> onDiskRoundtripIntegers(Trie<Integer> trie, boolean isOrdered)
     {
         return onDiskRoundtrip(trie, isOrdered, INTEGER_SERDE, INTEGER_SERDE);
     }
 
-    public static OnDiskTrie<String> onDiskRoundtripStrings(Trie<String> trie, boolean isOrdered)
+    public static FileTries.Plain<String> onDiskRoundtripStrings(Trie<String> trie, boolean isOrdered)
     {
         return onDiskRoundtrip(trie, isOrdered, STRING_SERDE, STRING_SERDE);
     }
 
-    public static <T> OnDiskTrie<T> onDiskRoundtrip(Trie<T> trie, boolean isOrdered, OnDiskTrieWriter.DataSerializer<T> serializer, OnDiskCursor.DataDeserializer<T> deserializer)
+    public static <T> FileTries.Plain<T> onDiskRoundtrip(Trie<T> trie, boolean isOrdered, OnDiskTrieWriter.DataSerializer<T> serializer, OnDiskCursor.DataDeserializer<T> deserializer)
     {
         try
         {
             File file = OnDiskTrieWriter.write(trie, isOrdered, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
-            return OnDiskTrie.open(file, deserializer, VERSION,  isOrdered, -1);
+            return FileTries.open(file, deserializer, isOrdered);
         }
         catch (IOException e)
         {
@@ -987,17 +987,17 @@ public class TrieUtil
         }
     }
 
-    public static OnDiskRangeTrie<TestRangeState> onDiskRoundtrip(RangeTrie<TestRangeState> trie)
+    public static FileTries.Range<TestRangeState> onDiskRoundtrip(RangeTrie<TestRangeState> trie)
     {
         return onDiskRoundtrip(trie, RANGE_SERDE, RANGE_SERDE);
     }
 
-    public static <S extends RangeState<S>> OnDiskRangeTrie<S> onDiskRoundtrip(RangeTrie<S> trie, OnDiskTrieWriter.DataSerializer<S> serializer, OnDiskCursor.DataDeserializer<S> deserializer)
+    public static <S extends RangeState<S>> FileTries.Range<S> onDiskRoundtrip(RangeTrie<S> trie, OnDiskTrieWriter.DataSerializer<S> serializer, OnDiskCursor.DataDeserializer<S> deserializer)
     {
         try
         {
             File file = OnDiskTrieWriter.write(trie, true, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
-            return OnDiskRangeTrie.open(file, deserializer, VERSION, -1);
+            return FileTries.openRange(file, deserializer);
         }
         catch (IOException e)
         {

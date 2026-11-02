@@ -24,7 +24,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import com.google.common.collect.Streams;
-import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -88,15 +87,6 @@ public class RootDeletionAccessorTest extends DeletionAwareTestBase
     {
         // The on-disk readers pull in BufferPools, whose static initializer needs configuration.
         DatabaseDescriptor.toolInitialization();
-    }
-
-    private final List<OnDiskDeletionAwareTrie<LivePoint, DeletionMarker>> opened = new ArrayList<>();
-
-    @After
-    public void closeOpened()
-    {
-        opened.forEach(OnDiskDeletionAwareTrie::close);
-        opened.clear();
     }
 
     /// Live content only: the accessors must report the absence of a deletion branch, and must do it in the two
@@ -250,7 +240,7 @@ public class RootDeletionAccessorTest extends DeletionAwareTestBase
             {
                 OnDiskDeletionAwareTrieWriter.write(trie, LIVE, MARKER, out);
                 TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(out.asNewBuffer()));
-                OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read = new OnDiskDeletionAwareTrie<>(factory, LIVE, MARKER, VERSION, -1, null);
+                OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read = new OnDiskDeletionAwareTrie<>(factory, LIVE, MARKER, VERSION, -1);
                 assertEquals(trie.hasDeletionBranchAtRoot(), read.hasDeletionBranchAtRoot());
                 assertEquals("rebufferers outstanding", 0, factory.outstanding);
             }
@@ -399,7 +389,6 @@ public class RootDeletionAccessorTest extends DeletionAwareTestBase
             OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
-            opened.add(read);
             return read;
         }
         catch (IOException e)

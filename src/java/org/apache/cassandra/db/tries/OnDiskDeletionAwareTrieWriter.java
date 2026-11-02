@@ -41,9 +41,10 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// other pointer in the format is encoded, and for the same reasons: a branch written just before its node is
 /// a byte or two away where an absolute position in a large trie takes four or five, and a subtree with only
 /// backward deltas inside is self-contained, so it can be relocated, or copied unmodified in compaction, which
-/// a single absolute pointer would prevent. This is the same reuse the in-memory trie makes of a prefix node's
-/// secondary pointer, which holds return-path content in a range trie and the alternate branch in a
-/// deletion-aware one (see `PREFIX_ALTERNATE_OFFSET` and the prefix node section of `InMemoryTrie.md`).
+/// a single absolute pointer would prevent. A node without children has its branch immediately before it; the
+/// delta is then 0 and takes no bytes, leaving the slot empty. This is the same reuse the in-memory trie makes of
+/// a prefix node's secondary pointer, which holds return-path content in a range trie and the alternate branch in
+/// a deletion-aware one (see `PREFIX_ALTERNATE_OFFSET` and the prefix node section of `InMemoryTrie.md`).
 ///
 /// A payload with no deletion branch is therefore byte-for-byte what a plain trie would write for the
 /// same content, and the node code's descent- and ascent-content bits are exactly
@@ -60,7 +61,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 ///
 /// ## Ordering
 ///
-/// [OnDiskTrieWriter] writes nodes bottom-up as the walk ascends, so every pointer it emits
+/// [OnDiskBaseTrieWriter] writes nodes bottom-up as the walk ascends, so every pointer it emits
 /// points backwards. [DeletionAwareCursor#process] visits a node's content, then its
 /// deletion branch, then descends into its children, and the node itself is written
 /// after its children. Serializing the deletion branch when the walk leaves it therefore
@@ -71,9 +72,9 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// been fully written — the same convention [OnDiskTrie#open] uses when it takes the
 /// file length as the root.
 ///
-/// This holds the data trie's [OnDiskTrieWriter], whose slots take either the caller's content or a [BranchRoot],
-/// and another that it reuses for each deletion branch.
-public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>>
+/// This is the writer of the data trie, whose slots take either the caller's content or a [BranchRoot], and holds an
+/// [OnDiskTrieWriter] that it reuses for each deletion branch.
+public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>> extends OnDiskBaseTrieWriter<Object>
 {
     /// The content of a node's ascent-side payload slot: the absolute position of the node's deletion branch, which
     /// [SlotSerializer] turns into a delta when it knows where the slot is written. The descent-side slot holds the
@@ -90,7 +91,7 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>>
 
     /// Writes whichever of the two kinds of slot it is handed: the caller's content, or the branch pointer as a
     /// minimal-width reversed integer, whose length the node's own length prefix records. The pointer is the delta
-    /// from the position the slot starts at back to the branch root.
+    /// from the position the slot starts at back to the branch root; a delta of 0 takes no bytes.
     private static class SlotSerializer<T> implements OnDiskTrieWriter.DataSerializer<Object>
     {
         final OnDiskTrieWriter.DataSerializer<T> contentSerializer;
@@ -112,19 +113,16 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>>
 
             // OnDiskWriteNodeType.writePayload emits the ascent-side slot first, so this is where the node's data
             // starts. The branch was written before the node; when the node has no children, the branch ends right
-            // here and the delta is 0.
+            // here and the delta is 0, which is written as no bytes at all: the slot is empty, of length 0.
             long branchRoot = ((BranchRoot) value).position;
             long delta = out.position() - branchRoot;
             assert delta >= 0 : "Deletion branch root " + branchRoot + " is after its node at " + out.position();
-            OnDiskTrieWriter.writeReversedSized(out, delta, OnDiskTrieWriter.bytesFor(delta));
+            if (delta > 0)
+                writeReversedSized(out, delta, bytesFor(delta));
         }
     }
 
-    final DataOutputPlus out;
     final OnDiskTrieWriter.DataSerializer<D> deletionSerializer;
-
-    /// The writer for the data trie itself.
-    final OnDiskTrieWriter<Object> inner;
 
     /// The writer for each deletion branch in turn. Null until the first deletion branch, so that a trie without
     /// any does not allocate it.
@@ -134,18 +132,17 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>>
                                           OnDiskTrieWriter.DataSerializer<T> contentSerializer,
                                           OnDiskTrieWriter.DataSerializer<D> deletionSerializer)
     {
-        this.out = out;
-        this.deletionSerializer = deletionSerializer;
         // Never ordered: OnDiskDeletionAwareTrie always reads the data trie with isOrdered = false, and an ordered
-        // write would swap the two content slots in OnDiskTrieWriter.writeAndRecycleNode, putting the branch pointer
-        // where the reader expects the live content.
-        this.inner = new OnDiskTrieWriter<>(out, new SlotSerializer<>(contentSerializer), false);
+        // write would swap the two content slots in OnDiskBaseTrieWriter.writeAndRecycleNode, putting the branch
+        // pointer where the reader expects the live content.
+        super(out, new SlotSerializer<>(contentSerializer), false);
+        this.deletionSerializer = deletionSerializer;
     }
 
     /// Serialize a deletion-aware trie.
     ///
-    /// [DeletionAwareCursor#process] cannot drive this: it never reports ascents, and [OnDiskTrieWriter]
-    /// only emits nodes on ascent — which is why the writers are driven by [OnDiskTrieWriter#step]. The same
+    /// [DeletionAwareCursor#process] cannot drive this: it never reports ascents, and [OnDiskBaseTrieWriter]
+    /// only emits nodes on ascent — which is why the writers are driven by [OnDiskBaseTrieWriter#step]. The same
     /// applies to a deletion branch, so both levels are walked explicitly here.
     ///
     /// Writes in [Direction#REVERSE] like [OnDiskTrieWriter#write], so the root ends up last and the trie
@@ -163,10 +160,10 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>>
         long startPosition = out.position();
         try (DeletionAwareCursor<T, D> c = trie.cursor(Direction.REVERSE))
         {
-            emitAt(fw, c);
+            fw.emitAt(c);
             long position = c.encodedPosition();
-            while (!Cursor.isExhausted(position = fw.inner.step(c, position)))
-                emitAt(fw, c);
+            while (!Cursor.isExhausted(position = fw.step(c, position)))
+                fw.emitAt(c);
         }
         // An empty trie leaves the stream untouched, and the position there is not a node.
         long position = out.position();
@@ -174,8 +171,7 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>>
     }
 
     /// Report the content and, if present, the whole deletion branch at the cursor's position.
-    private static <T, D extends RangeState<D>> void emitAt(OnDiskDeletionAwareTrieWriter<T, D> fw,
-                                                            DeletionAwareCursor<T, D> c) throws IOException
+    private void emitAt(DeletionAwareCursor<T, D> c) throws IOException
     {
         long position = c.encodedPosition();
 
@@ -188,31 +184,10 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>>
                                                Cursor.toString(position));
 
         long branchRoot = 0;
-        if ((position & Cursor.MAY_HAVE_DELETION_BRANCH_BIT) != 0)
+        try (RangeCursor<D> branch = DeletionAwareCursor.deletionBranchCursor(c, position))
         {
-            RangeCursor<D> branch = c.deletionBranchCursor(Direction.REVERSE);
             if (branch != null)
-            {
-                try (branch)
-                {
-                    // Always written ordered, independently of the data trie: a deletion branch is a range
-                    // trie, it is read back through OnDiskCursor.Range, and that always reads with
-                    // isOrdered = true. Writing it unordered loses the ascent-path stops and the read-back
-                    // positions disagree on ON_RETURN_PATH_BIT.
-                    if (fw.branchWriter == null)
-                        fw.branchWriter = new OnDiskTrieWriter<>(fw.out, fw.deletionSerializer, true);
-                    // A nested trie in the same stream. Its bytes land before the node that will reference them, so
-                    // the recorded root is a backward pointer like every other.
-                    long branchStart = fw.out.position();
-                    fw.branchWriter.writeFrom(branch);
-                    // A branch can be entered and produce nothing: `intersect` gives one when the set matches only a
-                    // prefix of the branch's data (see testDeletionBranchEmptiedByIntersection). It leaves the stream
-                    // untouched, at whatever node was written last, and a root recorded there would make the reader
-                    // set MAY_HAVE_DELETION_BRANCH_BIT and decode that byte as a node code.
-                    if (fw.out.position() > branchStart)
-                        branchRoot = fw.out.position();
-                }
-            }
+                branchRoot = writeDeletionBranch(branch);
         }
 
         // Emit once both halves are known. This must happen while the walk is still at this
@@ -221,9 +196,29 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>>
         // slots to the in-progress node, whose bytes are emitted later on ascent, so the recorded
         // root remains a backward pointer.
         if (content != null)
-            fw.inner.content(content);
+            descentContent(content);
         if (branchRoot > 0)
-            fw.inner.ascentContent(new BranchRoot(branchRoot));
+            ascentContent(new BranchRoot(branchRoot));
     }
 
+    /// Write the deletion branch the given fresh cursor walks, and return the position of its root, or 0 if it wrote
+    /// nothing.
+    private long writeDeletionBranch(RangeCursor<D> branch) throws IOException
+    {
+        // Always written ordered, independently of the data trie: a deletion branch is a range
+        // trie, it is read back through OnDiskRangeCursor, and that always reads with
+        // isOrdered = true. Writing it unordered loses the ascent-path stops and the read-back
+        // positions disagree on ON_RETURN_PATH_BIT.
+        if (branchWriter == null)
+            branchWriter = new OnDiskTrieWriter<>(out, deletionSerializer, true);
+        // A nested trie in the same stream. Its bytes land before the node that will reference them, so
+        // the recorded root is a backward pointer like every other.
+        long branchStart = out.position();
+        branchWriter.writeFrom(branch);
+        // A branch can be entered and produce nothing: `intersect` gives one when the set matches only a
+        // prefix of the branch's data (see testDeletionBranchEmptiedByIntersection). It leaves the stream
+        // untouched, at whatever node was written last, and a root recorded there would make the reader
+        // set MAY_HAVE_DELETION_BRANCH_BIT and decode that byte as a node code.
+        return out.position() > branchStart ? out.position() : 0;
+    }
 }

@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -72,15 +71,6 @@ public class OnDiskDeletionAwareMergeTest extends DeletionAwareTestBase
     {
         // The on-disk readers pull in BufferPools, whose static initializer needs configuration.
         DatabaseDescriptor.toolInitialization();
-    }
-
-    private final List<OnDiskDeletionAwareTrie<LivePoint, DeletionMarker>> opened = new ArrayList<>();
-
-    @After
-    public void closeOpened()
-    {
-        opened.forEach(OnDiskDeletionAwareTrie::close);
-        opened.clear();
     }
 
     /// Live points interleaved with ranges, ranges that switch deletion time inside a branch, and points that carry
@@ -235,7 +225,6 @@ public class OnDiskDeletionAwareMergeTest extends DeletionAwareTestBase
             OnDiskDeletionAwareTrieWriter.write(inMemory(points), LIVE, MARKER, out);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
-            opened.add(read);
             return read;
         }
         catch (IOException e)

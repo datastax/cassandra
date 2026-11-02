@@ -75,7 +75,8 @@ import static org.apache.cassandra.db.partitions.TrieBackedPartition.noExistingS
 import static org.apache.cassandra.db.partitions.TrieBackedPartition.noIncomingSelfDeletion;
 
 /// Immutable implementation of a [Row] object, where the data structure is represented by a trie.
-/// Stores either [Cell], or [TrieCellData] (if the row comes from a memtable trie).
+/// Stores [CellData]: a [Cell], a [TrieCellData] if the row comes from a memtable trie, or a [BufferCellData] if it
+/// comes from a deserialized partition update.
 ///
 /// Trie-backed rows using a mapping of column ids to numbers that is to be obtained from the table metadata. Currently,
 /// we don't support mixing different column sets in trie rows, thus all rows in use in one object (partition, memtable)
@@ -149,10 +150,12 @@ public class TrieBackedRow extends AbstractRow
     }
 
     /// Rebuild a row whose data keys its columns by indices other than the ones `metadata` gives them -- the indices of
-    /// the node that serialized it, when the schemas of the two nodes disagree -- as a row keyed by `metadata`.
+    /// the node that serialized it, when the schemas of the two nodes disagree, or of the metadata it was built or read
+    /// with, when a schema change has renumbered the columns since -- as a row keyed by `metadata`.
     ///
     /// `columns` are the columns the row may have, and `sourceColumnIds` (see [#columnIds]) gives the index each of
-    /// them is keyed by in `data`. Columns that `metadata` does not have, i.e. ones dropped on this node, are left out.
+    /// them is keyed by in `data`. Columns that `metadata` does not have, i.e. ones dropped on this node or since, are
+    /// left out.
     public static TrieBackedRow withColumnIndexes(TableMetadata metadata,
                                                   Clustering<?> clustering,
                                                   DeletionAwareTrie<Object, TrieTombstoneMarker> data,
@@ -262,6 +265,13 @@ public class TrieBackedRow extends AbstractRow
         this.columnIds = columnIds;
         this.clustering = clustering;
         this.data = data;
+    }
+
+    /// The map from column name to the index a row with the given columns keys each of them by in its trie, shared by
+    /// everything that uses the same `Columns` instance, so it must not be modified.
+    public static Object2IntHashMap<ColumnIdentifier> columnIdsMap(Columns columns)
+    {
+        return columnsMapCache.computeIfAbsent(columns, TrieBackedRow::makeColumnIdsMap);
     }
 
     private static Object2IntHashMap<ColumnIdentifier> makeColumnIdsMap(Columns columns)

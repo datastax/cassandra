@@ -45,6 +45,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.DurationSpec;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.memtable.ColumnNewerThanMemtableException;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.repair.CassandraKeyspaceRepairManager;
 import org.apache.cassandra.db.view.ViewManager;
@@ -687,6 +688,44 @@ public class Keyspace
                     columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, MILLISECONDS);
             }
         }
+        try
+        {
+            try
+            {
+                applyInWriteGroup(mutation, writeOptions, requiresViewUpdate, future);
+            }
+            catch (ColumnNewerThanMemtableException e)
+            {
+                // The mutation holds a column newer than the memtable of one of its tables. If the memtable has been
+                // switched, the mutation was made between a schema change publishing the column and switching the
+                // memtable: apply it once more, in a write group started after the switch, which goes past that
+                // memtable and has a commit log record of its own. The updates applied before the failure are applied
+                // again, and that is harmless. A mutation that fails again fails. One newer than the table's schema,
+                // which no memtable of the table can take, fails without being applied again.
+                if (!e.switched)
+                    throw e;
+                Tracing.trace("Applying the mutation again, as it is newer than a memtable it reached: {}", e.getMessage());
+                applyInWriteGroup(mutation, writeOptions, requiresViewUpdate, future);
+            }
+            return future;
+        }
+        finally
+        {
+            if (locks != null)
+            {
+                for (Lock lock : locks)
+                    if (lock != null)
+                        lock.unlock();
+            }
+        }
+    }
+
+    /**
+     * Appends the mutation to the commit log and applies its updates to their tables, and the views and indexes of
+     * those, in a write group of its own, then completes the future if there is one.
+     */
+    private void applyInWriteGroup(Mutation mutation, WriteOptions writeOptions, boolean requiresViewUpdate, Promise<?> future)
+    {
         try (WriteContext ctx = getWriteHandler().beginWrite(mutation, writeOptions))
         {
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
@@ -723,16 +762,6 @@ public class Keyspace
 
             if (future != null) {
                 future.trySuccess(null);
-            }
-            return future;
-        }
-        finally
-        {
-            if (locks != null)
-            {
-                for (Lock lock : locks)
-                    if (lock != null)
-                        lock.unlock();
             }
         }
     }

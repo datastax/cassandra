@@ -48,11 +48,11 @@ root's position is exactly the end of the file. The first byte, read in reverse 
 code, and the rest of the node's data precedes it.
 
 Children are always written before their parents, thus every pointer in the trie points backwards and is encoded as a
-delta that is subtracted from a position in the node that holds it: for a child pointer, the position at the start of
-the node's data; for the deletion branch pointer of a deletion-aware trie, the position at the start of its
-slot (see the generic content nodes below). We use a variable number of bytes per pointer (encoded in the node code, or
-for a deletion branch pointer in the slot's length) to store this delta. The first child of a node is written last,
-thus it immediately precedes the parent's data -- in other words its delta is always 0 and does not need to be stored.
+delta that is subtracted from the position at the start of the current node's data. This includes the deletion branch
+pointer of a deletion-aware trie (see the generic content nodes below). We use a variable number of bytes per pointer
+(encoded in the node code, or for a deletion branch pointer in the slot's length) to store this delta. The first child
+of a node is written last, thus it immediately precedes the parent's data -- in other words its delta is always 0 and
+does not need to be stored.
 <!-- to change for page-packed-->
 
 ### Leaf nodes (code `00nnnnnn`)
@@ -90,52 +90,43 @@ If this example is placed on bytes 11-14 of a file, the pointer 15 points to the
 
 `<pointer n+1><pointer n>...<pointer 1> <transition n+1><transition n>...<transition 0> 1nnnnnbb`
 
-A sparse node represents a node that has between 2 and 25 children inclusive (encoded as `n = childCount - 2` for
-`n < 24`). The transition characters are explicitly listed, as well as the pointers to the children, except the first
-child which has an implicit 0 pointer. Each pointer is encoded as an unsigned integer of `b+1` bytes which specifies the
-distance between the start of this node and the respective child. Each pointer is stored reversed.
+A sparse node represents a node that between 2 and 25 children inclusive (encoded as `n = childCount - 2` for `n < 24`).
+The transition characters are explicitly listed, as well as the pointers to the children, except the first child which
+has an implicit 0 pointer. Each pointer as encoded as an unsigned integer of `b+1` bytes which specifies the distance
+between the start of this node and the respective child. Each pointer is stored reversed.
 
 Note that not all codes starting with 1 encode sparse nodes; values of `n` between 24 and 31 encode other node types.
 If a child of a sparse node is more than `0xFFFFFFFF` bytes away (i.e. where the delta cannot fit in 4 bytes), a sparse
 node cannot be used (a bitmap node will be used instead).
 
-Example: the trie `A -> 01, B -> 02, C -> 03` is written as `03 01·02 01·01 01·04 02 43 42 41 84`: three leaves and
-a sparse node with 3 children (`10000100` has n=1 and b=0, i.e. one-byte pointers). The leaves end at positions 2, 4
-and 6, and the sparse node, which starts at 6 and ends at 12, specifies:
+Example: `04 01 82 00 43 42 41 85` encodes a sparse node with 3 children (10000101 has n=1 and b=1). If it resides
+(i.e. ends) on position `0x20E`, then the node specifies:
 ```
-A -> 6
-B -> 4
-C -> 2
+A -> 0x206
+B -> 0x184
+C -> 0x102
 ```
-All pointer targets are calculated from the position where the node starts (`12 - 6 = 6`). The first child has an
-implicit 0 delta, the second has the delta `02`, and the third -- `04`.
+All pointer targets are calculated from the position to the left of the node (`0x20E - 8 = 0x206`). The first child has
+an implicit 0 delta, the second has the delta `0x0082`, and the third -- `0x0104`.
 
 ### Bitmap nodes (code `11100bbb`)
 
 `<pointer n-1><pointer n-2>...<pointer 1> <256-bit bitmap> 11100bbb`
 
-A bitmap node can represent any node a sparse node cannot: one with more than 25 children, or fewer whose pointers
-need more than 4 bytes. Which of it and a dense node is used is decided by their encoded sizes (see below). The child
-transitions are stored as bits in the 32-byte bitmap (the respective bit is set for every child transition present in
-the node). Like everything else, the bitmap is read back to front: the byte immediately before the node code holds the
-bits for transitions `00`-`07`, lowest bit first, and the 32nd byte before the code those for `F8`-`FF`. Each
-pointer is encoded using `b+1` bytes specifying the distance from the start of this node. As before, the first pointer
-is an implicit 0.
+A bitmap node is used to represent any node a sparse node cannot -- one with more than 25 children, or fewer whose
+pointers need more than 4 bytes -- unless a dense node is no larger (see below). The child transitions are stored as
+bits in the 32-byte bitmap (the respective bit is set for every child transition present in the node). Like everything
+else, the bitmap is read back to front: the byte immediately before the node code holds the bits for transitions
+`00`-`07`, lowest bit first, and the 32nd byte before the code those for `F8`-`FF`. Each pointer is encoded using `b+1`
+bytes specifying the distance from the start of this node. As before, the first pointer is an implicit 0.
 
-A bitmap node is used when it is smaller than a dense node for the same children, i.e. when
-`32 + (childCount - 1) * (b+1)` is less than the size of the dense node's 256 pointers, whose width can be a byte more
-than the bitmap's (see below).
-
-Example: the trie mapping each of the 26 capital letters A-Z (`41`-`5A`) to a one-byte value, `A -> 01` to
-`Z -> 1A`, is written as 26 leaves (`1A 01 19 01 ... 01 01`) followed by
-```
-32 30 2E 2C 2A 28 26 24 22 20 1E 1C 1A 18 16 14 12 10 0E 0C 0A 08 06 04 02
-00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07 FF FF FE 00 00 00 00 00 00 00 00
-E0
-```
-a bitmap node with one byte per pointer. The first child, "A", immediately precedes the node, "B" is 2 bytes further
-towards the front of the file, and so on to "Z", 50 (`32`) bytes away. In the bitmap, `07 FF FF FE` are the bits for
-transitions `58`-`5F`, `50`-`57`, `48`-`4F` and `40`-`47`; reading back, `FE` is the ninth byte before the code.
+Example:
+`... 80 03 01 89 22 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07 FF FF FE 00 00 00 00 00 00
+00 00 E2`
+encodes a bitmap node that has transitions for the 26 capital letters A-Z (0x41-0x5A). The first child immediately
+precedes this node (1 + 32 + 3x25 bytes before this node's position), the second is `0x002289` bytes further towards
+the front of the file, the third -- `0x010380` bytes from the position of the first child. The rest are omitted
+for brevity.
 
 ### Dense nodes (code `11101bbb`)
 
@@ -148,10 +139,13 @@ The number of bytes per pointer is chosen so that the furthest child's delta is 
 Unlike the other node types, dense nodes do not have a child with an implicit 0 pointer, because the first child in
 this definition always corresponds to the 00 transition, and a dense node may be missing a child for it.
 
-Example: a trie with an empty leaf (`00`) for every transition but `00` is written as 255 leaves followed by
-`FE FD ... 02 01 00 FF E8`: a dense node with one byte per pointer, which has no child for `00` (`FF`), whose `01` child
-immediately precedes the node (delta `00`), whose `02` child is a byte further, and so on to `FF`, 254 (`FE`) bytes
-away. Reading back from the code, the pointers are in transition order.
+A bitmap node is used when it is smaller than a dense node for the same children, i.e. when
+`32 + (childCount - 1) * (b+1)` is less than the size of the dense node's 256 pointers, whose width can be a byte more
+than the bitmap's.
+
+Example: `... 00 00 00 00 FF FF FF FF EB`
+encodes a dense node that has 4 bytes per pointer, that has no child for 00 and whose 01 child immediately precedes the
+node (1 + 256x4 bytes before this node's position). The other transitions are omitted from the example.
 
 ### Generic content nodes (code `11110dap`)
 
@@ -179,30 +173,26 @@ The exact meaning of descent and ascent path is determined by the specific trie 
 - Range tries may have both ascent- and descent-side content. When the trie is walked in the forward direction, the
   two are presented according to the name; when it is walked in reverse, the two are swapped.
 - Deletion-aware tries do not have ascent-side data in their live path, but instead store pointers to deletion branches
-  in the ascent-side slot. Like the child pointers, the pointer is a delta, subtracted from the position where the slot
-  begins (i.e. the start of the node's payload), and is stored as a minimal-width reversed integer whose width is given
-  by the slot's length. Deletion branches in turn are range tries and follow the range trie behaviour. Because the
-  ascent-side slot is taken, the live data of a deletion-aware trie can only have descent-side content; the writer
-  rejects a trie that presents live content on the return path.
+  in the ascent-side slot. Like a child pointer, the pointer specifies the distance between the start of this node,
+  which is where the ascent-side slot begins, and the root of the deletion branch. It is stored reversed in as few
+  bytes as it needs, and the slot's length gives their number. A node with no children has its deletion branch
+  immediately before it; the delta is then 0 and takes no bytes, i.e. the slot is empty, with length 0. Deletion
+  branches in turn are range tries and follow the range trie behaviour. Because the ascent-side slot is taken, the live
+  data of a deletion-aware trie can only have descent-side content; the writer rejects a trie that presents live
+  content on the return path.
 
-Example (a fragment: the chain's child, which would precede it, is left out): `40 40 02 01 02 01 F7` encodes the
-combination of a prefix node that adds ascent and descent-side content both encoded as a single `02` byte (for example,
-this could be a row-level marker), and a single-transition chain for the 0x40 transition. In other words,
+Example: `40 40 02 01 02 01 F7` encodes the combination of a prefix node that adds ascent and descent-side content both
+encoded as a single `02` byte (for example, this could be a row-level marker), and a single-transition chain for the
+0x40 transition. In other words,
 ```
 < -> content 02
 @ -> ...
 > -> content 02
 ```
 
-A plain trie only has the descent side: `a -> 01, ab -> 02` is written as `02 01·62 40·01 01 F5·61 40`, where `01 01 F5`
-is a prefix node with the descent-side content `01` and a child, the chain for `b` immediately before it.
-
-In a deletion-aware trie, the trie with the live value `07` at `a` and a deletion of `[ab, ac)` (written as a deletion
-branch at `a`, whose markers at `b` and `c` serialize as two bytes) is written as
-`05 FF 02·FF 05 02·03 63 62 80·00 01 07 01 F6·61 40`. The first three nodes are the deletion branch, a range trie
-whose root, a sparse node, ends at position 10. The node at `a` is the prefix node `00 01 07 01 F6`: code `11110110` has
-both content flags and no child; reading back, the descent-side content is `07`, and the ascent-side slot holds the
-one-byte delta `00` -- the slot begins at position 10, exactly where the branch root is.
+Example: `34 12 02 07 01 F7` encodes a node of a deletion-aware trie with the live content `07` and children (given by
+the node immediately preceding it), whose deletion branch's root is `0x1234` bytes before the start of this node.
+Without children, the deletion branch would immediately precede the node, which would be encoded as `00 07 01 F6`.
 
 ### Reserved (code `11111xxx`)
 
@@ -301,8 +291,9 @@ furthest child's position and store it as part of the node code.
 
 ## Construction
 
-On-disk trie construction is done by `OnDiskTrieWriter`. The procedure is the classic incremental trie construction
-mechanism, with a couple of quirks.
+On-disk trie construction is done by `OnDiskBaseTrieWriter` and its subclasses, `OnDiskTrieWriter` for plain and range
+tries and `OnDiskDeletionAwareTrieWriter` for deletion-aware ones. The procedure is the classic incremental trie
+construction mechanism, with a couple of quirks.
 
 The trie is walked depth-first in reverse order, maintaining the path we took, as well as a write-time representations
 of the information we have collected for nodes on the current path. Once we enter a node, we save its content in 
@@ -396,6 +387,6 @@ at its root, as boundaries, the ranges that are open there.
 
 A deletion-aware trie is a data trie written unordered, with live content on the descent side only, whose nodes can
 point to a deletion branch: a range trie written in the same stream just before the node, whose root the node's
-ascent-side slot gives as a delta from the start of the slot (see the generic content nodes above). The reader flags
+ascent-side slot gives as a delta from the start of the node (see the generic content nodes above). The reader flags
 such a node with `MAY_HAVE_DELETION_BRANCH_BIT` from the node code alone, and only reads the slot when the cursor is
 asked for the branch.

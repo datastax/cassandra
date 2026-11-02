@@ -127,7 +127,8 @@ if the row should be listed as live even if all cells that it contains have been
 liveness info as a `LivenessInfo` object at the root of a row and use it as a marker to list rows within
 a partition.
 
-[^2]: Provided that the metadata does not change, which we can be guaranteed for the lifetime of a memtable.
+[^2]: The ids are those of the metadata the memtable was created with, which can differ from those of the metadata
+an update was made with; see [Column numbering and schema changes](#column-numbering-and-schema-changes).
 
 Rows can have a row deletion, which is represented as a branch deletion over the root of the row in the
 deletion branch of the trie. Like complex columns, it is also possible for rows to exist in the deletion
@@ -658,6 +659,57 @@ tombstones that may be between it and the current position of the iterator.
 This currently only works for partitions that are present only in a memtable, because the deletions need
 to be applied to data from other sources. This should be improved with later work on on-disk tries and query
 interfaces.
+
+### Column numbering and schema changes
+
+The column id in a cell's key is the column's index among the static or regular columns of the table's metadata
+(see [Row](#row)), so the keys only mean something together with the metadata that numbered them. A memtable keys,
+reads and flushes its content with the metadata it was created with, `actualMetadata`, which its `metadata()`
+returns. The table's current metadata, `metadata.get()`, can be newer, and reads and flushes take the dropped
+columns from it, leaving out the data of a column dropped after it was written to the memtable.
+
+A schema change that changes the static or regular columns switches the memtable (see `shouldSwitch`), and the
+new memtable numbers the columns as the new metadata does. (Every schema change switches it in fact, as new
+metadata has a new comparator, unless a concurrent switch, for the trie size limit for instance, created the next
+memtable with the old metadata first; see `ColumnFamilyStore.switchMemtableIfCurrent`. Such a memtable asks to be
+switched when an update whose columns differ from its own reaches it.)
+
+An update's trie numbers the columns as the metadata the update was made or deserialized with. When the update
+was made before a schema change and is applied after it, its column lists differ from the memtable's, and the
+memtable rebuilds it with its own numbering before merging it. The rebuild leaves out the columns the memtable's
+metadata does not have, i.e. ones dropped since, and the data of a column dropped and added again that is not
+newer than the drop. Equal lists are merged as they are, also when a column was dropped and added again in the
+same place, as reads and flushes leave out the update's data of the column that is not newer than the drop. The
+memtable remembers the last lists it found equal to its own without being the same instance, so that the updates
+of a statement prepared before a schema change that kept the columns are not compared column by column every time.
+
+A schema change publishes the new metadata before it switches the memtable, so a write made in between with the
+new metadata can reach a memtable created with the old one. If the write holds data of a column that is newer than
+the memtable (one its metadata neither has nor lists as dropped, or one dropped and added again since), the memtable
+cannot key it. Rather than leave that column's data out of a write that is acknowledged, the memtable fails the
+write with `ColumnNewerThanMemtableException` before it takes any of it, and asks to be switched for the schema
+change if the table's metadata is newer than its own. A write that fails asks for the switch also when another one
+has asked first, and waits for it: `ColumnFamilyStore` switches the memtable under the table's lock, and issues the
+write barrier that sends the write groups started after it to the next memtable before it lets go of the lock.
+If the memtable asked to be switched, `Keyspace.applyInternal` then applies the mutation once more, in a write group
+that starts after the switch and goes past the memtable that failed it. A write that fails again fails, with
+`INCOMPATIBLE_SCHEMA`. So does, without being applied again, one made with metadata newer than the table's, which no
+memtable of the table can take, and for which the memtable does not ask to be switched. A column a write only lists,
+as a read repair lists the columns its read fetched, is left out by the rebuild.
+
+The retry still fails in these cases:
+- A concurrent switch, for the trie size limit for instance, created the next memtable with the old metadata (see
+  above). The retry fails on that memtable, which asks to be switched in its turn, and is not applied again.
+- A mutation of several tables is applied once more only once. When it holds newer columns of two tables whose
+  memtables are both older than their tables' metadata, as a schema change that publishes the metadata of several
+  tables of a keyspace at once and then switches their memtables in turn can leave them, the retry goes past the
+  first one's memtable and fails on the second's.
+
+The failed attempt's commit log record lies in the range of the memtable that failed it, and the retry has a
+record of its own in the new memtable's range. The first is replayed only if the node stops before the failed
+memtable is flushed, into a memtable created with metadata that has the column, and replaying both records is
+harmless, as is replaying any record twice. Change data capture reads both records and sees the mutation twice, which
+its at-least-once delivery allows.
 
 ### Applying deletions and handling dangling markers
 

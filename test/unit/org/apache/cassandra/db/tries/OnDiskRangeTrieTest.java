@@ -43,7 +43,7 @@ import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-/// Covers the state machine of [OnDiskCursor.Range] over nodes with more children than a sparse node
+/// Covers the state machine of [OnDiskBaseRangeCursor] over nodes with more children than a sparse node
 /// can hold.
 ///
 /// The round-trip comparisons in the other on-disk tests only walk both directions, which never asks
@@ -118,7 +118,7 @@ public class OnDiskRangeTrieTest
         InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(prefixLength, transitions, suffixLength));
         File file = OnDiskTrieWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")));
 
-        try (OnDiskRangeTrie<TestRangeState> actual = OnDiskRangeTrie.open(file, RANGE_SERDE, VERSION, -1))
+        try (FileTries.Range<TestRangeState> actual = FileTries.openRange(file, RANGE_SERDE))
         {
             TrieUtil.assertTriesEqual(expected, actual);
             assertApplicableRangesEqual(expected, actual, prefixLength, suffixLength);
@@ -177,7 +177,7 @@ public class OnDiskRangeTrieTest
     private void assertTailsEqual(Direction walkDirection) throws IOException
     {
         InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(0, BITMAP_TRANSITIONS, 1));
-        try (OnDiskRangeTrie<TestRangeState> actual = TrieUtil.onDiskRoundtrip(expected))
+        try (FileTries.Range<TestRangeState> actual = TrieUtil.onDiskRoundtrip(expected))
         {
             RangeCursor<TestRangeState> expectedCursor = expected.cursor(walkDirection);
             RangeCursor<TestRangeState> actualCursor = actual.cursor(walkDirection);
@@ -197,8 +197,8 @@ public class OnDiskRangeTrieTest
     }
 
     /// Compares the two tails, and before walking them (which consumes them) the tails they in turn give
-    /// at their root: a branch tail holds its root's content in the cursor rather than in the file, and
-    /// a tail taken from it has to pick it up from there.
+    /// at their root: a tail presents content at its root that is not the node's own, and a tail taken
+    /// there has to present the same.
     private void assertTailsEqual(RangeCursor<TestRangeState> expected, RangeCursor<TestRangeState> actual)
     {
         for (Direction nestedDirection : Direction.values())
@@ -209,8 +209,8 @@ public class OnDiskRangeTrieTest
 
     /// [BaseTrie#tailTrie] hands back a trie that keeps a cursor as the position to make its cursors from, and has
     /// no close of its own for the caller to reach that cursor with. The cursor must therefore be released before the
-    /// trie is returned, and must still be able to produce tails afterwards -- which, for a range cursor, means the
-    /// deletions active at the tail's root have to be taken out of the file before the buffer goes back.
+    /// trie is returned, and must still be able to produce tails afterwards -- which, for a range cursor, means reading
+    /// the deletions active at the tail's root out of the file again, with a buffer of the tail's own.
     ///
     /// The probes stop above the wide node, on it, inside a key and past the end of one, and land on transitions the
     /// trie does not have, so that both the tail branch of [RangeTrie#tailTrie] and its covering-state one are taken.
@@ -222,8 +222,9 @@ public class OnDiskRangeTrieTest
         InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(prefixLength, BITMAP_TRANSITIONS, suffixLength));
         File file = OnDiskTrieWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")));
 
-        TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(OnDiskBaseTrie.openChunkReader(new ChannelProxy(file)));
-        try (OnDiskRangeTrie<TestRangeState> actual = new OnDiskRangeTrie<>(factory, RANGE_SERDE, VERSION, factory.fileLength(), factory.channel()))
+        ChannelProxy channel = new ChannelProxy(file);
+        TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(FileTries.openChunkReader(channel));
+        try (FileTries.Range<TestRangeState> actual = new FileTries.Range<>(factory, channel, RANGE_SERDE))
         {
             for (int transition = 0; transition <= 0xFF; ++transition)
             {
@@ -258,7 +259,7 @@ public class OnDiskRangeTrieTest
         TestRangeState covering = new TestRangeState(branchKey, false, 1, 1);
         RangeTrie<TestRangeState> expected = RangeTrie.branch(branchKey, VERSION, covering);
 
-        try (OnDiskRangeTrie<TestRangeState> actual = TrieUtil.onDiskRoundtrip(expected))
+        try (FileTries.Range<TestRangeState> actual = TrieUtil.onDiskRoundtrip(expected))
         {
             TrieUtil.assertTriesEqual(expected, actual);
         }
@@ -267,8 +268,8 @@ public class OnDiskRangeTrieTest
     /// Corrupt bytes, as a damaged commit-log record or message payload would present them, must be reported as
     /// corruption, as [OnDiskTrieTest#testCorruptTriesFailAsCorruption] checks for plain tries: a walk over them must
     /// neither hang nor fail with any other exception. A range cursor also reads the file to work out the state active
-    /// after a skip and when it is closed, so the walk here skips, asks for the state at every position, closes
-    /// cursors early and takes tails of closed ones.
+    /// after a skip and the content at a tail's root, so the walk here skips, asks for the state at every position,
+    /// closes cursors early and takes tails of closed ones.
     @Test
     public void testCorruptTriesFailAsCorruption() throws IOException
     {

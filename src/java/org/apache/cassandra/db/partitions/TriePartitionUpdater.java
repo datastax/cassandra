@@ -23,7 +23,6 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.memtable.TrieMemtable;
-import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.Cells;
 import org.apache.cassandra.db.rows.TrieBackedRow;
@@ -202,8 +201,8 @@ public class TriePartitionUpdater
             return content; // there is no row deletion here
 
         // No size tracking is needed, because the result of this gets applied to the trie with applyRow.
-        if (content instanceof Cell)
-            return rowDeletion.deletes((Cell<?>) content) ? null : content;
+        if (content instanceof CellData)
+            return rowDeletion.deletes((CellData<?, ?>) content) ? null : content;
         else if (content == TrieBackedRow.COMPLEX_COLUMN_MARKER)
             return content;
         else if (content instanceof LivenessInfo)
