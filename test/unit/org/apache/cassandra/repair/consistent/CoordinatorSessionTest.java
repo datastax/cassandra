@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
@@ -209,6 +210,76 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         Assert.assertTrue(coordinator.sentMessages.isEmpty());
     }
 
+    private static Message<PrepareConsistentResponse> prepareResponse(CoordinatorSession coordinator, InetAddressAndPort participant)
+    {
+        return Message.out(Verb.PREPARE_CONSISTENT_RSP, new PrepareConsistentResponse(coordinator.sessionID, participant, true));
+    }
+
+    @Test
+    public void sessionSubmissionIsOffloadedFromPrepareResponse()
+    {
+        InstrumentedCoordinatorSession coordinator = createInstrumentedSession();
+        List<Runnable> queued = new ArrayList<>();
+        AtomicBoolean submitted = new AtomicBoolean();
+        Promise<CoordinatedRepairResult> repairFuture = AsyncPromise.uncancellable();
+        coordinator.execute(() ->
+        {
+            submitted.set(true);
+            return repairFuture;
+        }, queued::add);
+
+        coordinator.handlePrepareResponse(prepareResponse(coordinator, PARTICIPANT1));
+        coordinator.handlePrepareResponse(prepareResponse(coordinator, PARTICIPANT2));
+        Assert.assertTrue(queued.isEmpty());
+        coordinator.handlePrepareResponse(prepareResponse(coordinator, PARTICIPANT3));
+
+        // The final response must return without running potentially blocking session startup.
+        Assert.assertFalse(submitted.get());
+        Assert.assertEquals(PREPARED, coordinator.getState());
+        Assert.assertEquals(1, queued.size());
+        queued.remove(0).run();
+        Assert.assertTrue(submitted.get());
+        Assert.assertEquals(REPAIRING, coordinator.getState());
+    }
+
+    @Test
+    public void failureBeforeOffloadedSessionSubmission() throws Exception
+    {
+        InstrumentedCoordinatorSession coordinator = createInstrumentedSession();
+        List<Runnable> queued = new ArrayList<>();
+        AtomicBoolean submitted = new AtomicBoolean();
+        Future<CoordinatedRepairResult> result = coordinator.execute(() ->
+        {
+            submitted.set(true);
+            return AsyncPromise.uncancellable();
+        }, queued::add);
+
+        coordinator.handlePrepareResponse(prepareResponse(coordinator, PARTICIPANT1));
+        coordinator.handlePrepareResponse(prepareResponse(coordinator, PARTICIPANT2));
+        coordinator.handlePrepareResponse(prepareResponse(coordinator, PARTICIPANT3));
+        Assert.assertEquals(1, queued.size());
+
+        // fail between the last prepare response and the queued session submission
+        coordinator.fail();
+        Assert.assertEquals(FAILED, coordinator.getState());
+        queued.remove(0).run();
+
+        Assert.assertFalse(coordinator.setRepairingCalled);
+        Assert.assertFalse(submitted.get());
+        Assert.assertEquals(FAILED, coordinator.getState());
+        Assert.assertTrue(result.isDone());
+        try
+        {
+            result.get();
+            Assert.fail("Expected repair to fail");
+        }
+        catch (ExecutionException e)
+        {
+            Assert.assertEquals(String.format("Incremental repair session %s has failed after the prepare phase before running repair sessions", coordinator.sessionID),
+                                e.getCause().getMessage());
+        }
+    }
+
     /**
      * Tests the complete coordinator side consistent repair cycle
      */
@@ -227,7 +298,7 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         // coordinator sends prepare requests to create local session and perform anticompaction
         Assert.assertFalse(repairSubmitted.get());
         Assert.assertTrue(coordinator.sentMessages.isEmpty());
-        Future<CoordinatedRepairResult> sessionResult = coordinator.execute(sessionSupplier);
+        Future<CoordinatedRepairResult> sessionResult = coordinator.execute(sessionSupplier, Runnable::run);
 
         for (InetAddressAndPort participant : PARTICIPANTS)
         {
@@ -310,7 +381,7 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         // coordinator sends prepare requests to create local session and perform anticompaction
         Assert.assertFalse(repairSubmitted.get());
         Assert.assertTrue(coordinator.sentMessages.isEmpty());
-        Future<CoordinatedRepairResult> sessionResult = coordinator.execute(sessionSupplier);
+        Future<CoordinatedRepairResult> sessionResult = coordinator.execute(sessionSupplier, Runnable::run);
         for (InetAddressAndPort participant : PARTICIPANTS)
         {
             PrepareConsistentRequest expected = new PrepareConsistentRequest(coordinator.sessionID, COORDINATOR, new HashSet<>(PARTICIPANTS));
@@ -372,7 +443,7 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         // coordinator sends prepare requests to create local session and perform anticompaction
         Assert.assertFalse(repairSubmitted.get());
         Assert.assertTrue(coordinator.sentMessages.isEmpty());
-        Future<CoordinatedRepairResult> sessionResult = coordinator.execute(sessionSupplier);
+        Future<CoordinatedRepairResult> sessionResult = coordinator.execute(sessionSupplier, Runnable::run);
         for (InetAddressAndPort participant : PARTICIPANTS)
         {
             PrepareConsistentRequest expected = new PrepareConsistentRequest(coordinator.sessionID, COORDINATOR, new HashSet<>(PARTICIPANTS));
@@ -437,7 +508,7 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         // coordinator sends prepare requests to create local session and perform anticompaction
         Assert.assertFalse(repairSubmitted.get());
         Assert.assertTrue(coordinator.sentMessages.isEmpty());
-        Future<CoordinatedRepairResult> sessionResult = coordinator.execute(sessionSupplier);
+        Future<CoordinatedRepairResult> sessionResult = coordinator.execute(sessionSupplier, Runnable::run);
 
         for (InetAddressAndPort participant : PARTICIPANTS)
         {

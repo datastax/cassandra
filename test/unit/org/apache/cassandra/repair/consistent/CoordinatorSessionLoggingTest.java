@@ -283,7 +283,7 @@ public class CoordinatorSessionLoggingTest extends AbstractRepairTest
                 ImmediateFuture.failure(new RuntimeException("test"));
         try
         {
-            session.execute(() -> failedFuture);
+            session.execute(() -> failedFuture, Runnable::run);
         }
         catch (Exception ignored) { /* expected — we only test the log */ }
 
