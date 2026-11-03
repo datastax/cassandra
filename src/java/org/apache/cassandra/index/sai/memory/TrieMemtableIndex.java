@@ -264,12 +264,15 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     @Override
     public void update(DecoratedKey key, Clustering clustering, ByteBuffer oldValue, ByteBuffer newValue, Memtable memtable, OpOrder.Group opGroup)
     {
-        int oldRemaining = oldValue == null ? 0 : oldValue.remaining();
-        int newRemaining = newValue == null ? 0 : newValue.remaining();
-        if (oldRemaining == 0 && newRemaining == 0)
+        // an empty value is indexed for the literal types allowing it (an empty string is a value, see index()):
+        // an update from null to an empty string must index it
+        boolean skipsEmpty = TypeUtil.skipsEmptyValue(validator);
+        boolean hasOld = oldValue != null && (oldValue.hasRemaining() || !skipsEmpty);
+        boolean hasNew = newValue != null && (newValue.hasRemaining() || !skipsEmpty);
+        if (!hasOld && !hasNew)
             return;
 
-        if (oldRemaining == newRemaining && validator.compare(oldValue, newValue) == 0)
+        if (hasOld && hasNew && oldValue.remaining() == newValue.remaining() && validator.compare(oldValue, newValue) == 0)
             return;
 
         RequestSensors sensors = requestTracker.get();
