@@ -196,9 +196,9 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             // Add before removing to prevent a period where the value is not available in the index
-            if (newValue != null && newValue.hasRemaining())
+            if (isIndexable(newValue))
                 applyTransformer(primaryKey, newValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
-            if (oldValue != null && oldValue.hasRemaining())
+            if (isIndexable(oldValue))
                 applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysRemover);
         }
         finally
@@ -230,14 +230,14 @@ public class TrieMemoryIndex extends MemoryIndex
             while (newValues != null && newValues.hasNext())
             {
                 ByteBuffer newValue = newValues.next();
-                if (newValue != null && newValue.hasRemaining())
+                if (isIndexable(newValue))
                     applyTransformer(primaryKey, newValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
             }
 
             while (oldValues != null && oldValues.hasNext())
             {
                 ByteBuffer oldValue = oldValues.next();
-                if (oldValue != null && oldValue.hasRemaining())
+                if (isIndexable(oldValue))
                     applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysRemover);
             }
         }
@@ -247,6 +247,16 @@ public class TrieMemoryIndex extends MemoryIndex
             primaryKeysAccumulator.setSeenPrimaryKeys(null);
             primaryKeysRemover.setSeenPrimaryKeys(null);
         }
+    }
+
+    /**
+     * @return whether the value is indexed: not null, and not empty, but for the literal types allowing empty values
+     * (an empty string is a value), as when the value is {@link #add added}
+     * (see {@code TrieMemtableIndex#index})
+     */
+    private boolean isIndexable(ByteBuffer value)
+    {
+        return value != null && (value.hasRemaining() || !TypeUtil.skipsEmptyValue(indexContext.getValidator()));
     }
 
     private void applyTransformer(PrimaryKey primaryKey,
