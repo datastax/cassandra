@@ -553,16 +553,70 @@ public class LiteralRangeQueryTest extends SAITester
 
         for (int i = 0; i < 3; i++)
         {
-            // The restrictions on clustering columns are also applied as clustering slices, which compare the raw
-            // values (a known limitation): the bounds select the same values with and without normalization, and
-            // the raw exclusions remove no more than the normalized ones. Hence no exclusion alone either, which
-            // only the slices would evaluate if the index doesn't serve it.
             assertSelected(List.of(2, 3), "v >= 'P' AND v != 'ROME'");
             assertSelected(List.of(2, 3), "v >= 'P' AND v != 'rome'");
             assertSelected(List.of(4), "v < 'R' AND v NOT IN ('PARIS')");
             assertSelected(List.of(3), "v > 'A' AND v < 'Z' AND v NOT IN ('paris', 'ROME', 'milan')");
             flushOrCompact(i);
         }
+    }
+
+    @Test
+    public void testClusteringColumnNormalizingIndex()
+    {
+        testClusteringColumnNormalizingIndex("ASC");
+    }
+
+    @Test
+    public void testReversedClusteringColumnNormalizingIndex()
+    {
+        testClusteringColumnNormalizingIndex("DESC");
+    }
+
+    /**
+     * The restrictions on a clustering column with a normalizing index compare the normalized values, as on the
+     * other columns, rather than the raw values of the clustering slices and names: the bounds and values below
+     * select different rows raw and normalized. The writes still address the raw clustering values.
+     */
+    private void testClusteringColumnNormalizingIndex(String order)
+    {
+        createTable("CREATE TABLE %s (k int, pk int, v text, x int, PRIMARY KEY (k, v)) WITH CLUSTERING ORDER BY (v " + order + ')');
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : 'false' }");
+        createIndex("CREATE CUSTOM INDEX ON %s(x) USING 'StorageAttachedIndex'");
+        execute("INSERT INTO %s (k, pk, v, x) VALUES (1, 1, 'Rome', 0)");
+        execute("INSERT INTO %s (k, pk, v, x) VALUES (1, 2, 'Paris', 0)");
+        execute("INSERT INTO %s (k, pk, v, x) VALUES (1, 3, 'turin', 0)");
+        execute("INSERT INTO %s (k, pk, v, x) VALUES (1, 4, 'milan', 0)");
+        execute("INSERT INTO %s (k, pk, v, x) VALUES (2, 5, 'Turin', 0)");
+
+        for (int i = 0; i < 3; i++)
+        {
+            assertSelected(List.of(1, 2, 3), "k = 1 AND v >= 'p'");
+            assertSelected(List.of(1, 2, 3, 5), "v >= 'p'");
+            assertSelected(List.of(2, 4), "k = 1 AND v > 'a' AND v < 'q'");
+            assertSelected(List.of(1, 3), "k = 1 AND v > 'paris'");
+            assertSelected(List.of(1), "k = 1 AND v = 'rome'");
+            assertSelected(List.of(1), "v = 'ROME'");
+            assertSelected(List.of(1, 3), "k = 1 AND v IN ('rome', 'TURIN')");
+            assertSelected(List.of(2, 3, 4), "k = 1 AND v != 'ROME'");
+            assertSelected(List.of(3, 4), "k = 1 AND v NOT IN ('ROME', 'paris')");
+            assertSelected(List.of(2, 3), "k = 1 AND v >= 'p' AND v != 'ROME'");
+            assertSelected(List.of(2, 3, 4, 5), "v != 'ROME' ALLOW FILTERING");
+
+            // Known exceptions, which keep comparing the raw values: an IN on the partition key, with which an
+            // indexed query isn't supported, and a != combined with an indexed restriction, which the index on
+            // the clustering column doesn't serve and that would then need ALLOW FILTERING.
+            assertSelected(List.of(3), "k IN (1, 2) AND v >= 'p'");
+            assertSelected(List.of(1, 2, 3, 4), "k = 1 AND x = 0 AND v != 'ROME'");
+            assertSelected(List.of(2, 3, 4), "k = 1 AND x = 0 AND v != 'ROME' ALLOW FILTERING");
+            flushOrCompact(i);
+        }
+
+        // the writes address the raw clustering values
+        execute("UPDATE %s SET pk = 6 WHERE k = 1 AND v = 'rome'");
+        assertSelected(List.of(1, 6), "k = 1 AND v = 'ROME'");
+        execute("DELETE FROM %s WHERE k = 1 AND v = 'ROME'");
+        assertSelected(List.of(1, 6), "k = 1 AND v = 'ROME'");
     }
 
     /**

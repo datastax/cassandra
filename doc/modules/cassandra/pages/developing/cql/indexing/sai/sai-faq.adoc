@@ -170,9 +170,11 @@ On indexes normalizing their terms (`case_sensitive: false`, `normalize`, `ascii
 
 The values excluded by `!=` and `NOT IN` on such a normalizing index are normalized like the range bounds, with or without `ALLOW FILTERING`: on a case-insensitive index `name != 'BANANA'` excludes both `'banana'` and `'Banana'`.
 On indexes with a tokenizing analyzer, which serve no ranges, `!=` and `NOT IN` compare the raw values.
+The restrictions on a clustering column with such an index, including `=` and `IN`, are served by the index as well, rather than as clustering slices comparing the raw values.
 Replicas that are older or do not have the index compare the raw values, and so do, for now:
 
-* the restrictions on clustering columns applied as clustering slices, as in single-partition queries;
+* the restrictions on a clustering column in queries with an `IN` on the partition key;
+* `!=` and `NOT IN` on a clustering column combined with another indexed restriction, without `ALLOW FILTERING`;
 * the conditions of lightweight transactions (`IF name != 'BANANA'`), which warn that the index analyzers are not applied.
 
 When a column has both a plain and a normalizing index, the plain one serves the range, `LIKE`, `!=` and `NOT IN` restrictions, comparing the raw values.

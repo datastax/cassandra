@@ -117,8 +117,10 @@ Upgrading
       'normalize', 'ascii') normalize the excluded values like the range bounds, and exclude the values equal to them
       once normalized: v != 'ROME' also excludes 'Rome', with or without ALLOW FILTERING. With a tokenizing analyzer
       they still compare the raw values. Replicas that are older or do not have the index compare the raw values.
-      Known exceptions, still comparing the raw values: the restrictions on clustering columns applied as clustering
-      slices (as in single-partition queries), and the conditions of lightweight transactions (which warn about it).
+      Restrictions on a clustering column with such an index (including =, which compared the raw clustering values)
+      are now served by the index rather than as clustering slices. Known exceptions, still comparing the raw values:
+      with an IN on the partition key; != on a clustering column combined with another indexed restriction, without
+      ALLOW FILTERING; the conditions of lightweight transactions (which warn about it).
       With a plain and a normalizing index on the same column, the plain one serves all these restrictions.
     - memtable_offheap_space: 0 is now rejected at startup when memtable_allocation_type is
     offheap_buffers or offheap_objects. Set a positive memtable_offheap_space, or an allocation
