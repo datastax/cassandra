@@ -353,6 +353,7 @@
         <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.lang=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED</string>
 
@@ -460,8 +461,11 @@
         <string>-Dio.netty.tryReflectionSetAccessible=true</string>
         <!-- required by ThreadAwareSecurityManager on JDK 18+ -->
         <string>-Djava.security.manager=allow</string>
-        <!-- Enable vector incubator feature (simd support), as in jvm17-server.options -->
+        <!-- Enable vector incubator feature (simd support), as in jvm21-server.options -->
         <string>--add-modules jdk.incubator.vector</string>
+        <!-- Open things up so we don't run into any jamm rejections (e.g. @Contended) that'd then go unsafe and crash out on in-jvm dtests; from CASSANDRA-18831 -->
+        <string>--add-opens=java.base/java.lang=ALL-UNNAMED</string>
+        <string>--add-exports=java.base/jdk.internal.vm.annotation=ALL-UNNAMED</string>
     </resources>
     <pathconvert property="_jvm21_test_arg_items_concat" refid="_jvm21_test_arg_items" pathsep=" "/>
     <condition property="_std-test-jvmargs" value="${_jvm11_test_arg_items_concat}">

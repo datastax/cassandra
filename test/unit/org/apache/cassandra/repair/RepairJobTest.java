@@ -288,6 +288,10 @@ public class RepairJobTest
 
         long singleTreeSize = ObjectSizes.measureDeep(mockTrees.get(addr1));
 
+        assertEquals(0, session.syncingCount());
+        for (MerkleTrees mt : mockTrees.values())
+            assertThat(mt.isReleased()).isFalse();
+
         // Use addr4 instead of one of the provided trees to force everything to be remote sync tasks as
         // LocalSyncTasks try to reach over the network.
         List<SyncTask> syncTasks = RepairJob.createStandardSyncTasks(SharedContext.Global.instance, sessionJobDesc, mockTreeResponses,
@@ -298,6 +302,10 @@ public class RepairJobTest
                                                                      session.pullRepair,
                                                                      session.previewKind);
 
+        for (MerkleTrees mt : mockTrees.values())
+            assertThat(mt.isReleased()).isTrue();
+        assertThat(session.syncingCount()).isEqualTo(0);
+
         // SyncTasks themselves should not contain significant memory
         SyncTaskListAssert.assertThat(syncTasks).hasSizeLessThan(0.2 * singleTreeSize);
 
@@ -306,21 +314,25 @@ public class RepairJobTest
         session.registerSyncCompleteCallback(future::get);
         ListenableFuture<List<SyncStat>> syncResults = job.executeTasks(syncTasks);
 
-        // NOTE: we intentionally do not assert that the session is larger than N trees while tasks are in flight.
-        // The session never references the trees directly; on JDK < 19 measureDeep() could reach them only
-        // incidentally through executor Thread/ThreadGroup internals, which no longer hold those references on JDK 19+.
+        assertThat(session.syncingCount()).isNotZero();
 
         // unblock syncComplete callback
         future.complete(null);
 
-        // The session may retain memory in the contained executor until its threads expire (JDK < 19), so wait
-        // until the session is clearly smaller than a single Merkle tree.
+        // Confirm that it's the thread timeout mechanism that's causing the SyncTasks to retire
+        assertThat(session.syncingCount()).isNotZero();
+
+        // We can't directly check the memory size in the session post JDK21; jamm has trouble walking the
+        // internal object graph of a ConcurrentHashMap's implementation post JDK21 and has bugs with the
+        // @Contended case (which are fixed in newer versions of jamm, but we're on 0.3.2).
+        // Instead, we treat the presence or removal of SyncTasks as indicative of the memory usage, as once
+        // difference calculation is complete, SyncTasks are the only things holding references to the MerkleTrees.
         long millisUntilFreed;
         for (millisUntilFreed = 0; millisUntilFreed < TEST_TIMEOUT_S * 1000; millisUntilFreed += THREAD_TIMEOUT_MILLIS)
         {
-            if (ObjectSizes.measureDeep(session) < Math.round(0.2 * singleTreeSize))
-                break;
             TimeUnit.MILLISECONDS.sleep(THREAD_TIMEOUT_MILLIS);
+            if (session.syncingCount() == 0)
+                break;
         }
         assertThat(millisUntilFreed).isLessThan(TEST_TIMEOUT_S * 1000);
 

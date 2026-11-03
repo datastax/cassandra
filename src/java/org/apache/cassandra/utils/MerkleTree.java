@@ -168,6 +168,12 @@ public class MerkleTree
         root = null;
     }
 
+    @VisibleForTesting
+    public boolean isReleased()
+    {
+        return root == null;
+    }
+
     public IPartitioner partitioner()
     {
         return partitioner;
