@@ -32,6 +32,7 @@ import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.CQL3CasRequest;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.filter.IndexHints;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -94,7 +95,8 @@ public final class ColumnConditions extends AbstractConditions implements Iterab
 
         for (ColumnCondition condition : this)
         {
-            if (indexRegistry.getAnalyzerFor(condition.column, condition.operator, null, indexHints).isPresent())
+            // the analyzer a filter with the same restriction would use, e.g. for a != (see RowFilter#analyzerFor)
+            if (RowFilter.analyzerFor(indexRegistry, condition.column, condition.operator, null, indexHints) != null)
             {
                 analyzedColumns.add(condition.column);
             }

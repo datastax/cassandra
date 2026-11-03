@@ -195,8 +195,18 @@ public class Expression
 
     public Expression(IndexContext indexContext)
     {
+        this(indexContext, indexContext);
+    }
+
+    /**
+     * @param indexContext the context of the expression, indexed if an index serves it
+     * @param analysisContext the context whose (index) analyzer analyzes the values the expression is evaluated on,
+     * that of the expression but for the exclusions no index serves (see {@link QueryController#getAnalysisContext})
+     */
+    public Expression(IndexContext indexContext, IndexContext analysisContext)
+    {
         this.context = indexContext;
-        this.analyzerFactory = indexContext.getAnalyzerFactory();
+        this.analyzerFactory = analysisContext.getAnalyzerFactory();
         this.validator = indexContext.getValidator();
     }
 
@@ -421,13 +431,28 @@ public class Expression
 
         // as a last step let's check exclusions for the given field,
         // this covers EQ/RANGE with exclusions.
-        for (ByteBuffer term : exclusions)
+        if (exclusions.isEmpty())
+            return true;
+
+        if (TypeUtil.isLiteral(validator))
         {
-            if (TypeUtil.isLiteral(validator) && validateStringValue(value.raw, term) ||
-                TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
-                return false;
+            // a literal is excluded if one of its (analyzed) terms is an excluded one: not through
+            // validateStringValue, which applies the operation of the expression (a RANGE matches any term in it).
+            // The value is analyzed once for all the exclusions (e.g. those of a NOT IN).
+            List<ByteBuffer> terms = analyze(value.raw);
+            for (ByteBuffer term : exclusions)
+            {
+                if (hasTerm(terms, term))
+                    return false;
+            }
+            return true;
         }
 
+        for (ByteBuffer term : exclusions)
+        {
+            if (TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
+                return false;
+        }
         return true;
     }
 
@@ -642,6 +667,40 @@ public class Expression
         {
             analyzer.end();
         }
+    }
+
+    /**
+     * @return the terms of the given literal value, analyzed as the indexed values are
+     */
+    private List<ByteBuffer> analyze(ByteBuffer columnValue)
+    {
+        List<ByteBuffer> terms = new ArrayList<>(1);
+        AbstractAnalyzer analyzer = analyzerFactory.create();
+        analyzer.reset(columnValue);
+        try
+        {
+            while (analyzer.hasNext())
+                terms.add(analyzer.next());
+            return terms;
+        }
+        finally
+        {
+            analyzer.end();
+        }
+    }
+
+    /**
+     * @return whether the given analyzed terms of a value include the given term; none does if the value has no
+     * terms (one the analyzer can't read), which is then not excluded
+     */
+    private boolean hasTerm(List<ByteBuffer> terms, ByteBuffer term)
+    {
+        for (ByteBuffer t : terms)
+        {
+            if (validator.compare(t, term) == 0)
+                return true;
+        }
+        return false;
     }
 
     public Op getOp()

@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -680,7 +681,7 @@ public class RowFilter
         @Nullable
         private Index.Analyzer analyzer(ColumnMetadata def, Operator op, ByteBuffer value)
         {
-            return indexRegistry == null ? null : indexRegistry.getAnalyzerFor(def, op, value, indexHints).orElse(null);
+            return indexRegistry == null ? null : analyzerFor(indexRegistry, def, op, value, indexHints);
         }
 
         public void addGeoDistanceExpression(ColumnMetadata def, ByteBuffer point, Operator op, ByteBuffer distance)
@@ -748,11 +749,18 @@ public class RowFilter
 
         private final List<FilterElement> children;
 
+        /**
+         * Whether several expressions of this element are {@code !=} evaluated on analyzed values (e.g. a
+         * {@code NOT IN}), which then share the analysis of the values of each row (see {@link AnalyzedValues}).
+         */
+        private final boolean sharesAnalyzedValues;
+
         public FilterElement(boolean isDisjunction, List<Expression> expressions, List<FilterElement> children)
         {
             this.isDisjunction = isDisjunction;
             this.expressions = expressions;
             this.children = children;
+            this.sharesAnalyzedValues = expressions.stream().filter(Expression::isAnalyzedExclusion).count() > 1;
         }
 
         public boolean isDisjunction()
@@ -872,10 +880,11 @@ public class RowFilter
         {
             if (isEmpty())
                 return true;
+            AnalyzedValues analyzedValues = sharesAnalyzedValues ? new AnalyzedValues() : null;
             if (isDisjunction)
             {
                 for (Expression e : expressions)
-                    if (e.isSatisfiedBy(table, key, row, nowInSec))
+                    if (e.isSatisfiedBy(table, key, row, nowInSec, analyzedValues))
                         return true;
                 for (FilterElement child : children)
                     if (child.isSatisfiedBy(table, key, row, nowInSec))
@@ -885,7 +894,7 @@ public class RowFilter
             else
             {
                 for (Expression e : expressions)
-                    if (!e.isSatisfiedBy(table, key, row, nowInSec))
+                    if (!e.isSatisfiedBy(table, key, row, nowInSec, analyzedValues))
                         return false;
                 for (FilterElement child : children)
                     if (!child.isSatisfiedBy(table, key, row, nowInSec))
@@ -1091,6 +1100,28 @@ public class RowFilter
             return null;
         }
 
+        /**
+         * Whether this is a {@code !=} evaluated on the values normalized by an index analyzer (see
+         * {@link RowFilter#analyzerFor}).
+         */
+        boolean isAnalyzedExclusion()
+        {
+            return operator == Operator.NEQ && analyzer() != null;
+        }
+
+        /**
+         * As {@link #isSatisfiedBy(TableMetadata, DecoratedKey, Row, long)}, analyzing the values of the row with
+         * the given analyzed values if not {@code null}.
+         */
+        protected boolean isSatisfiedBy(TableMetadata metadata,
+                                        DecoratedKey partitionKey,
+                                        Row row,
+                                        long nowInSec,
+                                        @Nullable AnalyzedValues analyzedValues)
+        {
+            return isSatisfiedBy(metadata, partitionKey, row, nowInSec);
+        }
+
         public boolean isOrderingExpression()
         {
             return operator == Operator.ANN || operator == Operator.BM25 || operator == Operator.ORDER_BY_ASC || operator == Operator.ORDER_BY_DESC;
@@ -1138,6 +1169,9 @@ public class RowFilter
             if (analyzer == null)
                 return operator.isSatisfiedBy(type, foundValue, value);
 
+            if (operator == Operator.NEQ)
+                return isSatisfiedByAnalyzedExclusion(type, analyzer.indexedTokens(foundValue));
+
             // Tokenizing indexes serve neither LIKE nor ranges, so the value and the pattern or bound each analyze
             // to a single (normalized) token: match the normalized pattern or bound against the normalized value,
             // as the index does against its normalized terms.
@@ -1155,6 +1189,23 @@ public class RowFilter
             }
 
             return operator.isSatisfiedByAnalyzed(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
+        }
+
+        /**
+         * Returns whether the given analyzed tokens of a value satisfy this {@link #isAnalyzedExclusion() analyzed !=}.
+         * Its analyzer is not tokenizing (see {@link RowFilter#analyzerFor}), so the value and the excluded value
+         * each analyze to a single (normalized) token, compared as the index compares its terms. A value or an
+         * excluded value without token (one the analyzer can't read) is equal to nothing, so the row is kept, as by
+         * the SAI post-filter.
+         */
+        protected boolean isSatisfiedByAnalyzedExclusion(AbstractType<?> type, List<ByteBuffer> indexedTokens)
+        {
+            List<ByteBuffer> queriedTokens = analyzer().queriedTokens();
+            assert indexedTokens.size() <= 1 && queriedTokens.size() <= 1
+                : "!= on " + column.name + " is analyzed by a tokenizing index: " + indexedTokens.size() + " value tokens, " + queriedTokens.size() + " operand tokens";
+            return indexedTokens.size() != 1
+                   || queriedTokens.size() != 1
+                   || operator.isSatisfiedBy(type, indexedTokens.get(0), queriedTokens.get(0));
         }
 
         @Nullable
@@ -1372,7 +1423,7 @@ public class RowFilter
                     case SIMPLE:
                         ByteBuffer value = ByteBufferUtil.readWithShortLength(in);
                         ANNOptions annOptions = operator == Operator.ANN ? ANNOptions.serializer.deserialize(in, version) : null;
-                        Index.Analyzer analyzer = indexRegistry.getAnalyzerFor(column, operator, value, indexHints).orElse(null);
+                        Index.Analyzer analyzer = analyzerFor(indexRegistry, column, operator, value, indexHints);
                         return new SimpleExpression(column, operator, value, analyzer, annOptions);
                     case MAP_COMPARISON:
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
@@ -1429,6 +1480,62 @@ public class RowFilter
     }
 
     /**
+     * Returns the analyzer of the index serving the given restriction, normalizing the restricted values and the
+     * operand as the index normalizes its terms, {@code null} if none.
+     * <p>
+     * A {@code !=} (also from a {@code NOT IN}) on a literal column is served by no index, but its operand is
+     * normalized by the index serving the ranges on the column, if any: as the range bounds are (and as SAI does with
+     * the exclusions of the ranges it serves), so that {@code v != 'ROME'} excludes the values {@code v >= 'ROME'
+     * AND v <= 'ROME'} selects. Tokenizing indexes serve no ranges, so a {@code !=} on their columns still compares
+     * the raw values: they are multiple tokens, and excluding the values having one of the tokens of the operand
+     * would make {@code !=} exclude more than its operand.
+     * <p>
+     * The operand can be {@code null} to only find out whether the restriction would be analyzed (as for the
+     * conditions of the lightweight transactions, which aren't).
+     */
+    @Nullable
+    public static Index.Analyzer analyzerFor(IndexRegistry indexRegistry,
+                                             ColumnMetadata column,
+                                             Operator operator,
+                                             @Nullable ByteBuffer value,
+                                             IndexHints indexHints)
+    {
+        Optional<Index.Analyzer> analyzer = indexRegistry.getAnalyzerFor(column, operator, value, indexHints);
+        if (analyzer.isEmpty() && operator == Operator.NEQ)
+            analyzer = indexRegistry.getAnalyzerFor(column, Operator.GTE, value, indexHints);
+        return analyzer.orElse(null);
+    }
+
+    /**
+     * The tokens of the values of one row analyzed by the analyzers of its {@code !=} restrictions, so that the
+     * restrictions whose analyzers analyze the values alike (see {@link Index.Analyzer#indexedTokensIdentity()}),
+     * e.g. those of a {@code NOT IN}, analyze each value once. It's confined to the evaluation of one row: the
+     * expressions, and so their analyzers, are shared by the concurrent evaluations of the rows.
+     */
+    static final class AnalyzedValues
+    {
+        private final List<Object> identities = new ArrayList<>(2);
+        private final List<ByteBuffer> values = new ArrayList<>(2);
+        private final List<List<ByteBuffer>> tokens = new ArrayList<>(2);
+
+        List<ByteBuffer> indexedTokens(Index.Analyzer analyzer, ByteBuffer value)
+        {
+            Object identity = analyzer.indexedTokensIdentity();
+            for (int i = 0; i < identities.size(); i++)
+            {
+                if (identities.get(i).equals(identity) && values.get(i).equals(value))
+                    return tokens.get(i);
+            }
+
+            List<ByteBuffer> analyzed = analyzer.indexedTokens(value);
+            identities.add(identity);
+            values.add(value);
+            tokens.add(analyzed);
+            return analyzed;
+        }
+    }
+
+    /**
      * An expression of the form 'column' 'op' 'value'.
      */
     public static class SimpleExpression extends Expression
@@ -1469,6 +1576,21 @@ public class RowFilter
         public ANNOptions annOptions()
         {
             return annOptions;
+        }
+
+        @Override
+        protected boolean isSatisfiedBy(TableMetadata metadata,
+                                        DecoratedKey partitionKey,
+                                        Row row,
+                                        long nowInSec,
+                                        @Nullable AnalyzedValues analyzedValues)
+        {
+            if (analyzedValues == null || !isAnalyzedExclusion())
+                return isSatisfiedBy(metadata, partitionKey, row, nowInSec);
+
+            assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for collection types";
+            ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);
+            return foundValue != null && isSatisfiedByAnalyzedExclusion(column.type, analyzedValues.indexedTokens(analyzer, foundValue));
         }
 
         @Override

@@ -779,6 +779,13 @@ public class StorageAttachedIndex implements Index
             {
                 return queriedTokens;
             }
+
+            @Override
+            public Object indexedTokensIdentity()
+            {
+                // the indexed values are analyzed by the analyzer of the index, whatever the queried value
+                return indexContext;
+            }
         });
     }
 
