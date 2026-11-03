@@ -534,8 +534,7 @@ public class LiteralRangeQueryTest extends SAITester
     }
 
     /**
-     * As {@link #testExclusionsClusteringColumnCaseInsensitive()}, on a reversed column (whose index currently serves
-     * the {@code !=}, unlike that of the ascending column).
+     * As {@link #testExclusionsClusteringColumnCaseInsensitive()}, on a reversed column.
      */
     @Test
     public void testExclusionsReversedClusteringColumnCaseInsensitive()
@@ -905,6 +904,42 @@ public class LiteralRangeQueryTest extends SAITester
         {
             SAIUtil.resetCurrentVersion();
         }
+    }
+
+    /**
+     * The index of a reversed (DESC clustering) column supports the same operators as that of an ascending one: on
+     * text, boolean and uuid columns it doesn't serve {@code !=}, which needs {@code ALLOW FILTERING} either way.
+     */
+    @Test
+    public void testExclusionsOnReversedColumnsNotServed()
+    {
+        for (String order : new String[]{ "ASC", "DESC" })
+        {
+            testExclusionsNotServed(order, "text", "'b'", "'a'", "'b'", "'c'");
+            testExclusionsNotServed(order, "boolean", "true", "false", "true");
+            testExclusionsNotServed(order, "uuid",
+                                    "00000000-0000-4000-8000-000000000002",
+                                    "00000000-0000-4000-8000-000000000001",
+                                    "00000000-0000-4000-8000-000000000002",
+                                    "00000000-0000-4000-8000-000000000003");
+        }
+    }
+
+    private void testExclusionsNotServed(String order, String type, String excluded, String... values)
+    {
+        createTable("CREATE TABLE %s (k int, pk int, v " + type + ", PRIMARY KEY (k, v)) WITH CLUSTERING ORDER BY (v " + order + ')');
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        List<Integer> expected = new ArrayList<>();
+        for (int pk = 0; pk < values.length; pk++)
+        {
+            execute("INSERT INTO %s (k, pk, v) VALUES (0, " + pk + ", " + values[pk] + ')');
+            if (!values[pk].equals(excluded))
+                expected.add(pk);
+        }
+
+        assertInvalidMessage("has an index but does not support the operators specified in the query",
+                             "SELECT pk FROM %s WHERE v != " + excluded);
+        assertEquals(order + ' ' + type, expected, keys(execute("SELECT pk FROM %s WHERE v != " + excluded + " ALLOW FILTERING")));
     }
 
     @Test

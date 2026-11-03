@@ -824,7 +824,8 @@ public class IndexContext
             return true;
         if (operator == Expression.Op.RANGE)
             return !TypeUtil.isLiteral(validator) || supportsLiteralRangeQueries();
-        if (operator != Expression.Op.EQ && EQ_ONLY_TYPES.contains(validator)) return false;
+        // unwrapped, so that the reversed (DESC clustering) columns support the same operators as the others
+        if (operator != Expression.Op.EQ && EQ_ONLY_TYPES.contains(validator.unwrap())) return false;
         return operator != null;
     }
 
