@@ -175,7 +175,7 @@ Replicas that are older or do not have the index compare the raw values, and so 
 * the restrictions on clustering columns applied as clustering slices, as in single-partition queries;
 * the conditions of lightweight transactions (`IF name != 'BANANA'`), which warn that the index analyzers are not applied.
 
-The index used to normalize the values when a column has several indexes is not yet deterministic.
+When a column has both a plain and a normalizing index, the plain one serves the range, `LIKE`, `!=` and `NOT IN` restrictions, comparing the raw values.
 
 == What is the disk footprint overhead for SAI indexes?
 

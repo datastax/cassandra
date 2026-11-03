@@ -942,6 +942,41 @@ public class LiteralRangeQueryTest extends SAITester
         assertEquals(order + ' ' + type, expected, keys(execute("SELECT pk FROM %s WHERE v != " + excluded + " ALLOW FILTERING")));
     }
 
+    /**
+     * With a plain and a normalizing index on the same column, the plain one serves the range, LIKE and {@code !=}
+     * restrictions whatever the creation order and the names of the indexes, so that every replica compares the
+     * values alike: as CQL does, the raw values.
+     */
+    @Test
+    public void testPlainAndNormalizingIndexes()
+    {
+        String plain = "WITH OPTIONS = { 'case_sensitive' : 'true' }";
+        String normalizing = "WITH OPTIONS = { 'case_sensitive' : 'false', 'equals_behaviour_when_analyzed': 'unsupported' }";
+        testPlainAndNormalizingIndexes("a1_plain", plain, "b1_normalizing", normalizing);
+        testPlainAndNormalizingIndexes("b2_plain", plain, "a2_normalizing", normalizing);
+        testPlainAndNormalizingIndexes("a3_normalizing", normalizing, "b3_plain", plain);
+        testPlainAndNormalizingIndexes("b4_normalizing", normalizing, "a4_plain", plain);
+    }
+
+    private void testPlainAndNormalizingIndexes(String firstName, String firstOptions, String secondName, String secondOptions)
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX " + firstName + " ON %s(v) USING 'StorageAttachedIndex' " + firstOptions);
+        createIndex("CREATE CUSTOM INDEX " + secondName + " ON %s(v) USING 'StorageAttachedIndex' " + secondOptions);
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "Paris");
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 2, "paris");
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 3, "Rome");
+
+        for (int i = 0; i < 3; i++)
+        {
+            assertEquals(List.of(2), keys(execute("SELECT pk FROM %s WHERE v >= 'p'")));
+            assertEquals(List.of(2), keys(execute("SELECT pk FROM %s WHERE v LIKE 'p%%'")));
+            assertEquals(List.of(2, 3), keys(execute("SELECT pk FROM %s WHERE v != 'Paris' ALLOW FILTERING")));
+            assertEquals(List.of(1, 2), keys(execute("SELECT pk FROM %s WHERE v : 'PARIS'")));
+            flushOrCompact(i);
+        }
+    }
+
     @Test
     public void testUnsupportedIndexes()
     {

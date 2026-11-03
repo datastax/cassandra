@@ -119,7 +119,7 @@ Upgrading
       they still compare the raw values. Replicas that are older or do not have the index compare the raw values.
       Known exceptions, still comparing the raw values: the restrictions on clustering columns applied as clustering
       slices (as in single-partition queries), and the conditions of lightweight transactions (which warn about it).
-      The index used when a column has several is not yet deterministic.
+      With a plain and a normalizing index on the same column, the plain one serves all these restrictions.
     - memtable_offheap_space: 0 is now rejected at startup when memtable_allocation_type is
     offheap_buffers or offheap_objects. Set a positive memtable_offheap_space, or an allocation
     type that does not allocate off-heap. See CASSANDRA-21019.
