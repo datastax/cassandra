@@ -48,6 +48,7 @@ RUN until apt-get update \
 # Debian bullseye does not package JDK 21, so install Eclipse Temurin 21 from a tarball with a verified checksum.
 # It is registered with update-alternatives so that .build/docker/_set_java.sh can select it.
 RUN sh -c '\
+  set -eu ;\
   JDK21_VERSION="21.0.13_9" ;\
   JDK21_TAG="jdk-21.0.13%2B9" ;\
   JDK21_SHA_amd64="d7f5d5cf865a2902b70ff549b97586a7d3f234e016f041ab447ea740c7d66d1c" ;\
@@ -57,7 +58,7 @@ RUN sh -c '\
     arm64) JDK21_ARCH=aarch64 ; JDK21_SHA=$JDK21_SHA_arm64 ;; \
     *) echo "Unsupported architecture for Temurin 21" ; exit 1 ;; \
   esac ;\
-  curl -fsSL --retry 5 --retry-connrefused --retry-delay 5 --max-time 180 -o /tmp/jdk21.tar.gz "https://github.com/adoptium/temurin21-binaries/releases/download/${JDK21_TAG}/OpenJDK21U-jdk_${JDK21_ARCH}_linux_hotspot_${JDK21_VERSION}.tar.gz" ;\
+  curl -fsSL --retry 5 --retry-connrefused --retry-delay 5 --max-time 900 -o /tmp/jdk21.tar.gz "https://github.com/adoptium/temurin21-binaries/releases/download/${JDK21_TAG}/OpenJDK21U-jdk_${JDK21_ARCH}_linux_hotspot_${JDK21_VERSION}.tar.gz" ;\
   echo "${JDK21_SHA}  /tmp/jdk21.tar.gz" | sha256sum -c - ;\
   mkdir -p /usr/lib/jvm/temurin-21 ;\
   tar -xzf /tmp/jdk21.tar.gz -C /usr/lib/jvm/temurin-21 --strip-components=1 ;\
