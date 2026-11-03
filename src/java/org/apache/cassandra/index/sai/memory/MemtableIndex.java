@@ -88,6 +88,44 @@ public interface MemtableIndex extends MemtableOrdering
 
     Iterator<Pair<ByteComparable.Preencoded, List<MemoryIndex.PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max);
 
+    /**
+     * Records that a term indexed in this memtable index comes from an expiring cell (with a TTL) that expires at the
+     * given time: the index has no expiration, so it keeps the terms of the expired cells.
+     *
+     * @param localExpirationTime the local expiration time of the cell, in seconds
+     */
+    default void markExpiringTerm(long localExpirationTime)
+    {
+    }
+
+    /**
+     * @param nowInSec the time of the query, in seconds
+     * @return whether some indexed term may come from a cell expired at the given time (see
+     * {@link #markExpiringTerm}); conservatively {@code true} if it isn't tracked
+     */
+    default boolean mayHaveExpiredTerms(long nowInSec)
+    {
+        return true;
+    }
+
+    /**
+     * Records that a partition deletion or a range tombstone was applied to the memtable: the terms of the rows it
+     * shadows are not removed from this index (nor, by some memtables, the rows from the memtable), so its terms, and
+     * those of any other source the deletion shadows, may not be those of the live rows.
+     */
+    default void markShadowingDeletion()
+    {
+    }
+
+    /**
+     * @return whether a partition deletion or a range tombstone was applied to the memtable (see
+     * {@link #markShadowingDeletion()}); conservatively {@code true} if it isn't tracked
+     */
+    default boolean hasShadowingDeletions()
+    {
+        return true;
+    }
+
     static MemtableIndex createIndex(IndexContext indexContext, Memtable mt)
     {
         return indexContext.isVector() ? new VectorMemtableIndex(indexContext, mt) : new TrieMemtableIndex(indexContext, mt);

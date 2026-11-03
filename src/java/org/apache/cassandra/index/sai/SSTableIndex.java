@@ -247,33 +247,65 @@ public class SSTableIndex implements Comparable<SSTableIndex>
     // but they are not a problem as post-filtering would get rid of them.
     // The keys matched in other indexes cannot be safely subtracted
     // as indexes may contain false positives caused by deletes and updates.
+    //
+    // The keys matching the expression are subtracted only if the caller found no deletion that may shadow terms (see
+    // IndexContext#hasShadowingDeletions), and if this SSTable has no expired cell (see
+    // IndexContext#mayHaveExpiredTerms): otherwise all its keys are included, and the post-filter decides.
     private KeyRangeIterator getNonEqIterator(Expression expression,
                                               AbstractBounds<PartitionPosition> keyRange,
                                               QueryContext context,
-                                              boolean defer) throws IOException
+                                              boolean defer,
+                                              boolean subtractEqualKeys) throws IOException
     {
         KeyRangeIterator allKeys = allSSTableKeys(keyRange);
-        if (TypeUtil.supportsRounding(expression.validator)
+        if (!subtractEqualKeys
+            || IndexContext.mayHaveExpiredTerms(sstable, context.nowInSec())
+            || TypeUtil.supportsRounding(expression.validator)
             || !this.getVersion().onDiskFormat().indexFeatureSet().isRowAware())
         {
             return allKeys;
         }
-        else
+
+        try
         {
-            Expression negExpression = expression.negated();
-            KeyRangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer);
+            KeyRangeIterator matchedKeys = searchableIndex.search(expression.negated(), keyRange, context, defer);
             return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(allKeys);
+            throw t;
         }
     }
 
+    /**
+     * As {@link #search(Expression, AbstractBounds, QueryContext, boolean, boolean)}, never subtracting the keys with
+     * an equal term for a non-equality: the other sources of the query, whose deletions may shadow the terms of this
+     * one, are not known.
+     */
     public KeyRangeIterator search(Expression expression,
                                    AbstractBounds<PartitionPosition> keyRange,
                                    QueryContext context,
                                    boolean defer) throws IOException
     {
+        return search(expression, keyRange, context, defer, false);
+    }
+
+    /**
+     * @param subtractEqualKeys for a non-equality, whether the keys with an equal term may be subtracted from all the
+     * keys: no deletion of the query's memtables and SSTables may shadow terms (see
+     * {@link IndexContext#hasShadowingDeletions(java.util.Collection, java.util.Collection, long)}); an SSTable that may
+     * have expired terms doesn't subtract them anyway
+     */
+    public KeyRangeIterator search(Expression expression,
+                                   AbstractBounds<PartitionPosition> keyRange,
+                                   QueryContext context,
+                                   boolean defer,
+                                   boolean subtractEqualKeys) throws IOException
+    {
         if (expression.getOp().isNonEquality())
         {
-            return getNonEqIterator(expression, keyRange, context, defer);
+            return getNonEqIterator(expression, keyRange, context, defer, subtractEqualKeys);
         }
 
         return searchableIndex.search(expression, keyRange, context, defer);

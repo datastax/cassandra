@@ -28,6 +28,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MonotonicClock;
 
 import static java.lang.Math.max;
@@ -47,6 +48,12 @@ public class QueryContext
 
     /** The query start time, in nanoseconds. Used to measure the query execution time. */
     private final long queryStartTimeNanos;
+
+    /**
+     * The time of the query, in seconds: that of the read command, for the liveness of the data (e.g. whether the
+     * terms of expiring cells may be expired, see {@code IndexContext#subtractsEqualKeys}).
+     */
+    private final long nowInSec;
 
     /**
      * Whether the query has timed out, checked at {@link #checkpoint()}.
@@ -135,6 +142,15 @@ public class QueryContext
     {
         this.command = command;
         this.queryStartTimeNanos = MonotonicClock.Global.approxTime.now();
+        this.nowInSec = command != null ? command.nowInSec() : FBUtilities.nowInSeconds();
+    }
+
+    /**
+     * @return the time of the query, in seconds
+     */
+    public long nowInSec()
+    {
+        return nowInSec;
     }
 
     public long totalQueryTimeNs()
