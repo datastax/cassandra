@@ -127,7 +127,8 @@ public class TrieBackedPartition implements Partition
         this.stats = stats;
         this.rowCountIncludingStatic = rowCountIncludingStatic;
         this.tombstoneCount = tombstoneCount;
-        this.hasStaticRow = trie.get(STATIC_CLUSTERING_PATH) != null;
+        // A static row may have no live content, only deletions (e.g. a whole complex column deletion).
+        this.hasStaticRow = trie.get(STATIC_CLUSTERING_PATH) != null || trie.tailTrie(STATIC_CLUSTERING_PATH, false) != null;
         this.partitionLevelDeletion = TrieTombstoneMarker.applicableDeletionOrLiveAtRoot(trie);
         // There must always be a partition marker.
         assert trie.get(ByteComparable.EMPTY) != null;
